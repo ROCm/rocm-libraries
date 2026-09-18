@@ -834,6 +834,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
     with pytest.raises(HkpPackError) as excinfo:
         pipeline._prewarm_variants(
             flat,
@@ -843,6 +844,8 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             tmp_path / "inter",
             variant_co,
             variant_symbol,
+            variant_observations,
+            {},
             log=_silent,
         )
 
@@ -1026,9 +1029,9 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     compile_one = getattr(pipeline, "_compile_one_variant", None)
     assert compile_one is not None, "pipeline._compile_one_variant does not exist"
 
-    vk, co_path, symbol, err = compile_one(job)
+    vk, co_path, symbol, err, observations = compile_one(job)
     assert vk == "VK-FROM-PARENT"
-    assert co_path is None and symbol is None
+    assert co_path is None and symbol is None and observations is None
     assert err.startswith("HkpPackError: ")
     assert "boom" in err
     assert calls == []
@@ -1125,6 +1128,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
     pipeline._prewarm_variants(
         load_flat_input(corpus, log=_silent),
         corpus,
@@ -1133,6 +1137,8 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
         tmp_path / "inter",
         variant_co,
         variant_symbol,
+        variant_observations,
+        {},
         log=_silent,
     )
 
@@ -1261,6 +1267,8 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
         _stub_hipcc(tmp_path),
         tmp_path / "inter",
         variant_co,
+        {},
+        {},
         {},
         log=_silent,
     )

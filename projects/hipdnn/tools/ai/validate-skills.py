@@ -27,7 +27,11 @@ FORBIDDEN_SKILL_TEXT = (
 
 FORBIDDEN_SKILL_PATTERNS = (re.compile(r"\bAskUserQuestion\b"),)
 
-SLASH_SKILL_PATTERN = re.compile(r"(?<![\w:/])/(?:hipdnn|pr-summary)[A-Za-z0-9_-]*")
+# The lookbehind excludes '.' so a relative path into a sibling skill directory
+# ("../hipdnn-ingestor-engine/RUNBOOK.md") is not read as a slash command. A genuine
+# command reference is preceded by whitespace, a line start, a backtick or a
+# bracket, never by a path segment separator.
+SLASH_SKILL_PATTERN = re.compile(r"(?<![\w:/.])/(?:hipdnn|pr-summary)[A-Za-z0-9_-]*")
 
 EXPECTED_SCRIPTS = {
     "hipdnn-superbuild": ("windows_rocm_setup.py",),
@@ -129,6 +133,7 @@ def validate_skill(skill: Path) -> list[str]:
 
     # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
     claude_commands = {
+        "hipdnn-ingestor-engine",
         "hipdnn-pr-quality",
         "hipdnn-superbuild",
         "hipdnn-superbuild-test",

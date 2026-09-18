@@ -1,0 +1,1856 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Unit tests for codegen/config_loader.py.
+
+Covers the happy path over both worked-example configs, the five pre-mint
+loader-mirroring checks (in order), deprecated-key rejection, and the
+kernel_source_kind rejection for hsaco_file/kpack/rocke_builder.
+"""
+
+import pytest
+import yaml
+
+from codegen.config_loader import ConfigError, load_config
+from codegen.models import KernelSource
+from tests.helpers import (
+    make_engine,
+    make_kernel,
+    make_kmd_field,
+    make_minimal_config,
+    make_pack,
+)
+
+
+class TestLoadHappyPath:
+    def test_scale_add_loads(self, scale_add_config):
+        assert scale_add_config.engine.name == "hipkernel:ScaleAdd"
+        assert len(scale_add_config.packs) == 1
+        assert scale_add_config.packs[0].kernels[0].metadata["block_size"] == 64
+
+    def test_binary_ops_loads(self, binary_ops_config):
+        assert binary_ops_config.engine.name == "hipkernel:BinaryOps"
+        assert len(binary_ops_config.packs) == 2
+        assert binary_ops_config.is_multi_pack
+
+    def test_scale_add_is_single_pack(self, scale_add_config):
+        assert not scale_add_config.is_multi_pack
+
+
+class TestEngineNameCheck:
+    """Pre-mint check #1: engine.name must be scoped namespace:local."""
+
+    def test_unscoped_name_rejected(self):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(engine=make_engine(name="pointwise"))
+        with pytest.raises(ConfigError, match="scoped"):
+            _check_engine_name_scoped(config)
+
+    def test_scoped_name_accepted(self):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(engine=make_engine(name="hipkernel:Pointwise"))
+        _check_engine_name_scoped(config)  # does not raise
+
+    def test_invalid_heuristic_value_rejected(self):
+        from codegen.config_loader import _check_engine_name_scoped
+
+        config = make_minimal_config(engine=make_engine(heuristic="bogus"))
+        with pytest.raises(ConfigError, match="heuristic"):
+            _check_engine_name_scoped(config)
+
+    def test_load_config_rejects_unscoped_name(self, tmp_path):
+        raw = {
+            "engine": {"name": "unscoped"},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "K.cpp",
+                                "entry_point": "K",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "bad.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="scoped"):
+            load_config(path)
+
+
+class TestKnobsIntTypedCheck:
+    """Pre-mint check #2: every knob names a declared, int-typed KMD field."""
+
+    def test_undeclared_knob_rejected(self):
+        from codegen.config_loader import _check_knobs_int_typed
+
+        config = make_minimal_config(engine=make_engine(knobs=["nonexistent"]))
+        with pytest.raises(ConfigError, match="no kmd_fields entry declares"):
+            _check_knobs_int_typed(config)
+
+    def test_non_int_knob_rejected(self):
+        from codegen.config_loader import _check_knobs_int_typed
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="dtype", type="string", default_value=None)
+            ],
+            engine=make_engine(knobs=["dtype"]),
+        )
+        with pytest.raises(ConfigError, match="int-typed"):
+            _check_knobs_int_typed(config)
+
+    def test_int_typed_knob_accepted(self):
+        from codegen.config_loader import _check_knobs_int_typed
+
+        config = make_minimal_config(engine=make_engine(knobs=["block_size"]))
+        _check_knobs_int_typed(config)  # does not raise
+
+
+class TestKernelMetadataAgainstKmdCheck:
+    """Pre-mint check #3: kernel metadata type-checks against the KMD, no
+    mandatory field omitted."""
+
+    def test_undeclared_metadata_key_rejected(self):
+        from codegen.config_loader import _check_kernel_metadata_against_kmd
+
+        kernel = make_kernel(metadata={"block_size": 64, "bogus_field": 1})
+        config = make_minimal_config(packs=[make_pack(kernels=[kernel])])
+        with pytest.raises(ConfigError, match="no kmd_fields entry declares"):
+            _check_kernel_metadata_against_kmd(config)
+
+    def test_omitted_mandatory_field_rejected(self):
+        from codegen.config_loader import _check_kernel_metadata_against_kmd
+
+        # 'dtype' has no default_value in make_minimal_config's kmd_fields, so it
+        # is mandatory; omit it from metadata.
+        kernel = make_kernel(metadata={"block_size": 64})
+        config = make_minimal_config(packs=[make_pack(kernels=[kernel])])
+        with pytest.raises(ConfigError, match="omits mandatory metadata field"):
+            _check_kernel_metadata_against_kmd(config)
+
+    def test_wrong_type_metadata_rejected(self):
+        from codegen.config_loader import _check_kernel_metadata_against_kmd
+
+        kernel = make_kernel(metadata={"block_size": "sixty-four", "dtype": "FLOAT"})
+        config = make_minimal_config(packs=[make_pack(kernels=[kernel])])
+        with pytest.raises(
+            ConfigError, match="does not match its declared kmd_fields type"
+        ):
+            _check_kernel_metadata_against_kmd(config)
+
+    def test_valid_metadata_accepted(self):
+        from codegen.config_loader import _check_kernel_metadata_against_kmd
+
+        config = make_minimal_config()
+        _check_kernel_metadata_against_kmd(config)  # does not raise
+
+
+class TestKernelArchSubsetOfPackCheck:
+    """Pre-mint check #4: a kernel's arch must be a subset of its pack's."""
+
+    def test_kernel_arch_reaching_past_pack_rejected(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        kernel = make_kernel(arch=["gfx950"])
+        pack = make_pack(arch=["gfx942"], kernels=[kernel])
+        config = make_minimal_config(packs=[pack])
+        with pytest.raises(ConfigError, match="reaches past the pack's arch"):
+            _check_kernel_arch_subset_of_pack(config)
+
+    def test_kernel_arch_subset_accepted(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        kernel = make_kernel(arch=["gfx942"])
+        pack = make_pack(arch=["gfx942", "gfx950"], kernels=[kernel])
+        config = make_minimal_config(packs=[pack])
+        _check_kernel_arch_subset_of_pack(config)  # does not raise
+
+    def test_empty_kernel_arch_inherits_pack(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        kernel = make_kernel(arch=[])
+        pack = make_pack(arch=["gfx942"], kernels=[kernel])
+        config = make_minimal_config(packs=[pack])
+        _check_kernel_arch_subset_of_pack(config)  # does not raise
+
+    def test_empty_pack_arch_covers_everything(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        kernel = make_kernel(arch=["gfx942"])
+        pack = make_pack(arch=[], kernels=[kernel])
+        config = make_minimal_config(packs=[pack])
+        _check_kernel_arch_subset_of_pack(config)  # does not raise
+
+
+class TestArchShapeCheck:
+    """Pre-mint check #5: arch entries are plausible gfx-prefixed base ids
+    (error), and unrecognized-but-well-formed ids warn rather than error."""
+
+    @pytest.mark.parametrize(
+        "bad_arch", ["GFX942", " gfx942", "gfx942:sramecc+", "notgfx"]
+    )
+    def test_malformed_arch_rejected(self, bad_arch):
+        from codegen.config_loader import _check_arch_shape
+
+        pack = make_pack(arch=[bad_arch])
+        config = make_minimal_config(packs=[pack])
+        with pytest.raises(ConfigError, match="not a plausible"):
+            _check_arch_shape(config)
+
+    def test_well_formed_unrecognized_arch_warns_not_errors(self):
+        from codegen.config_loader import _check_arch_shape
+
+        # gfx94 is well-formed (matches the gfx+lowercase-alnum shape) but not a
+        # real device id -- exactly the documented gfx94/gfx942 typo trap.
+        pack = make_pack(arch=["gfx94"])
+        config = make_minimal_config(packs=[pack])
+        with pytest.warns(UserWarning, match="well-formed but not a recognized"):
+            warnings_out = _check_arch_shape(config)
+        assert len(warnings_out) == 1
+
+    def test_recognized_arch_produces_no_warning(self):
+        from codegen.config_loader import _check_arch_shape
+
+        pack = make_pack(arch=["gfx942"])
+        config = make_minimal_config(packs=[pack])
+        warnings_out = _check_arch_shape(config)
+        assert warnings_out == []
+
+
+class TestKernelSourceKindRejection:
+    """Each rejection must name the DIALECT, not merely 'unsupported'.
+
+    The common authoring mistake is a real kind written under the wrong
+    dialect, whose fix is a one-line ``dialect:`` change. A bare 'unsupported'
+    sends the author looking for a missing feature instead.
+    """
+
+    def test_hsaco_file_rejected_naming_prerequisite(self):
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="hsaco_file")
+        with pytest.raises(ConfigError, match="supportsSourceKind"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_kpack_rejected_as_produced_not_authored(self):
+        """kpack is what hkp_pack WRITES; authoring it is a second source of
+        truth for library/toc_key/symbol/sha256 that can silently disagree
+        with the archive those four are supposed to describe."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="kpack")
+        with pytest.raises(ConfigError, match="PRODUCED kind, never an authored one"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_rocke_builder_rejected_pointing_at_the_packaged_spelling(self):
+        """The runtime enum spelling parses and nothing dispatches it. A rocKE
+        kernel reaches the loader already lowered to kpack, so the authored
+        spelling is 'rocke' under the packaged dialect."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="rocke_builder")
+        with pytest.raises(ConfigError, match="never reaches the runtime as rocKE"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_rocke_under_direct_load_names_the_right_dialect(self):
+        """The wrong-dialect case: 'rocke' is real, just not in direct_load."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config(kernel_source_kind="rocke")
+        with pytest.raises(ConfigError, match="belongs to dialect 'packaged'"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_embedded_source_under_packaged_names_the_right_dialect(self):
+        """And the converse direction."""
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+        from codegen.models import DIALECT_PACKAGED
+
+        config = make_minimal_config(
+            kernel_source_kind="embedded_source", dialect=DIALECT_PACKAGED
+        )
+        with pytest.raises(ConfigError, match="belongs to dialect 'direct_load'"):
+            _check_kernel_source_kind_implemented(config)
+
+    def test_embedded_source_accepted(self):
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        config = make_minimal_config()
+        _check_kernel_source_kind_implemented(config)  # does not raise
+
+    def test_rocke_accepted_under_packaged(self):
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+        from codegen.models import DIALECT_PACKAGED
+
+        kernel = make_kernel(
+            kernel_source=KernelSource(
+                kind="rocke",
+                source="kernels/gfx950/attention_dense.py",
+                builder="build_attention_dense",
+                spec={"batch": 1},
+            )
+        )
+        config = make_minimal_config(
+            kernel_source_kind="rocke",
+            dialect=DIALECT_PACKAGED,
+            packs=[make_pack(kernels=[kernel], arch=["gfx950"])],
+        )
+        _check_kernel_source_kind_implemented(config)  # does not raise
+
+    def test_per_kernel_kind_also_checked(self):
+        from codegen.config_loader import _check_kernel_source_kind_implemented
+
+        kernel = make_kernel(
+            kernel_source=KernelSource(
+                kind="hsaco_file", source_file="X.cpp", entry_point="X"
+            )
+        )
+        config = make_minimal_config(packs=[make_pack(kernels=[kernel])])
+        with pytest.raises(ConfigError, match="supportsSourceKind"):
+            _check_kernel_source_kind_implemented(config)
+
+
+class TestPackDiscriminatorsCheck:
+    def test_multi_pack_missing_discriminator_rejected(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="a", discriminator=""),
+                make_pack(name="b", discriminator="b"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="discriminator"):
+            _check_pack_discriminators(config)
+
+    def test_single_pack_with_discriminator_rejected(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(packs=[make_pack(discriminator="add")])
+        with pytest.raises(ConfigError, match="only one pack"):
+            _check_pack_discriminators(config)
+
+    def test_multi_pack_duplicate_discriminators_rejected(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="a", discriminator="x"),
+                make_pack(name="b", discriminator="x"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="duplicate discriminators"):
+            _check_pack_discriminators(config)
+
+    def test_duplicate_pack_names_rejected(self):
+        """A pack name keys its descriptor id AND its output filename.
+
+        Two packs sharing a name collided twice over: the same pack id, and the
+        second `<slug>_<pack>.kdp.json` overwriting the first, so an entire pack's
+        kernels vanished with no error. Only `discriminator` was checked before.
+        """
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="same", discriminator="x"),
+                make_pack(name="same", discriminator="y"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="duplicate names"):
+            _check_pack_discriminators(config)
+
+    def test_no_packs_rejected(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(packs=[])
+        with pytest.raises(ConfigError, match="at least one pack"):
+            _check_pack_discriminators(config)
+
+    def test_pack_with_no_kernels_rejected(self):
+        from codegen.config_loader import _check_pack_discriminators
+
+        config = make_minimal_config(packs=[make_pack(kernels=[])])
+        with pytest.raises(ConfigError, match="no kernels"):
+            _check_pack_discriminators(config)
+
+
+class TestEmittedIdentifierShape:
+    """Names this config splices into generated C++ IDENTIFIERS.
+
+    `native.cpp.j2` builds `<NAME>_FIELD` from every kmd field name, and
+    `<NAME>_MATCHER_SYMBOL` plus `<name>OperationMatches` from every pack
+    discriminator. A name outside the identifier shape is a syntax error in a file
+    the author never edited, reached from a config that loads cleanly and passes
+    every other pre-mint check.
+    """
+
+    def test_a_valid_config_is_accepted(self):
+        """The control: an underscored field name and discriminator are ordinary."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="head_dim"),
+                make_kmd_field(name="block_size"),
+            ],
+            packs=[
+                make_pack(name="a", discriminator="add_fast"),
+                make_pack(name="b", discriminator="_scale2"),
+            ],
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_an_ordinary_engine_local_name_is_accepted(self):
+        """The control for the engine half: both shipped spellings are ordinary.
+
+        `ConvFwd` is the PascalCase spelling every direct-load config uses and
+        `gfx950_attention_dense` the snake_case one the packaged worked example
+        uses, and they derive different identifiers from the same rule.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        for name in ("hipkernel:ConvFwd", "hkp_example:gfx950_attention_dense"):
+            config = make_minimal_config(engine=make_engine(name=name))
+            _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_kebab_case_engine_local_name_is_accepted(self):
+        """The regression this control exists to prevent: holding the SLUG to the
+        C++ identifier rule refuses kebab-case, which the tool converts on purpose.
+
+        `ENGINE_NAME_PATTERN` admits `-`, and `_to_pascal_case` is documented to
+        convert "``snake_case`` or ``kebab-case``" -- it splits on `-` and folds it
+        away, so every identifier `attn-v2` derives is already valid. Only the slug
+        keeps the hyphen, and a hyphen in a directory name is ordinary. The slug is
+        therefore held to a path-stem rule and the two C++ spellings to the
+        identifier rule.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        engine = make_engine(name="hipkernel:attn-v2")
+        assert (engine.slug, engine.pascal_name, engine.camel_name) == (
+            "attn-v2",
+            "AttnV2",
+            "attnV2",
+        )
+        _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
+
+    def test_a_local_name_leading_with_a_hyphen_is_rejected(self):
+        """The slug's own rule, on the one input the C++ spellings let through.
+
+        `_to_pascal_case` drops the empty leading part, so `-foo` derives the
+        perfectly good `Foo` and `foo`; the slug keeps the hyphen and names a
+        directory that reads as an option wherever it is passed on a command line.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        engine = make_engine(name="hipkernel:-foo")
+        assert (engine.pascal_name, engine.slug) == ("Foo", "-foo")
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(make_minimal_config(engine=engine))
+        message = str(excinfo.value)
+        assert "path stem" in message, message
+        assert "-foo" in message, message
+
+    def test_a_dotted_engine_local_name_is_rejected(self):
+        """`hipkernel:attn.v2` emits `class Attn.v2DispatchHandler`.
+
+        `ENGINE_NAME_PATTERN` admits `.` because the namespace half is a vendor
+        string; `_to_pascal_case` splits on `_` and `-` only, so the dot survives
+        into every identifier and file stem the local half reaches.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(name="hipkernel:attn.v2"))
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "attn.v2" in message, message
+        assert "Attn.v2" in message, message
+
+    def test_an_engine_local_name_starting_with_a_digit_is_rejected(self):
+        """`hipkernel:2dConv` emits `class 2dConvDispatchHandler` and
+        `register2dConvSymbols`. Nothing uppercases a leading digit away."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(name="hipkernel:2dConv"))
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "2dConv" in str(excinfo.value)
+
+    def test_an_engine_local_name_of_dots_is_rejected(self):
+        """`hipkernel:..` is the path-shaped half of the same defect: the slug
+        names this bundle's descriptor directory, and `..` names its parent.
+
+        Both rules refuse it -- `..` is no more an identifier than it is a stem --
+        and the identifier rule is reached first, so that is the diagnostic. The
+        stem rule is asserted directly here rather than through the message,
+        because it is what still refuses `..` if the C++ spellings ever change.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+        from codegen.models import PATH_STEM_PATTERN
+
+        engine = make_engine(name="hipkernel:..")
+        assert engine.slug == ".."
+        assert not PATH_STEM_PATTERN.match(engine.slug)
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(make_minimal_config(engine=engine))
+        assert "engine.name" in str(excinfo.value)
+
+    def test_load_config_runs_the_engine_name_check(self, tmp_path):
+        """Wired into the pre-mint phase: `_check_engine_name_scoped` accepts the
+        name, so nothing else stops it."""
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:attn.v2"},
+            "kmd_fields": [{"name": "head_dim", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"head_dim": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        assert "attn.v2" in str(excinfo.value)
+
+    def test_a_hyphenated_field_name_is_rejected(self):
+        """`head-dim` emits `constexpr std::string_view HEAD-DIM_FIELD`."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(kmd_fields=[make_kmd_field(name="head-dim")])
+        with pytest.raises(ConfigError, match="head-dim"):
+            _check_emitted_identifiers(config)
+
+    def test_two_field_names_differing_only_in_case_are_rejected_naming_both(self):
+        """`dtype` and `dType` both uppercase to `DTYPE_FIELD` -- a redefinition.
+
+        Each name is a perfectly good identifier on its own, so a shape check alone
+        does not catch it. The diagnostic has to carry both original spellings:
+        `DTYPE` names neither field in the config.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="dtype", type="string", default_value="FLOAT"),
+                make_kmd_field(name="dType", type="string", default_value="FLOAT"),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "'dtype'" in message and "'dType'" in message, message
+
+    def test_two_fields_spelled_identically_are_rejected(self):
+        """The same name twice emits `BLOCK_SIZE_FIELD` twice, as two spellings do.
+
+        Distinct from the case-variant above, and the harder of the two to catch: a
+        check that compares how the two entries describe themselves sees one
+        description and lets the second claim a constant already taken. What the
+        compiler rejects is the identifier appearing twice, which it does either way.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="block_size", type="int", default_value=64),
+                make_kmd_field(name="block_size", type="int", default_value=128),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "BLOCK_SIZE_FIELD" in str(excinfo.value), str(excinfo.value)
+
+    def test_two_discriminators_spelled_identically_are_rejected(self):
+        """The same collision on the matcher-symbol side, which folds the same way."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="left", discriminator="add", kernels=[make_kernel()]),
+                make_pack(name="right", discriminator="add", kernels=[make_kernel()]),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "ADD_MATCHER_SYMBOL" in str(excinfo.value), str(excinfo.value)
+
+    def test_a_hyphenated_discriminator_is_rejected(self):
+        """`add-fast` emits both `ADD-FAST_MATCHER_SYMBOL` and the function
+        `add-fastOperationMatches`."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="a", discriminator="add-fast"),
+                make_pack(name="b", discriminator="mul"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="add-fast"):
+            _check_emitted_identifiers(config)
+
+    def test_two_discriminators_differing_only_in_case_are_rejected_naming_both(self):
+        """`add` and `Add` both uppercase to `ADD_MATCHER_SYMBOL`.
+
+        `_check_pack_discriminators` dedups by EXACT match, so both survive it;
+        each is a good identifier on its own, so the shape check passes too. The
+        diagnostic has to carry both original spellings: `ADD` names neither pack.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="a", discriminator="add"),
+                make_pack(name="b", discriminator="Add"),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "'add'" in message and "'Add'" in message, message
+
+    def test_a_discriminator_on_a_reserved_stem_is_rejected(self):
+        """`graph` and `kernel` are already taken by the template's own fixed
+        constants, which it emits for every engine outside the per-pack loop.
+
+        Nothing else in the config mentions those two constants, so the collision
+        is invisible in the YAML and surfaces as a redefinition in generated C++.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        for reserved in ("graph", "Kernel"):
+            config = make_minimal_config(
+                packs=[
+                    make_pack(name="a", discriminator=reserved),
+                    make_pack(name="b", discriminator="mul"),
+                ]
+            )
+            with pytest.raises(ConfigError) as excinfo:
+                _check_emitted_identifiers(config)
+            assert f"'{reserved}'" in str(excinfo.value), reserved
+
+    def test_a_field_and_a_discriminator_may_share_a_name(self):
+        """The control for the two collision checks above: `<NAME>_FIELD` and
+        `<NAME>_MATCHER_SYMBOL` are different identifiers.
+
+        Folding both into one map would reject `add` as a metadata field beside an
+        `add` pack -- a pairing the config's own vocabulary encourages.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[make_kmd_field(name="add"), make_kmd_field(name="mul")],
+            packs=[
+                make_pack(name="a", discriminator="add"),
+                make_pack(name="b", discriminator="mul"),
+            ],
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_the_reserved_stems_are_the_ones_the_template_actually_emits(
+        self, template_dir
+    ):
+        """The reserved list is checked against its source rather than trusted.
+
+        A fixed `<STEM>_MATCHER_SYMBOL` added to the template and not to the tuple
+        reopens the hole silently: the config still loads, and the collision is a
+        C++ redefinition in a file nobody wrote.
+        """
+        import re
+
+        from codegen.config_loader import RESERVED_MATCHER_SYMBOL_STEMS
+
+        source = (template_dir / "native.cpp.j2").read_text()
+        # Only the LITERAL stems: the per-pack constant interpolates
+        # `{{ pack.discriminator.upper() }}` and so cannot match.
+        emitted = re.findall(
+            r"^constexpr std::string_view ([A-Z0-9_]+)_MATCHER_SYMBOL",
+            source,
+            re.MULTILINE,
+        )
+        assert sorted(emitted) == sorted(RESERVED_MATCHER_SYMBOL_STEMS), emitted
+
+    def test_load_config_runs_the_check(self, tmp_path):
+        """Wired into the pre-mint phase, not merely available to it."""
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "head-dim", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"head-dim": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="head-dim"):
+            load_config(path)
+
+
+class TestPackNamesAreSingleFileStems:
+    """A pack name is spliced into the KDP's FILENAME, so it is held to the stem rule.
+
+    ``IngestorConfig.kdp_stem`` builds ``<engine-slug>_<pack-name>`` for a multi-pack
+    engine, and ``generator.render`` writes that as
+    ``<descriptor_dir>/<stem>.kdp.json``. The same stem is also the descriptor's
+    runtime ``name`` (``<namespace>:<stem>``). The engine slug reaching the same
+    position is already held to `PATH_STEM_PATTERN`; the pack name reaching it is the
+    other half of one stem.
+
+    The rule is the SAME one as the slug's, so kebab-case passes: a hyphen is
+    ordinary in a filename. A pack name is never folded into a C++ identifier -- the
+    pack's ``discriminator`` is the field that is, and it carries its own identifier
+    check -- so the identifier rule would refuse a spelling nothing here converts.
+    """
+
+    def test_a_normal_multi_pack_engine_still_loads(self):
+        """Positive control: the shape every shipped multi-pack config uses.
+
+        ``configs/binary_ops.yaml`` names its packs ``add`` and ``max``; these are
+        the same shape, so a rule that refused them would be refusing what ships.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="add", discriminator="add"),
+                make_pack(name="sub", discriminator="sub"),
+            ]
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_kebab_case_pack_name_is_accepted(self):
+        """The control that separates the stem rule from the identifier rule.
+
+        ``add-fast`` emits ``binary_ops_add-fast.kdp.json``, an ordinary filename.
+        Holding the pack name to `CXX_IDENTIFIER_PATTERN` instead would refuse it,
+        and nothing derives a C++ name from it: the pack's ``discriminator`` is the
+        field that reaches ``<NAME>_MATCHER_SYMBOL``, and it is checked separately.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="add-fast", discriminator="addFast"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_pack_name_that_walks_up_is_rejected(self):
+        """``../evil`` puts ``..`` inside the stem of a file this tool writes."""
+        from codegen.config_loader import _check_emitted_identifiers
+        from codegen.models import PATH_STEM_PATTERN
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="../evil", discriminator="evil"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        assert config.kdp_stem(config.packs[0]) == "test_../evil"
+        assert not PATH_STEM_PATTERN.match("../evil")
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "../evil" in message, message
+        assert "path stem" in message, message
+
+    def test_a_pack_name_carrying_a_separator_is_rejected(self):
+        """A separator makes the stem name a place, not a file.
+
+        Both spellings, because the generated tree is written on either host: the
+        forward slash is a separator everywhere, and the backslash is one on the
+        platform this bundle is most often generated for.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        for name in ("add/fast", "add\\fast"):
+            config = make_minimal_config(
+                packs=[
+                    make_pack(name=name, discriminator="addFast"),
+                    make_pack(name="mul", discriminator="mul"),
+                ]
+            )
+            with pytest.raises(ConfigError) as excinfo:
+                _check_emitted_identifiers(config)
+            assert name in str(excinfo.value), name
+
+    def test_an_empty_pack_name_is_rejected(self):
+        """``name: ""`` is present, so the required-key check passes it.
+
+        It emits ``binary_ops_.kdp.json`` -- a stem ending in the separator the
+        multi-pack convention adds, and one every empty-named pack of one engine
+        lands on together.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="", discriminator="add"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "path stem" in str(excinfo.value), str(excinfo.value)
+
+    def test_a_pack_name_leading_with_a_hyphen_is_rejected(self):
+        """The stem rule's own edge, shared with the engine slug: a leading ``-``
+        reads as an option wherever the filename is passed on a command line."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="-fast", discriminator="fast"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="-fast"):
+            _check_emitted_identifiers(config)
+
+    def test_load_config_runs_the_pack_name_check(self, tmp_path):
+        """Wired into the pre-mint phase, not merely available to it."""
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": name,
+                    "discriminator": discriminator,
+                    "kernels": [
+                        {
+                            "name": f"k_{discriminator}",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+                for name, discriminator in (("../evil", "evil"), ("mul", "mul"))
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="path stem"):
+            load_config(path)
+
+
+class TestArchListsAreNormalisedAtLoad:
+    """A repeated arch entry is collapsed as the config is read.
+
+    Normalising at load settles it for every consumer at once, which is why it is
+    not a ConfigError: there is nothing the author could do about it that the loader
+    cannot. See ``config_loader._unique_arch`` for where a repeat bites.
+    """
+
+    def _load(self, tmp_path, pack_arch, kernel_arch):
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": pack_arch,
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "arch": kernel_arch,
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_a_repeated_arch_entry_is_collapsed(self, tmp_path):
+        config = self._load(
+            tmp_path, ["gfx942", "gfx950", "gfx942"], ["gfx950", "gfx950"]
+        )
+        assert config.packs[0].arch == ["gfx942", "gfx950"]
+        assert config.packs[0].kernels[0].arch == ["gfx950"]
+
+    def test_distinct_entries_are_all_kept_in_authored_order(self, tmp_path):
+        """The control: the normalisation is not a sort, and not a truncation.
+
+        Arch order reaches the descriptor bytes, so a normalisation that reordered
+        the list would rewrite what ships while every membership test kept passing.
+        """
+        config = self._load(tmp_path, ["gfx950", "gfx942"], ["gfx942"])
+        assert config.packs[0].arch == ["gfx950", "gfx942"]
+        assert config.packs[0].kernels[0].arch == ["gfx942"]
+
+
+class TestKernelNameUniquenessIsEngineScoped:
+    """Descriptor identity is engine-scoped, so the uniqueness check is too.
+
+    The loader collects an engine's packs into ONE `DescriptorSet` by engine id,
+    so two same-named kernels in two packs are as indistinguishable to the runtime
+    as two in one pack -- and nothing downstream catches either, because the
+    de-duplication pass keys on resolved metadata rather than on the name.
+    """
+
+    def _raw(self, left_names, right_names):
+        def kernel(name, block_size):
+            return {
+                "name": name,
+                "kernel_source": {
+                    "kind": "embedded_source",
+                    "source_file": "k.hip",
+                    "entry_point": "k",
+                },
+                "metadata": {"block_size": block_size},
+            }
+
+        return {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "left",
+                    "discriminator": "left",
+                    # Distinct metadata per kernel, so nothing here depends on the
+                    # de-duplication pass.
+                    "kernels": [
+                        kernel(name, 64 + i) for i, name in enumerate(left_names)
+                    ],
+                },
+                {
+                    "name": "right",
+                    "discriminator": "right",
+                    "kernels": [
+                        kernel(name, 128 + i) for i, name in enumerate(right_names)
+                    ],
+                },
+            ],
+        }
+
+    def _load(self, tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_distinct_names_across_two_packs_still_load(self, tmp_path):
+        """The control: the check widened to the engine must not reject an
+        ordinary multi-pack engine."""
+        config = self._load(tmp_path, self._raw(["a"], ["b"]))
+        assert [k.name for pack in config.packs for k in pack.kernels] == ["a", "b"]
+
+    def test_one_name_in_two_packs_is_rejected_naming_both_packs(self, tmp_path):
+        with pytest.raises(ConfigError, match="duplicated kernel name") as excinfo:
+            self._load(tmp_path, self._raw(["same"], ["same"]))
+        message = str(excinfo.value)
+        assert "'same'" in message, message
+        assert "'left'" in message and "'right'" in message, message
+
+    def test_one_name_twice_in_one_pack_is_still_rejected(self, tmp_path):
+        """The narrower invariant survives the widening: an engine-wide check that
+        lost the within-pack case would trade one silent collision for another."""
+        with pytest.raises(ConfigError, match="duplicated kernel name") as excinfo:
+            self._load(tmp_path, self._raw(["dup", "dup"], ["b"]))
+        assert "'left'" in str(excinfo.value)
+
+
+class TestDeprecatedKeys:
+    def _base_raw(self):
+        return {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "K.cpp",
+                                "entry_point": "K",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def test_kmd_field_optional_key_rejected(self, tmp_path):
+        raw = self._base_raw()
+        raw["kmd_fields"][0]["optional"] = True
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="optional"):
+            load_config(path)
+
+    def test_kmd_field_optional_key_rejected_even_when_false(self, tmp_path):
+        raw = self._base_raw()
+        raw["kmd_fields"][0]["optional"] = False
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="optional"):
+            load_config(path)
+
+    def test_kmd_field_default_key_rejected(self, tmp_path):
+        raw = self._base_raw()
+        raw["kmd_fields"][0]["default"] = 1
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="default_value"):
+            load_config(path)
+
+    def test_top_level_schema_key_rejected(self, tmp_path):
+        raw = self._base_raw()
+        raw["schema"] = "hipdnn.ued/v1"
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="schema"):
+            load_config(path)
+
+
+class TestBehaviorNotesVocabulary:
+    def test_unknown_behavior_note_rejected(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["engine"]["behavior_notes"] = ["not_a_real_note"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="closed vocabulary"):
+            load_config(path)
+
+    def test_runtime_compilation_accepted(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["engine"]["behavior_notes"] = ["runtime_compilation"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        config = load_config(path)
+        assert config.engine.behavior_notes == ["runtime_compilation"]
+
+
+class TestDirectLoadAuthoredSubpath:
+    """A direct-load bundle names the authored set it is written into.
+
+    Each set under ``test_descriptors/`` is its own pack target, walked by
+    directory and read by a different binary. A bundle that names none has no
+    shard to land in, and a default would file it in one that no suite reads --
+    which installs cleanly and then loads nothing, so the diagnostic has to name
+    the four values rather than pick one.
+    """
+
+    def test_a_direct_load_config_without_authored_subpath_is_rejected(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        del raw["authored_subpath"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        message = str(excinfo.value)
+        assert "authored_subpath" in message
+        for value in ("shared", "unit", "integration", "archive_fixture"):
+            assert value in message, message
+
+
+class TestPackagedAuthoredSubpathIsContained:
+    """A packaged bundle's subpath stays under the ``descriptors/`` root it names.
+
+    ``descriptor_dir`` joins the two as a STRING -- ``f"descriptors/{subpath}"`` --
+    and ``render()`` then writes fourteen files at ``output_dir / that``. A ``..``
+    component survives the join, so a packaged subpath that walks up writes the
+    whole bundle above ``--output-dir``, from a config that loads cleanly and
+    passes every other pre-mint check. An absolute subpath does not escape by
+    walking up but does not join either: ``C:/x`` turns the result drive-relative,
+    which is a file in an unnamed place rather than a contained write.
+
+    The direct-load branch of this same check has always constrained its subpath
+    to four known values; this branch is the one that was unconstrained.
+    """
+
+    def _raw(self, subpath):
+        raw = {
+            "dialect": "packaged",
+            "kernel_source_kind": "rocke",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx950"],
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "rocke",
+                                "source": "kernels/gfx950/attention_dense.py",
+                                "builder": "build_attention_dense",
+                                "spec": {"seqlen_q": 256},
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        if subpath is not None:
+            raw["authored_subpath"] = subpath
+        return raw
+
+    def _load(self, tmp_path, subpath):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(self._raw(subpath)))
+        return load_config(path)
+
+    def test_the_shipped_subpath_still_loads(self, tmp_path):
+        """The control, taken from configs/gfx950_attention_dense.yaml."""
+        config = self._load(tmp_path, "rocKE/gfx950_attention_dense")
+        assert config.descriptor_dir == "descriptors/rocKE/gfx950_attention_dense"
+
+    def test_an_omitted_subpath_still_falls_back_to_kind_over_slug(self, tmp_path):
+        """Omission stays legal on this branch -- unlike direct-load, the packaged
+        dialect has a default, and the containment rule must not turn it into a
+        requirement."""
+        config = self._load(tmp_path, None)
+        assert config.descriptor_dir == "descriptors/rocke/test"
+
+    def test_a_subpath_that_walks_out_of_the_descriptor_root_is_rejected(
+        self, tmp_path
+    ):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "../../../../g2demo_pwned")
+        message = str(excinfo.value)
+        assert "authored_subpath" in message, message
+        assert "g2demo_pwned" in message, message
+
+    def test_a_subpath_that_descends_before_walking_out_is_rejected(self, tmp_path):
+        """Containment is judged on the resolved path, not on a leading ``..``.
+
+        ``rocKE/../../x`` spends one component going down and two coming back up,
+        so a check that only looked at the first component would pass it.
+        """
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "rocKE/../../g2demo_pwned")
+        assert "g2demo_pwned" in str(excinfo.value)
+
+    def test_a_drive_qualified_subpath_is_rejected(self, tmp_path):
+        """``C:/x`` never reaches ``..``: it makes the join drive-relative."""
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "C:/g2demo_abs")
+        assert "g2demo_abs" in str(excinfo.value)
+
+    def test_a_drive_relative_subpath_is_rejected(self, tmp_path):
+        """``C:x`` has no root at all and is the same failure -- a path resolved
+        against a drive's own current directory, which no caller named."""
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "C:g2demo_abs")
+        assert "g2demo_abs" in str(excinfo.value)
+
+    def test_a_rooted_subpath_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "/g2demo_abs")
+        assert "g2demo_abs" in str(excinfo.value)
+
+    def test_a_backslash_separated_escape_is_rejected(self, tmp_path):
+        """The config is read on one platform and generated on another, so the
+        separator a Windows author types has to escape on the reader too."""
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "..\\..\\g2demo_pwned")
+        assert "g2demo_pwned" in str(excinfo.value)
+
+
+class TestPackKernelDefaults:
+    """A pack may hoist what every kernel repeats; a kernel overrides by restating.
+
+    Without hoisting, a generated variant set restates `kind`, `source`, `builder`
+    and every unvaried spec field once per kernel -- about half the file on the
+    shipped gfx942 dense sets, burying the fields that actually differ.
+    """
+
+    def _raw(self, **pack_extra):
+        return {
+            # `rocke` is a packaged-dialect kind; the loader cross-checks the two.
+            "dialect": "packaged",
+            "kernel_source_kind": "rocke",
+            "authored_subpath": "rocKE/test",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx942"],
+                    "kernels": [
+                        {
+                            "name": "k1",
+                            "kernel_source": {"spec": {"seqlen_q": 256}},
+                            "metadata": {"block_size": 64},
+                        },
+                        {
+                            "name": "k2",
+                            "kernel_source": {"spec": {"seqlen_q": 512}},
+                            "metadata": {"block_size": 64},
+                        },
+                    ],
+                    **pack_extra,
+                }
+            ],
+        }
+
+    def _load(self, tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_defaults_supply_kernel_source_and_spec(self, tmp_path):
+        raw = self._raw(
+            kernel_defaults={
+                "kind": "rocke",
+                "source": "kernels/gfx942/attention_dense.py",
+                "builder": "build_attention_dense",
+                "spec": {"head_size": 128, "dtype": "bf16"},
+            }
+        )
+        config = self._load(tmp_path, raw)
+        ks = config.packs[0].kernels
+        assert [k.kernel_source.kind for k in ks] == ["rocke", "rocke"]
+        assert [k.kernel_source.builder for k in ks] == ["build_attention_dense"] * 2
+        assert [k.kernel_source.spec["head_size"] for k in ks] == [128, 128]
+        assert [k.kernel_source.spec["seqlen_q"] for k in ks] == [256, 512]
+
+    def test_kernel_overrides_a_default_by_restating_it(self, tmp_path):
+        raw = self._raw(
+            kernel_defaults={
+                "kind": "rocke",
+                "source": "s.py",
+                "builder": "b",
+                "spec": {"head_size": 128},
+            }
+        )
+        raw["packs"][0]["kernels"][1]["kernel_source"]["spec"]["head_size"] = 64
+        config = self._load(tmp_path, raw)
+        assert [k.kernel_source.spec["head_size"] for k in config.packs[0].kernels] == [
+            128,
+            64,
+        ]
+
+    def test_missing_kind_still_rejected_when_no_defaults(self, tmp_path):
+        raw = self._raw()
+        with pytest.raises(ConfigError, match="kind"):
+            self._load(tmp_path, raw)
+
+
+class TestGzippedConfig:
+    """A `.gz` config loads identically to its plain-text twin.
+
+    A generated variant set belongs in the repo as plain text, so `.gz` is a
+    supported input rather than the way a config is expected to ship.
+    """
+
+    def _raw(self):
+        return {
+            "dialect": "packaged",
+            "kernel_source_kind": "rocke",
+            "authored_subpath": "rocKE/test",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx942"],
+                    "kernels": [
+                        {
+                            "name": "k1",
+                            "kernel_source": {
+                                "kind": "rocke",
+                                "source": "kernels/gfx942/attention_dense.py",
+                                "builder": "build_attention_dense",
+                                "spec": {"seqlen_q": 256},
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def test_gzipped_config_matches_plaintext(self, tmp_path):
+        import gzip as _gzip
+
+        text = yaml.dump(self._raw())
+        plain = tmp_path / "c.yaml"
+        plain.write_text(text)
+        packed = tmp_path / "c.yaml.gz"
+        with _gzip.open(packed, "wt") as f:
+            f.write(text)
+
+        a = load_config(plain)
+        b = load_config(packed)
+        assert a.engine.name == b.engine.name
+        assert len(a.packs[0].kernels) == len(b.packs[0].kernels)
+        assert (
+            a.packs[0].kernels[0].kernel_source.spec
+            == b.packs[0].kernels[0].kernel_source.spec
+        )
+
+    def test_gzipped_config_still_validated(self, tmp_path):
+        import gzip as _gzip
+
+        raw = self._raw()
+        raw["packs"][0]["kernels"][0]["kernel_source"].pop("kind")
+        packed = tmp_path / "c.yaml.gz"
+        with _gzip.open(packed, "wt") as f:
+            f.write(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="kind"):
+            load_config(packed)
+
+
+class TestAxisExpansion:
+    """Pack-level `axes` cross-products a `kernel_template` into ordinary
+    enumerated kernels at load time, so a pack author declares the axes rather
+    than the six-figure enumeration they stand for.
+    """
+
+    def _raw(self, axes, spec_extra=None, clear_template_spec=False, pack_extra=None):
+        template = {
+            "name": "dense",
+            "kernel_source": {
+                "kind": "rocke",
+                "source": "kernels/gfx942/dense.py",
+                "builder": "build_dense",
+                "spec": {} if clear_template_spec else {"seqlen_q": 256},
+            },
+            "metadata": {},
+        }
+        if spec_extra:
+            template["kernel_source"]["spec"].update(spec_extra)
+        pack = {
+            "name": "p",
+            "arch": ["gfx942"],
+            "axes": axes,
+            "kernel_template": template,
+        }
+        if pack_extra:
+            pack.update(pack_extra)
+        return {
+            "dialect": "packaged",
+            "kernel_source_kind": "rocke",
+            "authored_subpath": "rocKE/test",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [
+                {"name": "block_size", "type": "int", "default_value": 64},
+                {"name": "block_n", "type": "int", "default_value": 64},
+                {"name": "waves_per_eu", "type": "int", "default_value": 2},
+            ],
+            "packs": [pack],
+        }
+
+    def _load(self, tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_two_axes_over_one_template_yields_the_cross_product(self, tmp_path):
+        raw = self._raw({"block_n": [64, 32], "waves_per_eu": [2, 4]})
+        config = self._load(tmp_path, raw)
+        kernels = config.packs[0].kernels
+        assert len(kernels) == 4
+
+        names = [k.name for k in kernels]
+        assert len(set(names)) == 4, f"expanded kernel names collide: {names}"
+
+        by_combo = {
+            (k.kernel_source.spec["block_n"], k.kernel_source.spec["waves_per_eu"]): k
+            for k in kernels
+        }
+        assert set(by_combo) == {(64, 2), (64, 4), (32, 2), (32, 4)}
+        for (block_n, waves), kernel in by_combo.items():
+            # Every axis value must land in BOTH the spec and the metadata --
+            # the metadata is what the runtime and the dedup pass actually see.
+            assert kernel.metadata["block_n"] == block_n
+            assert kernel.metadata["waves_per_eu"] == waves
+            assert kernel.kernel_source.spec["seqlen_q"] == 256
+
+    def test_expanded_names_are_distinct_by_construction_not_luck(self, tmp_path):
+        """Every axis value is encoded into the name, in a fixed order. This
+        asserts distinctness directly rather than trusting that the axes chosen
+        happen to vary the name.
+        """
+        raw = self._raw({"block_n": [1, 2, 3], "waves_per_eu": [10, 20, 30]})
+        config = self._load(tmp_path, raw)
+        names = [k.name for k in config.packs[0].kernels]
+        assert len(names) == 9
+        assert len(set(names)) == 9
+
+    def test_axis_not_in_kmd_fields_is_rejected_naming_the_field(self, tmp_path):
+        raw = self._raw({"totally_undeclared_field": [1, 2]})
+        with pytest.raises(ConfigError, match="totally_undeclared_field"):
+            self._load(tmp_path, raw)
+
+    def test_empty_axis_list_is_rejected(self, tmp_path):
+        raw = self._raw({"block_n": []})
+        with pytest.raises(ConfigError, match="non-empty"):
+            self._load(tmp_path, raw)
+
+    def test_single_valued_axis_warns(self, tmp_path):
+        """A lone value contributes nothing to the cross-product and usually means
+        a typo -- a second value never added."""
+        raw = self._raw({"block_n": [64], "waves_per_eu": [2, 4]})
+        with pytest.warns(UserWarning, match="single value"):
+            config = self._load(tmp_path, raw)
+        assert len(config.packs[0].kernels) == 2
+
+    def test_axes_compose_with_kernel_defaults(self, tmp_path):
+        """An axis-expanded kernel is just another entry in the same per-kernel
+        loop that merges kernel_defaults underneath it.
+        """
+        raw = self._raw(
+            {"block_n": [64, 32]},
+            clear_template_spec=True,
+            pack_extra={
+                "kernel_defaults": {
+                    "kind": "rocke",
+                    "source": "kernels/gfx942/dense.py",
+                    "builder": "build_dense",
+                    "spec": {"seqlen_q": 999},
+                }
+            },
+        )
+        config = self._load(tmp_path, raw)
+        kernels = config.packs[0].kernels
+        assert len(kernels) == 2
+        for k in kernels:
+            assert k.kernel_source.kind == "rocke"
+            assert k.kernel_source.builder == "build_dense"
+            assert k.kernel_source.spec["seqlen_q"] == 999
+        assert {k.kernel_source.spec["block_n"] for k in kernels} == {64, 32}
+
+    def test_template_field_already_stated_is_not_overwritten_by_the_axis(
+        self, tmp_path
+    ):
+        raw = self._raw(
+            {"block_n": [64, 32]},
+            spec_extra={"block_n": -1},
+        )
+        config = self._load(tmp_path, raw)
+        for k in config.packs[0].kernels:
+            assert k.kernel_source.spec["block_n"] == -1
+
+    def test_kernel_template_without_axes_is_rejected(self, tmp_path):
+        raw = self._raw({"block_n": [64, 32]})
+        del raw["packs"][0]["axes"]
+        with pytest.raises(ConfigError, match="kernel_template"):
+            self._load(tmp_path, raw)
+
+    def test_axes_without_kernel_template_is_rejected(self, tmp_path):
+        raw = self._raw({"block_n": [64, 32]})
+        del raw["packs"][0]["kernel_template"]
+        with pytest.raises(ConfigError, match="kernel_template"):
+            self._load(tmp_path, raw)
+
+    def test_axes_must_be_a_mapping(self, tmp_path):
+        raw = self._raw({"block_n": [64, 32]})
+        raw["packs"][0]["axes"] = ["block_n", "waves_per_eu"]
+        with pytest.raises(ConfigError, match="mapping"):
+            self._load(tmp_path, raw)
+
+
+class TestUnknownKeysAreRefused:
+    """A key this loader does not read must not generate cleanly.
+
+    A silently dropped key means exit 0, a success banner, and a bundle missing
+    whatever the author thought they had configured -- `engine.knobbs` for
+    `engine.knobs` emits a UED with no knobs at all. That is the worst failure this
+    loader can have, because the author is not debugging: they believe it took
+    effect.
+    """
+
+    def _load(self, tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def _valid(self):
+        return {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def test_the_valid_config_still_loads(self, tmp_path):
+        """The control. Every rejection below is worthless without it."""
+        assert self._load(tmp_path, self._valid()) is not None
+
+    def test_a_typo_in_an_engine_key_is_refused(self, tmp_path):
+        raw = self._valid()
+        raw["engine"]["knobbs"] = ["block_size"]
+        with pytest.raises(ConfigError, match="knobbs"):
+            self._load(tmp_path, raw)
+
+    def test_a_typo_in_a_pack_key_is_refused(self, tmp_path):
+        raw = self._valid()
+        raw["packs"][0]["discriminador"] = "x"
+        with pytest.raises(ConfigError, match="discriminador"):
+            self._load(tmp_path, raw)
+
+    def test_a_typo_in_a_kernel_key_is_refused(self, tmp_path):
+        raw = self._valid()
+        raw["packs"][0]["kernels"][0]["metadatas"] = {}
+        with pytest.raises(ConfigError, match="metadatas"):
+            self._load(tmp_path, raw)
+
+    def test_a_typo_at_the_top_level_is_refused(self, tmp_path):
+        raw = self._valid()
+        raw["dialects"] = "packaged"
+        with pytest.raises(ConfigError, match="dialects"):
+            self._load(tmp_path, raw)
+
+    def test_the_diagnostic_lists_the_keys_that_ARE_read(self, tmp_path):
+        raw = self._valid()
+        raw["engine"]["knobbs"] = []
+        with pytest.raises(ConfigError, match="Known keys"):
+            self._load(tmp_path, raw)
+
+
+class TestMappingShapedKeysAreGuarded:
+    """A key the loader merges as a dict must actually be one.
+
+    Unguarded, `dict("oops")` raises `ValueError: dictionary update sequence element
+    #0 has length 1; 2 is required` from inside the merge -- naming neither the
+    kernel nor the key, and generate.py catches only ConfigError, so the raw
+    traceback reaches the author instead of the "must be a mapping" diagnostic.
+    """
+
+    def _load(self, tmp_path, mutate):
+        raw = {
+            "dialect": "packaged",
+            "kernel_source_kind": "rocke",
+            "authored_subpath": "rocKE/t",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "block_n", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx942"],
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "rocke",
+                                "source": "kernels/x.py",
+                                "builder": "build_x",
+                                "spec": {"block_n": 64},
+                            },
+                            "metadata": {"block_n": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        mutate(raw)
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    @pytest.mark.parametrize("bad", ["oops", [1, 2, 3], 42])
+    def test_a_non_mapping_spec_is_a_named_error(self, tmp_path, bad):
+        with pytest.raises(ConfigError, match="must be a mapping"):
+            self._load(
+                tmp_path,
+                lambda r: r["packs"][0]["kernels"][0]["kernel_source"].__setitem__(
+                    "spec", bad
+                ),
+            )
+
+    def test_a_non_mapping_metadata_is_a_named_error(self, tmp_path):
+        with pytest.raises(ConfigError, match="must be a mapping"):
+            self._load(
+                tmp_path,
+                lambda r: r["packs"][0]["kernels"][0].__setitem__("metadata", "oops"),
+            )
+
+    def test_a_well_formed_config_still_loads(self, tmp_path):
+        assert self._load(tmp_path, lambda r: None) is not None
+
+
+class TestSpecializationDeclaration:
+    """The ``specialization`` block is what a later check has instead of the
+    compiler.
+
+    A shipped bundle is verified on a machine where the rocKE that built it is not
+    installed, so every claim about which metadata the compiler consumed has to
+    ride on the descriptor. A declaration that is merely plausible is worse than
+    none: the check runs, reports agreement, and has verified nothing.
+    """
+
+    @staticmethod
+    def _rocke_config(**declaration):
+        """A packaged rocKE config whose spec carries both KMD fields."""
+        kernel = make_kernel(
+            kernel_source=KernelSource(
+                kind="rocke",
+                source="kernels/gfx942/example.py",
+                builder="build_example",
+                spec={"block_size": 64, "dtype": "bf16"},
+            ),
+        )
+        return make_minimal_config(
+            dialect="packaged",
+            kernel_source_kind="rocke",
+            packs=[make_pack(kernels=[kernel], arch=["gfx942"])],
+            specialization=declaration,
+        )
+
+    @staticmethod
+    def _complete_rocke_declaration(**overrides):
+        declaration = {
+            "metadata_fields": ["block_size", "dtype"],
+            "matcher_only_fields": [],
+            "bindings": {
+                "block_size": {"field": "block_size"},
+                "dtype": {"field": "dtype"},
+            },
+            "vocabulary": {"dtype": {"bf16": "BF16"}},
+        }
+        declaration.update(overrides)
+        return declaration
+
+    def test_a_complete_declaration_is_accepted(self):
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(**self._complete_rocke_declaration())
+        _check_specialization_declaration(config)  # does not raise
+
+    def test_a_partition_that_misses_a_field_is_rejected(self):
+        """An unlisted field reads to a checker as one nobody specialized on, so a
+        value that decided the binary is passed over unchecked."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                metadata_fields=["block_size"],
+                bindings={"block_size": {"field": "block_size"}},
+                vocabulary={},
+            )
+        )
+        with pytest.raises(ConfigError, match="partition"):
+            _check_specialization_declaration(config)
+
+    def test_a_partition_that_overlaps_is_rejected(self):
+        """A field claiming to be both checked and matcher-only makes the
+        declaration self-contradictory: a checker cannot decide whether to demand
+        a binding for it."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(matcher_only_fields=["dtype"])
+        )
+        with pytest.raises(ConfigError, match="BOTH"):
+            _check_specialization_declaration(config)
+
+    def test_binding_keys_must_equal_metadata_fields(self):
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                bindings={"block_size": {"field": "block_size"}}
+            )
+        )
+        with pytest.raises(ConfigError, match="bindings"):
+            _check_specialization_declaration(config)
+
+    def test_a_binding_naming_both_a_field_and_a_method_is_rejected(self):
+        """Two readings, no rule for which is authoritative."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                bindings={
+                    "block_size": {"field": "block_size", "method": "effective_block"},
+                    "dtype": {"field": "dtype"},
+                }
+            )
+        )
+        with pytest.raises(ConfigError, match="exactly one"):
+            _check_specialization_declaration(config)
+
+    def test_a_method_binding_is_accepted(self):
+        """The converse: an effective accessor is a legitimate reading, and the
+        only truthful one for a knob the kernel's own policy resolves."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                bindings={
+                    "block_size": {"method": "effective_block_size"},
+                    "dtype": {"field": "dtype"},
+                }
+            )
+        )
+        _check_specialization_declaration(config)  # does not raise
+
+    def test_a_spec_carried_field_may_not_be_called_matcher_only(self):
+        """The waiver this gate exists to refuse.
+
+        A key in ``kernel_source.spec`` is hydrated into the dataclass the builder
+        is called with, so it demonstrably reached the compiler. Relabelling it
+        matcher-only removes it from the agreement check while it keeps deciding
+        the binary -- which is how a gate goes green without checking anything.
+        """
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            metadata_fields=["dtype"],
+            matcher_only_fields=["block_size"],
+            bindings={"dtype": {"field": "dtype"}},
+            vocabulary={},
+        )
+        with pytest.raises(ConfigError, match="matcher-only"):
+            _check_specialization_declaration(config)
+
+    def test_a_direct_load_config_may_not_claim_metadata_fields(self):
+        """There is no builder object on that path, so a binding names a read
+        nothing performs."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": ["block_size"],
+                "matcher_only_fields": ["dtype"],
+                "bindings": {"block_size": {"field": "block_size"}},
+                "vocabulary": {},
+            }
+        )
+        with pytest.raises(ConfigError, match="compiled specialization"):
+            _check_specialization_declaration(config)
+
+    def test_a_direct_load_matcher_only_declaration_is_accepted(self):
+        """The shape every non-compiled bundle must state explicitly."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size", "dtype"],
+                "bindings": {},
+                "vocabulary": {},
+            }
+        )
+        _check_specialization_declaration(config)  # does not raise
+
+    def test_an_authored_consumer_identity_is_rejected(self):
+        """Ids are minted, never authored.
+
+        One config declares exactly one engine and one KMD, so it contributes
+        exactly one consumer entry -- the duplicate (engine, kmd) pair the contract
+        format forbids cannot be authored here at all. An authored id would be a
+        second source of truth pointing at whatever engine shared a name.
+        """
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = make_minimal_config(
+            specialization={
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size", "dtype"],
+                "bindings": {},
+                "vocabulary": {},
+                "engine_id": "00000000-0000-0000-0000-000000000000",
+            }
+        )
+        with pytest.raises(ConfigError, match="minted"):
+            _check_specialization_declaration(config)
+
+    def test_a_vocabulary_entry_for_an_unchecked_field_is_rejected(self):
+        """A translation with no effect leaves the builder's spelling in metadata,
+        which loads cleanly, reconciles on every count, and matches nothing."""
+        from codegen.config_loader import _check_specialization_declaration
+
+        config = self._rocke_config(
+            **self._complete_rocke_declaration(
+                vocabulary={"nonexistent": {"a": "B"}},
+            )
+        )
+        with pytest.raises(ConfigError, match="vocabulary"):
+            _check_specialization_declaration(config)
+
+    def test_every_shipped_example_config_carries_a_valid_declaration(
+        self, load_test_config
+    ):
+        """The examples are what an author copies, so a bundle they produce must
+        be checkable rather than merely loadable."""
+        for name in (
+            "scale_add.yaml",
+            "binary_ops.yaml",
+            "axes_example.yaml",
+            "variants_example.yaml",
+            "gfx950_attention_dense.yaml",
+        ):
+            config = load_test_config(name)
+            declared = {f.name for f in config.kmd_fields}
+            declaration = config.specialization
+            assert declaration, f"{name} declares no specialization"
+            assert (
+                set(declaration["metadata_fields"])
+                | set(declaration["matcher_only_fields"])
+                == declared
+            ), name

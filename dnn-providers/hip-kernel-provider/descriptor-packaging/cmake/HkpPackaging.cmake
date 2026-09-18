@@ -158,9 +158,10 @@ endfunction()
 #   multiply. 1 selects the packer's serial path.
 #
 #   NAME is also the source label the packer writes into every descriptor's
-#   provenance. The function records NAME and the absolute SOURCE_ROOT in a
-#   global registry, which hkp_verify_embedded_sources() reads to resolve a
-#   descriptor's authored location.
+#   provenance. The function records NAME, the absolute SOURCE_ROOT, OUT_ROOT and
+#   ARCHES in a global registry, which hkp_verify_embedded_sources() reads to
+#   resolve a descriptor's authored location and hkp_register_census_tests() reads
+#   to address one pack's own per-arch shards.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
@@ -314,7 +315,35 @@ function(hkp_wire_pack_target)
     # the two spellings agree and the verify step compares them exactly.
     get_filename_component(_abs_source_root "${ARG_SOURCE_ROOT}" ABSOLUTE)
     set_property(GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_${ARG_NAME} "${_abs_source_root}")
+
+    # Where this root's shards land and which arches it was wired for.
+    # hkp_register_census_tests() reads both to hand a census entry that root's OWN
+    # shard, so a suite is censused against the tree its pack target writes and never
+    # against a parent that another pack also fills.
+    set_property(GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_NAME} "${ARG_OUT_ROOT}")
+    set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_NAME} "${ARG_ARCHES}")
+
     set_property(GLOBAL APPEND PROPERTY HKP_PACK_LABELS "${ARG_NAME}")
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_record_dormant_pack(<name>)
+#   Record <name> as a pack this configuration knows about and deliberately left
+#   unwired.
+#
+#   The same global registry hkp_wire_pack_target() fills, because a consumer asking
+#   about one name has THREE answers to tell apart, not two: wired, dormant, unknown.
+#   Absence from HKP_PACK_LABELS alone collapses the last two, and a misspelled name
+#   produces exactly the evidence a legitimate dormancy does -- so a consumer that
+#   treats absence as a mistake reports an architecture this build does not pack for
+#   as a wiring error, and the reader goes looking for a typo that is not there.
+#
+#   A dormant name carries no OUT_ROOT, no arch list and no stamp: nothing was packed,
+#   so there is no output tree to address and no arch it was addressed for. The name
+#   is the whole record, which is all the distinction above needs.
+# ---------------------------------------------------------------------------
+function(_hkp_record_dormant_pack name)
+    set_property(GLOBAL APPEND PROPERTY HKP_PACK_DORMANT_LABELS "${name}")
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -853,47 +882,181 @@ function(hkp_require_ingestor_toolchain out_arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_add_packaging()
-#   Gate production packaging on ONE source root. The root names a location;
-#   producer selection is per-UKD on kernel_source.kind, so both producers are
-#   available to every root.
+# _hkp_resolve_production_root(<out_var> <out_is_default>)
+#   Declares the overridable production source root and resolves it to a path or
+#   to empty. Empty is the dormant case and not an error; a value that is set but
+#   is not a directory is fatal, because that is a typo rather than a choice.
 #
-#   This function runs only under HIPDNN_ENABLE_KERNEL_INGESTOR, and asserts
-#   that option's prerequisites first through hkp_require_ingestor_toolchain.
+#   <out_is_default> reports whether the resolved root is still the built-in
+#   default rather than one this build asked for. The two are not interchangeable:
+#   a named root carries an instruction to ship what is under it, while the default
+#   is inherited by every build that never mentioned descriptors at all, including
+#   builds targeting an architecture the shipped descriptors do not declare. Callers
+#   that turn "nothing to ship" into an error owe the default the gentler reading.
 #
-#   rocKE is REQUIRED, for the test roots as much as for production, so it is
-#   resolved once here for every root rather than selected per root. Unresolvable
-#   comgr is fatal at configure -- there is no build in which some roots pack and
-#   others do not. The cost is a venv provisioned even by a hip-only build; the
-#   benefit is that the acquisition path production ships through (rocke from a
-#   WHEEL) is the one every test exercises. Selecting per root left that path
-#   covered by nothing: production is dormant by default, and the pytest suite
-#   imports rocke from the source tree instead.
-#
-#   Root empty = production packaging dormant. Root set but not a directory =
-#   fatal. The tests are wired regardless.
+#   Equality against the default path is the only evidence available: a cache entry
+#   keeps no record of who wrote it. Passing exactly the default path is therefore
+#   read as the default, which is harmless -- it asks for precisely what the default
+#   already supplies.
 # ---------------------------------------------------------------------------
-function(hkp_add_packaging)
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+function(_hkp_resolve_production_root out_var out_is_default)
+    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
+        "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
+        "The authored source root the production pack step compiles from, \
+defaulting to the provider's in-tree shipped descriptors. Walked recursively; child \
+folders under it scope the content (hip/, rocKE/, per-integration folders) and each \
+descriptor's authored subpath is preserved into the staged and installed trees. A root \
+holding no descriptor, like an empty value, leaves production packaging dormant.")
 
-    hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
-    hkp_require_ingestor_toolchain(_arches)
+    set(${out_var} "" PARENT_SCOPE)
+    if("${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" STREQUAL
+       "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+        set(${out_is_default} TRUE PARENT_SCOPE)
+    else()
+        set(${out_is_default} FALSE PARENT_SCOPE)
+    endif()
 
-    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT "" CACHE PATH
-        "The authored source root the production pack step compiles from. \
-Walked recursively; child folders under it scope the content (hip/, rocKE/, \
-per-integration folders) and each descriptor's authored subpath is preserved \
-into the staged and installed trees. Empty leaves production packaging dormant.")
-    set(_source_root "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
         if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
             message(FATAL_ERROR
                 "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but is "
                 "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
         endif()
-        set(_source_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+        set(${out_var} "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_path_is_hidden(<out_var> <root> <path>)
+#   TRUE when any segment of <path> below <root> is dot-prefixed, which is how
+#   load_flat_input() decides a file is not authored content. Factored out so the
+#   two functions below cannot drift into two different notions of hidden: they
+#   walk the same roots and must agree on which files they are walking.
+# ---------------------------------------------------------------------------
+function(_hkp_path_is_hidden out_var root path)
+    set(${out_var} FALSE PARENT_SCOPE)
+    file(RELATIVE_PATH _rel "${root}" "${path}")
+    string(REPLACE "/" ";" _segments "${_rel}")
+    foreach(_segment IN LISTS _segments)
+        if(_segment MATCHES "^\\.")
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_has_kdp(<out_var> <root>)
+#   TRUE when <root> holds at least one non-hidden *.kdp.json. An empty <root>
+#   is FALSE rather than an error, which is what leaves packaging dormant.
+#
+#   CONFIGURE_DEPENDS so adding the first KDP re-runs configure and wires the
+#   target. Dot-prefixed segments are dropped the way load_flat_input() skips
+#   them, so a `.git/` or an editor's dot-directory under a user-supplied root
+#   is not content.
+# ---------------------------------------------------------------------------
+function(_hkp_root_has_kdp out_var root)
+    set(${out_var} FALSE PARENT_SCOPE)
+    if(NOT root)
+        return()
     endif()
 
+    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
+    foreach(_kdp IN LISTS _kdps)
+        _hkp_path_is_hidden(_kdp_hidden "${root}" "${_kdp}")
+        if(NOT _kdp_hidden)
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_covers_any_arch(<out_var> <root> <arches>)
+#   TRUE when at least one non-hidden *.kdp.json under <root> would survive
+#   arch_matches() for at least one arch in <arches>. Mirrors that predicate
+#   exactly: an absent `arch` key and an empty `arch` array are both wildcards,
+#   and anything else is exact string membership in the wired arch list.
+#
+#   FALSE is the only answer this function is asked to be sure of. kdp_survives()
+#   tests arch_matches() first, so a root no arch matches is a root nothing
+#   survives in -- provable emptiness. TRUE claims nothing beyond "not provably
+#   empty": a matching KDP can still prune on its UKD entries, which is the
+#   packer's report to make and not this function's.
+#
+#   That asymmetry decides every ambiguous case toward TRUE. A KDP whose JSON
+#   does not parse, or whose `arch` is not an array, is counted as covering, so
+#   the root stays wired and the packer reads the file and says what is wrong
+#   with it. Answering FALSE here would turn a malformed descriptor into a
+#   silently dormant build, which is the one outcome nobody could diagnose.
+#
+#   CONFIGURE_DEPENDS for the same reason as _hkp_root_has_kdp: authoring a KDP
+#   for a newly targeted arch must re-run configure and wire the target.
+# ---------------------------------------------------------------------------
+function(_hkp_root_covers_any_arch out_var root arches)
+    # cmake-lint: disable=E1120
+    #   cmake-lint carries no argument spec for foreach(... RANGE ...) and reports
+    #   every spelling of it as missing a positional argument. The index loop below
+    #   is valid CMake.
+    set(${out_var} FALSE PARENT_SCOPE)
+    if(NOT root)
+        return()
+    endif()
+
+    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
+    foreach(_kdp IN LISTS _kdps)
+        _hkp_path_is_hidden(_kdp_hidden "${root}" "${_kdp}")
+        if(_kdp_hidden)
+            continue()
+        endif()
+
+        # CONFIGURE_DEPENDS re-runs the glob when the SET of files changes, and this
+        # answer turns on their CONTENTS. Editing a KDP's `arch` moves no path, so
+        # without a content dependency the previous verdict survives the edit: a root
+        # that starts declaring this build's architecture stays dormant and ships
+        # nothing, with no configure to say otherwise.
+        set_property(
+            DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_kdp}")
+
+        file(READ "${_kdp}" _kdp_json)
+
+        # One error variable covers two ambiguous cases that both resolve to TRUE:
+        # "member not found", which is the absent-key wildcard, and "not valid JSON",
+        # which is the unparseable file the packer must be the one to report.
+        string(JSON _arch_type ERROR_VARIABLE _arch_err TYPE "${_kdp_json}" arch)
+        if(_arch_err OR NOT _arch_type STREQUAL "ARRAY")
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+
+        string(JSON _arch_len ERROR_VARIABLE _len_err LENGTH "${_kdp_json}" arch)
+        if(_len_err OR _arch_len EQUAL 0)
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+
+        math(EXPR _arch_last "${_arch_len} - 1")
+        foreach(_i RANGE ${_arch_last})
+            string(JSON _arch ERROR_VARIABLE _get_err GET "${_kdp_json}" arch ${_i})
+            if(_get_err OR _arch IN_LIST arches)
+                set(${out_var} TRUE PARENT_SCOPE)
+                return()
+            endif()
+        endforeach()
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_resolve_rocke_args(out_args out_comgr_lib)
+#
+#   Resolves the rocKE toolchain once and returns the keyword list every pack
+#   target is wired with, alongside the comgr library the ctest entries forward.
+#   The resolution happens once for every root: hkp_rocke_wheel_python_interp
+#   declares both a custom command OUTPUT and a target, so a second call would
+#   duplicate each.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_rocke_args out_args out_comgr_lib)
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
         "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
 ROCKE_COMGR_LIB for the pack step and the ctest entries. Needed on Windows, \
@@ -907,8 +1070,6 @@ loaded is the one named here.")
     # reads.
     set(_rocke_comgr_lib "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
 
-    # Resolved once, for every root. hkp_rocke_wheel_python_interp declares both a
-    # custom command OUTPUT and a target, so a second call is a duplicate of each.
     hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
     if(NOT _comgr_ok)
         message(FATAL_ERROR
@@ -933,8 +1094,80 @@ loaded is the one named here.")
         list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
     endif()
 
+    set(${out_args} "${_rocke_args}" PARENT_SCOPE)
+    set(${out_comgr_lib} "${_rocke_comgr_lib}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_add_packaging()
+#   Gate production packaging on ONE source root. The root names a location;
+#   producer selection is per-UKD on kernel_source.kind, so both producers are
+#   available to every root.
+#
+#   This function runs only under HIPDNN_ENABLE_KERNEL_INGESTOR, and asserts
+#   that option's prerequisites first through hkp_require_ingestor_toolchain.
+#
+#   rocKE is REQUIRED, for the test roots as much as for production, so it is
+#   resolved once here for every root rather than selected per root. Unresolvable
+#   comgr is fatal at configure -- there is no build in which some roots pack and
+#   others do not. The cost is a venv provisioned even by a hip-only build; the
+#   benefit is that the acquisition path production ships through (rocke from a
+#   WHEEL) is the one every test exercises. Selecting per root left that path
+#   covered by nothing: production is dormant by default, and the pytest suite
+#   imports rocke from the source tree instead.
+#
+#   The root defaults to the provider's in-tree shipped descriptors and is
+#   overridable. Root empty, or holding no descriptor = production packaging
+#   dormant. The default root additionally goes dormant when no descriptor under it
+#   declares an architecture this build packs for, because that root is inherited
+#   rather than requested; a named root in the same state is the packer's hard
+#   failure. Root set but not a directory = fatal. The tests are wired regardless.
+# ---------------------------------------------------------------------------
+function(hkp_add_packaging)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+    hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
+    hkp_require_ingestor_toolchain(_arches)
+
+    _hkp_resolve_production_root(_source_root _source_root_is_default)
+
+    _hkp_resolve_rocke_args(_rocke_args _rocke_comgr_lib)
+
+    # A KDP is what arch pruning consumes, so a root holding none has nothing to ship
+    # and packing it fails rather than shipping an empty tree. Standalone UKD/UMD/UED/
+    # UDD/KMD/UHD files, kernel sources and READMEs do not make a pack. A KDP that is
+    # present but pruned on every arch stays a hard failure for a NAMED root, which
+    # distinguishes "nothing to ship" from "something to ship that did not"; the
+    # default root goes dormant there instead, per the arch check below.
+    _hkp_root_has_kdp(_product_has_content "${_source_root}")
+    if(NOT _source_root)
+        set(_product_dormant_reason "empty-root")
+    else()
+        set(_product_dormant_reason "no-kdp")
+    endif()
+
+    # The hard failure above rests on a premise the packer states itself: a root wired
+    # to a pack was wired to ship descriptors. That premise belongs to a root this
+    # build NAMED. The default root is inherited by every build that never mentioned
+    # descriptors, including builds targeting an architecture the shipped descriptors
+    # do not declare, and those builds asked for nothing and so cannot have failed to
+    # get it. Arch coverage is therefore consulted for the default root alone; a named
+    # root reaches the packer and fails there exactly as it always has.
+    #
+    # Safe in one direction only, which is the direction needed. arch_matches() runs
+    # first inside kdp_survives(), so "no KDP declares an arch this build packs for"
+    # proves no KDP survives. A root this misses stays wired and the packer reports it,
+    # so the check only ever adds dormancy where emptiness is already provable.
+    if(_product_has_content AND _source_root_is_default)
+        _hkp_root_covers_any_arch(_product_covers_arch "${_source_root}" "${_arches}")
+        if(NOT _product_covers_arch)
+            set(_product_has_content FALSE)
+            set(_product_dormant_reason "no-arch")
+        endif()
+    endif()
+
     # Production descriptors.
-    if(_source_root)
+    if(_source_root AND _product_has_content)
         hkp_wire_pack_target(
             NAME product
             SOURCE_ROOT "${_source_root}"
@@ -942,8 +1175,16 @@ loaded is the one named here.")
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
-            ${_rocke_args})
+            ${_rocke_args}
+            PACK_JOBS 2)
     else()
+        # Every dormant reason passes through here, ahead of the split below, so the
+        # registry records the name once and no reason can be added later that reaches
+        # a `message(STATUS)` without also reaching this call. A reason that skipped it
+        # would leave 'product' looking misspelled to hkp_register_census_tests(), which
+        # is the one reading that has to stay fatal.
+        _hkp_record_dormant_pack(product)
+
         # A tree left over from an earlier configuration that did pack keeps
         # being loaded: the engine selects the plugin-relative directory on
         # existence alone, and nothing else removes it once the pack target and
@@ -951,10 +1192,26 @@ loaded is the one named here.")
         if(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR)
             file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
         endif()
-        message(STATUS
-            "hkp: no production source root set "
-            "(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT empty); production "
-            "packaging dormant (tests still run against the fixtures).")
+        # One message per reason. The three dormant cases are diagnosed differently --
+        # one is a deliberate opt-out, one is an authoring gap, one is an arch this
+        # build does not target -- and a single line covering all three sends whoever
+        # reads it looking for the wrong thing. The arch line names the arch list
+        # because that is the value to change to make packing happen.
+        if(_product_dormant_reason STREQUAL "empty-root")
+            message(STATUS
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is empty; production "
+                "packaging dormant (tests still run against the fixtures).")
+        elseif(_product_dormant_reason STREQUAL "no-arch")
+            message(STATUS
+                "hkp: the default production root '${_source_root}' declares no "
+                "descriptor for any architecture this build packs for (${_arches}), "
+                "so every descriptor under it would prune; production packaging "
+                "dormant (tests still run against the fixtures).")
+        else()
+            message(STATUS
+                "hkp: no *.kdp.json under '${_source_root}'; production packaging "
+                "dormant (tests still run against the fixtures).")
+        endif()
     endif()
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
@@ -1087,4 +1344,272 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
        AND COMMAND apply_ctest_category_labels)
         apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
     endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_join_census_cases(<out-var> [<case>...])
+#
+# Packs an EXPECTED_CASES list into the comma-separated string the binary reads. Comma
+# rather than the semicolon CMake lists use: the ENVIRONMENT test property is itself a
+# semicolon-separated list of VAR=VALUE, so an embedded semicolon would split the
+# variable into fragments.
+# ---------------------------------------------------------------------------
+function(_hkp_join_census_cases _outvar)
+    set(_cases "${ARGN}")
+    foreach(_case IN LISTS _cases)
+        if(_case MATCHES ",")
+            message(FATAL_ERROR
+                "hkp: expected census case '${_case}' contains a comma, which is "
+                "the separator the pin is delivered with, so the binary would read "
+                "it as two names. A GTest case name cannot hold one; this is a typo.")
+        endif()
+    endforeach()
+    list(JOIN _cases "," _joined)
+    set(${_outvar} "${_joined}" PARENT_SCOPE)
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_add_census_test(<name> <target> <gtest-filter> <environment> <pass-regex>)
+#
+# One CTest entry of a census family. Entry and controls go through here so a drifting
+# command or label cannot leave a control no longer controlling its entry.
+#
+# Empty <pass-regex> is the census entry itself, verdicted on exit status. Nonempty is
+# a control, and names the diagnostic the census prints when it refuses: a control that
+# asserted only "exited nonzero" would be satisfied just as well by a binary that never
+# launched. PASS_REGULAR_EXPRESSION REPLACES the exit-status check rather than adding
+# to it, so a control carries it ALONE; CTest still fails a test that times out or dies
+# on a signal, so a crash cannot pass through the match.
+#
+# The entry instead carries FAIL_REGULAR_EXPRESSION on the diagnostic prefix, which the
+# exit status cannot cover: a run that prints a refusal yet exits zero would otherwise
+# read as a clean census.
+# ---------------------------------------------------------------------------
+function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
+    add_test(
+        NAME "${_name}"
+        COMMAND "$<TARGET_FILE:${_target}>"
+                "--gtest_filter=${_filter}")
+    set_tests_properties("${_name}" PROPERTIES
+        ENVIRONMENT "${_environment}"
+        LABELS "unit_test;hip-kernel-provider;host")
+    if(_pass_regex)
+        set_tests_properties("${_name}" PROPERTIES
+            PASS_REGULAR_EXPRESSION "${_pass_regex}")
+    else()
+        set_tests_properties("${_name}" PROPERTIES
+            FAIL_REGULAR_EXPRESSION "Census: ")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_add_census_entry(<target> <suite> <arch> <shard> <joined-cases>)
+#
+# One suite's census at one architecture, together with the controls that make it
+# observable as a gate. <joined-cases> comes from _hkp_join_census_cases(); empty
+# suppresses both the pin and the control that watches it.
+# ---------------------------------------------------------------------------
+function(_hkp_add_census_entry _target _suite _arch _shard _cases)
+    set(_name "hip-kernel-provider-hkp-census-${_arch}-${_suite}")
+    set(_common "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_arch}")
+    set(_pin "")
+    if(_cases)
+        set(_pin ";HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases}")
+    endif()
+
+    _hkp_add_census_test("${_name}" "${_target}" "${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}" "")
+
+    # Control: every case in the suite goes unvisited. The filter's negative half
+    # cancels its positive half, so the registered inventory is intact, none of it
+    # runs, and the process would exit 0 on its own -- only the listener's
+    # per-iteration completion check turns this red. Neither the filter nor the regex
+    # names a case, so a renamed case cannot leave this red for the weaker reason that
+    # it matched nothing at all.
+    _hkp_add_census_test("${_name}-control-unvisited" "${_target}"
+                         "${_suite}.*-${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}"
+                         "did not complete .* successfully")
+
+    # Control: the explicit root does not exist. The shard name is one no arch carries
+    # and no packing rule writes, so the directory cannot come into being and start
+    # passing. The preflight rejects it before a single case runs, which is also what
+    # keeps a census from falling back to the binary's compiled-in root: that one holds
+    # every arch's descriptors and would let the entry pass while its own shard was
+    # missing. The regex is the preflight's own refusal, so nothing further in can
+    # satisfy this control.
+    _hkp_add_census_test("${_name}-control-absent-root" "${_target}" "${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}-hkp-census-control-absent${_pin}"
+                         "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing explicit HIPDNN_DESCRIPTOR_DIR")
+
+    # Control: the pin expects a case the suite does not register. Identical to the
+    # entry but for one extra name, so every real case still passes and the name
+    # comparison is the only thing left that can turn this red -- the direct control
+    # for the shrink the pin exists to catch. Registered only where a pin exists, and
+    # the sentinel is not a plausible case name, so no future case can adopt it and
+    # quietly make this pass. The regex holds the name comparison's own wording, which
+    # separates this from -control-unvisited above: both exit nonzero, but only the
+    # name check prints this line.
+    if(_cases)
+        _hkp_add_census_test("${_name}-control-unregistered-case" "${_target}"
+                             "${_suite}.*"
+                             "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard};HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases},HkpCensusControlCaseThatIsNeverRegistered"
+                             "is expected but not registered, so the suite has lost a case")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_require_census_declaration(suites target pack_name)
+#
+#   Fails configure when a census declaration names suites but omits what would
+#   run them. Each condition is independently fatal, and each message repeats the
+#   suites that prompted the check so the report names the declaration at fault
+#   rather than only the missing keyword.
+# ---------------------------------------------------------------------------
+function(_hkp_require_census_declaration suites target pack_name)
+    if(NOT target)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) without a TARGET, so "
+            "no binary could run them.")
+    endif()
+    if(NOT pack_name)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) without a PACK_NAME, "
+            "so no shard could be named.")
+    endif()
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) but the target "
+            "${target} does not exist, so no census could be registered. This "
+            "call must run after that target is created.")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# The emitted-bundle census. Each generated engine ships a GTest suite that reads what
+# actually loaded through discoverDescriptorSets() and then
+# loadValidatedDescriptorSets<Handle>(), and compares the loaded pack/kernel identities,
+# runtime source kind and SDK version against the inventory its generation emitted: a
+# pack whose symbols do not register drops its descriptors at load, and the census sees
+# them missing.
+#
+# The architecture is supplied EXPLICITLY, from the registry (HKP_PACK_ARCHES_<name>)
+# rather than from a probe -- a host census must not depend on which card is in the
+# machine, and a bundle cannot be its own expectation. Each suite gets an entry per
+# selected arch against that arch's own shard under HKP_PACK_OUT_ROOT_<name>, so a suite
+# is declarable only where it reads exactly one pack's shard. Call this once per packed
+# target, beside hkp_verify_embedded_sources(); a missing PACK_NAME, TARGET or recorded
+# arch list is fatal rather than a silent drop, because a census that registers nothing
+# is indistinguishable from one that passed.
+#
+# A PACK_NAME the registry knows only as DORMANT registers nothing and says so at
+# STATUS; an unknown name stays fatal. _hkp_record_dormant_pack() above owns why the
+# two are told apart rather than guessed at.
+#
+# Entries carry positive controls, registered by _hkp_add_census_entry() above, because
+# a gate nobody can watch fail is indistinguishable from no gate.
+#
+# EXPECTED_CASES pins one suite's case-name set. The execution guard proves everything
+# REGISTERED ran and passed; only the pin proves everything EXPECTED was registered, so
+# without it a suite can shrink silently and still certify green. Names, never a count:
+# a case added and a case lost cancel in a count. It is optional, but supplying the
+# keyword with no names is fatal, because an empty pin is indistinguishable from no pin
+# while looking like a check. See _hkp_join_census_cases() above for the comma
+# separator it is delivered with.
+# ---------------------------------------------------------------------------
+function(hkp_register_census_tests)
+    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
+        return()
+    endif()
+
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES;EXPECTED_CASES")
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "hkp_register_census_tests: unrecognised argument(s): "
+            "${ARG_UNPARSED_ARGUMENTS}")
+    endif()
+    if(NOT ARG_SUITES)
+        return()
+    endif()
+    if("EXPECTED_CASES" IN_LIST ARG_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) with an EXPECTED_CASES "
+            "keyword that names no case. An empty pin admits every case set, which "
+            "reads as a pinned suite while checking nothing. List the suite's cases, "
+            "or drop the keyword.")
+    endif()
+
+    _hkp_require_census_declaration("${ARG_SUITES}" "${ARG_TARGET}" "${ARG_PACK_NAME}")
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    get_property(_dormant_labels GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)
+    if(NOT ARG_PACK_NAME IN_LIST _labels)
+        # Registering nothing and saying so keeps a generated integration's census call
+        # valid across every configuration, instead of legal only where the arch lists
+        # happen to intersect. The reason is not restated: hkp_add_packaging() emits one
+        # line per dormant reason earlier in the same configure, and a second authority
+        # on which reason applies is one that can disagree with the first.
+        if(ARG_PACK_NAME IN_LIST _dormant_labels)
+            message(STATUS
+                "hkp: pack target '${ARG_PACK_NAME}' is dormant in this configuration, "
+                "so it stages no shard and the census suites declared against it "
+                "(${ARG_SUITES}) are not registered. The dormancy message earlier in "
+                "this configure names the reason.")
+            return()
+        endif()
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) at pack target "
+            "'${ARG_PACK_NAME}', which no hkp_wire_pack_target() call wired, so "
+            "there is no shard to census. Wired roots: ${_labels}. Roots left "
+            "dormant by this configuration: ${_dormant_labels}.")
+    endif()
+
+    get_property(_out_root GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_PACK_NAME})
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_PACK_NAME})
+    if(NOT _arches)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) at pack target "
+            "'${ARG_PACK_NAME}', which was wired with an empty architecture list, "
+            "so no shard exists to census. Set GPU_TARGETS/AMDGPU_TARGETS.")
+    endif()
+
+    # A pin names ONE suite's cases. Spread over several suites it would demand that
+    # each of them register the same set, which no two distinct suites do -- so the
+    # first entry would fail and the mistake would read as a broken suite rather than
+    # as a misplaced argument.
+    list(LENGTH ARG_SUITES _suite_count)
+    if(ARG_EXPECTED_CASES AND NOT _suite_count EQUAL 1)
+        message(FATAL_ERROR
+            "hkp: EXPECTED_CASES pins one suite's case-name set, but this call "
+            "declares ${_suite_count} suites (${ARG_SUITES}). Split the call so each "
+            "pinned suite carries its own list.")
+    endif()
+
+    _hkp_join_census_cases(_census_expected_cases ${ARG_EXPECTED_CASES})
+
+    foreach(_suite IN LISTS ARG_SUITES)
+        # The entry name carries the arch and the suite and nothing of the pack, so the
+        # same suite declared at a second pack target would ask CTest for one name twice
+        # -- and the second registration would silently take the first one's shard.
+        get_property(_owner GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite})
+        if(_owner)
+            message(FATAL_ERROR
+                "hkp: census suite '${_suite}' is declared at two pack targets, "
+                "'${_owner}' and '${ARG_PACK_NAME}'. A census entry is named for its "
+                "suite and arch alone, so the two collide. Declare the suite at the "
+                "one pack whose shard it reads.")
+        endif()
+        set_property(GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite} "${ARG_PACK_NAME}")
+
+        foreach(_census_arch IN LISTS _arches)
+            _hkp_add_census_entry("${ARG_TARGET}" "${_suite}" "${_census_arch}"
+                                  "${_out_root}/${_census_arch}"
+                                  "${_census_expected_cases}")
+        endforeach()
+    endforeach()
 endfunction()

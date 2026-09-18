@@ -52,6 +52,22 @@ Infer options from the user request:
    The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
 
+   For an ingestor engine, the discovery component is **`hip-kernel`**, not
+   `hip-kernel-provider`. A helper's first provider-prefixed command need not be the
+   requested engine's registration. In the gfx942 dense walkthrough, inspect the
+   actual installed CTest entry before executing it:
+   ```bash
+   ctest --test-dir <installed-ctest-root> -N -V \
+     -R '^hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests$'
+   ctest --test-dir <installed-ctest-root> --no-tests=error -V \
+     -R '^hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests$'
+   ```
+   Require that exact registration, the `hipkernel:Gfx942AttentionDense` engine pin,
+   current installed executable/plugin/config paths and intended quick/standard
+   cases. Missing registration, wrong pin, zero selected cases, all-skipped support
+   or failed numerical comparisons fail this gate. Do not substitute a broad
+   component PASS for exact-engine evidence.
+
 6. Run tests through `cmake_run.py` when no gtest filter is requested:
    ```bash
    python3 <scripts>/cmake_run.py --build-dir <build-dir> --target <target> [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
@@ -86,7 +102,40 @@ Infer options from the user request:
 | `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` | `hip-kernel-provider-external-integration-check` when present |
 | `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` | — |
 
-The exact article/engine/config for the external suite is resolved at build time; get the ready-to-run command from `discover_test_targets.py --scope external-integration` (the `command:` line) rather than hardcoding paths.
+The exact article/engine/config for the external suite is resolved at build time.
+Use discovery for available commands, then inspect the specific CTest registration
+when proving a named engine; a generic `command:` line is not that proof.
+
+## Ingestor proof boundaries
+
+[The ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) is the sole ordered
+create/extend workflow. Its early `device_probe.py --mode early` requires the
+requested device and writable root, not an install tree, and ignores inherited
+`INSTALL`. After installation, `device_probe.py --mode installed` requires explicit
+`--install <existing-install>`. Probe success is not dispatch.
+
+Native host proof executes actual typed provider registrations and descriptor
+loading, then checks the finalized emitted inventory. Use a fresh process,
+explicit `HIPDNN_TEST_EXPECTED_ARCH` from configured packaging architectures, the
+corresponding shard and a nonempty exact host-test selection. Missing or unknown
+architecture selection, wrong-arch data, absent/extra identities and wrong runtime
+source kind fail. Packaged runtime source kind is KPACK. Source-text symbol matching
+and structural descriptor validation cannot certify native hooks; host loading
+cannot prove device dispatch.
+
+Numerical acceptance needs a capable independent reference for the actual graph.
+Neither current CPU nor GPU SDPA reference supports a sink UID. Record **BLOCKED**
+when no capable reference exists; a skip, automatic fallback exhaustion or
+unverified golden output cannot pass.
+
+The corpus sweep interface is `<PY> <GEN>/tools/sweep.py --config <absolute-YAML>`
+with `configs/sweep-isolation.sweep.yaml.example`. Correctness is separate from
+timing, engine attribution is exact, and resume is bound to current input content.
+`SWEEP_DONE` is validated completion; explicit `correctness.enabled: false` yields
+`SWEEP_TIMING_ONLY`, never final acceptance. Unmet gates yield `SWEEP_INCOMPLETE`.
+After tuning/regeneration, repeat artifact/native/device/corpus gates against the
+final installation and complete the per-corpus runtime outcome join. Passing only
+unchanged baseline cases cannot establish that an extension's new variant served.
 
 ## Report
 
@@ -103,6 +152,11 @@ If a requested component has no matching target, say that it was not present in 
 
 ## Notes
 
+- **Build speed — comgr cache location.** Any build that packs kernels is dominated by
+  `libamd_comgr` lowering, whose on-disk cache defaults to `~/.cache/comgr`. On a machine
+  whose home is a network filesystem that makes every lookup a network round trip and slows
+  packing by an order of magnitude. Export `AMD_COMGR_CACHE_DIR` to a RAM disk or local disk
+  (e.g. `/tmp/comgr-cache`).
 - `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
 - Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
 - Windows comgr staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr. This happens on every Windows run, not just for a specific kernel path; GCN-assembly Winograd solvers are the common failure (`[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`), but the version mismatch is not limited to them. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer).
