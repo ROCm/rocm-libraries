@@ -1377,14 +1377,34 @@ class HWRegContainer(Container):
 class MemTokenData(Container):
     """Memory-token list carried on fence/barrier instructions.
 
-    Constructor: ``MemTokenData(tokens=[])``. ``tokens`` is a mutable
-    list of ints (mirrors C++ ``std::vector<int>``).
+    Constructor:
+    ``MemTokenData(tokens=[], warTokens=[], warDistance=0, rawTokens=[], rawDistance=0)``.
+    All three token fields are mutable lists of ints (mirrors C++
+    ``std::vector<int>``).
+
+    ``warTokens``/``warDistance`` describe a loop-carried write-after-read this
+    instruction guards: the tags the aliasing reads carried ``warDistance`` trips
+    ago. ``rawTokens``/``rawDistance`` are the mirror, riding the reader: the tags
+    the producing fill carried ``rawDistance`` trips ago. Both differ from
+    ``tokens`` because a memtoken names a physical buffer only for the trip it was
+    emitted from. Zero distance means no such relation.
     """
 
-    __slots__ = ("tokens",)
+    __slots__ = ("tokens", "warTokens", "warDistance", "rawTokens", "rawDistance")
 
-    def __init__(self, tokens: Optional[List[int]] = None) -> None:
+    def __init__(
+        self,
+        tokens: Optional[List[int]] = None,
+        warTokens: Optional[List[int]] = None,
+        warDistance: int = 0,
+        rawTokens: Optional[List[int]] = None,
+        rawDistance: int = 0,
+    ) -> None:
         self.tokens: List[int] = list(tokens) if tokens is not None else []
+        self.warTokens: List[int] = list(warTokens) if warTokens is not None else []
+        self.warDistance: int = warDistance
+        self.rawTokens: List[int] = list(rawTokens) if rawTokens is not None else []
+        self.rawDistance: int = rawDistance
 
     def toString(self) -> str:
         result = "mem_token:"
@@ -1392,22 +1412,52 @@ class MemTokenData(Container):
             if i > 0:
                 result += ","
             result += f" {tok}"
+        if self.warDistance > 0:
+            result += f" war(d={self.warDistance}):"
+            for i, tok in enumerate(self.warTokens):
+                if i > 0:
+                    result += ","
+                result += f" {tok}"
+        if self.rawDistance > 0:
+            result += f" raw(d={self.rawDistance}):"
+            for i, tok in enumerate(self.rawTokens):
+                if i > 0:
+                    result += ","
+                result += f" {tok}"
         return result
 
     def __repr__(self) -> str:
         return f"MemTokenData(tokens={self.tokens!r})"
 
+    # Every field must survive a copy. SIA4 deepcopies whole instruction modules
+    # to build the NoLoadLoop bodies, and an annotation dropped there is a wait
+    # silently not emitted.
+    def _state(self) -> Tuple[List[int], List[int], int, List[int], int]:
+        return (
+            list(self.tokens),
+            list(self.warTokens),
+            self.warDistance,
+            list(self.rawTokens),
+            self.rawDistance,
+        )
+
     def __copy__(self) -> "MemTokenData":
-        return MemTokenData(self.tokens)
+        return MemTokenData(*self._state())
 
     def __deepcopy__(self, memo: dict) -> "MemTokenData":
-        return MemTokenData(list(self.tokens))
+        return MemTokenData(*self._state())
 
-    def __getstate__(self) -> List[int]:
-        return list(self.tokens)
+    def __getstate__(self) -> Tuple[List[int], List[int], int, List[int], int]:
+        return self._state()
 
-    def __setstate__(self, state: List[int]) -> None:
-        self.tokens = list(state)
+    def __setstate__(self, state: Tuple[List[int], List[int], int, List[int], int]) -> None:
+        (
+            self.tokens,
+            self.warTokens,
+            self.warDistance,
+            self.rawTokens,
+            self.rawDistance,
+        ) = (list(state[0]), list(state[1]), state[2], list(state[3]), state[4])
 
 
 # ---------------------------------------------------------------------------

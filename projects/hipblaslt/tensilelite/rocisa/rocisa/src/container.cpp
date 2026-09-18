@@ -749,18 +749,44 @@ void init_containers(nb::module_ m)
              });
 
     nb::class_<rocisa::MemTokenData, rocisa::Container>(m_con, "MemTokenData")
-        .def(nb::init<const std::vector<int>&>(), nb::arg("tokens") = std::vector<int>{})
+        .def(nb::init<const std::vector<int>&,
+                      const std::vector<int>&,
+                      int,
+                      const std::vector<int>&,
+                      int>(),
+             nb::arg("tokens")      = std::vector<int>{},
+             nb::arg("warTokens")   = std::vector<int>{},
+             nb::arg("warDistance") = 0,
+             nb::arg("rawTokens")   = std::vector<int>{},
+             nb::arg("rawDistance") = 0)
         .def_rw("tokens", &rocisa::MemTokenData::tokens)
+        .def_rw("warTokens", &rocisa::MemTokenData::warTokens)
+        .def_rw("warDistance", &rocisa::MemTokenData::warDistance)
+        .def_rw("rawTokens", &rocisa::MemTokenData::rawTokens)
+        .def_rw("rawDistance", &rocisa::MemTokenData::rawDistance)
         .def("__str__", &rocisa::MemTokenData::toString)
         .def("__deepcopy__",
              [](const rocisa::MemTokenData& self, nb::dict) {
                  return rocisa::MemTokenData(self);
              })
         .def("__getstate__",
-             [](const rocisa::MemTokenData& self) { return self.tokens; })
-        .def("__setstate__", [](rocisa::MemTokenData& self, std::vector<int> t) {
-            new(&self) rocisa::MemTokenData(t);
-        });
+             [](const rocisa::MemTokenData& self) {
+                 return std::make_tuple(self.tokens,
+                                        self.warTokens,
+                                        self.warDistance,
+                                        self.rawTokens,
+                                        self.rawDistance);
+             })
+        .def("__setstate__",
+             [](rocisa::MemTokenData& self,
+                const std::
+                    tuple<std::vector<int>, std::vector<int>, int, std::vector<int>, int>& t) {
+                 new(&self) rocisa::MemTokenData(std::get<0>(t),
+                                                 std::get<1>(t),
+                                                 std::get<2>(t),
+                                                 std::get<3>(t),
+                                                 std::get<4>(t));
+             });
 
     nb::class_<rocisa::ContinuousRegister>(m_con, "ContinuousRegister")
         .def(

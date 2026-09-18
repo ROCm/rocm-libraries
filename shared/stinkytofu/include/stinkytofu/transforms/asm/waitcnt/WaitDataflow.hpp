@@ -114,9 +114,26 @@ int waitToDrain(CounterKind c, int countFrom);
 /// At block entry there is one entry per CFG predecessor; these are kept
 /// (not collapsed) at block exit so a successor's mergeFromPredecessors can
 /// recover each predecessor's path length.
+/// One in-flight memop, tagged with how many loop back-edges its state has
+/// crossed since it was issued. 0 means "issued in the block currently being
+/// walked"; N means N trips ago.
+///
+/// This is what lets a loop-carried dependence name a specific trip. Without it
+/// the queue holds several dynamic instances of one static op with nothing to
+/// tell them apart, and a distance-d hazard can only be approximated by "any
+/// earlier trip".
+struct QueuedOp {
+    StinkyInstruction* op = nullptr;
+    unsigned tripsBack = 0;
+
+    bool operator==(const QueuedOp& other) const {
+        return op == other.op && tripsBack == other.tripsBack;
+    }
+};
+
 struct PerPredQueue {
     BasicBlock* pred = nullptr;
-    std::deque<StinkyInstruction*> ops;
+    std::deque<QueuedOp> ops;
     std::unordered_set<StinkyInstruction*> saturatedOps;
 
     int countFrom(StinkyInstruction* op) const;
@@ -220,6 +237,20 @@ class WaitDataflow {
    private:
     const std::vector<BasicBlock*>& rpo;
     DataflowResult result;
+
+    /// Position of each block in `rpo`, so an edge can be classified without a
+    /// separate loop analysis.
+    std::unordered_map<const BasicBlock*, unsigned> rpoIndex;
+
+    /// An edge pred -> succ that does not advance in reverse post-order is a
+    /// back edge, i.e. one trip of some loop. Crossing it ages the in-flight
+    /// queue by a trip.
+    bool isBackEdge(const BasicBlock* pred, const BasicBlock* succ) const {
+        auto p = rpoIndex.find(pred);
+        auto s = rpoIndex.find(succ);
+        if (p == rpoIndex.end() || s == rpoIndex.end()) return false;
+        return p->second >= s->second;
+    }
 
     /// Per-counter RAW-wait constraint, indexed by CounterKind. Seeded with
     /// the built-in defaults by the constructor; overridable via
