@@ -169,42 +169,24 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
     });
 }
 
-// Returns true when any tensor stride/dim exceeds INT_MAX, or when a grouped
-// backward-weights tensor's addressable element extent exceeds INT_MAX, so the problem
-// must be dispatched to a CK instance whose argument types are int64 end-to-end.
-//
-// CK exposes both index_t (int32) and long_index_t (int64) MakeArgumentPointer
-// overloads, but most non-large-tensor impls override the int64 overload by
-// silently narrowing back to int32 (e.g.
-// device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp:2090-2117). Without
-// this filter the loader would happily pick a narrowing instance for an
-// out-of-range stride and corrupt the kernel arguments.
+// Non-large-tensor CK instances silently narrow CK's int64 MakeArgumentPointer overload
+// back to int32 and form byte offsets in 32-bit arithmetic, so any tensor whose byte span
+// exceeds INT_MAX overflows and returns silently wrong results -- even when every individual
+// dim/stride and the raw element count fit in int32. Must use GetNumBytes() (stride-aware
+// byte span), not GetElementSpace()/GetElementSize() (element counts): a tensor can have a
+// large element count but a sub-2GiB byte span (no risk), or the reverse -- a sub-INT_MAX
+// element count with a >2GiB byte span, which does overflow. Applies to every direction:
+// forward and backward-data hit the same 32-bit byte-offset overflow as backward-weights.
 template <typename ProblemDescriptionType>
 inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
 {
     if(!problem.AllTensorsDimsFitIntoInt())
         return true;
 
-    // AllTensorsDimsFitIntoInt() only checks that each individual length/stride fits in
-    // int32; it does NOT bound the maximum flat element offset the kernel indexes. A grouped
-    // backward-weights tensor whose element extent exceeds INT_MAX overflows a non-large CK
-    // instance's 32-bit element indexing and returns silently wrong results, so require a
-    // large-tensor (int64) instance for those too. Use GetElementSpace() (the stride-aware
-    // max addressable offset, as GetNumBytes() does), not GetElementSize() (the packed
-    // element count): for a non-packed tensor the element space is larger and is the true
-    // bound on the int32 offset that overflows. Scoped to the backward-weights direction:
-    // forward and backward-data verify correctly on the int32 instances and must keep them
-    // (the large-tensor instances are measurably slower). This gate is rank-agnostic, so it
-    // covers both 2D (ConvHipImplicitGemmGroupWrwXdlops) and 3D
-    // (ConvHipImplicitGemm3DGroupWrwXdlops) grouped backward-weights.
-    if(problem.IsDirectionBackwardWrW())
-    {
-        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-        return problem.GetIn().GetElementSpace() > max_int32 ||
-               problem.GetOut().GetElementSpace() > max_int32 ||
-               problem.GetWeights().GetElementSpace() > max_int32;
-    }
-    return false;
+    constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+    return problem.GetIn().GetNumBytes() > max_int32 ||
+           problem.GetOut().GetNumBytes() > max_int32 ||
+           problem.GetWeights().GetNumBytes() > max_int32;
 }
 
 // Large-tensor xdl impls embed "Large_Tensor" in their GetTypeString() (see

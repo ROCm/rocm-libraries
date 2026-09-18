@@ -125,7 +125,9 @@ miopenStatus_t CallGemm(const Handle& handle,
                         std::size_t b_offset,
                         Data_t C,
                         std::size_t c_offset,
-                        GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
+                        GemmBackend_t gemm_backend = GemmBackend_t::rocblas,
+                        Data_t workspace           = nullptr,
+                        std::size_t workspace_size = 0);
 
 // Overload with explicit C/D data type (e.g. bf16 A/B with fp32 C/D accumulation)
 MIOPEN_EXPORT

@@ -41,6 +41,7 @@
 
 #include "../../../shared/client_data_layout_helpers.h"
 #include "../../../shared/gpubuf.h"
+#include "../../../shared/hipfft_object_wrapper.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "../../../shared/rocfft_hip.h"
 
@@ -88,8 +89,6 @@ static size_t hipDataType_bytes(hipDataType t)
 
 struct device_context_t
 {
-    device_context_t() = delete;
-
     explicit device_context_t(int dev_id)
         : device_id(dev_id)
         , work_buffer_byte_bsize(0)
@@ -98,10 +97,23 @@ struct device_context_t
         HIP_EXPECT_SUCCESS(stream.alloc_with_err());
     }
 
-    const int           device_id;
+    static device_context_t make_nonowned_copy(const device_context_t& src)
+    {
+        device_context_t ret;
+        ret.device_id              = src.device_id;
+        ret.work_buffer_byte_bsize = src.work_buffer_byte_bsize;
+        ret.work_buffer = gpubuf::make_nonowned(src.work_buffer.data(), src.work_buffer.size());
+        ret.stream      = hipStream_wrapper_t::make_nonowned(src.stream.get_raw());
+        return ret;
+    }
+
+    int                 device_id;
     size_t              work_buffer_byte_bsize;
     gpubuf              work_buffer; // may be owned or not
     hipStream_wrapper_t stream; // may be owned or not
+
+private:
+    device_context_t() = default;
 };
 
 inline rocfft_result_placement placement_from_format(const hipfftXtSubFormat& format)
@@ -829,12 +841,68 @@ struct hipfftHandle_t
     rocfft_execution_info_wrapper_t info;
     std::vector<device_context_t>   device_contexts;
 
-    void** load_callback_ptrs       = nullptr;
-    void** load_callback_data       = nullptr;
-    size_t load_callback_lds_bytes  = 0;
-    void** store_callback_ptrs      = nullptr;
-    void** store_callback_data      = nullptr;
-    size_t store_callback_lds_bytes = 0;
+    struct callback_info_t
+    {
+        hipfftXtCallbackType type     = HIPFFT_CB_UNDEFINED;
+        void**               funcptrs = nullptr;
+        std::string          symbol;
+        std::vector<char>    bitcode;
+        void**               data      = nullptr;
+        size_t               lds_bytes = 0;
+
+        bool jit_enabled() const
+        {
+            return !symbol.empty() && !bitcode.empty();
+        }
+
+        // Throws HIPFFT_INVALID_VALUE if the callback type is not
+        // valid for the precision and I/O
+        static void validate_type(hipfftXtCallbackType cbtype, hipfftIOType io_type)
+        {
+            switch(cbtype)
+            {
+            case HIPFFT_CB_LD_COMPLEX:
+                if(io_type.precision() != rocfft_precision_single || io_type.is_real_to_complex())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_LD_COMPLEX_DOUBLE:
+                if(io_type.precision() != rocfft_precision_double || io_type.is_real_to_complex())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_LD_REAL:
+                if(io_type.precision() != rocfft_precision_single || !io_type.is_real_to_complex())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_LD_REAL_DOUBLE:
+                if(io_type.precision() != rocfft_precision_double || !io_type.is_real_to_complex())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_ST_COMPLEX:
+                if(io_type.precision() != rocfft_precision_single || io_type.is_complex_to_real())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_ST_COMPLEX_DOUBLE:
+                if(io_type.precision() != rocfft_precision_double || io_type.is_complex_to_real())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_ST_REAL:
+                if(io_type.precision() != rocfft_precision_single || !io_type.is_complex_to_real())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_ST_REAL_DOUBLE:
+                if(io_type.precision() != rocfft_precision_double || !io_type.is_complex_to_real())
+                    throw HIPFFT_INVALID_VALUE;
+                break;
+            case HIPFFT_CB_UNDEFINED:
+                throw HIPFFT_INVALID_VALUE;
+            }
+        }
+    };
+    callback_info_t load_callback, store_callback;
+
+    // Streams set before plan initialization, keyed by
+    // device ID (not owned by the hipfft plan)
+    std::map<int, hipStream_t> pending_streams;
 
     // Multi-processing communicator
     rocfft_comm_type comm_type   = rocfft_comm_none;
@@ -990,6 +1058,33 @@ struct hipfftHandle_t
                 ret.insert(type_placement_key_t{dft_type, rocfft_placement_notinplace});
             }
         }
+        return ret;
+    }
+
+    // Create a new handle copying all pre-initialization settings from src
+    // (shallow copies), except for the auto-allocation flag
+    // (auto_allocation is disabled in the returned plan).
+    static hipfftHandle_wrapper_t make_size_querying_plan_from(const hipfftHandle_t* src)
+    {
+        hipfftHandle_wrapper_t ret;
+        HIPFFT_EXPECT_SUCCESS(ret.alloc_with_err());
+        (*ret).auto_allocate = false;
+        if(!src)
+            return ret;
+
+        for(const auto& ctx : src->device_contexts)
+        {
+            (*ret).device_contexts.emplace_back(device_context_t::make_nonowned_copy(ctx));
+        }
+        (*ret).load_callback  = src->load_callback;
+        (*ret).store_callback = src->store_callback;
+        (*ret).scale_factor   = src->scale_factor;
+        (*ret).comm_type      = src->comm_type;
+        (*ret).comm_handle    = src->comm_handle;
+#ifdef HIPFFT_MPI_ENABLE
+        (*ret).mp_input_brick  = src->mp_input_brick;
+        (*ret).mp_output_brick = src->mp_output_brick;
+#endif
         return ret;
     }
 };
@@ -1223,6 +1318,40 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             ROCFFT_EXPECT_SUCCESS(
                 rocfft_plan_description_set_comm(desc, plan->comm_type, plan->comm_handle));
 
+        // set JIT callbacks if specified
+
+        // JIT callbacks cannot currently be combined with multi-GPU
+        // transforms.
+        const bool is_multi_gpu_transform = plan->device_contexts.size() > 1
+#ifdef HIPFFT_MPI_ENABLE
+                                            || plan->mp_input_brick || plan->mp_output_brick
+#endif
+            ;
+        if((plan->load_callback.jit_enabled() || plan->store_callback.jit_enabled())
+           && is_multi_gpu_transform)
+            return HIPFFT_NOT_IMPLEMENTED;
+        if(plan->load_callback.jit_enabled())
+        {
+            hipfftHandle_t::callback_info_t::validate_type(plan->load_callback.type, plan->io_type);
+            ROCFFT_EXPECT_SUCCESS(
+                rocfft_plan_description_set_load_callback(desc,
+                                                          plan->load_callback.symbol.c_str(),
+                                                          plan->load_callback.bitcode.data(),
+                                                          plan->load_callback.bitcode.size(),
+                                                          plan->load_callback.lds_bytes));
+        }
+        if(plan->store_callback.jit_enabled())
+        {
+            hipfftHandle_t::callback_info_t::validate_type(plan->store_callback.type,
+                                                           plan->io_type);
+            ROCFFT_EXPECT_SUCCESS(
+                rocfft_plan_description_set_store_callback(desc,
+                                                           plan->store_callback.symbol.c_str(),
+                                                           plan->store_callback.bitcode.data(),
+                                                           plan->store_callback.bitcode.size(),
+                                                           plan->store_callback.lds_bytes));
+        }
+
         if(plan->device_contexts.size() > 1)
         {
             // Determine the sub-formats of this rocfft plan's input and output fields. Unbatched
@@ -1318,6 +1447,27 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 plan->info, dev_info.work_buffer.data(), dev_info.work_buffer_byte_bsize));
         }
     }
+
+    // if JIT callbacks are used, pass the cbdata to the execution info
+    if(plan->load_callback.jit_enabled() && plan->load_callback.data)
+    {
+        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_load_callback_data(
+            plan->info, plan->load_callback.data, plan->device_contexts.size()));
+    }
+    if(plan->store_callback.jit_enabled() && plan->store_callback.data)
+    {
+        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_store_callback_data(
+            plan->info, plan->store_callback.data, plan->device_contexts.size()));
+    }
+    // Apply streams that were set before plan initialization, if any
+    for(const auto& [dev_id, stream] : plan->pending_streams)
+    {
+        // Note: the plan is now initialized, so the following call is
+        // actually applying the stream to the plan's execution info and
+        // the device contexts (e.g. for hipfftXtMemcpy)
+        HIPFFT_EXPECT_SUCCESS(hipfftSetStream(plan, stream));
+    }
+    plan->pending_streams.clear();
 
     return HIPFFT_SUCCESS;
 }
@@ -1555,48 +1705,25 @@ catch(...)
     return handle_exception();
 }
 
+// no try-catch needed: hipfftGetSize* catches all exceptions internally
 hipfftResult hipfftEstimate1d(int nx, hipfftType type, int batch, size_t* workSize)
-try
 {
-    if(!workSize)
-        return HIPFFT_INVALID_VALUE;
-    hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSize1d(plan, nx, type, batch, workSize);
-    return ret;
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftGetSize1d(nullptr, nx, type, batch, workSize);
 }
 
+// no try-catch needed: hipfftGetSize* catches all exceptions internally
 hipfftResult hipfftEstimate2d(int nx, int ny, hipfftType type, size_t* workSize)
-try
 {
-    if(!workSize)
-        return HIPFFT_INVALID_VALUE;
-    hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSize2d(plan, nx, ny, type, workSize);
-    return ret;
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftGetSize2d(nullptr, nx, ny, type, workSize);
 }
 
+// no try-catch needed: hipfftGetSize* catches all exceptions internally
 hipfftResult hipfftEstimate3d(int nx, int ny, int nz, hipfftType type, size_t* workSize)
-try
 {
-    if(!workSize)
-        return HIPFFT_INVALID_VALUE;
-    hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSize3d(plan, nx, ny, nz, type, workSize);
-    return ret;
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftGetSize3d(nullptr, nx, ny, nz, type, workSize);
 }
 
+// no try-catch needed: hipfftGetSize* catches all exceptions internally
 hipfftResult hipfftEstimateMany(int        rank,
                                 int*       n,
                                 int*       inembed,
@@ -1608,18 +1735,9 @@ hipfftResult hipfftEstimateMany(int        rank,
                                 hipfftType type,
                                 int        batch,
                                 size_t*    workSize)
-try
 {
-    if(!workSize)
-        return HIPFFT_INVALID_VALUE;
-    hipfftHandle plan = nullptr;
-    hipfftResult ret  = hipfftGetSizeMany(
-        plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize);
-    return ret;
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftGetSizeMany(
+        nullptr, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize);
 }
 
 hipfftResult
@@ -1628,17 +1746,9 @@ try
 {
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
-    if(nx < 0 || batch < 0)
-    {
-        return HIPFFT_INVALID_SIZE;
-    }
 
-    hipfftHandle p;
-    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
-    p->auto_allocate = false;
-    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan1d(p, nx, type, batch, workSize));
-    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
-
+    auto temp = hipfftHandle_t::make_size_querying_plan_from(plan);
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan1d(temp, nx, type, batch, workSize));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1651,17 +1761,9 @@ try
 {
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
-    if(nx < 0 || ny < 0)
-    {
-        return HIPFFT_INVALID_SIZE;
-    }
 
-    hipfftHandle p;
-    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
-    p->auto_allocate = false;
-    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan2d(p, nx, ny, type, workSize));
-    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
-
+    auto temp = hipfftHandle_t::make_size_querying_plan_from(plan);
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan2d(temp, nx, ny, type, workSize));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1675,17 +1777,9 @@ try
 {
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
-    if(nx < 0 || ny < 0 || nz < 0)
-    {
-        return HIPFFT_INVALID_SIZE;
-    }
 
-    hipfftHandle p;
-    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
-    p->auto_allocate = false;
-    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan3d(p, nx, ny, nz, type, workSize));
-    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
-
+    auto temp = hipfftHandle_t::make_size_querying_plan_from(plan);
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan3d(temp, nx, ny, nz, type, workSize));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1709,13 +1803,10 @@ try
 {
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
-    hipfftHandle p = nullptr;
-    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
-    p->auto_allocate = false;
-    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany(
-        p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
-    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
+    auto temp = hipfftHandle_t::make_size_querying_plan_from(plan);
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany(
+        temp, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1739,13 +1830,10 @@ try
 {
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
-    hipfftHandle p = nullptr;
-    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
-    p->auto_allocate = false;
-    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany64(
-        p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
-    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
+    auto temp = hipfftHandle_t::make_size_querying_plan_from(plan);
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany64(
+        temp, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1760,6 +1848,7 @@ try
         return HIPFFT_INVALID_VALUE;
     if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
+
     for(size_t idx = 0; idx < plan->device_contexts.size(); ++idx)
     {
         workSize[idx] = plan->device_contexts[idx].work_buffer_byte_bsize;
@@ -1787,24 +1876,36 @@ catch(...)
 hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea)
 try
 {
-    if(!plan || !plan->initialized() || plan->device_contexts.empty())
+    if(!plan || !plan->initialized() || plan->device_contexts.size() != 1)
         return HIPFFT_INVALID_PLAN;
-    if(plan->device_contexts.size() > 1)
-    {
-        // wrong API for multi-device usage, hipfftXtSetWorkArea (yet to
-        // be implemented) must be used for multi-device plans
-        return HIPFFT_INVALID_PLAN;
-    }
+    // work delegated to generalized version to avoid duplications
+    return hipfftXtSetWorkArea(plan, &workArea);
+}
+catch(...)
+{
+    return handle_exception();
+}
 
-    auto& dev_info = plan->device_contexts[0];
-    if(dev_info.work_buffer_byte_bsize == 0)
-        return HIPFFT_SUCCESS;
+hipfftResult hipfftXtSetWorkArea(hipfftHandle plan, void** workArea)
+try
+{
+    if(!plan || !plan->initialized())
+        return HIPFFT_INVALID_PLAN;
     if(!workArea)
         return HIPFFT_INVALID_VALUE;
-
-    dev_info.work_buffer = gpubuf::make_nonowned(workArea, dev_info.work_buffer_byte_bsize);
-    ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_work_buffer(
-        plan->info, dev_info.work_buffer.data(), dev_info.work_buffer_byte_bsize));
+    for(size_t idx = 0; idx < plan->device_contexts.size(); ++idx)
+    {
+        auto& dev_info = plan->device_contexts[idx];
+        if(dev_info.work_buffer_byte_bsize == 0)
+            continue;
+        if(!workArea[idx])
+            return HIPFFT_INVALID_VALUE;
+        rocfft_scoped_device dev(dev_info.device_id);
+        dev_info.work_buffer
+            = gpubuf::make_nonowned(workArea[idx], dev_info.work_buffer_byte_bsize);
+        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_work_buffer(
+            plan->info, dev_info.work_buffer.data(), dev_info.work_buffer_byte_bsize));
+    }
     plan->auto_allocate = false;
     return HIPFFT_SUCCESS;
 }
@@ -1912,24 +2013,29 @@ hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfft
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
 try
 {
-    if(!plan || !plan->initialized())
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
+
     auto stream_dev_id = hipInvalidDeviceId;
     HIP_EXPECT_SUCCESS(hipStreamGetDevice(stream, &stream_dev_id));
     if(stream_dev_id == hipInvalidDeviceId)
         return HIPFFT_INTERNAL_ERROR;
-
+    if(!plan->initialized())
+    {
+        plan->pending_streams[stream_dev_id] = stream;
+        return HIPFFT_SUCCESS;
+    }
+    // plan is initialized: attach the stream to all relevant device contexts
+    // Note: the given stream is irrelevant if attached to a device that is
+    // _not_ used by the plan
     for(auto& dev_info : plan->device_contexts)
     {
         if(dev_info.device_id != stream_dev_id)
             continue;
-        rocfft_scoped_device scoped_dev(dev_info.device_id);
         dev_info.stream = hipStream_wrapper_t::make_nonowned(stream);
-        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_stream(plan->info, dev_info.stream));
-        return HIPFFT_SUCCESS;
     }
-    // given stream is not on a device that is part of the plan's device list
-    return HIPFFT_INVALID_VALUE;
+    ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_stream(plan->info, stream));
+    return HIPFFT_SUCCESS;
 }
 catch(...)
 {
@@ -2016,8 +2122,10 @@ hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                  void**               callbackData)
 try
 {
-    if(!plan)
+    if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
+
+    hipfftHandle_t::callback_info_t::validate_type(cbtype, plan->io_type);
 
     // check that the input/output type matches what's being requested
     //
@@ -2027,68 +2135,52 @@ try
     switch(cbtype)
     {
     case HIPFFT_CB_LD_COMPLEX:
-        if(plan->io_type.precision() != rocfft_precision_single
-           || plan->io_type.is_real_to_complex())
-            return HIPFFT_INVALID_VALUE;
-        plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
-        plan->load_callback_lds_bytes = 0;
+        plan->load_callback.type      = cbtype;
+        plan->load_callback.funcptrs  = callbacks;
+        plan->load_callback.data      = callbackData;
+        plan->load_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_COMPLEX_DOUBLE:
-        if(plan->io_type.precision() != rocfft_precision_double
-           || plan->io_type.is_real_to_complex())
-            return HIPFFT_INVALID_VALUE;
-        plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
-        plan->load_callback_lds_bytes = 0;
+        plan->load_callback.type      = cbtype;
+        plan->load_callback.funcptrs  = callbacks;
+        plan->load_callback.data      = callbackData;
+        plan->load_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL:
-        if(plan->io_type.precision() != rocfft_precision_single
-           || !plan->io_type.is_real_to_complex())
-            return HIPFFT_INVALID_VALUE;
-        plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
-        plan->load_callback_lds_bytes = 0;
+        plan->load_callback.type      = cbtype;
+        plan->load_callback.funcptrs  = callbacks;
+        plan->load_callback.data      = callbackData;
+        plan->load_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL_DOUBLE:
-        if(plan->io_type.precision() != rocfft_precision_double
-           || !plan->io_type.is_real_to_complex())
-            return HIPFFT_INVALID_VALUE;
-        plan->load_callback_ptrs      = callbacks;
-        plan->load_callback_data      = callbackData;
-        plan->load_callback_lds_bytes = 0;
+        plan->load_callback.type      = cbtype;
+        plan->load_callback.funcptrs  = callbacks;
+        plan->load_callback.data      = callbackData;
+        plan->load_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX:
-        if(plan->io_type.precision() != rocfft_precision_single
-           || plan->io_type.is_complex_to_real())
-            return HIPFFT_INVALID_VALUE;
-        plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
-        plan->store_callback_lds_bytes = 0;
+        plan->store_callback.type      = cbtype;
+        plan->store_callback.funcptrs  = callbacks;
+        plan->store_callback.data      = callbackData;
+        plan->store_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX_DOUBLE:
-        if(plan->io_type.precision() != rocfft_precision_double
-           || plan->io_type.is_complex_to_real())
-            return HIPFFT_INVALID_VALUE;
-        plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
-        plan->store_callback_lds_bytes = 0;
+        plan->store_callback.type      = cbtype;
+        plan->store_callback.funcptrs  = callbacks;
+        plan->store_callback.data      = callbackData;
+        plan->store_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL:
-        if(plan->io_type.precision() != rocfft_precision_single
-           || !plan->io_type.is_complex_to_real())
-            return HIPFFT_INVALID_VALUE;
-        plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
-        plan->store_callback_lds_bytes = 0;
+        plan->store_callback.type      = cbtype;
+        plan->store_callback.funcptrs  = callbacks;
+        plan->store_callback.data      = callbackData;
+        plan->store_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL_DOUBLE:
-        if(plan->io_type.precision() != rocfft_precision_double
-           || !plan->io_type.is_complex_to_real())
-            return HIPFFT_INVALID_VALUE;
-        plan->store_callback_ptrs      = callbacks;
-        plan->store_callback_data      = callbackData;
-        plan->store_callback_lds_bytes = 0;
+        plan->store_callback.type      = cbtype;
+        plan->store_callback.funcptrs  = callbacks;
+        plan->store_callback.data      = callbackData;
+        plan->store_callback.lds_bytes = 0;
         break;
     case HIPFFT_CB_UNDEFINED:
         return HIPFFT_INVALID_VALUE;
@@ -2096,15 +2188,15 @@ try
 
     rocfft_status res;
     res = rocfft_execution_info_set_load_callback(plan->info,
-                                                  plan->load_callback_ptrs,
-                                                  plan->load_callback_data,
-                                                  plan->load_callback_lds_bytes);
+                                                  plan->load_callback.funcptrs,
+                                                  plan->load_callback.data,
+                                                  plan->load_callback.lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
     res = rocfft_execution_info_set_store_callback(plan->info,
-                                                   plan->store_callback_ptrs,
-                                                   plan->store_callback_data,
-                                                   plan->store_callback_lds_bytes);
+                                                   plan->store_callback.funcptrs,
+                                                   plan->store_callback.data,
+                                                   plan->store_callback.lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
     return HIPFFT_SUCCESS;
@@ -2137,13 +2229,13 @@ try
     case HIPFFT_CB_LD_COMPLEX_DOUBLE:
     case HIPFFT_CB_LD_REAL:
     case HIPFFT_CB_LD_REAL_DOUBLE:
-        plan->load_callback_lds_bytes = sharedSize;
+        plan->load_callback.lds_bytes = sharedSize;
         break;
     case HIPFFT_CB_ST_COMPLEX:
     case HIPFFT_CB_ST_COMPLEX_DOUBLE:
     case HIPFFT_CB_ST_REAL:
     case HIPFFT_CB_ST_REAL_DOUBLE:
-        plan->store_callback_lds_bytes = sharedSize;
+        plan->store_callback.lds_bytes = sharedSize;
         break;
     case HIPFFT_CB_UNDEFINED:
         return HIPFFT_INVALID_VALUE;
@@ -2151,17 +2243,78 @@ try
 
     rocfft_status res;
     res = rocfft_execution_info_set_load_callback(plan->info,
-                                                  plan->load_callback_ptrs,
-                                                  plan->load_callback_data,
-                                                  plan->load_callback_lds_bytes);
+                                                  plan->load_callback.funcptrs,
+                                                  plan->load_callback.data,
+                                                  plan->load_callback.lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
     res = rocfft_execution_info_set_store_callback(plan->info,
-                                                   plan->store_callback_ptrs,
-                                                   plan->store_callback_data,
-                                                   plan->store_callback_lds_bytes);
+                                                   plan->store_callback.funcptrs,
+                                                   plan->store_callback.data,
+                                                   plan->store_callback.lds_bytes);
     if(res != rocfft_status_success)
         return HIPFFT_INVALID_VALUE;
+    return HIPFFT_SUCCESS;
+}
+catch(...)
+{
+    return handle_exception();
+}
+
+hipfftResult hipfftXtSetJITCallback(hipfftHandle         plan,
+                                    const char*          symbol_name,
+                                    const void*          bitcode_data,
+                                    size_t               bitcode_len_bytes,
+                                    hipfftXtCallbackType cbtype,
+                                    void**               cbdata)
+try
+{
+    if(!plan || plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+
+    // Return an error if we're neither clearing callbacks nor setting
+    // symbol + bitcode together.
+    if(!(!symbol_name && !bitcode_data && !bitcode_len_bytes)
+       && !(symbol_name && bitcode_data && bitcode_len_bytes))
+        return HIPFFT_INVALID_VALUE;
+
+    switch(cbtype)
+    {
+    case HIPFFT_CB_LD_COMPLEX:
+    case HIPFFT_CB_LD_COMPLEX_DOUBLE:
+    case HIPFFT_CB_LD_REAL:
+    case HIPFFT_CB_LD_REAL_DOUBLE:
+    {
+        plan->load_callback.type = cbtype;
+        if(symbol_name)
+            plan->load_callback.symbol = symbol_name;
+        else
+            plan->load_callback.symbol.clear();
+        plan->load_callback.bitcode.assign(static_cast<const char*>(bitcode_data),
+                                           static_cast<const char*>(bitcode_data)
+                                               + bitcode_len_bytes);
+        plan->load_callback.data = cbdata;
+        break;
+    }
+    case HIPFFT_CB_ST_COMPLEX:
+    case HIPFFT_CB_ST_COMPLEX_DOUBLE:
+    case HIPFFT_CB_ST_REAL:
+    case HIPFFT_CB_ST_REAL_DOUBLE:
+    {
+        plan->store_callback.type = cbtype;
+        if(symbol_name)
+            plan->store_callback.symbol = symbol_name;
+        else
+            plan->store_callback.symbol.clear();
+        plan->store_callback.bitcode.assign(static_cast<const char*>(bitcode_data),
+                                            static_cast<const char*>(bitcode_data)
+                                                + bitcode_len_bytes);
+        plan->store_callback.data = cbdata;
+        break;
+    }
+    case HIPFFT_CB_UNDEFINED:
+        return HIPFFT_INVALID_VALUE;
+    }
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -2211,16 +2364,13 @@ hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
                                  hipDataType    executiontype)
 try
 {
+    if(!workSize)
+        return HIPFFT_INVALID_VALUE;
     hipfftIOType iotype;
     HIPFFT_EXPECT_SUCCESS(iotype.init(inputtype, outputtype, executiontype));
-
-    hipfftHandle p;
-    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
-    p->auto_allocate = false;
-
+    auto temp = hipfftHandle_t::make_size_querying_plan_from(plan);
     HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany_internal(
-        p, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize));
-    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
+        temp, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize));
     return HIPFFT_SUCCESS;
 }
 catch(...)

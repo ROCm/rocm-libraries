@@ -163,6 +163,18 @@ endif()
 # Setup version
 rocm_setup_version(VERSION "4.1.1")
 
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP ROCALUTION_COPYRIGHT_YEAR "%Y")
+    if(rocalution_VERSION_TWEAK)
+        set(ROCALUTION_PRODUCT_VERSION_DISPLAY "${rocalution_VERSION_MAJOR}.${rocalution_VERSION_MINOR} (${rocalution_VERSION_TWEAK})")
+    else()
+        set(ROCALUTION_PRODUCT_VERSION_DISPLAY "${rocalution_VERSION_MAJOR}.${rocalution_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
+
 if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( BUILD_CLIENTS ON )
   rocm_package_setup_component(clients)

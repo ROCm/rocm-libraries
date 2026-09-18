@@ -57,6 +57,8 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_CALLS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_SOURCE_NAMES)
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_SYMBOLS_KERNEL)
+
 /// 0: Off.
 /// 1: Logs each option on a separate line.
 /// 2: Logs all options altogether, on single line.
@@ -818,6 +820,12 @@ void BuildHip(const std::string& name,
         opts.push_back("-Wno-cuda-compat");
         opts.push_back("-fno-gpu-rdc");
         opts.push_back("-O3");
+        if(MIOPEN_DEBUG_SYMBOLS_KERNEL)
+        {
+            opts.push_back("-g");
+            MIOPEN_LOG_W("Compiling the kernel with debug symbols");
+        }
+
 #if WORKAROUND_SWDEV_413293
         opts.push_back("-fno-offload-uniform-block");
 #endif
