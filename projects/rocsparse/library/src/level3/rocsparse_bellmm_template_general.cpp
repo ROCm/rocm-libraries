@@ -122,23 +122,35 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::bellmm_general_blockdim_device<BELL_BLOCK_DIM, BLK_SIZE_Y, T>(trans_A,
-                                                                                 trans_B,
-                                                                                 Mb,
-                                                                                 N,
-                                                                                 alpha,
-                                                                                 bell_cols,
-                                                                                 bell_block_dim,
-                                                                                 bell_col_ind,
-                                                                                 bell_val,
-                                                                                 dense_B,
-                                                                                 ldb,
-                                                                                 order_B,
-                                                                                 beta,
-                                                                                 dense_C,
-                                                                                 ldc,
-                                                                                 order_C,
-                                                                                 idx_base);
+        // Grid-stride over the dense column panels: grid.y is clamped to the 65535
+        // hardware limit, so one grid sweep only covers hipGridDim_y * BLK_SIZE_Y
+        // columns. The bound depends solely on hipBlockIdx_y, hipGridDim_y, N and the
+        // compile-time tile width, all of which are block uniform, so every thread of a
+        // block runs the same number of iterations. int64_t arithmetic keeps the
+        // increment from overflowing when I is int32_t and N is near its maximum.
+        for(int64_t col_offset = static_cast<int64_t>(hipBlockIdx_y) * BLK_SIZE_Y; col_offset < N;
+            col_offset += static_cast<int64_t>(hipGridDim_y) * BLK_SIZE_Y)
+        {
+            rocsparse::bellmm_general_blockdim_device<BELL_BLOCK_DIM, BLK_SIZE_Y, T>(
+                static_cast<I>(col_offset),
+                trans_A,
+                trans_B,
+                Mb,
+                N,
+                alpha,
+                bell_cols,
+                bell_block_dim,
+                bell_col_ind,
+                bell_val,
+                dense_B,
+                ldb,
+                order_B,
+                beta,
+                dense_C,
+                ldc,
+                order_C,
+                idx_base);
+        }
     }
 
     template <typename T, typename I, typename A, typename B, typename C>
@@ -178,34 +190,35 @@ namespace rocsparse
         // 32; on wave32 it shrinks to fit small block dimensions.
         const rocsparse_int tile = rocsparse::bellmm_general_tile_size(handle, bell_block_dim);
 
-#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                               \
-    {                                                                       \
-        dim3 bellmm_blocks((mb - 1) / 1 + 1, (n - 1) / (TILE) + 1);         \
-        dim3 bellmm_threads((TILE), (TILE), 1);                             \
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                 \
-            (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), T>), \
-            bellmm_blocks,                                                  \
-            bellmm_threads,                                                 \
-            0,                                                              \
-            stream,                                                         \
-            trans_A,                                                        \
-            trans_B,                                                        \
-            mb,                                                             \
-            n,                                                              \
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),               \
-            bell_cols,                                                      \
-            bell_block_dim,                                                 \
-            bell_col_ind,                                                   \
-            bell_val,                                                       \
-            dense_B,                                                        \
-            ldb,                                                            \
-            order_B,                                                        \
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                \
-            dense_C,                                                        \
-            ldc,                                                            \
-            order_C,                                                        \
-            descr->base,                                                    \
-            handle->pointer_mode == rocsparse_pointer_mode_host);           \
+#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                                     \
+    {                                                                             \
+        dim3 bellmm_blocks((mb - 1) / 1 + 1,                                      \
+                           rocsparse::get_batch_grid_size((n - 1) / (TILE) + 1)); \
+        dim3 bellmm_threads((TILE), (TILE), 1);                                   \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
+            (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), T>),       \
+            bellmm_blocks,                                                        \
+            bellmm_threads,                                                       \
+            0,                                                                    \
+            stream,                                                               \
+            trans_A,                                                              \
+            trans_B,                                                              \
+            mb,                                                                   \
+            n,                                                                    \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                     \
+            bell_cols,                                                            \
+            bell_block_dim,                                                       \
+            bell_col_ind,                                                         \
+            bell_val,                                                             \
+            dense_B,                                                              \
+            ldb,                                                                  \
+            order_B,                                                              \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                      \
+            dense_C,                                                              \
+            ldc,                                                                  \
+            order_C,                                                              \
+            descr->base,                                                          \
+            handle->pointer_mode == rocsparse_pointer_mode_host);                 \
     }
 
         switch(tile)
