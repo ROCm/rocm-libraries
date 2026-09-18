@@ -35,6 +35,7 @@
 #include <chrono>
 #include <mutex>
 #include <shared_mutex>
+#include <thread>
 
 #if MIOPEN_USE_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
@@ -46,6 +47,9 @@
 
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEVICE_CU)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CHECK_SUB_BUFFER_OOB_MEMORY_ACCESS)
+/// Abandoned evaluation streams allowed outstanding before a find waits for one.
+/// 0 derives it from GPU_MAX_HW_QUEUES; see StreamTracker::MaxDraining.
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_NAIVE_MAX_DRAINING, 0)
 
 namespace miopen {
 
@@ -442,16 +446,100 @@ std::shared_ptr<ScratchAllocation> Handle::GetScratchBuffer(std::size_t sz) cons
     return alloc;
 }
 
-void StreamTracker::sweep()
+namespace {
+
+/// How often a blocked acquire() re-tests the abandoned streams. Bounds the
+/// latency it adds; the tests themselves are a handful of host-side queries.
+constexpr auto kDrainPollInterval = std::chrono::milliseconds(1);
+
+/// Exempts the calling thread from HIP's stream-capture restrictions for its
+/// lifetime, restoring the previous mode on exit.
+///
+/// Keeps the tracker from invalidating a capture it has nothing to do with. The
+/// launch path already declines to reclaim while the handle's own stream is
+/// recording, so what is left for this to cover is the captures that check
+/// cannot see: one running on a different stream than the handle's, or on
+/// another thread, which under the default global mode still makes our queries
+/// illegal and kills that capture when they are refused (issue #12121).
+///
+/// The streams polled here are the tracker's own and never part of a caller's
+/// graph, so the exemption is honest rather than a way to force something
+/// through. It does leave the reclaim free to run during such a capture, which
+/// is the accepted side of the trade: releasing scratch no graph references is
+/// a far smaller risk than destroying the graph.
+class ScopedRelaxedCaptureMode
+{
+public:
+    ScopedRelaxedCaptureMode()
+    {
+        // Swaps in mode_ and writes the mode it replaced back into it.
+        active_ = hipThreadExchangeStreamCaptureMode(&mode_) == hipSuccess;
+    }
+
+    ~ScopedRelaxedCaptureMode()
+    {
+        if(active_)
+            (void)hipThreadExchangeStreamCaptureMode(&mode_);
+    }
+
+    ScopedRelaxedCaptureMode(const ScopedRelaxedCaptureMode&)            = delete;
+    ScopedRelaxedCaptureMode& operator=(const ScopedRelaxedCaptureMode&) = delete;
+
+private:
+    hipStreamCaptureMode mode_ = hipStreamCaptureModeRelaxed;
+    bool active_               = false;
+};
+
+} // namespace
+
+std::size_t StreamTracker::MaxDraining()
+{
+    static const std::size_t cap = [] {
+        if(const auto override_value = env::value(MIOPEN_NAIVE_MAX_DRAINING); override_value != 0)
+            return static_cast<std::size_t>(override_value);
+
+        // ROCclr's default when the variable is unset.
+        std::size_t hw_queues = 4;
+        if(const auto raw = env::getEnvironmentVariable("GPU_MAX_HW_QUEUES"))
+        {
+            try
+            {
+                const auto parsed = std::stoul(*raw);
+                if(parsed > 0)
+                    hw_queues = static_cast<std::size_t>(parsed);
+            }
+            catch(const std::exception&)
+            {
+                MIOPEN_LOG_W("Ignoring unparseable GPU_MAX_HW_QUEUES=" << *raw);
+            }
+        }
+
+        // Two rings are already spoken for whenever this matters: the handle's
+        // own stream, and the slot the blocked acquire() is about to hand out.
+        return hw_queues > 3 ? hw_queues - 2 : std::size_t{1};
+    }();
+    return cap;
+}
+
+void StreamTracker::SweepLocked()
 {
     if(draining_.empty())
         return;
 
+    const ScopedRelaxedCaptureMode capture_guard;
+
     for(auto it = draining_.begin(); it != draining_.end();)
     {
-        if(hipStreamQuery(it->stream) == hipSuccess)
+        const auto retired = it->done ? hipEventQuery(it->done.get()) == hipSuccess
+                                      : hipStreamQuery(it->stream) == hipSuccess;
+        if(retired)
         {
-            it->scratch.reset();
+            if(it->scratch)
+            {
+                it->scratch.reset();
+                pinned_scratch_.fetch_sub(1, std::memory_order_relaxed);
+            }
+            it->done.reset();
             available_.push_back(std::move(*it));
             it = draining_.erase(it);
         }
@@ -460,26 +548,83 @@ void StreamTracker::sweep()
     }
 }
 
+void StreamTracker::SweepUnlessCapturing(hipStream_t stream)
+{
+    auto status = hipStreamCaptureStatusNone;
+    if(hipStreamIsCapturing(stream, &status) != hipSuccess || status != hipStreamCaptureStatusNone)
+        return;
+
+    sweep();
+}
+
+void StreamTracker::sweep()
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    SweepLocked();
+}
+
+void StreamTracker::release(Slot slot)
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    slot.scratch.reset();
+    available_.push_back(std::move(slot));
+}
+
+void StreamTracker::abandon(Slot slot)
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if(slot.scratch)
+        pinned_scratch_.fetch_add(1, std::memory_order_relaxed);
+    draining_.push_back(std::move(slot));
+}
+
 StreamTracker::~StreamTracker()
 {
-    if(draining_.empty())
+    if(owned_streams_.empty())
         return;
 
     MIOPEN_LOG_I("Waiting for " << draining_.size() << " abandoned stream(s) to drain");
 
+    const ScopedRelaxedCaptureMode capture_guard;
+
+    // Every owned stream, not just the draining ones. Kernels left running by a
+    // timed-out evaluation execute from code objects the Handle unloads during
+    // teardown, and release() does not require a slot to be quiescent, so an
+    // entry sitting in available_ carries no guarantee of its own. Synchronizing
+    // a stream that is already idle costs nothing.
     const auto start = std::chrono::steady_clock::now();
-    for(auto& slot : draining_)
-        (void)hipStreamSynchronize(slot.stream);
+    for(auto& stream : owned_streams_)
+        (void)hipStreamSynchronize(stream.get());
     const std::chrono::duration<double, std::milli> elapsed =
         std::chrono::steady_clock::now() - start;
 
-    MIOPEN_LOG_I("Drained " << draining_.size() << " abandoned stream(s) in " << elapsed.count()
-                            << " ms");
+    MIOPEN_LOG_I("Drained " << owned_streams_.size() << " evaluation stream(s) in "
+                            << elapsed.count() << " ms");
 }
 
 StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
 {
-    sweep();
+    std::unique_lock<std::mutex> lock(mutex_);
+
+    SweepLocked();
+
+    // Reclaiming costs nothing new, so the cap applies only to growth below.
+    const auto cap = MaxDraining();
+    if(available_.empty() && draining_.size() >= cap)
+    {
+        MIOPEN_LOG_I("Waiting for one of " << draining_.size() << " abandoned stream(s) to retire");
+        // Polling, not a completion callback: hipLaunchHostFunc is queued work on
+        // the very stream being watched, so it makes that stream read as busy and
+        // obscures the state it would be reporting. The interval it would save is
+        // nothing against a kernel that has already overrun its budget severalfold.
+        while(available_.empty() && draining_.size() >= cap)
+        {
+            lock.unlock();
+            std::this_thread::sleep_for(kDrainPollInterval);
+            lock.lock();
+            SweepLocked();
+        }
+    }
 
     if(!available_.empty())
     {
@@ -489,7 +634,7 @@ StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
     }
 
     owned_streams_.push_back(handle.CreateExclusiveStream());
-    return {owned_streams_.back().get(), {}};
+    return {owned_streams_.back().get(), {}, {}};
 }
 
 void Handle::SetAllocator(miopenAllocatorFunction allocator,
@@ -510,6 +655,11 @@ Allocator::ManageDataPtr Handle::Create(std::size_t sz) const
 {
     MIOPEN_HANDLE_LOCK
     this->Finish();
+    // Reclaim scratch pinned by abandoned naive evaluations before serving a new
+    // allocation - the one moment that memory is unambiguously wanted back. No
+    // capture check needed here, unlike the launch path: Finish() above is
+    // already illegal mid-capture, so none can be in flight.
+    this->impl->stream_tracker_.sweep();
     return this->impl->allocator(sz);
 }
 
@@ -621,9 +771,14 @@ std::vector<Kernel> Handle::GetKernelsImpl(const std::string& algorithm,
 KernelInvoke Handle::Run(Kernel k, bool coop_launch) const
 {
     this->impl->set_ctx();
-    // Reclaim scratch pinned by abandoned naive evaluations as soon as their
-    // streams go idle, rather than waiting for the next acquire().
-    this->impl->stream_tracker_.sweep();
+    // Hand back the scratch an abandoned naive evaluation is still pinning, as
+    // soon as its kernel retires. Launches are the only event frequent enough to
+    // notice promptly - a find may never run again, and frameworks that supply
+    // their own workspace never reach Handle::Create - but they are also the only
+    // ones that can be inside a graph capture, so this has to opt out of those
+    // (issue #12121) and settle for the next launch that is not being recorded.
+    if(this->impl->stream_tracker_.HasPinnedScratch())
+        this->impl->stream_tracker_.SweepUnlessCapturing(this->GetStream());
     auto callback = (this->impl->enable_profiling || MIOPEN_GPU_SYNC)
                         ? this->impl->elapsed_time_handler()
                         : nullptr;
