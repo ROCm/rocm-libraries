@@ -20,8 +20,8 @@ struct BlockScaleQuantizeParams
 {
     BlockScaleQuantizeParams(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
         int32_t blockSize,
         std::optional<int64_t> axis = std::nullopt)
         : xTensor(unpackTensorAttributes(xAttributes))
@@ -110,8 +110,8 @@ public:
         }
 
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
+        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
@@ -141,8 +141,8 @@ public:
                               : std::nullopt;
 
         BlockScaleQuantizeParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                        *tensorMap.at(nodeAttributes->scale_tensor_uid()),
                                         *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                        *tensorMap.at(nodeAttributes->scale_tensor_uid()),
                                         blockSize,
                                         axis);
 
