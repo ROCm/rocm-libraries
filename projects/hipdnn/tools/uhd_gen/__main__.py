@@ -20,7 +20,7 @@ Collect, train and install:
     python -m uhd_gen train \\
         --input bench.csv \\
         --descriptor-tree ./descriptors --engine hipkernel:pointwise \\
-        --features q.seqlen_q kernel.block_size device.cu_count \\
+        --features pointwise.elements kernel.block_size device.cu_count \\
         --target tflops \\
         --group-by benchmark device \\
         --output-dir ./uhd_output \\
@@ -298,7 +298,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         dest="report_regret",
         metavar="COL",
         help=(
-            "Columns identifying one problem (e.g. the q.* columns). Reports "
+            "Columns identifying one problem (e.g. benchmark device). Reports "
             "out-of-fold top-1 regret of the ranking the model induces, which is what "
             "RFC 0019.13 §11 asks for and what CV RMSE cannot answer."
         ),
