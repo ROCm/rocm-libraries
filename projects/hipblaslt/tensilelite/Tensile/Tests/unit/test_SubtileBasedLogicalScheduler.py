@@ -764,6 +764,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         unrollIdx=0,
         laneSGPRCount=1 if is_gfx1250 else 2,
         subtileLdsSwizzle=not is_gfx1250,
+        subtileSpilledDRanges=[],
     )
     if is_gfx1250:
         writer.sgprPool.checkOut(12)

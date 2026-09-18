@@ -655,7 +655,8 @@ class GlobalWriteBatchWriter:
         (self.parentWriter.states.useBias != DataDirection.NONE or \
          self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
       needsCrossWaveBarrier = subtileBarrierDrains and isSubtileMultiDU(self.kernel)
-      if self.parentWriter.states.useBias == DataDirection.READ and not needsCrossWaveBarrier:
+      if self.parentWriter.states.useBias == DataDirection.READ and not needsCrossWaveBarrier \
+          and not self.parentWriter._plsinFusedSkipBias(self.kernel):
         waitLocalLoadCnt += self.biasLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (bias)"%self.biasLoadIssued[elementIdx])
       if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -723,7 +724,8 @@ class GlobalWriteBatchWriter:
         vlcnt = 0
         commentList.append("Gate")
       # Local read wait
-      if self.parentWriter.states.useBias == DataDirection.READ:
+      if self.parentWriter.states.useBias == DataDirection.READ \
+          and not self.parentWriter._plsinFusedSkipBias(self.kernel):
         dscnt = 0
         commentList.append("Bias LDS")
       if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
@@ -833,7 +835,8 @@ class GlobalWriteBatchWriter:
 
     modGwvwScale = []
     localReferenceVgpr = None
-    if self.parentWriter.states.useBias == DataDirection.READ:
+    if self.parentWriter.states.useBias == DataDirection.READ \
+        and not self.parentWriter._plsinFusedSkipBias(self.kernel):
       modGwvwBias = Module("GwvwBias")
       self.localLoadsBiasIssued += addEpilogueLoad(modGwvwBias, 'Bias', addrBiasVgpr, self.addrBias, dataBias, self.loadedDataBias, addrCalc.biasOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load Bias")
       localReferenceVgpr = addrBiasVgpr
@@ -1844,7 +1847,8 @@ class GlobalWriteBatchWriter:
     activationCDataType = self.kernel["ProblemType"]["ActivationComputeDataType"]
 
     if self.kernel["_GlobalAccumulation"] != 'MultipleBuffer':
-      if self.kernel["ProblemType"]["DestDataType"].isBFloat16() and self.kernel["ProblemType"]["HighPrecisionAccumulate"]:
+      if self.kernel["ProblemType"]["DestDataType"].isBFloat16() and self.kernel["ProblemType"]["HighPrecisionAccumulate"] \
+          and not self._pairedStoreClobbersBf16Consts():
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" ))
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" ))
@@ -1884,7 +1888,9 @@ class GlobalWriteBatchWriter:
         self.kernel, self._weaveMfmaGroups())
       vPermAddr = self.cvtVgprStruct.vgprPermAddr
       vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init
-      if self._permlane16Active:
+      if self._permlane16Active and self.parentWriter.states.subtileHoistedPermAddr:
+        module.addComment1("permlane16 row-byte delta already hoisted out of the batch preamble")
+      elif self._permlane16Active:
         # Component C: the AITER two-`v_permlane16_swap` shuffle needs no ds_bpermute,
         # so the partner-lane address is dead.  Repurpose the vPermAddr slot to hold
         # the per-lane-group row-byte delta that compensates the permlane16 lane
@@ -1932,13 +1938,16 @@ class GlobalWriteBatchWriter:
       # Pre-compute lane_group*8 once; reused as the row-byte address correction in every
       # paired dwordx4 store (addrDVgpr encodes lane_group*8 but we need lane_group*16).
       vLGDelta = self.cvtVgprStruct.vgprLaneGroupDelta
-      module.addComment1("16bit dwordx4: pre-compute lane_group*8 row-byte correction")
-      module.add(VAndB32(dst=vgpr(vLGDelta), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"),
-                         comment="lane_id = Serial & (WS-1)"))
-      module.add(VLShiftRightB32(dst=vgpr(vLGDelta), shiftHex=4, src=vgpr(vLGDelta),
-                                 comment="lane_group = lane_id >> 4"))
-      module.add(VLShiftLeftB32(dst=vgpr(vLGDelta), shiftHex=3, src=vgpr(vLGDelta),
-                                comment="vgprLaneGroupDelta = lane_group * 8"))
+      if self.parentWriter.states.subtileHoistedLaneGroupDelta:
+        module.addComment1("16bit dwordx4: lane_group*8 already hoisted out of the batch preamble")
+      else:
+        module.addComment1("16bit dwordx4: pre-compute lane_group*8 row-byte correction")
+        module.add(VAndB32(dst=vgpr(vLGDelta), src0=self.kernel["WavefrontSize"]-1, src1=vgpr("Serial"),
+                           comment="lane_id = Serial & (WS-1)"))
+        module.add(VLShiftRightB32(dst=vgpr(vLGDelta), shiftHex=4, src=vgpr(vLGDelta),
+                                   comment="lane_group = lane_id >> 4"))
+        module.add(VLShiftLeftB32(dst=vgpr(vLGDelta), shiftHex=3, src=vgpr(vLGDelta),
+                                  comment="vgprLaneGroupDelta = lane_group * 8"))
       # Compute bpe scale shift once (compile-time constant); used inside
       # _emit16bitSubtilePairedStore to adjust addrDVgpr inline without
       # modifying it in place, so no restore loop is needed after the stores.
@@ -2143,7 +2152,8 @@ class GlobalWriteBatchWriter:
 
       # Add bias
       mergeActFuncCall = False
-      if self.parentWriter.states.useBias == DataDirection.READ:
+      if self.parentWriter.states.useBias == DataDirection.READ \
+          and not self.parentWriter._plsinFusedSkipBias(self.kernel):
         if activationCDataType == self.kernel["ProblemType"]["ComputeDataType"] and self.kernel["ActivationFuncCall"]:
           mergeActFuncCall = True
         if (self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["UseE"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
@@ -2865,6 +2875,23 @@ class GlobalWriteBatchWriter:
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
 
     return module
+
+  def _pairedStoreClobbersBf16Consts(self):
+    """True when the paired dwordx4 store overwrites the bf16 software-rounding
+    constants before anything can read them, so emitting them is pure waste.
+
+    The paired store aliases cvtVgprStruct.vgprBf16Temp..vgprBf16Inc as its 4-dword
+    pack buffer (vPack+0..+3, see _emit16bitSubtilePairedStore) and packs with the
+    native v_cvt_pk, which needs no mask/NaN/rounding-bias operand.  On the
+    branch-free full-tile fused arm there is no beta C-convert, no E-convert and no
+    edge/orphan fallback, so the three constants are written once per batch and never
+    read.  Every other arm keeps them: the beta and loadE paths feed vgprBf16Mask to
+    VCvtBF16toFP32, and the software pack path in PackData reads all three.
+    """
+    return (self._fusedFullTileNoGuards()
+            and bool(self.kernel.get("UseSubtileImpl"))
+            and not self.beta
+            and not self.loadE)
 
   def _fusedFullTileNoGuards(self):
     """True inside the branch-free FULL-TILE fused NLL store: every per-store bounds

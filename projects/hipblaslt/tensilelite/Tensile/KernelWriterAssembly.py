@@ -14882,7 +14882,7 @@ class KernelWriterAssembly(KernelWriter):
       _fusedDefineEpilogueSrd("SrdScaleB")
     if kernel["ProblemType"]["UseScaleAlphaVec"] and not self._plsinFusedSkipEpilogueMul():
       _fusedDefineEpilogueSrd("SrdScaleAlphaVec")
-    if self.states.useBias != DataDirection.NONE:
+    if self.states.useBias != DataDirection.NONE and not self._plsinFusedSkipBias(kernel):
       _fusedDefineEpilogueSrd("SrdBias")
 
     # --- deferred drain of outstanding NLL summation memory traffic (normally
@@ -16149,6 +16149,75 @@ class KernelWriterAssembly(KernelWriter):
     """True while emitting the fused NLL store: skip scalar alpha and ScaleAlphaVec."""
     return bool(self.states.subtileFusedFullTileStore)
 
+  def emitSubtileStoreLaneMath(self, kernel, cvtVgprStruct):
+    """Materialize the wave-invariant 16bit-subtile store lane offsets once per store.
+
+    ``lane_group*8`` (vgprLaneGroupDelta) and, on the permlane16 path, the
+    ``(lane_group&1)*12`` row-byte delta (vgprPermAddr) are pure functions of Serial
+    and are recomputed in every write batch's preamble -- 120 identical copies in an
+    MT256x320 fused store.  Both live in the cvtVgpr block that globalWriteElements
+    holds for the whole store and no batch writes them, so one copy here (ahead of
+    the StreamK store branches and every beta/edge arm) dominates all of them.
+
+    The ds_bpermute form of vgprPermAddr is NOT hoisted: it needs the batch-owned
+    lane-mask SGPRs.  Batches re-derive their own permlane16 predicate and only skip
+    what this actually emitted, so a mismatch costs the optimization, never
+    correctness.
+    """
+    module = Module("SubtileStoreLaneMath")
+    self.states.subtileHoistedLaneGroupDelta = False
+    self.states.subtileHoistedPermAddr = False
+    if not kernel.get("UseSubtileImpl") or cvtVgprStruct is None:
+      return module
+    if getattr(cvtVgprStruct, "vgprLaneGroupDelta", -1) < 0:
+      return module
+    from .Components.GlobalWriteBatch import plsinStorePermlane16Active
+    ws = kernel["WavefrontSize"]
+    vLGDelta = cvtVgprStruct.vgprLaneGroupDelta
+    module.addComment1("hoisted 16bit dwordx4 store lane math (wave-invariant, once per store)")
+    module.add(VAndB32(dst=vgpr(vLGDelta), src0=ws-1, src1=vgpr("Serial"),
+                       comment="lane_id = Serial & (WS-1)"))
+    module.add(VLShiftRightB32(dst=vgpr(vLGDelta), shiftHex=4, src=vgpr(vLGDelta),
+                               comment="lane_group = lane_id >> 4"))
+    module.add(VLShiftLeftB32(dst=vgpr(vLGDelta), shiftHex=3, src=vgpr(vLGDelta),
+                              comment="vgprLaneGroupDelta = lane_group * 8"))
+    self.states.subtileHoistedLaneGroupDelta = True
+    # MT320x256 is the one tile whose permlane16 eligibility depends on the weave
+    # groups; the fused arm is the weaving one, so key off that.
+    weaveHint = True if self.states.subtileFusedFullTileStore else None
+    vPermAddr = getattr(cvtVgprStruct, "vgprPermAddr", -1)
+    if vPermAddr >= 0 and plsinStorePermlane16Active(kernel, weaveHint):
+      bpeDest = self.states.bpeCexternalGSU1
+      module.add(VLShiftRightB32(dst=vgpr(vPermAddr), shiftHex=3, src=vgpr(vLGDelta),
+                                 comment="lane_group = vgprLaneGroupDelta >> 3"))
+      module.add(VAndB32(dst=vgpr(vPermAddr), src0=1, src1=vgpr(vPermAddr),
+                         comment="lane_group & 1"))
+      module.add(VMulLOU32(dst=vgpr(vPermAddr), src0=vgpr(vPermAddr), src1=12*bpeDest,
+                           comment="(lane_group&1)*12 rows = permlane16 row-byte delta"))
+      self.states.subtileHoistedPermAddr = True
+    return module
+
+  def _plsinFusedSkipBias(self, kernel):
+    """True while emitting the fused NLL store: skip the whole bias epilogue.
+
+    computePostLoopFusedStore folds AddressBias == nullptr into PostLoopFusedStore,
+    so a tile with a real bias always takes the PLAIN arm and its post-loop epilogue.
+    In the fused arm the bias global load therefore reads a null SRD (num_records ==
+    0) and returns zero, which makes the LDS staging, the per-block ds_read and the
+    packed add a no-op -- plus the ds_write/ds_read pair drags an s_barrier into the
+    weaved store.  Requires the hoisted flag: the non-fp32 fallback chain in
+    emitFusedStoreGuard has no bias-null term, so the fused arm there can still see a
+    live bias.  ActivationFuncCall is excluded because the merged path routes the bias
+    add into vgprActCopy, which the activation then reads.
+    """
+    if not self.states.subtileFusedFullTileStore:
+      return False
+    if not self._plsinFusedFlagEligible(kernel):
+      return False
+    if kernel["ActivationFuncCall"]:
+      return False
+    return self.states.useBias == DataDirection.READ
+
   def _plsinApplyAlphaInFused(self, kernel):
     """Fused NLL store never applies GEMM alpha.
 
@@ -17205,7 +17274,8 @@ class KernelWriterAssembly(KernelWriter):
 
       # Add bias lds
       isLdsLoaded = False
-      if self.states.useBias == DataDirection.READ and isSingleKernel:
+      if self.states.useBias == DataDirection.READ and isSingleKernel \
+          and not self._plsinFusedSkipBias(kernel):
         # Init bias Srd
         labelStr = self.labels.getNameInc("Bias")
         with self.allocTmpSgpr(1,1, tag="globalWriteElements_tmpSgprRes2") as tmpSgprRes:
@@ -17574,6 +17644,10 @@ class KernelWriterAssembly(KernelWriter):
 
       cvtVgprStruct  = None
       cvtVgpr        = None
+      # No hoisted lane math until emitSubtileStoreLaneMath below says otherwise; a
+      # stale True would make batches skip a computation that never ran.
+      self.states.subtileHoistedLaneGroupDelta = False
+      self.states.subtileHoistedPermAddr = False
       is16bitHPA = (kernel["ProblemType"]["DestDataType"].isBFloat16() or
                     kernel["ProblemType"]["DestDataType"].isHalf()) and \
                    kernel["ProblemType"]["HighPrecisionAccumulate"]
@@ -17599,6 +17673,7 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprLaneGroupDelta=(cvtVgpr+5) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1)
+        module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
@@ -17838,6 +17913,9 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpVgpr.idx)
       if cvtVgpr is not None:
         self.vgprPool.checkIn(cvtVgpr)
+      # The hoisted values die with the cvtVgpr block.
+      self.states.subtileHoistedLaneGroupDelta = False
+      self.states.subtileHoistedPermAddr = False
       if gsuLimit > 1 and gsuLimitIdx == 0:
         if deferGSU0:
           # GSU0 store code is done. Append it to deferredGSU0 (placed after persistent loop),
