@@ -41,6 +41,30 @@ void testComparisonProgram() {
                 identicalResult.matchedNaNs == 0 && identicalResult.matchedInfinities == 0,
             "Encoded-equality comparison changed all-close-only report semantics.");
 
+    ComparisonOptions identicalUlp = encodedEquality;
+    identicalUlp.allClose = false;
+    identicalUlp.computeUlp = true;
+    identicalUlp.ulpType = ScalarType::Float32;
+    identicalUlp.maximumUlpTolerance = 0.0;
+    const ComparisonReport identicalUlpResult =
+        compare(Tensor::copyNativeStorage(std::span<const float>(identicalValues)),
+                Tensor::copyNativeStorage(std::span<const float>(identicalValues)), identicalUlp);
+    require(identicalUlpResult.passed() && identicalUlpResult.compared == identicalValues.size() &&
+                !identicalUlpResult.allCloseEvaluated && identicalUlpResult.ulpEvaluated &&
+                identicalUlpResult.ulpCompared == identicalValues.size() &&
+                identicalUlpResult.maximumUlp == 0.0 && identicalUlpResult.sumUlp == 0.0,
+            "Encoded-equality comparison produced incorrect zero-distance ULP evidence.");
+
+    const std::array<std::complex<float>, 2> identicalComplex{{{1.0f, 2.0f}, {-3.0f, 4.0f}}};
+    identicalUlp.ulpType = ScalarType::ComplexFloat32;
+    const ComparisonReport identicalComplexUlpResult =
+        compare(Tensor::copyNativeStorage(std::span<const std::complex<float>>(identicalComplex)),
+                Tensor::copyNativeStorage(std::span<const std::complex<float>>(identicalComplex)),
+                identicalUlp);
+    require(identicalComplexUlpResult.passed() &&
+                identicalComplexUlpResult.ulpCompared == 2 * identicalComplex.size(),
+            "Encoded-equality comparison counted complex ULP components incorrectly.");
+
     for (size_t typeIndex = 0; typeIndex < scalarTypeCount; ++typeIndex) {
         const ScalarType type = static_cast<ScalarType>(typeIndex);
         Tensor expected(type, Shape{16});
