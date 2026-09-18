@@ -75,6 +75,181 @@ _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
 
 # ---------------------------------------------------------------------------
+# Split-K degree selection
+#
+# Two degrees matter per tile config and they must never drift apart:
+#   * the CK-heuristic degree, which is what --split-k -1 resolves to and what
+#     dispatch actually ships;
+#   * the sweep ladder, which is what --split-k 0 walks.
+#
+# The heuristic is floor(waves_per_cu * num_cus / base_grid) clamped to
+# [1, wg_K] -- a floor division that essentially never lands on a power of two,
+# while the ladder is nothing but powers of two. Left alone the two sets do not
+# intersect, so a sweep run cannot answer "did the heuristic pick well?".
+# _sweep_degrees() folds the heuristic's degree into the ladder so --split-k 0
+# is a strict superset of --split-k -1.
+#
+# The formula lives in exactly one place per direction below, and every caller
+# -- the -1 build path and the 0 sweep path alike -- goes through it. A second
+# copy would let "what we sweep" and "what we ship" diverge silently.
+# ---------------------------------------------------------------------------
+
+
+def _ck_split_k_wgrad(problem, tile_m: int, tile_n: int, tile_k: int, arch: str) -> int:
+    """The split-K degree ``--split-k -1`` resolves to for this wgrad config.
+
+    The GEMM dims come from the kernel's own ``_wg_M/_wg_N/_wg_K`` rather than
+    being re-derived here. Re-deriving them is what let this drift before: the
+    open-coded form dropped the 3-D depth terms (``Z`` in N, ``Do`` in K), so on
+    a 3-D conv the benchmark resolved a different degree than the one the kernel
+    builder ships. Now that this value seeds the sweep ladder and drives the
+    '*' marker, a second derivation would make that marker a lie.
+    """
+    from rocke.helpers.split_k import select_split_k_wgrad
+    from kernels.common.conv_implicit_gemm_wgrad import _wg_K, _wg_M, _wg_N
+
+    return select_split_k_wgrad(
+        wg_M=_wg_M(problem),
+        wg_N=_wg_N(problem),
+        wg_K=_wg_K(problem),
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        arch=arch,
+    ).split_k
+
+
+def _ck_split_k_dgrad(
+    problem, tile_m: int, tile_n: int, tile_k: int, arch: str, *, is_wmma: bool
+) -> int:
+    """The split-K degree ``--split-k -1`` resolves to for this dgrad config.
+
+    WMMA has no split-K support on the dgrad path, so it pins to 1.
+
+    GEMM dims come from the kernel's own ``_dg_M/_dg_N/_dg_K`` for the same
+    reason as the wgrad helper above.
+    """
+    if is_wmma:
+        return 1
+    from rocke.helpers.split_k import select_split_k_wgrad
+    from kernels.common.conv_implicit_gemm_dgrad import _dg_K, _dg_M, _dg_N
+
+    return select_split_k_wgrad(
+        wg_M=_dg_M(problem),
+        wg_N=_dg_N(problem),
+        wg_K=_dg_K(problem),
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        arch=arch,
+    ).split_k
+
+
+def _is_wmma_arch(arch: str) -> bool:
+    """True when ``arch`` uses WMMA (wave32) rather than MFMA (wave64)."""
+    from rocke.core.arch import ArchTarget
+
+    return ArchTarget.from_gfx(arch).wave_size == 32
+
+
+def _sweep_degrees(ck_degree: int) -> tuple[int, ...]:
+    """``_SPLIT_K_AUTO`` merged with ``ck_degree``, descending, deduplicated.
+
+    Descending order is load-bearing: ``--split-k-prune`` walks degrees from
+    high to low and stops at the first regression, and the ``pending`` re-sort
+    keys on ``-split_k`` to reproduce it. When ``ck_degree`` is already on the
+    ladder the ladder entry is reused rather than duplicated, so no degree is
+    ever timed twice.
+    """
+    if ck_degree < 1:
+        return _SPLIT_K_AUTO
+    return tuple(sorted(set(_SPLIT_K_AUTO) | {ck_degree}, reverse=True))
+
+
+# The next three are the actual sweep-axis decisions, lifted to module level so
+# they are directly testable. They used to be closures over `args`, which meant
+# the only way to reach them was to run a whole GPU sweep -- so the property
+# this file exists to guarantee ("--split-k 0 covers the --split-k -1 degree")
+# had no unit coverage at all and a regression at the call site was invisible.
+
+
+def _wgrad_sweep_split_k_values(
+    args_split_k: int,
+    pipeline: str,
+    async_dma: bool,
+    problem,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    arch: str,
+) -> tuple[int, ...]:
+    """Split-K degrees to compile for one wgrad combo.
+
+    ``0`` means "sweep": the async and 'basic' legs cannot use the runtime-degree
+    kernel (they need a compile-time trip count to lay out the pipeline), so they
+    compile one kernel per concrete degree and walk the merged ladder here. Every
+    other leg returns the single sentinel ``0``, the runtime-degree kernel, and
+    sweeps the ladder at launch time instead -- see
+    :func:`_wgrad_runtime_split_k_degrees`.
+
+    Decided per combo, not once per run: a run-level predicate that tested only
+    ``async_dma`` silently dropped every ``pipeline='basic'`` combo from a sweep.
+    """
+    if args_split_k != 0:
+        return (args_split_k,)
+    if async_dma or pipeline == "basic":
+        return _sweep_degrees(_ck_split_k_wgrad(problem, tile_m, tile_n, tile_k, arch))
+    return (0,)
+
+
+def _wgrad_runtime_split_k_degrees(
+    is_runtime: bool, resolved_split_k: int, ck_split_k: int
+) -> tuple[int, ...]:
+    """Degrees to launch for one already-compiled wgrad kernel.
+
+    A runtime-degree kernel takes the degree as the ``ks`` kernel argument, so
+    the whole merged ladder costs extra launches and no extra compiles. A fixed
+    kernel has exactly one degree baked in.
+    """
+    return _sweep_degrees(ck_split_k) if is_runtime else (resolved_split_k,)
+
+
+def _prune_skips_wgrad_combo(
+    cfg_key, pruned_configs, resolved_split_k: int, ck_split_k: int
+) -> bool:
+    """Whether ``--split-k-prune`` should skip this already-built wgrad combo.
+
+    The shipped (CK) degree is never skipped. This is the guard that matters for
+    the async and 'basic' legs: there every degree is compiled as its own combo,
+    so a pruned config would drop the CK combo *here*, before the per-launch
+    prune check in the measure loop ever sees it. The runtime leg is the
+    opposite -- one combo carries the whole ladder -- and is exempted per launch.
+    """
+    return cfg_key in pruned_configs and resolved_split_k != ck_split_k
+
+
+def _dgrad_sweep_split_k_values(
+    args_split_k: int,
+    problem,
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    arch: str,
+    *,
+    is_wmma: bool,
+) -> tuple[int, ...]:
+    """Split-K degrees to compile for one dgrad combo.
+
+    Dgrad has no runtime-degree kernel, so every degree is its own compile.
+    """
+    if args_split_k != 0:
+        return (args_split_k,)
+    return _sweep_degrees(
+        _ck_split_k_dgrad(problem, tile_m, tile_n, tile_k, arch, is_wmma=is_wmma)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Result record
 # ---------------------------------------------------------------------------
 
@@ -103,6 +278,10 @@ class Result:
     async_dma: bool = False
     passed: bool | None = None  # None when --verify was not requested
     two_stage: bool = False  # True when timed as Stage1+Stage2 deterministic pipeline
+    # True when split_k is the degree the CK heuristic picks for this tile
+    # config -- i.e. the degree --split-k -1 would ship. Marked with '*' in the
+    # progress lines and ranked tables so a sweep can be read against dispatch.
+    ck_auto: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -785,7 +964,9 @@ def main() -> int:
         metavar="N",
         help=(
             "wgrad split-K degree: "
-            "0 = sweep all degrees in %(auto)s, "
+            "0 = sweep all degrees in %(auto)s plus the CK-heuristic degree for "
+            "each tile config (so the sweep is a superset of -1; the heuristic's "
+            "row is marked '*'), "
             "1 = disabled, "
             ">1 = fixed degree, "
             "-1 = auto (CK formula per tile config)"
@@ -1105,6 +1286,7 @@ def main() -> int:
         "pipeline",
         "epilogue",
         "split_k",
+        "ck_auto",
         "rocke_ms",
         "rocke_tflops",
         "rocke_gbps",
@@ -1257,6 +1439,7 @@ def main() -> int:
                             "pipeline": r.pipeline,
                             "epilogue": r.epilogue,
                             "split_k": r.split_k,
+                            "ck_auto": r.ck_auto,
                             "rocke_ms": r.ms,
                             "rocke_tflops": r.tflops,
                             "rocke_gbps": r.gbps,
@@ -1408,17 +1591,7 @@ def _build_wgrad_one(args_tuple):
         wave_size=target.wave_size,
     )
     if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        resolved_split_k = select_split_k_wgrad(
-            wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
-            tile_m=tile_m,
-            tile_n=tile_n,
-            tile_k=tile_k,
-            arch=arch,
-        ).split_k
+        resolved_split_k = _ck_split_k_wgrad(problem, tile_m, tile_n, tile_k, arch)
     else:
         # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
         resolved_split_k = split_k
@@ -1501,17 +1674,7 @@ def _build_wgrad_two_stage_one(args_tuple):
 
     warp_tile_k = atom.k
     if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        resolved_split_k = select_split_k_wgrad(
-            wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
-            tile_m=tile_m,
-            tile_n=tile_n,
-            tile_k=tile_k,
-            arch=arch,
-        ).split_k
+        resolved_split_k = _ck_split_k_wgrad(problem, tile_m, tile_n, tile_k, arch)
     elif split_k == 0:
         # Runtime split-K is atomic, not two-stage — skip.
         return None
@@ -1618,20 +1781,9 @@ def _build_dgrad_one(args_tuple):
 
     warp_tile_k = atom.k
     if split_k == -1:
-        if _mma_family == "wmma":
-            resolved_split_k = 1
-        else:
-            from rocke.helpers.split_k import select_split_k_wgrad
-
-            resolved_split_k = select_split_k_wgrad(
-                wg_M=problem.N * problem.Hi * problem.Wi,
-                wg_N=problem.cpg,
-                wg_K=problem.Y * problem.X * problem.kpg,
-                tile_m=tile_m,
-                tile_n=tile_n,
-                tile_k=tile_k,
-                arch=arch,
-            ).split_k
+        resolved_split_k = _ck_split_k_dgrad(
+            problem, tile_m, tile_n, tile_k, arch, is_wmma=_mma_family == "wmma"
+        )
     else:
         resolved_split_k = split_k
 
@@ -2144,7 +2296,8 @@ def _run_wgrad_sweep(
         1        — disabled (normal epilogue, z-grid = 1).
         >1       — fixed degree; dW is zero-initialised before each launch,
                    kernel atomic-adds partials, result is final dW.
-        0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
+        0 (auto) — sweep all degrees in _SPLIT_K_AUTO, plus the CK-heuristic
+        degree for each tile config (the degree -1 would ship).
     """
     import torch
     from rocke.helpers.manifest import conv_args_signature
@@ -2208,12 +2361,25 @@ def _run_wgrad_sweep(
     # async_dma silently dropped every pipeline='basic' combo from a --split-k 0
     # sweep, because 'basic' is runtime-incapable too and its specs then failed
     # validation and were discarded without a reason string.
-    def _split_k_values_for(pipeline: str, async_dma: bool) -> tuple:
-        if args.split_k != 0:
-            return (args.split_k,)
-        if async_dma or pipeline == "basic":
-            return _SPLIT_K_AUTO
-        return (0,)
+    #
+    # The ladder these legs walk is _SPLIT_K_AUTO plus this config's CK degree,
+    # so a sweep covers what --split-k -1 would ship. The degree depends on
+    # tile_m/tile_n/tile_k (via base_grid), so it is per tile config rather than
+    # one extra value for the run -- hence _geom is a parameter here. The
+    # runtime leg does not need it: its degree rides the `ks` kernel arg and is
+    # merged at launch time instead (see _rt_degrees below), costing a launch
+    # rather than a compile.
+    def _split_k_values_for(_geom: tuple, pipeline: str, async_dma: bool) -> tuple:
+        return _wgrad_sweep_split_k_values(
+            args.split_k,
+            pipeline,
+            async_dma,
+            problem,
+            _geom[0],
+            _geom[1],
+            _geom[2],
+            arch,
+        )
 
     # async_dma is a swept axis rather than a flag: unlike lds_k_outer it is not
     # deducible from (arch, spec). It removes the register staging of the tile,
@@ -2236,7 +2402,7 @@ def _run_wgrad_sweep(
         )
         for _epilogue in _EPILOGUES
         for _pipeline, _async_dma in _legs
-        for _sk in _split_k_values_for(_pipeline, _async_dma)
+        for _sk in _split_k_values_for(_geom, _pipeline, _async_dma)
     ]
 
     if args.sample is not None:
@@ -2384,6 +2550,13 @@ def _run_wgrad_sweep(
         artifact = artifact_map[kernel.name]
         _is_rt = resolved_split_k == 0  # runtime split-K kernel
 
+        # The degree the CK heuristic ships for this tile config. Computed once
+        # per config and reused to extend the runtime ladder, to flag the
+        # matching row, and to exempt that row from pruning -- all through the
+        # same helper --split-k -1 goes through, so the swept degree and the
+        # shipped degree cannot drift.
+        _ck_sk = _ck_split_k_wgrad(p, tile_m, tile_n, tile_k, arch)
+
         if _do_prune:
             _cfg_key = (
                 tile_m,
@@ -2396,7 +2569,9 @@ def _run_wgrad_sweep(
                 epilogue,
                 _async_dma,
             )
-            if _cfg_key in _pruned_configs:
+            if _prune_skips_wgrad_combo(
+                _cfg_key, _pruned_configs, resolved_split_k, _ck_sk
+            ):
                 n_skipped += 1
                 continue
 
@@ -2420,14 +2595,39 @@ def _run_wgrad_sweep(
             )
             continue
 
-        # For runtime kernels iterate over _SPLIT_K_AUTO degrees at launch time;
-        # for fixed kernels there is exactly one degree (resolved_split_k itself).
-        _rt_degrees = _SPLIT_K_AUTO if _is_rt else (resolved_split_k,)
+        # For runtime kernels iterate the sweep ladder at launch time; the
+        # degree rides the `ks` kernel arg, so folding in the CK degree costs
+        # one extra launch and no recompile. Any positive degree is legal here:
+        # WgradConvSpec pads K_wg to a multiple of tile_k * split_k, and
+        # wg_K_padded(split_k=...) is recomputed per launch below.
+        # For fixed kernels there is exactly one degree (resolved_split_k).
+        _rt_degrees = _wgrad_runtime_split_k_degrees(_is_rt, resolved_split_k, _ck_sk)
 
-        for _i, _launch_sk in enumerate(_rt_degrees):
-            if _do_prune and _is_rt and _cfg_key in _pruned_configs:
-                n_skipped += len(_rt_degrees) - _i
-                break
+        for _launch_sk in _rt_degrees:
+            # The CK degree is exempt from pruning in both directions: a prune
+            # never skips it, and (below) it never triggers one. Without the
+            # first half, --split-k 0 --split-k-prune could prune past the
+            # shipped degree and never measure it -- the exact hole this change
+            # exists to close. Without the second, an off-ladder degree landing
+            # mid-ladder could trip a prune that the pure power-of-two walk
+            # would not have, truncating the sweep earlier than before.
+            #
+            # Two consequences, both deliberate and both in the safe direction:
+            #   * when the CK degree coincides with a ladder value, that ladder
+            #     row is exempt too. The rule stays "the shipped degree is always
+            #     measured and never drives pruning" rather than changing meaning
+            #     depending on whether the heuristic happened to land on a power
+            #     of two.
+            #   * keeping it out of _best_tflops means a CK degree that is the
+            #     fastest for its config does not raise the bar the ladder is
+            #     compared against, so prune fires no more often than it did
+            #     before -- it trades a little extra runtime for never silently
+            #     losing coverage that develop had.
+            _is_ck_row = _launch_sk == _ck_sk
+            if _do_prune and _is_rt and not _is_ck_row:
+                if _cfg_key in _pruned_configs:
+                    n_skipped += 1
+                    continue
             block = (spec.block_size, 1, 1)
             stream = 0
 
@@ -2532,12 +2732,18 @@ def _run_wgrad_sweep(
                     vec_a=_va,
                     vec_b=_vb,
                     vec_c=_vc,
+                    ck_auto=_is_ck_row,
                 )
             )
 
             _spk_label = f"spk{_launch_sk}rt" if _is_rt else f"spk{_launch_sk}"
+            if _is_ck_row:
+                _spk_label += "*"
             prune_marker = ""
-            if _do_prune:
+            # `not _is_ck_row`: see the exemption note at the top of this loop.
+            # The CK row is reported but kept out of the best-so-far bookkeeping
+            # so the prune trajectory over the ladder matches a sweep without it.
+            if _do_prune and not _is_ck_row:
                 _cfg_key = (
                     tile_m,
                     tile_n,
@@ -2563,7 +2769,7 @@ def _run_wgrad_sweep(
                 f"[{n_run:4d}] tile={tile_m}x{tile_n}x{tile_k} "
                 f"warp={warp_m}x{warp_n} "
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
-                f"{pipeline}/{epilogue:9s} {_spk_label:<7s} "
+                f"{pipeline}/{epilogue:9s} {_spk_label:<9s} "
                 f"{'async ' if _async_dma else '      '}"
                 f"vec={_va}/{_vb}/{_vc} "
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms"
@@ -2763,11 +2969,13 @@ def _run_wgrad_sweep(
     print(f"\n{'='*92}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*92}")
-    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<10}  config"
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<11}  config"
     print(hdr)
     print("-" * 92)
     for rank, r in enumerate(results[:top_n], 1):
         mode = f"spk{r.split_k}2s" if r.two_stage else f"spk{r.split_k}"
+        if r.ck_auto:
+            mode += "*"
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
@@ -2777,8 +2985,11 @@ def _run_wgrad_sweep(
             f"{' async' if r.async_dma else ''}"
         )
         print(
-            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<10}  {cfg_str}"
+            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<11}  {cfg_str}"
         )
+
+    if any(r.ck_auto for r in results[:top_n]):
+        print("\n* = split-K degree chosen by the CK heuristic (--split-k -1)")
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
@@ -2822,7 +3033,8 @@ def _run_dgrad_sweep(
         1        -- disabled (normal epilogue, z-grid = 1).
         >1       -- fixed degree; dX is zero-initialised before each launch,
                    kernel atomic-adds partials, result is final dX.
-        0 (auto) -- sweep all degrees in _SPLIT_K_AUTO.
+        0 (auto) -- sweep all degrees in _SPLIT_K_AUTO, plus the CK-heuristic
+        degree for each tile config (the degree -1 would ship).
     """
     import ctypes
     import torch
@@ -2867,21 +3079,32 @@ def _run_dgrad_sweep(
         {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
     ]
 
-    split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
+    # Split-K is no longer a flat axis of the product: under --split-k 0 the
+    # swept degrees are _SPLIT_K_AUTO plus this config's CK degree, and that
+    # degree depends on tile_m/tile_n/tile_k (via base_grid). So it has to vary
+    # per tile config -- the same shape the wgrad sweep already uses.
+    _dgrad_is_wmma = _is_wmma_arch(arch)
 
-    combos = list(
-        itertools.product(
-            _TILE_MN,
-            _TILE_MN,
-            _TILE_K,
-            _WARP_MN,
-            _WARP_MN,
-            _WARP_TILE_MN,
-            _PIPELINES,
-            _EPILOGUES,
-            split_k_values,
+    def _split_k_values_for(_geom: tuple) -> tuple:
+        return _dgrad_sweep_split_k_values(
+            args.split_k,
+            problem,
+            _geom[0],
+            _geom[1],
+            _geom[2],
+            arch,
+            is_wmma=_dgrad_is_wmma,
         )
-    )
+
+    combos = [
+        (*_geom, _pipeline, _epilogue, _sk)
+        for _geom in itertools.product(
+            _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
+        )
+        for _pipeline in _PIPELINES
+        for _epilogue in _EPILOGUES
+        for _sk in _split_k_values_for(_geom)
+    ]
 
     if args.sample is not None:
         total = len(combos)
@@ -2957,6 +3180,11 @@ def _run_dgrad_sweep(
 
     n_measured = 0
     for _combo, spec, resolved_split_k, kernel in pending:
+        # Flag the row whose degree is the one --split-k -1 would ship, via the
+        # same helper that build path uses.
+        _ck_auto = resolved_split_k == _ck_split_k_dgrad(
+            p, spec.tile_m, spec.tile_n, spec.tile_k, arch, is_wmma=_dgrad_is_wmma
+        )
         artifact = artifact_map.get(kernel.name)
         if artifact is None:
             continue
@@ -3059,6 +3287,7 @@ def _run_dgrad_sweep(
                 vec_a=vec_a,
                 vec_b=vec_b,
                 vec_c=vec_c,
+                ck_auto=_ck_auto,
             )
         )
 
@@ -3067,7 +3296,8 @@ def _run_dgrad_sweep(
             f"[{n_measured:4d}] tile={spec.tile_m}x{spec.tile_n}x{spec.tile_k} "
             f"warp={spec.warp_m}x{spec.warp_n} "
             f"atom={spec.warp_tile_m}x{spec.warp_tile_n}x{spec.warp_tile_k} "
-            f"{spec.pipeline}/{spec.epilogue:9s} spk{resolved_split_k:<3d} "
+            f"{spec.pipeline}/{spec.epilogue:9s} "
+            f"{('spk' + str(resolved_split_k) + ('*' if _ck_auto else '')):<8s} "
             f"vec={_lva}/{vec_b}/{vec_c} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
@@ -3102,10 +3332,13 @@ def _run_dgrad_sweep(
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
-            f"{r.pipeline}/{r.epilogue} spk{r.split_k} "
+            f"{r.pipeline}/{r.epilogue} spk{r.split_k}{'*' if r.ck_auto else ''} "
             f"vec={_lva_r}/{r.vec_b}/{r.vec_c}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+
+    if any(r.ck_auto for r in results[:top_n]):
+        print("\n* = split-K degree chosen by the CK heuristic (--split-k -1)")
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
