@@ -2857,7 +2857,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 using roc::host_numerics::Shape;
                 using roc::host_numerics::SiluActivation;
                 using roc::host_numerics::Tensor;
-                using roc::host_numerics::matmulWithBlasBackend;
+                using roc::host_numerics::matmulIntoWithBlasBackend;
                 using roc::host_numerics::multiply;
                 using roc::host_numerics::referenceEpilogueInto;
                 using roc::host_numerics::referenceSumInto;
@@ -2922,29 +2922,51 @@ void testing_matmul_with_bias(const Arguments&                                  
                           ? hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha)
                           : Tensor::scalar(accumulatorType, 1);
 
-                const Shape referenceShape{referenceA.shape()[0], referenceB.shape()[1]};
-                const bool  hasProduct
-                    = alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
-                      && referenceA.shape()[1] != 0;
-                Tensor referenceAccumulator
-                    = hasProduct
-                          ? matmulWithBlasBackend(
-                                referenceA, referenceB, accumulatorType, matmulOptions)
-                          : Tensor(accumulatorType, referenceShape);
-                EpilogueOptions conversion(accumulatorType);
-                if(hasProduct)
-                    conversion.inputScale = alpha;
-                if(beta.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
+                const std::complex<double> alphaValue = alpha.item<std::complex<double>>();
+                const std::complex<double> betaValue  = beta.item<std::complex<double>>();
+                const std::complex<double> outputScaleValue
+                    = outputScale.item<std::complex<double>>();
+                const bool hasProduct = alphaValue != std::complex<double>(0.0, 0.0)
+                                        && referenceA.shape()[1] != 0;
+                const bool productIsFinal
+                    = hasProduct && alphaValue == std::complex<double>(1.0, 0.0)
+                      && betaValue == std::complex<double>(0.0, 0.0)
+                      && outputScaleValue == std::complex<double>(1.0, 0.0)
+                      && referenceD.type() != ScalarType::Int8;
+                if(productIsFinal)
                 {
-                    conversion.addend = referenceC;
-                    conversion.addendScale
-                        = multiply(beta, scaleC, accumulatorType, accumulatorType);
+                    matmulIntoWithBlasBackend(referenceA, referenceB, referenceD, matmulOptions);
                 }
+                else
+                {
+                    const Shape referenceShape{referenceA.shape()[0], referenceB.shape()[1]};
+                    const Layout referenceLayout
+                        = referenceD.layout().stride(0) <= referenceD.layout().stride(1)
+                              ? Layout::contiguousFirstDimensionFastest(referenceShape)
+                              : Layout::contiguousLastDimensionFastest(referenceShape);
+                    Tensor referenceAccumulator
+                        = hasProduct
+                              ? Tensor::allocateUninitialized(accumulatorType, referenceLayout)
+                              : Tensor(accumulatorType, referenceLayout);
+                    EpilogueOptions conversion(accumulatorType);
+                    if(hasProduct)
+                    {
+                        matmulIntoWithBlasBackend(
+                            referenceA, referenceB, referenceAccumulator, matmulOptions);
+                        conversion.inputScale = alpha;
+                    }
+                    if(betaValue != std::complex<double>(0.0, 0.0))
+                    {
+                        conversion.addend = referenceC;
+                        conversion.addendScale
+                            = multiply(beta, scaleC, accumulatorType, accumulatorType);
+                    }
 
-                conversion.outputScale = outputScale;
-                if(referenceD.type() == ScalarType::Int8)
-                    conversion.outputConversion = OutputConversion::SaturatingInt8;
-                referenceEpilogueInto(referenceAccumulator, {.output = referenceD}, conversion);
+                    conversion.outputScale = outputScale;
+                    if(referenceD.type() == ScalarType::Int8)
+                        conversion.outputConversion = OutputConversion::SaturatingInt8;
+                    referenceEpilogueInto(referenceAccumulator, {.output = referenceD}, conversion);
+                }
 
                 if(preparedProblem.epilogueEnabled)
                 {
