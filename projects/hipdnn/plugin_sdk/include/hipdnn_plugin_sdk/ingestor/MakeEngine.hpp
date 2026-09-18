@@ -5,8 +5,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <map>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -106,6 +108,67 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
     return "generic-untuned-v1/" + uhd::sha256(selector.dump());
 }
 
+/// @brief The engine facts a cached ranking's validity depends on, for `EngineIdentity`.
+///
+/// The model hash is a digest over EVERY heuristic @p set can resolve, not over one of them:
+/// which model ranks is decided per architecture at first rank() (RFC 0019 §8.3), long after
+/// this runs, and a shard is keyed by arch but a cache directory is not. Hashing all of them
+/// means the directory changes when ANY of them changes, which over-invalidates a little --
+/// a gfx1151-only model change also retires gfx942's records -- and under-invalidates never.
+///
+/// The kernels are deliberately NOT hashed in, unlike engineSelectorRevision() above: a pack
+/// gaining a kernel is what the coverage gate is for, and retiring every measured ranking on
+/// it would cost a GPU sweep to re-learn an order the records already hold.
+///
+/// Empty when the engine ships no heuristic at all: there is no model content to version,
+/// and `winnerCacheShardPath()` renders that as its own directory.
+inline std::string engineModelHash(const DescriptorSet& set)
+{
+    const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"model_hash", descriptor.modelHash},
+                              {"features_hash", descriptor.featuresHash},
+                              {"adapter", static_cast<int>(descriptor.adapter)},
+                              {"native", descriptor.nativeSymbol},
+                              {"objective", descriptor.objective},
+                              {"transform", descriptor.score.transform}};
+    };
+
+    // An ordered map, so the digest does not depend on hash-table iteration order.
+    std::map<std::string, nlohmann::json> rankers;
+    for(const auto& [arch, descriptor] : set.heuristicsByArch)
+    {
+        rankers.emplace(arch, rankerIdentity(descriptor));
+    }
+    if(set.heuristic && rankers.count("default") == 0)
+    {
+        rankers.emplace("default", rankerIdentity(*set.heuristic));
+    }
+    if(rankers.empty())
+    {
+        return {};
+    }
+    return uhd::sha256(nlohmann::json(rankers).dump());
+}
+
+/// @brief What identifies this engine to the caches that outlive one ranking.
+inline EngineIdentity engineIdentity(const DescriptorSet& set)
+{
+    // The UED's declared catalog-ranking UHD, falling back to the resolved `default`
+    // descriptor's own id: an engine may bind a model in provider code without naming it on
+    // the UED (RFC 0019 Open Question 7), and that model still identifies the cache directory.
+    std::string uhdId;
+    if(set.engine.heuristicId.has_value())
+    {
+        uhdId = toString(*set.engine.heuristicId);
+    }
+    else if(set.heuristic)
+    {
+        uhdId = toString(set.heuristic->id);
+    }
+    return EngineIdentity{set.engine.name, set.engine.revision, uhdId, engineModelHash(set)};
+}
+
 /// Takes @p set by value so a caller building both an engine and its state manager
 /// builds the set once.
 /// @param graphMatchSymbol The engine's `graph_match` native symbol; empty means the
@@ -113,10 +176,11 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
 /// @param describedBy Names the engine in the graph_match resolution failure and in the
 ///        warning an engine shipping no heuristic gets. Defaulted from @p set, but a
 ///        caller that already moved `set.engine` out must pass it, or both name nothing.
-/// @param engineName The engine's scoped name, used to locate its on-disk
-///        winner-cache shard. Defaulted from @p set like @p describedBy -- a caller
-///        that already moved `set.engine` out must pass it explicitly, or the state
-///        manager gets an empty name and disables its disk cache.
+/// @param engine The engine's identity -- scoped name, revision, UHD id and model content
+///        hash -- which locates its on-disk winner-cache shard and versions its in-memory
+///        catalog cache. Defaulted from @p set like @p describedBy; a caller that already
+///        moved `set.engine` out must pass it explicitly (see engineIdentity()), or the
+///        state manager gets an empty name and disables its disk cache.
 /// @param knobs The UED's declared knobs, carrying RFC 0019 §6.3 check 2 into the
 ///        heuristic factory. Defaulted from @p set for the same reason as the two above,
 ///        and for the same reason a caller that already moved `set.engine` out must pass
@@ -129,23 +193,36 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
                      const std::string& graphMatchSymbol,
                      std::string describedBy = {},
-                     std::string engineName = {},
+                     EngineIdentity engine = {},
                      std::vector<std::string> knobs = {})
 {
     if(describedBy.empty())
     {
         describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     }
-    if(engineName.empty())
+    if(engine.name.empty())
     {
-        engineName = set.engine.name;
+        engine = engineIdentity(set);
     }
     if(knobs.empty())
     {
         knobs = set.engine.knobs;
     }
-    auto heuristic = makeKernelHeuristic(
-        set.heuristic, describedBy, knobs, set.heuristicsByArch, set.unavailableHeuristicArches);
+    // Read from `set.schema` before the move below hands it to the state manager: RFC 0019
+    // §6.3 check 2's first assertion needs the KMD's declared fields, and a moved-from
+    // schema declares none -- which would refuse every model that reads a `$kernel.*`
+    // feature, exactly the way an empty knob list would.
+    std::unordered_set<std::string> kmdFields;
+    for(const auto& field : set.schema.fields)
+    {
+        kmdFields.insert(field.name);
+    }
+    auto heuristic = makeKernelHeuristic(set.heuristic,
+                                         describedBy,
+                                         knobs,
+                                         kmdFields,
+                                         set.heuristicsByArch,
+                                         set.unavailableHeuristicArches);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
         std::move(set.matchers),
@@ -155,7 +232,7 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
         graphMatchSymbol,
         describedBy,
         KernelIngestorStateManager<THandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
-        std::move(engineName));
+        std::move(engine));
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a
@@ -165,11 +242,11 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     makeEngine(DescriptorSet set, const IDeviceResolver<THandle>& deviceResolver)
 {
     // Each read of the UED is its own statement, sequenced before the moves below:
-    // reading engine/describedBy/engineName inside the same call as a move would be
+    // reading engine/describedBy/identity inside the same call as a move would be
     // unsequenced and could read an already-moved-from (empty) engine, silently
     // disabling the disk cache.
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
-    auto engineName = set.engine.name;
+    auto identity = engineIdentity(set);
     auto knobs = set.engine.knobs;
     auto predictions = std::move(set.enginePredictionsByArch);
     auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
@@ -182,7 +259,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         makeStateManager<THandle>(std::move(set),
                                   std::move(graphMatchSymbol),
                                   std::move(describedBy),
-                                  std::move(engineName),
+                                  std::move(identity),
                                   std::move(knobs)),
         deviceResolver,
         std::move(predictions),

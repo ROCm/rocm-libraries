@@ -18,6 +18,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp>
 
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include <gtest/gtest.h>
 
@@ -155,6 +156,45 @@ TEST_F(TestTreeDataAdapter, LoadFailsOnHashMismatch)
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:different_hash");
 
     EXPECT_EQ(adapter, nullptr);
+}
+
+/// RFC 0019 §12: a contract diagnostic is "a clear error (not a warning) naming which of the
+/// three checks failed". Both of this adapter's checks reported at WARN, which is the level
+/// an operator filters out -- and the consequence here is silent, since the engine goes on
+/// answering and ranks by declared order, so this line is the only trace that its model was
+/// disabled. The level is asserted rather than the wording: the message is free to change,
+/// the severity is the contract. The WARN count is asserted too, because raising one check
+/// and leaving its sibling behind is what made the two spellings of one condition diverge.
+TEST_F(TestTreeDataAdapter, AContractCheckThatDisablesTheModelReportsAnError)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    auto buffer = GbdtModelBuilder()
+                      .setNumFeatures(2)
+                      .setFeaturesHash("sha256:model_hash")
+                      .addTree(makeLeafTree(1.0))
+                      .build();
+
+    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(
+                  buffer.data(), buffer.size(), "sha256:different_hash"),
+              nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << "the features-hash check must report at ERROR:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
+        << recorder.getRecordedLogsAsString();
+
+    recorder.clearLogs();
+
+    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(
+                  buffer.data(), buffer.size(), "sha256:model_hash", "sha256:not-these-bytes"),
+              nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << "the model-digest check must report at ERROR:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestTreeDataAdapter, LoadSucceedsWithEmptyExpectedHash)

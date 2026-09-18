@@ -139,6 +139,34 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     EXPECT_NEAR(treeResult.tflops, nativeResult.tflops, 1e-12);
 }
 
+/// RFC 0019 §7.2's digest is the adapter's to verify, and this is the L1 half of that.
+///
+/// The check used to live here, in the predictor, ahead of the factory call -- which is
+/// precisely why the kernel-ranking role, which has no such preamble, dlopen'ed the same
+/// library unverified. Moving it into CustomLibraryAdapter::load makes one implementation
+/// serve both roles, and this pins the L1 side of that move: a mismatched digest must still
+/// leave the engine without an estimate rather than quietly scoring through a substituted
+/// library.
+TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNoEstimate)
+{
+    auto custom = config(document());
+    custom.adapterType = "custom_library";
+    custom.modelArtifactPath
+        = std::filesystem::absolute(
+              std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
+              / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
+              .string();
+    custom.customLibrarySymbol = "test_linear_scorer";
+    custom.modelHash = sha256(std::string("not this library"));
+
+    const auto result = predict(custom);
+    // INVALID, not UNAVAILABLE: §11.2 separates "I do not answer this question" from "I
+    // answer, and the answer is bad". A library present under a digest it does not match is
+    // the second, and reporting it as merely absent would hide a substituted artifact.
+    EXPECT_EQ(result.status, PredictionStatus::INVALID);
+    EXPECT_DOUBLE_EQ(result.tflops, 0.0);
+}
+
 TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
 {
     auto cfg = config(document());
@@ -152,16 +180,21 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
     EXPECT_EQ(binding.at("role"), "predict_engine_tflops");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_EQ(binding.at("uhd_id"), cfg.uhdId);
-    // The engine, not the predictor, publishes trained_against: a staleness check needs
-    // the descriptor set the model is being compared against, which only the engine knows.
-    EXPECT_FALSE(binding.contains("trained_against"));
+    // A description says what a model collected from it would be trained against. For an
+    // engine with no descriptors that is the selector revision and nothing else (§4.1,
+    // Open Question 7); a descriptor-backed engine adds its set on top in GenericEngine.
+    // A description carrying none at all cannot be turned into a UHD, which is where every
+    // opaque L1 collection stopped before this (run 67929509).
+    EXPECT_EQ(binding.at("trained_against").at("selector_revision"), "selector-1");
+    EXPECT_FALSE(binding.at("trained_against").contains("ued"));
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
     EXPECT_EQ(predict(cfg).status, PredictionStatus::UNAVAILABLE);
 }
 
-/// RFC 0019 §11.2 and Open Question 7: an engine whose UED binds no prediction role
-/// contributes no score, yet must still describe the binding an author would train
-/// against -- that description is how the very first model gets collected.
+/// RFC 0019 §11.2: an engine nothing binds a prediction model to -- no UED role map and
+/// no UUID declared in provider code (Open Question 7) -- contributes no score, yet must
+/// still describe the binding an author would train against: that description is how the
+/// very first model gets collected.
 TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclinesToScore)
 {
     const UhdConfig unbound;
@@ -177,7 +210,7 @@ TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclin
     EXPECT_EQ(binding.at("arch"), "gfx942");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_FALSE(binding.contains("uhd_id"));
-    EXPECT_FALSE(binding.contains("trained_against"));
+    EXPECT_EQ(binding.at("trained_against").at("selector_revision"), "selector-1");
     EXPECT_EQ(nlohmann::json::parse(description.features_json).at("graph.work"), std::log1p(42.0));
 }
 

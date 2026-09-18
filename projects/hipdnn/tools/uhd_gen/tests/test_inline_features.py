@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Exercise canonical expression training with the actual shared feature runtime."""
 import json
-import os
-import shutil
 
 import pytest
 
@@ -20,14 +18,6 @@ PROVENANCE = {"ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": 
               "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.4"}, "umd": []}
 
 
-@pytest.fixture
-def evaluator():
-    executable = shutil.which(os.environ.get("HIPDNN_UHD_FEATURE_EVALUATOR", "hipdnn_uhd_features"))
-    if executable is None:
-        pytest.skip("shared hipdnn_uhd_features executable is not available")
-    return executable
-
-
 def test_inline_ast_and_categorical_leaves_match_runtime(evaluator):
     frame = pd.DataFrame({"attention.query.dims[2]": [129, 64], "kernel.tile_m": [32, 64],
                           "kernel.dtype": ["fp16", "bf16"]})
@@ -36,7 +26,7 @@ def test_inline_ast_and_categorical_leaves_match_runtime(evaluator):
     encoding = {"$kernel.dtype": {"bf16": 0, "fp16": 1}}
     digest, values = evaluate_feature_rows(frame, signature, encoding, evaluator)
     assert values == [[5, 1, 1], [1, 0, 0]]
-    assert digest == compute_features_hash(signature, encoding)
+    assert digest == compute_features_hash(signature, encoding, evaluator)
 
 
 def test_computed_training_ships_provenance_and_scores_real_artifact(tmp_path, evaluator):

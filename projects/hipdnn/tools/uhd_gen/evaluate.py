@@ -1386,7 +1386,7 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
         from .immediate import validate_model
         validate_model(descriptor)
 
-    from .features import build_features_signature, compute_features_hash, evaluate_feature_rows, signature_references
+    from .features import build_features_signature, compute_features_hash, signature_references
 
     signature = descriptor.get("features_signature") or manifest.get("features_signature")
     if not signature and manifest.get("features"):
@@ -1404,13 +1404,13 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
 
     categorical_encoding = descriptor.get("categorical_encoding", manifest.get("categorical_encoding", {}))
     expected_hash = descriptor.get("features_hash", manifest.get("features_hash"))
-    if any(isinstance(entry, dict) for entry in signature):
-        actual_hash, _ = evaluate_feature_rows(pd.DataFrame(columns=features), signature,
-                                               categorical_encoding, feature_evaluator)
-    else:
-        actual_hash = compute_features_hash(signature, categorical_encoding)
-    if expected_hash is not None and actual_hash != expected_hash:
-        raise ValueError("features_signature/categorical_encoding does not match features_hash")
+    if expected_hash is not None:
+        # RFC 0019 §6.3: verification runs the routine generation stamped with, so the
+        # digest is recomputed by the shared evaluator whatever the signature contains.
+        # Checking a C++-stamped hash against a Python-recomputed one only ever proved
+        # that the two implementations had not drifted yet.
+        if compute_features_hash(signature, categorical_encoding, feature_evaluator) != expected_hash:
+            raise ValueError("features_signature/categorical_encoding does not match features_hash")
 
     transform = descriptor.get("score", {}).get("transform", manifest.get("score_transform", "log1p"))
     if transform not in ("identity", "log1p"):

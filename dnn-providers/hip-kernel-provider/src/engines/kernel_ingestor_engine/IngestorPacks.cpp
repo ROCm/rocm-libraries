@@ -14,10 +14,11 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
-        // ConvFwd owns a module cache now: develop gave it resetConvFwdModuleCache, so the
-        // entry that previously declared it cacheless would leave this pack out of the reset
-        // sweep -- and TestIngestorPacksModuleCacheOwnership would not catch it, because
-        // `false, nullptr` is self-consistent.
+        // Packaged/kpack since the conv pack moved to lowered rocKE builders: it owns a
+        // module cache (ConvNative.cpp's convFwdKpackModuleCache), so the reset sweep must
+        // reach it. The entry that previously declared it cacheless would leave this pack
+        // out of that sweep -- and TestIngestorPacksModuleCacheOwnership would not catch
+        // it, because `false, nullptr` is self-consistent.
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, true, &resetConvFwdModuleCache},
         // Packaged/kpack: its kernels are lowered rocKE builders resolved out of the
         // per-arch .kpack archive, so it owns a module cache the reset sweep must

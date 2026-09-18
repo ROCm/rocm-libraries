@@ -195,13 +195,22 @@ inline std::unique_ptr<TableAdapter> TableAdapter::loadFromBuffer(
         return nullptr;
     }
 
-    // Validate features hash
+    // Validate features hash (RFC 0019 §6.3 check 3).
+    //
+    // ERROR, not WARN: §12 requires "a clear error (not a warning) naming which of the three
+    // checks failed and why, plus the fact that ranking degraded to static_order and the
+    // estimate was reported as 0". A features-hash mismatch here is the same event
+    // TreeDataAdapter and CustomLibraryAdapter report, so it is named the same way and at the
+    // same level -- three spellings of one condition is how a log grep finds two of them and
+    // concludes the third never fires.
     const std::string modelHash
         = model->features_hash() != nullptr ? model->features_hash()->str() : "";
     if(!expectedFeaturesHash.empty() && modelHash != expectedFeaturesHash)
     {
-        HIPDNN_SDK_LOG_WARN("TableAdapter: features hash mismatch - model='"
-                            << modelHash << "' expected='" << expectedFeaturesHash << "'");
+        HIPDNN_SDK_LOG_ERROR("TableAdapter: features hash mismatch - expected='"
+                             << expectedFeaturesHash << "' actual='" << modelHash
+                             << "'; the model is not used -- ranking degrades to static_order "
+                                "and an engine estimate is reported as 0");
         return nullptr;
     }
 

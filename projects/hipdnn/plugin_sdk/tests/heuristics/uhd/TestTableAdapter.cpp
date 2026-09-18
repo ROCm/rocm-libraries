@@ -15,6 +15,8 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TableAdapter.hpp>
 
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/table_model_generated.h>
 
@@ -212,6 +214,30 @@ TEST_F(TestTableAdapter, FeaturesHashMismatch)
     // Load should fail due to hash mismatch
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     EXPECT_EQ(adapter, nullptr);
+}
+
+/// RFC 0019 §12: a contract diagnostic is "a clear error (not a warning) naming which of the
+/// three checks failed". This is the same event TreeDataAdapter reports for its own artifact,
+/// so it is reported at the same level -- one condition logged at two levels is how an
+/// operator greps for the errors and never learns this model was disabled. The level is
+/// asserted, not the wording.
+TEST_F(TestTableAdapter, TheFeaturesHashCheckReportsAnError)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    auto buffer = TableModelBuilder()
+                      .setNumFeatures(2)
+                      .setFeaturesHash("sha256:wrong_hash")
+                      .addBucket(0, {5.0})
+                      .addEntry({0}, 100, 1.0)
+                      .build();
+
+    EXPECT_EQ(TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH), nullptr);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestTableAdapter, TrainingArchDetection)

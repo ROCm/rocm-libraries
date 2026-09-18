@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from . import addressing
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import build_features_signature, signature_references
@@ -59,6 +60,28 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
 def _write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def _absent_as_null(value):
+    """Raw collected rows, with every non-finite float replaced by null.
+
+    `allow_nan=False` is the right guard for a model, a provenance snapshot or a manifest:
+    NaN is not JSON, and a number that cannot be written is a number that should not have
+    been computed. It is the wrong guard for the raw measurement log, where a missing
+    optional field -- `stddevMs` on a single-iteration run, `iters` on a run that reported
+    none -- arrives as NaN through pandas and means "absent", which JSON spells null.
+
+    Without this, an engine that measured its whole corpus successfully loses the lot at
+    the final write: run 67929365 collected 600 gfx950 graphs and died on
+    "Out of range float values are not JSON compliant: nan" after the measurement was done.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _absent_as_null(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_absent_as_null(item) for item in value]
+    return value
 
 
 def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
@@ -124,85 +147,104 @@ def _finite_positive(value) -> bool:
 
 
 def collect_graph(command: list[str], environment: dict, log_dir: Path, commands: list,
-                  *, engine_descriptor_id: str) -> tuple[list[dict], set[str]]:
-    """Enumeration and timing must agree on identity, bindings and the exact tuple."""
-    candidates = []
-    seen_ids, seen_tuples = set(), set()
-    offset = 0
-    first = None
-    total = None
-    while True:
-        page = _run_json([command[0], "enumerate", *command[1:], "--offset", str(offset), "--limit", "10000"],
-                         environment, log_dir, len(commands), commands)
-        identity = _identity(page)
-        if str(identity[0]) != command[command.index("--engine-id") + 1]:
-            raise ValueError("enumeration returned another engine's catalog")
-        if identity[4] != engine_descriptor_id:
-            raise ValueError("enumerated engine does not own the recorded UED provenance")
-        if first is None:
-            first = page
-            total = page.get("total_count")
-            if not isinstance(total, int) or total < 0:
-                raise ValueError("enumeration lacks a bounded total_count")
-        elif identity != _identity(first) or page.get("total_count") != total:
-            raise ValueError("candidate enumeration identity/count changed between pages")
-        for key in ("problem_features", "device_features"):
-            if _feature_map(page, key) != _feature_map(first, key):
-                raise ValueError(f"{key} changed between enumeration pages")
-        batch = page.get("candidates")
-        if not isinstance(batch, list):
-            raise ValueError("enumeration lacks a candidates array")
-        for candidate in batch:
-            candidate_id = candidate.get("id")
-            knobs = _knob_tuple(candidate)
-            if not candidate_id or candidate_id in seen_ids or knobs in seen_tuples:
-                raise ValueError("candidate identities and complete enrolled knob tuples must be unique")
-            seen_ids.add(candidate_id)
-            seen_tuples.add(knobs)
-            _feature_map(candidate, "kernel_features")
-            candidates.append(candidate)
-        next_offset = page.get("next_offset")
-        if next_offset is None:
-            if len(candidates) != total:
-                raise ValueError("candidate enumeration ended before total_count; refusing silent truncation")
-            break
-        if not batch or next_offset != offset + len(batch) or next_offset >= total:
-            raise ValueError("candidate enumeration returned an invalid continuation offset")
-        offset = next_offset
+                  *, engine_descriptor_id: str, addressing_table: dict | None = None
+                  ) -> tuple[list[dict], set[str]]:
+    """One bench invocation per graph: the sweep enumerates and times in one process.
+
+    RFC 0019 §13.2: "Sweeping inside one process amortises" the plugin load, the graph
+    build and the kernel compilation that a process per row pays once each. The enumerate
+    call used to be a second process per graph that built the same catalog and threw the
+    timings away; `--sweep --json` now returns the catalog it timed, so one startup covers
+    both. The checks below are unchanged -- they simply read one response instead of two.
+    """
+    candidates: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_tuples: set[tuple] = set()
+    measured = _run_json([*command, "--sweep", "--json"], environment, log_dir, len(commands), commands)
+    first = measured
+    identity = _identity(measured)
+    if str(identity[0]) != command[command.index("--engine-id") + 1]:
+        raise ValueError("the sweep returned another engine's catalog")
+    if identity[4] != engine_descriptor_id:
+        raise ValueError("swept engine does not own the recorded UED provenance")
+    total = measured.get("total_count")
+    if not isinstance(total, int) or total < 0:
+        raise ValueError("the sweep lacks a bounded total_count")
+    batch = measured.get("candidates")
+    if not isinstance(batch, list):
+        raise ValueError("the sweep lacks a candidates array; it must report what it timed")
+    # A sweep holds the whole catalog in one process, so there is no continuation to
+    # follow -- but the count is still checked, because a page limit silently truncating
+    # the catalog would train a model on a subset and call it complete.
+    if measured.get("next_offset") is not None or len(batch) != total:
+        raise ValueError("the sweep did not time the whole catalog; refusing silent truncation")
+    for candidate in batch:
+        candidate_id = candidate.get("id")
+        knobs = _knob_tuple(candidate)
+        if not candidate_id or candidate_id in seen_ids or knobs in seen_tuples:
+            raise ValueError("candidate identities and complete enrolled knob tuples must be unique")
+        seen_ids.add(candidate_id)
+        seen_tuples.add(knobs)
+        _feature_map(candidate, "kernel_features")
+        candidates.append(candidate)
     if not candidates:
-        raise ValueError(f"no matched candidates for graph {first['graph_id']}")
+        raise ValueError(f"no matched candidates for graph {measured.get('graph_id')}")
+    # What each pinned integer addressed, learned from the engine's own answer. Accumulated
+    # across graphs because one graph's catalog shows only the values ITS candidates carry.
+    if addressing_table is not None:
+        addressing.observe(candidates, addressing_table)
     rows = []
     published = set(_feature_map(first, "problem_features")) | set(_feature_map(first, "device_features"))
-    for candidate in candidates:
-        # Complete enrolled settings replace collection pins; no Cartesian combinations.
-        timing_command = list(command)
-        while "--knob" in timing_command:
-            index = timing_command.index("--knob")
-            del timing_command[index:index + 2]
-        for name, value in _knob_tuple(candidate):
-            timing_command.extend(["--knob", f"{name}={value}"])
-        measured = _run_json([*timing_command, "--json"], environment, log_dir, len(commands), commands)
-        if _identity(measured) != _identity(first):
-            raise ValueError("timing response belongs to another graph/device/engine")
-        for key in ("problem_features", "device_features"):
-            if _feature_map(measured, key) != _feature_map(first, key):
-                raise ValueError(f"timing changed the enumerated {key}")
-        results = measured.get("results", [])
-        if len(results) != 1:
+    # The trade one process per graph accepts: a kernel that CRASHES takes the whole
+    # graph's rows with it rather than its own row. A kernel that merely fails to build or
+    # run does not -- autotune reports it as an unsucceeded result
+    # (makeCompileFailedResult and its siblings), so it still reaches the corpus as the
+    # failure it is.
+    results = measured.get("results")
+    if not isinstance(results, list):
+        raise ValueError("sweep response lacks a results array")
+    by_id = {}
+    for result in results:
+        identity = result.get("candidate_id")
+        if identity in by_id:
             raise ValueError("one enrolled tuple must time exactly one candidate")
-        result = results[0]
-        if result.get("candidate_id") != candidate["id"] or _knob_tuple(result) != _knob_tuple(candidate):
+        by_id[identity] = result
+    # A bijection, checked both ways. Enumeration decided the candidate set, so a sweep that
+    # times a subset has silently dropped rows the corpus would then be missing without
+    # saying so, and one that times something else was not the catalog that was enumerated.
+    if set(by_id) != {candidate["id"] for candidate in candidates}:
+        raise ValueError("the sweep did not time exactly the catalog it reported")
+    for candidate in candidates:
+        result = by_id[candidate["id"]]
+        if _knob_tuple(result) != _knob_tuple(candidate):
             raise ValueError("timed knobs did not resolve to the enrolled candidate")
         if _feature_map(result, "kernel_features") != _feature_map(candidate, "kernel_features"):
             raise ValueError("timing kernel metadata differs from enrolled candidate")
         if not isinstance(result.get("is_valid"), bool):
             raise ValueError("timing response must preserve the benchmark's is_valid verdict")
+        # RFC 0019 §13.2: "A timing is only a training label once the candidate is known
+        # correct ... and records the verdict on the row." Required, not defaulted: a bench
+        # that emits no verdict has performed no check, and reading that as valid is exactly
+        # the inverted oracle the section exists to prevent. `null` is the honest verdict
+        # when the cross-check could decide nothing, and it is spelled differently from
+        # `true` precisely so it cannot be mistaken for one.
+        if "numerically_valid" not in result or not isinstance(result.get("validation"), str):
+            raise ValueError("timing response must carry a numerical-validation verdict "
+                             "(RFC 0019 §13.2); this benchmark performed no correctness check")
+        verdict = result["numerically_valid"]
+        if verdict not in (True, False, None):
+            raise ValueError("numerically_valid must be true, false or null")
         elapsed = result.get("robust_time_ms")
         if result.get("succeeded") and (not isinstance(elapsed, (int, float)) or not math.isfinite(elapsed) or elapsed <= 0):
             raise ValueError("successful timing requires a positive finite robust_time_ms")
         row = {"benchmark": first["graph_id"], "device": first["device_id"],
                "arch": first["device_arch"].split(":", 1)[0], "device_arch": first["device_arch"],
                "engine": first["engine_id"], "kernel": candidate["id"], "is_valid": result["is_valid"],
+               # A second column beside `is_valid`, never folded into it. `is_valid` means
+               # "a measurement was obtained" and §8.1 plus `evaluate`'s exclusion counters
+               # both read it that way; a row that ran and computed the wrong answer is a
+               # different fact from a row that never ran, and §13.2 keeps both.
+               "numerically_valid": verdict, "validation": result["validation"],
                "succeeded": result.get("succeeded"), "skip_reason": result.get("skip_reason"),
                "robustMeanMs": elapsed, "minTimeMs": result.get("min_time_ms"), "avgTimeMs": result.get("avg_time_ms"),
                # RFC 0019.13 §8.3 makes `stddevMs` and `iters` columns of the result
@@ -211,6 +253,16 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
                # inert on a corpus that drops them.
                "stddevMs": result.get("stddev_ms"), "iters": result.get("iterations"),
                "knob_settings": json.dumps(candidate["knob_settings"], sort_keys=True)}
+        if verdict is False:
+            # §13.2: the row "is written with its measurement suppressed and an explicit
+            # invalid marker, so the model learns the failure surface instead of inferring
+            # one from absence". Suppressed here, at the one place the corpus row is built,
+            # so every consumer of it sees the same thing: `corpus.json`, `corpus.csv`, the
+            # `evaluate` regret pass that reads the corpus back, and any later retrain. A
+            # wrong-but-fast kernel holds the best time in its group, so leaving the number
+            # in place and relying on each consumer to filter is how it becomes the label.
+            for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs"):
+                row[column] = None
         for mapping in (first["problem_features"], first["device_features"], candidate["kernel_features"]):
             collision = set(row) & set(mapping)
             if collision:
@@ -279,11 +331,13 @@ def run_generate(args: argparse.Namespace) -> int:
                 raise ValueError("--descriptor-tree must be an existing descriptor root (it may be empty)")
             provenance, ued, exposed = None, {}, {}
             kernel_fields = set()
+            ordinals = {}
         else:
             provenance = snapshot_provenance(tree, args.engine, args.arch)
             ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
             _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
             kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
+            ordinals = {}
         output.parent.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".uhd-generate-", dir=output.parent))
         environment = dict(os.environ)
@@ -293,7 +347,18 @@ def run_generate(args: argparse.Namespace) -> int:
             collection_tree = stage / "collection_descriptors"
             shutil.copytree(tree, collection_tree)
             exposed = dict(ued)
-            exposed["knobs"] = [field["name"] for field in kmd["fields"] if field["type"] == "int"]
+            # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
+            # equals the metadata tuple and every catalog entry is individually reachable.
+            # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
+            # and abort the run on the collision at _knob_tuple.
+            #
+            # Which of those fields ends up addressed BY AN ORDINAL is the engine's
+            # decision, not this tool's: a knob value is an int64 end to end, so the
+            # ingestor numbers each non-integer field over its own value set and reports
+            # the pin it chose on every enumerated candidate. The mapping is read back off
+            # the collection below (addressing.observe) rather than re-derived here, so
+            # there is no second numbering to disagree with the engine's.
+            exposed["knobs"] = [field["name"] for field in kmd["fields"]]
             _write_json(collection_tree / ued_path.relative_to(tree), exposed)
             _write_json(stage / "shipping_ued.json", ued)
             environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
@@ -339,6 +404,7 @@ def run_generate(args: argparse.Namespace) -> int:
                     collected, names = collect_immediate_graph(command, run_env, stage / "commands", commands)
                 else:
                     collected, names = collect_graph(command, run_env, stage / "commands", commands,
+                                                     addressing_table=ordinals,
                                                      engine_descriptor_id=ued["id"])
                 rows.extend(collected)
                 published.update(names)
@@ -352,8 +418,20 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("the graph/device corpus contains duplicate candidate measurements")
         _write_json(stage / "provenance.json", provenance)
         frame.to_csv(stage / "corpus.csv", index=False)
-        _write_json(stage / "corpus.json", rows)
-        usable = frame.copy() if immediate else frame[frame["is_valid"] & frame["succeeded"].eq(True)].copy()
+        _write_json(stage / "corpus.json", _absent_as_null(rows))
+        # Three conditions, because they are three different facts about a candidate and
+        # §13.2 keeps them apart: `succeeded` says the engine ran it, `is_valid` says a
+        # measurement came back, and `numerically_valid is not False` says nothing showed
+        # the result to be wrong. The last one is the label gate -- a wrong-but-fast kernel
+        # holds the best time in its group, so admitting it trains the ranker to prefer it.
+        # `ne(False)` rather than `eq(True)`: an undecidable verdict is null, and null is
+        # the pre-existing state of every corpus collected before there was a reference to
+        # check against (Open Question 19). Gating on it would train on nothing at all.
+        # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
+        # with its measurement suppressed and its marker, which is what §13.2 asks for.
+        usable = (frame.copy() if immediate else
+                  frame[frame["is_valid"] & frame["succeeded"].eq(True)
+                        & frame["numerically_valid"].ne(False)].copy())
         if usable.empty:
             raise ValueError("the benchmark produced no successful valid timings")
         if immediate:
@@ -416,7 +494,7 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError("multiple observed architectures require an explicit --arch promotion target")
         _write_json(stage / "features.json", signature)
         train_frame.to_csv(stage / "train.csv", index=False)
-        _write_json(stage / "train.json", train_frame.to_dict(orient="records"))
+        _write_json(stage / "train.json", _absent_as_null(train_frame.to_dict(orient="records")))
         train_args = ["train", "--input", str(stage / "train.json"), "--feature-signature", str(stage / "features.json"),
                       "--provenance", str(stage / "provenance.json"),
                       "--target", target, "--objective", objective, "--score-units", units,
@@ -458,6 +536,15 @@ def run_generate(args: argparse.Namespace) -> int:
             "device_coverage": coverage, "training_problem_keys": sorted(training_keys),
             "eval_problem_keys": sorted(evaluated_keys), "seed": args.seed, "eval_fraction": args.eval_fraction,
             "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", []),
+            # The runtime derives the same tables from the same inventory, so this is recorded
+            # for reading rather than for use: an ordinal in a stored row means nothing without
+            # the value set it indexes, and a disagreement between the two sides should be
+            # visible here rather than only in a kernel that was addressed wrongly.
+            # What each knob's pinned integer addressed, as the engine reported it on the
+            # candidates this corpus enumerated. Recorded for reading, not for use: the
+            # runtime derives its own numbering, and an ordinal in a stored row is
+            # unreadable without knowing which value it named.
+            "knob_encodings": addressing.as_manifest(ordinals),
             "engine_id": args.engine_id, "training_arches": arches, "promotion_role": args.role,
             "promotion_arch": args.arch or arches[0],
         })

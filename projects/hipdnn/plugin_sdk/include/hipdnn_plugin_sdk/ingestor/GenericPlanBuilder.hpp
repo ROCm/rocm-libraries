@@ -10,6 +10,7 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -222,65 +223,83 @@ public:
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
-        // Coverage and orderability are checked against the knob-filtered candidates
-        // here, independent of the same check against the full catalog in
-        // sortedCatalog(): one can fail while the other passes.
-        const WinnerKey winnerKey{
-            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
-            DeviceKey{context.deviceProperties}};
-        const auto record = _stateManager.winnerFor(winnerKey);
-        if(record.has_value())
+        // Orderability is the FULL catalog's question, answered once, in sortedCatalog():
+        // `catalog.orderedFromRecord` says a benchmarked record covered and ordered every
+        // kernel the matchers admitted, and `filtered` is that order with rows removed, so
+        // it is the measured order restricted.
+        //
+        // Asking again here against `filtered` -- which is what this did -- makes the answer
+        // depend on the pin. A record covering the pinned subset but not the full catalog
+        // said "measured" to a pinned request and "heuristic" to an unpinned one over the
+        // same candidates, and the two orders need not agree. RFC 0019 §5 step 8 fixes the
+        // basis for exactly this reason: the decision is "resolved against the canonical
+        // candidate set -- every kernel the matchers admitted for this graph, before any knob
+        // filter narrows it ... Knob filtering then applies to the resulting order."
+        //
+        // The lookup itself stays lazy: a WinnerKey hashes the whole graph, so it is not
+        // worth building when neither a benchmark write nor a possible hit needs one.
+        std::optional<WinnerKey> winnerKey;
+        std::optional<WinnerRecord> record;
+        if(settings.benchmarkingEnabled
+           || _stateManager.mightHaveWinnerFor(context.deviceProperties.gcnArchName))
         {
-            if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
+            winnerKey
+                = WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
+                            DeviceKey{context.deviceProperties}};
+            record = _stateManager.winnerFor(*winnerKey);
+        }
+
+        if(catalog.orderedFromRecord)
+        {
+            // Walks the ranked list instead of committing to its front: constructing
+            // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
+            // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
+            // than an empty cache.
+            for(size_t rank = 0; rank < filtered.size(); ++rank)
             {
-                // Walks the ranked list instead of committing to its front: constructing
-                // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
-                // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
-                // than an empty cache.
-                for(size_t rank = 0; rank < ranked->size(); ++rank)
+                try
                 {
-                    try
-                    {
-                        auto plan = std::make_unique<GenericPlan<THandle>>(
-                            _stateManager.getDispatchDetails((*ranked)[rank]),
-                            context,
-                            catalog.bound);
+                    auto plan = std::make_unique<GenericPlan<THandle>>(
+                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
-                        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                               << _engine.name << "' served kernel "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
-                                               << rank << " from a benchmarked record of "
-                                               << record->size() << " entry(s) for "
-                                               << filtered.size() << " candidate(s)");
+                    // The record itself may have been evicted from the bounded winner cache
+                    // since the catalog was ordered by it; the order survives on the cached
+                    // catalog either way, so only the entry count in this line is unavailable.
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "ingestor: engine '"
+                        << _engine.name << "' served kernel " << toString(filtered[rank].kernelId)
+                        << " at rank " << rank << " from a benchmarked record of "
+                        << (record.has_value() ? std::to_string(record->size()) : "?")
+                        << " entry(s) for " << filtered.size() << " candidate(s)");
 
-                        executionContext.setPlan(std::move(plan));
-                        return;
-                    }
-                    catch(const std::exception& error)
-                    {
-                        HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                               << _engine.name << "' could not build a plan for "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
-                                               << rank << ": " << error.what()
-                                               << "; trying the next ranked entry");
-                    }
+                    executionContext.setPlan(std::move(plan));
+                    return;
                 }
+                catch(const std::exception& error)
+                {
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                           << _engine.name << "' could not build a plan for "
+                                           << toString(filtered[rank].kernelId) << " at rank "
+                                           << rank << ": " << error.what()
+                                           << "; trying the next ranked entry");
+                }
+            }
 
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                       << _engine.name
-                                       << "' found a benchmarked record whose entries no longer "
-                                          "resolve; falling back to normal selection");
-            }
-            else if(settings.benchmarkingEnabled)
-            {
-                // A record only ever reorders candidates measured together; it never
-                // replaces the heuristic's pick, so a record that does not fully cover
-                // `filtered` is ignored rather than partially trusted.
-                HIPDNN_PLUGIN_LOG_INFO(
-                    "ingestor: engine '"
-                    << _engine.name << "' has a benchmarked record that does not fully cover "
-                    << filtered.size() << " candidate(s); re-benchmarking all of them");
-            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                   << _engine.name
+                                   << "' found a benchmarked record whose entries no longer "
+                                      "resolve; falling back to normal selection");
+        }
+        else if(record.has_value() && settings.benchmarkingEnabled)
+        {
+            // A record only ever reorders candidates measured together; it never
+            // replaces the heuristic's pick, so a record that does not fully cover
+            // the catalog is ignored rather than partially trusted.
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ingestor: engine '"
+                << _engine.name << "' has a benchmarked record that does not fully cover its "
+                << catalog.entries.size() << " applicable kernel(s); re-benchmarking "
+                << filtered.size() << " candidate(s)");
         }
 
         if(!settings.benchmarkingEnabled)
@@ -375,21 +394,30 @@ public:
         // one notion of "which GPU", so a log line and a cache entry can never disagree
         // about whether two rows came from the same device.
         // Hex so both values survive a log grep unambiguously.
+        // `winnerKey` is engaged on this path: the lazy probe above builds it whenever
+        // benchmarking is enabled, and only a benchmarking request reaches here.
         std::ostringstream benchmarkId;
-        benchmarkId << std::hex << winnerKey.graph.hash();
+        benchmarkId << std::hex << winnerKey->graph.hash();
         std::ostringstream deviceId;
-        deviceId << std::hex << winnerKey.device.hash();
+        deviceId << std::hex << winnerKey->device.hash();
 
         // A record that exists but did not serve this graph -- either it failed the coverage gate
         // or none of its ranked entries still resolved -- is being superseded, so its write must
         // append rather than adopt.
-        const auto cause = record.has_value() ? WinnerWriteCause::COVERAGE_REBENCHMARK
-                                              : WinnerWriteCause::FRESH_MISS;
+        //
+        // `catalog.orderedFromRecord` is consulted alongside the lookup because the two can
+        // disagree now that the winner cache is bounded: a catalog can carry a measured order
+        // whose record has since been evicted, and reaching here then still means a record was
+        // tried and did not serve. Reading the lookup alone would call that a fresh miss and
+        // adopt the very line that just failed to resolve.
+        const auto cause = record.has_value() || catalog.orderedFromRecord
+                               ? WinnerWriteCause::COVERAGE_REBENCHMARK
+                               : WinnerWriteCause::FRESH_MISS;
 
         executionContext.setPlan(makeBenchmarkPlan(
             std::move(candidates),
             handle,
-            [&stateManager = _stateManager, winnerKey, cause](
+            [&stateManager = _stateManager, winnerKey = std::move(*winnerKey), cause](
                 const std::vector<RankedEntry>& ranking) {
                 stateManager.recordWinner(winnerKey, ranking, cause);
             },
@@ -413,13 +441,18 @@ public:
         {
             const auto values = KernelIngestorStateManager<THandle>::knobValues(ranked, knobName);
 
+            // A non-integer value is advertised as its ordinal, which is what a caller must
+            // pin to select that kernel (RFC 0019 §13.2). Dropping those values instead --
+            // as this did while only INT was addressable -- advertised a knob whose valid set
+            // omitted most of the kernels it selects between.
             std::vector<int64_t> choices;
             choices.reserve(values.size());
             for(const auto& value : values)
             {
-                if(const auto* intValue = std::get_if<int64_t>(&value))
+                if(const auto ordinal = _stateManager.knobOrdinal(knobName, value);
+                   ordinal.has_value())
                 {
-                    choices.push_back(*intValue);
+                    choices.push_back(*ordinal);
                 }
             }
             if(choices.empty())
@@ -429,8 +462,11 @@ public:
 
             KnobT knob;
             knob.knob_id = knobName;
-            knob.description
-                = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name + "'";
+            knob.description = "Kernel metadata field '" + knobName + "' of engine '" + _engine.name
+                               + "'"
+                               + (_stateManager.isOrdinalKnob(knobName)
+                                      ? " (ordinal: an index into the field's value set)"
+                                      : "");
 
             IntValueT defaultValue;
             defaultValue.value = choices.front();
@@ -611,9 +647,18 @@ public:
         initializeExecutionSettings(handle, graph, config, executionSettings);
         const auto context = contextFor(handle, graph);
         auto catalog = _stateManager.unsortedCatalog(context);
-        catalog.entries = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        const auto filtered
+            = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         std::string modelId;
-        const auto ranking = _stateManager.calibratedRanking(catalog, context, modelId);
+        // Both halves of the catalog go in: the full one is the basis the ranking is decided
+        // on, the filtered one is what the answer may name. Passing only the filtered set --
+        // which is what this did -- ranked the pinned subset fresh and bypassed the cached
+        // full-catalog order entirely, so a pin could reorder two candidates relative to each
+        // other and a scorer that threw only on an excluded candidate degraded the unpinned
+        // prediction while the pinned one scored normally. RFC 0019 §9.2 and §5 step 8; see
+        // KernelIngestorStateManager::calibratedRanking().
+        const auto ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        catalog.entries = filtered;
         result.reason = "No calibrated configuration prediction is available";
         for(const auto& scored : ranking)
         {
@@ -750,13 +795,17 @@ private:
         for(const auto& name : _engine.knobs)
         {
             const auto it = kernel.metadata.find(name);
-            // getCustomKnobs advertises only integer metadata today. Non-integer
-            // fields must not be invented as unsupported knobs during enumeration.
+            // The enrolled tuple must ADDRESS this kernel: an enumerated candidate is
+            // replayed by pinning exactly these values, so a field left out of the tuple is a
+            // field the replay does not constrain. Non-integer values enter as their ordinal
+            // (RFC 0019 §13.2); while they were dropped, two kernels differing only in such a
+            // field enrolled the same tuple and enumeration refused both as ambiguous.
             if(it != kernel.metadata.end())
             {
-                if(const auto* value = std::get_if<int64_t>(&it->second))
+                if(const auto ordinal = _stateManager.knobOrdinal(name, it->second);
+                   ordinal.has_value())
                 {
-                    tuple.emplace(name, *value);
+                    tuple.emplace(name, *ordinal);
                 }
             }
         }
@@ -906,12 +955,13 @@ private:
         filtered.reserve(catalog.size());
         for(const auto& kernel : catalog)
         {
+            // A pin is matched through the engine's ordinal domain, so a string, bool, float
+            // or int_list field selects the kernel carrying the value that index names. The
+            // int64-only comparison this replaces made those fields unpinnable: a filter
+            // naming one matched nothing and the request failed as unsatisfiable.
             const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [&kernel](const auto& setting) {
-                      const auto value = kernel.tryGetMetadata(setting.first);
-                      const auto* intValue
-                          = value.has_value() ? std::get_if<int64_t>(&*value) : nullptr;
-                      return intValue != nullptr && *intValue == setting.second;
+                = std::all_of(filter.begin(), filter.end(), [this, &kernel](const auto& setting) {
+                      return _stateManager.knobMatches(kernel, setting.first, setting.second);
                   });
             if(matchesEverySetKnob)
             {

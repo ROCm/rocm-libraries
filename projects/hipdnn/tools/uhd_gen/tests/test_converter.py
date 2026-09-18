@@ -10,6 +10,8 @@ These tests verify that:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import struct
 import tempfile
 from pathlib import Path
@@ -22,11 +24,11 @@ import pytest
 flatbuffers = pytest.importorskip("flatbuffers")
 lgb = pytest.importorskip("lightgbm")
 np = pytest.importorskip("numpy")
-pytest.importorskip("pandas")  # imported transitively by uhd_gen.__main__
+pd = pytest.importorskip("pandas")
 
 import uhd_gen  # noqa: E402,F401  puts _generated/ on sys.path
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModel  # noqa: E402
-from uhd_gen.__main__ import _looks_like_cost_metric  # noqa: E402
+from uhd_gen.__main__ import _looks_like_cost_metric, main  # noqa: E402
 from uhd_gen.lgbm_to_flatbuffer import (  # noqa: E402
     GBDT_MODEL_FILE_IDENTIFIER,
     _objective_name,
@@ -34,6 +36,10 @@ from uhd_gen.lgbm_to_flatbuffer import (  # noqa: E402
     convert,
 )
 from uhd_gen.train_uhd import train_model  # noqa: E402
+
+
+def _read_model(path: Path) -> GbdtModel:
+    return GbdtModel.GetRootAs(path.read_bytes(), 0)
 
 
 def _create_synthetic_data(n_samples: int = 1000, n_features: int = 5, seed: int = 42):
@@ -426,6 +432,92 @@ class TestEdgeCases:
         convert(lgbm_path, "sha256:deep_tree", fb_path)
 
         assert fb_path.exists()
+
+
+class TestReproducibility:
+    """A shipped artifact that cannot be rebuilt byte for byte cannot be checked.
+
+    The committed `.bin` files are 4.8 MB of the product; RFC 0019 §10.5 records a content
+    hash over them, and a wall-clock stamp inside the buffer makes that hash a function of
+    when someone ran the converter rather than of what they converted.
+    """
+
+    @staticmethod
+    def _saved(tmp_path: Path) -> Path:
+        X, y = _create_synthetic_data(n_samples=200, n_features=4)
+        lgbm_path = tmp_path / "model.lgbm"
+        _train_simple_model(X, y, num_trees=8).save_model(str(lgbm_path))
+        return lgbm_path
+
+    def test_two_conversions_of_one_model_produce_identical_bytes(self, tmp_path: Path):
+        lgbm_path = self._saved(tmp_path)
+        first, second = tmp_path / "first.bin", tmp_path / "second.bin"
+        first_digest = convert(lgbm_path, "sha256:0123456789abcdef", first,
+                               num_training_samples=200, training_arches=["gfx942"],
+                               model_version="1.0.0")
+        second_digest = convert(lgbm_path, "sha256:0123456789abcdef", second,
+                                num_training_samples=200, training_arches=["gfx942"],
+                                model_version="1.0.0")
+        assert first.read_bytes() == second.read_bytes()
+        # The returned digest is what the descriptor body records and TreeDataAdapter
+        # recomputes, so it has to be over the bytes that reached the file.
+        assert first_digest == second_digest == hashlib.sha256(first.read_bytes()).hexdigest()
+
+    def test_an_unstamped_conversion_omits_the_date_rather_than_inventing_one(self, tmp_path: Path,
+                                                                             monkeypatch):
+        monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+        convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin")
+        model = _read_model(tmp_path / "model.bin")
+        assert model.TrainingDate() is None
+        # Everything else that is provenance rather than a clock still lands.
+        assert model.Framework() == b"lightgbm"
+
+    def test_source_date_epoch_supplies_the_stamp_a_reproducible_build_can_reproduce(
+            self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+        convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin")
+        assert _read_model(tmp_path / "model.bin").TrainingDate() == b"2023-11-14T22:13:20+00:00"
+
+    def test_an_explicit_stamp_outranks_the_environment(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+        convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin",
+                training_date="2024-02-29T00:00:00+00:00")
+        assert _read_model(tmp_path / "model.bin").TrainingDate() == b"2024-02-29T00:00:00+00:00"
+
+    def test_an_unparseable_source_date_epoch_is_refused_not_ignored(self, tmp_path: Path,
+                                                                    monkeypatch):
+        # Ignoring it would drop a stamp the build asked for without saying so, and the
+        # reproducible-builds specification requires the error.
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "yesterday")
+        with pytest.raises(ValueError, match="SOURCE_DATE_EPOCH"):
+            convert(self._saved(tmp_path), "sha256:0123456789abcdef", tmp_path / "model.bin")
+
+    def test_training_records_the_artifact_digest_in_the_descriptor_and_the_manifest(
+            self, tmp_path: Path, evaluator):
+        block = [64 if row % 2 else 256 for row in range(80)]
+        corpus = tmp_path / "corpus.csv"
+        pd.DataFrame({"kernel.block_size": block,
+                      "tflops": [120 - 0.2 * value for value in block]}).to_csv(corpus, index=False)
+        snapshot = tmp_path / "provenance.json"
+        snapshot.write_text(json.dumps({
+            "ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "1.0"},
+            "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.0"},
+            "umd": []}), encoding="utf-8")
+        output = tmp_path / "model"
+        assert main(["train", "--input", str(corpus), "--provenance", str(snapshot),
+                     "--features", "kernel.block_size", "--target", "tflops",
+                     "--output-dir", str(output), "--num-boost-round", "10",
+                     "--early-stopping", "5"]) == 0
+        document = (output / "heuristic.uhd.json").read_text(encoding="utf-8")
+        descriptor = json.loads(document)
+        manifest = json.loads((output / "train_manifest.json").read_text(encoding="utf-8"))
+        artifact = (output / descriptor["tree_data"]["artifact"]).read_bytes()
+        # Bare hex: TreeDataAdapter compares this against `sha256(buffer, size)`, which
+        # carries no `sha256:` prefix. A prefixed value would refuse every model it guards.
+        assert descriptor["tree_data"]["hash"] == hashlib.sha256(artifact).hexdigest()
+        # RFC 0019.13 §10.5 wants the pair: the document and the artifact it names.
+        assert manifest["model_sha256"] == descriptor["tree_data"]["hash"]
+        assert manifest["uhd_sha256"] == hashlib.sha256(document.encode("utf-8")).hexdigest()
 
 
 if __name__ == "__main__":

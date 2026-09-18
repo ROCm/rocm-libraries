@@ -3,15 +3,22 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <set>
+#include <string>
+
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
+#include "version.h"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 
 namespace asm_sdpa_engine
@@ -70,6 +77,88 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForSdpaGraph)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
+}
+
+/// RFC 0019 Open Question 7 (RESOLVED) plus §11.2: with nothing deployed for the UUIDs
+/// this engine declares -- the state of every machine that has not installed a model --
+/// the engine answers UNAVAILABLE. Absence is a normal outcome, never an exception and
+/// never a crash, whether or not a descriptor tree exists to look in.
+TEST_F(TestAsmSdpaEngine, ReportsNoEstimateWhenNoDeclaredModelIsDeployed)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT prediction;
+    ASSERT_NO_THROW(prediction = _engine.getPrediction(
+                        _handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true));
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.engine_id, AsmSdpaEngine::staticId());
+    EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE);
+}
+
+/// ASM SDPA runs its own kernel selection, so it has no exact configuration of ours to
+/// predict: RFC 0019 §11.2's "A only (opaque)" row. Declining must stay a decline rather
+/// than becoming an error now that the engine answers the ENGINE query.
+TEST_F(TestAsmSdpaEngine, DeclinesTheConfigurationPredictionQuery)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+
+    const auto prediction = _engine.getPrediction(
+        _handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::CONFIGURATION);
+}
+
+/// The declaration surface itself. A malformed or duplicated literal would not fail the
+/// build -- it would silently mean "this architecture never binds a model", or "gfx950
+/// answers with gfx942's model" -- so the compiled-in table is checked here.
+TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
+{
+    std::set<std::string> seenArch;
+    std::set<std::string> seenId;
+    EXPECT_FALSE(AsmSdpaEngine::L1_MODEL_IDS.empty());
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        EXPECT_FALSE(arch.empty());
+        EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id))) << id;
+        EXPECT_TRUE(seenArch.insert(std::string(arch)).second) << arch;
+        EXPECT_TRUE(seenId.insert(std::string(id)).second) << "two architectures declare " << id;
+    }
+}
+
+/// The expiry rule every shipped L1 model is judged against.
+///
+/// A model records this string and the loader refuses one that does not match, so what the
+/// revision NAMES decides which changes expire a model. It used to name the provider
+/// release, which is wrong in both directions: `0.2.0 -> 0.2.1` for a change that cannot
+/// touch this engine expired both shipped models, and a vendored kernel swap under a fixed
+/// version expired nothing -- the silent direction, since a stale L1 estimate changes which
+/// ENGINE is selected. It is now a digest over the forward kernels, the CSVs that describe
+/// them and the forward dispatch sources.
+TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
+{
+    const std::string revision = AsmSdpaEngine::selectorRevision();
+    const std::string prefix = "hip-kernel-provider/asm-sdpa-fwd/";
+    ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
+
+    // A build that did not compute the digest reports "undetermined", which no shipped
+    // model can match -- deliberately, but it means the CMake wiring has been dropped.
+    const std::string digest = revision.substr(prefix.size());
+    EXPECT_EQ(digest.size(), 16u) << revision;
+    EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    })) << revision;
+
+    // The regression itself: no provider version component, in any form.
+    EXPECT_EQ(revision.find(HIP_KERNEL_PROVIDER_VERSION_STRING), std::string::npos) << revision;
+    EXPECT_EQ(revision.find("0.2."), std::string::npos) << revision;
 }
 
 } // namespace

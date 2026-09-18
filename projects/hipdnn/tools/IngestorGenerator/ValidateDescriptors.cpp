@@ -601,8 +601,8 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
                     }
                     // Force every artifact through the real loader, including non-default
                     // architectures. No score function registered above is ever executed.
-                    const auto loaded
-                        = UhdKernelHeuristic::tryCreate(*model, set.engine.name, set.engine.knobs);
+                    const auto loaded = UhdKernelHeuristic::tryCreate(
+                        *model, set.engine.name, set.engine.knobs, fields);
                     if(!loaded)
                     {
                         throw std::invalid_argument("Model load failed; see runtime diagnostics");

@@ -237,7 +237,7 @@ def test_training_feature_pruning_never_removes_authored_knobs(tmp_path):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     manifest = _read(model / "train_manifest.json")
-    manifest["dropped_constant_features"] = ["kernel.tile_m"]
+    manifest["dropped_constant_features"] = [{"column": "kernel.tile_m", "value": 128}]
     _write(model / "train_manifest.json", manifest)
     _apply(build_plan(model, tree))
     ued = _read(tree / "engine.ued.json")
@@ -352,13 +352,13 @@ def _train(tmp_path, *extra):
                  "--num-boost-round", "10", "--early-stopping", "5", *extra])
 
 
-def test_train_retains_explicit_model_identity(tmp_path):
+def test_train_retains_explicit_model_identity(tmp_path, evaluator):
     assert _train(tmp_path, "--uhd-id", NEW) == 0
     assert _read(tmp_path / "model" / "heuristic.uhd.json")["id"] == NEW
     assert _read(tmp_path / "model" / "train_manifest.json")["uhd_id"] == NEW
 
 
-def test_train_mints_identity_when_omitted(tmp_path):
+def test_train_mints_identity_when_omitted(tmp_path, evaluator):
     assert _train(tmp_path) == 0
     identity = _read(tmp_path / "model" / "heuristic.uhd.json")["id"]
     assert str(uuid.UUID(identity)) == identity
@@ -368,3 +368,168 @@ def test_train_mints_identity_when_omitted(tmp_path):
 def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
     assert _train(tmp_path, "--uhd-id", malformed) == 1
     assert not (tmp_path / "model" / "heuristic.uhd.json").exists()
+def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1"):
+    """A model for an engine with no UED: trained against a selector revision only."""
+    provenance = {"selector_revision": revision}
+    doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
+           "objective": "max", "features_signature": ["$graph.work"],
+           "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
+           "score": {"units": "tflops", "calibrated": True, "transform": "identity"},
+           "tree_data": {"artifact": "model.bin"}}
+    _write(root / "heuristic.uhd.json", doc)
+    _write(root / "train_manifest.json",
+           {"training_arches": ["gfx950"], "trained_against": provenance,
+            "role": "predict_engine_tflops"})
+    (root / "model.bin").write_bytes(b"incoming model")
+    return root
+
+
+def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(tmp_path):
+    """AITER and MIOpen own no descriptor set: RFC 0019 4.1 / Open Question 7 binds their
+    model by a UUID declared in provider code, so promotion writes the document where the
+    loader scans and edits nothing. Before this, `select_engine` ended the run with
+    "expected one UED for --engine 'ASM_SDPA_ENGINE', found 0" -- after the model had
+    already trained (run 67929588)."""
+    tree = _tree(tmp_path / "tree")
+    before = _read(tree / "engine.ued.json")
+    model = _opaque_model(tmp_path / "model")
+
+    plan = build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine_tflops", arch="gfx950")
+    _apply(plan)
+
+    assert plan.ued_path is None
+    assert _read(tree / "engine.ued.json") == before, "no role map may change"
+    installed = tree / "heuristics" / "ASM_SDPA_ENGINE" / "predict_engine_tflops" / "gfx950"
+    assert _read(installed / "heuristic.uhd.json")["id"] == NEW
+    assert (installed / "model.bin").read_bytes() == b"incoming model"
+
+
+def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
+    """The UUID is the whole binding: the provider looks for exactly one, so a second
+    document carrying it makes the engine's model ambiguous rather than replaced."""
+    tree = _tree(tmp_path / "tree")
+    _write(tree / "elsewhere" / "other.uhd.json", {"version": "1.0", "id": NEW, "name": "other",
+           "adapter": "tree_data", "objective": "max", "features_signature": ["$graph.work"],
+           "features_hash": "sha256:" + "0" * 16, "trained_against": {"selector_revision": "r"},
+           "tree_data": {"artifact": "other.bin"}})
+    model = _opaque_model(tmp_path / "model")
+    with pytest.raises(PromoteError, match="already installed"):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine_tflops", arch="gfx950")
+
+
+def test_an_engine_with_no_catalog_cannot_be_given_a_catalog_ranker(tmp_path):
+    """sort_kernel_catalog ranks an engine's own enumerated configurations. An engine that
+    publishes none has nothing for that model to order, so the role is refused here rather
+    than installed and silently never consulted."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "model")
+    (model / "train_manifest.json").unlink()
+    with pytest.raises(PromoteError, match="catalog it does not own"):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="sort_kernel_catalog", arch="gfx950")
+
+
+def _corpus(root, rows):
+    """The corpus `generate` stages beside the model directory it trains into."""
+    return _write(root / "corpus.json", rows)
+
+
+def _row(kernel, **overrides):
+    return {"benchmark": "graph-7", "device": "board", "kernel": kernel, "engine": 7,
+            "succeeded": True, "is_valid": True, "numerically_valid": True,
+            "validation": "agrees_with_catalog: 3 of 3 cross-checked candidates produced this output",
+            "robustMeanMs": 2.5, "avgTimeMs": 2.6} | overrides
+
+
+def test_emission_is_refused_while_a_candidate_carries_an_invalid_marker(tmp_path):
+    """RFC 0019 §13.4: package emission fails while any invalid marker is unresolved.
+
+    The model cannot stand in for this. §13.2: the scorer cannot exclude a candidate, so a
+    kernel that is applicable and incorrect stays selectable through every path that does
+    not consult the model -- a knob pin, a winner that fails to build, any `static_order`
+    fallback. A learned demotion is a preference, and this is the last stage able to refuse.
+    """
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _corpus(tmp_path, [_row("kernel-a"),
+                       _row("kernel-b", numerically_valid=False,
+                            validation="output_mismatch: tensor 'Y' element 2 is 9.9e+01",
+                            robustMeanMs=None, avgTimeMs=None)])
+
+    with pytest.raises(PromoteError) as refusal:
+        build_plan(model, tree)
+
+    # Named, because §13.2's remedy is a pack edit the author has to make by hand and
+    # "the corpus contains an invalid candidate" does not say which kernel or which problem.
+    assert "kernel-b" in str(refusal.value) and "graph-7" in str(refusal.value)
+    assert "output_mismatch" in str(refusal.value)
+    # The remedy the RFC gives, so the message is actionable on its own.
+    assert "UMD" in str(refusal.value) and "UKD" in str(refusal.value)
+
+
+def test_an_invalid_candidate_blocks_promotion_without_being_erased(tmp_path):
+    """§13.2 keeps the invalid rows "in the dataset for diagnostics either way".
+
+    Promotion refusing and the corpus retaining the row are complementary: the refusal
+    stops the pack shipping, and the row is how the author finds out what to change. A
+    gate that pruned the corpus to clear itself would destroy that evidence.
+    """
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    corpus = _corpus(tmp_path, [_row("kernel-b", numerically_valid=False,
+                                     validation="output_mismatch: tensor 'Y'")])
+    before = _read(corpus)
+
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
+
+    assert _read(corpus) == before
+
+
+def test_a_clean_corpus_promotes_and_an_undecided_one_promotes_with_a_warning(tmp_path):
+    """Only a decided failure blocks; an undecided verdict is reported, never silent.
+
+    Open Question 19(a) leaves the per-op reference open, so a corpus of nulls is today's
+    expected state and refusing it would block every promotion. It still has to be visible:
+    "we could not check" must not reach an author looking the same as "we checked".
+    """
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _corpus(tmp_path, [_row("kernel-a"), _row("kernel-b")])
+    assert build_plan(model, tree).warnings == []
+
+    _corpus(tmp_path, [_row("kernel-a"),
+                       _row("kernel-b", numerically_valid=None,
+                            validation="no_reference: one candidate ran")])
+    warnings = build_plan(model, tree).warnings
+    assert len(warnings) == 1 and "1 of 2" in warnings[0]
+
+
+def test_a_model_with_no_visible_corpus_reports_that_it_was_not_gated(tmp_path):
+    """A promotion that could not read the markers says so rather than passing quietly.
+
+    Refusing outright would make an archived model unpromotable, and staying silent would
+    make an ungated promotion indistinguishable from a gated one -- which is the failure
+    §13.2 names: a missing check must never read as a passing check.
+    """
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+
+    warnings = build_plan(model, tree).warnings
+
+    assert len(warnings) == 1 and "--corpus" in warnings[0]
+
+
+def test_an_explicit_corpus_outranks_the_sibling_default(tmp_path):
+    """`--corpus` names the corpus an archived model was trained from.
+
+    Without precedence a stale `corpus.json` left beside the model directory would decide
+    the gate, and a clean leftover file would wave through the run that found the defect.
+    """
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    _corpus(tmp_path, [_row("kernel-a")])
+    archived = _write(tmp_path / "archive" / "corpus.json",
+                      [_row("kernel-b", numerically_valid=False, validation="output_mismatch: tensor 'Y'")])
+
+    with pytest.raises(PromoteError, match="kernel-b"):
+        build_plan(model, tree, corpus=archived)

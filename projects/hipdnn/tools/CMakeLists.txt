@@ -15,6 +15,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
     install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # TestUhdGenArtifact drives `uhd_gen train`, which stamps features_hash with this
+    # binary for every signature (RFC 0019 §6.3 leaves the digest one definition, and it
+    # is FeatureExtractor::computeHash). Wired here rather than beside the test target
+    # because `tools` is configured after `plugin_sdk`, so hipdnn_uhd_features does not
+    # exist yet when that target is declared.
+    if(TARGET hipdnn_plugin_sdk_tests)
+        target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
+            HIPDNN_UHD_GEN_FEATURE_EVALUATOR="$<TARGET_FILE:hipdnn_uhd_features>")
+        add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
+    endif()
 endif()
 
 add_executable(hipdnn_list_engines ListEngines.cpp)
@@ -68,6 +79,21 @@ if(Python3_Interpreter_FOUND)
                     ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
         set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+
+        # corpus_build assembles the SDPA graph corpus a UHD is trained on, from the
+        # packed kernel geometries, the recorded model shapes and the declared space.
+        # Registered here because its failures are all silent ones: a graph that is
+        # rejected at from_binary looks fine on disk, a shape emitted twice doubles
+        # the weight of whichever regime it lands in, and a missing regime label
+        # leaves RFC 0019.13 §11.2's per-regime table reporting UNAVAILABLE. Offline
+        # and GPU-free -- every input is a file in this tree -- and it needs no ML
+        # dependencies.
+        add_test(
+            NAME corpus_build_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                    ${CMAKE_CURRENT_SOURCE_DIR}/corpus_build/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(corpus_build_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
     else()
         message(WARNING
                 "uhd_gen tests NOT registered: pytest is not importable by "

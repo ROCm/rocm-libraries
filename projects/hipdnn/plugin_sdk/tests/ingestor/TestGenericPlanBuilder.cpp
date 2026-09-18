@@ -466,9 +466,20 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
-TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
+/// Admits every kernel, so the catalog holds both dtypes -- the case an ordinal exists for.
+inline bool acceptEveryKernel(const MatchContext& /*context*/,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& /*kernel*/)
 {
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    return true;
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsAnOrdinal)
+{
+    // Supersedes GetCustomKnobsSkipsFieldsWithNoIntegerValues, which pinned the gap rather
+    // than a contract: a string field was advertised as nothing, so the two block_size=64
+    // kernels this catalog holds could not be told apart through the knob surface.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
     const TestDeviceResolver resolver;
@@ -477,8 +488,44 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
     const TestGraph graph(makeGraphId(0x95));
     const auto knobs = builder.getCustomKnobs(0, graph);
 
-    ASSERT_EQ(knobs.size(), 1U);
-    EXPECT_EQ(knobs.front().knob_id, BLOCK_SIZE);
+    ASSERT_EQ(knobs.size(), 2U);
+    const auto dtype = std::find_if(
+        knobs.begin(), knobs.end(), [](const auto& knob) { return knob.knob_id == DTYPE; });
+    ASSERT_NE(dtype, knobs.end());
+    ASSERT_TRUE(dtype->constraint.AsIntConstraint() != nullptr);
+    // "FLOAT" then "HALF": the engine's distinct values in the order that numbers them.
+    auto advertised = dtype->constraint.AsIntConstraint()->valid_values;
+    std::sort(advertised.begin(), advertised.end());
+    EXPECT_EQ(advertised, (std::vector<int64_t>{0, 1}));
+    // The caller is told these are indices; 0 and 1 are not dtypes.
+    EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
+}
+
+TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatValue)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    // The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} and the score is the block size, so
+    // unpinned the winner is 256 FLOAT. Pinning dtype alone -- ordinal 1, "HALF" -- selects
+    // a kernel the block_size knob cannot reach on its own: 64 names two of them.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, DTYPE, 1);
+    const TestGraph graph(makeGraphId(0x96));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getStringMetadata(DTYPE), "HALF");
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
 TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
@@ -1614,6 +1661,90 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
     EXPECT_EQ(context.plan().getWorkspaceSize(handle), 256U)
         << "an uncovering record with benchmarking on must be ignored and the whole "
            "filtered set re-benchmarked, not served from the narrow subset";
+}
+
+/// RFC 0019 §5 step 8 fixes the basis a ranking is decided on at the CANONICAL candidate
+/// set -- "every kernel the matchers admitted for this graph, before any knob filter
+/// narrows it" -- so a record that covers a narrowed request but not the whole catalog is
+/// refused for BOTH. Orderability used to be re-decided against the narrowed set here,
+/// independently of the same decision in sortedCatalog(), and that is the divergence: one
+/// record served a measured order to the narrowed run and a heuristic order to the whole
+/// one, over candidates both runs share, so the same two kernels came back in opposite
+/// relative order depending only on a constraint that removed a third.
+///
+/// Narrowed by the workspace limit rather than a knob pin because both go through
+/// applyConstraints() and the limit is the only one that can leave more than one candidate
+/// here: the engine exposes a single integer knob over three distinct block sizes, so a pin
+/// always leaves exactly one kernel and makes any ordering question vacuous.
+///
+/// Falsifying mutation: order from `orderIfFullyCovered(*record, filtered)` again instead of
+/// from `catalog.orderedFromRecord`, and the narrowed run serves kernel_128.
+TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarrowedRunToo)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD8));
+    const auto properties = testDeviceProperties();
+
+    // A prior run measured only the two small kernels, and ranked kernel_128 ahead of
+    // kernel_64 -- the opposite of the heuristic's priority order, so which order was used
+    // is visible in the workspace of the plan that comes back.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+        << "this test needs the heuristic front to differ from the record's";
+    WinnerRecord partial;
+    for(const auto& kernel : catalog)
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        if(blockSize == 128)
+        {
+            partial.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    for(const auto& kernel : catalog)
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        {
+            partial.push_back(rankedEntryFor(kernel, 9.0));
+        }
+    }
+    ASSERT_EQ(partial.size(), 2U) << "the record must cover the narrowed set and nothing more";
+    manager->recordWinner(winnerKeyFor(graph, properties), partial, WinnerWriteCause::FRESH_MISS);
+
+    flatbuffers::FlatBufferBuilder wideBuilder;
+    const auto wideConfig = makeEmptyEngineConfig(wideBuilder);
+    KnobFilterSettings wideSettings;
+    builder.initializeExecutionSettings(0, graph, wideConfig, wideSettings);
+    ASSERT_FALSE(wideSettings.ingestorSettings.workspaceLimit.has_value());
+    KnobFilterContext wideRun;
+    wideRun.setExecutionSettings(wideSettings);
+    builder.buildPlan(0, graph, wideConfig, wideRun);
+
+    // 200 bytes admits kernel_64 and kernel_128 and excludes kernel_256, leaving exactly
+    // the set the record covers.
+    flatbuffers::FlatBufferBuilder narrowBuilder;
+    const auto narrowConfig = makeIntKnobEngineConfig(
+        narrowBuilder, hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 200);
+    KnobFilterSettings narrowSettings;
+    builder.initializeExecutionSettings(0, graph, narrowConfig, narrowSettings);
+    ASSERT_EQ(narrowSettings.ingestorSettings.workspaceLimit, 200);
+    KnobFilterContext narrowRun;
+    narrowRun.setExecutionSettings(narrowSettings);
+    builder.buildPlan(0, graph, narrowConfig, narrowRun);
+
+    EXPECT_EQ(wideRun.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "a record that does not cover the whole catalog cannot order it";
+    EXPECT_EQ(narrowRun.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "the narrowed run must read the same order source as the wide one: the record "
+           "covers what survived the limit, but orderability is the full catalog's question";
 }
 
 /// Two buildPlan calls for the same graph and device: the first populates the cache by

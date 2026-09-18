@@ -3,12 +3,19 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 /// @file TestUhdAdapters.cpp
 /// @brief makeUhdAdapter's dispatch -- RFC 0019 §7's kind names, resolved to an adapter.
@@ -92,6 +99,63 @@ TEST(TestIngestorUhdAdapters, TheFactoryDeclinesANativeKindWithNoSymbol)
     config.nativeSymbol = "";
 
     EXPECT_EQ(makeUhdAdapter(config), nullptr);
+}
+
+/// The scorer library TestCustomLibraryAdapter dlopen's, as an absolute path.
+std::string testScorerLibrary()
+{
+    return (std::filesystem::path(HIPDNN_TEST_PLUGIN_DIR)
+            / hipdnn_data_sdk::utilities::getLibraryName("hipdnn_test_scorer_lib"))
+        .string();
+}
+
+/// The SHA-256 of @p path's bytes -- what a conformant UHD would declare as the artifact's
+/// `hash`. Computed rather than pinned: the library is rebuilt from source on every
+/// configuration, so a literal digest would pin this suite to one toolchain.
+std::string bytesHashOf(const std::string& path)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    EXPECT_TRUE(file) << "the test scorer library is missing: " << path;
+    const auto size = file.tellg();
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    file.seekg(0);
+    EXPECT_TRUE(file.read(reinterpret_cast<char*>(bytes.data()), size));
+    return sha256(bytes.data(), bytes.size());
+}
+
+/// RFC 0019 §7.2: a body naming an artifact may carry the digest of its bytes, "which the
+/// adapter recomputes before parsing and refuses on mismatch".
+///
+/// The factory dropped `modelHash` on the floor for this arm, so a declared digest bound
+/// nothing: the provider dlopen'ed -- and ran the initialisers of -- whatever sat at the
+/// declared path. It was invisible because the L1 predictor hashed the same file itself
+/// before calling the factory, so only `sort_kernel_catalog`, which has no such pre-check,
+/// loaded an unverified library. Both roles construct through here, so verifying in the
+/// adapter is what makes the guarantee role-independent.
+TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIsNotItsBytes)
+{
+    UhdConfig config;
+    config.adapterType = "custom_library";
+    config.modelArtifactPath = testScorerLibrary();
+    config.customLibrarySymbol = "test_linear_scorer";
+    config.featuresSignature = {"$kernel.tile_m", "$kernel.split_k", "$q.seqlen"};
+    config.featuresHash = FEATURES_HASH;
+
+    // A digest of the right shape over the wrong bytes: the tamper this check exists for is
+    // a substituted library, not a malformed field, so the value has to be a real hash.
+    config.modelHash = sha256(std::string("a different library"));
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+
+    // The control: the same config with the digest the file really has. Without it the case
+    // above would also pass against a factory that refused every custom_library outright.
+    config.modelHash = bytesHashOf(config.modelArtifactPath);
+    const auto loaded = makeUhdAdapter(config);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->type(), UhdAdapterType::CUSTOM_LIBRARY);
+
+    // And a UHD declaring no digest still loads: §4.1 makes the artifact hash optional.
+    config.modelHash.clear();
+    EXPECT_NE(makeUhdAdapter(config), nullptr);
 }
 
 } // namespace

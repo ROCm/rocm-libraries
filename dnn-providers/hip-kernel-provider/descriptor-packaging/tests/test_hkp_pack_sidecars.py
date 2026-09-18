@@ -301,17 +301,22 @@ def test_explicit_semantic_revision_does_not_change_format_admission(tmp_path):
         load_flat_input(root, log=lambda *_: None)
 
 
+def _canonical_uhd_validator():
+    """The published schema, which the runtime loader (UhdParser.hpp) mirrors."""
+    jsonschema = pytest.importorskip("jsonschema")
+    schema_path = next(parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
+                       for parent in Path(__file__).resolve().parents
+                       if (parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json").is_file())
+    return jsonschema.Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+
+
 @pytest.mark.parametrize("mutation", [
     "valid", "missing_objective", "missing_provenance", "legacy_provenance",
     "wrong_body", "two_bodies", "legacy_derived", "bare_feature", "empty_feature",
     "invalid_hash", "unknown_header", "unsupported_format",
 ])
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
-    jsonschema = pytest.importorskip("jsonschema")
-    schema_path = next(parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json"
-                       for parent in Path(__file__).resolve().parents
-                       if (parent / "projects/hipdnn/plugin_sdk/schemas/uhd.schema.json").is_file())
-    validator = jsonschema.Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+    validator = _canonical_uhd_validator()
     doc = _model_uhd("model.bin")
     if mutation == "missing_objective":
         del doc["objective"]
@@ -346,6 +351,72 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     else:
         with pytest.raises(HkpPackError):
             load_flat_input(root, log=lambda *_: None)
+
+
+def test_schema_admits_the_extension_namespaces_the_loader_ignores():
+    """RFC 0019 §4.1: `x-`, `_` and a root `provenance` are reserved "at the document root
+    and inside every nested object", and UhdParser.hpp's `keys()` accepts exactly those. The
+    schema published beside it did not, so a producer that validated against it could not
+    emit a descriptor the loader accepts -- the divergence §4.1 forbids, in the direction it
+    calls a contradiction rather than a tightening.
+    """
+    validator = _canonical_uhd_validator()
+    doc = _model_uhd("model.bin")
+    doc["x-trained-by"] = "uhd_gen 3.2"
+    doc["_internal"] = {"ticket": "SWDEV-000000"}
+    doc["provenance"] = {"dataset": "nightly", "rows": 4096}
+    doc["score"] = {"units": "tflops", "x-sampler": "sobol"}
+    doc["trained_against"]["_run"] = 17
+    doc["tree_data"]["x-bytes"] = 2048
+
+    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+
+    # The reserved namespaces are what make the closed schema affordable, not a hole in it:
+    # a name in neither namespace is still refused, at the root and nested alike.
+    stray_root = _model_uhd("model.bin")
+    stray_root["notes"] = "not an extension key"
+    assert not validator.is_valid(stray_root)
+    stray_nested = _model_uhd("model.bin")
+    stray_nested["tree_data"]["bytes"] = 2048
+    assert not validator.is_valid(stray_nested)
+
+
+def test_schema_pairs_a_calibrated_score_with_a_max_objective():
+    """RFC 0019 §4.1: "A `calibrated` score requires `objective: max`" -- a calibrated number
+    is a throughput, and a throughput is maximized. Checked here rather than discovered when
+    an engine's estimate sorts backwards (§11.3).
+    """
+    validator = _canonical_uhd_validator()
+    doc = _model_uhd("model.bin")
+    doc["score"] = {"units": "tflops", "calibrated": True}
+
+    doc["objective"] = "max"
+    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+
+    doc["objective"] = "min"
+    assert not validator.is_valid(doc)
+
+    # Only a calibrated score is tied to the direction; an uncalibrated `min` model is legal
+    # and needs no trainer-side negation (§4.1's `objective` row).
+    doc["score"]["calibrated"] = False
+    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+
+
+def test_schema_requires_the_signature_a_categorical_encoding_encodes():
+    """RFC 0019 §4.1: `categorical_encoding` is required "if a feature reads a string field",
+    so an encoding with no `features_signature` encodes nothing -- it names fields no feature
+    row reads. A native UHD carries the case on its own, since a model adapter already
+    requires the signature for other reasons.
+    """
+    validator = _canonical_uhd_validator()
+    doc = _native_uhd()
+    doc["categorical_encoding"] = {"$kernel.layout": {"nhwc": 0, "nchw": 1}}
+    assert not validator.is_valid(doc)
+
+    doc["features_signature"] = ["$kernel.layout"]
+    doc["features_hash"] = "sha256:" + "0" * 16
+    doc["trained_against"] = {"selector_revision": "hkp-2026.09"}
+    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
 
 
 def test_all_role_and_arch_models_remain_reachable_when_packaging(tmp_path, main_fixture):

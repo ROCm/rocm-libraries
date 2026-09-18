@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/IUhdAdapter.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -30,6 +31,8 @@
 #endif
 
 #include <cstddef>
+#include <cstdint>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -110,6 +113,53 @@ inline std::string sharedLibraryError()
 #endif
 }
 
+/// Whether @p path's bytes hash to @p expectedHash, naming what disagreed when they do not.
+///
+/// Reads the whole artifact: the digest is over the library as shipped, so accepting a
+/// prefix would accept a library with anything appended to it. The size is bounded before
+/// the buffer is sized -- the same bound TreeDataAdapter applies -- so a hostile length
+/// cannot be turned into an allocation by a file nothing has verified yet.
+inline bool artifactHashMatches(const std::string& path, const std::string& expectedHash)
+{
+    constexpr std::streamoff MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if(!file)
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: cannot open " << path
+                                                                  << " to verify its hash");
+        return false;
+    }
+    const auto size = file.tellg();
+    if(size <= 0 || size > MAX_ARTIFACT_BYTES)
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: " << path
+                                                      << " is empty or exceeds the artifact "
+                                                         "size bound; hash not verified");
+        return false;
+    }
+
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    file.seekg(0);
+    if(!file.read(reinterpret_cast<char*>(bytes.data()), size))
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: " << path << " could not be read in full; "
+                                                      << "hash not verified");
+        return false;
+    }
+
+    const auto actual = sha256(bytes.data(), bytes.size());
+    if(actual != expectedHash)
+    {
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: model hash mismatch for "
+                             << path << " - expected='" << expectedHash << "' actual='" << actual
+                             << "'; the model is not used -- ranking degrades to static_order "
+                                "and an engine estimate is reported as 0");
+        return false;
+    }
+    return true;
+}
+
 } // namespace detail
 
 /// @brief Custom library adapter for compiled scorers (RFC 0019 §7.2).
@@ -130,6 +180,9 @@ public:
     /// @param symbolName           C ABI scorer function name.
     /// @param numFeatures          Expected feature-row length.
     /// @param expectedFeaturesHash SHA-256 of the feature signature.
+    /// @param expectedModelHash    SHA-256 of the library's own bytes, from the UHD's
+    ///        `custom_library.hash`. Empty when the descriptor declares none, which RFC 0019
+    ///        §4.1 allows -- the digest is optional, but a declared one is binding.
     /// @return Adapter on success, nullptr on any load failure.
     ///
     /// Returns nullptr rather than throwing: a descriptor set is drop-in data from a
@@ -138,7 +191,8 @@ public:
     static std::unique_ptr<CustomLibraryAdapter> load(const std::string& libraryPath,
                                                       const std::string& symbolName,
                                                       size_t numFeatures,
-                                                      const std::string& expectedFeaturesHash);
+                                                      const std::string& expectedFeaturesHash,
+                                                      const std::string& expectedModelHash = "");
 
     ~CustomLibraryAdapter() override
     {
@@ -221,7 +275,8 @@ inline std::unique_ptr<CustomLibraryAdapter>
     CustomLibraryAdapter::load(const std::string& libraryPath,
                                const std::string& symbolName,
                                size_t numFeatures,
-                               const std::string& expectedFeaturesHash)
+                               const std::string& expectedFeaturesHash,
+                               const std::string& expectedModelHash)
 {
     if(libraryPath.empty())
     {
@@ -232,6 +287,18 @@ inline std::unique_ptr<CustomLibraryAdapter>
     {
         HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: symbolName is empty for library "
                              << libraryPath);
+        return nullptr;
+    }
+
+    // RFC 0019 §7.2: a body naming a model artifact may carry the digest of its bytes, and
+    // the adapter recomputes it before parsing and refuses on mismatch. Before the open,
+    // never after: dlopen/LoadLibrary maps the image and runs its initialisers, so a
+    // library verified afterwards has already executed whatever it wanted to. That
+    // ordering is why this cannot be hoisted to the caller the way EnginePredictor used to
+    // do it -- and why the same .so bound as `sort_kernel_catalog` went unverified while
+    // the `predict_engine_tflops` binding of it was checked.
+    if(!expectedModelHash.empty() && !detail::artifactHashMatches(libraryPath, expectedModelHash))
+    {
         return nullptr;
     }
 

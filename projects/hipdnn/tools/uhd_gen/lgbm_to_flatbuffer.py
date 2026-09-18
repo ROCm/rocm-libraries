@@ -14,7 +14,9 @@ identity here is a name, so a schema addition renumbers nothing.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,33 @@ logger = logging.getLogger(__name__)
 # File identifier for GbdtModel FlatBuffers
 GBDT_MODEL_FILE_IDENTIFIER = b"HGBM"
 
+#: The reproducible-builds variable every other build step in this tree honours. A
+#: shipped artifact has to be checkable against its source, and RFC 0019 §10.5 records a
+#: content hash over the model -- which is worth nothing if converting the same LightGBM
+#: model twice produces two different digests.
+SOURCE_DATE_EPOCH = "SOURCE_DATE_EPOCH"
+
+
+def resolve_training_date(training_date: str | None = None) -> str | None:
+    """The stamp to record, or None when there is no truthful one to record.
+
+    Wall-clock `now()` is not provenance: it says when the file was written, not what it
+    was built from, and it makes the 4.8 MB of committed `.bin` artifacts differ on every
+    conversion. An omitted optional field costs a reader nothing; an invented one costs
+    them byte-reproducibility.
+    """
+    if training_date is not None:
+        return training_date
+    epoch = os.environ.get(SOURCE_DATE_EPOCH, "").strip()
+    if not epoch:
+        return None
+    try:
+        seconds = int(epoch)
+    except ValueError:
+        raise ValueError(f"{SOURCE_DATE_EPOCH} must be an integer count of seconds; got {epoch!r}") from None
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
+
+
 def convert(
     lgbm_path: str | Path,
     features_hash: str,
@@ -40,9 +69,10 @@ def convert(
     num_training_samples: int | None = None,
     training_arches: list[str] | None = None,
     model_version: str | None = None,
+    training_date: str | None = None,
     group_by_feature_index: int = -1,
     group_models: list[tuple[float, "lgb.Booster"]] | None = None,
-) -> None:
+) -> str:
     """Convert LightGBM model to FlatBuffer GbdtModel.
 
     Args:
@@ -54,6 +84,12 @@ def convert(
             on (e.g., ["gfx942", "gfx1100"]). Used for RFC 0019 §9.2 out-of-distribution
             detection at runtime.
         model_version: Optional semantic version (e.g., "1.0.0").
+        training_date: ISO 8601 stamp to record; see `resolve_training_date`.
+
+    Returns:
+        The SHA-256 of the bytes written, as `TreeDataAdapter` recomputes them: the
+        content hash RFC 0019 §7.2 lets the descriptor body carry and §10.5 requires the
+        manifest to record.
     """
     model = lgb.Booster(model_file=str(lgbm_path))
     model_json = model.dump_model()
@@ -64,22 +100,25 @@ def convert(
         num_training_samples,
         training_arches=training_arches,
         model_version=model_version,
+        training_date=training_date,
         group_by_feature_index=group_by_feature_index,
         groups=None
         if not group_models
         else [(value, booster.dump_model()) for value, booster in group_models],
     )
 
-    with open(output_path, "wb") as f:
-        f.write(buffer)
+    Path(output_path).write_bytes(buffer)
+    digest = hashlib.sha256(buffer).hexdigest()
 
     logger.info(
-        "Converted %s to %s (%d bytes, %d trees)",
+        "Converted %s to %s (%d bytes, %d trees, sha256:%s)",
         lgbm_path,
         output_path,
         len(buffer),
         len(model_json["tree_info"]),
+        digest,
     )
+    return digest
 
 
 def build_gbdt_model(
@@ -88,6 +127,7 @@ def build_gbdt_model(
     num_training_samples: int | None = None,
     training_arches: list[str] | None = None,
     model_version: str | None = None,
+    training_date: str | None = None,
     group_by_feature_index: int = -1,
     groups: list[tuple[float, dict[str, Any]]] | None = None,
 ) -> bytes:
@@ -99,6 +139,7 @@ def build_gbdt_model(
         num_training_samples: Optional number of training samples.
         training_arches: GPU architectures the model was trained on.
         model_version: Semantic version string.
+        training_date: ISO 8601 stamp to record; see `resolve_training_date`.
 
     Returns:
         FlatBuffer bytes for GbdtModel.
@@ -117,8 +158,11 @@ def build_gbdt_model(
     model.learningRate = 1.0
 
     model.framework = "lightgbm"
-    model.trainingDate = datetime.now(timezone.utc).isoformat()
     model.trainingObjective = _objective_name(model_json)
+
+    stamp = resolve_training_date(training_date)
+    if stamp is not None:
+        model.trainingDate = stamp
 
     if num_training_samples is not None:
         model.numTrainingSamples = num_training_samples

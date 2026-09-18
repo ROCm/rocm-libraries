@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,34 @@ def _nest(root, sub, fixture):
     return dest
 
 
+def _restem_uuid_ids(folder, token):
+    """Give every UUID id under `folder` a distinct, deterministic value.
+
+    A descriptor whose id is a UUID carries no stem, so the `-solo` -> `-solob`
+    substitution below cannot reach it: two copies of one fixture would define
+    that id twice and whole-set validation refuses the tree. Derived with uuid5
+    rather than uuid4 because a pack is compared byte for byte against a second
+    run of itself. Applied to the folder's JSON text, so a definition and the
+    references naming it move together -- the same way the token substitution
+    works.
+    """
+    ids = set()
+    for path in sorted(folder.rglob("*.json")):
+        did = json.loads(path.read_text(encoding="utf-8")).get("id")
+        try:
+            uuid.UUID(str(did))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        ids.add(did)
+    for path in sorted(folder.rglob("*.json")):
+        text = path.read_text(encoding="utf-8")
+        for did in sorted(ids):
+            text = text.replace(
+                did, str(uuid.uuid5(uuid.NAMESPACE_URL, f"hkp-test/{token}/{did}"))
+            )
+        path.write_text(text, encoding="utf-8")
+
+
 def _rename_ids(folder, stem, new_stem):
     """Re-stem a fixture's files and ids so two copies can coexist in one root."""
     for src in sorted(folder.glob(f"{stem}.*")):
@@ -70,6 +99,7 @@ def _rename_ids(folder, stem, new_stem):
             encoding="utf-8",
         )
         src.unlink()
+    _restem_uuid_ids(folder, new_stem)
 
 
 # --- A. Recursive discovery and rel_dir (quick, compile-free) ---------------
@@ -1162,6 +1192,57 @@ def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
         )
 
 
+def test_a_model_uhds_artifact_reaches_the_shipped_tree(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
+):
+    """A trained UHD must be shipped with the model it names.
+
+    test_hkp_pack_sidecars.py covers resolution and the intermediate mirror, and
+    stops there. Carriage happens twice -- once into the pre-prune intermediate and
+    once into the arch output -- and only the second is what the runtime reads. With
+    the second missing, every sidecar case still passed while the shipped tree held a
+    descriptor naming a model that was never packed; the runtime then finds the
+    artifact missing and drops the whole engine.
+    """
+    root = tmp_path / "root"
+    dest = _nest(root, "hip/pointwise", main_fixture)
+
+    # The fixture's UHD is native, so it names no file. Make it the trained kind. Both
+    # UEDs already reference the shared UHD, so it survives the reachability walk and its
+    # sidecar has to survive with it.
+    (dest / "shared.uhd.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
+                "name": "Shared trained heuristic",
+                "adapter": "tree_data",
+                "features_signature": ["$kernel.block_size"],
+                "features_hash": "sha256:" + "0" * 16,
+                "trained_against": {
+                    "ued": {"id": "699a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
+                    "kmd": {"id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
+                    "umd": [],
+                },
+                "objective": "max",
+                "tree_data": {"artifact": "shared_model.bin"},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (dest / "shared_model.bin").write_bytes(b"HGBM-arch")
+
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
+
+    shipped = tmp_path / "out" / ARCH / "hip" / "pointwise"
+    assert (shipped / "shared.uhd.json").is_file(), "the UHD itself must ship"
+    artifact = shipped / "shared_model.bin"
+    assert artifact.is_file(), "a shipped UHD must be shipped with the model it names"
+    assert artifact.read_bytes() == b"HGBM-arch"
+
+
 # --- I. The embedded_source kind (quick, compile-free) ----------------------
 _EMBEDDED_SOURCE = {
     "kind": "embedded_source",
@@ -1663,6 +1744,7 @@ def _embedded_copy(root, sub, fixture, suffix=""):
             renamed.write_text(text, encoding="utf-8")
             if renamed != path:
                 path.unlink()
+        _restem_uuid_ids(dest, f"solo{suffix}")
     return dest
 
 
@@ -1734,54 +1816,3 @@ def test_packing_without_a_source_label_is_refused(
     assert "source_label is required" in message
     assert "--source-label" in message
     assert "pointwise/kernels/PointwiseAdd.cpp" in message
-
-
-def test_a_model_uhds_artifact_reaches_the_shipped_tree(
-    tmp_path, main_fixture, hipcc, rocm_kpack_dir
-):
-    """A trained UHD must be shipped with the model it names.
-
-    test_hkp_pack_sidecars.py covers resolution and the intermediate mirror, and
-    stops there. Carriage happens twice -- once into the pre-prune intermediate and
-    once into the arch output -- and only the second is what the runtime reads. With
-    the second missing, every sidecar case still passed while the shipped tree held a
-    descriptor naming a model that was never packed; the runtime then finds the
-    artifact missing and drops the whole engine.
-    """
-    root = tmp_path / "root"
-    dest = _nest(root, "hip/pointwise", main_fixture)
-
-    # The fixture's UHD is native, so it names no file. Make it the trained kind. Both
-    # UEDs already reference the shared UHD, so it survives the reachability walk and its
-    # sidecar has to survive with it.
-    (dest / "shared.uhd.json").write_text(
-        json.dumps(
-            {
-                "version": "1.0",
-                "id": "bb58374f-2972-57b1-a9cb-c358bddef2e5",
-                "name": "Shared trained heuristic",
-                "adapter": "tree_data",
-                "features_signature": ["$kernel.block_size"],
-                "features_hash": "sha256:" + "0" * 16,
-                "trained_against": {
-                    "ued": {"id": "699a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
-                    "kmd": {"id": "799a8b19-8e34-4f74-86d6-b6495a6483f3", "revision": "1.0"},
-                    "umd": [],
-                },
-                "objective": "max",
-                "tree_data": {"artifact": "shared_model.bin"},
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (dest / "shared_model.bin").write_bytes(b"HGBM-arch")
-
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
-
-    shipped = tmp_path / "out" / ARCH / "hip" / "pointwise"
-    assert (shipped / "shared.uhd.json").is_file(), "the UHD itself must ship"
-    artifact = shipped / "shared_model.bin"
-    assert artifact.is_file(), "a shipped UHD must be shipped with the model it names"
-    assert artifact.read_bytes() == b"HGBM-arch"

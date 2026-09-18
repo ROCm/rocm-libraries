@@ -223,13 +223,23 @@ inline std::unique_ptr<TreeDataAdapter>
     }
 
     // Validate model hash if provided (RFC 0019 §9.2 integrity validation)
+    //
+    // ERROR, not WARN: RFC 0019 §12 requires "a clear error (not a warning) naming which of
+    // the three checks failed and why, plus the fact that ranking degraded to static_order
+    // and the estimate was reported as 0". The consequence is otherwise silent -- the engine
+    // keeps answering and ranks by declared order -- so this line is the only trace. The
+    // facts are named in the same order as every sibling check (which check, expected,
+    // actual, consequence) so one grep finds them all.
     if(!expectedModelHash.empty())
     {
         const std::string actualHash = sha256(buffer, size);
         if(actualHash != expectedModelHash)
         {
-            HIPDNN_SDK_LOG_WARN("TreeDataAdapter: model hash mismatch - computed='"
-                                << actualHash << "' expected='" << expectedModelHash << "'");
+            HIPDNN_SDK_LOG_ERROR(
+                "TreeDataAdapter: model hash mismatch - expected='"
+                << expectedModelHash << "' actual='" << actualHash
+                << "'; the model is not used -- ranking degrades to static_order and an "
+                   "engine estimate is reported as 0");
             return nullptr;
         }
     }
@@ -253,13 +263,16 @@ inline std::unique_ptr<TreeDataAdapter>
         return nullptr;
     }
 
-    // Validate features hash
+    // Validate features hash (RFC 0019 §6.3 check 3, the signature the model was trained
+    // against). ERROR for the reason given above.
     const std::string modelHash
         = model->features_hash() != nullptr ? model->features_hash()->str() : "";
     if(!expectedFeaturesHash.empty() && modelHash != expectedFeaturesHash)
     {
-        HIPDNN_SDK_LOG_WARN("TreeDataAdapter: features hash mismatch - model='"
-                            << modelHash << "' expected='" << expectedFeaturesHash << "'");
+        HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: features hash mismatch - expected='"
+                             << expectedFeaturesHash << "' actual='" << modelHash
+                             << "'; the model is not used -- ranking degrades to static_order "
+                                "and an engine estimate is reported as 0");
         return nullptr;
     }
 

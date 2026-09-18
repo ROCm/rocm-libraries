@@ -111,7 +111,7 @@ class TestPublishedCsv:
 
     def test_an_unknown_dtype_spelling_is_refused_not_passed_through(self, tmp_path):
         """The CSV reader once built `dtype` from `row.get("dtype") or "bf16"`
-        directly, bypassing `_DTYPE_SPELLINGS` entirely -- the graph-corpus and
+        directly, bypassing `DTYPE_SPELLINGS` entirely -- the graph-corpus and
         rocKE-bench readers both refuse an unrecognised dtype, and the CSV path
         silently wrote it straight into the corpus instead. An unrecognised dtype
         here builds the wrong binary and still validates, exactly like the mask
@@ -123,7 +123,7 @@ class TestPublishedCsv:
     def test_every_dtype_spelling_normalises_the_same_as_the_other_readers(
         self, tmp_path
     ):
-        """The converse of the refusal above: every spelling `_DTYPE_SPELLINGS`
+        """The converse of the refusal above: every spelling `DTYPE_SPELLINGS`
         already recognises must still mine cleanly through the CSV path, and
         normalise to the same canonical value the graph/rocKE-bench readers
         produce -- the fix must not narrow what a valid CSV can express."""
@@ -369,7 +369,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
     def test_a_non_numeric_left_bound_is_refused_not_resolved_to_causal(self, tmp_path):
         """`left_bound` drives the branch below (`>= 0` -> window, else causal),
         and a non-numeric value fell through neither comparison, landing on
-        `return _MASK_TYPE["causal"]` by default -- the same wrong-answer-not-a-
+        `return MASK_TYPE["causal"]` by default -- the same wrong-answer-not-a-
         decline failure this reader exists to refuse for mask and dtype."""
         self._graph(
             tmp_path / "graphs" / "g.json",

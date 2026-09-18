@@ -483,8 +483,8 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             }
         }
         // RFC 0019 §11.2: an engine that supplies neither estimate "falls back to
-        // static ordering; contributes no score" (table row "Neither") and "is
-        // ordered by the existing static rules". Emitting the unscored tail in
+        // static ordering; contributes no score" (table row "No declared model") and
+        // "is ordered by the existing static rules". Emitting the unscored tail in
         // candidate-arrival order is neither the static rules nor deterministic, so
         // order it with the shared static ordering; scored rows keep their ranking.
         const auto tail = std::find_if(desc.ranked.begin(),

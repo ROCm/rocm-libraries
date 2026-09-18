@@ -43,9 +43,10 @@
 #include <string>
 #include <vector>
 
-#if !defined(HIPDNN_UHD_GEN_PYTHON) || !defined(HIPDNN_UHD_GEN_TOOLS_DIR)
+#if !defined(HIPDNN_UHD_GEN_PYTHON) || !defined(HIPDNN_UHD_GEN_TOOLS_DIR) \
+    || !defined(HIPDNN_UHD_GEN_FEATURE_EVALUATOR)
 #error \
-    "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see tools/CMakeLists.txt"
+    "HIPDNN_UHD_GEN_PYTHON, HIPDNN_UHD_GEN_TOOLS_DIR and HIPDNN_UHD_GEN_FEATURE_EVALUATOR must be defined; see tools/CMakeLists.txt"
 #endif
 
 namespace hipdnn_plugin_sdk::uhd
@@ -89,6 +90,11 @@ int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& out
           + " --features q.M kernel.tile_m" + " --target tflops" + " --provenance \""
           + (csv.parent_path() / "provenance.json").string() + "\"" + " --output-dir \""
           + outputDir.string() + "\"" + " --name \"uhd_gen artifact test\""
+          // THIS build's evaluator, not whatever the tool would otherwise discover: the
+          // point of the test is that the hash C++ recomputes on load is the hash the
+          // tool stamped, and a stale binary from a sibling build tree would make the
+          // comparison meaningless even while it passed.
+          + " --feature-evaluator \"" + HIPDNN_UHD_GEN_FEATURE_EVALUATOR + "\""
           + " --num-boost-round 40 --early-stopping 10"
           // Diagnostics deliberately not suppressed: when this
           // fails, the tool's traceback is the only thing that says

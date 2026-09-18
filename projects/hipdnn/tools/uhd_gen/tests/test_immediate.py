@@ -43,6 +43,8 @@ def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5):
             "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}
 
 
+# Callers take the `evaluator` fixture: the digest below is the runtime's, computed by the
+# shared binary, because RFC 0019 §6.3 leaves features_hash with exactly one definition.
 def descriptor(row):
     return {"version": "1.0", "id": UHD, "name": "immediate model", "adapter": "tree_data",
             "trained_against": row["binding"]["trained_against"], "objective": "max",
@@ -137,7 +139,7 @@ def test_cross_engine_labels_require_the_same_full_graph_work_count():
         normalize_corpus(pd.DataFrame([first, second]))
 
 
-def test_single_engine_predictions_have_signed_errors_without_fake_ranking_regret():
+def test_single_engine_predictions_have_signed_errors_without_fake_ranking_regret(evaluator):
     row = measurement()
     report = evaluate_immediate(pd.DataFrame([row]), [bundle(row, 1200)], eval_fraction=1, seed=0)
     calibration = report["metrics"]["calibration"]
@@ -147,7 +149,7 @@ def test_single_engine_predictions_have_signed_errors_without_fake_ranking_regre
     assert report["metrics"]["immediate_selection"]["regret"]["mean"] is None
 
 
-def test_selection_regret_compares_other_immediate_engines_not_tuned_candidates():
+def test_selection_regret_compares_other_immediate_engines_not_tuned_candidates(evaluator):
     fast, slow = measurement(), measurement(engine=8, elapsed=4)
     report = evaluate_immediate(pd.DataFrame([fast, slow]), [bundle(fast, 400), bundle(slow, 600)],
                                 eval_fraction=1, seed=0, include_per_problem=True)
@@ -156,14 +158,14 @@ def test_selection_regret_compares_other_immediate_engines_not_tuned_candidates(
     assert report["metrics"]["per_engine"][fast["engine_name"]]["signed_bias_tflops"] == -600
 
 
-def test_holdout_is_checked_by_graph_device_keys_not_input_filename():
+def test_holdout_is_checked_by_graph_device_keys_not_input_filename(evaluator):
     row = measurement()
     report = evaluate_immediate(pd.DataFrame([row]), [bundle(row, 1000, [("graph", "board")])],
                                 eval_fraction=1, seed=0)
     assert report["holdout_integrity"]["status"] == "COMPROMISED"
 
 
-def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model():
+def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model(evaluator):
     row = measurement()
     row["binding"]["uhd_id"] = "old-model"
     response = copy.deepcopy(row)
@@ -178,7 +180,7 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
         scorer(normalize_corpus(pd.DataFrame([changed])))
 
 
-def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifact(tmp_path):
+def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifact(tmp_path, evaluator):
     pytest.importorskip("lightgbm")
     pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main
@@ -209,3 +211,27 @@ def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifac
     assert np.all(np.abs(predictions - np.asarray([2 * (1 + index / 240) for index in range(24)])) < 0.3)
     ued = json.loads((root / "engine.ued.json").read_text(encoding="utf-8"))
     assert ued[ROLE]["gfx942"] == installed.descriptor["id"]
+
+
+def test_a_prediction_the_runtime_would_refuse_is_a_decline_not_a_broken_artifact(evaluator):
+    """A physical TFLOPS prediction that is not positive is one EnginePredictor reports as
+    INVALID, falling back to static ordering for that graph. The model is fitted on log1p
+    and inverted with expm1, so a log-space prediction below zero lands in (-1, 0) -- a few
+    rows at the bottom of the range. Failing the artifact discarded a trained AITER model
+    over 4 rows in 495 (run 67929709); the rows are now reported and skipped."""
+    good, bad = measurement(), measurement(engine=8, graph="other")
+    report = evaluate_immediate(pd.DataFrame([good, bad]),
+                                [bundle(good, 1200), bundle(bad, -5)],
+                                eval_fraction=1, seed=0)
+    assert report["metrics"]["unscored_rows"]["total"] == 1
+    assert report["metrics"]["unscored_rows"]["per_engine"][bad["engine_name"]] == 1
+    assert report["metrics"]["calibration"]["rows"] == 1
+    assert report["metrics"]["calibration"]["signed_bias_tflops"] == 200
+
+
+def test_a_model_that_can_score_nothing_is_still_a_failure(evaluator):
+    """Reporting every row as a decline is not a model; it is an artifact that would leave
+    the engine on static ordering everywhere, which the generator must not publish."""
+    row = measurement()
+    with pytest.raises(ValueError, match="scored no evaluation row"):
+        evaluate_immediate(pd.DataFrame([row]), [bundle(row, -1)], eval_fraction=1, seed=0)

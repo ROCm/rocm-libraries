@@ -117,3 +117,36 @@ def test_malformed_explicit_revision_does_not_default(tmp_path, revision):
 def test_snapshot_rejects_legacy_version_only_provenance():
     with pytest.raises(ProvenanceError):
         validate_provenance({"ued": "1.0", "kmd": "1.0", "umd": "1.0"})
+
+
+def test_an_engine_with_no_descriptors_is_trained_against_its_selector_revision():
+    """RFC 0019 §4.1, Open Question 7: an engine with no UED binds its model by declared
+    UUID, so there is no ued/kmd/umd to name -- only the provider build whose behaviour was
+    measured. The loader has accepted this since opaque engines gained L1 (`UhdParser.hpp`
+    :146-161); this validator rejecting it stopped every AITER and MIOpen L1 collection
+    after the whole corpus had been measured (runs 67929293, 67929294)."""
+    recorded = validate_provenance({"selector_revision": "miopen-provider/0.2.0/aiter-fwd-1"})
+    assert recorded == {"selector_revision": "miopen-provider/0.2.0/aiter-fwd-1"}
+
+
+@pytest.mark.parametrize("snapshot", [
+    {},
+    {"selector_revision": ""},
+    {"selector_revision": 3},
+    {"ued": {"id": UED, "revision": "1.0"}},
+    {"selector_revision": "rev", "unexpected": "value"},
+])
+def test_provenance_that_names_neither_form_completely_is_refused(snapshot):
+    """Two thirds of a descriptor set is not a weaker claim, it is an unverifiable one --
+    and an empty or absent revision names nothing at all."""
+    with pytest.raises(ProvenanceError):
+        validate_provenance(snapshot)
+
+
+def test_a_stale_selector_revision_is_refused_rather_than_scored():
+    """L1 is the one score compared ACROSS engines, so a model measured against another
+    provider build does not merely misreport a number -- it changes which engine wins."""
+    trained = {"selector_revision": "aiter-fwd-1"}
+    compare_provenance(trained, {"selector_revision": "aiter-fwd-1"})
+    with pytest.raises(ProvenanceError, match="selector_revision"):
+        compare_provenance(trained, {"selector_revision": "aiter-fwd-2"})

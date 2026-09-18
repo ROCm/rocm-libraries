@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
@@ -34,6 +35,12 @@ std::filesystem::path descriptorSearchDirectory();
 /// than an override -- it can add descriptors beside the shipped ones, but a file
 /// redefining a shipped id is refused and the shipped definition stands.
 std::vector<std::filesystem::path> descriptorSearchDirectories();
+
+/// Every descriptor file under those directories, parsed once. The catalog behind
+/// discoverDescriptorSets(), exposed because an opaque engine resolves the UHD id it
+/// declares in provider code out of the same catalog (RFC 0019 Open Question 7,
+/// RESOLVED) and must not pay a second walk of the tree to do it.
+const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog();
 
 /// Every descriptor set this provider serves. Registers symbols first so validation can
 /// check each descriptor's symbol exists -- a set returns only if buildable, which lets

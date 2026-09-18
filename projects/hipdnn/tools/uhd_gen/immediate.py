@@ -315,6 +315,7 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
     if missing:
         raise ValueError(f"missing per-engine models; pass --additional-model-dir for {sorted(missing)}")
     predicted = pd.Series(index=held_out.index, dtype=float)
+    declined: dict[str, int] = {}
     for engine, group in frame.groupby("engine_name", sort=False):
         bundle = by_engine[engine]
         check_model_binding(bundle.descriptor, group)
@@ -329,10 +330,24 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
         if selected.empty:
             continue
         values = np.asarray(bundle.scorer(selected), dtype=float)
-        if values.shape != (len(selected),) or not np.isfinite(values).all() or (values < 0).any():
-            raise ValueError("L1 model returned invalid physical tflops predictions")
+        if values.shape != (len(selected),):
+            raise ValueError("L1 model returned the wrong number of predictions")
+        # A physical TFLOPS prediction that is not positive is one the RUNTIME refuses:
+        # EnginePredictor reports INVALID rather than a score, and the engine falls back to
+        # static ordering for that graph. The model is fitted on log1p and inverted with
+        # expm1, so a log-space prediction below zero lands in (-1, 0) -- a handful of rows
+        # near the bottom of the range, not a broken artifact. Scoring them as declines
+        # here reports what the runtime will do; failing the whole artifact threw away a
+        # trained model over 4 rows in 495 (run 67929709).
+        impossible = ~np.isfinite(values) | (values <= 0)
+        values[impossible] = np.nan
+        declined[engine] = int(impossible.sum())
         predicted.loc[selected.index] = values
-    held_out["predicted_tflops"] = predicted
+    held_out = held_out.assign(predicted_tflops=predicted)
+    unscored = int(held_out["predicted_tflops"].isna().sum())
+    held_out = held_out[held_out["predicted_tflops"].notna()].copy()
+    if held_out.empty:
+        raise ValueError("L1 model scored no evaluation row with a possible physical tflops")
 
     def calibration(group):
         measured = group["tflops"].to_numpy(dtype=float)
@@ -371,6 +386,10 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
                   "eval_problems": len(split.eval_problems),
                   "eval_problem_keys": [list(key) for key in split.eval_problems]},
         "metrics": {"problems_scored": len(per_problem), "calibration": calibration(held_out),
+                    "unscored_rows": {"total": unscored, "per_engine": declined,
+                                      "detail": "predictions the runtime would refuse as "
+                                                "non-positive physical tflops; the engine "
+                                                "falls back to static ordering for these"},
                     "per_engine": {name: calibration(group) for name, group in held_out.groupby("engine_name")},
                     "immediate_selection": {"problems_compared": len(regrets),
                                             "regret": _summarise(regrets),

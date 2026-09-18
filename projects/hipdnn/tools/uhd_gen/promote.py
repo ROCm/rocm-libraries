@@ -34,8 +34,13 @@ class PromotePlan:
     descriptor_path: Path
     descriptor_id: str
     artifact_path: Path | None
-    ued_path: Path
-    ued_document: dict
+    #: The UED whose role map binds this model, and the document to rewrite. Both are None
+    #: for an engine that owns no descriptor set: it binds its model by a UUID declared in
+    #: provider code (RFC 0019 §4.1, Open Question 7), so there is no role map to edit and
+    #: nothing to rewrite -- the model is installed where the loader scans, under the
+    #: identity the provider already asks for.
+    ued_path: Path | None
+    ued_document: dict | None
     engine_name: str
     old_heuristic: str | None
     role: str
@@ -57,12 +62,15 @@ def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--remove-knob", action="append", default=[], dest="remove_knobs",
                         help="Explicitly remove an authored knob; requires a model trained against the prospective major revision")
     parser.add_argument("--dry-run", action="store_true", help="Validate and report without writing")
+    parser.add_argument("--corpus", help="The corpus.json this model was trained from; "
+                                         "defaults to the one generate stages beside --model-dir")
 
 
 def run_promote(args: argparse.Namespace) -> int:
     try:
         plan = build_plan(Path(args.model_dir), Path(args.descriptor_tree), args.engine,
-                          role=args.role, arch=args.arch, remove_knobs=args.remove_knobs)
+                          role=args.role, arch=args.arch, remove_knobs=args.remove_knobs,
+                          corpus=Path(args.corpus) if args.corpus else None)
         for warning in plan.warnings:
             logger.warning("%s", warning)
         if not args.dry_run:
@@ -76,17 +84,139 @@ def run_promote(args: argparse.Namespace) -> int:
 
 def build_plan(model_dir: Path, descriptor_tree: Path, engine: str | None = None, *,
                role: str = "sort_kernel_catalog", arch: str | None = None,
-               remove_knobs: tuple[str, ...] | list[str] = ()) -> PromotePlan:
+               remove_knobs: tuple[str, ...] | list[str] = (),
+               corpus: Path | None = None) -> PromotePlan:
     """Resolve all dependencies, ownership and destination collisions without writes."""
     try:
-        return _build_plan(Path(model_dir), Path(descriptor_tree), engine, role, arch, remove_knobs)
+        return _build_plan(Path(model_dir), Path(descriptor_tree), engine, role, arch,
+                           remove_knobs, corpus)
     except ValueError as error:
         raise PromoteError(str(error)) from error
 
 
-def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
+def _corpus_path(model_dir: Path, corpus: Path | None) -> Path | None:
+    """The corpus that produced this model, when this run can see it.
+
+    `generate` stages `corpus.json` beside the `model/` directory it trains into and
+    promotes from exactly that layout, so the sibling is the ordinary case and needs no
+    flag; `--corpus` is for promoting a model whose corpus was archived elsewhere.
+    """
+    if corpus is not None:
+        if not corpus.is_file():
+            raise PromoteError(f"--corpus is not a readable file: {corpus}")
+        return corpus
+    for sibling in (model_dir / "corpus.json", model_dir.parent / "corpus.json"):
+        if sibling.is_file():
+            return sibling
+    return None
+
+
+def _correctness_gate(model_dir: Path, corpus: Path | None) -> list[str]:
+    """RFC 0019 §13.4: refuse emission while any candidate carries an invalid marker.
+
+    §13.2 is explicit that this is diagnosis, not remedy: suppressing the timing protects
+    the training labels, but the scorer cannot exclude a candidate (§5), so a kernel that
+    is applicable and incorrect stays selectable through every path that does not consult
+    the model -- a knob pin, a winning candidate that fails to build, any `static_order`
+    fallback. A learned demotion is a preference, and preference is not a correctness gate.
+
+    So the refusal lives here, at the stage §13.4 calls "the only stage positioned to
+    refuse to ship it". Clearing the marker is a matcher or kernel change, deliberately
+    reaching back into the pack: this is the one documented exception to the two-stage
+    layering, not a hole in it.
+
+    Returns the warnings a caller should surface. An undecidable verdict is not a refusal
+    -- Open Question 19(a) has not settled what reference each op validates against, so a
+    corpus of nulls is the expected state today -- but it is reported, because a check that
+    decided nothing must never be mistaken for a check that passed.
+    """
+    path = _corpus_path(model_dir, corpus)
+    if path is None:
+        return ["no corpus.json beside the model, so RFC 0019 §13.2's correctness markers "
+                "could not be read; this promotion is not gated on them. Pass --corpus to "
+                "point at the corpus this model was trained from."]
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise PromoteError(f"cannot read training corpus {path}: {error}") from error
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise PromoteError(f"{path}: the corpus must be an array of measured rows")
+    invalid = [row for row in rows if row.get("numerically_valid") is False]
+    if invalid:
+        named = "\n".join(
+            f"  {row.get('kernel', '<unnamed candidate>')} on {row.get('benchmark', '<unnamed problem>')}: "
+            f"{row.get('validation') or 'no reason recorded'}"
+            for row in invalid[:5])
+        more = f"\n  ... and {len(invalid) - 5} more" if len(invalid) > 5 else ""
+        raise PromoteError(
+            f"{len(invalid)} candidate(s) in {path} carry an unresolved RFC 0019 §13.2 "
+            f"invalid marker, so package emission is refused (§13.4):\n{named}{more}\n"
+            "The model cannot fix this: a ranking demotes a kernel, and every path that "
+            "does not consult the model still selects it. Narrow the pack's UMD so the "
+            "kernel is no longer applicable for those problems, or withdraw the UKD, then "
+            "regenerate.")
+    unchecked = sum(1 for row in rows if row.get("numerically_valid") is None)
+    if unchecked:
+        return [f"{unchecked} of {len(rows)} corpus row(s) carry no decided correctness "
+                f"verdict (RFC 0019 Open Question 19 leaves the per-op reference open), so "
+                f"their timings were trained on without being shown correct"]
+    return []
+
+
+def _opaque_plan(descriptor_path, descriptor, identity, model_dir, descriptor_tree,
+                 engine, role, arch, remove_knobs):
+    """Install a model for an engine that owns no descriptor set.
+
+    Nothing is bound here and nothing is rewritten: the provider names the UUID it will
+    look for, and this writes the document carrying that UUID where the loader already
+    scans. The identity is therefore load-bearing in a way it is not for a UED-owned role
+    -- promote the wrong UUID and the engine reports no model rather than the wrong one,
+    which is why a collision with an installed UHD is refused rather than overwritten.
+    """
+    if remove_knobs:
+        raise PromoteError("knob removal applies to authored UED knobs; this engine has no UED")
+    if role != ROLE:
+        raise PromoteError(
+            f"an engine with no descriptor set has only the {ROLE} role; {role} ranks a "
+            "catalog it does not own")
+    engine_name = str(engine or descriptor.get("engine") or "")
+    if not engine_name:
+        raise PromoteError("pass --engine: the canonical engine name the provider declares")
+    destination_dir = Path(descriptor_tree) / "heuristics" / _slug(engine_name) / role / arch
+    destination_descriptor = destination_dir / descriptor_path.name
+    _contained(destination_descriptor, descriptor_tree, "destination descriptor")
+    artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
+    installed_descriptor = copy.deepcopy(descriptor)
+    plan = PromotePlan(descriptor_path, identity, artifact_path, None, None,
+                       engine_name, None, role, arch,
+                       destination_descriptor, installed_descriptor)
+    if artifact_path is not None:
+        destination_artifact = destination_dir / artifact_path.name
+        _contained(destination_artifact, descriptor_tree, "destination artifact")
+        installed_descriptor[descriptor["adapter"]][artifact_key] = artifact_path.name
+        if not _same_file(artifact_path, destination_artifact):
+            plan.copies.append((artifact_path, destination_artifact))
+    for path in sorted(Path(descriptor_tree).rglob(f"*{UHD_SUFFIX}")):
+        if path.name == UHD_SUFFIX or _same_file(path, destination_descriptor):
+            continue
+        if descriptor_id(_load_json(path, "installed UHD").get("id"), str(path)) == identity:
+            raise PromoteError(
+                f"incoming UHD id {identity} is already installed at {path}; refusing duplicate identity")
+    return plan
+
+
+def _slug(name: str) -> str:
+    """A directory name from an engine name: the loader keys on content, not on layout."""
+    return "".join(character if character.isalnum() else "_" for character in name).strip("_")
+
+
+def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, corpus=None):
     if role not in ROLES:
         raise PromoteError(f"unknown heuristic role {role!r}")
+    # First, because it is the one refusal that is not about this installation at all: a
+    # correctness defect the timing run found is a fact about the pack, and it holds whether
+    # or not the descriptors line up.
+    gate_warnings = _correctness_gate(model_dir, corpus)
     descriptor_path = _find_descriptor(model_dir)
     _contained(descriptor_path, model_dir, "source descriptor")
     descriptor = _load_json(descriptor_path, "UHD")
@@ -117,6 +247,18 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
     index = load_descriptor_tree(descriptor_tree)
     if any(identity in entries for entries in index.values()):
         raise PromoteError(f"incoming UHD identity {identity} conflicts with a dependency descriptor")
+    if "ued" not in provenance:
+        # An engine that owns no descriptor set: AITER, MIOpen. RFC 0019 §4.1 / Open
+        # Question 7 binds its model by a UUID declared in provider code, so there is no
+        # role map to edit and no UED to select -- promotion is installing the document
+        # where the loader scans, under the identity the provider already asks for. The
+        # model says so itself: its trained_against names a selector revision and nothing
+        # else, which is exactly the case `select_engine` cannot serve ("expected one UED
+        # for --engine 'ASM_SDPA_ENGINE', found 0", run 67929588, after the model trained).
+        opaque = _opaque_plan(descriptor_path, descriptor, identity, model_dir,
+                              descriptor_tree, engine, role, arch, remove_knobs)
+        opaque.warnings.extend(gate_warnings)
+        return opaque
     ued_path, original_ued = select_engine(index, engine)
     engine_name = str(original_ued.get("name", ""))
     destination_dir = ued_path.parent / "heuristics" / original_ued["id"] / role / arch
@@ -131,6 +273,7 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs):
     plan = PromotePlan(descriptor_path, identity, artifact_path, ued_path, ued,
                        engine_name, old, role, arch,
                        destination_descriptor, installed_descriptor)
+    plan.warnings.extend(gate_warnings)
     if remove_knobs:
         exposed = ued.get("knobs", [])
         if not isinstance(exposed, list) or any(not isinstance(item, str) for item in exposed):
@@ -384,12 +527,14 @@ def _apply(plan: PromotePlan) -> None:
         shutil.copy2(source, destination)
     if plan.write_descriptor:
         _write_json(plan.destination_descriptor, plan.descriptor_document)
-    _write_json(plan.ued_path, plan.ued_document)
+    if plan.ued_path is not None:
+        _write_json(plan.ued_path, plan.ued_document)
 
 
 def _report(plan: PromotePlan, dry_run: bool) -> None:
     print("UHD promotion plan (dry run, nothing written)" if dry_run else "UHD promoted")
-    print(f"  engine: {plan.engine_name}\n  binding: {plan.ued_path}\n  role/arch: {plan.role}/{plan.arch}")
+    binding = plan.ued_path if plan.ued_path is not None else "declared in provider code"
+    print(f"  engine: {plan.engine_name}\n  binding: {binding}\n  role/arch: {plan.role}/{plan.arch}")
     print(f"  heuristic was: {plan.old_heuristic or '(none)'}\n  heuristic now: {plan.descriptor_id}")
     for source, destination in plan.copies:
         print(f"  {'would copy' if dry_run else 'copy'}: {source} -> {destination}")
