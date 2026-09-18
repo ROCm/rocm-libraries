@@ -550,36 +550,92 @@ def _build_fp32_instOffs(mt: int, vw: int, lrvw: int,
                          miWaveGroup: int,
                          xf32EmuPack: bool,
                          matrixInstM: int = 16) -> tuple:
-  # Mirror LocalRead.py FP32 / XF32 ds_load_b32 emit
-  nRPU = max(miInputPerThread // max(lrvw, 1), 1)
-  numVectorsPerTile = max(miWaveTile // max(vw, 1), 1)
-  numReadsPerVector = max(vw, 1)
-  miWaveGroupShape  = matrixInstM * miWaveGroup * vw
-  unrollStrideBytes = mt * 4
+  """Build instruction offsets used by the FP32 padding search.
+
+  Standard FP32 forces ds_load_b32, so its rIdx loop has
+  MIInputPerThread entries even when LRVW is larger.
+  """
   if xf32EmuPack:
+    nRPU = max(miInputPerThread // max(lrvw, 1), 1)
+    numVectorsPerTile = max(miWaveTile // max(vw, 1), 1)
+    numReadsPerVector = max(vw, 1)
+    miWaveGroupShape = matrixInstM * miWaveGroup * vw
+    unrollStrideBytes = mt * 4
     kFn = lambda r: ((r // max(lrvw, 1)) * max(lrvw, 1) + r * max(lrvw, 1)) * unrollStrideBytes
-  else:
-    kFn = lambda r: r * max(lrvw, 1) * unrollStrideBytes
-  return tuple(sorted({
-    kFn(r) + v * miWaveGroupShape * 4 + e * 4
-    for v in range(numVectorsPerTile)
-    for e in range(numReadsPerVector)
-    for r in range(nRPU)
-  }))
+    return tuple(sorted({
+      kFn(r) + v * miWaveGroupShape * 4 + e * 4
+      for v in range(numVectorsPerTile)
+      for e in range(numReadsPerVector)
+      for r in range(nRPU)
+    }))
+
+  numTilePerInst = 1
+  numReadsPerUnroll = miInputPerThread // numTilePerInst
+  numVectorsPerTile = miWaveTile // vw
+  numReadsPerVector = vw
+  miWaveGroupShape = matrixInstM * miWaveGroup * vw
+
+  instOffs = []
+  for vIdx in range(numVectorsPerTile):
+    for eIdx in range(numReadsPerVector):
+      for tiIdx in range(numTilePerInst):
+        for rIdx in range(numReadsPerUnroll):
+          offsetVal = eIdx + vIdx * miWaveGroupShape
+          incOffset = rIdx * mt
+          # tiIdx is zero for the supported square FP32 opcode.
+          instOffs.append((incOffset + offsetVal) * 4)
+  return tuple(sorted(instOffs))
 
 @lru_cache(maxsize=None)
 def _fp32_shape(mt: int, vw: int, lrvw: int, miWaveGroup: int,
                 miInputPerThread: int, miWaveTile: int,
                 matrixInstK: int, usesTDM: bool,
-                xf32EmuPack: bool = False, matrixInstM: int = 16) -> _Shape:
+                xf32EmuPack: bool = False, matrixInstM: int = 16,
+                baseInputPerThread: int = 0) -> _Shape:
   instOffs = _build_fp32_instOffs(mt, vw, lrvw, miInputPerThread, miWaveTile,
-                                  miWaveGroup, xf32EmuPack)
-  return _Shape([(t % 16 * vw + t // 16 * mt * lrvw) * 4 for t in range(32)],
+                                  miWaveGroup, xf32EmuPack, matrixInstM)
+  inputPerThread = baseInputPerThread or lrvw
+  return _Shape([(t % 16 * vw + t // 16 * mt * inputPerThread) * 4
+                 for t in range(32)],
                 instOffs if instOffs else (0,),
                 tuple(w * matrixInstM * vw * 4 for w in range(max(miWaveGroup, 1))),
                 mt * 4 * matrixInstK,
                 _min_block_bytes(usesTDM),
                 _write_row_bytes(mt, 4.0, usesTDM))
+
+def _fp32_shapes(mt: int, vw: int, lrvw: int, miWaveGroup: int,
+                 miInputPerThread: int, miWaveTile: int,
+                 matrixInstK: int, usesTDM: bool,
+                 xf32EmuPack: bool = False,
+                 matrixInstM: int = 16) -> tuple:
+  """Local-read address shapes that must share one valid block selection.
+
+  Standard FP32 rebuilds its tensor-relative base with LRVW in the main loop
+  and MIInputPerThread in the tail loop. Tensor and buffer bases are added
+  after block padding and therefore do not change either shape's pad phase.
+  """
+  if xf32EmuPack:
+    return (_fp32_shape(
+        mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
+        matrixInstK, usesTDM, xf32EmuPack, matrixInstM),)
+
+  main = _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
+                     matrixInstK, usesTDM, xf32EmuPack, matrixInstM)
+  if lrvw == miInputPerThread:
+    return (main,)
+  tail = _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
+                     matrixInstK, usesTDM, xf32EmuPack, matrixInstM,
+                     baseInputPerThread=miInputPerThread)
+  return (main, tail)
+
+def _fp32_valid_blocks(shapes: tuple, tdmComponentBytes: int,
+                       tdmNumComponents: int) -> list:
+  """Blocks valid for every main/tail FP32 local-read pattern."""
+  valid = set(_LDS_PAD_BLOCK_BYTES)
+  for shape in shapes:
+    valid.intersection_update(
+      _valid_blocks_for(shape, tdmComponentBytes, tdmNumComponents))
+  return [block for block in _LDS_PAD_BLOCK_BYTES if block in valid]
 
 @lru_cache(maxsize=None)
 def _compute_fp32_config(mt: int, vw: int, lrvw: int,
@@ -595,14 +651,24 @@ def _compute_fp32_config(mt: int, vw: int, lrvw: int,
   No block padding is one of the candidates. Returns {"perBlock", "pad"}
   with pad in dwords.
   """
-  shape = _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
-                      matrixInstK, usesTDM, xf32EmuPack)
+  shapes = _fp32_shapes(mt, vw, lrvw, miWaveGroup, miInputPerThread,
+                        miWaveTile, matrixInstK, usesTDM, xf32EmuPack)
+
+  def costs(cand):
+    result = []
+    for shape in shapes:
+      patternCosts = _b32_wave_costs(shape.rawAddrs, cand[0], cand[1],
+                                     shape.wOffsets, shape.instOffs)
+      if patternCosts is None:
+        return None
+      result.extend(patternCosts)
+    return result
+
   best = _search_padding(
-    _valid_blocks_for(shape, tdmComponentBytes, tdmNumComponents),
+    _fp32_valid_blocks(shapes, tdmComponentBytes, tdmNumComponents),
     _LDS_PAD_STEP_BYTES,
-    lambda: len(shape.instOffs),   # one thread per bank on every instruction
-    lambda cand: _b32_wave_costs(shape.rawAddrs, cand[0], cand[1],
-                                 shape.wOffsets, shape.instOffs))
+    lambda: max(len(shape.instOffs) for shape in shapes),
+    costs)
   if best is None:
     return {"perBlock": 0, "pad": 0}
   return {"perBlock": best[0], "pad": best[1] // 4}
@@ -630,10 +696,10 @@ def get_fp32_valid_blocks(mt: int, vw: int, lrvw: int, miWaveGroup: int,
                           xf32EmuPack: bool = False,
                           tdmComponentBytes: int = 0,
                           tdmNumComponents: int = 1) -> tuple:
-  return tuple(_valid_blocks_for(
-    _fp32_shape(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
-                matrixInstK, usesTDM, xf32EmuPack),
-    tdmComponentBytes, tdmNumComponents))
+  shapes = _fp32_shapes(mt, vw, lrvw, miWaveGroup, miInputPerThread,
+                        miWaveTile, matrixInstK, usesTDM, xf32EmuPack)
+  return tuple(_fp32_valid_blocks(shapes, tdmComponentBytes,
+                                  tdmNumComponents))
 
 # The one pair the MX scale layout uses when it pads at all.
 MXS_LDS_BLOCK_BYTES = 256

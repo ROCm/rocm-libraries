@@ -155,6 +155,52 @@ def test_fp32_wave_separated_tdm_component_phase(
         False, **kwargs)
 
 
+@pytest.mark.parametrize(
+    "mt, miWaveGroup, miWaveTile, componentBytes, numComponents, "
+    "oldBlock, perBlock, pad",
+    [
+        # NN: A is tile-major.
+        ( 48, 1, 3,  3072, 2,  256, 128, 4),
+        (320, 4, 5, 10240, 4, 1024, 512, 4),
+        # TT: B is tile-major.
+        (192, 4, 3, 12288, 2, 1024, 512, 6),
+        ( 96, 2, 3,  3072, 4,  512, 256, 6),
+    ],
+)
+def test_fp32_tile_major_tail_padding_phase(
+        mt, miWaveGroup, miWaveTile, componentBytes, numComponents,
+        oldBlock, perBlock, pad):
+    """LRVW=4 main and MIInputPerThread=2 tail must both be valid."""
+    kwargs = {
+        "tdmComponentBytes": componentBytes,
+        "tdmNumComponents": numComponents,
+    }
+    assert get_fp32_mt_config(
+        mt, "perBlock", 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
+        False, **kwargs) == perBlock
+    assert get_fp32_mt_config(
+        mt, "pad", 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
+        False, **kwargs) == pad
+    assert oldBlock not in _L.get_fp32_valid_blocks(
+        mt, 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
+        False, **kwargs)
+
+
+def test_fp32_tile_major_main_and_tail_bases_match_codegen():
+    """LraTileAssignment uses LRVW in main and MIInputPerThread in tail."""
+    main, tail = _L._fp32_shapes(
+        48, 1, 4, 1, 2, 3, _K_B32, _TDM, False)
+    assert main.rawAddrs[16] == 48 * 4 * 4
+    assert tail.rawAddrs[16] == 48 * 2 * 4
+
+
+def test_fp32_tile_major_instruction_offsets_match_codegen():
+    """Model every rIdx/eIdx/vIdx emitted by the standard FP32 path."""
+    assert _L._build_fp32_instOffs(
+        48, 1, 4, 2, 3, 1, False) == (
+            0, 64, 128, 192, 256, 320)
+
+
 # XF32 (xf32EmuPack=True)
 #   MT=32  from [16,16,32,1,1,1,1,2,2]
 #   MT=64  from [16,16,32,1,1,2,2,2,2]
