@@ -64,7 +64,8 @@ namespace rocsparse_ut
             handle->properties.maxGridSize[0] = saved;
         }
 
-        ScopedMaxGridSizeX(const ScopedMaxGridSizeX&)            = delete;
+        ScopedMaxGridSizeX(const ScopedMaxGridSizeX&) = delete;
+
         ScopedMaxGridSizeX& operator=(const ScopedMaxGridSizeX&) = delete;
     };
 }
