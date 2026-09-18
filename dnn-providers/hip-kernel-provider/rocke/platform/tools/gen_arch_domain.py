@@ -1,0 +1,885 @@
+#!/usr/bin/env python3
+"""Generate the intrinsic availability table (the "arch domain") by probing the
+installed toolchain.
+
+# Why this exists
+
+rocke resolves an intrinsic `declare` on ONE axis: the LLVM flavor. The target
+arch is consumed only to pick an ISA backend (`lower_llvm.py`, `backend_for(arch
+or "gfx950")`) and never reaches the decl table -- so "is this intrinsic
+available on this GPU" is checked nowhere at build time. See
+`dsl_docs/development/arch_axis_proposal.md`.
+
+This tool measures the missing axis instead of hand-maintaining it, and commits
+the result as a data file. Nothing consumes the artifact yet; landing the data
+first is deliberate (it cannot break anything, and it surfaces the defects that
+justify the rest).
+
+# Two stages, because the two axes are answered by different tools
+
+Stage A -- the flavor axis -- asks whether this LLVM knows the name at all. It
+is arch-free, so it runs once per key rather than once per (key, arch), and it
+uses `opt -S`: LLVM resolves a recognised `llvm.*` declare on parse, attaching
+the intrinsic's attributes and remangling overloads, while an unrecognised name
+round-trips verbatim as an ordinary external function. See `_name_exists`.
+
+Stage B -- the arch axis -- compiles AND LINKS a probe module per (key, arch),
+for names that survived stage A. It is a link for the same reason
+`check_ir_validity.py` is: a `declare` for a nonexistent intrinsic is accepted
+by `opt -passes=verify` AND by `clang -S` -- to the backend it is an ordinary
+external call, emitted as a GOT-relative `s_swappc_b64` -- and only the link
+forces the symbol to resolve. It runs in a subprocess because an intrinsic that
+exists but is unsupported on the target reaches `report_fatal_error`, which
+kills the process.
+
+The split is what makes this cheap: we do not need a hand-written compatibility
+matrix, we can read each answer off its own oracle.
+
+    stage A resolves      -> continue to stage B
+    stage A verbatim      -> "name_absent"   this SPELLING is not an intrinsic
+                                             in this LLVM (flavor axis)
+    link OK               -> "ok"            available here
+    Cannot select / fatal -> "arch_absent"   the name is real, this target
+                                             cannot lower it (arch axis)
+
+Three more buckets exist so that a non-answer is never recorded as a negative:
+
+    invalid target ID     -> "target_unsupported"  this clang cannot target this
+                                                   arch at all; it has no opinion
+    clang crashed         -> "toolchain_crash"     asking the question killed the
+                                                   compiler; we did not get an
+                                                   answer, only a bug report
+    anything else         -> "probe_error"         OUR module was malformed
+
+`name_absent` deserves care when reading results: it means the exact mangled
+string rocke emits is not a known intrinsic. A genuinely nonexistent operation
+and a merely mis-mangled overload suffix are indistinguishable here -- both are
+bugs in the decl table, but they are different bugs.
+
+# Provenance is not optional
+
+A result is only meaningful against the toolchain that produced it, and a host
+can only ever validate its own flavor. The artifact therefore records the clang
+identity and the flavor rocke resolved, and the generator refuses to run when
+those two disagree -- an artifact labelled with the wrong LLVM vintage is worse
+than no artifact, because it looks authoritative.
+
+Usage:
+  python rocke/platform/tools/gen_arch_domain.py            # write the artifact
+  python rocke/platform/tools/gen_arch_domain.py --check    # CI: regen is a no-op
+  python rocke/platform/tools/gen_arch_domain.py --only mfma --verbose
+  python rocke/platform/tools/gen_arch_domain.py --keep-ir DIR
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures as cf
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROCKE = HERE.parent  # tools -> rocke/platform
+
+SCHEMA = "rocke.intrinsic_arch_domain/v1"
+DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
+
+
+def default_out(flavor: str) -> Path:
+    """One artifact per flavor, named after it.
+
+    A single shared file would be wrong, not merely inconvenient: a host can
+    only ever measure its own LLVM, so whichever flavor ran last would silently
+    overwrite the others and `--check` would fail on every machine whose
+    toolchain differs from the one that blessed the file. Naming the flavor
+    makes each column independently ownable and independently checkable.
+    """
+    return DATA_DIR / f"intrinsic_arch_domain.{flavor}.json"
+
+
+STATUS_OK = "ok"
+STATUS_NAME_ABSENT = "name_absent"
+STATUS_ARCH_ABSENT = "arch_absent"
+STATUS_TARGET_UNSUPPORTED = "target_unsupported"
+STATUS_TOOLCHAIN_CRASH = "toolchain_crash"
+STATUS_TOOLCHAIN_TIMEOUT = "toolchain_timeout"
+STATUS_PROBE_ERROR = "probe_error"
+
+# Bumped when the probe *semantics* change -- not when this file is merely
+# edited -- and recorded into every column so a committed answer can be told
+# apart from one an older generator measured.
+#
+# The need is not hypothetical. The llvm20 column blessed before `-O0` became
+# mandatory records `ok` for six arches on
+# `llvm.amdgcn.raw.ptr.buffer.load.async.lds`, and the current generator cannot
+# reproduce that on the same toolchain build because the probe does not
+# terminate at all: at -O3 the call was deleted before it could hang, and the
+# empty module linked. Nothing in the artifact said which generator wrote it,
+# so the only way to find that out was to re-measure and notice the
+# contradiction.
+#
+#   1 -- initial, probes at -O3
+#   2 -- probes at -O0, per-probe timeout, provenance recorded
+GENERATOR = 2
+
+# Hoisted out of `_probe` so the artifact can record the flags that actually
+# ran rather than a hand-copied list that drifts from them. `-O0` is the one
+# that decides correctness (see `_probe`), which is exactly why a column must
+# carry proof it was used.
+PROBE_CFLAGS = ("-O0", "-nogpulib")
+
+# A probe that has not answered in this long is not going to. A probe module is
+# a single declare and a single call, and the normal cost is tens of
+# milliseconds, so this is roughly three orders of magnitude of headroom.
+#
+# The budget exists to bound the *sweep*, not to hurry any one probe. Without
+# it a single non-terminating probe hangs the whole run, `--check` never
+# returns, and the drift gate's own subprocess timeout fires 30 minutes later
+# as an error rather than a verdict -- one unlucky key takes down the gate for
+# every host running that flavor.
+PROBE_TIMEOUT_S = 60
+
+
+def _bootstrap_sys_path() -> None:
+    """Import rocke from the checkout without an external PYTHONPATH, matching
+    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
+    the decl table lives entirely in platform."""
+    path = ROCKE / "python"
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+
+# --------------------------------------------------------------------------
+# Probe module synthesis
+# --------------------------------------------------------------------------
+
+# Parameter attributes that may appear between the type and the comma. They are
+# legal on a declare but carry no meaning for us, and `immarg` is the only one
+# that changes what we must pass at the call site.
+_PARAM_ATTRS = ("nocapture", "readnone", "readonly", "writeonly", "immarg")
+
+
+def _split_params(params: str) -> list[str]:
+    """Split a declare's parameter list on top-level commas.
+
+    Aggregate types contain commas of their own (`{ i32, i32 }`), so a plain
+    `.split(",")` corrupts them.
+    """
+    out: list[str] = []
+    depth = 0
+    cur = ""
+    for ch in params:
+        if ch in "<{[(":
+            depth += 1
+        elif ch in ">}])":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+
+def _param_type(param: str) -> tuple[str, bool]:
+    """Strip parameter attributes, returning (type, is_immarg)."""
+    is_imm = "immarg" in param
+    ty = param
+    for attr in _PARAM_ATTRS:
+        ty = ty.replace(attr, "")
+    return " ".join(ty.split()), is_imm
+
+
+_DECL_RE = re.compile(r"^declare\s+(.+?)\s+@([\w.]+)\((.*)\)\s*$")
+
+# `Segmentation fault (core dumped)` vs `Segmentation fault` is a property of
+# the host's core-dump settings, not of the crash. See `_crash_reason`.
+_CORE_DUMPED_RE = re.compile(r"\s*\(core dumped\)\s*$")
+
+# The buffer fat pointer is not a legal kernel-argument type and cannot be
+# produced by an addrspacecast, so it is the one operand we still pass poison
+# for. That is safe here: the gfx942 control above lowers fine with a poison
+# resource as long as the *integer* operands are real values.
+_FAT_PTR = "ptr addrspace(8)"
+
+# Literal values the immediate-operand rescue tries, in order. See
+# `_probe_module`'s `literal_ints` and `_wants_literals`.
+_LITERAL_PROBE_VALUES = (0, 4)
+
+# The two ways LLVM reports "that operand had to be an immediate". llvm22
+# rejects the call in the verifier; llvm20 has no such check and instead dies
+# during type legalisation, which is why the same decl-table gap reads as a
+# frontend error on one vintage and a backend error on the other.
+_IMMEDIATE_OPERAND_DIAGS = (
+    "immarg operand has non-immediate parameter",
+    "do not know how to expand this operator's operand",
+)
+
+
+def _wants_literals(status: str, evidence: str) -> bool:
+    """True when a failure looks like our probe passed a variable where the
+    intrinsic demands a constant, rather than a real arch answer."""
+    if status not in (STATUS_ARCH_ABSENT, STATUS_PROBE_ERROR):
+        return False
+    low = evidence.lower()
+    return any(d in low for d in _IMMEDIATE_OPERAND_DIAGS)
+
+
+def _probe_module(
+    decl: str, datalayout: str, literal_ints: int | None = None
+) -> tuple[str, str]:
+    """Build a minimal module that declares an intrinsic and calls it.
+
+    Returns (module_text, ""), or ("", reason) when the declare cannot be
+    parsed -- an unparseable row is a probe_error, never a negative result.
+
+    Every non-constant operand is a real SSA value, not `poison`. `poison` is a
+    valid constant of every first-class type and so looks like the obvious
+    generic choice, but it makes the probe lie: a poison `i32` operand sends
+    `raw.ptr.buffer.load.lds` into "Do not know how to expand this operator's
+    operand!" on gfx942, where the same call with concrete integers lowers
+    cleanly -- a false arch_absent. Integers, floats, vectors and aggregates
+    therefore arrive as kernel arguments, and non-generic pointers as an
+    addrspacecast of one.
+
+    `literal_ints`, when set, replaces every integer kernel argument with that
+    literal value. Some operands must be immediates even though the declare
+    does not mark them `immarg`: rocke's decl table is hand-written and records
+    `immarg` only where an author happened to add it, while LLVM checks the
+    real intrinsic signature. `raw.ptr.buffer.load.lds`'s size operand is the
+    example, and the two vintages report the mismatch differently -- llvm20
+    fails to legalise (on *every* arch, reading as a universal arch_absent when
+    the truth is "CDNA yes, RDNA no"), llvm22 rejects it up front with "immarg
+    operand has non-immediate parameter". This variant exists to rescue both,
+    and only those two diagnostics.
+
+    The result is stored `volatile` so the call survives -O3; without it, DCE
+    would drop the reference and the link would succeed spuriously.
+    """
+    m = _DECL_RE.match(decl.strip())
+    if not m:
+        return "", f"cannot parse declare: {decl!r}"
+    ret, name, params = m.groups()
+    ret = ret.strip()
+
+    kargs: list[str] = []
+    prologue: list[str] = []
+    args: list[str] = []
+    for i, param in enumerate(_split_params(params)):
+        ty, is_imm = _param_type(param)
+        if ty == "metadata":
+            # Not a first-class type. rocke's only metadata operands are the
+            # av.* scope lists, which want a real scope node, not an empty one.
+            args.append("metadata !0")
+        elif is_imm:
+            args.append(f"{ty} {'false' if ty == 'i1' else '0'}")
+        elif ty == _FAT_PTR:
+            args.append(f"{ty} poison")
+        elif literal_ints is not None and re.fullmatch(r"i\d+", ty):
+            lit = literal_ints
+            args.append(f"{ty} {('true' if lit else 'false') if ty == 'i1' else lit}")
+        elif ty == "ptr":
+            args.append("ptr %base")
+        elif re.fullmatch(r"ptr addrspace\(\d+\)", ty):
+            prologue.append(f"  %p{i} = addrspacecast ptr %base to {ty}")
+            args.append(f"{ty} %p{i}")
+        else:
+            kargs.append(f"{ty} %a{i}")
+            args.append(f"{ty} %a{i}")
+
+    call = f"call {ret} @{name}({', '.join(args)})"
+    if ret == "void":
+        tail = f"  {call}\n"
+    else:
+        tail = f"  %r = {call}\n  store volatile {ret} %r, ptr addrspace(1) %out\n"
+
+    signature = ", ".join(["ptr addrspace(1) %out", "ptr %base", *kargs])
+    text = (
+        f'target datalayout = "{datalayout}"\n'
+        'target triple = "amdgcn-amd-amdhsa"\n\n'
+        f"{decl.strip()}\n\n"
+        f"define amdgpu_kernel void @probe({signature}) {{\n"
+        "entry:\n" + "".join(f"{line}\n" for line in prologue) + tail + "  ret void\n"
+        "}\n\n"
+        '!0 = !{!"agent"}\n'
+    )
+    return text, ""
+
+
+def _name_exists(opt: str, decl: str, scratch: Path) -> tuple[bool, str]:
+    """Ask this LLVM whether it recognises the declare's name as an intrinsic.
+
+    This is the *flavor* axis, and it is worth answering separately because it
+    is arch-free: a name either exists in this LLVM or it does not, and asking
+    once per key replaces one link probe per arch.
+
+    The oracle is that LLVM resolves a recognised `llvm.*` declare on parse --
+    it attaches the intrinsic's attribute set and, for overloaded intrinsics,
+    remangles the name (`ds.read.tr16.b64` prints back as `...b64.v4i16`). An
+    unrecognised `llvm.*` name is just an external function and round-trips
+    verbatim. No codegen is involved, so this also answers the cases where
+    codegen crashes outright: an `llvm.*` name with a `metadata` operand that
+    LLVM does not know is lowered as an ordinary call, and computing the
+    alignment of a metadata argument segfaults the backend.
+    """
+    src = scratch / "name.ll"
+    src.write_text(decl.strip() + "\n", encoding="utf-8")
+    proc = subprocess.run(
+        [opt, "-S", "-o", "-", str(src)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False, f"opt rejected the declare: {_first_error(proc.stderr)}"
+    for line in proc.stdout.splitlines():
+        if line.startswith("declare "):
+            attributed = re.search(r"#\d+\s*$", line) is not None
+            m = _DECL_RE.match(re.sub(r"\s*#\d+\s*$", "", line))
+            canonical = m.group(2) if m else ""
+            if attributed:
+                return True, canonical
+            # Remangled but attribute-free: still a resolved intrinsic.
+            original = _DECL_RE.match(decl.strip())
+            if original and canonical and canonical != original.group(2):
+                return True, canonical
+            return False, ""
+    # The declare did not survive the round-trip at all. An unrecognised
+    # `llvm.*` name is an ordinary external function and is printed back
+    # verbatim even when unused, so a vanished declare means AutoUpgrade
+    # consumed it -- `amdgcn.global.atomic.fadd` becoming a plain `atomicrmw`
+    # is the live example. That still links, so the name counts as present.
+    return True, "(auto-upgraded)"
+
+
+# --------------------------------------------------------------------------
+# Probe execution + classification
+# --------------------------------------------------------------------------
+
+
+def _classify(rc: int, diag: str) -> tuple[str, str]:
+    """Map a clang invocation to (status, evidence).
+
+    Order matters: "invalid target ID" is a frontend rejection that can coexist
+    with nothing else, and must be checked before the backend diagnostics.
+    """
+    if rc == 0:
+        return STATUS_OK, ""
+    low = diag.lower()
+    if "invalid target id" in low:
+        return STATUS_TARGET_UNSUPPORTED, "invalid target ID"
+    if "undefined symbol" in low:
+        return STATUS_NAME_ABSENT, _first_error(diag)
+    # Three ways the backend says "this target cannot lower that": instruction
+    # selection has no pattern, type legalisation cannot break the operand
+    # down, and the generic lowering wants a runtime libcall the device does
+    # not have. All three are reached only *after* the name resolved, so the
+    # flavor axis is already settled by _name_exists() and cannot be confused
+    # with them here.
+    if (
+        "cannot select" in low
+        or "do not know how to expand this operator's operand" in low
+        or "no libcall available for" in low
+    ):
+        return STATUS_ARCH_ABSENT, _first_error(diag)
+    # The compiler died rather than answered. This is NOT arch_absent: we did
+    # not learn that the target cannot lower the intrinsic, only that asking
+    # crashes LLVM. It gets its own status because folding it into either
+    # neighbour loses a finding -- `permlane64` on the wave64 targets segfaults
+    # instruction selection on llvm20 -- and because a crash is reproducible,
+    # so it stays stable under `--check` the way a resource failure would not.
+    if "please submit a bug report" in low or "stack dump:" in low:
+        return STATUS_TOOLCHAIN_CRASH, _crash_reason(diag)
+    # Unrecognised failure. Attributing it to the arch would be a guess, and a
+    # wrong guess here silently bakes a false negative into the artifact.
+    return STATUS_PROBE_ERROR, _first_error(diag)
+
+
+def _crash_reason(diag: str) -> str:
+    """Summarise a clang crash without embedding host-specific paths.
+
+    The crash dump leads with the full `-cc1` command line, which carries temp
+    directories and the resource-dir path. Committing that would make the
+    artifact differ between hosts for no informational gain, so keep only the
+    pass name and the signal.
+
+    The signal name needs the same treatment for a less obvious reason: the
+    driver appends `(core dumped)` only when the kernel actually wrote one,
+    which depends on the host's `ulimit -c` and core_pattern rather than on
+    anything about the compiler. Leaving it in makes the committed evidence
+    differ between two machines that observed the identical crash, so `--check`
+    reports drift where there is none -- the one failure mode a drift gate
+    cannot afford.
+    """
+    parts = []
+    for line in diag.splitlines():
+        s = line.strip()
+        if s.startswith("Running pass"):
+            parts.append(s.rstrip("."))
+        elif "unable to execute command:" in s:
+            reason = s.split("unable to execute command:")[-1].strip()
+            parts.append(_CORE_DUMPED_RE.sub("", reason).strip())
+    return "; ".join(parts[-2:])[:200] or "clang crashed"
+
+
+def _first_error(text: str) -> str:
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if "error" in low or "undefined symbol" in low or "cannot select" in low:
+            return s[:200]
+    return (text.strip().splitlines() or ["(no diagnostic)"])[0][:200]
+
+
+def _probe(
+    clang: str,
+    path: Path,
+    arch: str,
+    out: Path,
+    timeout: float = PROBE_TIMEOUT_S,
+) -> tuple[str, str]:
+    """Compile AND LINK one probe module for one arch.
+
+    `-nogpulib` is required, not an optimisation: without it clang links the
+    ROCm device bitcode, which on a multi-install host can come from a DIFFERENT
+    ROCm than the one rocke resolved (observed: a 7.1 bitcode set pulled into a
+    probe, with datalayout-mismatch warnings). The probe must measure the
+    compiler, not the device libraries.
+
+    `-O0` is also required, and for a subtler reason: at -O3 the IR pipeline can
+    delete the very call we are asking about, and a module with nothing left to
+    select links happily. llvm.amdgcn.permlane64 on gfx942 is the case that
+    found this -- a kernel argument is wave-uniform, permlane64 of a uniform
+    value folds to the identity, and LLVM 22's InstCombine folds it away. The
+    object contained no permlane64 at all, the link succeeded, and the probe
+    reported ok for a target where the instruction does not exist. Nine of the
+    149 keys are foldable this way. -O0 keeps the call alive to ISel, which is
+    the only place that can answer the question.
+
+    Keeping the call alive also exposes probes that never terminate -- llvm20
+    spins indefinitely on `raw.ptr.buffer.load.async.lds` for every arch that
+    can target it -- so the timeout is part of the same bargain rather than a
+    defensive extra. A probe that runs out of budget is reported as
+    `toolchain_timeout` and never as `arch_absent`: not finishing is not an
+    answer about the target.
+    """
+    argv = [
+        clang,
+        "-x",
+        "ir",
+        *PROBE_CFLAGS,
+        "-target",
+        "amdgcn-amd-amdhsa",
+        f"-mcpu={arch}",
+        "-o",
+        str(out),
+        str(path),
+    ]
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            # Run from the scratch directory, not from wherever the sweep was
+            # invoked. Probing is *expected* to crash clang -- that is what
+            # `toolchain_crash` records -- and a crash on a host with core dumps
+            # enabled drops a multi-megabyte `core` next to the caller. Run the
+            # sweep from a checkout and those land in the worktree.
+            cwd=str(out.parent),
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            STATUS_TOOLCHAIN_TIMEOUT,
+            f"clang did not terminate within {timeout:g}s",
+        )
+    return _classify(proc.returncode, (proc.stderr or proc.stdout).strip())
+
+
+# --------------------------------------------------------------------------
+# Inputs: the decl table, the arch list, the toolchain identity
+# --------------------------------------------------------------------------
+
+
+def _decl_table(flavor: str) -> dict[str, str]:
+    """The decls a _Lowerer would resolve for this flavor.
+
+    Mirrors `_Lowerer.__init__` exactly -- base table, then the per-flavor
+    override dict. Duplicating the merge here rather than importing a private
+    helper keeps the tool honest about what it measured, but it is a mirror and
+    must be updated if the resolution rule gains a rung.
+    """
+    from rocke.core import lower_llvm as L
+
+    decls = dict(L._INTRINSIC_DECLS)
+    if flavor == L.LLVM_FLAVOR_LLVM22:
+        decls.update(L._INTRINSIC_DECLS_LLVM22_OVERRIDES)
+    elif flavor == L.LLVM_FLAVOR_LLVM23:
+        decls.update(L._INTRINSIC_DECLS_LLVM23_OVERRIDES)
+    return decls
+
+
+def _clang_identity(clang: str) -> str:
+    try:
+        proc = subprocess.run(
+            [clang, "--version"], capture_output=True, text=True, check=False
+        )
+        return (proc.stdout or "").strip().splitlines()[0][:200]
+    except (OSError, IndexError):
+        return "(unknown)"
+
+
+def _flavor_of_clang(identity: str) -> str | None:
+    """Best-effort LLVM major from `clang --version`, as a flavor string."""
+    m = re.search(r"clang version (\d+)", identity)
+    return f"llvm{m.group(1)}" if m else None
+
+
+def _available_cpus(cgroup_root: Path = Path("/sys/fs/cgroup")) -> int:
+    """CPUs this process may actually use, not the CPUs the host has.
+
+    `os.cpu_count()` reports the machine. Inside a container it is the wrong
+    number by a wide margin -- a sweep launched in a two-CPU container on a
+    large host sized itself for the host and ran six clang processes against
+    two cores. That is not merely slow: the probes are already near the
+    resource limits this cap exists to stay under (see the call site), and
+    oversubscription is how a `probe_error` starts depending on load.
+
+    Three sources, narrowest first. Affinity covers cpuset pinning, `cpu.max`
+    covers a CFS quota (cgroup v2, then v1) -- a quota is a *rate*, so a
+    fractional share rounds up to one whole worker rather than to zero.
+
+    `cgroup_root` is a parameter so the quota branch is reachable from a test.
+    Neither this host nor the probe containers impose a quota, so left
+    hardcoded it would be the one path nothing ever executes.
+    """
+    counts = []
+
+    getaffinity = getattr(os, "sched_getaffinity", None)
+    if getaffinity is not None:
+        try:
+            counts.append(len(getaffinity(0)))
+        except OSError:
+            pass
+
+    for quota_path, period_path in (
+        (cgroup_root / "cpu.max", None),
+        (
+            cgroup_root / "cpu" / "cpu.cfs_quota_us",
+            cgroup_root / "cpu" / "cpu.cfs_period_us",
+        ),
+    ):
+        try:
+            if period_path is None:
+                quota_s, period_s = quota_path.read_text().split()[:2]
+            else:
+                quota_s = quota_path.read_text().strip()
+                period_s = period_path.read_text().strip()
+            # "max" (v2) and a negative quota (v1) both mean unlimited.
+            if quota_s == "max":
+                continue
+            quota, period = int(quota_s), int(period_s)
+            if quota > 0 and period > 0:
+                counts.append(max(1, -(-quota // period)))
+        except (OSError, ValueError):
+            continue
+
+    counts.append(os.cpu_count() or 4)
+    return max(1, min(counts))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
+    ap.add_argument(
+        "--check", action="store_true", help="regenerate and fail on any diff"
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="override the artifact path (default: one file per flavor)",
+    )
+    ap.add_argument("--only", default=None, help="substring filter on decl keys")
+    ap.add_argument(
+        "--arch", action="append", default=None, help="limit to these arches"
+    )
+    ap.add_argument(
+        "--keep-ir", type=Path, default=None, help="keep probe modules here"
+    )
+    ap.add_argument("--jobs", type=int, default=0)
+    ap.add_argument("--verbose", action="store_true")
+    args = ap.parse_args()
+
+    _bootstrap_sys_path()
+    sys.path.insert(0, str(HERE))
+    from check_ir_validity import _llvm_tool  # same resolution order, one owner
+    from rocke.core import lower_llvm as L
+    from rocke.core.isa.backend import wired_arches
+
+    flavor = L._resolve_llvm_flavor()
+    clang = _llvm_tool("clang")
+    opt = _llvm_tool("opt")
+
+    print("rocKE intrinsic arch-domain generator")
+    print(f"   flavor : {flavor}")
+    print(f"   clang  : {clang or '(not found)'}")
+    print(f"   opt    : {opt or '(not found)'}")
+
+    if clang is None:
+        print(
+            "\nRESULT: UNVALIDATED - no clang found under the resolved ROCm "
+            "install or on PATH; nothing was probed. Set ROCKE_LLVM_BIN."
+        )
+        return 0
+
+    identity = _clang_identity(clang)
+    print(f"   version: {identity}")
+
+    # A probe result is only meaningful against the flavor it was measured on.
+    # Recording llvm20 results in an artifact stamped llvm23 would be actively
+    # misleading, so disagreement is fatal rather than a warning.
+    clang_flavor = _flavor_of_clang(identity)
+    if clang_flavor and clang_flavor != flavor:
+        print(
+            f"\nERROR: clang reports {clang_flavor} but rocke resolved {flavor}. "
+            "The probe would be attributed to the wrong LLVM vintage. "
+            "Set ROCKE_LLVM_BIN to the matching toolchain, or ROCKE_LLVM_FLAVOR "
+            "if the override is intended."
+        )
+        return 2
+
+    arches = sorted(args.arch) if args.arch else sorted(wired_arches())
+    decls = _decl_table(flavor)
+    keys = sorted(k for k in decls if not args.only or args.only in k)
+    print(f"   arches : {', '.join(arches)}")
+    print(f"   keys   : {len(keys)}")
+
+    tmp = tempfile.TemporaryDirectory(prefix="rocke_arch_domain_")
+    ir_dir = args.keep_ir if args.keep_ir else Path(tmp.name)
+    ir_dir.mkdir(parents=True, exist_ok=True)
+
+    datalayout = L._datalayout_for_flavor(flavor)
+
+    # Build every probe module first; an unparseable declare is a probe_error
+    # for every arch rather than a crash mid-sweep.
+    modules: dict[str, tuple[Path | None, str]] = {}
+    literal_modules: dict[str, list[Path]] = {}
+    for key in keys:
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
+        text, why = _probe_module(decls[key], datalayout)
+        if why:
+            modules[key] = (None, why)
+            continue
+        path = ir_dir / f"{stem}.ll"
+        path.write_text(text)
+        modules[key] = (path, "")
+        # Two literal values, tried in order. Neither is safe alone: 0 is
+        # rejected where the operand is a byte count, and a nonzero value is
+        # out of range where the operand is a small enum (an MFMA cbsz/blgp
+        # selector, say). Trying both keeps the rescue from depending on which
+        # kind of operand we happened to hit.
+        variants = []
+        for lit in _LITERAL_PROBE_VALUES:
+            lit_text, why_lit = _probe_module(decls[key], datalayout, literal_ints=lit)
+            if not why_lit and lit_text != text:
+                lit_path = ir_dir / f"{stem}.lit{lit}.ll"
+                lit_path.write_text(lit_text)
+                variants.append(lit_path)
+        if variants:
+            literal_modules[key] = variants
+
+    # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
+    # `opt` run instead of one link per arch, and it is the only stage that can
+    # answer a key whose codegen crashes.
+    canonical: dict[str, str] = {}
+    absent: set[str] = set()
+    for key in keys:
+        exists, note = (
+            _name_exists(opt, decls[key], Path(ir_dir)) if opt else (True, "")
+        )
+        if exists:
+            canonical[key] = note
+        else:
+            absent.add(key)
+    print(
+        f"   names  : {len(keys) - len(absent)} present, {len(absent)} absent in {flavor}"
+    )
+
+    # Stage B -- the arch axis, only for names that exist.
+    work = [(k, a) for k in keys if k not in absent for a in arches]
+
+    def run(item: tuple[str, str]) -> tuple[str, str, str, str]:
+        key, arch = item
+        path, why = modules[key]
+        if path is None:
+            return key, arch, STATUS_PROBE_ERROR, why
+        out = Path(ir_dir) / f"{path.stem}.{arch}.hsaco"
+        status, evidence = _probe(clang, path, arch, out)
+        # Rescue a suspected false negative. Both diagnostics below are the
+        # signature of "this operand had to be an immediate" -- llvm22 says so
+        # outright, llvm20 only fails to legalise -- so a literal-operand
+        # re-probe that lowers cleanly means the arch does support the
+        # intrinsic and our first probe was simply malformed.
+        #
+        # Scoped to those two diagnostics on purpose: literals give the backend
+        # strictly more information, so a blanket retry could constant-fold a
+        # genuinely unsupported intrinsic away and manufacture an `ok`.
+        if _wants_literals(status, evidence) and key in literal_modules:
+            # Try every literal value before giving up: a value that is out of
+            # range for one operand kind is in range for another, and stopping
+            # at the first non-OK answer would let an unlucky first choice
+            # masquerade as the arch's verdict.
+            settled: tuple[str, str] | None = None
+            last: tuple[str, str] | None = None
+            for i, lit_path in enumerate(literal_modules[key]):
+                lit_out = Path(ir_dir) / f"{path.stem}.lit{i}.{arch}.hsaco"
+                lit_status, lit_evidence = _probe(clang, lit_path, arch, lit_out)
+                if lit_status == STATUS_OK:
+                    return key, arch, STATUS_OK, ""
+                last = (lit_status, lit_evidence)
+                if settled is None and not _wants_literals(lit_status, lit_evidence):
+                    settled = last
+            # Every variant still failed to legalise -- but with no variable
+            # integer operands left, that is no longer something our probe can
+            # fix, so it is the target speaking. gfx942 takes this call with a
+            # literal size and gfx1201 does not, on both llvm20 and llvm22.
+            # The verifier's immarg complaint is excluded on purpose: surviving
+            # the literal sweep means the non-immediate operand is not an
+            # integer, which really is our module's fault.
+            if settled is None and last and last[0] == STATUS_ARCH_ABSENT:
+                settled = last
+            status, evidence = settled or (status, evidence)
+        return key, arch, status, evidence
+
+    # Threads, not processes: each unit of work is already its own subprocess.
+    #
+    # The cap is deliberately well under the core count. Each probe is a clang
+    # that itself spawns ld.lld, so the process fan-out is ~2x the worker count
+    # and saturating a big host hits RLIMIT_NPROC -- observed as `posix_spawn
+    # failed: Resource temporarily unavailable` and as std::system_error from
+    # clang's own thread pool. Those surface as probe_error, and a probe_error
+    # that depends on machine load would make the artifact nondeterministic and
+    # `--check` flaky. Staying cheap is worth more here than being fast.
+    jobs = args.jobs or min(8, _available_cpus())
+    results: dict[str, dict[str, dict[str, str]]] = {k: {} for k in keys}
+
+    def record(key: str, arch: str, status: str, evidence: str) -> None:
+        cell: dict[str, str] = {"status": status, "verified_on": flavor}
+        if evidence and status != STATUS_OK:
+            cell["evidence"] = evidence
+        results[key][arch] = cell
+
+    for key in absent:
+        for arch in arches:
+            record(key, arch, STATUS_NAME_ABSENT, f"not an intrinsic in {flavor}")
+
+    with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
+        for key, arch, status, evidence in ex.map(run, work):
+            record(key, arch, status, evidence)
+            if args.verbose and status != STATUS_OK:
+                print(f"     {key:44s} {arch:14s} {status}")
+
+    # Second pass, serial: anything that failed in a way we could not classify,
+    # and anything that took the toolchain down with it, gets one more chance
+    # with no contention. A real result is stable under retry; a resource
+    # failure is not, and under -j the probes fork enough linkers to hit the
+    # process limit occasionally -- llvm.fabs.f32 on gfx11-generic aborted that
+    # way once in three runs and would otherwise have been recorded as a
+    # permanent compiler crash. A genuine crash (permlane64 on the wave64
+    # targets) reproduces serially, so the retry separates the two. Cells that
+    # survive stay as they were, which is the honest answer.
+    #
+    # A timeout retries on the same budget rather than a larger one. The retry
+    # is there to remove contention, not to grant more time: if 60 uncontended
+    # seconds are not enough for a module this small, more seconds will not
+    # change the verdict, and raising the budget only to watch a known hang
+    # spin costs the whole sweep. A probe that was merely starved by a loaded
+    # host clears the same bar easily once it has the machine to itself.
+    unstable = (STATUS_PROBE_ERROR, STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT)
+    retry = [(k, a) for k, a in work if results[k][a]["status"] in unstable]
+    if retry:
+        print(f"   retrying {len(retry)} unclassified/crashed probe(s) serially...")
+        for key, arch in retry:
+            _k, _a, status, evidence = run((key, arch))
+            record(key, arch, status, evidence)
+
+    doc = {
+        "schema": SCHEMA,
+        "_comment": (
+            "GENERATED by tools/gen_arch_domain.py -- do not hand-edit. "
+            "Which intrinsic declarations link for which gfx target, measured "
+            "by compiling AND LINKING a probe module per (key, arch). Only the "
+            "flavor named in toolchain.flavor was measured; every other flavor "
+            "is unvalidated on this host by construction. See "
+            "dsl_docs/development/arch_axis_proposal.md."
+        ),
+        # Provenance. `clang` alone identifies the compiler but not how it was
+        # asked, and the two questions have different answers: the same
+        # toolchain build reports `ok` or hangs for the same key depending on
+        # the optimisation level the probe used. A column that does not carry
+        # these fields was written by generator 1 and cannot be trusted where
+        # it says `ok`.
+        "toolchain": {
+            "flavor": flavor,
+            "clang": identity,
+            "arches": arches,
+            "generator": GENERATOR,
+            "probe_cflags": list(PROBE_CFLAGS),
+            "probe_timeout_s": PROBE_TIMEOUT_S,
+        },
+        "keys": results,
+        # What this LLVM resolved each surviving declare to. Mostly identical
+        # to the declared name; the interesting rows are the overloaded
+        # intrinsics that remangle (`ds.read.tr16.b64` -> `...b64.v4i16`) and
+        # the legacy ones AutoUpgrade rewrites, because both are places where
+        # what rocke emits and what the toolchain executes differ.
+        "canonical": {k: v for k, v in sorted(canonical.items()) if v},
+    }
+    text = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+
+    counts: dict[str, int] = {}
+    for key in keys:
+        for arch in arches:
+            s = results[key][arch]["status"]
+            counts[s] = counts.get(s, 0) + 1
+    print("\n   " + "  ".join(f"{s}={n}" for s, n in sorted(counts.items())))
+
+    out = args.out or default_out(flavor)
+
+    if args.check:
+        if not out.is_file():
+            # Not a failure. A host can only measure its own flavor, so a
+            # flavor nobody has blessed yet simply has no column to check --
+            # failing here would red every CI machine running a newer ROCm.
+            print(
+                f"\nUNVALIDATED: no committed column for {flavor} "
+                f"({out.name}); nothing to check. Run without --check to add one."
+            )
+            return 0
+        if out.read_text() != text:
+            print(
+                f"\nFAIL: {out} is stale -- regenerating changed it.\n"
+                "      Re-run without --check and commit the result."
+            )
+            return 1
+        print(f"\nOK: {out.name} is up to date.")
+        return 0
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    print(f"\nwrote {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
