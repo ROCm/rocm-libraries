@@ -1303,7 +1303,12 @@ class GlobalWriteBatchWriter:
           module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -1 -> exec"))
 
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+        # SourceSwap: vc1 varies within an LDS round, so rowInc fires per element. Both the
+        # SRD row pointer and storeRemapCoord1 would then advance a full tile *before*
+        # storeRemapAddStore flushes that round, writing it to the next round's rows. Defer
+        # the whole advance to after the flush (see the StoreRemapLastBatch blocks below).
+        _ssDeferRowAdv = self.kernel["SourceSwap"] and self.kernel["StoreRemapVectorWidth"] > 0
+        if (not _ssDeferRowAdv) and self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
           module.addComment1("StoreRemap: shift coord1 address MultipleBufferSingleKernel")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
@@ -1386,7 +1391,7 @@ class GlobalWriteBatchWriter:
         sumIdx = self.ss.elementSumIdx[elementIdx]
         if self.kernel["StoreRemapVectorWidth"]:
           rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
-          module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
+          module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe, self.batchElements[elementIdx][2]))
           # Column Block Shape has been written to LDS
           # Now read back and write out to global memory
       # module.add(storeCodeGSUSK)
@@ -1399,6 +1404,27 @@ class GlobalWriteBatchWriter:
         self._epilogScratchFree(tmpInrSgpr)
         module.add(storeModule)
         self.storesIssued += numNewStores
+        if self.kernel["SourceSwap"]:
+          # The other half of _ssDeferRowAdv above: that suppressed the per-element advance,
+          # this performs it once, here, after the round has been flushed. StoreRemapVectorWidth
+          # is already guaranteed non-zero by the enclosing condition.
+          # One LDS round covers MatrixInstN*MIWaveGroup[1] rows of C/D. storeRemapAddStore
+          # addresses via SrdD + storeRemapOffsetCoord1 (within-tile), so the cross-round step
+          # belongs to the SRD; storeRemapCoord1 is the absolute row used by the edge check.
+          _tileRows = self.kernel["MatrixInstN"] * self.kernel["MIWaveGroup"][1]
+          _bpeD = self.parentWriter.states.bpeCexternal
+          packedC1 = self.kernel["PackedC1IndicesX"]
+          _strideD1 = "StrideD%s" % (self.parentWriter.states.indexChars[packedC1[0]])
+          module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr(_strideD1), src1=_tileRows * _bpeD,
+                             comment="storeRemap: next LDS round = %u rows" % _tileRows))
+          module.add(SAddU32(dst=sgpr("SrdD+0"), src0=sgpr("SrdD+0"), src1=sgpr(self.tmpS01),
+                             comment="storeRemap: SrdD += one LDS round"))
+          module.add(SAddCU32(dst=sgpr("SrdD+1"), src0=sgpr("SrdD+1"), src1=0,
+                              comment="storeRemap: SrdD carry"))
+          module.add(VMovB32(vgpr(self.tmpVgpr), _tileRows, comment="storeRemap: rows per LDS round"))
+          module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1),
+                             vgpr(self.parentWriter.vgprs.storeRemapCoord1),
+                             vgpr(self.tmpVgpr), "storeRemap: coord1 += one LDS round"))
 
     gsuComponent = Component.GSU.find(self.parentWriter)
     module.add(gsuComponent.globalWriteBatchProlog(self.parentWriter, self.kernel, self.tmpVgpr, self.tmpVgprSize, self.tmpVgprDynamic, \
@@ -1523,6 +1549,27 @@ class GlobalWriteBatchWriter:
         self._epilogScratchFree(tmpInrSgpr)
         module.add(storeModule)
         self.storesIssued += numNewStores
+        if self.kernel["SourceSwap"]:
+          # The other half of _ssDeferRowAdv above: that suppressed the per-element advance,
+          # this performs it once, here, after the round has been flushed. StoreRemapVectorWidth
+          # is already guaranteed non-zero by the enclosing condition.
+          # One LDS round covers MatrixInstN*MIWaveGroup[1] rows of C/D. storeRemapAddStore
+          # addresses via SrdD + storeRemapOffsetCoord1 (within-tile), so the cross-round step
+          # belongs to the SRD; storeRemapCoord1 is the absolute row used by the edge check.
+          _tileRows = self.kernel["MatrixInstN"] * self.kernel["MIWaveGroup"][1]
+          _bpeD = self.parentWriter.states.bpeCexternal
+          packedC1 = self.kernel["PackedC1IndicesX"]
+          _strideD1 = "StrideD%s" % (self.parentWriter.states.indexChars[packedC1[0]])
+          module.add(SMulI32(dst=sgpr(self.tmpS01), src0=sgpr(_strideD1), src1=_tileRows * _bpeD,
+                             comment="storeRemap: next LDS round = %u rows" % _tileRows))
+          module.add(SAddU32(dst=sgpr("SrdD+0"), src0=sgpr("SrdD+0"), src1=sgpr(self.tmpS01),
+                             comment="storeRemap: SrdD += one LDS round"))
+          module.add(SAddCU32(dst=sgpr("SrdD+1"), src0=sgpr("SrdD+1"), src1=0,
+                              comment="storeRemap: SrdD carry"))
+          module.add(VMovB32(vgpr(self.tmpVgpr), _tileRows, comment="storeRemap: rows per LDS round"))
+          module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1),
+                             vgpr(self.parentWriter.vgprs.storeRemapCoord1),
+                             vgpr(self.tmpVgpr), "storeRemap: coord1 += one LDS round"))
 
     if self.parentWriter.states.serializedStore:
       module.add(SNop(0, "1 wait state required when next inst writes vgprs held by previous dwordx4 store inst"))
@@ -1932,7 +1979,12 @@ class GlobalWriteBatchWriter:
       # Already write wave column block into LDS
       # Now read lds data back to registers and write to global memroy
       if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+        # SourceSwap: vc1 varies within an LDS round, so rowInc fires per element. Both the
+        # SRD row pointer and storeRemapCoord1 would then advance a full tile *before*
+        # storeRemapAddStore flushes that round, writing it to the next round's rows. Defer
+        # the whole advance to after the flush (see the StoreRemapLastBatch blocks below).
+        _ssDeferRowAdv = self.kernel["SourceSwap"] and self.kernel["StoreRemapVectorWidth"] > 0
+        if (not _ssDeferRowAdv) and self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
           module.addComment1("StoreRemap: shift coord1 address")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
@@ -2565,7 +2617,7 @@ class GlobalWriteBatchWriter:
       else:
         if not self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
           rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
-          module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
+          module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe, self.batchElements[elementIdx][2]))
           # Column Block Shape has been written to LDS
           # Now read back and write out to global memory
         else:

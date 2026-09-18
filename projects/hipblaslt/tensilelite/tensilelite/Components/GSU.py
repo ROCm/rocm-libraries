@@ -1453,7 +1453,7 @@ class GSUOn(GSU):
                         glc=isGlc, slc=isSlc, nt=isNT, hi16=0, scope=wsScope, comment="store WS"))
                 else:
                     rpe = writer.states.bpeCinternal // writer.states.bpr
-                    storeCodeGSUSK.add(writer.storeRemapAddLocalWrite(kernel, ss, addrCalc, sumIdx*rpe))
+                    storeCodeGSUSK.add(writer.storeRemapAddLocalWrite(kernel, ss, addrCalc, sumIdx*rpe, batchElements[elementIdx][2]))
                     # Column Block Shape has been written to LDS
                     # Now read back and write out to global memory
                 # TODO(CLS+flat): buffer-only soffset bump. Flat needs a persistent 64-bit addr walk.

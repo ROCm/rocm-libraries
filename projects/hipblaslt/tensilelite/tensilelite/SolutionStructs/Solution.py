@@ -6736,9 +6736,9 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["StoreRemapVectorWidth"]:
-      if state["SourceSwap"]:
-        reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
-        return
+      #if state["SourceSwap"]:
+      #  reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
+      #  return
       if state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1:
         reject(state, printRejectionReason, "VW>1 not compatible with StoreRemap")
         return
@@ -6829,10 +6829,15 @@ class Solution(collections.abc.Mapping):
       storeInstMinWidth = 1 # minimum dwordx1
       storeInstMaxWidth = 4 # maximum dwordx4
       srMinVw = max(storeInstMinWidth, int(storeInstMinWidth/state["ProblemType"]["DestDataType"].numRegisters()))
-      numReg  = max(state["ProblemType"]["DestDataType"].numRegisters(), state["ProblemType"]["ComputeDataType"].numRegisters())
+      # Sized on DestDataType alone, not max(Dest, Compute). This value constrains only the
+      # direct store, which writes DestDataType. The GSU branch does store the f32 workspace
+      # through the same remap, but it no longer inherits this width: globalWriteElements
+      # narrows it there to storeRemapGsuGwvw = min(SRVW, 16 // bpeCinternal) and re-emits the
+      # gwvw-dependent addresses. Sizing on the compute type instead would let the f32 path
+      # cap the f16 one at SRVW 4, which forbids MacroTile0 > 128 for no reason.
+      numReg  = state["ProblemType"]["DestDataType"].numRegisters()
 
       srMaxVw = int(storeInstMaxWidth/numReg)
-      # FIXME: Add StoreRemapVectorWidthGSU and StoreRemapVectorWidthNonGSU
       while srMaxVw < state["StoreRemapVectorWidth"]:
         state["StoreRemapVectorWidth"] = state["StoreRemapVectorWidth"] // 2
       if srMinVw > state["StoreRemapVectorWidth"] or srMaxVw < state["StoreRemapVectorWidth"]:
@@ -6841,12 +6846,41 @@ class Solution(collections.abc.Mapping):
 
       if state["StoreRemapVectorWidth"] * state["WavefrontSize"] < state["MacroTile0"]:
         reject(state, printRejectionReason, "storeRemap: Per wave single global write instruction doesn't enough to write one M column." + \
-               " Please use larger StoreRemapVectorWidth.")
+               " Please use larger StoreRemapVectorWidth(%u).(%u)"%(state["StoreRemapVectorWidth"], state["MacroTile0"]))
         return
       if (state["MacroTile0"]*state["MatrixInstN"])//state["MIWaveGroup"][0] < state["StoreRemapVectorWidth"]*state["WavefrontSize"]:
         reject(state, printRejectionReason, "storeRemap: number elements of lds less than per wave per local read elements." + \
                " Please use smaller StoreRemapVectorWidth.")
         return
+      if state["SourceSwap"]:
+        # SourceSwap needs three things, all in place: the LDS-write coord0/coord1 derivation
+        # (storeRemapComputeStoreVgprs), the vc1 row walk (storeRemapAddLocalWrite), and the
+        # tt1-only column-block grouping (refineOccupancy). Validated numerically across
+        # MIWaveTile/MIWaveGroup combinations from MT16x16 up to MT256x256.
+        #
+        # Only MatrixInstBM/BN == 1 and a coord1 span that fits the LDS tile are derived; both
+        # are checked below. Note VectorWidthA/B must be 1 -- a pre-existing storeRemap
+        # restriction enforced earlier in this function.
+        if state["MatrixInstBM"] != 1 or state["MatrixInstBN"] != 1:
+          reject(state, printRejectionReason, \
+                 "storeRemap + SourceSwap: MatrixInstBM(%u)/MatrixInstBN(%u) > 1 is not derived" \
+                 % (state["MatrixInstBM"], state["MatrixInstBN"]))
+          return
+        # A thread's coord1 base plus the vc1 row walk must land inside the
+        # MatrixInstN*MIWaveGroup[1] rows the LDS tile allocates.
+        _mit  = min(state["MatrixInstM"], state["MatrixInstN"])
+        _miM  = state["MatrixInstM"] * state["MatrixInstBM"] if (state["MatrixInstM"] == 4) else _mit
+        _base = state["VectorWidthB"] * ( \
+                  state["MatrixInstN"] * state["MatrixInstBN"] * (state["MIWaveGroup"][1] - 1) \
+                  + state["MIOutputVectorWidth"] * (state["WavefrontSize"] // _miM - 1))
+        _walk = state["VectorWidthB"] * state["MIOutputVectorWidth"] - 1
+        _rows = state["MatrixInstN"] * state["MIWaveGroup"][1]
+        if _base + _walk >= _rows:
+          reject(state, printRejectionReason, \
+                 "storeRemap + SourceSwap: coord1 base %u + row walk %u exceeds the %u LDS rows " \
+                 "allocated. Try VectorWidthB=1 (VectorWidthB runs along N, the strided direction " \
+                 "of C/D, so it does not widen the store anyway)." % (_base, _walk, _rows))
+          return
       ldsRemapPad = max(state["StoreRemapVectorWidth"],state["MIOutputVectorWidth"])
       ldsNumBytesRemapC = (state["MacroTile0"]+ldsRemapPad)* state["MatrixInstN"] * state["MIWaveGroup"][1]
 
