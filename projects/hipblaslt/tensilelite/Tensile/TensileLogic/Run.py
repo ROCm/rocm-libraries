@@ -36,13 +36,13 @@ import rocisa
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 
-from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
-from Tensile.LibraryIO import readYAML
-from Tensile.Toolchain.Validators import validateToolchain
+from ..Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
+from ..Common.Architectures import SUPPORTED_ISA
+from ..Common.Capabilities import makeIsaInfoMap
+from ..Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
+from ..LibraryIO import readYAML
+from ..Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments, BUNDLED_KNOWN_BUGS
 from .KnownBugs import (
