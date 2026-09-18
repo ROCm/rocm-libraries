@@ -779,6 +779,76 @@ class SNop(Instruction):
 # forwarding to the matching _stinkytofu.<ClassName>(dst, src0, src1, comment).
 
 
+def _enum_value(value: Any, default: int = 0) -> int:
+    """Return an enum-like object's integer value."""
+    if value is None:
+        return default
+    return int(getattr(value, "value", value))
+
+
+def _apply_vop3(inst: Any, vop3: Any) -> None:
+    """Forward all VOP3P fields accepted by logical IR."""
+    if vop3 is None:
+        return
+    inst.set_vop3(
+        op_sel=list(getattr(vop3, "op_sel", None) or []),
+        op_sel_hi=list(getattr(vop3, "op_sel_hi", None) or []),
+        byte_sel=list(getattr(vop3, "byte_sel", None) or []),
+    )
+
+
+def _apply_sdwa(inst: Any, sdwa: Any) -> None:
+    """Forward SDWA fields accepted by logical IR."""
+    if sdwa is None:
+        return
+    inst.set_sdwa(
+        dst_sel=_enum_value(getattr(sdwa, "dst_sel", None)),
+        dst_unused=_enum_value(getattr(sdwa, "dst_unused", None)),
+        src0_sel=_enum_value(getattr(sdwa, "src0_sel", None)),
+        src1_sel=_enum_value(getattr(sdwa, "src1_sel", None)),
+    )
+
+
+def _apply_flat(inst: Any, modifier: Any) -> None:
+    """Forward rocisa FLAT modifiers to logical IR."""
+    if modifier is None:
+        return
+    from .base import getAsmCaps  # noqa: WPS433
+    caps = getAsmCaps()
+    inst.set_flat(
+        offset=getattr(modifier, "offset12", 0),
+        glc=getattr(modifier, "glc", False),
+        slc=getattr(modifier, "slc", False),
+        lds=getattr(modifier, "lds", False),
+        is_store=getattr(modifier, "isStore", False),
+        has_glc_modifier=bool(caps.get("HasGLCModifier", 0)),
+        has_sc0_modifier=bool(caps.get("HasSC0Modifier", 0)),
+        scope=_enum_value(getattr(modifier, "scope", None)),
+        th=_enum_value(getattr(modifier, "th", None), -1),
+    )
+
+
+def _apply_global(inst: Any, modifier: Any) -> None:
+    """Forward rocisa GLOBAL modifiers to logical IR."""
+    if modifier is None:
+        return
+    from .base import getAsmCaps  # noqa: WPS433
+    caps = getAsmCaps()
+    inst.set_global(
+        offset=getattr(modifier, "offset", 0),
+        th=_enum_value(getattr(modifier, "th", None), -1),
+        scope=_enum_value(getattr(modifier, "scope", None)),
+        glc=getattr(modifier, "glc", False),
+        slc=getattr(modifier, "slc", False),
+        dlc=getattr(modifier, "dlc", False),
+        lds=getattr(modifier, "lds", False),
+        is_store=getattr(modifier, "isStore", False),
+        has_glc_modifier=bool(caps.get("HasGLCModifier", 0)),
+        has_sc0_modifier=bool(caps.get("HasSC0Modifier", 0)),
+        has_dlc_modifier=bool(caps.get("HasDLCModifier", 0)),
+    )
+
+
 def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType",
                            base: type = None):
     """Factory for scalar/vector ALU instruction shim classes (dst, src0, src1).
@@ -844,13 +914,9 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
         # e.g. GlobalWriteBatch emits ``v_pk_mul_f32 ... op_sel_hi:[0,1,1]``
         # for the alpha-scale packed multiply; dropping op_sel_hi yields an
         # "invalid op_sel operand" from the assembler.
-        v = getattr(self, "vop3", None)
-        if v is not None:
-            inst.set_vop3(
-                op_sel=list(getattr(v, "op_sel", None) or []),
-                op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
-                byte_sel=list(getattr(v, "byte_sel", None) or []),
-            )
+        _apply_vop3(inst, getattr(self, "vop3", None))
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
+        _apply_true16(inst, self.dst, self.srcs)
         return inst
 
     def __deepcopy__(self, memo):
@@ -876,7 +942,8 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         base = CommonInstruction
 
     def __init__(self, dst: Any, src: Any = None,
-                 comment: str = "", sdwa: Any = None, dpp: Any = None, **kw):
+                 comment: str = "", sdwa: Any = None, dpp: Any = None,
+                 vop3: Any = None, **kw):
         _ = kw
         CommonInstruction.__init__(
             self,
@@ -885,7 +952,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
             srcs=[src],
             dpp=dpp,
             sdwa=sdwa,
-            vop3=None,
+            vop3=vop3,
             comment=comment,
         )
         self.setInst(mnemonic)
@@ -897,8 +964,9 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src_reg = _to_stinky_register(self.srcs[0])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src_reg, comment=self.comment)
-        if getattr(self, 'vop3', None) is not None:
-            inst.set_vop3(op_sel=self.vop3.op_sel)
+        _apply_vop3(inst, getattr(self, "vop3", None))
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
+        _apply_true16(inst, self.dst, self.srcs)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1167,7 +1235,9 @@ def _make_scalar_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src0_reg = _to_stinky_register(self.srcs[0])  # value
         src1_reg = _to_stinky_register(self.srcs[1])  # shift amount
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -1284,13 +1354,8 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
         # e.g. GlobalWriteBatch emits ``v_fma_mix_f32 ... op_sel:[..] op_sel_hi:[0,1,0]``
         # for the beta-scale mix-precision FMA; dropping op_sel_hi makes the
         # kernel read the wrong fp16 half and produces incorrect results.
-        v = getattr(self, "vop3", None)
-        if v is not None:
-            inst.set_vop3(
-                op_sel=list(getattr(v, "op_sel", None) or []),
-                op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
-                byte_sel=list(getattr(v, "byte_sel", None) or []),
-            )
+        _apply_vop3(inst, getattr(self, "vop3", None))
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
         return inst
 
     def __deepcopy__(self, memo):
@@ -1344,6 +1409,7 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
         return inst
 
     def __deepcopy__(self, memo):
@@ -1443,7 +1509,10 @@ class VCndMaskB32(CommonInstruction):
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
         src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
-        return _st.VCndMaskB32(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+        inst = _st.VCndMaskB32(
+            dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -2041,6 +2110,7 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
         return inst
 
     def __deepcopy__(self, memo):
@@ -3381,7 +3451,10 @@ def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType")
         src_reg = _to_stinky_register(self.srcs[0])
         scale_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src_reg, scale_reg, comment=self.comment)
+        inst = factory(dst_reg, src_reg, scale_reg, comment=self.comment)
+        _apply_vop3(inst, getattr(self, "vop3", None))
+        _apply_sdwa(inst, getattr(self, "sdwa", None))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3504,7 +3577,10 @@ class FlatAtomicDecU32(CommonInstruction):
         dst_reg = _to_stinky_register(self.dst)
         addr_reg = _to_stinky_register(self.srcs[0])
         data_reg = _to_stinky_register(self.srcs[1])
-        return _st.FlatAtomicDecU32(dst_reg, addr_reg, data_reg, comment=self.comment)
+        inst = _st.FlatAtomicDecU32(
+            dst_reg, addr_reg, data_reg, comment=self.comment)
+        _apply_flat(inst, self.flat)
+        return inst
 
     def __deepcopy__(self, memo):
         clone = CommonInstruction.__deepcopy__(self, memo)
@@ -3541,8 +3617,10 @@ class GlobalAtomicIncU32Saddr(CommonInstruction):
         vaddr_reg = _to_stinky_register(self.srcs[0])
         data_reg = _to_stinky_register(self.srcs[1])
         saddr_reg = _to_stinky_register(self.srcs[2])
-        return _st.GlobalAtomicIncU32Saddr(dst_reg, vaddr_reg, data_reg, saddr_reg,
-                                           comment=self.comment)
+        inst = _st.GlobalAtomicIncU32Saddr(
+            dst_reg, vaddr_reg, data_reg, saddr_reg, comment=self.comment)
+        _apply_global(inst, self.glob)
+        return inst
 
     def __deepcopy__(self, memo):
         clone = CommonInstruction.__deepcopy__(self, memo)
@@ -3725,10 +3803,12 @@ def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1, base
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
+        _apply_flat(inst, self.flat)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3760,11 +3840,13 @@ def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1, bas
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.dst),
             comment=self.comment)
+        _apply_flat(inst, self.flat)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3796,11 +3878,13 @@ def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1, ba
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
+        _apply_flat(inst, self.flat)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4072,11 +4156,13 @@ def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
+        _apply_global(inst, self._modifier)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -4805,13 +4891,17 @@ def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
 class MFMAInstruction(Instruction):
     """``v_mfma_*`` shim (rocisa ``MFMAInstruction``)."""
 
-    __slots__ = ("accType", "variant", "mfma1k", "acc", "a", "b", "acc2", "acc2_imm", "neg")
+    __slots__ = (
+        "accType", "variant", "mfma1k", "acc", "a", "b", "acc2", "acc2_imm",
+        "neg", "reuseA", "reuseB",
+    )
 
     def __init__(self, instType: Any = None, accType: Any = None,
                  variant: Any = None, mfma1k: bool = False,
                  acc: Any = None, a: Any = None, b: Any = None,
                  acc2: Any = None, acc2_imm: Any = None, neg: bool = False,
-                 comment: str = "", **kw):
+                 comment: str = "", reuseA: bool = False, reuseB: bool = False,
+                 **kw):
         _ = kw
         super().__init__(instType, comment)
         self.accType = accType
@@ -4823,6 +4913,8 @@ class MFMAInstruction(Instruction):
         self.acc2 = acc2
         self.acc2_imm = acc2_imm
         self.neg = neg
+        self.reuseA = reuseA
+        self.reuseB = reuseB
 
     def preStr(self) -> str:
         """Port of rocisa MFMAInstruction::preStr (mfma.hpp)."""
@@ -4906,6 +4998,8 @@ class MFMAInstruction(Instruction):
             _to_stinky_register(self.b),
             acc2=acc2_reg,
             neg=self.neg,
+            reuseA=self.reuseA,
+            reuseB=self.reuseB,
             matrixAFmt=matrix_a_fmt,
             matrixBFmt=matrix_b_fmt,
             scaled=scaled,
@@ -4942,6 +5036,8 @@ class MFMAInstruction(Instruction):
         clone.acc2 = _deepcopy(self.acc2, memo) if self.acc2 is not None else None
         clone.acc2_imm = self.acc2_imm
         clone.neg = self.neg
+        clone.reuseA = self.reuseA
+        clone.reuseB = self.reuseB
         return clone
 
 
@@ -4949,7 +5045,8 @@ class MXMFMAInstruction(Instruction):
     """``v_wmma_scale_*`` / ``v_mfma_scale_*`` shim (rocisa ``MXMFMAInstruction``)."""
 
     __slots__ = ("accType", "mxScaleAType", "mxScaleBType", "variant",
-                 "acc", "a", "b", "acc2", "mxsa", "mxsb", "vop3", "mxCBSZ", "block")
+                 "acc", "a", "b", "acc2", "mxsa", "mxsb", "vop3", "mxCBSZ",
+                 "block", "reuseA", "reuseB", "mxScaleASel", "mxScaleBSel")
 
     def __init__(self, *, instType: Any = None, accType: Any = None,
                  variant: Any = None, acc: Any = None,
@@ -4958,7 +5055,9 @@ class MXMFMAInstruction(Instruction):
                  vop3: Any = None,
                  mxScaleAType: Any = None, mxScaleBType: Any = None,
                  mxCBSZ: int = 0, block: int = 32,
-                 comment: str = "", **kw):
+                 comment: str = "", reuseA: bool = False, reuseB: bool = False,
+                 mxScaleASel: int = 0, mxScaleBSel: int = 0,
+                 **kw):
         _ = kw
         super().__init__(instType, comment)
         self.accType = accType
@@ -4973,6 +5072,10 @@ class MXMFMAInstruction(Instruction):
         self.mxsb = mxsb
         self.vop3 = vop3
         self.mxCBSZ = mxCBSZ
+        self.reuseA = reuseA
+        self.reuseB = reuseB
+        self.mxScaleASel = mxScaleASel
+        self.mxScaleBSel = mxScaleBSel
         # MX scale block size (16 or 32); selects v_wmma_scale vs v_wmma_scale16.
         # rocisa passes this via `block=max(MXBlockA, MXBlockB)`. It is distinct
         # from variant[3] (the MI blocks count, typically 1).
@@ -5011,7 +5114,7 @@ class MXMFMAInstruction(Instruction):
         has_wmma_v3 = bool(getAsmCaps().get("HasWMMA_V3", 0))
         matrix_a_fmt, matrix_b_fmt = _wmma_matrix_fmts(
             self.instType, m, n, k, has_wmma_v3)
-        return _st.MXMFMA(
+        inst = _st.MXMFMA(
             mx_type_str,
             _inst_type_to_str(self.accType),
             _inst_type_to_str(self.mxScaleAType) if self.mxScaleAType else "f32",
@@ -5023,9 +5126,15 @@ class MXMFMAInstruction(Instruction):
             _to_stinky_register(self.acc2) if self.acc2 else None,
             _to_stinky_register(self.mxsa) if self.mxsa else None,
             _to_stinky_register(self.mxsb) if self.mxsb else None,
+            reuseA=self.reuseA,
+            reuseB=self.reuseB,
             matrixAFmt=matrix_a_fmt,
             matrixBFmt=matrix_b_fmt,
+            mxScaleASel=self.mxScaleASel,
+            mxScaleBSel=self.mxScaleBSel,
             comment=self.comment)
+        _apply_vop3(inst, self.vop3)
+        return inst
 
     def getParams(self):
         return [self.acc, self.a, self.b]
@@ -5061,6 +5170,10 @@ class MXMFMAInstruction(Instruction):
         clone.vop3 = self.vop3
         clone.mxCBSZ = self.mxCBSZ
         clone.block = self.block
+        clone.reuseA = self.reuseA
+        clone.reuseB = self.reuseB
+        clone.mxScaleASel = self.mxScaleASel
+        clone.mxScaleBSel = self.mxScaleBSel
         return clone
 
 
