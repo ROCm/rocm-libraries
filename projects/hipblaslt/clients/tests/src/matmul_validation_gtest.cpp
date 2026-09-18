@@ -119,6 +119,32 @@ TEST(HostNumericsMatmulValidation, EmptyOutputsAreNoOps)
     EXPECT_EQ(summary.averageUlp, 0.0);
 }
 
+TEST(HostNumericsMatmulValidation, UnitCheckPreservesNonFiniteSemantics)
+{
+    using namespace hipblaslt::host_numerics;
+
+    const float          nan = std::numeric_limits<float>::quiet_NaN();
+    MatmulValidationCase matching;
+    MatmulValidationCase mismatching;
+    matching.outputs.push_back(scalarComparison(nan, nan));
+    mismatching.outputs.push_back(scalarComparison(nan, 1.0f));
+    const MatmulValidationOptions options{.compareAllClose = true};
+
+    EXPECT_TRUE(validateMatmulOutputs(options, std::span(&matching, 1)).passed);
+    EXPECT_FALSE(validateMatmulOutputs(options, std::span(&mismatching, 1)).passed);
+}
+
+TEST(HostNumericsMatmulValidation, NormOnlyPreservesNonFiniteConsistencyCheck)
+{
+    using namespace hipblaslt::host_numerics;
+
+    const float          infinity = std::numeric_limits<float>::infinity();
+    MatmulValidationCase mismatching;
+    mismatching.outputs.push_back(scalarComparison(infinity, 1.0f));
+
+    EXPECT_FALSE(validateMatmulOutputs({.compareNorm = true}, std::span(&mismatching, 1)).passed);
+}
+
 TEST(MatmulAlgoIndex, MixedValidityContract)
 {
     hipblaslt_local_handle handle;

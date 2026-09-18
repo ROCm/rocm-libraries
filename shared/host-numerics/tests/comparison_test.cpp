@@ -25,6 +25,87 @@ void testComparisonProgram() {
                 !emptyResult.ulpEvaluated,
             "Runtime fast comparison rejected an empty tensor.");
 
+    ComparisonOptions encodedEquality;
+    encodedEquality.equalNaNs = true;
+    encodedEquality.computeElementwiseStatistics = false;
+    encodedEquality.computeFrobenius = false;
+    encodedEquality.maxReportedMismatches = 0;
+    encodedEquality.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+
+    const float quietNaN = std::numeric_limits<float>::quiet_NaN();
+    const std::array<float, 4> identicalValues{quietNaN, -0.0f, 1.0f, -2.0f};
+    const ComparisonReport identicalResult = compare(
+        Tensor::copyNativeStorage(std::span<const float>(identicalValues)),
+        Tensor::copyNativeStorage(std::span<const float>(identicalValues)), encodedEquality);
+    require(identicalResult.passed() && identicalResult.compared == identicalValues.size() &&
+                identicalResult.matchedNaNs == 0 && identicalResult.matchedInfinities == 0,
+            "Encoded-equality comparison changed all-close-only report semantics.");
+
+    for (size_t typeIndex = 0; typeIndex < scalarTypeCount; ++typeIndex) {
+        const ScalarType type = static_cast<ScalarType>(typeIndex);
+        Tensor expected(type, Shape{16});
+        const Tensor observed = expected.deepCopy();
+        const ComparisonReport result = compare(observed, expected, encodedEquality);
+        require(result.passed() && result.compared == expected.elementCount(),
+                "Encoded-equality comparison failed for a supported scalar type.");
+    }
+
+    ComparisonOptions unequalNaNs = encodedEquality;
+    unequalNaNs.equalNaNs = false;
+    const std::array<float, 1> identicalNaN{quietNaN};
+    require(!compare(Tensor::copyNativeStorage(std::span<const float>(identicalNaN)),
+                     Tensor::copyNativeStorage(std::span<const float>(identicalNaN)), unequalNaNs)
+                 .passed(),
+            "Encoded-equality comparison accepted NaNs when equalNaNs was disabled.");
+
+    const std::array<float, 1> positiveZero{0.0f};
+    const std::array<float, 1> negativeZero{-0.0f};
+    require(
+        compare(Tensor::copyNativeStorage(std::span<const float>(positiveZero)),
+                Tensor::copyNativeStorage(std::span<const float>(negativeZero)), encodedEquality)
+            .passed(),
+        "Encoded-equality fallback distinguished signed zeros.");
+
+    const std::array<std::byte, 2> packedExpected{std::byte{0xa5}, std::byte{0xbc}};
+    const std::array<std::byte, 2> packedObserved{std::byte{0xa6}, std::byte{0xbc}};
+    const Layout packedOffsetLayout(Shape{3}, {1}, 1);
+    require(compare(Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
+                                                      packedObserved),
+                    Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
+                                                      packedExpected),
+                    encodedEquality)
+                .passed(),
+            "Encoded-equality optimization compared packed bits outside the logical tensor.");
+    const std::array<std::byte, 2> packedMismatch{std::byte{0xa5}, std::byte{0xac}};
+    require(!compare(Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
+                                                       packedMismatch),
+                     Tensor::copyEncodedBackingStorage(ScalarType::Float4E2M1, packedOffsetLayout,
+                                                       packedExpected),
+                     encodedEquality)
+                 .passed(),
+            "Encoded-equality optimization ignored a packed logical mismatch.");
+
+    const std::array<float, 5> paddedExpected{1.0f, 2.0f, 99.0f, 3.0f, 4.0f};
+    const std::array<float, 5> paddedObserved{1.0f, 2.0f, -99.0f, 3.0f, 4.0f};
+    const Layout paddedLayout(Shape{2, 2}, {1, 3});
+    require(compare(Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedObserved)),
+                    Tensor::copyNativeStorage(paddedLayout, std::span<const float>(paddedExpected)),
+                    encodedEquality)
+                .passed(),
+            "Encoded-equality optimization compared padding outside the logical tensor.");
+
+    const std::array<float, 1> closeObserved{1.0001f};
+    const std::array<float, 1> closeExpected{1.0f};
+    ComparisonOptions tolerantEquality = allCloseComparisonOptions(0.001, 0.0, true);
+    tolerantEquality.computeElementwiseStatistics = false;
+    tolerantEquality.computeFrobenius = false;
+    tolerantEquality.maxReportedMismatches = 0;
+    require(
+        compare(Tensor::copyNativeStorage(std::span<const float>(closeObserved)),
+                Tensor::copyNativeStorage(std::span<const float>(closeExpected)), tolerantEquality)
+            .passed(),
+        "Encoded-equality optimization bypassed the numerical tolerance fallback.");
+
     const auto requireInvalidEmptyOptions = [&](const ComparisonOptions& options,
                                                 const char* message) {
         bool rejected = false;
