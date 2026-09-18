@@ -249,9 +249,8 @@ namespace TensileLite
             using std::begin;
             using std::end;
 
-            // An indexed shard carries no materialized solutions to copy, so
-            // stamp the code object name on its cache instead and let it apply
-            // as solutions are parsed.
+            // Indexed shards publish solutions later; stamp the code-object
+            // name on the cache so it is applied as each one is parsed.
             if(mLibrary->blobCache)
                 mLibrary->blobCache->setCodeObjectFilename(filePrefix + ".co");
 
@@ -496,8 +495,8 @@ namespace TensileLite
                              "default behavior."
                           << std::endl;
                 {
-                    // Goes through the resolver: for an indexed library the
-                    // forced index will not be in `solutions` yet.
+                    // Indexed libraries keep unparsed solutions out of
+                    // `solutions`; the resolver walks the cache.
                     auto selected_solution = resolveSolutionByIndex(solution_index);
                     if(!selected_solution)
                     {

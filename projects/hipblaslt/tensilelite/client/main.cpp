@@ -1148,12 +1148,6 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
-    // solution-start-idx and num-solutions are resolved by SolutionIterator from
-    // args below; the local copies that used to be computed here were never read
-    // again, and picking the range off library->solutions here both forced an
-    // indexed library to materialize before the Best/Top iterators could measure
-    // a lazy selection, and decremented end() on an empty map.
-
     std::shared_ptr<DataInitialization> dataInit;
     {
         ScopedTimer timer("data_init_setup");

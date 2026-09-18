@@ -430,9 +430,8 @@ TEST_F(IndexedLibraryLoadTest, RejectsTreeReferenceToIndexNotInTable)
     EXPECT_EQ(library, nullptr);
 }
 
-// offset + length overflows int64 and wraps negative, so a span check written as
-// a sum accepts it and leaves the slice pointing far outside the blob. Loading
-// such a file used to succeed and then read wild memory on materialization.
+// A span check written as offset+length wraps for large values and would
+// accept a slice past the blob. The loader must reject this.
 TEST_F(IndexedLibraryLoadTest, RejectsSpanThatOverflowsSignedArithmetic)
 {
     constexpr int64_t huge = int64_t(1) << 62;
@@ -643,9 +642,8 @@ TEST_F(IndexedLibraryParityTest, IndexedLoadMatchesLegacyLoad)
 
 TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
 {
-    // Guards the hipBLASLt algo-index path, which calls getSolutionByIndex
-    // without a preceding findBestSolution and used to depend on the shard
-    // merge having pre-populated the solutions map.
+    // Guards the hipBLASLt algo-index path: getSolutionByIndex must
+    // resolve with no preceding findBestSolution.
     auto fixture = legacyFixture();
     if(!fs::is_regular_file(fixture))
         GTEST_SKIP() << "no legacy library fixture at " << fixture;

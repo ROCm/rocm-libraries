@@ -107,14 +107,13 @@ namespace TensileLite
             return m_materialized.size();
         }
 
-        /// Code object file name stamped onto every solution as it is
-        /// materialized. Shard loading sets this, because the solutions it used
-        /// to stamp in bulk no longer exist at merge time.
+        /// Code-object filename applied to each solution as it is parsed.
+        /// Also stamped onto anything already in the memo, so a late set()
+        /// still reaches solutions that were materialized first.
         void setCodeObjectFilename(std::string filename)
         {
             std::unique_lock<std::shared_mutex> lock(m_guard);
             m_codeObjectFilename = std::move(filename);
-            // Anything already materialized predates the stamp.
             for(auto const& entry : m_materialized)
                 if(entry.second)
                     entry.second->codeObjectFilename = m_codeObjectFilename;

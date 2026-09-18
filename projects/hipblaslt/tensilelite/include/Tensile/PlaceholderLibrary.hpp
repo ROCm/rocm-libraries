@@ -181,9 +181,8 @@ namespace TensileLite
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
                 library = mLibrary->library;
 
-                // Indexed shards have nothing materialized to stamp in bulk
-                // below, so the name goes on the cache and is applied to each
-                // solution as it is parsed.
+                // Indexed shards publish solutions later; stamp the name on
+                // the cache so it is applied as each one is parsed.
                 if(mLibrary->blobCache)
                     mLibrary->blobCache->setCodeObjectFilename(getCodeObjectFileName());
 

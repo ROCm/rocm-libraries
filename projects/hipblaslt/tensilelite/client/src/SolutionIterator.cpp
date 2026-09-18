@@ -359,18 +359,13 @@ namespace TensileLite
         {
             m_firstSolutionIdx = firstSolutionIdx;
 
-            // This iterator walks every solution by construction, so an indexed
-            // library gains nothing from staying lazy here -- and the index
-            // range below is picked straight off the solutions map, which is
-            // empty for that format until something publishes into it. Note this
-            // has to be materializeAllSolutions() and not the blob cache's own
-            // materializeAll(): leaf nodes resolve through the cache and never
-            // touch the map, so filling the cache alone would leave the reads
-            // below dereferencing an empty map.
+            // Indexes library->solutions. For an indexed library that map is
+            // empty until caches are parsed and published; materializeAllSolutions()
+            // does both. The cache's own materializeAll() only parses, and
+            // leaves the reads below on an empty map.
             //
-            // Scoped to this iterator on purpose: the Best/Top iterators are
-            // what load-latency measurements go through, and materializing for
-            // them would erase the very cost this is meant to reduce.
+            // Best/Top iterators must not call this: they measure selection
+            // latency and should stay lazy.
             library->materializeAllSolutions();
 
             if(library->solutions.empty())
