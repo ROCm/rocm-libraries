@@ -4,7 +4,9 @@
 show_help() {
     cat << EOF
 
-Usage: $(basename "$0") [benchmarks] [precisions] [sizes]
+Usage: $(basename "$0") [benchmarks] [precisions] [sizes] [-e]
+
+Pass -e to perform computations with emulated single and double precision (only for the cusolver path)
 
 benchmarks to run
 valid options are: (default will run all of them)
@@ -97,6 +99,7 @@ Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfNpvt
 suite=""
 precision=""
 case=""
+emul=false
 
 if [ $# == 0 ]; then
     suite=$Slist
@@ -106,6 +109,10 @@ else
     args=$@
     for a in $args; do
         error=true
+        if [ $a == "-e" ]; then
+            emul=true
+            error=false
+        fi
         for s in $Slist; do
             if [ $a == $s ]; then
                 new=true
@@ -192,7 +199,11 @@ mkdir -p "$output_dir"
 # --------------------------------- #
 for s in $suite; do
     for p in $precision; do
-        python3 hipsolver-perfoptim-suite.py -v -o "$output_dir/$p${s}_benchmarks.csv" $s $p $case
+        if $emul; then
+            python3 hipsolver-perfoptim-suite.py --emulated -v -o "$output_dir/$p${s}_benchmarks_emul.csv" $s $p $case
+        else
+            python3 hipsolver-perfoptim-suite.py -v -o "$output_dir/$p${s}_benchmarks.csv" $s $p $case
+        fi
     done
 done
 

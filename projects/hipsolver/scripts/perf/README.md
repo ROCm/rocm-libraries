@@ -78,6 +78,8 @@ medium -> see definitions in hipsolver_suites.py for included size values
 large  -> see definitions in hipsolver_suites.py for included size values
 huge   -> see definitions in hipsolver_suites.py for included size values
 (note: several can be selected)
+
+Pass -e to perform computations with emulated single and double precision (only for the cusolver path)
 ```
 
 For example, benchmarking `geqrf` with real and complex single precisions on the small and large size cases would look like this:
@@ -85,3 +87,9 @@ For example, benchmarking `geqrf` with real and complex single precisions on the
 ./perfoptim-suite geqrf s c small large
 ```
 After completion, the results of the benchmark will have been written to `hipsolver_customer01_benchmarks/sgeqrf_benchmarks.csv` and `hipsolver_customer01_benchmarks/cgeqrf_benchmarks.csv` for the real single precision case and the complex single precision case, respectively.
+
+Emulated single and double precision can be enabled when using cusolver like this:
+```
+./perfoptim-suite -e geqrf s c small large 
+```
+After completion, the results of the benchmark will have been written to `hipsolver_customer01_benchmarks/sgeqrf_benchmarks_emul.csv` and `hipsolver_customer01_benchmarks/cgeqrf_benchmarks_emul.csv` for the real single precision case and the complex single precision case, respectively. 

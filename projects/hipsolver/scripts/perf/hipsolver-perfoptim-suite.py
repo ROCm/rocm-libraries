@@ -78,7 +78,7 @@ def call_hipsolver_bench(bench_executable, *args):
             process.returncode)
 
 
-def execute_benchmarks(output_file, suite, precision, case, bench_executable, local):
+def execute_benchmarks(output_file, suite, precision, case, bench_executable, local, emulated):
     """
     EXECUTE_BENCHMARKS collects the arguments for the benchmark client, calls
     the client, gets the resulting time, and writes everything to output file
@@ -89,6 +89,9 @@ def execute_benchmarks(output_file, suite, precision, case, bench_executable, lo
 
     for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision,
                                                     sizenormal=sizenormal, sizebatch=sizebatch):
+        if emulated:
+            bench_args += ' --math_mode fp32_fp64'
+        
         # Run benchmark
         # TODO: for some reason, the hipsolver-bench outputs results to stderr. 
         # this may need revision in the future.
@@ -126,6 +129,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog='hipsolver-perfoptim-suite',
         description='Executes a selected suite of benchmarks and collates the results.')
+    parser.add_argument('--emulated',
+            action='store_true',
+            help='perform computations with emulated single and double precision (only cusolver path)')
     parser.add_argument('-v','--verbose',
             action='store_true',
             help='display more information about operations being performed')
@@ -154,6 +160,6 @@ if __name__ == '__main__':
 
     if args.output_path is not None and not args.local:
         with open(args.output_path, 'w', buffering=1, encoding='utf-8') as output_file:
-            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe, args.local)
+            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe, args.local, args.emulated)
     else:
-        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe, args.local)
+        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe, args.local, args.emulated)
