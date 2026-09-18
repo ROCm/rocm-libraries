@@ -6593,8 +6593,15 @@ class KernelWriterAssembly(KernelWriter):
       #---
       imod.addComment1("addr += (StaggerUIter) * GlobalReadIncs%s+%u"% (tc, self.states.unrollIdx))
 
+      # GSU.graIncrements negates GlobalReadIncs when the unroll dimension is
+      # mirrored, so that operand is signed there and unsigned everywhere else.
+      unrollMirrored = tc in ('A', 'B', 'Metadata') \
+          and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] \
+              in kernel["ProblemType"]["MirrorDims%s"%tc]
+      widenIncs = self.s_mul_i64_i32 if unrollMirrored else self.s_mul_u64_u32
+
       # Calculate the stagger byte offset
-      imod.addModuleAsFlatItems(self.s_mul_u64_u32(
+      imod.addModuleAsFlatItems(widenIncs(
                 sgpr(staggerTmp), sgpr(staggerTmp+1), \
                 sgpr("StaggerUIter"), sgpr("GlobalReadIncs%s+%u"%(tc, self.states.unrollIdx)), \
                 comment=" stagger byte offset"))
@@ -6606,7 +6613,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # Amount of bytes to add to get back to start.
       # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-      imod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
+      imod.addModuleAsFlatItems(widenIncs(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
                 self.loopCounter(kernel, self.states.unrollIdx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
                 comment="Number of bytes accessed by the unroll loop"))
 
