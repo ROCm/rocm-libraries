@@ -5223,6 +5223,11 @@ def _split_tmp_regs(tmpSgprRes):
         return tmpSgprRes.idx + 1, tmpSgprRes.idx
 
 
+def _contig_comment(third, comment):
+    """3-contiguous overload: a str third arg is the positional comment; else ``comment=``."""
+    return third if isinstance(third, str) else comment
+
+
 def SLongBranch(label, tmpSgprRes_or_pcPair, offSgpr_or_posLabel=None,
                 positiveLabelStr=None, comment=""):
     """Port of ``rocisa::SLongBranch`` (extension.hpp).
@@ -5231,24 +5236,34 @@ def SLongBranch(label, tmpSgprRes_or_pcPair, offSgpr_or_posLabel=None,
       SLongBranch(label, tmpSgprRes, positiveLabelStr, comment="")
       SLongBranch(label, pcPair, offSgpr, positiveLabelStr, comment="")
     """
-    if isinstance(offSgpr_or_posLabel, str) or offSgpr_or_posLabel is None:
+    if isinstance(offSgpr_or_posLabel, str):
+        # 3-contiguous positional: 3rd is pos label; 4th positional is comment
+        # (bound to *this* ``positiveLabelStr`` slot) unless ``comment=`` is used.
         tmpSgprRes = tmpSgprRes_or_pcPair
-        posLabel = offSgpr_or_posLabel or ""
-        cmt = positiveLabelStr if positiveLabelStr is not None else comment
+        posLabel = offSgpr_or_posLabel
+        cmt = comment or (positiveLabelStr or "")
         if tmpSgprRes.size < 3:
             raise RuntimeError("ContinuousRegister size must be at least 3.")
         tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)
         return _SLongBranchImpl(label, tmpSgprX2, tmpSgprX1, posLabel, cmt)
-    else:
-        pcPair = tmpSgprRes_or_pcPair
-        offSgpr = offSgpr_or_posLabel
+    if offSgpr_or_posLabel is None:
+        # 3-contiguous keyword: ``positiveLabelStr=``, ``comment=``
+        tmpSgprRes = tmpSgprRes_or_pcPair
         posLabel = positiveLabelStr or ""
         cmt = comment
-        if pcPair.size < 2 or pcPair.idx % 2 != 0:
-            raise RuntimeError("pcPair must be a 2-aligned pair.")
-        if offSgpr.size < 1:
-            raise RuntimeError("offSgpr must have at least 1 register.")
-        return _SLongBranchImpl(label, pcPair.idx, offSgpr.idx, posLabel, cmt)
+        if tmpSgprRes.size < 3:
+            raise RuntimeError("ContinuousRegister size must be at least 3.")
+        tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)
+        return _SLongBranchImpl(label, tmpSgprX2, tmpSgprX1, posLabel, cmt)
+    pcPair = tmpSgprRes_or_pcPair
+    offSgpr = offSgpr_or_posLabel
+    posLabel = positiveLabelStr or ""
+    cmt = comment
+    if pcPair.size < 2 or pcPair.idx % 2 != 0:
+        raise RuntimeError("pcPair must be a 2-aligned pair.")
+    if offSgpr.size < 1:
+        raise RuntimeError("offSgpr must have at least 1 register.")
+    return _SLongBranchImpl(label, pcPair.idx, offSgpr.idx, posLabel, cmt)
 
 
 def _SLongBranchImpl(label, tmpSgprX2, tmpSgprX1, positiveLabelStr, comment):
@@ -5295,7 +5310,7 @@ def SLongBranchPositive(label, tmpSgprRes_or_pcPair, offSgpr_or_comment=None,
     Module, Label, ContinuousRegister, sgpr = _ext_lazy()
 
     if isinstance(offSgpr_or_comment, str) or offSgpr_or_comment is None:
-        cmt = offSgpr_or_comment or ""
+        cmt = _contig_comment(offSgpr_or_comment, comment)
         labelName = label.getLabelName()
         module = Module("SLongBranchPositive " + labelName)
         if cmt:
@@ -5345,7 +5360,7 @@ def SLongBranchNegative(label, tmpSgprRes_or_pcPair, offSgpr_or_comment=None,
     """
     if isinstance(offSgpr_or_comment, str) or offSgpr_or_comment is None:
         tmpSgprRes = tmpSgprRes_or_pcPair
-        cmt = offSgpr_or_comment or ""
+        cmt = _contig_comment(offSgpr_or_comment, comment)
         if tmpSgprRes.size < 3:
             raise RuntimeError(
                 "ContinuousRegister size must be at least 3.")
