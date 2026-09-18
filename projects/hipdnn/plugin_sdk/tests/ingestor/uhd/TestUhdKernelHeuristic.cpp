@@ -1822,7 +1822,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, EachCandidateReportsItsOwnGroup)
     // case the sequence serves. Here the two candidates are in different groups by construction.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_per_candidate");
     const auto fixture = writeGroupedFixture(dir.path());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1849,7 +1850,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
     // and its reported group has to match.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_agrees");
     const auto fixture = writeGroupedFixture(dir.path());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1877,7 +1879,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrain
 
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_not_a_defect");
     const auto fixture = writeGroupedFixture(dir.path());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1901,7 +1904,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheGroupFeatureIsNamed)
     // model reads rather than whatever the descriptor happens to list first.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_named");
     const auto fixture = writeGroupedFixture(dir.path());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const auto feature = heuristic->groupFeature();
@@ -1915,7 +1919,8 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ASingleLayerModelReportsNoGroup)
     // shipped UHD. NaN rather than a number, because every real number is a legal group value.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_ungrouped_no_group");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
-    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1937,7 +1942,7 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
     // it never made. The artifact is missing, which is the fallback §5 step 7 names.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_degraded");
     const auto heuristic
-        = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS);
+        = makeKernelHeuristic(modelDescriptor(dir.path(), "not_written.bin"), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
