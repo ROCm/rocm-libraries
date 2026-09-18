@@ -38,6 +38,25 @@
 #include "rocsparse_common.h"
 #include "rocsparse_primitives.hpp"
 
+namespace
+{
+    // Blocks needed to cover `nitems` at `items_per_block` items each, clamped to the
+    // device grid.x limit. The kernel behind the clamp grid-strides over whatever the
+    // clamp drops.
+    //
+    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
+    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
+    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
+    // #11512 lands the body below is the one-line
+    //   return rocsparse::get_grid_size(rocsparse::ceil_div(nitems, items_per_block),
+    //                                   handle->properties.maxGridSize[0]);
+    int64_t grid_size_x(rocsparse_handle handle, int64_t nitems, int64_t items_per_block)
+    {
+        return rocsparse::min((nitems - 1) / items_per_block + 1,
+                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
+    }
+}
+
 #define launch_gebsr2gebsr_fast_kernel(T, direction, block_size, segment_size)     \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \
         (rocsparse::gebsr2gebsr_fast_kernel<direction, block_size, segment_size>), \
@@ -581,11 +600,19 @@ try
 
     constexpr rocsparse_int block_size     = 256;
     rocsparse_int           wavefront_size = handle->wavefront_size;
-    rocsparse_int           grid_size      = mb * row_block_dim / (block_size / wavefront_size);
-    if(mb * row_block_dim % (block_size / wavefront_size) != 0)
-    {
-        grid_size++;
-    }
+
+    // AISPARSE-684. One wavefront per row of the CSR matrix, so the launch is sized
+    // from mb * row_block_dim. Both factors are rocsparse_int and the multiply used
+    // to be evaluated before the division, so the intermediate product overflowed --
+    // signed, hence undefined behaviour -- above INT_MAX even when the final grid
+    // size was perfectly legal (mb = 65536 with row_block_dim = 32768 reaches it, and
+    // nothing bounds row_block_dim beyond rejecting zero above). The product is now
+    // formed in int64_t and the grid clamped against the device limit;
+    // gebsr2csr_nnz_kernel grid-strides over the rows the clamp drops and applies the
+    // same 64-bit widening to the bound it checks against.
+    const int64_t num_rows       = static_cast<int64_t>(mb) * row_block_dim;
+    const int64_t rows_per_block = block_size / wavefront_size;
+    const int64_t grid_size      = grid_size_x(handle, num_rows, rows_per_block);
 
     dim3 blocks(grid_size);
     dim3 threads(block_size);
