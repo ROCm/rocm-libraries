@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Launch hipblaslt-bench-a2a across a rank group on one host.
+
+Starts one process per rank with the RANK / LOCAL_RANK / WORLD_SIZE /
+MASTER_ADDR / MASTER_PORT variables the benchmark reads, and exits non-zero if
+any rank does.
+
+    hipblaslt-bench-a2a-launch --nproc 8 -- --timing 1 --iters 10 --verify 1
+
+Options must precede `--`; everything after it goes to the benchmark. Rank 0
+writes to this process's stdout, the other ranks to <log-dir>/rank<N>.log. When
+a rank exits non-zero the surviving ranks are terminated.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from shutil import which
+
+HERE = Path(__file__).resolve().parent
+BENCH = "hipblaslt-bench-a2a"
+
+
+def resolve_bench(explicit: str | None) -> Path:
+    """Locate the benchmark: --bench, else beside this script, else PATH."""
+    if explicit:
+        path = Path(explicit)
+        if not (path.is_file() and os.access(path, os.X_OK)):
+            sys.exit(f"ERROR: --bench {path} is not an executable file.")
+        return path
+    beside = HERE / BENCH
+    if os.access(beside, os.X_OK):
+        return beside
+    found = which(BENCH)
+    if found:
+        return Path(found)
+    sys.exit(
+        f"ERROR: {BENCH} not found beside this script or on PATH; pass --bench PATH. "
+        "It is built only when hipBLASLt is configured with --gemm-a2a-fusion."
+    )
+
+
+def rank_env(rank: int, nproc: int, addr: str, port: int) -> dict[str, str]:
+    env = os.environ.copy()
+    env["RANK"] = str(rank)
+    env["LOCAL_RANK"] = str(rank)
+    env["WORLD_SIZE"] = str(nproc)
+    env["MASTER_ADDR"] = addr
+    env["MASTER_PORT"] = str(port)
+    return env
+
+
+def terminate(procs: list[subprocess.Popen]) -> None:
+    for proc in procs:
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+    for proc in procs:
+        if proc.poll() is None:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+def main() -> int:
+    def _sigterm(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _sigterm)
+
+    ap = argparse.ArgumentParser(
+        description=f"Launch {BENCH} across a rank group on one host.",
+        epilog="All options must precede `--`; everything after it is passed to the "
+        "benchmark, e.g. hipblaslt-bench-a2a-launch --nproc 8 -- --timing 1 --iters 10",
+    )
+    ap.add_argument(
+        "--nproc",
+        type=int,
+        required=True,
+        metavar="N",
+        help="number of ranks to start, one process and one device each",
+    )
+    ap.add_argument(
+        "--addr",
+        default="127.0.0.1",
+        metavar="HOST",
+        help="rendezvous address (default: 127.0.0.1)",
+    )
+    ap.add_argument(
+        "--port",
+        type=int,
+        default=29500,
+        metavar="N",
+        help="rendezvous port (default: 29500)",
+    )
+    ap.add_argument(
+        "--bench",
+        metavar="PATH",
+        help=f"{BENCH} to run (default: one beside this script, else PATH)",
+    )
+    ap.add_argument(
+        "--log-dir",
+        metavar="DIR",
+        help="directory for the non-zero ranks' logs (default: cwd)",
+    )
+    ap.add_argument(
+        "bench_args", nargs=argparse.REMAINDER, help="benchmark arguments after `--`"
+    )
+    args = ap.parse_args()
+
+    if args.nproc < 1:
+        sys.exit("ERROR: --nproc must be >= 1.")
+    if not 1 <= args.port <= 65535:
+        sys.exit("ERROR: --port must be in 1..65535.")
+    bench_args = (
+        args.bench_args[1:]
+        if args.bench_args and args.bench_args[0] == "--"
+        else args.bench_args
+    )
+
+    bench = resolve_bench(args.bench)
+    log_dir = Path(args.log_dir) if args.log_dir else Path.cwd()
+    if args.nproc > 1:
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            sys.exit(f"ERROR: cannot create log dir {log_dir} ({e.strerror}).")
+
+    command = [str(bench), *bench_args]
+    print(f"launching {args.nproc} rank(s): {' '.join(command)}", flush=True)
+
+    procs: list[subprocess.Popen] = []
+    logs = []
+    try:
+        for rank in range(args.nproc):
+            env = rank_env(rank, args.nproc, args.addr, args.port)
+            if rank == 0:
+                procs.append(subprocess.Popen(command, env=env))
+                continue
+            path = log_dir / f"rank{rank}.log"
+            try:
+                handle = open(path, "w")
+            except OSError as e:
+                sys.exit(f"ERROR: cannot write {path} ({e.strerror}).")
+            logs.append(handle)
+            procs.append(
+                subprocess.Popen(
+                    command, env=env, stdout=handle, stderr=subprocess.STDOUT
+                )
+            )
+
+        codes: list[int | None] = [None] * len(procs)
+        while any(code is None for code in codes):
+            for i, proc in enumerate(procs):
+                if codes[i] is None:
+                    codes[i] = proc.poll()
+            if any(code for code in codes if code is not None):
+                break
+            time.sleep(0.1)
+    except FileNotFoundError:
+        sys.exit(f"ERROR: could not execute {bench}.")
+    finally:
+        terminate(procs)
+        for handle in logs:
+            handle.close()
+
+    failed = [(i, code) for i, code in enumerate(codes) if code]
+    for rank, code in failed:
+        where = "stdout" if rank == 0 else str(log_dir / f"rank{rank}.log")
+        print(f"rank {rank} exited {code} (see {where})", file=sys.stderr)
+    return failed[0][1] if failed else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
