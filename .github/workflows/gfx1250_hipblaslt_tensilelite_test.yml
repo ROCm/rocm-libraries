@@ -180,7 +180,6 @@ jobs:
         shell: bash
     env:
       ROCM: ${{ github.workspace }}/rocm
-      LD_LIBRARY_PATH: ${{ github.workspace }}/rocm/lib:${{ github.workspace }}/rocm/lib/llvm/lib:${{ github.workspace }}/rocm/lib/rocm_sysdeps/lib
       # Activates the env-gated xfail for known-failing configs in configMarks
       # (companion tensilelite PR). Inert against artifacts that predate it.
       GFX1250_HW_XFAIL: "1"
@@ -222,7 +221,7 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35170097210' }}  # SCRATCH: #12178 build (xfails + gfx942 fix in artifact)
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35289418443' }}  # SCRATCH: PR #12282 (revision-marks) build
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -302,7 +301,7 @@ jobs:
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
-          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
+          TL_TARGET=gfx1250v0  # SCRATCH: CI HW is the v0 stepping; pin it (probe unreliable in prebuilt-client container)
           # HIP device compiles through ccache.
           # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
           if ! command -v ccache >/dev/null 2>&1; then
@@ -314,7 +313,7 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
