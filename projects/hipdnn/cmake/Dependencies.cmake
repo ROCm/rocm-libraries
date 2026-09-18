@@ -5,12 +5,33 @@ cmake_minimum_required(VERSION 3.25.2)
 
 include(FetchContent)
 
-option(HIPDNN_NO_DOWNLOAD "Disables downloading of any external dependencies" OFF)
+option(ALLOW_FETCH_DEPS
+       "Allow fetching third-party dependencies the build environment does not provide"
+       OFF
+)
 
+# HIPDNN_NO_DOWNLOAD is the previous, inverted spelling, honoured for one
+# release. Only a truthy value counts: the previous release declared it with
+# option(), so every existing build tree caches HIPDNN_NO_DOWNLOAD:BOOL=OFF and
+# a DEFINED test would fire on any reconfigure.
 if(HIPDNN_NO_DOWNLOAD)
-    set(FETCHCONTENT_FULLY_DISCONNECTED OFF
-        CACHE BOOL "Don't attempt to download or update anything" FORCE
+    message(DEPRECATION
+        "HIPDNN_NO_DOWNLOAD is deprecated and will be removed. Use "
+        "ALLOW_FETCH_DEPS, which has the inverse meaning. Interpreting "
+        "HIPDNN_NO_DOWNLOAD=${HIPDNN_NO_DOWNLOAD} as ALLOW_FETCH_DEPS=OFF."
     )
+    set(ALLOW_FETCH_DEPS OFF CACHE BOOL
+        "Allow fetching third-party dependencies the build environment does not provide"
+        FORCE
+    )
+endif()
+unset(HIPDNN_NO_DOWNLOAD CACHE)
+
+# Backstop for fetches that bypass hipdnn_add_dependency(). Uncached, so it
+# applies to this directory and below and not to sibling subprojects, which run
+# their own FetchContent and never opted into this policy.
+if(NOT ALLOW_FETCH_DEPS)
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON)
 endif()
 
 # _hipdnn_suppress_rocm_toolchain_checks()
@@ -67,6 +88,16 @@ function(hipdnn_add_dependency dep_name)
             find_package(${dep_name} ${PARSE_VERSION} QUIET ${PARSE_FIND_PACKAGE_ARGS})
         endif()
         if(NOT ${dep_name}_FOUND)
+            if(NOT ALLOW_FETCH_DEPS)
+                message(FATAL_ERROR
+                    "${dep_name} was not found, and hipDNN does not fetch "
+                    "third-party dependencies. They are provided by the build "
+                    "environment: TheRock's third-party tree, or an install "
+                    "prefix on CMAKE_PREFIX_PATH. Provide ${dep_name}, or "
+                    "configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
+                    "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
+                )
+            endif()
             message(STATUS "Did not find ${dep_name}, it will be built locally")
             _build_local()
         else()
