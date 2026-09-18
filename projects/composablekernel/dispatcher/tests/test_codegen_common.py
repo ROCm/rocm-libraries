@@ -623,7 +623,22 @@ class TestQuantSpecSweepHelpers(unittest.TestCase):
 
 
 class TestArchWarpTileK(unittest.TestCase):
-    """The gfx942/gfx950 WarpTileK rule -- a silent-wrong-answer trap."""
+    """The gfx942/gfx950/gfx1250 WarpTileK rule -- a silent-wrong-answer trap."""
+
+    def test_gfx1250_is_128_regardless_of_preshuffle(self):
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1250"), 128)
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1250", preshuffle_quant=True), 128)
+
+    def test_gfx1250_match_is_exact_and_suffix_tolerant(self):
+        # Real agents report a feature suffix, which must not defeat the match...
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1250:xnack-"), 128)
+        # ...but the match is EXACT, never a "gfx12" family test: gfx1200/gfx1201
+        # expose only a 16x16x16 8-bit WMMA fragment, so K=128 would compile and
+        # then silently mis-execute there.
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1200"), 32)
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx1201"), 32)
+        # A prefix test would wrongly accept this.
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx12500"), 32)
 
     def test_gfx950_is_128_regardless_of_preshuffle(self):
         self.assertEqual(fp8_warp_tile_k_for_arch("gfx950"), 128)

@@ -352,8 +352,15 @@ _SUPPORTED_ARCHS = ("gfx942", "gfx950", "gfx1250")
 
 
 def _validate_arch(arch: str) -> str:
-    """Return arch if supported, else raise. Mirrors the C++ runtime arch check."""
-    if not arch or not any(arch.startswith(a) for a in _SUPPORTED_ARCHS):
+    """Return arch if supported, else raise. Mirrors the C++ runtime arch check.
+
+    Matching is EXACT on the target name after stripping any feature suffix, so
+    "gfx1250" and "gfx1250:xnack-" are accepted while near-misses such as
+    "gfx12500" are rejected instead of slipping through a prefix test.  The
+    original string is returned unchanged because it is what reaches
+    --offload-arch and the .so filename.
+    """
+    if not arch or arch.split(":", 1)[0] not in _SUPPORTED_ARCHS:
         raise ValueError(
             f"Unsupported GPU architecture {arch!r} for TensorQuant bridge "
             f"(supported: {', '.join(_SUPPORTED_ARCHS)})"
@@ -402,6 +409,24 @@ def _generate_tensor_quant_kernel(
     return generate_kernel(config, output_dir, _CODEGEN_SCRIPT)
 
 
+def _ocp_fp8_arch_defines(gfx_arch):
+    """-D flags selecting the OCP fp8/bf8 encodings instead of the legacy FNUZ pair.
+
+    The ``"gfx12"`` test here is deliberately FAMILY-WIDE and must NOT be narrowed
+    to the exact gfx1250 match used for warp_tile_k (see ``_is_gfx1250``): every
+    gfx12xx part -- gfx1200, gfx1201 and gfx1250 -- uses OCP e4m3/e5m2, so
+    narrowing it would switch gfx1200/gfx1201 back to FNUZ.  These two predicates
+    look textually similar and must never be "tidied" into each other.
+
+    Kept as a named helper (rather than inlined at the call site, as it was) so the
+    invariant is unit-testable across all five block-scale quant bridges; abquant
+    silently lacked the gfx12 half until it was caught in review.
+    """
+    if "gfx12" in (gfx_arch or "") or "gfx950" in (gfx_arch or ""):
+        return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    return []
+
+
 def _compile_tensor_quant_kernel(
     hpp_path: Path,
     so_path: Path,
@@ -426,13 +451,7 @@ def _compile_tensor_quant_kernel(
     # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ). These mirror the
     # CMakeLists.txt definitions normally injected by CMake but absent in the
     # standalone hipcc build path.
-    arch_defines = []
-    # OCP fp8 encoding is a whole-gfx12-family property (gfx1200/gfx1201/gfx1250
-    # all use OCP e4m3/e5m2), so this substring test is intentional and must NOT
-    # be narrowed to an exact gfx1250 match the way _is_gfx1250 is used for
-    # warp_tile_k -- narrowing it would break fp8 on gfx1200/gfx1201.
-    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
-        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    arch_defines = _ocp_fp8_arch_defines(gfx_arch)
     if "gfx950" in gfx_arch:
         arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
 
@@ -610,7 +629,7 @@ def expand_tensor_quant_sweep(
 # =============================================================================
 
 
-def _is_gfx1250(gfx_arch):
+def _is_gfx1250(gfx_arch: Optional[str]) -> bool:
     """EXACT gfx1250 match, tolerant of feature suffixes (``gfx1250:xnack-``).
 
     Deliberately exact, NOT a ``"gfx12" in gfx_arch`` family test.  Two distinct
@@ -625,8 +644,9 @@ def _is_gfx1250(gfx_arch):
         warp tile does not exist on them; the kernel would still compile and
         silently return garbage.
 
-    #11043 adds a shared ``normalize_gfx_arch()`` to ``codegen_common.py``; this
-    private helper should collapse onto it once that PR lands.
+    ``codegen_common.normalize_gfx_arch()`` now provides the suffix-stripping half
+    of this rule; collapsing this helper onto it is a worthwhile follow-up, kept
+    out of this change to avoid adding a codegen import to all five bridges.
     """
     return (gfx_arch or "").split(":")[0] == "gfx1250"
 
@@ -634,13 +654,17 @@ def _is_gfx1250(gfx_arch):
 def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     """Arch-derived WarpTileK for fp8/bf8 with M_Warp_Tile=16.
 
-    Mirrors ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>()
+    cf. ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>()
     (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp):
 
       - gfx950 (CK_GFX950_SUPPORT): is_8bit_float -> 128
-      - gfx1250 (WMMA, EXACT match -- see _is_gfx1250): is_8bit_float -> 128.
-        NOT the whole gfx12 family: gfx1200/gfx1201 have only a 16x16x16 8-bit
-        fragment and would silently mis-execute at K=128.
+      - gfx1250: is_8bit_float -> 128.  A DELIBERATE DIVERGENCE from
+        get_k_warp_tile, not a mirror: gfx1250 takes that function's WMMA branch
+        (CMakeLists.txt sets CK_TILE_USE_WMMA=1 for gfx12), where M_Warp_Tile==16
+        yields `is_8bit ? 64 : 32` -- upstream's own answer is 64.  128 is used
+        because warp_gemm_dispatcher.hpp provides the 16x16x128 fp8/bf8 WMMA
+        fragment under __gfx125__ and it is GPU-verified on MI400.  The gfx1250
+        test is EXACT (see _is_gfx1250) -- gfx1200/gfx1201 have only 16x16x16.
       - gfx942 (and other legacy MFMA archs): IsFlatMM==false -> 32
 
     Picking 128 on gfx942 is a silent-correctness bug: there is no valid
@@ -648,14 +672,21 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     all-zeros (confirmed on GPU, MI300X). 32 is bit-exact and at parity with
     Old-TE (which launches ...16x16x32 on gfx942).
     """
-    return 128 if ("gfx950" in gfx_arch or _is_gfx1250(gfx_arch)) else 32
+    if not gfx_arch:
+        # Never silently default: an absent arch must not fall through to the
+        # gfx942 legacy tile (see this module's "never silently default" rule).
+        raise ValueError("gfx_arch is required to derive warp_tile_k for TensorQuant")
+    # _is_gfx1250 first keeps this None-safe (`in` raises TypeError on None);
+    # gfx950 stays a substring test so "gfx950:xnack-" still matches.
+    return 128 if (_is_gfx1250(gfx_arch) or "gfx950" in gfx_arch) else 32
 
 
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Default fp8 TensorQuant config (tile = 16x64x256, warp = 1x4x1).
 
-    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950/gfx1250, mirroring
-    ck_tile::get_k_warp_tile<fp8_t, M_Warp_Tile=16>().
+    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950, mirroring
+    ck_tile::get_k_warp_tile<fp8_t, M_Warp_Tile=16>().  gfx1250 also uses 128,
+    but by deliberate divergence from that helper -- see fp8_warp_tile_k_for_arch.
     """
     return TensorQuantKernelConfig(
         variant_key="fp8",
@@ -674,8 +705,9 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelCo
 def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Default bf8 TensorQuant config (tile = 16x64x256, warp = 1x4x1).
 
-    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950/gfx1250, mirroring
-    ck_tile::get_k_warp_tile<bf8_t, M_Warp_Tile=16>().
+    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950, mirroring
+    ck_tile::get_k_warp_tile<bf8_t, M_Warp_Tile=16>().  gfx1250 also uses 128,
+    but by deliberate divergence from that helper -- see fp8_warp_tile_k_for_arch.
     """
     return TensorQuantKernelConfig(
         variant_key="bf8",

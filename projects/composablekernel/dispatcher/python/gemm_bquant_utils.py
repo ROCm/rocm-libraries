@@ -164,6 +164,37 @@ def _bquant_codegen_flags(hipcc: str = _DEFAULT_HIPCC) -> "Tuple[str, ...]":
 # =============================================================================
 
 
+
+# pk_int4 ("i4") variants are NOT usable on gfx1250.
+#
+# Copilot flagged these as "not compiling on gfx1250 at any warp_tile_k", and the
+# grouped sibling carries the same claim in prose.  The mechanism in that claim is
+# wrong -- they compile fine -- but the conclusion is right, and the true failure
+# mode is worse.  Measured on MI400 (gfx1250) across {fp8i4, bf8i4} x warp_tile_k
+# {16, 32, 64, 128} x N {128, 256, 512}: all 24 combinations BUILT and LAUNCHED,
+# and all 24 produced NaN.  At warp_tile_k 16/32 the finite elements are ~zero
+# against a non-zero reference; at 64/128 the output is large garbage, and 64 and
+# 128 give bit-identical results, which suggests warp_tile_k stops being honoured
+# on this path.  C4/fp8 and C4/bf8 pass in the same harness with the same host
+# codec, so this is specific to the pk_int4 path rather than a packing mismatch.
+#
+# Reject at construction time so the breakage is loud, instead of shipping a
+# kernel that silently returns NaN.  Remove this once the pk_int4 path is fixed
+# and re-verified on hardware.
+_I4_VARIANTS = ("fp8i4", "bf8i4")
+
+
+def _reject_i4_on_gfx1250(variant_key: str, gfx_arch) -> None:
+    """Raise if a pk_int4 variant is targeted at gfx1250 (see _I4_VARIANTS)."""
+    if variant_key in _I4_VARIANTS and _is_gfx1250(gfx_arch):
+        raise ValueError(
+            f"BQuant variant {variant_key!r} is not supported on "
+            f"{gfx_arch!r}: the packed-int4 path builds and launches on gfx1250 "
+            f"but returns NaN (GPU-confirmed on MI400 at warp_tile_k 16/32/64/128). "
+            f"Use fp8/bf8 on gfx1250, or target gfx942/gfx950 for i4."
+        )
+
+
 @dataclass
 class BQuantKernelConfig:
     """
@@ -199,6 +230,12 @@ class BQuantKernelConfig:
     k_block_per_cu: int      = 1
 
     gfx_arch: str = _NAME_ONLY_GFX_ARCH
+
+
+    def __post_init__(self):
+        # Single choke point: catches the public default_* constructors, the
+        # internal config builders, and expand_*_sweep, all of which land here.
+        _reject_i4_on_gfx1250(self.variant_key, self.gfx_arch)
 
     @property
     def name(self) -> str:
@@ -838,6 +875,24 @@ def _get_dispatcher_static_lib() -> Optional[Path]:
     return static_lib if static_lib.exists() else None
 
 
+def _ocp_fp8_arch_defines(gfx_arch):
+    """-D flags selecting the OCP fp8/bf8 encodings instead of the legacy FNUZ pair.
+
+    The ``"gfx12"`` test here is deliberately FAMILY-WIDE and must NOT be narrowed
+    to the exact gfx1250 match used for warp_tile_k (see ``_is_gfx1250``): every
+    gfx12xx part -- gfx1200, gfx1201 and gfx1250 -- uses OCP e4m3/e5m2, so
+    narrowing it would switch gfx1200/gfx1201 back to FNUZ.  These two predicates
+    look textually similar and must never be "tidied" into each other.
+
+    Kept as a named helper (rather than inlined at the call site, as it was) so the
+    invariant is unit-testable across all five block-scale quant bridges; abquant
+    silently lacked the gfx12 half until it was caught in review.
+    """
+    if "gfx12" in (gfx_arch or "") or "gfx950" in (gfx_arch or ""):
+        return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    return []
+
+
 def _compile_bquant_kernel(
     hpp_path: Path,
     so_path: Path,
@@ -864,13 +919,7 @@ def _compile_bquant_kernel(
     # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
     # These mirror the CMakeLists.txt definitions that are normally injected by CMake
     # but are absent in the standalone hipcc build path.
-    arch_defines = []
-    # OCP fp8 encoding is a whole-gfx12-family property (gfx1200/gfx1201/gfx1250
-    # all use OCP e4m3/e5m2), so this substring test is intentional and must NOT
-    # be narrowed to an exact gfx1250 match the way _is_gfx1250 is used for
-    # warp_tile_k -- narrowing it would break fp8 on gfx1200/gfx1201.
-    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
-        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    arch_defines = _ocp_fp8_arch_defines(gfx_arch)
     if "gfx950" in gfx_arch:
         arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
 
@@ -1109,16 +1158,20 @@ def _is_gfx1250(gfx_arch: Optional[str]) -> bool:
         warp tile does not exist on them; the kernel would still compile and
         silently return garbage.
 
-    #11043 adds a shared ``normalize_gfx_arch()`` to ``codegen_common.py``; this
-    private helper should collapse onto it once that PR lands.
+    ``codegen_common.normalize_gfx_arch()`` now provides the suffix-stripping half
+    of this rule; collapsing this helper onto it is a worthwhile follow-up, kept
+    out of this change to avoid adding a codegen import to all five bridges.
     """
     return (gfx_arch or "").split(":")[0] == "gfx1250"
 
 
 def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
-    """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16, IsFlatMM>().
+    """Arch-derived K warp-tile for this bridge's M_Warp_Tile=16 configs.
 
-    (tile_gemm_shape.hpp:104-136, M_Warp_Tile=16, non-WMMA path.)  Every non-MX
+    (cf. ck_tile::get_k_warp_tile<PrecType, 16, IsFlatMM>(),
+    tile_gemm_shape.hpp:104-136.  Matched exactly on gfx90a/gfx942/gfx950, which
+    take that function's non-WMMA branch; gfx1250 takes the WMMA branch and is the
+    one divergence -- see the gfx1250 note below.)  Every non-MX
     BQuant variant -- fp8, bf8, fp8i4, bf8i4 -- instantiates the GEMM config with an
     8-bit float PrecType (GemmConfig<fp8_t>/<bf8_t>; the pk_int4 B operand does NOT
     drive the K warp tile -- see gemm_bquant_quantgrouped{,_preshuffleb,_preshufflequant}
@@ -1126,9 +1179,15 @@ def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
     So is_8bit_float is always True and warp_tile_k depends only on arch + pipeline:
 
       gfx950 (CK_GFX950_SUPPORT): 128   (both decode IsFlatMM=false and preshuffle)
-      gfx1250 (WMMA, EXACT match -- see _is_gfx1250): 128, likewise for both
-              pipelines.  NOT the whole gfx12 family: gfx1200/gfx1201 have only a
-              16x16x16 8-bit fragment and would silently mis-execute at K=128.
+      gfx1250: 128 -- a DELIBERATE DIVERGENCE from get_k_warp_tile, not a mirror.
+              gfx1250 takes that function's WMMA branch (CMakeLists.txt sets
+              CK_TILE_USE_WMMA=1 for gfx12), where M_Warp_Tile==16 yields
+              `is_8bit ? 64 : 32` -- upstream's own answer is 64.  128 is used
+              because warp_gemm_dispatcher.hpp provides the 16x16x128 fp8/bf8 WMMA
+              fragment under __gfx125__ and it is GPU-verified on MI400; 64 is
+              untested for these pipelines.  The gfx1250 test is EXACT (see
+              _is_gfx1250) -- gfx1200/gfx1201 have only a 16x16x16 8-bit fragment.
+              Applies to both pipelines.
       gfx942/gfx90a/other, decode (IsFlatMM=false)   : 32
       gfx942/gfx90a/other, preshuffle_b (IsFlatMM=true): 64
 
@@ -1140,7 +1199,17 @@ def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
     variants, which get_k_warp_tile<fp8_t,16>() never returns for M_Warp_Tile=16 --
     that was wrong on BOTH arches.
     """
-    if "gfx950" in gfx_arch or _is_gfx1250(gfx_arch):
+    if not gfx_arch:
+        # Never silently default: an absent arch must not fall through to the
+        # gfx942 legacy tile (see this module's "never silently default" rule).
+        raise ValueError("gfx_arch is required to derive warp_tile_k for BQuant")
+    if _is_gfx1250(gfx_arch) or "gfx950" in gfx_arch:
+        # _is_gfx1250 is tested FIRST so the whole expression stays None-safe: the
+        # `in` operator raises TypeError on None, which would make _is_gfx1250's
+        # documented None tolerance unreachable from here.  gfx950 stays a SUBSTRING
+        # test (unlike gfx1250, which is exact) so feature-suffixed ids such as
+        # "gfx950:xnack-" still match; no plausible target name contains "gfx950"
+        # as a proper substring.
         return 128
     # gfx942 / gfx90a / other: 8-bit-float PrecType, M_Warp_Tile=16 non-WMMA path.
     return 64 if is_flatmm else 32

@@ -672,18 +672,29 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str, *, preshuffle_quant: bool = False) -
     (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp)::
 
         gfx950                        -> 128  (both plain and preshufflequant)
+        gfx1250 (EXACT match)         -> 128  (see below -- a divergence, not a mirror)
         gfx942/other, plain           ->  32
         gfx942/other, preshufflequant ->  64
+
+    gfx1250 is the one arch where this does NOT mirror ``get_k_warp_tile``: that
+    function's WMMA branch returns ``is_8bit ? 64 : 32`` at ``M_Warp_Tile==16``,
+    i.e. 64.  128 is used because ``warp_gemm_dispatcher.hpp`` provides the
+    16x16x128 fp8/bf8 WMMA fragment under ``__gfx125__`` and it is GPU-verified on
+    MI400.  The match is EXACT (suffix-tolerant), never ``"gfx12" in ...``:
+    gfx1200/gfx1201 expose only a 16x16x16 8-bit fragment, so K=128 would compile
+    and then silently mis-execute there.
 
     This rule must exist exactly once. Using 128 on gfx942 compiles cleanly and
     then produces **all-zeros output** -- there is no valid 16x16x128 fp8/bf8
     warp-gemm on gfx942 -- so a second, drifting copy is a silent-wrong-answer
-    bug rather than a build failure.
+    bug rather than a build failure.  The five ``gemm_*quant_utils`` bridges keep
+    a private ``_is_gfx1250()`` carrying the same rule; those are candidates to
+    collapse onto ``normalize_gfx_arch()`` in a follow-up.
 
     ``preshuffle_quant`` applies to AQuant's preshufflequant configs; every
     other quant operator passes the default.
     """
-    if "gfx950" in gfx_arch:
+    if "gfx950" in gfx_arch or normalize_gfx_arch(gfx_arch or "") == "gfx1250":
         return 128
     return 64 if preshuffle_quant else 32
 
