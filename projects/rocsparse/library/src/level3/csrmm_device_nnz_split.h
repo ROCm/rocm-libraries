@@ -39,14 +39,15 @@ namespace rocsparse
               typename B,
               typename C,
               typename T>
-    ROCSPARSE_DEVICE_ILF void csrmmnn_nnz_split_main_device(bool conj_A,
-                                                            bool conj_B,
-                                                            J    ncol,
-                                                            J    M,
-                                                            J    N,
-                                                            J    K,
-                                                            I    nnz,
-                                                            T    alpha,
+    ROCSPARSE_DEVICE_ILF void csrmmnn_nnz_split_main_device(bool    conj_A,
+                                                            bool    conj_B,
+                                                            int64_t bid,
+                                                            J       ncol,
+                                                            J       M,
+                                                            J       N,
+                                                            J       K,
+                                                            I       nnz,
+                                                            T       alpha,
                                                             J* __restrict__ row_block_red,
                                                             T* __restrict__ val_block_red,
                                                             const J* __restrict__ row_limits,
@@ -68,9 +69,15 @@ namespace rocsparse
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
+
+        // bid is the nnz block this call operates on, supplied by the __global__
+        // wrapper which grid-strides over the full 64-bit nblocks because grid.x is
+        // clamped at the launch site (AISPARSE-672). nblocks is also the row stride
+        // of the block reduction buffers; it used to be read off hipGridDim_x, which
+        // is only equal to nblocks while the grid is unclamped.
+        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
 
         __shared__ J shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
@@ -91,6 +98,12 @@ namespace rocsparse
                   * conj_val(rocsparse::nontemporal_load(&csr_val[BLOCKSIZE * bid + tid]), conj_A);
         }
 
+        // Barrier before the shared_row write, not only after it. The __global__
+        // wrapper now calls this function once per nnz block in a grid-stride loop,
+        // so without a leading barrier this write races with the shared_row[tid + 1]
+        // read at the end of the previous block's column loop (AISPARSE-672). The
+        // remainder kernel below already had the barrier in this position.
+        __syncthreads();
         shared_row[tid] = row_ind;
         __syncthreads();
 
@@ -163,7 +176,7 @@ namespace rocsparse
             {
                 for(unsigned int i = 0; i < WF_SIZE; ++i)
                 {
-                    val_block_red[hipGridDim_x * (colB + i) + bid] = valB[i];
+                    val_block_red[nblocks * (colB + i) + bid] = valB[i];
                 }
             }
         }
@@ -182,14 +195,15 @@ namespace rocsparse
               typename B,
               typename C,
               typename T>
-    ROCSPARSE_DEVICE_ILF void csrmmnn_nnz_split_remainder_device(bool conj_A,
-                                                                 bool conj_B,
-                                                                 J    offset,
-                                                                 J    M,
-                                                                 J    N,
-                                                                 J    K,
-                                                                 I    nnz,
-                                                                 T    alpha,
+    ROCSPARSE_DEVICE_ILF void csrmmnn_nnz_split_remainder_device(bool    conj_A,
+                                                                 bool    conj_B,
+                                                                 int64_t bid,
+                                                                 J       offset,
+                                                                 J       M,
+                                                                 J       N,
+                                                                 J       K,
+                                                                 I       nnz,
+                                                                 T       alpha,
                                                                  J* __restrict__ row_block_red,
                                                                  T* __restrict__ val_block_red,
                                                                  const J* __restrict__ row_limits,
@@ -211,9 +225,11 @@ namespace rocsparse
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
+
+        // bid and nblocks as in csrmmnn_nnz_split_main_device (AISPARSE-672).
+        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
 
         __shared__ J shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
@@ -315,7 +331,7 @@ namespace rocsparse
             {
                 if((colB + i) < N)
                 {
-                    val_block_red[hipGridDim_x * (colB + i) + bid] = valB[i];
+                    val_block_red[nblocks * (colB + i) + bid] = valB[i];
                 }
             }
         }
@@ -353,6 +369,7 @@ namespace rocsparse
     template <unsigned int BLOCKSIZE, typename I, typename J, typename C, typename T>
     ROCSPARSE_DEVICE_ILF void
         csrmmnn_general_block_reduce_device(I nblocks,
+                                            I col,
                                             const J* __restrict__ row_block_red,
                                             const T* __restrict__ val_block_red,
                                             C*              dense_C,
@@ -365,7 +382,9 @@ namespace rocsparse
         __shared__ I shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE];
 
-        const I col = hipBlockIdx_x;
+        // col is the dense column this call reduces, supplied by the __global__
+        // wrapper which grid-strides over n because grid.x is clamped at the launch
+        // site (AISPARSE-672).
 
         shared_row[tid] = -1;
         shared_val[tid] = static_cast<T>(0);
@@ -412,6 +431,7 @@ namespace rocsparse
     template <unsigned int BLOCKSIZE, typename I, typename J, typename C, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrmmnn_general_block_reduce(I       nblocks,
+                                      J       n,
                                       int64_t batch_count,
                                       const J* __restrict__ row_block_red,
                                       const T* __restrict__ val_block_red,
@@ -422,16 +442,30 @@ namespace rocsparse
     {
         // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
         // are computed with load_pointer so the device kernel stays batch-agnostic.
-        // hipGridDim_x equals n, so the per-batch val_block_red stride is nblocks * n.
+        // The per-batch val_block_red stride is nblocks * n. n is now taken from the
+        // argument rather than from hipGridDim_x: grid.x is one block per dense
+        // column but is clamped against the hardware limit (AISPARSE-672), so
+        // hipGridDim_x is no longer guaranteed to equal n.
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::csrmmnn_general_block_reduce_device<BLOCKSIZE>(
-                nblocks,
-                load_pointer(row_block_red, batch, static_cast<int64_t>(nblocks)),
-                load_pointer(val_block_red, batch, static_cast<int64_t>(nblocks) * hipGridDim_x),
-                load_pointer(dense_C, batch, batch_stride_C),
-                ldc,
-                order_C);
+            // Grid-stride over the dense columns. The bound and the stride are block
+            // uniform, so the __syncthreads() calls in the device function below stay
+            // convergent.
+            for(int64_t col = hipBlockIdx_x; col < static_cast<int64_t>(n); col += hipGridDim_x)
+            {
+                // col fits I: a 64-bit column type J only ever pairs with a 64-bit
+                // row pointer type I.
+                rocsparse::csrmmnn_general_block_reduce_device<BLOCKSIZE>(
+                    nblocks,
+                    static_cast<I>(col),
+                    load_pointer(row_block_red, batch, static_cast<int64_t>(nblocks)),
+                    load_pointer(val_block_red,
+                                 batch,
+                                 static_cast<int64_t>(nblocks) * static_cast<int64_t>(n)),
+                    load_pointer(dense_C, batch, batch_stride_C),
+                    ldc,
+                    order_C);
+            }
         }
     }
 
@@ -444,36 +478,41 @@ namespace rocsparse
                                               J* __restrict__ row_limits,
                                               rocsparse_index_base idx_base)
     {
-        const I gid = hipThreadIdx_x + BLOCKSIZE * hipBlockIdx_x;
+        // grid.x is sized from the 64-bit nblocks and clamped against the hardware
+        // limit at the launch site, so grid-stride over the full count and keep the
+        // flattened index 64-bit (AISPARSE-672). This kernel has no barriers, so the
+        // per-thread bound is harmless; the loop replaces the early return, which
+        // would otherwise strand the strided iterations.
+        const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        if(gid >= nblocks)
+        for(int64_t gid = static_cast<int64_t>(hipThreadIdx_x) + BLOCKSIZE * hipBlockIdx_x;
+            gid < static_cast<int64_t>(nblocks);
+            gid += stride)
         {
-            return;
-        }
+            const I s0 = static_cast<I>(NNZ_PER_BLOCK * gid);
 
-        const I s0 = NNZ_PER_BLOCK * gid;
-
-        J left  = 0;
-        J right = m;
-        J mid   = (left + right) / 2;
-        while((csr_row_ptr[left] - idx_base) < s0 && left < mid && right > mid)
-        {
-            if((csr_row_ptr[mid] - idx_base) <= s0)
+            J left  = 0;
+            J right = m;
+            J mid   = (left + right) / 2;
+            while((csr_row_ptr[left] - idx_base) < s0 && left < mid && right > mid)
             {
-                left = mid;
+                if((csr_row_ptr[mid] - idx_base) <= s0)
+                {
+                    left = mid;
+                }
+                else
+                {
+                    right = mid;
+                }
+                mid = (left + right) / 2;
             }
-            else
+
+            row_limits[gid] = left;
+
+            if(gid == static_cast<int64_t>(nblocks) - 1)
             {
-                right = mid;
+                row_limits[gid + 1] = m;
             }
-            mid = (left + right) / 2;
-        }
-
-        row_limits[gid] = left;
-
-        if(gid == nblocks - 1)
-        {
-            row_limits[gid + 1] = m;
         }
     }
 
@@ -486,14 +525,15 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void csrmmnt_nnz_split_main_device(bool conj_A,
-                                                            bool conj_B,
-                                                            J    ncol,
-                                                            J    M,
-                                                            J    N,
-                                                            J    K,
-                                                            I    nnz,
-                                                            T    alpha,
+    ROCSPARSE_DEVICE_ILF void csrmmnt_nnz_split_main_device(bool    conj_A,
+                                                            bool    conj_B,
+                                                            int64_t bid,
+                                                            J       ncol,
+                                                            J       M,
+                                                            J       N,
+                                                            J       K,
+                                                            I       nnz,
+                                                            T       alpha,
                                                             const J* __restrict__ row_limits,
                                                             const I* __restrict__ csr_row_ptr,
                                                             const J* __restrict__ csr_col_ind,
@@ -511,8 +551,11 @@ namespace rocsparse
         static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
 
         const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
+
+        // bid is the nnz block this call operates on, supplied by the __global__
+        // wrapper which grid-strides over the full 64-bit block count because grid.x
+        // is clamped at the launch site (AISPARSE-672).
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
@@ -615,14 +658,15 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void csrmmnt_nnz_split_remainder_device(bool conj_A,
-                                                                 bool conj_B,
-                                                                 J    ncol_offset,
-                                                                 J    M,
-                                                                 J    N,
-                                                                 J    K,
-                                                                 I    nnz,
-                                                                 T    alpha,
+    ROCSPARSE_DEVICE_ILF void csrmmnt_nnz_split_remainder_device(bool    conj_A,
+                                                                 bool    conj_B,
+                                                                 int64_t bid,
+                                                                 J       ncol_offset,
+                                                                 J       M,
+                                                                 J       N,
+                                                                 J       K,
+                                                                 I       nnz,
+                                                                 T       alpha,
                                                                  const J* __restrict__ row_limits,
                                                                  const I* __restrict__ csr_row_ptr,
                                                                  const J* __restrict__ csr_col_ind,
@@ -643,9 +687,10 @@ namespace rocsparse
                       "BLOCKSIZE / WF_SIZE must be a power of two.");
 
         const int tid = hipThreadIdx_x;
-        const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
+
+        // bid as in csrmmnt_nnz_split_main_device (AISPARSE-672).
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);

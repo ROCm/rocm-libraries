@@ -68,45 +68,57 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
+        // One block per nnz block. grid.x is sized from the 64-bit nblocks and
+        // clamped against handle->properties.maxGridSize[0] at the launch site, so
+        // grid-stride over the full count (AISPARSE-672). The bound derives from the
+        // nnz kernel argument and the compile-time BLOCKSIZE and the stride is
+        // hipGridDim_x, so both are block uniform and the __syncthreads() calls in
+        // the device function stay convergent.
+        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
+
         // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
         // are computed with load_pointer so the device kernels stay batch-agnostic.
         // The reduction buffers are laid out contiguously per batch: row_block_red
-        // has stride gridDim_x (== nblocks) and val_block_red has stride
-        // gridDim_x * n. row_limits is shared across batches because every batch
-        // has the same sparsity pattern.
+        // has stride nblocks and val_block_red has stride nblocks * n, matching the
+        // host allocation. These strides used to be read off hipGridDim_x, which is
+        // only equal to nblocks while the grid is unclamped. row_limits is shared
+        // across batches because every batch has the same sparsity pattern.
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            J* row_block_red_batch
-                = load_pointer(row_block_red, batch, static_cast<int64_t>(hipGridDim_x));
+            J* row_block_red_batch = load_pointer(row_block_red, batch, nblocks);
 
-            if(alpha == 0 && beta == 1)
+            for(int64_t bid = hipBlockIdx_x; bid < nblocks; bid += hipGridDim_x)
             {
-                row_block_red_batch[hipBlockIdx_x] = -1;
-                continue;
-            }
+                if(alpha == 0 && beta == 1)
+                {
+                    row_block_red_batch[bid] = -1;
+                    continue;
+                }
 
-            rocsparse::csrmmnn_nnz_split_main_device<BLOCKSIZE, WF_SIZE>(
-                conj_A,
-                conj_B,
-                ncol,
-                m,
-                n,
-                k,
-                nnz,
-                alpha,
-                row_block_red_batch,
-                load_pointer(val_block_red, batch, static_cast<int64_t>(hipGridDim_x) * n),
-                row_limits,
-                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                beta,
-                load_pointer(dense_C, batch, batch_stride_C),
-                ldc,
-                order_C,
-                idx_base);
+                rocsparse::csrmmnn_nnz_split_main_device<BLOCKSIZE, WF_SIZE>(
+                    conj_A,
+                    conj_B,
+                    bid,
+                    ncol,
+                    m,
+                    n,
+                    k,
+                    nnz,
+                    alpha,
+                    row_block_red_batch,
+                    load_pointer(val_block_red, batch, nblocks * n),
+                    row_limits,
+                    load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                    load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                    load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    beta,
+                    load_pointer(dense_C, batch, batch_stride_C),
+                    ldc,
+                    order_C,
+                    idx_base);
+            }
         }
     }
 
@@ -150,40 +162,46 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
-        // Grid-stride loop over the batch dimension (grid y). See main kernel.
+        // Grid-stride loops over the nnz blocks (grid x) and the batch dimension
+        // (grid y). See main kernel.
+        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
+
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            J* row_block_red_batch
-                = load_pointer(row_block_red, batch, static_cast<int64_t>(hipGridDim_x));
+            J* row_block_red_batch = load_pointer(row_block_red, batch, nblocks);
 
-            if(alpha == 0 && beta == 1)
+            for(int64_t bid = hipBlockIdx_x; bid < nblocks; bid += hipGridDim_x)
             {
-                row_block_red_batch[hipBlockIdx_x] = -1;
-                continue;
-            }
+                if(alpha == 0 && beta == 1)
+                {
+                    row_block_red_batch[bid] = -1;
+                    continue;
+                }
 
-            rocsparse::csrmmnn_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(
-                conj_A,
-                conj_B,
-                offset,
-                m,
-                n,
-                k,
-                nnz,
-                alpha,
-                row_block_red_batch,
-                load_pointer(val_block_red, batch, static_cast<int64_t>(hipGridDim_x) * n),
-                row_limits,
-                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                beta,
-                load_pointer(dense_C, batch, batch_stride_C),
-                ldc,
-                order_C,
-                idx_base);
+                rocsparse::csrmmnn_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(
+                    conj_A,
+                    conj_B,
+                    bid,
+                    offset,
+                    m,
+                    n,
+                    k,
+                    nnz,
+                    alpha,
+                    row_block_red_batch,
+                    load_pointer(val_block_red, batch, nblocks * n),
+                    row_limits,
+                    load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                    load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                    load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    beta,
+                    load_pointer(dense_C, batch, batch_stride_C),
+                    ldc,
+                    order_C,
+                    idx_base);
+            }
         }
     }
 
@@ -224,29 +242,40 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
+        // One block per nnz block, the same count the nn path calls nblocks. grid.x
+        // is sized from the 64-bit nnz and clamped at the launch site, so grid-stride
+        // over the full count (AISPARSE-672). The bound derives from the nnz kernel
+        // argument and the compile-time BLOCKSIZE and the stride is hipGridDim_x, so
+        // both are block uniform.
+        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
+
         // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
         // are computed with load_pointer so the device kernels stay batch-agnostic.
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::csrmmnt_nnz_split_main_device<BLOCKSIZE, WF_SIZE, LOOPS>(
-                conj_A,
-                conj_B,
-                ncol,
-                m,
-                n,
-                k,
-                nnz,
-                alpha,
-                row_limits,
-                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                load_pointer(dense_C, batch, batch_stride_C),
-                ldc,
-                order_C,
-                idx_base);
+            for(int64_t bid = hipBlockIdx_x; bid < nblocks; bid += hipGridDim_x)
+            {
+                rocsparse::csrmmnt_nnz_split_main_device<BLOCKSIZE, WF_SIZE, LOOPS>(
+                    conj_A,
+                    conj_B,
+                    bid,
+                    ncol,
+                    m,
+                    n,
+                    k,
+                    nnz,
+                    alpha,
+                    row_limits,
+                    load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                    load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                    load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    load_pointer(dense_C, batch, batch_stride_C),
+                    ldc,
+                    order_C,
+                    idx_base);
+            }
         }
     }
 
@@ -286,28 +315,35 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // Grid-stride loop over the batch dimension (grid y). See main kernel.
+        // Grid-stride loops over the nnz blocks (grid x) and the batch dimension
+        // (grid y). See main kernel.
+        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
+
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::csrmmnt_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(
-                conj_A,
-                conj_B,
-                offset,
-                m,
-                n,
-                k,
-                nnz,
-                alpha,
-                row_limits,
-                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                load_pointer(dense_C, batch, batch_stride_C),
-                ldc,
-                order_C,
-                idx_base);
+            for(int64_t bid = hipBlockIdx_x; bid < nblocks; bid += hipGridDim_x)
+            {
+                rocsparse::csrmmnt_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(
+                    conj_A,
+                    conj_B,
+                    bid,
+                    offset,
+                    m,
+                    n,
+                    k,
+                    nnz,
+                    alpha,
+                    row_limits,
+                    load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                    load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                    load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    load_pointer(dense_C, batch, batch_stride_C),
+                    ldc,
+                    order_C,
+                    idx_base);
+            }
         }
     }
 }
