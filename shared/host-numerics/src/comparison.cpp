@@ -75,6 +75,9 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
     if (observed.shape() != expected.shape())
         throw std::invalid_argument("Host numerics tensor comparison shape mismatch.");
 
+    const auto observedStorage = observed.rawEncodedBackingStorage();
+    const auto expectedStorage = expected.rawEncodedBackingStorage();
+
     if (observed.type() == expected.type() && detail::allCloseOnlyComparison(options)) {
         ComparisonReport result = visitScalarType(observed.type(), [&]<typename Tag>() {
             return detail::compareAllCloseOnlyKnown<Tag>(observed, expected, options);
@@ -111,12 +114,12 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                         observed.layout(), expected.layout(), options.selection,
                         [&](size_t logicalIndex, ptrdiff_t observedOffset,
                             ptrdiff_t expectedOffset) {
-                            accumulator.observeIntegral(
-                                logicalIndex, observedOffset, expectedOffset,
-                                detail::loadFastComparisonReal<ObservedTag>(
-                                    observed.rawEncodedBackingStorage(), observedOffset),
-                                detail::loadFastComparisonReal<ExpectedTag>(
-                                    expected.rawEncodedBackingStorage(), expectedOffset));
+                            accumulator.observeIntegral(logicalIndex, observedOffset,
+                                                        expectedOffset,
+                                                        detail::loadFastComparisonReal<ObservedTag>(
+                                                            observedStorage, observedOffset),
+                                                        detail::loadFastComparisonReal<ExpectedTag>(
+                                                            expectedStorage, expectedOffset));
                         });
                 }
             });
@@ -126,28 +129,38 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
             detail::forEachSelectedOffsetPair(
                 observed.layout(), expected.layout(), options.selection,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
-                    std::optional<bool> decision;
-                    if (options.allClose)
-                        decision.emplace(detail::knownAllCloseDecision<Tag>(
-                            observed, observedOffset, expected, expectedOffset, options));
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
-                        accumulator.observe(
-                            logicalIndex, observedOffset, expectedOffset,
-                            detail::loadComparisonValueKnown<Tag>(
-                                observed.rawEncodedBackingStorage(), observedOffset),
-                            detail::loadComparisonValueKnown<Tag>(
-                                expected.rawEncodedBackingStorage(), expectedOffset),
-                            decision);
+                        const ComparisonValue observedValue =
+                            detail::loadComparisonValueKnown<Tag>(observedStorage, observedOffset);
+                        const ComparisonValue expectedValue =
+                            detail::loadComparisonValueKnown<Tag>(expectedStorage, expectedOffset);
+                        std::optional<bool> decision;
+                        if (options.allClose) {
+                            if (options.complexComparisonMode == ComplexComparisonMode::Magnitude)
+                                decision.emplace(detail::compareComplexMagnitude(
+                                                     observedValue, expectedValue, options)
+                                                     .close);
+                            else
+                                decision.emplace(detail::valuesClose(observedValue.real,
+                                                                     expectedValue.real, options) &&
+                                                 detail::valuesClose(observedValue.imaginary,
+                                                                     expectedValue.imaginary,
+                                                                     options));
+                        }
+                        accumulator.observe(logicalIndex, observedOffset, expectedOffset,
+                                            observedValue, expectedValue, decision);
                     } else {
-                        accumulator.observeReal(
-                            logicalIndex, observedOffset, expectedOffset,
-                            detail::loadComparisonValueKnown<Tag>(
-                                observed.rawEncodedBackingStorage(), observedOffset)
-                                .real,
-                            detail::loadComparisonValueKnown<Tag>(
-                                expected.rawEncodedBackingStorage(), expectedOffset)
-                                .real,
-                            decision);
+                        const auto observedValue =
+                            detail::loadFastComparisonReal<Tag>(observedStorage, observedOffset);
+                        const auto expectedValue =
+                            detail::loadFastComparisonReal<Tag>(expectedStorage, expectedOffset);
+                        const std::optional<bool> decision =
+                            options.allClose ? std::optional<bool>(detail::valuesCloseFast(
+                                                   observedValue, expectedValue, options))
+                                             : std::nullopt;
+                        accumulator.observeReal(logicalIndex, observedOffset, expectedOffset,
+                                                static_cast<double>(observedValue),
+                                                static_cast<double>(expectedValue), decision);
                     }
                 });
         });

@@ -22,9 +22,117 @@
 #include "comparison_iteration.hpp"
 
 namespace roc::host_numerics::detail {
+inline bool encodedBitRangesAreIdentical(std::span<const std::byte> observed,
+                                         std::span<const std::byte> expected, uint64_t firstBit,
+                                         uint64_t comparedBits) {
+    if (firstBit > std::numeric_limits<uint64_t>::max() - comparedBits) return false;
+    const uint64_t pastLastBit = firstBit + comparedBits;
+    const uint64_t requiredBytes = pastLastBit / 8 + static_cast<uint64_t>(pastLastBit % 8 != 0);
+    if (requiredBytes > observed.size() || requiredBytes > expected.size()) return false;
+
+    const auto bitsEqual = [&](uint64_t bit) {
+        const size_t byte = static_cast<size_t>(bit / 8);
+        const unsigned mask = 1U << (bit % 8);
+        return (std::to_integer<unsigned>(observed[byte]) & mask) ==
+               (std::to_integer<unsigned>(expected[byte]) & mask);
+    };
+    while (comparedBits != 0 && firstBit % 8 != 0) {
+        if (!bitsEqual(firstBit)) return false;
+        ++firstBit;
+        --comparedBits;
+    }
+
+    const size_t firstByte = static_cast<size_t>(firstBit / 8);
+    const size_t comparedBytes = static_cast<size_t>(comparedBits / 8);
+    if (comparedBytes != 0 &&
+        std::memcmp(observed.data() + firstByte, expected.data() + firstByte, comparedBytes) != 0)
+        return false;
+    firstBit += static_cast<uint64_t>(comparedBytes) * 8;
+    comparedBits -= static_cast<uint64_t>(comparedBytes) * 8;
+    while (comparedBits != 0) {
+        if (!bitsEqual(firstBit)) return false;
+        ++firstBit;
+        --comparedBits;
+    }
+    return true;
+}
+
+inline bool encodedValuesAreIdentical(const Tensor& observed, const Tensor& expected,
+                                      const ComparisonOptions& options) {
+    // This is only an early success test. A byte mismatch falls through to the numerical
+    // comparison because different encodings can still compare equal (for example, signed zero).
+    if (!options.selection.selectsAll() || observed.type() != expected.type() ||
+        observed.layout() != expected.layout() ||
+        (!options.equalNaNs && scalarTypeInfo(observed.type()).supportsNaN))
+        return false;
+
+    const size_t elementCount = observed.elementCount();
+    if (elementCount == 0) return true;
+    const uint64_t storageBits = scalarTypeInfo(observed.type()).storageBits;
+    const auto observedStorage = observed.rawEncodedBackingStorage();
+    const auto expectedStorage = expected.rawEncodedBackingStorage();
+
+    if (hasProvablyDistinctElementOffsets(observed.layout())) {
+        const auto [firstElement, lastElement] = elementBounds(observed.layout());
+        if (firstElement >= 0 && lastElement >= firstElement &&
+            static_cast<uintmax_t>(lastElement - firstElement) + 1 == elementCount &&
+            static_cast<uint64_t>(firstElement) <=
+                std::numeric_limits<uint64_t>::max() / storageBits &&
+            static_cast<uint64_t>(elementCount) <=
+                std::numeric_limits<uint64_t>::max() / storageBits)
+            return encodedBitRangesAreIdentical(observedStorage, expectedStorage,
+                                                static_cast<uint64_t>(firstElement) * storageBits,
+                                                static_cast<uint64_t>(elementCount) * storageBits);
+    }
+
+    const Shape& shape = observed.shape();
+    size_t contiguousDimension = shape.rank();
+    for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+        if ((observed.layout().stride(dimension) == 1 ||
+             observed.layout().stride(dimension) == -1) &&
+            (contiguousDimension == shape.rank() || shape[dimension] > shape[contiguousDimension]))
+            contiguousDimension = dimension;
+    }
+    if (contiguousDimension == shape.rank()) return false;
+
+    const size_t contiguousElements = shape[contiguousDimension];
+    const size_t blockCount = elementCount / contiguousElements;
+    std::vector<size_t> coordinates(shape.rank(), 0);
+    for (size_t block = 0; block < blockCount; ++block) {
+        size_t remaining = block;
+        for (size_t dimension = 0; dimension < shape.rank(); ++dimension) {
+            if (dimension == contiguousDimension) continue;
+            coordinates[dimension] = remaining % shape[dimension];
+            remaining /= shape[dimension];
+        }
+        ptrdiff_t firstElement = observed.layout().elementOffset(coordinates);
+        if (observed.layout().stride(contiguousDimension) < 0)
+            firstElement -= static_cast<ptrdiff_t>(contiguousElements - 1);
+        if (firstElement < 0 ||
+            static_cast<uint64_t>(firstElement) >
+                std::numeric_limits<uint64_t>::max() / storageBits ||
+            static_cast<uint64_t>(contiguousElements) >
+                std::numeric_limits<uint64_t>::max() / storageBits ||
+            !encodedBitRangesAreIdentical(observedStorage, expectedStorage,
+                                          static_cast<uint64_t>(firstElement) * storageBits,
+                                          static_cast<uint64_t>(contiguousElements) * storageBits))
+            return false;
+    }
+    return true;
+}
+
 template <typename Tag>
 ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& expected,
                                           const ComparisonOptions& options) {
+    if (encodedValuesAreIdentical(observed, expected, options)) {
+        ComparisonReport result;
+        result.compared = observed.elementCount();
+        result.allCloseEvaluated = true;
+        return result;
+    }
+
+    const auto observedStorage = observed.rawEncodedBackingStorage();
+    const auto expectedStorage = expected.rawEncodedBackingStorage();
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonReport result;
         result.allCloseEvaluated = true;
@@ -66,10 +174,10 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                         static_cast<ptrdiff_t>(innerIndex) * expected.layout().strides()[0];
                     bool close = false;
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
-                        const ComparisonValue observedValue = loadComparisonValueKnown<Tag>(
-                            observed.rawEncodedBackingStorage(), observedOffset);
-                        const ComparisonValue expectedValue = loadComparisonValueKnown<Tag>(
-                            expected.rawEncodedBackingStorage(), expectedOffset);
+                        const ComparisonValue observedValue =
+                            loadComparisonValueKnown<Tag>(observedStorage, observedOffset);
+                        const ComparisonValue expectedValue =
+                            loadComparisonValueKnown<Tag>(expectedStorage, expectedOffset);
                         if (options.complexComparisonMode == ComplexComparisonMode::Magnitude) {
                             close = compareComplexMagnitude(observedValue, expectedValue, options)
                                         .close;
@@ -79,10 +187,9 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                                     predicate(observedValue.imaginary, expectedValue.imaginary);
                         }
                     } else {
-                        close = predicate(loadFastComparisonReal<Tag>(
-                                              observed.rawEncodedBackingStorage(), observedOffset),
-                                          loadFastComparisonReal<Tag>(
-                                              expected.rawEncodedBackingStorage(), expectedOffset));
+                        close =
+                            predicate(loadFastComparisonReal<Tag>(observedStorage, observedOffset),
+                                      loadFastComparisonReal<Tag>(expectedStorage, expectedOffset));
                     }
                     result.mismatches += static_cast<size_t>(!close);
                 }
@@ -98,10 +205,10 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                 ++result.compared;
                 bool close = false;
                 if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
-                    const ComparisonValue observedValue = loadComparisonValueKnown<Tag>(
-                        observed.rawEncodedBackingStorage(), observedOffset);
-                    const ComparisonValue expectedValue = loadComparisonValueKnown<Tag>(
-                        expected.rawEncodedBackingStorage(), expectedOffset);
+                    const ComparisonValue observedValue =
+                        loadComparisonValueKnown<Tag>(observedStorage, observedOffset);
+                    const ComparisonValue expectedValue =
+                        loadComparisonValueKnown<Tag>(expectedStorage, expectedOffset);
                     if (options.complexComparisonMode == ComplexComparisonMode::Magnitude) {
                         close =
                             compareComplexMagnitude(observedValue, expectedValue, options).close;
@@ -111,10 +218,8 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
                             close && predicate(observedValue.imaginary, expectedValue.imaginary);
                     }
                 } else {
-                    close = predicate(loadFastComparisonReal<Tag>(
-                                          observed.rawEncodedBackingStorage(), observedOffset),
-                                      loadFastComparisonReal<Tag>(
-                                          expected.rawEncodedBackingStorage(), expectedOffset));
+                    close = predicate(loadFastComparisonReal<Tag>(observedStorage, observedOffset),
+                                      loadFastComparisonReal<Tag>(expectedStorage, expectedOffset));
                 }
                 result.mismatches += static_cast<size_t>(!close);
             });

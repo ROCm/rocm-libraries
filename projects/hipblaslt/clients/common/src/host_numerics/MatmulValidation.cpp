@@ -164,6 +164,9 @@ namespace hipblaslt::host_numerics
         bool   allCloseFailed   = false;
         double requiredAbsolute = 0.0;
         double requiredRelative = 0.0;
+        // All-close already rejects every non-finite mismatch. Norm-only validation needs the
+        // separate consistency evidence because a Frobenius reduction cannot represent it.
+        const bool needsSpecialValueStatistics = options.compareNorm && !options.compareAllClose;
 
         for(const auto& validationCase : cases)
         {
@@ -175,12 +178,12 @@ namespace hipblaslt::host_numerics
                     compareMatmulOutput(output,
                                         validationCase.allCloseTolerance,
                                         options,
-                                        options.compareAllClose || options.compareNorm,
+                                        needsSpecialValueStatistics,
                                         options.searchAllClose,
                                         options.computeUlp));
             }
 
-            if(options.compareAllClose || options.compareNorm)
+            if(needsSpecialValueStatistics)
                 for(const auto& report : outputReports)
                     record(report.comparison.nonFiniteMismatches == 0);
             if(options.compareAllClose)
