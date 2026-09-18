@@ -201,6 +201,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             MatchersCoverBothScopes
             SubtractsInTheRightDirection
     )
+
+    # Census for the gfx950 dense-attention production pack. One entry per
+    # arch in the `product` pack's recorded list (gfx950). Reads only the
+    # product shard, so it is eligible for census registration.
+    hkp_register_census_tests(
+        TARGET hip_kernel_provider_tests
+        PACK_NAME product
+        SUITES TestGfx950AttentionDensePacks
+        EXPECTED_CASES
+            LoadsExactlyTheEmittedPacks
+            LoadsExactlyTheEmittedKernels
+            EveryLoadedDescriptorCoversTheRequestedArch
+            EveryKernelDeclaresTheEmittedRuntimeSourceKind
+            DeclaresTheConfiguredSdkVersion
+            ExposesTheConfiguredKnobs
+            RanksThroughItsRegisteredScoreSymbol
+            CarriesNoGraphScopedMatcher
+            CarriesExactlyOneSharedKernelScopedMatcher
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

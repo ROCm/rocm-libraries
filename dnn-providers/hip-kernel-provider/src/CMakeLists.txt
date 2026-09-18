@@ -305,6 +305,36 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
+    # Register the gfx950 dense attention engine's CI target.
+    # Gated on the flags that produce the engine: ingestor ON, SDPA frontend ON,
+    # and the rocKE producer ON (descriptors only exist when all three hold).
+    set(_gfx950_attention_dense_category_args "")
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND DEFINED HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML)
+        list(APPEND _gfx950_attention_dense_category_args
+            TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-dense-external-integration
+            ENVIRONMENT ${TEST_ENVIRONMENT}
+        )
+    endif()
+
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+       AND TARGET hipdnn_integration_tests)
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950AttentionDense"
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionDense.toml
+            ${_gfx950_attention_dense_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-dense-external-integration-check target")
+    else()
+        message(STATUS "HIPDNN_ENABLE_KERNEL_INGESTOR/SDPA/ROCKE not all ON - skipping gfx950-attention-dense-external-integration-check")
+    endif()
+
     # Install the ctest files. When YAML-based categorization is active, install the
     # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
     # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.

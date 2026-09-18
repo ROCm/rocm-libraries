@@ -1,0 +1,16 @@
+# Integration test configuration for hipkernel:Gfx950AttentionDense
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# All bundles for this engine are forward-only dense SDPA on gfx950.
+# No tolerance overrides needed: the forward pass uses the common SdpaAttributes
+# tolerance (tol::sdpa::getToleranceFwd<T>()).
+
+# Skip on non-gfx950 arches: the engine's packs arch-prune before the matcher,
+# so every case would skip anyway, but an explicit skip gives a clearer reason.
+[[skips]]
+archs = []
+filters = ["*"]
+reason = "hipkernel:Gfx950AttentionDense is gfx950-only; packs arch-prune on all other arches"

@@ -167,6 +167,21 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
+# Register the gfx950 dense attention kpack engine integration test target.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+   AND HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME   "hipkernel:Gfx950AttentionDense"
+        INSTALL_SUBDIR hip_kernel_provider
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER
+            "quick_SdpaFwdRuntimeScale_bshd_*:standard_SdpaFwdRuntimeScale_bshd_*"
+    )
+endif()
+
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     set(_synthetic_root "/__hipdnn_install_root__")

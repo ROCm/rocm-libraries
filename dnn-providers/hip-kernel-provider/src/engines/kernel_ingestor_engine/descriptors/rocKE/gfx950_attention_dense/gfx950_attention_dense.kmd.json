@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "id": "18d64174-ba2a-4d80-b2a7-906ed2636749",
+  "name": "Gfx950AttentionDense variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "batch",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "seqlen_q",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "seqlen_kv",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "causal",
+      "type": "int",
+      "default_value": 1
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "ragged",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "block_n",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int",
+      "default_value": 2
+    },
+    {
+      "name": "persistent",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_persistent",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "wide_lds_dma",
+      "type": "int",
+      "default_value": 0
+    }
+  ]
+}
