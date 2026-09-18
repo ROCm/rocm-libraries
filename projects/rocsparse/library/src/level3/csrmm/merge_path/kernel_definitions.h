@@ -93,10 +93,14 @@ namespace rocsparse
             {
                 for(int64_t bid = hipBlockIdx_x; bid < merge_block_count; bid += hipGridDim_x)
                 {
+                    const coordinate_t<uint32_t> start_coord
+                        = load_pointer(coord0, batch, coord_batch_stride)[bid];
+                    const coordinate_t<uint32_t> end_coord
+                        = load_pointer(coord1, batch, coord_batch_stride)[bid];
+
                     rocsparse::csrmmnt_merge_path_main_device<WF_SIZE, ITEMS_PER_THREAD, LOOPS>(
                         conj_A,
                         conj_B,
-                        bid,
                         ncol_offset,
                         ncol,
                         m,
@@ -107,8 +111,8 @@ namespace rocsparse
                         load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
                         load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
                         load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                        load_pointer(coord0, batch, coord_batch_stride),
-                        load_pointer(coord1, batch, coord_batch_stride),
+                        start_coord,
+                        end_coord,
                         load_pointer(dense_B, batch, batch_stride_B),
                         ldb,
                         beta,

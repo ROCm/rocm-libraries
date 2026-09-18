@@ -45,11 +45,9 @@ namespace rocsparse
     // The signature matches rocsparse::get_grid_size from AISPARSE-696 (PR #11512),
     // so once that lands every call site below becomes a one-line substitution:
     // csrmm_nnz_split_grid_size_x -> rocsparse::get_grid_size.
-    template <typename J>
-    static inline uint32_t csrmm_nnz_split_grid_size_x(J count, int64_t max_extent)
+    static inline uint32_t csrmm_nnz_split_grid_size_x(int64_t count, int64_t max_extent)
     {
-        const int64_t extent = static_cast<int64_t>(count);
-        return static_cast<uint32_t>((extent > max_extent) ? max_extent : extent);
+        return static_cast<uint32_t>((count > max_extent) ? max_extent : count);
     }
 
     template <typename T, typename I, typename J, typename A>

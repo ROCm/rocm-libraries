@@ -176,43 +176,40 @@ namespace rocsparse
               typename B,
               typename C,
               typename T>
-    ROCSPARSE_DEVICE_ILF void csrmmnt_merge_path_main_device(bool     conj_A,
-                                                             bool     conj_B,
-                                                             int64_t  bid,
-                                                             J        ncol_offset,
-                                                             J        ncol,
-                                                             J        M,
-                                                             J        N,
-                                                             J        K,
-                                                             I        nnz,
-                                                             T        alpha,
-                                                             const I* csr_row_ptr,
-                                                             const J* csr_col_ind,
-                                                             const A* csr_val,
-                                                             const coordinate_t<uint32_t>* coord0,
-                                                             const coordinate_t<uint32_t>* coord1,
-                                                             const B*                      dense_B,
-                                                             int64_t                       ldb,
-                                                             T                             beta,
-                                                             C*                            dense_C,
-                                                             int64_t                       ldc,
-                                                             rocsparse_order               order_C,
-                                                             rocsparse_index_base          idx_base)
+    ROCSPARSE_DEVICE_ILF void csrmmnt_merge_path_main_device(bool                   conj_A,
+                                                             bool                   conj_B,
+                                                             J                      ncol_offset,
+                                                             J                      ncol,
+                                                             J                      M,
+                                                             J                      N,
+                                                             J                      K,
+                                                             I                      nnz,
+                                                             T                      alpha,
+                                                             const I*               csr_row_ptr,
+                                                             const J*               csr_col_ind,
+                                                             const A*               csr_val,
+                                                             coordinate_t<uint32_t> start_coord,
+                                                             coordinate_t<uint32_t> end_coord,
+                                                             const B*               dense_B,
+                                                             int64_t                ldb,
+                                                             T                      beta,
+                                                             C*                     dense_C,
+                                                             int64_t                ldc,
+                                                             rocsparse_order        order_C,
+                                                             rocsparse_index_base   idx_base)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
 
         const int lid = threadIdx.x & (WF_SIZE - 1);
 
-        // bid is the merge block this call operates on. It is supplied by the
-        // __global__ wrapper, which grid-strides over the full 64-bit merge block
-        // count because grid.x is clamped at the launch site (AISPARSE-671).
+        // start_coord and end_coord delimit the merge block this call operates on.
+        // The __global__ wrapper loads them, grid-striding over the full 64-bit
+        // merge block count because grid.x is clamped at the launch site
+        // (AISPARSE-671).
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
-
-        const coordinate_t<uint32_t> start_coord = coord0[bid];
-        const coordinate_t<uint32_t> end_coord   = coord1[bid];
 
         // Defensive clamp: keep coordinate-derived
         // row and nnz extents in range so stale/uninitialized merge coordinates
