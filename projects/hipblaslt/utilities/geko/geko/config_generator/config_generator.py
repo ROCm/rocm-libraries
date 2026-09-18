@@ -62,6 +62,7 @@ def run(
     for gp in config["GemmProblems"]:
         _config = copy.deepcopy(config)
         _config["GemmProblem"] = gp
+        _config["MX"] = gp.mx
         _run_per_gemm_type(
             _config,
             hipblaslt_path,

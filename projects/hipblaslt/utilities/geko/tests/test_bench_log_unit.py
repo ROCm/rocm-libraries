@@ -26,6 +26,8 @@ def _row(**overrides):
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
         "call_count": 1,
     }
     row.update(overrides)
@@ -150,6 +152,8 @@ def test_verify_output_true_and_false_paths(monkeypatch: pytest.MonkeyPatch, tmp
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             }
         ]
     )
@@ -240,6 +244,8 @@ def test_summarize_keep_thr_positive_uses_standard_benchmark(
                     "c_type": "f16_r",
                     "d_type": "f16_r",
                     "compute_type": "c_f32_r",
+                    "scaleA": 1,
+                    "scaleB": 1,
                     "us": 1.0,
                 }
             ]
@@ -287,6 +293,8 @@ def test_summarize_keep_thr_positive_uses_bench_run_path(monkeypatch: pytest.Mon
                     "c_type": "f16_r",
                     "d_type": "f16_r",
                     "compute_type": "c_f32_r",
+                    "scaleA": 1,
+                    "scaleB": 1,
                     "us": 2.0,
                 }
             ]

@@ -48,6 +48,8 @@ GEMM_FIELDS = (
     "c_type",
     "d_type",
     "compute_type",
+    "scaleA",
+    "scaleB",
 )
 
 GEMM_LOG_FIELDS = (
@@ -62,6 +64,8 @@ GEMM_LOG_FIELDS = (
     "c_type",
     "d_type",
     "compute_type",
+    "scaleA",
+    "scaleB",
 )
 GEMM_TYPE_FIELDS = (
     "transA",

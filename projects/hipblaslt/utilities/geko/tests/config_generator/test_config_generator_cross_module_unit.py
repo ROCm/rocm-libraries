@@ -195,8 +195,8 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(cg, "build_tensilelite_client", lambda *_a, **_k: tmp_path / "client")
 
     gt = GemmType.from_tensile("N", "N", "H", "H", "S")
-    gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]]})()
-    gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]]})()
+    gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]], "mx": False})()
+    gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]], "mx": False})()
 
     calls = []
     monkeypatch.setattr(cg, "_run_per_gemm_type", lambda conf, *_a, **_k: calls.append(conf["GemmProblem"]))

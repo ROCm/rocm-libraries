@@ -346,6 +346,8 @@ def run_search(
     state.dump(state_path)
 
 
+
+
 def run_configure(
     hipblaslt_path: str,
     log_file: str,

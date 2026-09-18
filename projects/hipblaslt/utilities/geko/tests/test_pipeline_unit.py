@@ -684,3 +684,25 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
     pipeline.run_optimize(str(hip), workdir=str(workdir), devices=[0], retry=False)
     assert (workdir / "build" / "keep.txt").is_file()
     assert (workdir / "benchmarks" / "keep.txt").is_file()
+
+
+def test_mx_detected_from_scale_columns_in_workload(tmp_path: Path) -> None:
+    """MX should be detected per-GEMM from scaleA/scaleB in workload log."""
+    from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
+    import pandas as pd
+
+    df = pd.DataFrame([
+        {"transA": "T", "transB": "N", "a_type": "f8_r", "b_type": "f8_r",
+         "c_type": "f32_r", "compute_type": "f32_r", "m": 256, "n": 256,
+         "batch_count": 1, "k": 256, "d_type": "f32_r", "scaleA": 3, "scaleB": 3},
+        {"transA": "N", "transB": "N", "a_type": "bf16_r", "b_type": "bf16_r",
+         "c_type": "bf16_r", "compute_type": "f32_r", "m": 512, "n": 512,
+         "batch_count": 1, "k": 256, "d_type": "bf16_r", "scaleA": 1, "scaleB": 1},
+    ])
+    gcs = gemm_configs_from_gemm_dataframe(df)
+    assert len(gcs) == 2
+    mx_gcs = [gc for gc in gcs if gc.mx]
+    non_mx_gcs = [gc for gc in gcs if not gc.mx]
+    assert len(mx_gcs) == 1
+    assert mx_gcs[0].gemm_type.data_type == "F8"
+    assert len(non_mx_gcs) == 1

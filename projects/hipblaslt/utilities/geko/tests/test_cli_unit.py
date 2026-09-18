@@ -168,8 +168,41 @@ def test_parse_cli_args_inline_normalizes_transpose_and_retry_flag() -> None:
         "0",
         "--no_retry",
     ])
-    assert args.inline == (64, 64, 1, 64, "B", "B", "S", "T", "N")
+    assert args.inline == (64, 64, 1, 64, "B", "B", "S", "T", "N", False)
     assert args.retry is False
+
+
+def test_parse_cli_args_inline_mx_flag_accepted() -> None:
+    args = cli.parse_cli_args([
+        "--bench",
+        "--inline",
+        "1024", "1024", "1", "1024",
+        "F8", "S", "S", "N", "T", "MX",
+        "--devices", "0",
+    ])
+    assert args.inline == (1024, 1024, 1, 1024, "F8", "S", "S", "N", "T", True)
+
+
+def test_parse_cli_args_inline_invalid_tenth_arg_rejected() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N", "T", "NOTMX",
+            "--devices", "0",
+        ])
+
+
+def test_parse_cli_args_inline_wrong_arg_count_rejected() -> None:
+    with pytest.raises(SystemExit):
+        cli.parse_cli_args([
+            "--bench",
+            "--inline",
+            "1024", "1024", "1", "1024",
+            "F8", "S", "S", "N",
+            "--devices", "0",
+        ])
 
 
 def test_parse_cli_args_surfaces_device_parse_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -481,7 +514,7 @@ def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch
         search=False,
         workload=None,
         gemm_config=None,
-        inline=(64, 64, 1, 64, "B", "B", "S", "N", "N"),
+        inline=(64, 64, 1, 64, "B", "B", "S", "N", "N", False),
         arch=None,
         hipblaslt=str(tmp_path),
         verbose=0,

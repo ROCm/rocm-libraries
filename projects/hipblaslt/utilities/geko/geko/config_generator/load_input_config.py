@@ -113,24 +113,35 @@ def _apply_env_config_overrides(config: Dict[str, Any]) -> None:
             )
 
 
-def gemm_configs_from_gemm_dataframe(df: pd.DataFrame) -> List[GemmConfig]:
-    """Group df by GEMM_TYPE_FIELDS; sizes use M,N,K or m,n,k columns per summarize output.
+def gemm_configs_from_gemm_dataframe(
+    df: pd.DataFrame,
+) -> List[GemmConfig]:
+    """Group df by GEMM_TYPE_FIELDS + scale columns; sizes use M,N,K or m,n,k.
+
+    MX is detected per-group from scaleA/scaleB columns (>= 3 means MX).
+    MX-only data types (F4) auto-enable MX in GemmConfig regardless.
 
     Args:
         df: Non-empty GEMM table; empty or None yields [].
 
     Returns:
-        One GemmConfig per dtype/transpose group (GemmType.from_hipblaslt).
+        One GemmConfig per unique GEMM-type/MX combination.
     """
     if df is None or df.empty:
         return []
     size_cols = (
         ["M", "N", "batch_count", "K"] if "M" in df.columns else ["m", "n", "batch_count", "k"]
     )
+    has_scale = "scaleA" in df.columns and "scaleB" in df.columns
+    df = df.copy()
+    df["_mx"] = (df["scaleA"] >= 3) | (df["scaleB"] >= 3) if has_scale else False
+
+    group_cols = list(GEMM_TYPE_FIELDS) + ["_mx"]
     gemm_configs: List[GemmConfig] = []
-    for gemm_key, gby in df.groupby(list(GEMM_TYPE_FIELDS), sort=False):
+    for group_key, gby in df.groupby(group_cols, sort=False):
+        *type_vals, is_mx = group_key
         sizes = gby[size_cols].values.tolist()
-        fields = dict(zip(GEMM_TYPE_FIELDS, gemm_key))
+        fields = dict(zip(GEMM_TYPE_FIELDS, type_vals))
         gt = GemmType.from_hipblaslt(
             fields["transA"],
             fields["transB"],
@@ -139,7 +150,7 @@ def gemm_configs_from_gemm_dataframe(df: pd.DataFrame) -> List[GemmConfig]:
             fields["c_type"],
             fields["compute_type"],
         )
-        gemm_configs.append(GemmConfig(gt, sizes))
+        gemm_configs.append(GemmConfig(gt, sizes, mx=bool(is_mx)))
     return gemm_configs
 
 
@@ -171,7 +182,7 @@ def get_gemm_problem(config: dict) -> None:
         str(config["ComputeDataType"]),
     )
     sizes = get_sizes(config)
-    config["GemmProblems"] = [GemmConfig(gemm_type, sizes)]
+    config["GemmProblems"] = [GemmConfig(gemm_type, sizes, mx=config.get("MX", False))]
 
 
 def _load_config_from_yaml(config_path: str | Path) -> Dict[str, Any]:

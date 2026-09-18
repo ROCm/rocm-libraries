@@ -246,16 +246,17 @@ _LIBRARY_LOGIC_FIELDS_GFX942 = {
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX942,
 }
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value
 # (keys align with geko.constants.SUPPORTED_ARCH).
+# mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
 _ARCH_SPECS = {
-    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
+    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001),
+    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001),
+    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
 }
 
 HARDWARE_MAP = {
@@ -264,8 +265,9 @@ HARDWARE_MAP = {
         "XCC": xcc,
         "ONLY_INCLUDE_MIs": mis,
         "LibraryLogic": ll,
+        "mx_scale": mx_scale,
     }
-    for arch, (cus, xcc, mis, ll) in _ARCH_SPECS.items()
+    for arch, (cus, xcc, mis, ll, mx_scale) in _ARCH_SPECS.items()
 }
 
 assert set(SUPPORTED_ARCH) == set(_ARCH_SPECS), (
@@ -287,8 +289,6 @@ MAX_MT0 = 1024
 
 MIN_MT1 = 4
 MAX_MT1 = 1024
-
-MAX_MT_AREA = 1024 * 1024 # Used by setupMTTuning.py. TODO - This should not be here.
 
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
@@ -328,6 +328,7 @@ REQUIRED_CONFIG_FIELDS = ["TRANSA", "TRANSB", "DataType", "DestDataType", "Compu
 # User YAML overrides via ``setdefault`` in ``load_input_config._prepare_config``.
 # To add or change per-ARCH optional defaults, edit ``CONFIG_DEFAULTS_BY_ARCH`` below.
 _CONFIG_OPTIONAL_COMMON = {
+    "MX": False,
     "StreamK": True,
     "search_space": None,
     "MACROTILE_OPT": False,
@@ -349,7 +350,7 @@ ENV_UPDATABLE_KEYS = {
 }
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
-_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False}
+_CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}
 
 CONFIG_DEFAULTS_BY_ARCH = {
     "gfx950": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX950},
