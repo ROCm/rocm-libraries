@@ -617,6 +617,32 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("na") = 1, nb::arg("offset") = 0, nb::arg("offset0") = 0,
             nb::arg("offset1") = 0, nb::arg("gds") = false, "Set DS (LDS/GDS) modifiers")
         .def(
+            "set_flat",
+            [](LogicalInstruction& inst, int offset, bool glc, bool slc, bool lds, bool isStore,
+               bool hasGLCModifier, bool hasSC0Modifier, int scope, int th) {
+                inst.flat =
+                    FLATModifiers(offset, glc, slc, lds, isStore, hasGLCModifier, hasSC0Modifier,
+                                  static_cast<MUBUFScope>(scope), static_cast<TemporalHint>(th));
+            },
+            nb::arg("offset") = 0, nb::arg("glc") = false, nb::arg("slc") = false,
+            nb::arg("lds") = false, nb::arg("is_store") = false,
+            nb::arg("has_glc_modifier") = false, nb::arg("has_sc0_modifier") = false,
+            nb::arg("scope") = 0, nb::arg("th") = -1, "Set FLAT memory modifiers")
+        .def(
+            "set_global",
+            [](LogicalInstruction& inst, int offset, int th, int scope, bool glc, bool slc,
+               bool dlc, bool lds, bool isStore, bool hasGLCModifier, bool hasSC0Modifier,
+               bool hasDLCModifier) {
+                inst.global = GLOBALModifiers(
+                    offset, static_cast<TemporalHint>(th), static_cast<MUBUFScope>(scope), glc, slc,
+                    dlc, lds, isStore, hasGLCModifier, hasSC0Modifier, hasDLCModifier);
+            },
+            nb::arg("offset") = 0, nb::arg("th") = -1, nb::arg("scope") = 0, nb::arg("glc") = false,
+            nb::arg("slc") = false, nb::arg("dlc") = false, nb::arg("lds") = false,
+            nb::arg("is_store") = false, nb::arg("has_glc_modifier") = false,
+            nb::arg("has_sc0_modifier") = false, nb::arg("has_dlc_modifier") = false,
+            "Set GLOBAL memory modifiers")
+        .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
                int scope, int th, bool isStore) {
@@ -643,6 +669,16 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("op_sel") = std::vector<int>{}, nb::arg("op_sel_hi") = std::vector<int>{},
             nb::arg("byte_sel") = std::vector<int>{},
             "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers")
+        .def(
+            "set_sdwa",
+            [](LogicalInstruction& inst, int dstSel, int dstUnused, int src0Sel, int src1Sel) {
+                inst.sdwa = SDWAModifiers(static_cast<SDWAModifiers::SelectBit>(dstSel),
+                                          static_cast<SDWAModifiers::UnusedBit>(dstUnused),
+                                          static_cast<SDWAModifiers::SelectBit>(src0Sel),
+                                          static_cast<SDWAModifiers::SelectBit>(src1Sel));
+            },
+            nb::arg("dst_sel") = 0, nb::arg("dst_unused") = 0, nb::arg("src0_sel") = 0,
+            nb::arg("src1_sel") = 0, "Set SDWA sub-dword modifiers")
         .def(
             "set_true16",
             [](LogicalInstruction& inst, int dst0, int dst1, const std::vector<int>& srcs) {
@@ -685,18 +721,19 @@ NB_MODULE(_stinkytofu, m) {
         "MFMA",
         [](const std::string& instType, const std::string& accType, int m, int n, int k, int blocks,
            bool mfma1k, const StinkyRegister& acc, const StinkyRegister& a, const StinkyRegister& b,
-           std::optional<StinkyRegister> acc2, bool neg, const std::string& matrixAFmt,
-           const std::string& matrixBFmt, bool scaled, bool scaleOperands,
-           const std::string& comment) {
+           std::optional<StinkyRegister> acc2, bool neg, bool reuseA, bool reuseB,
+           const std::string& matrixAFmt, const std::string& matrixBFmt, bool scaled,
+           bool scaleOperands, const std::string& comment) {
             return makeLogicalInstructionShared(MFMA(
                 instType, accType, m, n, k, blocks, mfma1k, acc, a, b, acc2 ? &(*acc2) : nullptr,
-                neg, matrixAFmt, matrixBFmt, scaled, scaleOperands, comment));
+                neg, reuseA, reuseB, matrixAFmt, matrixBFmt, scaled, scaleOperands, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("m"), nb::arg("n"), nb::arg("k"),
         nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
-        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("matrixAFmt") = "",
-        nb::arg("matrixBFmt") = "", nb::arg("scaled") = false, nb::arg("scaleOperands") = false,
-        nb::arg("comment") = "", "Create an MFMA instruction");
+        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("reuseA") = false,
+        nb::arg("reuseB") = false, nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "",
+        nb::arg("scaled") = false, nb::arg("scaleOperands") = false, nb::arg("comment") = "",
+        "Create an MFMA instruction");
 
     // MXMFMA - Mixed-precision Matrix Fused Multiply-Add
     m.def(
@@ -706,17 +743,19 @@ NB_MODULE(_stinkytofu, m) {
            int k, int block, const StinkyRegister& acc, const StinkyRegister& a,
            const StinkyRegister& b, const StinkyRegister& acc2, const StinkyRegister& mxsa,
            const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& matrixAFmt,
-           const std::string& matrixBFmt, const std::string& comment) {
+           const std::string& matrixBFmt, int mxScaleASel, int mxScaleBSel,
+           const std::string& comment) {
             return makeLogicalInstructionShared(
                 MXMFMA(instType, accType, mxScaleATypeStr, mxScaleBTypeStr, m, n, k, block, acc, a,
-                       b, acc2, mxsa, mxsb, reuseA, reuseB, matrixAFmt, matrixBFmt, comment));
+                       b, acc2, mxsa, mxsb, reuseA, reuseB, matrixAFmt, matrixBFmt, mxScaleASel,
+                       mxScaleBSel, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("mxScaleATypeStr"),
         nb::arg("mxScaleBTypeStr"), nb::arg("m"), nb::arg("n"), nb::arg("k"), nb::arg("block"),
         nb::arg("acc"), nb::arg("a"), nb::arg("b"), nb::arg("acc2"), nb::arg("mxsa"),
         nb::arg("mxsb"), nb::arg("reuseA") = false, nb::arg("reuseB") = false,
-        nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "", nb::arg("comment") = "",
-        "Create an MXMFMA instruction");
+        nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "", nb::arg("mxScaleASel") = 0,
+        nb::arg("mxScaleBSel") = 0, nb::arg("comment") = "", "Create an MXMFMA instruction");
 
     // SMFMA - Sparse Matrix Fused Multiply-Add
     m.def(
