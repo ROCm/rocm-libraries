@@ -49,34 +49,44 @@ namespace rocsparse
                                       coordinate_t<uint32_t>* __restrict__ coord1,
                                       rocsparse_index_base idx_base)
     {
-        const int bid = blockIdx.x;
+        // Merge block count. This is 64-bit because it derives from M + nnz rather
+        // than from a single index, so it is genuinely wider than the unsigned int
+        // dim3 field it is sized onto. grid.x is clamped against the hardware limit
+        // at the launch site, so grid-stride over the full count here, and keep bid
+        // 64-bit so the value is not truncated again on the way back out.
+        const uint64_t total_work  = static_cast<uint64_t>(M) + nnz;
+        const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
-        // Search starting/ending coordinates of the range for this block.
-        const I diagonal0 = (bid + 0) * ITEMS_PER_THREAD;
-        const I diagonal1 = rocsparse::min((I)(M + nnz), (I)((bid + 1) * ITEMS_PER_THREAD));
-
-        // Coordinates are computed independently for each batch because the row
-        // pointer data may differ between batches (offsets_batch_stride_A != 0). Each
-        // batch owns a contiguous block of coords_per_batch coordinates. Grid-stride
-        // over the batch dimension so batch counts larger than the grid-y limit work.
-        for(int64_t batch = blockIdx.y; batch < batch_count; batch += gridDim.y)
+        for(int64_t bid = blockIdx.x; bid < static_cast<int64_t>(block_count); bid += gridDim.x)
         {
-            rocprim::counting_iterator<I> nnz_indices0(idx_base);
-            rocprim::counting_iterator<I> nnz_indices1(idx_base);
+            // Search starting/ending coordinates of the range for this block.
+            const I diagonal0 = (I)(bid * ITEMS_PER_THREAD);
+            const I diagonal1 = rocsparse::min((I)(M + nnz), (I)((bid + 1) * ITEMS_PER_THREAD));
 
-            // Search across the diagonals to find coordinates to process.
-            merge_path_search(diagonal0,
-                              load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
-                              nnz_indices0,
-                              I(M),
-                              nnz,
-                              load_pointer(coord0, batch, coords_per_batch)[bid]);
-            merge_path_search(diagonal1,
-                              load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
-                              nnz_indices1,
-                              I(M),
-                              nnz,
-                              load_pointer(coord1, batch, coords_per_batch)[bid]);
+            // Coordinates are computed independently for each batch because the row
+            // pointer data may differ between batches (offsets_batch_stride_A != 0).
+            // Each batch owns a contiguous block of coords_per_batch coordinates.
+            // Grid-stride over the batch dimension so batch counts larger than the
+            // grid-y limit work.
+            for(int64_t batch = blockIdx.y; batch < batch_count; batch += gridDim.y)
+            {
+                rocprim::counting_iterator<I> nnz_indices0(idx_base);
+                rocprim::counting_iterator<I> nnz_indices1(idx_base);
+
+                // Search across the diagonals to find coordinates to process.
+                merge_path_search(diagonal0,
+                                  load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
+                                  nnz_indices0,
+                                  I(M),
+                                  nnz,
+                                  load_pointer(coord0, batch, coords_per_batch)[bid]);
+                merge_path_search(diagonal1,
+                                  load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
+                                  nnz_indices1,
+                                  I(M),
+                                  nnz,
+                                  load_pointer(coord1, batch, coords_per_batch)[bid]);
+            }
         }
     }
 
@@ -166,39 +176,40 @@ namespace rocsparse
               typename B,
               typename C,
               typename T>
-    ROCSPARSE_DEVICE_ILF void csrmmnt_merge_path_main_device(bool     conj_A,
-                                                             bool     conj_B,
-                                                             J        ncol_offset,
-                                                             J        ncol,
-                                                             J        M,
-                                                             J        N,
-                                                             J        K,
-                                                             I        nnz,
-                                                             T        alpha,
-                                                             const I* csr_row_ptr,
-                                                             const J* csr_col_ind,
-                                                             const A* csr_val,
-                                                             const coordinate_t<uint32_t>* coord0,
-                                                             const coordinate_t<uint32_t>* coord1,
-                                                             const B*                      dense_B,
-                                                             int64_t                       ldb,
-                                                             T                             beta,
-                                                             C*                            dense_C,
-                                                             int64_t                       ldc,
-                                                             rocsparse_order               order_C,
-                                                             rocsparse_index_base          idx_base)
+    ROCSPARSE_DEVICE_ILF void csrmmnt_merge_path_main_device(bool                   conj_A,
+                                                             bool                   conj_B,
+                                                             J                      ncol_offset,
+                                                             J                      ncol,
+                                                             J                      M,
+                                                             J                      N,
+                                                             J                      K,
+                                                             I                      nnz,
+                                                             T                      alpha,
+                                                             const I*               csr_row_ptr,
+                                                             const J*               csr_col_ind,
+                                                             const A*               csr_val,
+                                                             coordinate_t<uint32_t> start_coord,
+                                                             coordinate_t<uint32_t> end_coord,
+                                                             const B*               dense_B,
+                                                             int64_t                ldb,
+                                                             T                      beta,
+                                                             C*                     dense_C,
+                                                             int64_t                ldc,
+                                                             rocsparse_order        order_C,
+                                                             rocsparse_index_base   idx_base)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
 
         const int lid = threadIdx.x & (WF_SIZE - 1);
-        const int bid = blockIdx.x;
+
+        // start_coord and end_coord delimit the merge block this call operates on.
+        // The __global__ wrapper loads them, grid-striding over the full 64-bit
+        // merge block count because grid.x is clamped at the launch site
+        // (AISPARSE-671).
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
-
-        const coordinate_t<uint32_t> start_coord = coord0[bid];
-        const coordinate_t<uint32_t> end_coord   = coord1[bid];
 
         // Defensive clamp: keep coordinate-derived
         // row and nnz extents in range so stale/uninitialized merge coordinates
@@ -419,6 +430,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         csrmmnt_merge_path_main_multi_rows_device(bool                          conj_A,
                                                   bool                          conj_B,
+                                                  int64_t                       block_base,
                                                   J                             ncol_offset,
                                                   J                             ncol,
                                                   J                             M,
@@ -448,7 +460,11 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / (WF_SIZE);
 
-        const int bid = (BLOCKSIZE / WF_SIZE) * blockIdx.x + wid;
+        // block_base is the grid.x iteration supplied by the __global__ wrapper,
+        // which grid-strides over the clamped grid. bid is 64-bit to match the width
+        // of block_count below: a clamped grid with a 32-bit bid would still
+        // truncate (AISPARSE-671).
+        const int64_t bid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * block_base + wid;
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
@@ -456,7 +472,7 @@ namespace rocsparse
         const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
-        if(bid < block_count)
+        if(bid < static_cast<int64_t>(block_count))
         {
             const coordinate_t<uint32_t> start_coord = coord0[bid];
             const coordinate_t<uint32_t> end_coord   = coord1[bid];
@@ -636,6 +652,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         csrmmnt_merge_path_remainder_device(bool                          conj_A,
                                             bool                          conj_B,
+                                            int64_t                       block_base,
                                             J                             ncol_offset,
                                             J                             M,
                                             J                             N,
@@ -664,7 +681,11 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / (WF_SIZE);
 
-        const int bid = (BLOCKSIZE / WF_SIZE) * blockIdx.x + wid;
+        // block_base is the grid.x iteration supplied by the __global__ wrapper,
+        // which grid-strides over the clamped grid. bid is 64-bit to match the width
+        // of block_count below: a clamped grid with a 32-bit bid would still
+        // truncate (AISPARSE-671).
+        const int64_t bid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * block_base + wid;
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
@@ -672,7 +693,7 @@ namespace rocsparse
         const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
-        if(bid < block_count)
+        if(bid < static_cast<int64_t>(block_count))
         {
             const coordinate_t<uint32_t> start_coord = coord0[bid];
             const coordinate_t<uint32_t> end_coord   = coord1[bid];
@@ -863,6 +884,7 @@ namespace rocsparse
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmmnn_merge_path_device(bool                          conj_A,
                                                         bool                          conj_B,
+                                                        int64_t                       block_base,
                                                         J                             M,
                                                         J                             N,
                                                         J                             K,
@@ -890,7 +912,11 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / (WF_SIZE);
 
-        const int bid = (BLOCKSIZE / WF_SIZE) * blockIdx.x + wid;
+        // block_base is the grid.x iteration supplied by the __global__ wrapper,
+        // which grid-strides over the clamped grid. bid is 64-bit to match the width
+        // of block_count below: a clamped grid with a 32-bit bid would still
+        // truncate (AISPARSE-671).
+        const int64_t bid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * block_base + wid;
 
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
@@ -898,7 +924,7 @@ namespace rocsparse
         const uint64_t total_work  = static_cast<uint64_t>(M + nnz);
         const uint64_t block_count = (total_work - 1) / ITEMS_PER_THREAD + 1;
 
-        if(bid < block_count)
+        if(bid < static_cast<int64_t>(block_count))
         {
             const coordinate_t<uint32_t> start_coord = coord0[bid];
             const coordinate_t<uint32_t> end_coord   = coord1[bid];
