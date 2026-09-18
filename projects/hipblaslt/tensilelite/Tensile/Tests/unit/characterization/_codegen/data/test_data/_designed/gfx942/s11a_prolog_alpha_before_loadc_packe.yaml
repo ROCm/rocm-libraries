@@ -1,0 +1,63 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# GlobalWriteBatch.py _prolog alpha-before-loadC characterization config (gfx942).
+#
+# Target lines (Tensile/Components/GlobalWriteBatch.py):
+#   codeMulAlpha is None branch (LSU>1 forces codeMulAlpha=None on the MIArchVgpr
+#   alphaBeforeLoadC path -> KernelWriterAssembly.py:16523):
+#     822  while elementIdx < len(batchElements)
+#     824  packed even-pair usePK=True guard
+#     825  module.add(_applyAlpha(... usePK=True))
+#     828  module.add(_applyAlpha(...))  (single/odd path)
+#   codeMulAlpha not-None branch (LSU==1, int8->fp32 replaceHolder):
+#     836  srcRegName = rh.getParams()[2].getCompleteRegName()
+#     837  module.add(VCvtI32toF32(...))  # int8 MI out reg -> fp32
+#
+# alphaBeforeLoadC requires (KernelWriterAssembly.py:16506-16520):
+#   MIArchVgpr=True, applyAlpha, beta, and (StorePriorityOpt or StoreSyncOpt).
+# 836/837 additionally require DataType.isInt8() && ComputeDataType.isSingle()
+#   && GlobalSplitU==1 (line 835) -> int8_hpa ProblemType (I8 in, s compute).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 2
+  DataInitTypeAlpha: 2
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # I8 in / i8 out / s (int32) compute, NN, HPA, Beta, alphaBeforeLoadC path
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: I8
+      DestDataType: I8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  2, 1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - GlobalSplitU: [1]
+        - MIArchVgpr: [True]
+        - StorePriorityOpt: [True]
+        - WorkGroupMapping: [4]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

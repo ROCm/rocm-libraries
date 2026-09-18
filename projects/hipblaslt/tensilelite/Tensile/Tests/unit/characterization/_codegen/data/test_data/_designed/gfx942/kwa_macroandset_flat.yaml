@@ -1,0 +1,59 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S00 macroAndSet: flat (non-buffer) GlobalReadAddr + globalReadIncsUseVgpr.
+#
+# Target: Tensile/KernelWriterAssembly.py macroAndSet RegSet emission.
+#   - 1442,1444,1447,1449 : else branch (not BufferLoad) -> vgprGlobalReadAddrA/B
+#   - 1489,1491,1494,1496,1499 : globalReadIncsUseVgpr -> vgprGlobalReadIncsA/B
+#   plus the flat-addressing emit arms these RegSets feed (globalReadIncsUseVgpr
+#   ripples through graFinalOffsets / globalReadInc emit).
+#
+# Mechanism: KernelWriter.py sets
+#   globalReadIncsUseVgpr = False if kernel["BufferLoad"] else True
+# so BufferLoad=False forces BOTH the flat GlobalReadAddr else-arm and the
+# globalReadIncsUseVgpr RegSets. The MXSA/MXSB arms are NOT reachable here:
+# Solution.py forces BufferLoad for MXBlock, so a MX config can never take the
+# flat else-branch (Category B for that sub-cluster).
+#
+# Constraints for BufferLoad=0 (Solution.py assignDerivedParameters):
+#   - PrefetchGlobalRead < 2, no UseBias, no Sparse, no GroupedGemm,
+#     no sub-dword dtype, no TDMInst.  fp32 NN satisfies all.
+#
+# 1 emitted kernel (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - BufferLoad: [False]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
