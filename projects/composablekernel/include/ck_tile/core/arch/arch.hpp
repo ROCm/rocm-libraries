@@ -461,12 +461,6 @@ constexpr auto get_compiler_target()
 // different types. The CK_USE_GFX* tier is family-coarse and picks a representative target.
 #if defined(CK_CMAKE_GPU_TARGET_IDS)
 #define CK_TILE_GPU_TARGET_IDS CK_CMAKE_GPU_TARGET_IDS
-#elif defined(CK_USE_GFX1250)
-#define CK_TILE_GPU_TARGET_IDS 0x1250
-#elif defined(CK_USE_GFX950)
-#define CK_TILE_GPU_TARGET_IDS 0x0950
-#elif defined(CK_USE_GFX94)
-#define CK_TILE_GPU_TARGET_IDS 0x0942
 #elif USE_NEW_UNIFIED_FRAMEWORK
 #pragma message(                                                                             \
     "ck_tile: no GPU target known at compile time; falling back to the current pass's "      \
