@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -90,8 +90,6 @@ int main(int argc, char* argv[])
 
     p.SetCoarseningStrategy(CoarseningStrategy::PMIS);
     p.SetInterpolationType(InterpolationType::ExtPI);
-    p.SetInterpolationTruncationFactor(0.0);
-    p.SetInterpolationMaxElmts(4);
     p.SetCoarsestLevel(20);
 
     // Limit operator complexity

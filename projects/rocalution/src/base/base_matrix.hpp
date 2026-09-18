@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -759,10 +759,10 @@ namespace rocalution
         /** \brief Assemble the prolongation operator from the F-point interpolation
         * weights, inserting the identity at the coarse points */
         virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
-                                       const BaseVector<int>&       f2c,
-                                       const BaseVector<int>&       f2f,
-                                       const BaseMatrix<ValueType>& W,
-                                       BaseMatrix<ValueType>*       prolong) const;
+                                        const BaseVector<int>&       f2c,
+                                        const BaseVector<int>&       f2f,
+                                        const BaseMatrix<ValueType>& W,
+                                        BaseMatrix<ValueType>*       prolong) const;
 
         /** \brief Factorized Sparse Approximate Inverse assembly for given system
         * matrix power pattern or external sparsity pattern */

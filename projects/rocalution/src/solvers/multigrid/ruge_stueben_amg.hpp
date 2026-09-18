@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +60,7 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetCoarseningStrategy(CoarseningStrategy strat);
 
-        /** \brief Set Interpolation type */
+        /** \brief Set Interpolation type. */
         ROCALUTION_EXPORT
         void SetInterpolationType(InterpolationType type);
 
@@ -70,12 +70,14 @@ namespace rocalution
         void SetInterpolationFF1Limit(bool FF1);
 
         /** \brief Drop interpolation weights below \p factor times the largest magnitude
-        * of their row (default: 0, no truncation) */
+        * of their row and rescale the row to preserve its sum. \p factor must be in
+        * [0, 1) (default: 0, no truncation). */
         ROCALUTION_EXPORT
         void SetInterpolationTruncationFactor(float factor);
 
-        /** \brief Keep at most \p max_elmts weights per interpolation row
-        * (default: 0, unlimited) */
+        /** \brief Keep at most \p max_elmts weights per interpolation row and rescale the
+        * row to preserve its sum (default: 0, unlimited). Only available for a single
+        * process. */
         ROCALUTION_EXPORT
         void SetInterpolationMaxElmts(int max_elmts);
 

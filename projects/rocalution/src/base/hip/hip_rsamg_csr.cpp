@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1241,12 +1241,6 @@ namespace rocalution
         free_hip(&d_max_hash);
         free_hip(&rocprim_buffer);
 
-        // LDS capacity check
-        if(max_hash_fill >= 4096)
-        {
-            return false;
-        }
-
         // Exclusive sum to obtain row offset pointers of P
         // P contains only nnz per row, so far
         DISCARD_HIP_ERROR(
@@ -1406,6 +1400,24 @@ namespace rocalution
                 DISPATCH_EXTPI_INTERP_FILL(global, 64, 64, 4096);
             }
         }
+        else
+        {
+            // More nnz per row will not fit into LDS
+            // Fall back to host
+            cast_glo->Clear();
+
+            free_hip(&cast_pi->mat_.col);
+            free_hip(&cast_pi->mat_.val);
+            free_hip(&cast_pg->mat_.col);
+            free_hip(&cast_pg->mat_.val);
+
+            cast_pi->nnz_  = 0;
+            cast_pg->nnz_  = 0;
+            cast_pi->ncol_ = 0;
+            cast_pg->ncol_ = 0;
+
+            return false;
+        }
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         return true;
@@ -1437,15 +1449,17 @@ namespace rocalution
         assert(cast_ff != NULL);
         assert(cast_fc != NULL);
 
+        // Column indices of A are used to index the row-based C-F and index maps
+        assert(this->nrow_ == this->ncol_);
+
         hipStream_t stream = HIPSTREAM(_get_backend_descriptor()->HIP_stream_current);
 
         // Flag coarse and fine points and turn the flags into index maps
         set_to_zero_hip(256, this->nrow_ + 1, cast_f2c->vec_, false, stream);
         set_to_zero_hip(256, this->nrow_ + 1, cast_f2f->vec_, false, stream);
 
-        kernel_csr_rs_mmextpi_cf_flags<256>
-            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(
-                this->nrow_, cast_cf->vec_, cast_f2c->vec_, cast_f2f->vec_);
+        kernel_csr_rs_mmextpi_cf_flags<256><<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(
+            this->nrow_, cast_cf->vec_, cast_f2c->vec_, cast_f2f->vec_);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         cast_f2c->ExclusiveSum(*cast_f2c);
@@ -1555,10 +1569,10 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIScale(const BaseVector<int>& CFmap,
-                                                            const BaseVector<int>& f2f,
+    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                                            const BaseVector<int>&       f2f,
                                                             const BaseMatrix<ValueType>& A_FC,
-                                                            BaseMatrix<ValueType>* A_FF) const
+                                                            BaseMatrix<ValueType>*       A_FF) const
     {
         const HIPAcceleratorVector<int>* cast_cf
             = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);
@@ -1617,14 +1631,14 @@ namespace rocalution
         allocate_hip(cast_ff->nnz_, &ff_val_orig);
         copy_d2d(cast_ff->nnz_, cast_ff->mat_.val, ff_val_orig, false, stream);
 
-        kernel_csr_rs_mmextpi_scale_ff<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
-            nf,
-            cast_ff->mat_.row_offset,
-            cast_ff->mat_.col,
-            cast_ff->mat_.val,
-            ff_val_orig,
-            D_q,
-            D_theta);
+        kernel_csr_rs_mmextpi_scale_ff<256>
+            <<<(nf - 1) / 256 + 1, 256, 0, stream>>>(nf,
+                                                     cast_ff->mat_.row_offset,
+                                                     cast_ff->mat_.col,
+                                                     cast_ff->mat_.val,
+                                                     ff_val_orig,
+                                                     D_q,
+                                                     D_theta);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         kernel_csr_rs_mmextpi_scale_rows<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
@@ -1707,17 +1721,17 @@ namespace rocalution
             nf, cast_ff->mat_.row_offset, cast_ff->mat_.col, cast_ff->mat_.val, D_tmp, D_tau);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
-        kernel_csr_rs_mmextpe_scale<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
-            nf,
-            cast_ff->mat_.row_offset,
-            cast_ff->mat_.col,
-            cast_ff->mat_.val,
-            cast_fc->mat_.row_offset,
-            cast_fc->mat_.val,
-            D_lambda,
-            D_beta,
-            D_tau,
-            D_w);
+        kernel_csr_rs_mmextpe_scale<256>
+            <<<(nf - 1) / 256 + 1, 256, 0, stream>>>(nf,
+                                                     cast_ff->mat_.row_offset,
+                                                     cast_ff->mat_.col,
+                                                     cast_ff->mat_.val,
+                                                     cast_fc->mat_.row_offset,
+                                                     cast_fc->mat_.val,
+                                                     D_lambda,
+                                                     D_beta,
+                                                     D_tau,
+                                                     D_w);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&D_lambda);
@@ -1730,11 +1744,12 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>& CFmap,
-                                                                const BaseVector<int>& f2c,
-                                                                const BaseVector<int>& f2f,
-                                                                const BaseMatrix<ValueType>& W,
-                                                                BaseMatrix<ValueType>* prolong) const
+    bool
+        HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                                               const BaseVector<int>&       f2c,
+                                                               const BaseVector<int>&       f2f,
+                                                               const BaseMatrix<ValueType>& W,
+                                                               BaseMatrix<ValueType>* prolong) const
     {
         const HIPAcceleratorVector<int>* cast_cf
             = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);

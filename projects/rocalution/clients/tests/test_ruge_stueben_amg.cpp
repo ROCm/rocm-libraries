@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 
+#include "testing_rsamg_truncation.hpp"
 #include "testing_ruge_stueben_amg.hpp"
 #include "utility.hpp"
 
@@ -32,6 +33,12 @@ typedef std::tuple<int, std::string, unsigned int, int, int, int, int, int, int,
 
 // size, format, use_acc, interpolation type, truncation factor, max elements per row
 typedef std::tuple<int, unsigned int, int, std::string, float, int> rsamg_interp_tuple;
+
+// rows, use_acc, truncation factor, max elements per row
+typedef std::tuple<int, int, float, int> rsamg_trunc_tuple;
+
+// rows, truncation factor, max elements per row
+typedef std::tuple<int, float, int> rsamg_trunc_parity_tuple;
 
 std::vector<int>          rsamg_size                = {63, 134};
 std::vector<std::string>  rsamg_smoother            = {"Jacobi"};
@@ -50,14 +57,22 @@ std::vector<std::string>  rsamg_coarsening_strategy = {"PMIS"};
 // ExtPI_FF1 is the classical Ext+I operator with the FF1 limit enabled, which is the only
 // operator the limit applies to, so it is one more entry here rather than a dimension of
 // its own. These keep their own size and format so that the emulation modes below, which
-// trim the matrix above, cannot leave them empty.
+// trim the matrix above, cannot leave them empty. Both backends are always swept, because
+// the host implementations are OpenMP parallel and are not covered anywhere else.
 std::vector<std::string> rsamg_interpolation_type
     = {"Direct", "ExtPI", "ExtPI_FF1", "MMExtPI", "MMExtPE"};
-std::vector<int>          rsamg_interp_size        = {63};
-std::vector<unsigned int> rsamg_interp_format      = {1};
-std::vector<int>          rsamg_interp_use_acc     = {1};
-std::vector<float>        rsamg_interp_trunc       = {0.0f, 0.2f};
-std::vector<int>          rsamg_interp_max_elmts   = {0, 4};
+std::vector<int>          rsamg_interp_size      = {63};
+std::vector<unsigned int> rsamg_interp_format    = {1};
+std::vector<int>          rsamg_interp_use_acc   = {0, 1};
+std::vector<float>        rsamg_interp_trunc     = {0.0f, 0.2f};
+std::vector<int>          rsamg_interp_max_elmts = {0, 4};
+
+// The truncation post-pass has an exact specification, so it is checked directly on a
+// small operator rather than through the convergence of a whole hierarchy
+std::vector<int>   rsamg_trunc_size      = {8};
+std::vector<int>   rsamg_trunc_use_acc   = {0, 1};
+std::vector<float> rsamg_trunc_factor    = {0.0f, 0.2f, 0.5f};
+std::vector<int>   rsamg_trunc_max_elmts = {0, 2, 4};
 
 // Function to update tests if environment variable is set
 void update_rsamg()
@@ -89,9 +104,6 @@ void update_rsamg()
         rsamg_rebuildnumeric.insert(rsamg_rebuildnumeric.end(), {0, 1});
         rsamg_use_acc.push_back(0);
         rsamg_coarsening_strategy.push_back("Greedy");
-
-        // Exercise the host implementation of every interpolation operator as well
-        rsamg_interp_use_acc.push_back(0);
     }
 
     if(is_env_var_set("ROCALUTION_EMULATION_SMOKE"))
@@ -104,6 +116,10 @@ void update_rsamg()
         rsamg_cycle.push_back(0);
         rsamg_scaling.push_back(0);
         rsamg_rebuildnumeric.push_back(0);
+
+        // One point of the truncation sweep is enough to keep a smoke run quick
+        rsamg_interp_trunc     = {0.2f};
+        rsamg_interp_max_elmts = {4};
     }
     else if(is_env_var_set("ROCALUTION_EMULATION_REGRESSION"))
     {
@@ -242,3 +258,78 @@ INSTANTIATE_TEST_CASE_P(ruge_stueben_amg_interpolation,
                                          testing::ValuesIn(rsamg_interpolation_type),
                                          testing::ValuesIn(rsamg_interp_trunc),
                                          testing::ValuesIn(rsamg_interp_max_elmts)));
+
+class parameterized_rsamg_truncation : public testing::TestWithParam<rsamg_trunc_tuple>
+{
+protected:
+    parameterized_rsamg_truncation() {}
+    virtual ~parameterized_rsamg_truncation() {}
+    virtual void SetUp() {}
+    virtual void TearDown() {}
+};
+
+Arguments setup_rsamg_truncation_arguments(rsamg_trunc_tuple tup)
+{
+    Arguments arg;
+    arg.size         = std::get<0>(tup);
+    arg.use_acc      = std::get<1>(tup);
+    arg.trunc_factor = std::get<2>(tup);
+    arg.p_max_elmts  = std::get<3>(tup);
+    return arg;
+}
+
+TEST_P(parameterized_rsamg_truncation, rsamg_truncation_float)
+{
+    Arguments arg = setup_rsamg_truncation_arguments(GetParam());
+    ASSERT_EQ(testing_rsamg_truncation<float>(arg), true);
+}
+
+TEST_P(parameterized_rsamg_truncation, rsamg_truncation_double)
+{
+    Arguments arg = setup_rsamg_truncation_arguments(GetParam());
+    ASSERT_EQ(testing_rsamg_truncation<double>(arg), true);
+}
+
+INSTANTIATE_TEST_CASE_P(rsamg_truncation,
+                        parameterized_rsamg_truncation,
+                        testing::Combine(testing::ValuesIn(rsamg_trunc_size),
+                                         testing::ValuesIn(rsamg_trunc_use_acc),
+                                         testing::ValuesIn(rsamg_trunc_factor),
+                                         testing::ValuesIn(rsamg_trunc_max_elmts)));
+
+class parameterized_rsamg_truncation_parity
+    : public testing::TestWithParam<rsamg_trunc_parity_tuple>
+{
+protected:
+    parameterized_rsamg_truncation_parity() {}
+    virtual ~parameterized_rsamg_truncation_parity() {}
+    virtual void SetUp() {}
+    virtual void TearDown() {}
+};
+
+Arguments setup_rsamg_truncation_parity_arguments(rsamg_trunc_parity_tuple tup)
+{
+    Arguments arg;
+    arg.size         = std::get<0>(tup);
+    arg.trunc_factor = std::get<1>(tup);
+    arg.p_max_elmts  = std::get<2>(tup);
+    return arg;
+}
+
+TEST_P(parameterized_rsamg_truncation_parity, rsamg_truncation_parity_float)
+{
+    Arguments arg = setup_rsamg_truncation_parity_arguments(GetParam());
+    ASSERT_EQ(testing_rsamg_truncation_parity<float>(arg), true);
+}
+
+TEST_P(parameterized_rsamg_truncation_parity, rsamg_truncation_parity_double)
+{
+    Arguments arg = setup_rsamg_truncation_parity_arguments(GetParam());
+    ASSERT_EQ(testing_rsamg_truncation_parity<double>(arg), true);
+}
+
+INSTANTIATE_TEST_CASE_P(rsamg_truncation_parity,
+                        parameterized_rsamg_truncation_parity,
+                        testing::Combine(testing::ValuesIn(rsamg_trunc_size),
+                                         testing::ValuesIn(rsamg_trunc_factor),
+                                         testing::ValuesIn(rsamg_trunc_max_elmts)));

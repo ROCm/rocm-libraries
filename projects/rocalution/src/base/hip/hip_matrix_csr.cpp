@@ -4545,18 +4545,18 @@ namespace rocalution
         set_to_zero_hip(this->local_backend_.HIP_block_size, nrow + 1, row_nnz);
 
         dim3 BlockSize(this->local_backend_.HIP_block_size);
-        dim3 GridSize(static_cast<unsigned int>(std::min<int64_t>(
-            (nrow - 1) / this->local_backend_.HIP_block_size + 1, 65535)));
+        dim3 GridSize(static_cast<unsigned int>(
+            std::min<int64_t>((nrow - 1) / this->local_backend_.HIP_block_size + 1, 65535)));
 
         // Rescales the surviving values of this->mat_ in place
         kernel_csr_rs_truncation_mark<<<GridSize, BlockSize, 0, stream>>>(nrow,
-                                                                         trunc_factor,
-                                                                         max_elmts,
-                                                                         this->mat_.row_offset,
-                                                                         this->mat_.col,
-                                                                         this->mat_.val,
-                                                                         keep,
-                                                                         row_nnz);
+                                                                          trunc_factor,
+                                                                          max_elmts,
+                                                                          this->mat_.row_offset,
+                                                                          this->mat_.col,
+                                                                          this->mat_.val,
+                                                                          keep,
+                                                                          row_nnz);
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         PtrType* row_offset = NULL;
@@ -4600,13 +4600,18 @@ namespace rocalution
         allocate_hip(nnz, &val);
 
         kernel_csr_rs_truncation_compact<<<GridSize, BlockSize, 0, stream>>>(nrow,
-                                                                            this->mat_.row_offset,
-                                                                            this->mat_.col,
-                                                                            this->mat_.val,
-                                                                            keep,
-                                                                            row_offset,
-                                                                            col,
-                                                                            val);
+                                                                             this->mat_.row_offset,
+                                                                             this->mat_.col,
+                                                                             this->mat_.val,
+                                                                             keep,
+                                                                             row_offset,
+                                                                             col,
+                                                                             val);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        // The compaction reads keep and the old arrays, so it has to finish before any of
+        // them are released
+        DISCARD_HIP_ERROR(hipStreamSynchronize(stream));
         CHECK_HIP_ERROR(__FILE__, __LINE__);
 
         free_hip(&keep);
@@ -4621,6 +4626,8 @@ namespace rocalution
         this->nrow_ = nrow;
         this->ncol_ = ncol;
         this->nnz_  = nnz;
+
+        this->ApplyAnalysis();
 
         return true;
     }

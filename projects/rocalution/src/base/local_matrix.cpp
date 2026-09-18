@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -6963,28 +6963,10 @@ namespace rocalution
                                                                       prolong->matrix_,
                                                                       NULL);
 
-        if(err == true)
-        {
-            // Fill P
-            err = csr_ptr->matrix_->AMGSmoothedAggregationProlongFill(global_col_begin,
-                                                                      global_col_end,
-                                                                      lumping_strat,
-                                                                      relax,
-                                                                      *connections.vector_,
-                                                                      *aggregates.vector_,
-                                                                      *aggregate_root_nodes.vector_,
-                                                                      *i64zero_vec.vector_,
-                                                                      *f2c_map.vector_,
-                                                                      *zero_mat.matrix_,
-                                                                      prolong->matrix_,
-                                                                      NULL,
-                                                                      NULL);
-        }
-
         // LCOV_EXCL_START
         if((err == false) && (csr_ptr->is_host_() == true) && (csr_ptr->GetFormat() == CSR))
         {
-            LOG_INFO("Computation of LocalMatrix::AMGSmoothedAggregation() failed");
+            LOG_INFO("Computation of LocalMatrix::ILU0Factorize() failed");
             csr_ptr->Info();
             FATAL_ERROR(__FILE__, __LINE__);
         }
@@ -7072,6 +7054,23 @@ namespace rocalution
                 prolong->MoveToAccelerator();
             }
             // LCOV_EXCL_STOP
+        }
+        else
+        {
+            // Fill P
+            csr_ptr->matrix_->AMGSmoothedAggregationProlongFill(global_col_begin,
+                                                                global_col_end,
+                                                                lumping_strat,
+                                                                relax,
+                                                                *connections.vector_,
+                                                                *aggregates.vector_,
+                                                                *aggregate_root_nodes.vector_,
+                                                                *i64zero_vec.vector_,
+                                                                *f2c_map.vector_,
+                                                                *zero_mat.matrix_,
+                                                                prolong->matrix_,
+                                                                NULL,
+                                                                NULL);
         }
 
 #ifdef DEBUG_MODE
@@ -7586,38 +7585,54 @@ namespace rocalution
             return;
         }
 
-        assert(this->GetFormat() == CSR);
-
         bool err = this->matrix_->RSInterpolationTruncation(trunc_factor, max_elmts);
 
         // LCOV_EXCL_START
+
+        if((err == false) && (this->is_host_() == true) && (this->GetFormat() == CSR))
+        {
+            LOG_INFO("Computation of LocalMatrix::RSInterpolationTruncation() failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+
         if(err == false)
         {
-            // The accelerator backend may not implement this yet, so fall back to the host
-            if(this->is_accel_())
-            {
-                this->MoveToHost();
+            // Move to host
+            bool is_accel = this->is_accel_();
+            this->MoveToHost();
 
-                if(this->matrix_->RSInterpolationTruncation(trunc_factor, max_elmts) == false)
-                {
-                    LOG_INFO("Computation of LocalMatrix::RSInterpolationTruncation() failed");
-                    this->Info();
-                    FATAL_ERROR(__FILE__, __LINE__);
-                }
+            // Convert to CSR
+            unsigned int format   = this->GetFormat();
+            int          blockdim = this->GetBlockDimension();
+            this->ConvertToCSR();
 
-                this->MoveToAccelerator();
-
-                LOG_VERBOSE_INFO(2,
-                                 "*** warning: LocalMatrix::RSInterpolationTruncation() is "
-                                 "performed on the host");
-            }
-            else
+            if(this->matrix_->RSInterpolationTruncation(trunc_factor, max_elmts) == false)
             {
                 LOG_INFO("Computation of LocalMatrix::RSInterpolationTruncation() failed");
                 this->Info();
                 FATAL_ERROR(__FILE__, __LINE__);
             }
+
+            if(format != CSR)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: LocalMatrix::RSInterpolationTruncation() is "
+                                 "performed in CSR format");
+
+                this->ConvertTo(format, blockdim);
+            }
+
+            if(is_accel == true)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: LocalMatrix::RSInterpolationTruncation() is "
+                                 "performed on the host");
+
+                this->MoveToAccelerator();
+            }
         }
+
         // LCOV_EXCL_STOP
 
 #ifdef DEBUG_MODE
@@ -7640,6 +7655,9 @@ namespace rocalution
         assert(this->is_host_() == S.is_host_());
         assert(this->is_host_() == prolong->is_host_());
 
+        // The assembly step casts prolong to a CSR matrix of the matching backend
+        assert(prolong->GetFormat() == CSR);
+
 #ifdef DEBUG_MODE
         this->Check();
 #endif
@@ -7654,7 +7672,8 @@ namespace rocalution
             csr_mat.ConvertToCSR();
             mat = &csr_mat;
 
-            LOG_VERBOSE_INFO(2, std::string("*** warning: ") + name + " is performed in CSR format");
+            LOG_VERBOSE_INFO(2,
+                             std::string("*** warning: ") + name + " is performed in CSR format");
         }
 
         // Fine to coarse and fine to fine maps
@@ -7685,7 +7704,6 @@ namespace rocalution
             FATAL_ERROR(__FILE__, __LINE__);
         }
         // LCOV_EXCL_STOP
-
 
         if(ext_pe)
         {
