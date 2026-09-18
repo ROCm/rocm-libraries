@@ -33,6 +33,24 @@
 
 namespace rocsparse
 {
+    // AISPARSE-671. The merge path sizes grid.x from a 64-bit block count derived
+    // from m + nnz, so the value is genuinely wider than the unsigned int dim3
+    // field it is assigned to and must be clamped against the hardware grid.x
+    // maximum. Every kernel launched through these sites grid-strides over the
+    // full count, so a clamped grid only costs iterations, never coverage.
+    //
+    // Deliberately local to this translation unit rather than added to
+    // rocsparse_common.hpp, which is a live conflict zone (AISPARSE-677/678/696).
+    // The signature matches rocsparse::get_grid_size from AISPARSE-696 (PR
+    // #11512), so once that lands every call site below becomes a one-line
+    // substitution: csrmm_merge_grid_size_x -> rocsparse::get_grid_size.
+    template <typename J>
+    static inline uint32_t csrmm_merge_grid_size_x(J count, int64_t max_extent)
+    {
+        const int64_t extent = static_cast<int64_t>(count);
+        return static_cast<uint32_t>((extent > max_extent) ? max_extent : extent);
+    }
+
     template <typename T, typename I, typename J, typename A>
     rocsparse_status csrmm_buffer_size_template_merge(rocsparse_handle          handle,
                                                       rocsparse_operation       trans_A,
@@ -122,7 +140,8 @@ namespace rocsparse
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_merge_compute_coords<1, ITEM_PER_THREAD>),
-                dim3(block_count, get_batch_grid_size<int64_t>(num_coord_sets)),
+                dim3(csrmm_merge_grid_size_x(block_count, handle->properties.maxGridSize[0]),
+                     get_batch_grid_size<int64_t>(num_coord_sets)),
                 dim3(1),
                 0,
                 handle->stream,
@@ -149,7 +168,8 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_MERGE_KERNEL(CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD)                \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                   \
         (rocsparse::csrmmnn_merge_path_kernel<CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3((block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,                             \
+        dim3(csrmm_merge_grid_size_x((block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,     \
+                                     handle->properties.maxGridSize[0]),                  \
              get_batch_grid_size<J>(batch_count_C)),                                      \
         dim3(CSRMMNN_DIM),                                                                \
         0,                                                                                \
@@ -260,7 +280,8 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_MERGE_MAIN_KERNEL(WF_SIZE, ITEM_PER_THREAD, LOOPS)                \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
         (rocsparse::csrmmnt_merge_path_main_kernel<WF_SIZE, ITEM_PER_THREAD, LOOPS, T>), \
-        dim3(block_count, get_batch_grid_size<J>(batch_count_C)),                        \
+        dim3(csrmm_merge_grid_size_x(block_count, handle->properties.maxGridSize[0]),    \
+             get_batch_grid_size<J>(batch_count_C)),                                     \
         dim3(WF_SIZE),                                                                   \
         0,                                                                               \
         handle->stream,                                                                  \
@@ -296,7 +317,8 @@ namespace rocsparse
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                      \
         (rocsparse::                                                                         \
              csrmmnt_merge_path_remainder_kernel<CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3((block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1,                                \
+        dim3(csrmm_merge_grid_size_x((block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1,        \
+                                     handle->properties.maxGridSize[0]),                     \
              get_batch_grid_size<J>(batch_count_C)),                                         \
         dim3(CSRMMNT_DIM),                                                                   \
         0,                                                                                   \

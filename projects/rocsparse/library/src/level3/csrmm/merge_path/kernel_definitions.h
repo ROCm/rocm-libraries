@@ -81,30 +81,42 @@ namespace rocsparse
                 = (offsets_batch_stride_A != 0)
                       ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
                       : 0;
+
+            // One block per merge block. grid.x is clamped against
+            // handle->properties.maxGridSize[0] at the launch site, so grid-stride
+            // over the full 64-bit merge block count (AISPARSE-671). The bound and
+            // the stride are block uniform (a kernel argument and hipGridDim_x), so
+            // every thread of a block runs the same number of iterations.
+            const int64_t merge_block_count = static_cast<int64_t>(coord_block_count);
+
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
-                rocsparse::csrmmnt_merge_path_main_device<WF_SIZE, ITEMS_PER_THREAD, LOOPS>(
-                    conj_A,
-                    conj_B,
-                    ncol_offset,
-                    ncol,
-                    m,
-                    n,
-                    k,
-                    nnz,
-                    alpha,
-                    load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                    load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                    load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                    load_pointer(coord0, batch, coord_batch_stride),
-                    load_pointer(coord1, batch, coord_batch_stride),
-                    load_pointer(dense_B, batch, batch_stride_B),
-                    ldb,
-                    beta,
-                    load_pointer(dense_C, batch, batch_stride_C),
-                    ldc,
-                    order_C,
-                    idx_base);
+                for(int64_t bid = hipBlockIdx_x; bid < merge_block_count; bid += hipGridDim_x)
+                {
+                    rocsparse::csrmmnt_merge_path_main_device<WF_SIZE, ITEMS_PER_THREAD, LOOPS>(
+                        conj_A,
+                        conj_B,
+                        bid,
+                        ncol_offset,
+                        ncol,
+                        m,
+                        n,
+                        k,
+                        nnz,
+                        alpha,
+                        load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                        load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                        load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                        load_pointer(coord0, batch, coord_batch_stride),
+                        load_pointer(coord1, batch, coord_batch_stride),
+                        load_pointer(dense_B, batch, batch_stride_B),
+                        ldb,
+                        beta,
+                        load_pointer(dense_C, batch, batch_stride_C),
+                        ldc,
+                        order_C,
+                        idx_base);
+                }
             }
         }
     }
@@ -157,30 +169,43 @@ namespace rocsparse
                 = (offsets_batch_stride_A != 0)
                       ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
                       : 0;
+            // Each block covers BLOCKSIZE / WF_SIZE merge blocks, one per wavefront,
+            // so the grid is sized in those groups. grid.x is clamped at the launch
+            // site; grid-stride over the full group count (AISPARSE-671). The bound
+            // and the stride are block uniform.
+            constexpr int64_t waves_per_block = BLOCKSIZE / WF_SIZE;
+            const int64_t     block_group_count
+                = (static_cast<int64_t>(coord_block_count) - 1) / waves_per_block + 1;
+
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
-                rocsparse::
-                    csrmmnt_merge_path_remainder_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(
-                        conj_A,
-                        conj_B,
-                        ncol_offset,
-                        m,
-                        n,
-                        k,
-                        nnz,
-                        alpha,
-                        load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                        load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                        load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                        load_pointer(coord0, batch, coord_batch_stride),
-                        load_pointer(coord1, batch, coord_batch_stride),
-                        load_pointer(dense_B, batch, batch_stride_B),
-                        ldb,
-                        beta,
-                        load_pointer(dense_C, batch, batch_stride_C),
-                        ldc,
-                        order_C,
-                        idx_base);
+                for(int64_t block_base = hipBlockIdx_x; block_base < block_group_count;
+                    block_base += hipGridDim_x)
+                {
+                    rocsparse::
+                        csrmmnt_merge_path_remainder_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(
+                            conj_A,
+                            conj_B,
+                            block_base,
+                            ncol_offset,
+                            m,
+                            n,
+                            k,
+                            nnz,
+                            alpha,
+                            load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                            load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                            load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                            load_pointer(coord0, batch, coord_batch_stride),
+                            load_pointer(coord1, batch, coord_batch_stride),
+                            load_pointer(dense_B, batch, batch_stride_B),
+                            ldb,
+                            beta,
+                            load_pointer(dense_C, batch, batch_stride_C),
+                            ldc,
+                            order_C,
+                            idx_base);
+                }
             }
         }
     }
@@ -233,28 +258,38 @@ namespace rocsparse
                       ? static_cast<int64_t>(((coord_block_count - 1) / 256 + 1) * 256)
                       : 0;
 
+            // Group count as in the remainder kernel above (AISPARSE-671).
+            constexpr int64_t waves_per_block = BLOCKSIZE / WF_SIZE;
+            const int64_t     block_group_count
+                = (static_cast<int64_t>(coord_block_count) - 1) / waves_per_block + 1;
+
             for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
             {
-                rocsparse::csrmmnn_merge_path_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(
-                    conj_A,
-                    conj_B,
-                    m,
-                    n,
-                    k,
-                    nnz,
-                    alpha,
-                    load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
-                    load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
-                    load_pointer(csr_val, batch, columns_values_batch_stride_A),
-                    load_pointer(coord0, batch, coord_batch_stride),
-                    load_pointer(coord1, batch, coord_batch_stride),
-                    load_pointer(dense_B, batch, batch_stride_B),
-                    ldb,
-                    beta,
-                    load_pointer(dense_C, batch, batch_stride_C),
-                    ldc,
-                    order_C,
-                    idx_base);
+                for(int64_t block_base = hipBlockIdx_x; block_base < block_group_count;
+                    block_base += hipGridDim_x)
+                {
+                    rocsparse::csrmmnn_merge_path_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(
+                        conj_A,
+                        conj_B,
+                        block_base,
+                        m,
+                        n,
+                        k,
+                        nnz,
+                        alpha,
+                        load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                        load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                        load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                        load_pointer(coord0, batch, coord_batch_stride),
+                        load_pointer(coord1, batch, coord_batch_stride),
+                        load_pointer(dense_B, batch, batch_stride_B),
+                        ldb,
+                        beta,
+                        load_pointer(dense_C, batch, batch_stride_C),
+                        ldc,
+                        order_C,
+                        idx_base);
+                }
             }
         }
     }
