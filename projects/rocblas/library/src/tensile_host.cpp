@@ -860,6 +860,16 @@ namespace
             static std::string base_path;
             static int         determined_path{determine_tensile_base_path(base_path)};
 
+            // The device predicate name stays `processor` (matches the physical
+            // gfx1250 device for Tensile solution selection); the catalog key may
+            // diverge to select the strict device library by GPU revision.
+            std::string catalog_key = processor;
+            if(rocblas_internal_is_strict_target(deviceId)
+               && TestPath(base_path + "/gfx1250-strict"))
+            {
+                catalog_key = "gfx1250-strict";
+            }
+
             path = base_path;
             // Probe subdirectories from most-specific to least-specific so that shard
             // overlays compose correctly regardless of how TheRock splits arch builds:
@@ -870,29 +880,29 @@ namespace
             std::string xnack_mode   = rocblas_internal_get_xnack_mode();
             if(!xnack_mode.empty())
             {
-                std::string processor_xnack = processor + "-" + xnack_mode;
+                std::string processor_xnack = catalog_key + "-" + xnack_mode;
                 if(TestPath(path + "/" + processor_xnack))
                 {
                     path += "/" + processor_xnack;
                     found_subdir = true;
                 }
             }
-            if(!found_subdir && TestPath(path + "/" + processor))
-                path += "/" + processor;
+            if(!found_subdir && TestPath(path + "/" + catalog_key))
+                path += "/" + catalog_key;
 
 #ifdef TENSILE_YAML
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
+            tensileLibraryPath = path + "/TensileLibrary_lazy_" + catalog_key + ".yaml";
 #else
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".dat";
+            tensileLibraryPath = path + "/TensileLibrary_lazy_" + catalog_key + ".dat";
 #endif
             if(!TestPath(tensileLibraryPath))
             {
                 tensile_lazy_load_enabled = false;
 
 #ifdef TENSILE_YAML
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".yaml";
+                tensileLibraryPath = path + "/TensileLibrary_" + catalog_key + ".yaml";
 #else
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".dat";
+                tensileLibraryPath = path + "/TensileLibrary_" + catalog_key + ".dat";
 #endif
                 if(!TestPath(tensileLibraryPath))
                 {
@@ -973,7 +983,7 @@ namespace
             if(!tensile_lazy_load_enabled || rocblas_initialize_called())
             {
                 // only load modules for the current architecture
-                auto dir = path + "/*" + processor + "*co";
+                auto dir = path + "/*" + catalog_key + "*co";
 
                 // Get current xnack mode
                 std::string xnack = rocblas_internal_get_xnack_mode();

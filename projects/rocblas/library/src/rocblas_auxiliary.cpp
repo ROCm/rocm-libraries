@@ -998,6 +998,34 @@ std::string rocblas_internal_get_xnack_mode()
     return XnackMode<hipDeviceProp_t>{}(deviceProperties);
 }
 
+// Internal use. True when the device's revision requires the strict gfx1250
+// device library. Kept revision-numeric and codename-neutral on purpose.
+bool rocblas_internal_is_strict_target(int deviceId)
+{
+    // Test/CI override: force strict-catalog selection on any gfx1250 device.
+    static const bool force_strict = [] {
+        const char* e = std::getenv("ROCBLAS_TENSILE_STRICT");
+        return e && strtol(e, nullptr, 0) != 0;
+    }();
+
+    hipDeviceProp_t deviceProperties;
+    if(hipGetDeviceProperties(&deviceProperties, deviceId) != hipSuccess)
+        return false;
+
+    // The strict identity only applies to gfx1250 silicon.
+    if(std::string(deviceProperties.gcnArchName).find("gfx1250") == std::string::npos)
+        return false;
+
+    if(force_strict)
+        return true;
+
+    // Revision-gated: the strict device library targets a specific silicon
+    // revision, compared numerically against asicRevision. The threshold value
+    // carries no codename and must be confirmed against the target hardware.
+    static constexpr int c_strict_asic_revision = 0;
+    return deviceProperties.asicRevision == c_strict_asic_revision;
+}
+
 /*******************************************************************************
  * exported. Whether to skip buffer alloc/init/copy when tracing kernel names in Tensile *
  *******************************************************************************/
