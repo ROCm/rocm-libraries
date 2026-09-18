@@ -135,6 +135,10 @@ set(test_sources ${test_sources}
     Utils_test.cpp
 )
 
+if(TENSILE_USE_MSGPACK)
+    list(APPEND test_sources PlaceholderLibrary_test.cpp)
+endif()
+
 if(TENSILE_USE_LLVM)
     find_package(LLVM REQUIRED CONFIG)
 
