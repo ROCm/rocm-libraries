@@ -110,6 +110,9 @@ void Arguments::init()
     // bytes
     devices = 0;
 
+    a2a_world  = 1;
+    a2a_extent = 0;
+
     norm_check     = 0;
     allclose_check = 0;
     unit_check     = 1;
