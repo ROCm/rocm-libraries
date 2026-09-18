@@ -45,7 +45,7 @@ class ScaledWmmaOp:
 
     @property
     def matrix_format(self) -> int:
-        return {"fp8": 0, "bf8": 1}[self.matrix_dtype]
+        return {"fp8": 0, "bf8": 1, "fp6": 2, "bf6": 3}[self.matrix_dtype]
 
 
 _SCALE = E8M0ScalePacking(count=4, block_k=32)
@@ -53,7 +53,7 @@ _SCALE16 = E8M0ScalePacking(count=8, block_k=16)
 _GFX1250_WMMA_SCALE = {
     op_id: ScaledWmmaOp(op_id=op_id, matrix_dtype=dtype, scales=packing)
     for family, packing in (("wmma_scale", _SCALE), ("wmma_scale16", _SCALE16))
-    for dtype in ("fp8", "bf8")
+    for dtype in ("fp8", "bf8", "fp6", "bf6")
     for op_id in (f"{family}_f32_16x16x128_{dtype}_{dtype}",)
 }
 
@@ -61,3 +61,9 @@ _GFX1250_WMMA_SCALE = {
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     """Resolve a catalog ID or concrete tile op name; reject unknown variants."""
     return _GFX1250_WMMA_SCALE.get(op_id.removeprefix("tile."))
+
+
+SCALED_WMMA_OPS = {
+    op_id: (spec.scale16, spec.matrix_format, spec.matrix_format)
+    for op_id, spec in _GFX1250_WMMA_SCALE.items()
+}

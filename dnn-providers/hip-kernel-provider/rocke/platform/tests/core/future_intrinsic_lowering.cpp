@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -688,6 +689,29 @@ void case_opcode_names_are_aligned()
     }
 }
 
+void case_lowbit_dtype_aliases()
+{
+    const char* aliases[][2] = {
+        {"fp8", "fp8e4m3"},
+        {"bf8", "bf8e5m2"},
+        {"fp6", "fp6e2m3"},
+        {"bf6", "fp6e3m2"},
+        {"fp4", "fp4e2m1"},
+    };
+    char scratch[32];
+    for(const auto& pair : aliases)
+    {
+        if(strcmp(rocke_normalize_dtype(pair[0], scratch, sizeof(scratch)), pair[1]) != 0
+           || strcmp(rocke_normalize_dtype(pair[1], scratch, sizeof(scratch)), pair[1]) != 0)
+            fail("low-bit alias must resolve to explicit catalog key", __LINE__);
+        const auto* arch = rocke_arch_target_from_gfx("gfx950");
+        const int k = strcmp(pair[0], "fp4") == 0 ? 128 : 96;
+        if((strcmp(pair[0], "fp4") == 0 || strcmp(pair[0], "fp6") == 0)
+           && !rocke_mma_catalog_has_shape(&arch->mma, "mma", pair[0], pair[1], "fp32", 16, 16, k))
+            fail("low-bit aliases must resolve native catalog rows", __LINE__);
+    }
+}
+
 struct TestCase
 {
     const char* name;
@@ -695,6 +719,7 @@ struct TestCase
 };
 
 const TestCase k_cases[] = {
+    {"lowbit_dtype_aliases", case_lowbit_dtype_aliases},
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},

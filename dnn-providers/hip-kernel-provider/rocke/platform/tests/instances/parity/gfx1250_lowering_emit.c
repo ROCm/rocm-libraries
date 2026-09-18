@@ -343,6 +343,8 @@ typedef struct config
 {
     build_fn_t build;
     const char* arch;
+    const char* op_id;
+    bool scale16;
 } config_t;
 
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
@@ -371,6 +373,10 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_bf6", false},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_bf6", true},
     {build_wmma_scale_bf8, "gfx1250"},
     {build_wmma_scale16_bf8, "gfx1250"},
 };
@@ -407,7 +413,14 @@ int main(int argc, char** argv)
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    CONFIGS[idx].build(&b);
+    if(CONFIGS[idx].build)
+    {
+        CONFIGS[idx].build(&b);
+    }
+    else
+    {
+        wmma_scaled(&b, CONFIGS[idx].scale16, CONFIGS[idx].op_id);
+    }
 
     if(!rocke_ir_builder_ok(&b))
     {

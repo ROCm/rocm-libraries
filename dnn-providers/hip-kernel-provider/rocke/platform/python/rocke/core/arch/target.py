@@ -23,6 +23,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .wmma_scale import SCALED_WMMA_OPS
+
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
 # Canonical dtype spellings used as catalog keys. Instance/spec dtype strings
@@ -755,7 +757,8 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    # Native gfx1250 scaled WMMA. FP8/BF8 use 64 bytes per lane as <16 x i32>.
+    # Native gfx1250 scaled WMMA. FP8 uses 64 bytes per lane; FP6 uses
+    # 48 packed bytes padded with four zero words to the same <16 x i32> ABI.
     # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
     # bytes in i64. Both share the gfx12 column-distributed accumulator.
     "wmma_scale_f32_16x16x128_fp8_fp8": _FragInfo(
@@ -767,25 +770,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    "wmma_scale_f32_16x16x128_bf8_bf8": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-    ),
     "wmma_scale16_f32_16x16x128_fp8_fp8": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-    ),
-    "wmma_scale16_f32_16x16x128_bf8_bf8": _FragInfo(
         16,
         16,
         8,
@@ -804,6 +789,16 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         _wmma_gfx12_acc_16x16,
     ),
 }
+
+
+# All native matrix pairs share the padded ABI and accumulator layout.
+
+_MMA_FRAGMENT_INFO.update(
+    {
+        op_id: _MMA_FRAGMENT_INFO["wmma_scale_f32_16x16x128_fp8_fp8"]
+        for op_id in SCALED_WMMA_OPS
+    }
+)
 
 
 def _frag_info(op_id: str) -> _FragInfo:

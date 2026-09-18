@@ -665,6 +665,18 @@ class _Lowerer:
     def _op_tile_wmma_scale16_f32_16x16x128_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_scaled(op)
 
+    def _op_tile_wmma_scale_f32_16x16x128_fp6_fp6(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_scaled(op)
+
+    def _op_tile_wmma_scale_f32_16x16x128_bf6_bf6(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_scaled(op)
+
+    def _op_tile_wmma_scale16_f32_16x16x128_fp6_fp6(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_scaled(op)
+
+    def _op_tile_wmma_scale16_f32_16x16x128_bf6_bf6(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_scaled(op)
+
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).

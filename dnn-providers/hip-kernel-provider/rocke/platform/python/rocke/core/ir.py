@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .arch.wmma_scale import SCALED_WMMA_OPS
+
 # ----------------------------- Types --------------------------------------
 
 
@@ -86,10 +88,11 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
     "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale_f32_16x16x128_bf8_bf8": "mxacc",
     "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale16_f32_16x16x128_bf8_bf8": "mxacc",
 }
+
+
+_MMA_RESULT_HINT.update({op_id: "mxacc" for op_id in SCALED_WMMA_OPS})
 
 
 def _check_u16(op: str, field: str, value: int) -> int:

@@ -35,6 +35,10 @@ static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma(const char
         {"wmma_scale_f32_16x16x128_bf8_bf8", 1, scale},
         {"wmma_scale16_f32_16x16x128_fp8_fp8", 0, scale16},
         {"wmma_scale16_f32_16x16x128_bf8_bf8", 1, scale16},
+        {"wmma_scale_f32_16x16x128_fp6_fp6", 2, scale},
+        {"wmma_scale_f32_16x16x128_bf6_bf6", 3, scale},
+        {"wmma_scale16_f32_16x16x128_fp6_fp6", 2, scale16},
+        {"wmma_scale16_f32_16x16x128_bf6_bf6", 3, scale16},
     };
     if(!op_id)
     {
