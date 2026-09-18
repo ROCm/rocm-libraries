@@ -158,19 +158,39 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         constexpr auto I0 = Number<0>{};
         constexpr auto I1 = Number<1>{};
 
-        a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-        b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+        // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
 
+        __builtin_amdgcn_sched_barrier(0);
+        a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+        b_blockwise_copy.PrecomputeIdx(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        __builtin_amdgcn_sched_barrier(0);
+        b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+        __builtin_amdgcn_sched_barrier(0);
+
+        __builtin_amdgcn_sched_barrier(0);
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
         b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+        a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+        b_blockwise_copy.PrecomputeIdx(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        __builtin_amdgcn_sched_barrier(0);
 
+        wait_dscnt();
         block_sync_lds_direct_load();
 
-        a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-        b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+        // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        __builtin_amdgcn_sched_barrier(0);
+        a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+        b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        __builtin_amdgcn_sched_barrier(0);
 
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
         b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+        a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+        b_blockwise_copy.PrecomputeIdx(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        __builtin_amdgcn_sched_barrier(0);
 
         if constexpr(HasMainLoop)
         {
@@ -182,22 +202,57 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 asm volatile(";; HotLoop Start Load");
                 __builtin_amdgcn_sched_barrier(0);
 
+                wait_dscnt();
                 block_sync_lds_direct_load();
 
-                a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-                b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
-
-                a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-
-                block_sync_lds_direct_load();
+                __builtin_amdgcn_sched_barrier(0);
+                b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+                a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
                 __builtin_amdgcn_sched_barrier(0);
 
-                a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-                b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+                __builtin_amdgcn_sched_barrier(0);
+                a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+                a_blockwise_copy.PrecomputeIdx(
+                    a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+                b_blockwise_copy.PrecomputeIdx(
+                    b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+                __builtin_amdgcn_sched_barrier(0);
+
+                wait_dscnt();
+                block_sync_lds_direct_load();
+
+                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+
+                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+
+                // wait_dscnt();
+                // block_sync_lds_direct_load();
+
+                __builtin_amdgcn_sched_barrier(0);
+                asm volatile(";; HotLoop Mid Load");
+                __builtin_amdgcn_sched_barrier(0);
+
+                __builtin_amdgcn_sched_barrier(0);
+                a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+                b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+                __builtin_amdgcn_sched_barrier(0);
 
                 a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
                 b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+                a_blockwise_copy.PrecomputeIdx(
+                    a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+                b_blockwise_copy.PrecomputeIdx(
+                    b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+                __builtin_amdgcn_sched_barrier(0);
+
+                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+
+                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
                 __builtin_amdgcn_sched_barrier(0);
                 asm volatile(";; HotLoop End Load");
@@ -210,6 +265,7 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
         if constexpr(TailNum == TailNumber::Odd) {}
         else if constexpr(TailNum == TailNumber::Even)
         {
+            wait_dscnt();
             block_sync_lds_direct_load();
         }
     }
@@ -304,6 +360,8 @@ struct GridwiseGemmMathWave<TileMathThreadGroup, 1>
                 block_gemm.Run(a_block_buf.At(I0), b_block_buf.At(I0), c_thread_buf);
 
                 block_sync_lds();
+                __builtin_amdgcn_sched_barrier(0);
+                asm volatile(";; HotLoop Mid Compute");
                 __builtin_amdgcn_sched_barrier(0);
 
                 // GEMM A1, B1
