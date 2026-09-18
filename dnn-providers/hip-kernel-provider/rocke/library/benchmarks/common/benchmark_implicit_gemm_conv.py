@@ -129,14 +129,18 @@ def _grid_for_spec(spec, p):
 def _grid_for_wgrad_spec(spec, split_k: int):
     """Derive launch grid from wgrad spec and split-K degree.
 
-    gx/gy tile the per-group GEMM (spec.wg_M/wg_N). The group index rides on
-    block_id_z, giving z = groups * split_k (== split_k for the ungrouped
-    groups==1 path).
+    gx/gy tile the GEMM the tile actually covers (spec.grid_M/grid_N). The group
+    index rides on block_id_z, giving z = grid_groups * split_k (== split_k for
+    the ungrouped groups==1 path).
+
+    grid_* rather than wg_* because a group-merged spec has one workgroup per Gm
+    conv groups: the tile is Gm times larger and there are Gm times fewer of
+    them. The two are equal whenever group_merge == 1.
     """
     tile_m, tile_n = spec.tile_m, spec.tile_n
-    gx = (spec.wg_N + tile_n - 1) // tile_n
-    gy = (spec.wg_M + tile_m - 1) // tile_m
-    return (gx, gy, spec.problem.groups * split_k)
+    gx = (spec.grid_N + tile_n - 1) // tile_n
+    gy = (spec.grid_M + tile_m - 1) // tile_m
+    return (gx, gy, spec.grid_groups * split_k)
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:

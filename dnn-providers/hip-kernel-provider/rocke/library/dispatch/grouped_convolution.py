@@ -1460,9 +1460,11 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
 
     gfx1250's only fp16/bf16 atom is 16x16x32 (there is no 16x16x16). WMMA wgrad
     requires split_k=1 and the direct-store ('default') epilogue, so both are
-    forced here regardless of the request. Grouped Gm=1 is supported (the kernel
-    is validated dual-engine by test_gfx1250_grouped_wgrad_dual_engine); group
-    merging (Gm>1) is MFMA-only and is rejected by is_valid_wgrad_spec.
+    forced here regardless of the request. Grouped convolution is supported and
+    runs grid-per-group (the kernel is validated dual-engine by
+    test_gfx1250_grouped_wgrad_dual_engine). Group merging is not implemented
+    for any arch -- WgradConvSpec has no group-merge field, so there is nothing
+    for is_valid_wgrad_spec to reject.
     """
     name = "implicit_gemm_conv_wgrad_gfx1250"
     spec_id = "igemm_conv_wgrad_gfx1250_32x32"

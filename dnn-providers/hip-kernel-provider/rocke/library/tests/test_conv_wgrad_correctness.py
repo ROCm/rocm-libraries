@@ -271,6 +271,8 @@ def _make_spec(
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
@@ -397,9 +399,9 @@ def _run_one(
     # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
     # z = groups * split_k (the group axis rides on z alongside split-K;
     # == split_k for groups=1).
-    gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
-    gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    gz = p.groups * spec.split_k
+    gx = (spec.grid_N + spec.tile_n - 1) // spec.tile_n
+    gy = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
+    gz = spec.grid_groups * spec.split_k
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
@@ -987,9 +989,10 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         )
 
     def test_gfx1250_grouped_wgrad_dual_engine(self):
-        # Grouped wgrad (grid-per-group, Gm=1) on gfx1250 (wave32 WMMA 16x16x32).
-        # Group merging is MFMA-only (is_valid_wgrad_spec rejects Gm>1 on WMMA), so
-        # this guards only the grouped Gm=1 WMMA path. Lower through the backend
+        # Grouped wgrad (grid-per-group) on gfx1250 (wave32 WMMA 16x16x32).
+        # Group merging is not implemented for any arch -- WgradConvSpec has no
+        # group-merge field -- so this guards the grouped WMMA path as it ships,
+        # one conv group per workgroup. Lower through the backend
         # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
         # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
         # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
@@ -1268,9 +1271,9 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
 
         # Stage 1: z = groups * split_k (encodes group and slice index).
         s1_grid = (
-            (spec.wg_N + spec.tile_n - 1) // spec.tile_n,
-            (spec.wg_M + spec.tile_m - 1) // spec.tile_m,
-            p.groups * spec.split_k,
+            (spec.grid_N + spec.tile_n - 1) // spec.tile_n,
+            (spec.grid_M + spec.tile_m - 1) // spec.tile_m,
+            spec.grid_groups * spec.split_k,
         )
         s1_block = (spec.block_size, 1, 1)
 
@@ -1326,6 +1329,9 @@ def _check_two_stage(
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
     seed: int = 0,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1367,6 +1373,12 @@ def _check_two_stage(
 
     # Promote to two-stage.
     ts_spec = _dc_replace(base_spec, two_stage=True)
+    if tile_m is not None:
+        ts_spec = _dc_replace(ts_spec, tile_m=tile_m)
+    if tile_n is not None:
+        ts_spec = _dc_replace(ts_spec, tile_n=tile_n)
+    if group_merge > 1:
+        ts_spec = _dc_replace(ts_spec, group_merge=group_merge)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -1390,6 +1402,36 @@ def _check_two_stage(
     max_abs = dW_ref.abs().max().item()
     if max_abs < 1e-6:
         return True, "reference near-zero; skipped numeric check"
+
+    # Coverage guards, checked before the tolerance so a dropped slab reports
+    # as "whole rows missing" rather than as a vague numeric failure.
+    #
+    # Rows catch an accumulator bound left at the per-group extent under group
+    # merging: every merged row above 0 then fails the test and its dW slab is
+    # never written. Columns catch the failure the row guard structurally
+    # cannot see -- a decompaction error that writes the correct output channel
+    # at the wrong (y, x, c) position, which is the new mode the block-diagonal
+    # predicate introduces.
+    nz_ref_row = dW_ref.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_out_row = dW_ours.reshape(p.K, -1).abs().sum(dim=1) > 0
+    n_missing_rows = int((nz_ref_row & ~nz_out_row).sum())
+    if n_missing_rows:
+        return False, (
+            f"{n_missing_rows}/{p.K} dW output-channel rows are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}, "
+            f"spk{ts_spec.split_k}) -- whole groups are not being written"
+        )
+    cpg = p.C // p.groups
+    n_cols = p.K * p.Y * p.X
+    nz_ref_col = dW_ref.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    nz_out_col = dW_ours.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    n_missing_cols = int((nz_ref_col & ~nz_out_col).sum())
+    if n_missing_cols:
+        return False, (
+            f"{n_missing_cols}/{n_cols} dW (k,y,x) positions are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}) "
+            f"-- the merged column index decompacts to the wrong position"
+        )
 
     tol = 5e-2
     rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
@@ -2024,6 +2066,195 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
             f"validator should charge the K-outer shape ({k_outer_bytes}), "
             f"not the M-outer one ({m_outer_bytes}); got: {why}",
         )
+
+
+class TestWgradGroupMergeGate(unittest.TestCase):
+    """Host-side gate for ``group_merge`` (no GPU needed).
+
+    The gate has to agree between :meth:`WgradConvSpec.validate` and
+    :func:`is_valid_wgrad_spec`: a spec the dispatcher admits and the builder
+    then rejects is the exact failure this family has produced before.
+    """
+
+    def _spec(self, **kw):
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            problem=ConvProblem(
+                N=2, Hi=12, Wi=12, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64
+            ),
+            data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+            tile_m=16,
+            tile_n=128,
+            tile_k=32,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=64,
+            pipeline="mem",
+            epilogue="cshuffle",
+            split_k=4,
+            two_stage=True,
+            lds_k_outer=True,
+        )
+        base.update(kw)
+        return WgradConvSpec(**base)
+
+    def test_default_is_one_and_always_admitted(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        spec = self._spec()
+        self.assertEqual(spec.group_merge, 1)
+        ok, why = is_valid_wgrad_spec(spec, arch="gfx950")
+        self.assertTrue(ok, why)
+
+    def test_merged_dims_track_group_merge(self):
+        # grid_* is what the tile covers; wg_* stays the true per-group extent
+        # that sizes dW and the workspace. Conflating them is the silent
+        # wrong-answer bug this whole path is prone to.
+        spec = self._spec(group_merge=8)
+        self.assertEqual((spec.wg_M, spec.wg_N), (1, 9))
+        self.assertEqual((spec.grid_M, spec.grid_N), (8, 72))
+        self.assertEqual(spec.grid_groups, 8)
+        base = self._spec()
+        self.assertEqual((base.grid_M, base.grid_N), (base.wg_M, base.wg_N))
+        self.assertEqual(base.grid_groups, base.problem.groups)
+
+    def test_validate_and_predicate_agree(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        cases = [
+            dict(group_merge=3),  # not a supported degree
+            dict(group_merge=128),  # not a supported degree
+            dict(group_merge=8, tile_n=32),  # merged N exceeds the tile
+            dict(group_merge=8, two_stage=False, split_k=1),  # needs two-stage
+            dict(group_merge=8, wave_size=32),  # MFMA only
+        ]
+        for kw in cases:
+            spec = self._spec(**kw)
+            ok, why = is_valid_wgrad_spec(spec, arch="gfx950")
+            self.assertFalse(ok, f"{kw} should be rejected")
+            with self.assertRaises(ValueError, msg=f"{kw} must raise"):
+                spec.validate()
+
+    def test_non_depthwise_is_gated_off(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        p = ConvProblem(N=2, Hi=12, Wi=12, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=8)
+        ok, why = is_valid_wgrad_spec(
+            self._spec(problem=p, group_merge=4), arch="gfx950"
+        )
+        self.assertFalse(ok)
+        self.assertIn("depthwise", why)
+
+    def test_group_merge_must_divide_groups(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        p = ConvProblem(N=2, Hi=12, Wi=12, C=24, K=24, Y=3, X=3, pH=1, pW=1, groups=24)
+        ok, why = is_valid_wgrad_spec(
+            self._spec(problem=p, group_merge=16), arch="gfx950"
+        )
+        self.assertFalse(ok)
+        self.assertIn("divide", why)
+
+    def test_kernel_name_distinguishes_degrees(self):
+        # The compile cache keys on kernel.name. Untagged, a Gm sweep would
+        # measure one binary N times.
+        names = {self._spec(group_merge=g).kernel_name() for g in (1, 2, 4, 8)}
+        self.assertEqual(len(names), 4, f"kernel names collide: {names}")
+        self.assertNotIn("gm1", self._spec().kernel_name())
+
+    def test_merged_build_widens_the_load(self):
+        # The whole point of merging: the depthwise free axis is one element
+        # wide, so every load is scalar. Merging makes it a run of Gm.
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
+
+        scalar = lower_kernel_to_llvm(
+            build_implicit_gemm_conv_wgrad(self._spec(), arch="gfx950")
+        )
+        merged = lower_kernel_to_llvm(
+            build_implicit_gemm_conv_wgrad(self._spec(group_merge=8), arch="gfx950")
+        )
+        self.assertEqual(
+            _count_vector_buffer_loads(scalar),
+            0,
+            "depthwise group_merge=1 should have no vector loads to begin with",
+        )
+        self.assertGreater(
+            _count_vector_buffer_loads(merged),
+            0,
+            "group_merge=8 must vectorise the dY/X loads",
+        )
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+class TestWgradGroupMergeNumerics(unittest.TestCase):
+    """GPU numerics for group merging, over the two-stage path.
+
+    ``_check_two_stage`` applies row- and column-coverage guards before the
+    tolerance check, so a dropped group slab or a mis-decompacted column
+    reports as such rather than as an opaque numeric failure.
+    """
+
+    # Depthwise: cpg == kpg == 1, so wg_N == Y*X and merged N == Y*X*Gm.
+    _DW = _Shape(
+        "3x3_dw_N2H12W12C64K64", N=2, Hi=12, Wi=12, C=64, K=64, Y=3, X=3, pH=1, pW=1
+    )
+
+    def _check(self, **kw):
+        # _make_spec uses a 2x2 warp grid, so tile_m must clear
+        # warp_m * warp_tile_m = 32. tile_n = 128 holds the merged N of
+        # Y*X*cpg*Gm = 9*8 = 72 for the largest degree tested.
+        kw.setdefault("tile_m", 32)
+        kw.setdefault("tile_n", 128)
+        kw.setdefault("warp_tile_mn", 16)
+        kw.setdefault("tile_k", 32)
+        ok, why = _check_two_stage(self._DW, "bf16", "mem", groups=64, **kw)
+        self.assertTrue(ok, why)
+
+    def test_group_merge_degrees(self):
+        for gm in (1, 2, 4, 8):
+            with self.subTest(group_merge=gm):
+                self._check(split_k=4, group_merge=gm, seed=40 + gm)
+
+    def test_group_merge_with_deeper_split_k(self):
+        for gm in (2, 8):
+            with self.subTest(group_merge=gm):
+                self._check(split_k=8, group_merge=gm, seed=50 + gm)
+
+    def test_group_merge_equals_group_count(self):
+        # grid_groups == 1: the merged problem has a single group, but the
+        # K-slice still has to be decoded off z and the diagonal still masked.
+        # Before the grouped path was forced on, this raised UnboundLocalError.
+        shape = _Shape(
+            "3x3_dw_N2H12W12C8K8", N=2, Hi=12, Wi=12, C=8, K=8, Y=3, X=3, pH=1, pW=1
+        )
+        ok, why = _check_two_stage(
+            shape,
+            "bf16",
+            "mem",
+            groups=8,
+            split_k=4,
+            group_merge=8,
+            tile_m=32,
+            tile_n=128,
+            warp_tile_mn=16,
+            tile_k=32,
+            seed=60,
+        )
+        self.assertTrue(ok, why)
 
 
 if __name__ == "__main__":
