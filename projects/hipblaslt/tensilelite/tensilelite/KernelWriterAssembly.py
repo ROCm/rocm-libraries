@@ -17045,7 +17045,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Store Remap: Local Write
   ##############################################################################
-  def storeRemapAddLocalWrite(self, kernel, ss, addrCalc, srcVgpr):
+  def storeRemapAddLocalWrite(self, kernel, ss, addrCalc, srcVgpr, vc1=0):
     """
     Add localWrite for the element with addrCalc and srcVgpr.
     """
@@ -17057,6 +17057,37 @@ class KernelWriterAssembly(KernelWriter):
 
     addr0  = vgpr(self.vgprs.storeRemapLW)
     offset = addrCalc.coordOffset0 * self.states.bpeCexternal
+    if kernel["SourceSwap"]:
+      # The default layout can ignore coordOffset1: N lives in the lane index there, so every
+      # element a thread writes in one LDS round shares its storeRemapLW row. SourceSwap moves
+      # N into the accumulator registers -- vc1 enumerates the MIOutputVectorWidth outputs of
+      # one MFMA, which are contiguous in coord1 -- so a thread's elements in one round walk
+      # MIOutputVectorWidth *rows*. The LDS tile stays coord0-major (so the read-back and the
+      # global store stay wide); these just step down a column of it.
+      # Use the element's vc1, NOT addrCalc.coordOffset1. coordOffset1 is
+      # wtIdex*MatrixInstN + vc1: the wtIdex part identifies the *round*, and LDS is flushed
+      # and reused from the same base every round, so adding it walks straight out of the
+      # tile. vc1 alone is the within-round row: thread base + vc1 exactly fills the
+      # MatrixInstN*MIWaveGroup[1] rows.
+      # MUST match the ldsPad used for the LDS stride in storeRemapComputeStoreVgprs
+      # (v_mov_b32 vX, MT0+PAD). Using 0 here makes the write row stride MT0 while the read
+      # stride stays MT0+ldsPad, so every row past the first lands in the wrong column block.
+      ldsPad = max(kernel["StoreRemapVectorWidth"], kernel["MIOutputVectorWidth"])
+      offset += vc1 * (kernel["MacroTile0"] + ldsPad) * self.states.bpeCexternal
+      assert offset < 65536, \
+        "storeRemap + SourceSwap: ds offset %u exceeds the 16-bit DS offset field" % offset
+      assert vc1 < kernel["MatrixInstN"] * kernel["MIWaveGroup"][1], \
+        "storeRemap + SourceSwap: vc1 %u exceeds the %u-row LDS tile -- a batch is " \
+        "spanning column blocks (check the nBatchesPerRow grouping). " \
+        "kernel=%s MT=%ux%u MIWaveTile=%s MIWaveGroup=%s MI=%ux%u BM/BN=%u/%u " \
+        "SRVW=%u VWA=%u VWB=%u MIOVW=%u WS=%u" \
+        % (vc1, kernel["MatrixInstN"] * kernel["MIWaveGroup"][1],
+           self.states.kernelName, kernel["MacroTile0"], kernel["MacroTile1"],
+           kernel["MIWaveTile"], kernel["MIWaveGroup"],
+           kernel["MatrixInstM"], kernel["MatrixInstN"],
+           kernel["MatrixInstBM"], kernel["MatrixInstBN"],
+           kernel["StoreRemapVectorWidth"], kernel["VectorWidthA"], kernel["VectorWidthB"],
+           kernel["MIOutputVectorWidth"], kernel["WavefrontSize"])
     ds     = DSModifiers(offset=offset)
 
     numRegs = int(max(1, rpv))
@@ -17205,7 +17236,35 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Store remap compute vgprs:
   ##############################################################################
-  def storeRemapComputeStoreVgprs(self, kernel):
+  def storeRemapGsuGwvw(self, kernel):
+    """gwvw the GSU branch of globalWriteElements uses for storeRemap, or None if disabled.
+
+    That branch stores the f32 workspace (bpeCexternal = bpeCinternal), so the LDS read-back
+    and the global store are bpeCinternal*gwvw bytes and must stay <= 16 (dwordx4 / ds_*_b128).
+    """
+    srvw = kernel["StoreRemapVectorWidth"]
+    if not srvw:
+      return None
+    return min(srvw, 16 // self.states.bpeCinternal)
+
+  def storeRemapComputeStoreVgprs(self, kernel, gwvwOverride=None, reuse=False):
+    """Emit the storeRemap addresses.
+
+    gwvwOverride/reuse exist so the GSU branch of globalWriteElements can re-emit the
+    gwvw-dependent half with a smaller StoreRemapVectorWidth: that branch stores f32
+    workspace (bpeCexternal = bpeCinternal), so bpeCexternal*gwvw must still be a legal
+    ds_load/buffer_store width. reuse=True keeps the already-allocated vgprs and skips
+    the local-write address, which does not depend on gwvw.
+
+    The SourceSwap branch below is triggered by, in yaml terms:
+        SourceSwap: 1                 -> implied by Sparse: 2
+        StoreRemapVectorWidth: 2|4|8  -> 0 disables storeRemap entirely
+        VectorWidthA: 1
+        VectorWidthB: 1               -> both are a pre-existing storeRemap restriction
+    plus MatrixInstBM/BN 1 and StoreRemapVectorWidth * WavefrontSize >= MacroTile0. Rejected
+    with a specific reason in SolutionStructs/Solution.py otherwise. Note VectorWidthA > 1 and
+    storeRemap are mutually exclusive: they are two different ways of reaching a wide store,
+    and the accumulator shuffle (accumShuffleForLDSTrVW) is the other one."""
     module = Module("storeRemapComputeStoreVgprs")
     module.addComment0("Store Remap Local Write address")
 
@@ -17216,49 +17275,113 @@ class KernelWriterAssembly(KernelWriter):
       wg0="WorkGroup0"
       wg1="WorkGroup1"
 
-      tid0 = self.vgprPool.checkOut(1, "SR coord0")
-      tid1 = self.vgprPool.checkOut(1, "SR coord1")
-      coord1Offset = self.vgprPool.checkOut(1, "SR coord1 offset")
-      storeRemapLW = self.vgprPool.checkOut(1, "SR local write")
-      storeRemapLR = self.vgprPool.checkOut(1, "SR local read")
+      if reuse:
+        tid0 = self.vgprs.storeRemapCoord0
+        tid1 = self.vgprs.storeRemapCoord1
+        coord1Offset = self.vgprs.storeRemapOffsetCoord1
+        storeRemapLW = self.vgprs.storeRemapLW
+        storeRemapLR = self.vgprs.storeRemapLR
+        tmpV0 = self.vgprPool.checkOut(5, tag="storeRemapComputeStoreVgprs_tmpV0_reuse")
+      else:
+        tid0 = self.vgprPool.checkOut(1, "SR coord0")
+        tid1 = self.vgprPool.checkOut(1, "SR coord1")
+        coord1Offset = self.vgprPool.checkOut(1, "SR coord1 offset")
+        storeRemapLW = self.vgprPool.checkOut(1, "SR local write")
+        storeRemapLR = self.vgprPool.checkOut(1, "SR local read")
 
-      tmpV0 = self.vgprPool.checkOut(5, tag="storeRemapComputeStoreVgprs_tmpV0")
+        tmpV0 = self.vgprPool.checkOut(5, tag="storeRemapComputeStoreVgprs_tmpV0")
       waveCoord0 = tmpV1 = tmpV0+1
       ldsStride = tmpV0+2
       coord0 = tmpV0+3
       waveCoord1 = tmpV0+4
 
-      # GSU and StreamK parallel reduction carry a runtime byte size.
-      # Whole-tile persistent DP and GSU=0 use the final output type and do
-      # not allocate GSULog2BpeD.
-      gwvw = kernel["StoreRemapVectorWidth"]
+      gwvw = gwvwOverride if gwvwOverride is not None else kernel["StoreRemapVectorWidth"]
       ldsPad = max(kernel["StoreRemapVectorWidth"],kernel["MIOutputVectorWidth"])
 
       #calculate local write Address: v[vgprLocalWriteAddrC]
-      module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", self.states.kernel["WavefrontSize"]*kernel["MIWaveGroup"][0], \
-        ContinuousRegister(tmpV0, 2)))
-
-      module.add(VMulLOU32(dst=vgpr(waveCoord1),
-                src0=hex(kernel["MatrixInstN"]), src1=vgpr(tid1), comment="coord1 offset of LDS for each Wave"))
-      module.add(VAndB32(dst=vgpr(tid1),
-                src0=hex(kernel["MatrixInstN"]-1), src1=vgpr("Serial"), comment="coord1 offset of LDS for each thread"))
-      module.add(VAddU32(dst=vgpr(tid1), src0=vgpr(waveCoord1), src1=vgpr(tid1), comment="coord1 offset in MacroTile"))
       module.add(VMovB32(dst=vgpr(ldsStride), src=hex(kernel["MacroTile0"]+ldsPad), \
                 comment="lds stride = MT0 + PAD"))
-      module.add(VMulLOU32(dst=vgpr(tmpV0), src0=vgpr(tid1), src1=vgpr(ldsStride), \
-                comment="lds coord1 offset = Col-id* lds stride"))
 
-      module.add(vectorStaticDivideAndRemainder(waveCoord0, tid0, tid0, self.states.kernel["WavefrontSize"], ContinuousRegister(tmpV0, 2)))
-      module.add(VLShiftRightB32(dst=vgpr(coord0),
-                shiftHex=hex(log2(kernel["MatrixInstN"])), src=vgpr(tid0), \
-                comment="tid / matrixInstN"))
+      if kernel["SourceSwap"]:
+        # SourceSwap transposes the accumulator, so M and N read the opposite lane fields
+        # from the default layout below. Mirror ComputeStoreVgprsMFMASwap (the source of
+        # truth for this geometry) -- its MacroTile-relative part only, since LDS is indexed
+        # by (coord1, coord0) within the tile and the wg0/wg1 offsets are added later:
+        #   coord1 = vwB * ( MIBShape1*(wave_id/MIWG0) + MIOVW*((Serial%WS)/matrixInstM) )
+        #   coord0 = vwA * ( MIBShape0*(wave_id%MIWG0) + (Serial%matrixInstM) )
+        # NOTE the matrixInstM/N below intentionally fall back to min(M,N), matching
+        # ComputeStoreVgprs. Other copies of this MatrixInst==4 adjustment (ShiftVector-
+        # Components, KernelWriterModules) fall back to MatrixInstM instead, so they are
+        # NOT interchangeable -- do not "deduplicate" them without checking.
+        # Register discipline: waveCoord0 aliases tmpV1 == tmpV0+1, which is the second half
+        # of the ContinuousRegister(tmpV0, 2) divide scratch, and ldsStride is tmpV0+2. So the
+        # only legal scratch here is ContinuousRegister(tmpV0, 2), nothing live may sit in
+        # tmpV0/tmpV0+1 across a divide, and the tid1*ldsStride row offset (which lands in
+        # tmpV0) must be computed last. waveCoord0 is deliberately unused.
+        MIBShape0   = kernel["MatrixInstM"] * kernel["MatrixInstBM"]
+        MIBShape1   = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
+        matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+        matrixInstM = MIBShape0 if (kernel["MatrixInstM"] == 4) else matrixInstT
 
-      if kernel["MIOutputVectorWidth"] > 1:
-        module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(kernel["MIOutputVectorWidth"])), src=vgpr(coord0), \
-                comment="lds coord0 offset *= 4 (each thread hold 4 element)"))
+        tmpRes   = ContinuousRegister(tmpV0, 2)
+        ssWaveId = self.vgprPool.checkOut(1, "SR SS wave id")
+        ssDummy  = self.vgprPool.checkOut(1, "SR SS dummy")
 
-      module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
-                comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
+        module.add(vectorStaticDivide(ssWaveId, "Serial", self.states.kernel["WavefrontSize"], tmpRes, \
+                  "SS: wave_id = Serial / WavefrontSize"))
+
+        # coord0 (LDS column) = vwA * ( MIBShape0*(wave_id % MIWaveGroup[0]) + Serial % matrixInstM )
+        module.add(vectorStaticRemainder(ssDummy, coord0, ssWaveId, kernel["MIWaveGroup"][0], tmpRes, tmpSgprInfo, \
+                  "SS: wave_id0 = wave_id % MIWaveGroup[0]"))
+        module.add(VMulLOU32(dst=vgpr(coord0), src0=hex(MIBShape0), src1=vgpr(coord0), \
+                  comment="SS: wave coordination offset 0"))
+        module.add(vectorStaticRemainder(ssDummy, tid0, "Serial", matrixInstM, tmpRes, tmpSgprInfo, \
+                  "SS: tid0 = Serial % matrixInstM"))
+        module.add(VAddLShiftLeftU32(dst=vgpr(coord0), src0=vgpr(tid0), src1=vgpr(coord0), \
+                  shiftHex=log2(kernel["VectorWidthA"]), comment="SS: coord0 = vwA * (wave_id0 + tid0)"))
+
+        # coord1 (LDS row) = vwB * ( MIBShape1*(wave_id / MIWaveGroup[0]) + MIOVW*((Serial%WS) / matrixInstM) )
+        module.add(vectorStaticDivide(waveCoord1, ssWaveId, kernel["MIWaveGroup"][0], tmpRes, \
+                  "SS: wave_id1 = wave_id / MIWaveGroup[0]"))
+        module.add(VMulLOU32(dst=vgpr(waveCoord1), src0=hex(MIBShape1), src1=vgpr(waveCoord1), \
+                  comment="SS: coord1 offset of LDS for each Wave"))
+        module.add(vectorStaticRemainder(ssDummy, tid1, "Serial", self.states.kernel["WavefrontSize"], tmpRes, tmpSgprInfo, \
+                  "SS: tid1 = Serial % WavefrontSize"))
+        module.add(vectorStaticDivide(tid1, tid1, matrixInstM, tmpRes, "SS: tid1 /= matrixInstM"))
+        module.add(vectorStaticMultiply(vgpr(tid1), vgpr(tid1), kernel["MIOutputVectorWidth"], tmpSgprInfo, \
+                  "SS: tid1 * continuous_output"))
+        module.add(VAddLShiftLeftU32(dst=vgpr(tid1), src0=vgpr(waveCoord1), src1=vgpr(tid1), \
+                  shiftHex=log2(kernel["VectorWidthB"]), comment="SS: coord1 = vwB * (wave_id1 + tid1)"))
+
+        self.vgprPool.checkIn(ssDummy)
+        self.vgprPool.checkIn(ssWaveId)
+
+        # last: nothing needs the tmpV0 scratch after this point
+        module.add(VMulLOU32(dst=vgpr(tmpV0), src0=vgpr(tid1), src1=vgpr(ldsStride), \
+                  comment="lds coord1 offset = Col-id* lds stride"))
+      else:
+        module.add(vectorStaticDivideAndRemainder(tid1, tid0, "Serial", self.states.kernel["WavefrontSize"]*kernel["MIWaveGroup"][0], \
+          ContinuousRegister(tmpV0, 2)))
+
+        module.add(VMulLOU32(dst=vgpr(waveCoord1),
+                  src0=hex(kernel["MatrixInstN"]), src1=vgpr(tid1), comment="coord1 offset of LDS for each Wave"))
+        module.add(VAndB32(dst=vgpr(tid1),
+                  src0=hex(kernel["MatrixInstN"]-1), src1=vgpr("Serial"), comment="coord1 offset of LDS for each thread"))
+        module.add(VAddU32(dst=vgpr(tid1), src0=vgpr(waveCoord1), src1=vgpr(tid1), comment="coord1 offset in MacroTile"))
+        module.add(VMulLOU32(dst=vgpr(tmpV0), src0=vgpr(tid1), src1=vgpr(ldsStride), \
+                  comment="lds coord1 offset = Col-id* lds stride"))
+
+        module.add(vectorStaticDivideAndRemainder(waveCoord0, tid0, tid0, self.states.kernel["WavefrontSize"], ContinuousRegister(tmpV0, 2)))
+        module.add(VLShiftRightB32(dst=vgpr(coord0),
+                  shiftHex=hex(log2(kernel["MatrixInstN"])), src=vgpr(tid0), \
+                  comment="tid / matrixInstN"))
+
+        if kernel["MIOutputVectorWidth"] > 1:
+          module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(kernel["MIOutputVectorWidth"])), src=vgpr(coord0), \
+                  comment="lds coord0 offset *= 4 (each thread hold 4 element)"))
+
+        module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
+                  comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
 
       if self.sgprBpeList:
         module.add(VAddLShiftLeftU32(
@@ -17347,7 +17470,8 @@ class KernelWriterAssembly(KernelWriter):
 
       module.addSpaceLine()
 
-      module.add(self._syncThreads(kernel, "StoreRemap Start"))
+      if not reuse:
+        module.add(self._syncThreads(kernel, "StoreRemap Start"))
 
       self.vgprs.storeRemapLW = storeRemapLW  #local write
       self.vgprs.storeRemapLR = storeRemapLR  #local read
@@ -17357,12 +17481,21 @@ class KernelWriterAssembly(KernelWriter):
 
       self.vgprPool.checkIn(tmpV0)
 
-      nElements = kernel["MacroTile0"]*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
-      rpe = self.states.bpeCexternal / self.states.bpr
-      rpv = rpe * gwvw
-      self.vgprs.storeRemapAS = []
-      for i in range(0, nElements, gwvw):
-        self.vgprs.storeRemapAS.append(self.vgprPool.checkOutAligned(int(rpv), int(rpv), "store element d"))
+      if not reuse:
+        nElements = kernel["MacroTile0"]*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
+        # The GSU branch re-emits with a smaller gwvw (see gwvwOverride above), which needs
+        # MORE blocks. Size the pool for whichever path needs most, so the re-emit can reuse
+        # this allocation; the wider path simply uses a prefix of the list.
+        _gwvws = [gwvw]
+        _g = self.storeRemapGsuGwvw(kernel)
+        if _g:
+          _gwvws.append(_g)
+        _nBlocks = max(len(range(0, nElements, g)) for g in _gwvws)
+        _rpv     = max(int(self.states.bpeCexternalGSU1 * gwvw / self.states.bpr),
+                       int(self.states.bpeCinternal * _g / self.states.bpr) if _g else 0)
+        self.vgprs.storeRemapAS = []
+        for i in range(_nBlocks):
+          self.vgprs.storeRemapAS.append(self.vgprPool.checkOutAligned(_rpv, _rpv, "store element d"))
     if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
         self.sgprPool.checkIn(self.sgprBpeList[1])
         self.sgprPool.checkIn(self.sgprBpeList[0])
@@ -18575,6 +18708,10 @@ class KernelWriterAssembly(KernelWriter):
     gsuAccumBackup     = kernel["_GlobalAccumulation"]
     bpeCexternalBackup = self.states.bpeCexternal
     afcBackup          = kernel["ActivationFuncCall"]
+    # The GSU branch below re-points bpeCexternal at bpeCinternal (f32 workspace), so its
+    # storeRemap gwvw must be narrowed (storeRemapGsuGwvw) and the gwvw-dependent addresses
+    # re-emitted. Restored to this value on the GSU1 branch.
+    srvwBackup         = kernel["StoreRemapVectorWidth"]
     useBiasBackup      = self.states.useBias
     betasBackup        = betas
 
@@ -18665,6 +18802,14 @@ class KernelWriterAssembly(KernelWriter):
           # the GSU>1 store keeps the dest element size rather than the fp32 one.
           if not self.states.useAtomicPkAddBF16:
             self.states.bpeCexternal = self.states.bpeCinternal
+            # storeRemap stays on here, but this branch stores the f32 workspace, so its
+            # gwvw must be narrowed until bpeCinternal*gwvw fits a ds_load/buffer_store.
+            # Re-emit the gwvw-dependent addresses (LDS read + global coords) for that width;
+            # the local-write address and the vgpr allocations are shared with the GSU1 path.
+            _srvwGsu = self.storeRemapGsuGwvw(kernel)
+            if _srvwGsu and _srvwGsu != srvwBackup:
+              kernel["StoreRemapVectorWidth"] = _srvwGsu
+              module.add(self.storeRemapComputeStoreVgprs(kernel, gwvwOverride=_srvwGsu, reuse=True))
           if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
             self.states.useBias = self.states.useBias if self.states.useBias == DataDirection.WRITE else DataDirection.NONE
           if self.states.useBias == DataDirection.WRITE and kernel["ProblemType"]["BiasSrc"] == "D":
@@ -18684,6 +18829,9 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(gsuLabel)
           self.states.bpeCexternal = self.states.bpeCexternalGSU1
+          if kernel["StoreRemapVectorWidth"] != srvwBackup:
+            kernel["StoreRemapVectorWidth"] = srvwBackup
+            module.add(self.storeRemapComputeStoreVgprs(kernel, gwvwOverride=srvwBackup, reuse=True))
           self.states.useBias = useBiasBackup
           kernel["LdsOffsetBias"] = kernel["LdsOffsetBiasNonGSU"]
           kernel["ActivationFuncCall"] = afcBackup
@@ -19745,7 +19893,16 @@ class KernelWriterAssembly(KernelWriter):
     # elements of column block must be multiple size of numElementsPerBatch
     nBatchesPerRow = 0
     if kernel["StoreRemapVectorWidth"]:
-      firstRow = [e for e in element if e[0]==0 and e[2]==0] # format for element = (tt1, tt0, vc1, vc0)
+      # format for element = (tt1, tt0, vc1, vc0)
+      if kernel["SourceSwap"]:
+        # SourceSwap sets vectorWidth1 = VectorWidthB * MIOutputVectorWidth, so vc1 enumerates
+        # the MIOutputVectorWidth N-contiguous outputs of one MFMA -- all of which land in the
+        # SAME column block (coordOffset1 = wtIdex*MatrixInstN + vc1). Filtering vc1==0 here
+        # would make a "column block" MIOutputVectorWidth times too small, and batches would
+        # spill into the next block's LDS rows.
+        firstRow = [e for e in element if e[0]==0]
+      else:
+        firstRow = [e for e in element if e[0]==0 and e[2]==0]
       # find the largest factor and smaller than numElementPerBatch
       nBatchesPerRow = 1
       for d in range(1, len(firstRow)+1):
