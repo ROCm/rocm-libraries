@@ -4569,9 +4569,7 @@ try
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!devIpiv && n)
-        *hInfo = -6;
-    else if(strideP != n)
+    else if(devIpiv && strideP != n)
     {
         *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -4636,9 +4634,7 @@ try
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!devIpiv && n)
-        *hInfo = -6;
-    else if(strideP != n)
+    else if(devIpiv && strideP != n)
     {
         *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -4703,9 +4699,7 @@ try
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!devIpiv && n)
-        *hInfo = -6;
-    else if(strideP != n)
+    else if(devIpiv && strideP != n)
     {
         *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -4770,9 +4764,7 @@ try
         *hInfo = -4;
     else if(lda < std::max(1, n))
         *hInfo = -5;
-    else if(!devIpiv && n)
-        *hInfo = -6;
-    else if(strideP != n)
+    else if(devIpiv && strideP != n)
     {
         *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;

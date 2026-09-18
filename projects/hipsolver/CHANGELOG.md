@@ -16,6 +16,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
     * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
 
 ### Changed
+
+* The rocSOLVER backend now allows devIpiv to be passed as a null pointer to hipsolverXgetrs and hipsolverDnXgetrs.
+
 ### Removed
 ### Optimized
 ### Resolved issues

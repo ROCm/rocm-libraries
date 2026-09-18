@@ -52,6 +52,7 @@ void getrs_checkBadArgs(const hipsolverHandle_t    handle,
 {
     // handle
     EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                          false,
                                           nullptr,
                                           params,
                                           trans,
@@ -73,6 +74,7 @@ void getrs_checkBadArgs(const hipsolverHandle_t    handle,
 
     // values
     EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                          false,
                                           handle,
                                           params,
                                           hipsolverOperation_t(-1),
@@ -96,6 +98,7 @@ void getrs_checkBadArgs(const hipsolverHandle_t    handle,
     // pointers
     if constexpr(!std::is_same<I, int>::value)
         EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                              false,
                                               handle,
                                               (hipsolverDnParams_t) nullptr,
                                               trans,
@@ -115,6 +118,7 @@ void getrs_checkBadArgs(const hipsolverHandle_t    handle,
                                               bc),
                               HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                          false,
                                           handle,
                                           params,
                                           trans,
@@ -134,25 +138,7 @@ void getrs_checkBadArgs(const hipsolverHandle_t    handle,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
-                                          handle,
-                                          params,
-                                          trans,
-                                          m,
-                                          nrhs,
-                                          dA,
-                                          lda,
-                                          stA,
-                                          (Id) nullptr,
-                                          stP,
-                                          dB,
-                                          ldb,
-                                          stB,
-                                          dWork,
-                                          lwork,
-                                          dInfo,
-                                          bc),
-                          HIPSOLVER_STATUS_INVALID_VALUE);
-    EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                          false,
                                           handle,
                                           params,
                                           trans,
@@ -172,6 +158,7 @@ void getrs_checkBadArgs(const hipsolverHandle_t    handle,
                                           bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                          false,
                                           handle,
                                           params,
                                           trans,
@@ -312,7 +299,8 @@ void testing_getrs_bad_arg()
     }
 }
 
-template <bool CPU,
+template <bool NPVT,
+          bool CPU,
           bool GPU,
           typename T,
           typename I,
@@ -366,8 +354,28 @@ void getrs_initData(const hipsolverHandle_t    handle,
             int info;
             cpu_getrf(m, m, hA[b], lda, hIpiv_cpu[b], &info);
 
-            for(I i = 0; i < m; i++)
-                hIpiv[b][i] = hIpiv_cpu[b][i];
+            if(!NPVT)
+            {
+                for(I i = 0; i < m; i++)
+                    hIpiv[b][i] = hIpiv_cpu[b][i];
+            }
+            else
+            {
+                // ------------------------------------------------------------------------------
+                // Perform the LU decomposition of matrix A using the reference LAPACK routine.
+                //
+                // NOTE: LAPACK GETRF computes LU factorization with row pivoting to produce
+                // P * A = L * U, where the permutation matrix P is encoded in the ipivot vector
+                //
+                // Let matrix B = P * A, then we have
+                // B = L * U is the LU factorization of matrix B without pivoting
+                //
+                // Thus we can use GETRF to perform LU factorization then discard the  pivot sequence.
+                // It is as if we are generating matrix B, instead of the original matrix A.
+                // ------------------------------------------------------------------------------
+                for(I i = 0; i < m; i++)
+                    hIpiv[b][i] = hIpiv_cpu[b][i] = i + 1;
+            }
         }
     }
 
@@ -382,6 +390,7 @@ void getrs_initData(const hipsolverHandle_t    handle,
 
 template <testAPI_t API,
           bool      BATCHED,
+          bool      NPVT,
           typename T,
           typename I,
           typename SIZE,
@@ -419,28 +428,29 @@ void getrs_getError(const hipsolverHandle_t    handle,
                     double*                    max_err)
 {
     // input data initialization
-    getrs_initData<true, true, T>(handle,
-                                  params,
-                                  trans,
-                                  m,
-                                  nrhs,
-                                  dA,
-                                  lda,
-                                  stA,
-                                  dIpiv,
-                                  stP,
-                                  dB,
-                                  ldb,
-                                  stB,
-                                  bc,
-                                  hA,
-                                  hIpiv,
-                                  hIpiv_cpu,
-                                  hB);
+    getrs_initData<NPVT, true, true, T>(handle,
+                                        params,
+                                        trans,
+                                        m,
+                                        nrhs,
+                                        dA,
+                                        lda,
+                                        stA,
+                                        dIpiv,
+                                        stP,
+                                        dB,
+                                        ldb,
+                                        stB,
+                                        bc,
+                                        hA,
+                                        hIpiv,
+                                        hIpiv_cpu,
+                                        hB);
 
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(hipsolver_getrs(API,
+                                        NPVT,
                                         handle,
                                         params,
                                         trans,
@@ -496,6 +506,7 @@ void getrs_getError(const hipsolverHandle_t    handle,
 
 template <testAPI_t API,
           bool      BATCHED,
+          bool      NPVT,
           typename T,
           typename I,
           typename SIZE,
@@ -535,24 +546,24 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
 {
     if(!perf)
     {
-        getrs_initData<true, false, T>(handle,
-                                       params,
-                                       trans,
-                                       m,
-                                       nrhs,
-                                       dA,
-                                       lda,
-                                       stA,
-                                       dIpiv,
-                                       stP,
-                                       dB,
-                                       ldb,
-                                       stB,
-                                       bc,
-                                       hA,
-                                       hIpiv,
-                                       hIpiv_cpu,
-                                       hB);
+        getrs_initData<NPVT, true, false, T>(handle,
+                                             params,
+                                             trans,
+                                             m,
+                                             nrhs,
+                                             dA,
+                                             lda,
+                                             stA,
+                                             dIpiv,
+                                             stP,
+                                             dB,
+                                             ldb,
+                                             stB,
+                                             bc,
+                                             hA,
+                                             hIpiv,
+                                             hIpiv_cpu,
+                                             hB);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -563,48 +574,49 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    getrs_initData<true, false, T>(handle,
-                                   params,
-                                   trans,
-                                   m,
-                                   nrhs,
-                                   dA,
-                                   lda,
-                                   stA,
-                                   dIpiv,
-                                   stP,
-                                   dB,
-                                   ldb,
-                                   stB,
-                                   bc,
-                                   hA,
-                                   hIpiv,
-                                   hIpiv_cpu,
-                                   hB);
+    getrs_initData<NPVT, true, false, T>(handle,
+                                         params,
+                                         trans,
+                                         m,
+                                         nrhs,
+                                         dA,
+                                         lda,
+                                         stA,
+                                         dIpiv,
+                                         stP,
+                                         dB,
+                                         ldb,
+                                         stB,
+                                         bc,
+                                         hA,
+                                         hIpiv,
+                                         hIpiv_cpu,
+                                         hB);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        getrs_initData<false, true, T>(handle,
-                                       params,
-                                       trans,
-                                       m,
-                                       nrhs,
-                                       dA,
-                                       lda,
-                                       stA,
-                                       dIpiv,
-                                       stP,
-                                       dB,
-                                       ldb,
-                                       stB,
-                                       bc,
-                                       hA,
-                                       hIpiv,
-                                       hIpiv_cpu,
-                                       hB);
+        getrs_initData<NPVT, false, true, T>(handle,
+                                             params,
+                                             trans,
+                                             m,
+                                             nrhs,
+                                             dA,
+                                             lda,
+                                             stA,
+                                             dIpiv,
+                                             stP,
+                                             dB,
+                                             ldb,
+                                             stB,
+                                             bc,
+                                             hA,
+                                             hIpiv,
+                                             hIpiv_cpu,
+                                             hB);
 
         CHECK_ROCBLAS_ERROR(hipsolver_getrs(API,
+                                            NPVT,
                                             handle,
                                             params,
                                             trans,
@@ -631,27 +643,28 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        getrs_initData<false, true, T>(handle,
-                                       params,
-                                       trans,
-                                       m,
-                                       nrhs,
-                                       dA,
-                                       lda,
-                                       stA,
-                                       dIpiv,
-                                       stP,
-                                       dB,
-                                       ldb,
-                                       stB,
-                                       bc,
-                                       hA,
-                                       hIpiv,
-                                       hIpiv_cpu,
-                                       hB);
+        getrs_initData<NPVT, false, true, T>(handle,
+                                             params,
+                                             trans,
+                                             m,
+                                             nrhs,
+                                             dA,
+                                             lda,
+                                             stA,
+                                             dIpiv,
+                                             stP,
+                                             dB,
+                                             ldb,
+                                             stB,
+                                             bc,
+                                             hA,
+                                             hIpiv,
+                                             hIpiv_cpu,
+                                             hB);
 
         start = get_time_us_sync(stream);
         hipsolver_getrs(API,
+                        NPVT,
                         handle,
                         params,
                         trans,
@@ -674,7 +687,13 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
     *gpu_time_used /= hot_calls;
 }
 
-template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
+template <testAPI_t API,
+          bool      BATCHED,
+          bool      STRIDED,
+          bool      NPVT,
+          typename T,
+          typename I,
+          typename SIZE>
 void testing_getrs(Arguments& argus)
 {
     // get arguments
@@ -714,6 +733,7 @@ void testing_getrs(Arguments& argus)
         {
             host_strided_batch_vector<int> hInfo(1, 1, 1, bc);
             EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                                  NPVT,
                                                   handle,
                                                   params,
                                                   trans,
@@ -736,6 +756,7 @@ void testing_getrs(Arguments& argus)
         else
         {
             EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
+                                                  NPVT,
                                                   handle,
                                                   params,
                                                   trans,
@@ -832,60 +853,60 @@ void testing_getrs(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            getrs_getError<API, BATCHED, T>(handle,
-                                            params,
-                                            trans,
-                                            m,
-                                            nrhs,
-                                            dA,
-                                            lda,
-                                            stA,
-                                            dIpiv,
-                                            stP,
-                                            dB,
-                                            ldb,
-                                            stB,
-                                            dWork,
-                                            size_W,
-                                            dInfo,
-                                            bc,
-                                            hA,
-                                            hIpiv,
-                                            hIpiv_cpu,
-                                            hB,
-                                            hBRes,
-                                            hInfo,
-                                            hInfoRes,
-                                            &max_error);
+            getrs_getError<API, BATCHED, NPVT, T>(handle,
+                                                  params,
+                                                  trans,
+                                                  m,
+                                                  nrhs,
+                                                  dA,
+                                                  lda,
+                                                  stA,
+                                                  dIpiv,
+                                                  stP,
+                                                  dB,
+                                                  ldb,
+                                                  stB,
+                                                  dWork,
+                                                  size_W,
+                                                  dInfo,
+                                                  bc,
+                                                  hA,
+                                                  hIpiv,
+                                                  hIpiv_cpu,
+                                                  hB,
+                                                  hBRes,
+                                                  hInfo,
+                                                  hInfoRes,
+                                                  &max_error);
 
         // collect performance data
         if(argus.timing)
-            getrs_getPerfData<API, BATCHED, T>(handle,
-                                               params,
-                                               trans,
-                                               m,
-                                               nrhs,
-                                               dA,
-                                               lda,
-                                               stA,
-                                               dIpiv,
-                                               stP,
-                                               dB,
-                                               ldb,
-                                               stB,
-                                               dWork,
-                                               size_W,
-                                               dInfo,
-                                               bc,
-                                               hA,
-                                               hIpiv,
-                                               hIpiv_cpu,
-                                               hB,
-                                               hInfo,
-                                               &gpu_time_used,
-                                               &cpu_time_used,
-                                               hot_calls,
-                                               argus.perf);
+            getrs_getPerfData<API, BATCHED, NPVT, T>(handle,
+                                                     params,
+                                                     trans,
+                                                     m,
+                                                     nrhs,
+                                                     dA,
+                                                     lda,
+                                                     stA,
+                                                     dIpiv,
+                                                     stP,
+                                                     dB,
+                                                     ldb,
+                                                     stB,
+                                                     dWork,
+                                                     size_W,
+                                                     dInfo,
+                                                     bc,
+                                                     hA,
+                                                     hIpiv,
+                                                     hIpiv_cpu,
+                                                     hB,
+                                                     hInfo,
+                                                     &gpu_time_used,
+                                                     &cpu_time_used,
+                                                     hot_calls,
+                                                     argus.perf);
     }
 
     else
@@ -915,60 +936,60 @@ void testing_getrs(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            getrs_getError<API, BATCHED, T>(handle,
-                                            params,
-                                            trans,
-                                            m,
-                                            nrhs,
-                                            dA,
-                                            lda,
-                                            stA,
-                                            dIpiv,
-                                            stP,
-                                            dB,
-                                            ldb,
-                                            stB,
-                                            dWork,
-                                            size_W,
-                                            dInfo,
-                                            bc,
-                                            hA,
-                                            hIpiv,
-                                            hIpiv_cpu,
-                                            hB,
-                                            hBRes,
-                                            hInfo,
-                                            hInfoRes,
-                                            &max_error);
+            getrs_getError<API, BATCHED, NPVT, T>(handle,
+                                                  params,
+                                                  trans,
+                                                  m,
+                                                  nrhs,
+                                                  dA,
+                                                  lda,
+                                                  stA,
+                                                  dIpiv,
+                                                  stP,
+                                                  dB,
+                                                  ldb,
+                                                  stB,
+                                                  dWork,
+                                                  size_W,
+                                                  dInfo,
+                                                  bc,
+                                                  hA,
+                                                  hIpiv,
+                                                  hIpiv_cpu,
+                                                  hB,
+                                                  hBRes,
+                                                  hInfo,
+                                                  hInfoRes,
+                                                  &max_error);
 
         // collect performance data
         if(argus.timing)
-            getrs_getPerfData<API, BATCHED, T>(handle,
-                                               params,
-                                               trans,
-                                               m,
-                                               nrhs,
-                                               dA,
-                                               lda,
-                                               stA,
-                                               dIpiv,
-                                               stP,
-                                               dB,
-                                               ldb,
-                                               stB,
-                                               dWork,
-                                               size_W,
-                                               dInfo,
-                                               bc,
-                                               hA,
-                                               hIpiv,
-                                               hIpiv_cpu,
-                                               hB,
-                                               hInfo,
-                                               &gpu_time_used,
-                                               &cpu_time_used,
-                                               hot_calls,
-                                               argus.perf);
+            getrs_getPerfData<API, BATCHED, NPVT, T>(handle,
+                                                     params,
+                                                     trans,
+                                                     m,
+                                                     nrhs,
+                                                     dA,
+                                                     lda,
+                                                     stA,
+                                                     dIpiv,
+                                                     stP,
+                                                     dB,
+                                                     ldb,
+                                                     stB,
+                                                     dWork,
+                                                     size_W,
+                                                     dInfo,
+                                                     bc,
+                                                     hA,
+                                                     hIpiv,
+                                                     hIpiv_cpu,
+                                                     hB,
+                                                     hInfo,
+                                                     &gpu_time_used,
+                                                     &cpu_time_used,
+                                                     hot_calls,
+                                                     argus.perf);
     }
 
     // validate results for rocsolver-test
