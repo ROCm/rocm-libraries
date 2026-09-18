@@ -776,10 +776,13 @@ class Greedy {
     /// A pinned member fixes the whole block, since its members sit at fixed
     /// offsets from one another. Live-ins bind regardless of policy: relocating a
     /// register the dispatch filled changes what the kernel reads, so this is not
-    /// something a compacting run may trade away for a lower high-water mark.
+    /// something a compacting run may trade away for a lower high-water mark. An
+    /// Active pinToProducer rule is the same obligation for the values it names.
     const char* pinReasonOf(const Block& block) const {
         for (const Member& member : block.members) {
-            if (context_.constraints.isPinned(member.value)) return "a function live-in";
+            if (!context_.constraints.isPinned(member.value)) continue;
+            const char* reason = context_.constraints.pinReason(member.value);
+            return reason != nullptr ? reason : "a function live-in";
         }
         for (const Member& member : block.members) {
             if (const char* reason = context_.scope.immobileReason(member.value)) return reason;
