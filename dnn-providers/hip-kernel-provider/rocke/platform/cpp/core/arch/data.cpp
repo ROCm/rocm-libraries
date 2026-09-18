@@ -1064,8 +1064,7 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * NOTE: fp4/fp6 dtypes are not in _DTYPE_ALIASES, so normalize_dtype passes them
- * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
+ * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
