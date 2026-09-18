@@ -117,17 +117,23 @@ recompile authored input.
 
 The schema-versioned producing-build record binds effective values and observation
 requests, canonical authored-input digest, observed builder/spec/accessor identities
-and origins, consumer UKD/engine/KMD IDs, KMD content, completed metadata, KDP/effective
-architecture and actual library/toc-key/symbol/payload SHA256. Its binding digest
-excludes the evidence itself. The declaration remains alongside the record so a
-checker needs no external profile.
+and origins, consumer UKD/engine/KMD/KDP IDs, KDP/effective architecture and actual
+library/toc-key/symbol/payload SHA256. Each consumer's engine, KMD, KDP header,
+completed metadata and declaration are bound by content digest rather than carried
+whole: the checker rebuilds them from the descriptors in front of it, so a digest
+fails on everything an embedded copy would while the record stays a small fraction
+of the bundle. Its binding digest excludes the evidence itself. The declaration
+remains alongside the record so a checker needs no external profile.
 
-Producer identities are qualified names and defining-file paths/content hashes
-observed from actual imported objects. Required unresolvable origins fail evidence
-production; producer files must remain stable during the invocation. Wheel stamps
-are separately labeled build provenance, not proof of imported origins or the
-entire transitive toolchain. Existing hermetic wheel selection and wheel-content
-build dependencies remain responsible for rebuilds after producer changes.
+Producer identities are module-qualified names and defining-file content hashes
+observed from actual imported objects. The defining path is watched for the length of
+the invocation but never published: shipping it would make the artifact a function of
+the building machine's install layout instead of its inputs. Required unresolvable
+origins fail evidence production; producer files must remain stable during the
+invocation. Wheel stamps are separately labeled build provenance, not proof of
+imported origins or the entire transitive toolchain. Existing hermetic wheel selection
+and wheel-content build dependencies remain responsible for rebuilds after producer
+changes.
 
 ### Full versus structural checking
 
@@ -192,7 +198,17 @@ Census registration is one call per packed target, made in
 hkp_register_census_tests(
     TARGET hip_kernel_provider_tests
     PACK_NAME unit
-    SUITES TestPointwisePacks)
+    SUITES TestPointwisePacks
+    EXPECTED_CASES
+        EachPackShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes
+        EveryKernelNamesItsPacksEmbeddedSource
+        EveryEmbeddedSourceKeyResolvesInTheCompiledInTable
+        EveryPackNamesTheArchitectureItWasPackedFor
+        EveryPackSharesTheEngineDispatchAndAllButOneMatcher
+        ExposesBlockSizeAsAKnobAndDtypeAsInternal
+        MatchersCoverBothScopes
+        SubtractsInTheRightDirection
+)
 ```
 
 `PACK_NAME` selects the wired pack target whose `OUT_ROOT` and recorded arch list the
@@ -223,7 +239,10 @@ the production loader's normal fallback is unchanged. The exact named suite must
 exist and be nonempty. Every registered case must complete and pass without skipping
 in each iteration, with at least one completed iteration. Disabled, filtered-out,
 sharded-out, failed or skipped cases, list-only and repeat-zero invocations cannot
-satisfy the census. Repeated partial runs cannot accumulate coverage.
+satisfy the census. Repeated partial runs cannot accumulate coverage. `EXPECTED_CASES`
+supplies the half execution cannot: those obligations are built from the cases the
+suite registered, so a deleted case takes its own obligation with it and an unpinned
+census still reports complete.
 
 The call is made where the target is defined and after it exists; there is no
 deferral machinery. Each missing prerequisite is fatal rather than a silent drop,

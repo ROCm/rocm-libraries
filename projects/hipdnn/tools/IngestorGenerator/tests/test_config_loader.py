@@ -410,6 +410,132 @@ class TestEmittedIdentifierShape:
         )
         _check_emitted_identifiers(config)  # does not raise
 
+    def test_an_ordinary_engine_local_name_is_accepted(self):
+        """The control for the engine half: both shipped spellings are ordinary.
+
+        `ConvFwd` is the PascalCase spelling every direct-load config uses and
+        `gfx950_attention_dense` the snake_case one the packaged worked example
+        uses, and they derive different identifiers from the same rule.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        for name in ("hipkernel:ConvFwd", "hkp_example:gfx950_attention_dense"):
+            config = make_minimal_config(engine=make_engine(name=name))
+            _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_kebab_case_engine_local_name_is_accepted(self):
+        """The regression this control exists to prevent: holding the SLUG to the
+        C++ identifier rule refuses kebab-case, which the tool converts on purpose.
+
+        `ENGINE_NAME_PATTERN` admits `-`, and `_to_pascal_case` is documented to
+        convert "``snake_case`` or ``kebab-case``" -- it splits on `-` and folds it
+        away, so every identifier `attn-v2` derives is already valid. Only the slug
+        keeps the hyphen, and a hyphen in a directory name is ordinary. The slug is
+        therefore held to a path-stem rule and the two C++ spellings to the
+        identifier rule.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        engine = make_engine(name="hipkernel:attn-v2")
+        assert (engine.slug, engine.pascal_name, engine.camel_name) == (
+            "attn-v2",
+            "AttnV2",
+            "attnV2",
+        )
+        _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
+
+    def test_a_local_name_leading_with_a_hyphen_is_rejected(self):
+        """The slug's own rule, on the one input the C++ spellings let through.
+
+        `_to_pascal_case` drops the empty leading part, so `-foo` derives the
+        perfectly good `Foo` and `foo`; the slug keeps the hyphen and names a
+        directory that reads as an option wherever it is passed on a command line.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        engine = make_engine(name="hipkernel:-foo")
+        assert (engine.pascal_name, engine.slug) == ("Foo", "-foo")
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(make_minimal_config(engine=engine))
+        message = str(excinfo.value)
+        assert "path stem" in message, message
+        assert "-foo" in message, message
+
+    def test_a_dotted_engine_local_name_is_rejected(self):
+        """`hipkernel:attn.v2` emits `class Attn.v2DispatchHandler`.
+
+        `ENGINE_NAME_PATTERN` admits `.` because the namespace half is a vendor
+        string; `_to_pascal_case` splits on `_` and `-` only, so the dot survives
+        into every identifier and file stem the local half reaches.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(name="hipkernel:attn.v2"))
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "attn.v2" in message, message
+        assert "Attn.v2" in message, message
+
+    def test_an_engine_local_name_starting_with_a_digit_is_rejected(self):
+        """`hipkernel:2dConv` emits `class 2dConvDispatchHandler` and
+        `register2dConvSymbols`. Nothing uppercases a leading digit away."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(name="hipkernel:2dConv"))
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "2dConv" in str(excinfo.value)
+
+    def test_an_engine_local_name_of_dots_is_rejected(self):
+        """`hipkernel:..` is the path-shaped half of the same defect: the slug
+        names this bundle's descriptor directory, and `..` names its parent.
+
+        Both rules refuse it -- `..` is no more an identifier than it is a stem --
+        and the identifier rule is reached first, so that is the diagnostic. The
+        stem rule is asserted directly here rather than through the message,
+        because it is what still refuses `..` if the C++ spellings ever change.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+        from codegen.models import PATH_STEM_PATTERN
+
+        engine = make_engine(name="hipkernel:..")
+        assert engine.slug == ".."
+        assert not PATH_STEM_PATTERN.match(engine.slug)
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(make_minimal_config(engine=engine))
+        assert "engine.name" in str(excinfo.value)
+
+    def test_load_config_runs_the_engine_name_check(self, tmp_path):
+        """Wired into the pre-mint phase: `_check_engine_name_scoped` accepts the
+        name, so nothing else stops it."""
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:attn.v2"},
+            "kmd_fields": [{"name": "head_dim", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"head_dim": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(path)
+        assert "attn.v2" in str(excinfo.value)
+
     def test_a_hyphenated_field_name_is_rejected(self):
         """`head-dim` emits `constexpr std::string_view HEAD-DIM_FIELD`."""
         from codegen.config_loader import _check_emitted_identifiers
@@ -593,6 +719,159 @@ class TestEmittedIdentifierShape:
         path = tmp_path / "c.yaml"
         path.write_text(yaml.dump(raw))
         with pytest.raises(ConfigError, match="head-dim"):
+            load_config(path)
+
+
+class TestPackNamesAreSingleFileStems:
+    """A pack name is spliced into the KDP's FILENAME, so it is held to the stem rule.
+
+    ``IngestorConfig.kdp_stem`` builds ``<engine-slug>_<pack-name>`` for a multi-pack
+    engine, and ``generator.render`` writes that as
+    ``<descriptor_dir>/<stem>.kdp.json``. The same stem is also the descriptor's
+    runtime ``name`` (``<namespace>:<stem>``). The engine slug reaching the same
+    position is already held to `PATH_STEM_PATTERN`; the pack name reaching it is the
+    other half of one stem.
+
+    The rule is the SAME one as the slug's, so kebab-case passes: a hyphen is
+    ordinary in a filename. A pack name is never folded into a C++ identifier -- the
+    pack's ``discriminator`` is the field that is, and it carries its own identifier
+    check -- so the identifier rule would refuse a spelling nothing here converts.
+    """
+
+    def test_a_normal_multi_pack_engine_still_loads(self):
+        """Positive control: the shape every shipped multi-pack config uses.
+
+        ``configs/binary_ops.yaml`` names its packs ``add`` and ``max``; these are
+        the same shape, so a rule that refused them would be refusing what ships.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="add", discriminator="add"),
+                make_pack(name="sub", discriminator="sub"),
+            ]
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_kebab_case_pack_name_is_accepted(self):
+        """The control that separates the stem rule from the identifier rule.
+
+        ``add-fast`` emits ``binary_ops_add-fast.kdp.json``, an ordinary filename.
+        Holding the pack name to `CXX_IDENTIFIER_PATTERN` instead would refuse it,
+        and nothing derives a C++ name from it: the pack's ``discriminator`` is the
+        field that reaches ``<NAME>_MATCHER_SYMBOL``, and it is checked separately.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="add-fast", discriminator="addFast"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_pack_name_that_walks_up_is_rejected(self):
+        """``../evil`` puts ``..`` inside the stem of a file this tool writes."""
+        from codegen.config_loader import _check_emitted_identifiers
+        from codegen.models import PATH_STEM_PATTERN
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="../evil", discriminator="evil"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        assert config.kdp_stem(config.packs[0]) == "test_../evil"
+        assert not PATH_STEM_PATTERN.match("../evil")
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "../evil" in message, message
+        assert "path stem" in message, message
+
+    def test_a_pack_name_carrying_a_separator_is_rejected(self):
+        """A separator makes the stem name a place, not a file.
+
+        Both spellings, because the generated tree is written on either host: the
+        forward slash is a separator everywhere, and the backslash is one on the
+        platform this bundle is most often generated for.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        for name in ("add/fast", "add\\fast"):
+            config = make_minimal_config(
+                packs=[
+                    make_pack(name=name, discriminator="addFast"),
+                    make_pack(name="mul", discriminator="mul"),
+                ]
+            )
+            with pytest.raises(ConfigError) as excinfo:
+                _check_emitted_identifiers(config)
+            assert name in str(excinfo.value), name
+
+    def test_an_empty_pack_name_is_rejected(self):
+        """``name: ""`` is present, so the required-key check passes it.
+
+        It emits ``binary_ops_.kdp.json`` -- a stem ending in the separator the
+        multi-pack convention adds, and one every empty-named pack of one engine
+        lands on together.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="", discriminator="add"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "path stem" in str(excinfo.value), str(excinfo.value)
+
+    def test_a_pack_name_leading_with_a_hyphen_is_rejected(self):
+        """The stem rule's own edge, shared with the engine slug: a leading ``-``
+        reads as an option wherever the filename is passed on a command line."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="-fast", discriminator="fast"),
+                make_pack(name="mul", discriminator="mul"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="-fast"):
+            _check_emitted_identifiers(config)
+
+    def test_load_config_runs_the_pack_name_check(self, tmp_path):
+        """Wired into the pre-mint phase, not merely available to it."""
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": name,
+                    "discriminator": discriminator,
+                    "kernels": [
+                        {
+                            "name": f"k_{discriminator}",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+                for name, discriminator in (("../evil", "evil"), ("mul", "mul"))
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="path stem"):
             load_config(path)
 
 
@@ -817,6 +1096,112 @@ class TestDirectLoadAuthoredSubpath:
         assert "authored_subpath" in message
         for value in ("shared", "unit", "integration", "archive_fixture"):
             assert value in message, message
+
+
+class TestPackagedAuthoredSubpathIsContained:
+    """A packaged bundle's subpath stays under the ``descriptors/`` root it names.
+
+    ``descriptor_dir`` joins the two as a STRING -- ``f"descriptors/{subpath}"`` --
+    and ``render()`` then writes fourteen files at ``output_dir / that``. A ``..``
+    component survives the join, so a packaged subpath that walks up writes the
+    whole bundle above ``--output-dir``, from a config that loads cleanly and
+    passes every other pre-mint check. An absolute subpath does not escape by
+    walking up but does not join either: ``C:/x`` turns the result drive-relative,
+    which is a file in an unnamed place rather than a contained write.
+
+    The direct-load branch of this same check has always constrained its subpath
+    to four known values; this branch is the one that was unconstrained.
+    """
+
+    def _raw(self, subpath):
+        raw = {
+            "dialect": "packaged",
+            "kernel_source_kind": "rocke",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": ["gfx950"],
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "rocke",
+                                "source": "kernels/gfx950/attention_dense.py",
+                                "builder": "build_attention_dense",
+                                "spec": {"seqlen_q": 256},
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        if subpath is not None:
+            raw["authored_subpath"] = subpath
+        return raw
+
+    def _load(self, tmp_path, subpath):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(self._raw(subpath)))
+        return load_config(path)
+
+    def test_the_shipped_subpath_still_loads(self, tmp_path):
+        """The control, taken from configs/gfx950_attention_dense.yaml."""
+        config = self._load(tmp_path, "rocKE/gfx950_attention_dense")
+        assert config.descriptor_dir == "descriptors/rocKE/gfx950_attention_dense"
+
+    def test_an_omitted_subpath_still_falls_back_to_kind_over_slug(self, tmp_path):
+        """Omission stays legal on this branch -- unlike direct-load, the packaged
+        dialect has a default, and the containment rule must not turn it into a
+        requirement."""
+        config = self._load(tmp_path, None)
+        assert config.descriptor_dir == "descriptors/rocke/test"
+
+    def test_a_subpath_that_walks_out_of_the_descriptor_root_is_rejected(
+        self, tmp_path
+    ):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "../../../../g2demo_pwned")
+        message = str(excinfo.value)
+        assert "authored_subpath" in message, message
+        assert "g2demo_pwned" in message, message
+
+    def test_a_subpath_that_descends_before_walking_out_is_rejected(self, tmp_path):
+        """Containment is judged on the resolved path, not on a leading ``..``.
+
+        ``rocKE/../../x`` spends one component going down and two coming back up,
+        so a check that only looked at the first component would pass it.
+        """
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "rocKE/../../g2demo_pwned")
+        assert "g2demo_pwned" in str(excinfo.value)
+
+    def test_a_drive_qualified_subpath_is_rejected(self, tmp_path):
+        """``C:/x`` never reaches ``..``: it makes the join drive-relative."""
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "C:/g2demo_abs")
+        assert "g2demo_abs" in str(excinfo.value)
+
+    def test_a_drive_relative_subpath_is_rejected(self, tmp_path):
+        """``C:x`` has no root at all and is the same failure -- a path resolved
+        against a drive's own current directory, which no caller named."""
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "C:g2demo_abs")
+        assert "g2demo_abs" in str(excinfo.value)
+
+    def test_a_rooted_subpath_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "/g2demo_abs")
+        assert "g2demo_abs" in str(excinfo.value)
+
+    def test_a_backslash_separated_escape_is_rejected(self, tmp_path):
+        """The config is read on one platform and generated on another, so the
+        separator a Windows author types has to escape on the reader too."""
+        with pytest.raises(ConfigError) as excinfo:
+            self._load(tmp_path, "..\\..\\g2demo_pwned")
+        assert "g2demo_pwned" in str(excinfo.value)
 
 
 class TestPackKernelDefaults:

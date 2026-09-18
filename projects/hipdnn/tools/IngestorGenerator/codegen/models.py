@@ -84,6 +84,14 @@ ENGINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 #: wrote.
 CXX_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+#: A name that becomes ONE path component -- a directory name or a file stem --
+#: not a C++ identifier. Laxer than `CXX_IDENTIFIER_PATTERN` over the hyphen
+#: (legal in a directory name, subtraction in an identifier, and folded away by
+#: `_to_pascal_case`), stricter over ``.`` (``..`` names the parent) and over the
+#: separators and leading ``-`` that would misname the component. Leading digits
+#: are an identifier concern, settled against the derived Pascal name.
+PATH_STEM_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
+
 #: ``DescriptorLoader.hpp``'s ``isPlausibleArchBaseId``: ``gfx`` + lowercase
 #: alnum/``-``/``_``, no feature suffix. A well-formed-but-unrecognized id
 #: (``gfx94``) passes this shape check and only trips pre-mint check #5.

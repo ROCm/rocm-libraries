@@ -132,8 +132,17 @@ the test target exists:
 hkp_register_census_tests(
     TARGET hip_kernel_provider_tests
     PACK_NAME <the pack target holding this bundle's shard>
-    SUITES Test<Name>Packs)
+    SUITES Test<Name>Packs
+    EXPECTED_CASES
+        <one line per case name the suite registers>
+)
 ```
+
+`EXPECTED_CASES` pins the suite's case-name set: optional to CMake, and required for
+the census to mean what it claims. The execution half draws its obligations from the
+cases the suite registered, so a case that stops being compiled takes its own
+obligation with it and the census still reports complete. The `cmake_test_sources.txt`
+fragment emits the list pre-filled -- re-splice it when the bundle's shape changes.
 
 `PACK_NAME` selects the wired pack target whose own `OUT_ROOT` and recorded arch list
 the entries address. CMake registers a separate
@@ -144,6 +153,7 @@ without a Python launcher, with:
 - `HIPDNN_TEST_CENSUS_SUITE=Test<Name>Packs`
 - `HIPDNN_TEST_EXPECTED_ARCH=<arch>` (from the wired list, not detected or read from descriptors)
 - `HIPDNN_DESCRIPTOR_DIR=<that pack target's OUT_ROOT>/<arch>` -- its own shard, not a shared stage tree
+- `HIPDNN_TEST_CENSUS_EXPECTED_CASES=<the pinned case names, comma-separated>`
 
 Run the registered obligation from the build-tree provider CTest directory:
 
@@ -419,7 +429,11 @@ reproduce the input kernel-for-kernel.
 
 ```yaml
 engine:
-  name: hipkernel:MyEngine        # required, scoped namespace:local
+  name: hipkernel:MyEngine        # required, scoped namespace:local. The LOCAL half
+                                  # must derive both a valid C++ identifier and a valid
+                                  # single path stem. PascalCase, snake_case and
+                                  # kebab-case all work; a '.' or a leading digit is
+                                  # accepted by the scoped-name regex and rejected here.
   sdk_version: "1.0.0"            # optional, three components, default "1.0.0"
   behavior_notes: [runtime_compilation]   # optional, closed vocabulary
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
@@ -442,12 +456,10 @@ kernel_source_kind: embedded_source   # direct-load example; packaged sources us
 authored_subpath: unit            # REQUIRED for direct_load, naming one of the four
                                     # authored sets: shared | unit | integration |
                                     # archive_fixture. Each is a separate pack target
-                                    # reaching a different binary, so nothing in the
-                                    # config implies the answer and there is no
-                                    # default that is merely conservative -- a wrong
-                                    # set shows up as an engine that loads nothing.
-                                    # Optional for packaged, where it defaults to
-                                    # <kernel_source_kind>/<slug>.
+                                    # reaching a different binary, so a wrong set shows
+                                    # up as an engine that loads nothing. Optional for
+                                    # packaged, defaulting to <kernel_source_kind>/<slug>;
+                                    # must be RELATIVE and stay under descriptors/.
 workspace_policy: none | fixed | derived
 delegates_to_existing_plan: false
 

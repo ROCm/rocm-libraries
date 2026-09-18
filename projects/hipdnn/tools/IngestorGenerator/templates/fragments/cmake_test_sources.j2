@@ -61,28 +61,24 @@ hkp_register_census_tests(TARGET hip_kernel_provider_tests
 ## Every registered case must execute and pass without skipping in every iteration.
 ## Missing suites, filtered/disabled/sharded-out cases and zero iterations fail.
 ##
-## EXPECTED_CASES arrives as HIPDNN_TEST_CENSUS_EXPECTED_CASES, comma-separated, and
-## pins this suite's case-name set. Execution alone cannot catch a suite that SHRINKS:
-## the obligation set is built from the registered cases, so a case that stops being
-## compiled takes its own obligation with it and the census still reports complete. The
-## pin is compared by name in both directions -- expected-but-unregistered and
-## registered-but-unexpected each fail, because a count lets the two cancel. Regenerate
-## and re-splice this call whenever the bundle's shape changes: has_heuristic,
-## is_multi_pack and behavior_notes each add or remove a case, and the list above is
-## read straight out of the suite this run rendered, so it already reflects them.
-## The call also registers a control per arch whose pin names a case that does not exist
-## and which must emit the lost-a-case diagnostic to pass, which is what proves the
-## comparison is still live.
+## EXPECTED_CASES is optional to configure and required for the census to mean what it
+## claims: the guard's obligations come from the cases the suite registered, so a deleted
+## case takes its own obligation with it. The list above is read out of the suite this
+## run rendered; re-splice this call whenever the bundle's shape changes.
 {% else %}
 ## Splice point 5b: nothing is registered for this direct-load engine by default.
 ##
 ## A direct-load engine's suite is censused, if at all, by a hand-added
 ## `hkp_register_census_tests(TARGET hip_kernel_provider_tests PACK_NAME <set>
-## SUITES Test{{ config.engine.pascal_name }}Packs)` call in
-## `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the authored
-## set this bundle writes into (`unit`, `integration`, `shared` or
+## SUITES Test{{ config.engine.pascal_name }}Packs EXPECTED_CASES <case> <case> ...)`
+## call in `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the
+## authored set this bundle writes into (`unit`, `integration`, `shared` or
 ## `archive_fixture`). Census requires every case in the suite to execute without
 ## skipping, so only declare a suite that reads this bundle's shard and no other.
+##
+## EXPECTED_CASES is optional to configure and required for the census to mean what it
+## claims: the guard's obligations come from the cases the suite registered, so a deleted
+## case takes its own obligation with it. Pin the TEST_F names; the pin is what notices.
 ##
 ## This bundle writes into: {{ config.authored_subpath }}
 {% endif %}

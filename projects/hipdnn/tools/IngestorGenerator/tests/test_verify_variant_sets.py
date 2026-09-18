@@ -641,7 +641,6 @@ def _identity(name: str) -> dict:
     return {
         "module": "kernels.test",
         "qualname": name,
-        "file": f"/src/kernels/{name}.py",
         "sha256": "0" * 64,
     }
 

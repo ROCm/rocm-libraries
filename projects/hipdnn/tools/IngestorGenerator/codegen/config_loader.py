@@ -11,9 +11,10 @@ generic message (metadata, arch-covers, engine name collision).
 
 import gzip
 import itertools
+import posixpath
 import re
 import warnings as _warnings
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import yaml
 
@@ -36,6 +37,7 @@ from .models import (
     KERNEL_SOURCE_KINDS,
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
+    PATH_STEM_PATTERN,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -1085,16 +1087,49 @@ def _check_dialect(config: IngestorConfig) -> None:
 
 
 def _check_authored_subpath(config: IngestorConfig) -> None:
-    """A direct-load bundle names the authored set it writes into.
+    """Each dialect's ``authored_subpath`` names a place that dialect can write.
 
-    ``test_descriptors/{shared,unit,integration,archive_fixture}`` are four separate
-    pack targets, each walked by directory and each reaching a different binary.
-    Nothing in the config implies which one a bundle belongs to, and defaulting would
-    file it in one shard while its suite reads another -- which shows up as an engine
-    that loads nothing rather than as a path mistake. The packaged dialect is
-    unaffected: its subpath already falls back to ``<kind>/<slug>``.
+    ``direct_load``: one of the authored sets. The four are separate pack targets,
+    each walked by directory and each reaching a different binary, and nothing in the
+    config implies which one a bundle belongs to -- defaulting would file it in one
+    shard while its suite reads another, surfacing as an engine that loads nothing
+    rather than as a path mistake.
+
+    ``packaged``: free-form, but a subpath of the ``descriptors/`` source root, which
+    is the packager's and is mirrored verbatim into the staged and installed layouts.
+    ``descriptor_dir`` joins the two as a string, so a ``..`` component survives the
+    join and ``render()`` writes above ``--output-dir``; an absolute subpath is the
+    same hole with a different shape. Both are checked lexically because no output
+    directory exists yet: every check in this module runs before ``generate.py`` is
+    given one.
     """
     if config.is_packaged:
+        subpath = config.authored_subpath
+        if not subpath:
+            return
+        # Read with Windows semantics on either host, so a config validated on
+        # Linux and generated on Windows gets the same answer: backslash is a
+        # separator there, and ``C:x`` is drive-relative rather than rooted.
+        stated = PureWindowsPath(subpath)
+        if stated.drive or stated.root:
+            raise ConfigError(
+                f"engine '{config.engine.name}' is a '{DIALECT_PACKAGED}' bundle "
+                f"whose 'authored_subpath' is '{subpath}', which is not relative. "
+                f"It is joined under the bundle's 'descriptors/' source root, and a "
+                f"rooted or drive-qualified subpath does not join -- the descriptors "
+                f"land outside --output-dir. State a path relative to 'descriptors/', "
+                f"e.g. '{config.kernel_source_kind}/{config.engine.slug}' (the default)."
+            )
+        resolved = posixpath.normpath(stated.as_posix())
+        if resolved == ".." or resolved.startswith("../"):
+            raise ConfigError(
+                f"engine '{config.engine.name}' is a '{DIALECT_PACKAGED}' bundle "
+                f"whose 'authored_subpath' '{subpath}' resolves to '{resolved}', "
+                f"outside the 'descriptors/' source root it is joined into -- it "
+                f"would write this bundle's files above --output-dir and install "
+                f"them where hkp_pack never walks. State a path under 'descriptors/', "
+                f"e.g. '{config.kernel_source_kind}/{config.engine.slug}' (the default)."
+            )
         return
     if config.authored_subpath not in AUTHORED_TEST_SETS:
         stated = (
@@ -1429,8 +1464,9 @@ RESERVED_MATCHER_SYMBOL_STEMS = ("GRAPH", "KERNEL")
 
 
 def _check_emitted_identifiers(config: IngestorConfig) -> None:
-    """Every name spliced into a generated C++ identifier is shaped like one, and
-    no two of them land on the same identifier.
+    """Every name spliced into a generated C++ identifier is shaped like one, no two
+    of them land on the same identifier, and every name spliced into an emitted path
+    is a single path component.
 
     ``native.cpp.j2`` interpolates each kmd field name uppercased into
     ``<NAME>_FIELD`` and each pack discriminator into ``<NAME>_MATCHER_SYMBOL``
@@ -1446,7 +1482,61 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
     sharing a name emit ``<NAME>_FIELD`` and ``<NAME>_MATCHER_SYMBOL``. Each suffix
     therefore gets its own claim map, and every collision -- field/field,
     discriminator/discriminator, discriminator/reserved -- is the same claim failing.
+
+    The engine's local name is checked the same way and first, because it is the
+    outer scope: a defect there renames the file rather than one constant inside
+    it. It reaches TWO shapes, not one -- `pascal_name` and `camel_name` are
+    spliced into C++, while `slug` is a directory name and a file stem -- so each
+    is held to the rule for where it lands. Kebab-case is the case that separates
+    them: `_to_pascal_case` folds ``-`` away, so ``attn-v2`` is a good stem AND a
+    good identifier once derived, and one rule covering both would refuse a
+    spelling this tool converts on purpose.
+
+    The derived spellings are read through `EngineSpec`, which splits the name on
+    ':', so this runs after check #1 has established that there is a local half.
+
+    A pack's name is the other half of that same file stem: `kdp_stem` builds
+    ``<engine-slug>_<pack-name>`` for a multi-pack engine, so the two names reach one
+    filename and are held to one rule. It is checked for every engine rather than
+    only the multi-pack ones, because the pack COUNT is what decides whether the name
+    is spliced, and a second pack is added by an edit that says nothing about the
+    first pack's spelling -- making a name good today and a path tomorrow. Its
+    discriminator is the field that reaches C++ and keeps the identifier rule.
     """
+    for derived, emitted_as in (
+        (
+            config.engine.pascal_name,
+            "the classes 'Test<NAME>Packs' and '<NAME>DispatchHandler', the "
+            "functions 'register<NAME>Symbols' and 'reset<NAME>ModuleCache', and "
+            "the file 'packs/<NAME>Native.cpp'",
+        ),
+        (
+            config.engine.camel_name,
+            "the functions '<name>GraphMatches' and '<name>DispatchHandler'",
+        ),
+    ):
+        if not CXX_IDENTIFIER_PATTERN.match(derived):
+            raise ConfigError(
+                f"engine.name '{config.engine.name}' derives '{derived}' from its "
+                f"local name '{config.engine.local_name}', which must be a C++ "
+                f"identifier, matching ^[A-Za-z_][A-Za-z0-9_]*$. It names "
+                f"{emitted_as}. Anything else is not a declined match -- it is a "
+                f"file nobody wrote failing to compile. Spell the local name in "
+                f"PascalCase, snake_case or kebab-case."
+            )
+    if not PATH_STEM_PATTERN.match(config.engine.slug):
+        raise ConfigError(
+            f"engine.name '{config.engine.name}' derives the slug "
+            f"'{config.engine.slug}' from its local name "
+            f"'{config.engine.local_name}', which must be a single path stem, "
+            f"matching ^[A-Za-z0-9_][A-Za-z0-9_-]*$. The slug is this bundle's "
+            f"descriptor directory name and the stem of every descriptor file "
+            f"under it, so a '.' or a separator does not name a badly-spelled "
+            f"bundle -- it names a different directory, and '..' names the parent "
+            f"of the one this config asked for. A hyphen is fine here and is "
+            f"folded away in the C++ names. Spell the local name in PascalCase, "
+            f"snake_case or kebab-case."
+        )
     for kmd_field in config.kmd_fields:
         if not CXX_IDENTIFIER_PATTERN.match(kmd_field.name):
             raise ConfigError(
@@ -1457,6 +1547,18 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
                 f"to compile, in a file nobody wrote."
             )
     for pack in config.packs:
+        if not PATH_STEM_PATTERN.match(pack.name):
+            raise ConfigError(
+                f"pack name '{pack.name}' must be a single path stem, matching "
+                f"^[A-Za-z0-9_][A-Za-z0-9_-]*$. A multi-pack engine names its KDP "
+                f"'<engine-slug>_<pack-name>.kdp.json' and gives the descriptor the "
+                f"runtime name '<namespace>:<engine-slug>_<pack-name>', so a '.' or "
+                f"a separator here does not name a badly-spelled pack -- it names a "
+                f"different path, and '..' reaches out of the directory this config "
+                f"asked for. A hyphen is fine: the pack name is never folded into a "
+                f"C++ identifier, which is what this pack's 'discriminator' is for. "
+                f"Spell it in snake_case or kebab-case."
+            )
         if pack.discriminator and not CXX_IDENTIFIER_PATTERN.match(pack.discriminator):
             raise ConfigError(
                 f"pack '{pack.name}' discriminator '{pack.discriminator}' must be "

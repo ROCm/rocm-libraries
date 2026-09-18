@@ -31,7 +31,7 @@ source according to workspace policy.
 | | `direct_load` | `packaged` |
 |---|---|---|
 | Authored source | `embedded_source` | `rocke` or `hip` |
-| Authored under | `test_descriptors/<set>/<slug>/` | `descriptors/<producer>/<bundle>/` |
+| Authored under | `test_descriptors/<set>/<slug>`, `<set>` one of `shared`, `unit`, `integration`, `archive_fixture`; staged, not shipped | `descriptors/<subpath>`, defaulting to `<kind>/<slug>`; ships |
 | Runtime descriptors | Per-arch shard, kind unchanged (passthrough) | Per-arch shard, rewritten to `kind: kpack` |
 | Kernel source | `add_kernels_for_embedding()` key table, compiled into the binary | Lowered at pack time into one archive per arch |
 

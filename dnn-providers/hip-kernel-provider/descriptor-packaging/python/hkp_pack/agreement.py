@@ -212,6 +212,32 @@ def consumer_record(ukd, engine, kmd, kdp_header, arch, declaration):
     }
 
 
+def stored_record(record):
+    """One consumer record as it ships: ids to name the documents, digests to bind them.
+
+    `verify` rebuilds the records from the descriptors in front of it and compares the
+    projection, so a changed engine, KMD, KDP header, metadata or declaration fails its
+    binding. Carrying the documents instead would say nothing more and cost the whole
+    bundle -- the trade `resolved_contract` already refuses for the contract alone.
+
+    Each document digests on its own so a failure can name which one moved, and
+    `declaration` digests separately: a standalone UKD states its own contract, so the
+    KDP header does not cover it.
+    """
+    return {
+        "ukd_id": record["ukd_id"],
+        "engine_id": record["engine"]["id"],
+        "engine_digest": digest(record["engine"]),
+        "kmd_id": record["kmd"]["id"],
+        "kmd_digest": digest(record["kmd"]),
+        "kdp_id": record["kdp"]["id"],
+        "kdp_digest": digest(record["kdp"]),
+        "metadata_digest": digest(record["metadata"]),
+        "effective_arch": record["effective_arch"],
+        "declaration_digest": digest(record["declaration"]),
+    }
+
+
 def canonical_records(records):
     """One consumer list in an order neither side chooses.
 
@@ -225,7 +251,12 @@ def canonical_records(records):
 
 
 class OriginObserver:
-    """One stable producing invocation's defining-file identities."""
+    """One stable producing invocation's defining-file identities.
+
+    The resolved path is watched for the length of the invocation and never published:
+    no side compares it, and shipping it would make the artifact a function of the
+    building machine's install layout rather than of its inputs.
+    """
 
     def __init__(self):
         self.files = {}
@@ -242,7 +273,6 @@ class OriginObserver:
             return {
                 "module": obj.__module__,
                 "qualname": obj.__qualname__,
-                "file": str(path),
                 "sha256": sha,
             }
         except (TypeError, OSError, AttributeError) as exc:
@@ -347,7 +377,7 @@ def publish(ukd, observations, records):
         "schema_version": 1,
         "authored_digest": digest(authored),
         "observations": observations,
-        "consumers": records,
+        "consumers": [stored_record(record) for record in records],
         "descriptor_digest": descriptor_binding(ukd),
     }
 
@@ -356,10 +386,11 @@ def verify(ukd, records, payload):
     """Check one shipped UKD's evidence against the descriptors and bytes in hand.
 
     `records` is built from the CURRENT descriptors through `consumer_record` and
-    `canonical_records`, so equality with the stored list is what fails a changed
-    KMD, metadata, KDP header, declaration or effective architecture. Nothing here
-    imports a producer: the evidence is self-contained, which is what lets a packed
-    artifact be checked on a machine that has never had rocKE installed.
+    `canonical_records`, so equality of their `stored_record` projections with the
+    stored list is what fails a changed KMD, metadata, KDP header, declaration or
+    effective architecture. Nothing here imports a producer: the evidence is
+    self-contained, which is what lets a packed artifact be checked on a machine
+    that has never had rocKE installed.
 
     Every deviation raises. A missing or unsupported record is a failure and never
     an unchecked property -- an artifact that cannot say what it was built from has
@@ -375,7 +406,7 @@ def verify(ukd, records, payload):
     }
     if record.get("authored_digest") != digest(authored):
         raise HkpPackError("effective_spec authored-input binding mismatch")
-    if record.get("consumers") != records:
+    if record.get("consumers") != [stored_record(entry) for entry in records]:
         raise HkpPackError("effective_spec consumer binding mismatch")
     source = ukd["kernel_source"]
     payload_sha = hashlib.sha256(payload).hexdigest()
@@ -395,7 +426,7 @@ def verify(ukd, records, payload):
     producer = observations.get("producer", {})
     for role in ("builder", "spec"):
         identity = producer.get(role, {})
-        if set(identity) != {"module", "qualname", "file", "sha256"} or not all(
+        if set(identity) != {"module", "qualname", "sha256"} or not all(
             isinstance(v, str) and v for v in identity.values()
         ):
             raise HkpPackError("missing producing-object identity")

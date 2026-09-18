@@ -49,7 +49,7 @@ class Index:
             if dtype not in _DESCRIPTOR_TYPES:
                 continue
             try:
-                with open(path) as fh:
+                with open(path, encoding="utf-8") as fh:
                     doc = json.load(fh)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise DescriptorContextError(

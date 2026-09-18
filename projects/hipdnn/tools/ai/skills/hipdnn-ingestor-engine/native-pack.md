@@ -99,39 +99,42 @@ structural validator substitutes no-op native stubs and cannot establish this.
 Fresh processes are required because registration/discovery is memoized.
 
 The census is a direct native obligation, registered one
-`hkp_register_census_tests(TARGET … PACK_NAME … SUITES …)` call per packed target in
-`src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and after the test
-target exists. Per declared suite and per arch in that pack target's own recorded
-list, CMake registers an independent test
-`hip-kernel-provider-hkp-census-<arch>-<suite>` running
-`hip_kernel_provider_tests --gtest_filter=<suite>.*` with
-`HIPDNN_TEST_CENSUS_SUITE`, an explicit `HIPDNN_TEST_EXPECTED_ARCH` and a
-`HIPDNN_DESCRIPTOR_DIR` of that pack target's **own** `OUT_ROOT` shard for the arch —
-not a shared stage tree. There is no Python launcher and no XML census guard.
+`hkp_register_census_tests(TARGET … PACK_NAME … SUITES … EXPECTED_CASES …)` call per
+packed target in `src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and
+after the test target exists. Per declared suite and per arch in that pack target's own
+recorded list, CMake registers **four** independent tests: the census entry, plus the
+`-control-unvisited`, `-control-absent-root` and `-control-unregistered-case` controls,
+the last only where a pin exists. Run the family, not the entry alone. Entry naming, the
+invocation, the environment each entry supplies and why a control passes on refusal text
+rather than exit status are under **Packaged census: direct native CTest entries** in
+[RUNBOOK.md](RUNBOOK.md). There is no Python launcher and no XML census guard.
 Expected names/counts, runtime source kind and SDK version come from the finalized
 emitted inventory; the arch comes from the wired arch list, never from loaded
 descriptors or the host GPU — a bundle cannot be its own expectation.
 
-**What may be censused is decided by shard count, not by dialect.** An entry hands
-the binary exactly one directory, so only a suite confined to one pack target's shard
-qualifies. `TestPointwisePacks` is censused at the `unit` target even though
-`unit/pointwise/` is authored in the `embedded_source` dialect, because every case in
-it reads that one shard; `TestConvFwdPack` reaches across the `unit` and
-`unit_shared` shards and is censused nowhere. Declaring one suite at two pack targets
-is fatal: the entry name carries arch and suite alone, so the second registration
-would silently take the first one's shard.
+**What may be censused is decided by shard count, not by dialect** — an entry hands the
+binary exactly one directory, so only a suite confined to one pack target's shard
+qualifies; **Packaged census: direct native CTest entries** in [RUNBOOK.md](RUNBOOK.md)
+carries the worked examples and the one-suite-at-two-pack-targets rule.
 
 The guard is active only for a nonempty census-suite variable, and it fails closed:
 an empty arch, a missing/empty/nonexistent explicit root, an absent or empty named
 suite, any case that skips or fails, list-only or zero-iteration invocations, and
 partial runs that never complete one full iteration. Ordinary invocations without
 the variable keep normal filtering and skip behavior, and the runtime's production
-descriptor-root fallback is unchanged. An empty `SUITES` registers nothing, and tests
-built OFF yields no census evidence at all — absence, not a pass. Every other missing
-prerequisite is fatal at configure instead: an unwired `PACK_NAME`, a missing or
-absent `TARGET`, an empty recorded arch list. An uncensused suite states its
-inventory through its ordinary host run; invoked directly it still requires an
-explicit expected arch and descriptor root.
+descriptor-root fallback is unchanged. An empty `SUITES`, tests built OFF, and a
+`PACK_NAME` this configuration left **dormant** each register nothing — absence of
+census evidence, not a pass. Dormancy is the deliberate exception; a prerequisite that
+could not have been chosen deliberately is fatal at configure instead, and **Packaged
+census: direct native CTest entries** in [RUNBOOK.md](RUNBOOK.md) draws that line. An
+uncensused suite states its inventory through its ordinary host run; invoked directly it
+still requires an explicit expected arch and descriptor root.
+
+`EXPECTED_CASES` pins the suite's case-name set and arrives as
+`HIPDNN_TEST_CENSUS_EXPECTED_CASES`, comma-separated. It is optional to CMake and
+required for the census to mean what it claims, so a registration without it is green in
+exactly the case it exists to catch; **Packaged census: direct native CTest entries** in
+[RUNBOOK.md](RUNBOOK.md) states the mechanism and what an unpinned call forfeits.
 
 Placeholder/audit, native inventory and numerical dispatch are distinct evidence.
 Neither a structural pass nor a loaded registry proves that a graph was served.

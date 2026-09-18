@@ -16,8 +16,10 @@ verifier is exactly the dependency this design refuses.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -608,18 +610,6 @@ class TestPackedVerification:
                 "descriptor binding mismatch",
                 id="authored-arch",
             ),
-            # `shipped_ukd` hands back the very list the evidence stores, so an
-            # edit here moves both sides of the consumer-binding comparison
-            # together; what refuses it is the observation the edited
-            # declaration no longer names. The consumer binding itself is
-            # exercised by the records-side mutations below.
-            pytest.param(
-                lambda d: d["provenance"]["effective_spec"]["consumers"][0][
-                    "declaration"
-                ].__setitem__("vocabulary", {}),
-                "lacks this consumer's observation",
-                id="declaration",
-            ),
             pytest.param(
                 restamp_authored_spec,
                 "authored-input binding mismatch",
@@ -669,22 +659,67 @@ class TestPackedVerification:
         with pytest.raises(HkpPackError, match="payload binding"):
             agreement.verify(doc, records, PAYLOAD + b"tampered")
 
-    def test_a_changed_schema_fails(self):
-        """The KMD rides in the consumer record, so altering the schema the
-        descriptor is read against breaks the binding rather than quietly
-        re-completing the metadata against a different default."""
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            pytest.param(
+                lambda r: r["engine"].__setitem__("name", "demo:Other"), id="engine"
+            ),
+            pytest.param(
+                # The KMD is what the descriptor's metadata is read against, so a
+                # moved default has to fail here rather than quietly re-complete
+                # the metadata and agree with an observation taken under the old
+                # one.
+                lambda r: r["kmd"]["fields"][3].__setitem__("default_value", 32),
+                id="kmd",
+            ),
+            pytest.param(
+                lambda r: r["kdp"].__setitem__("name", "changed consumer"), id="kdp"
+            ),
+            pytest.param(
+                lambda r: r["metadata"].__setitem__("head_size", 128), id="metadata"
+            ),
+            pytest.param(
+                lambda r: r["declaration"].__setitem__("vocabulary", {}),
+                id="declaration",
+            ),
+            pytest.param(
+                lambda r: r.__setitem__("effective_arch", "gfx950"),
+                id="effective_arch",
+            ),
+        ],
+    )
+    def test_a_changed_consumer_document_fails_its_binding(self, mutate):
+        """Every document a record names, moved on its own, on the rebuild side.
+
+        The stored list names the documents and digests them rather than carrying
+        them, so this set is what says the projection kept every binding an
+        embedded document would have carried. Six mutations, six failures, each
+        one reaching the comparison alone: a field whose binding went missing
+        would leave its case the only green one here.
+        """
         doc, records = shipped_ukd()
         altered = copy.deepcopy(records)
-        altered[0]["kmd"]["fields"][3]["default_value"] = 32
+        mutate(altered[0])
         with pytest.raises(HkpPackError, match="consumer binding"):
             agreement.verify(doc, altered, PAYLOAD)
 
-    def test_a_changed_effective_arch_fails(self):
+    def test_a_declaration_re_evidenced_over_its_own_edit_still_fails(self):
+        """A consistent edit on both sides is refused by the observation instead.
+
+        Re-deriving the evidence from edited descriptors is what someone holding
+        the whole tree can do, and it takes the consumer binding out of the way.
+        What is left is the compile itself: the edited declaration asks for
+        readouts the observation was never taken for, and no earlier check
+        reaches that far.
+        """
         doc, records = shipped_ukd()
-        altered = copy.deepcopy(records)
-        altered[0]["effective_arch"] = "gfx950"
-        with pytest.raises(HkpPackError, match="consumer binding"):
-            agreement.verify(doc, altered, PAYLOAD)
+        records[0]["declaration"]["vocabulary"] = {}
+        doc["provenance"]["effective_spec"]["consumers"] = [
+            agreement.stored_record(entry) for entry in records
+        ]
+        with pytest.raises(HkpPackError, match="lacks this consumer's observation"):
+            agreement.verify(doc, records, PAYLOAD)
 
     def test_an_absent_record_is_a_failure_and_not_an_unchecked_property(self):
         doc, records = shipped_ukd()
@@ -722,6 +757,156 @@ class TestPackedVerification:
         doc, records = shipped_ukd()
         reloaded = json.loads(json.dumps(doc))
         agreement.verify(reloaded, json.loads(json.dumps(records)), PAYLOAD)
+
+
+_MACHINE_PRODUCER = '''
+"""A producer whose only variable is the directory it was read from."""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class MachineSpec:
+    head_size: int = 64
+    dtype: str = "bf16"
+    causal: bool = True
+    block_n: int = 64
+
+    def resolved_use_exp2_fast(self) -> bool:
+        return not (self.dtype == "bf16" and self.head_size == 128)
+
+
+def build(spec, *, arch):
+    return (spec, arch)
+'''
+
+
+@contextlib.contextmanager
+def loaded_producer(directory):
+    """One copy of the same producer bytes, imported from `directory`.
+
+    Two roots holding identical source is what a second build machine presents to
+    the observer: one module name, one set of qualnames, one content hash, and a
+    different absolute path. Loaded by location under a fixed module name rather
+    than through `sys.path`, so the two copies differ in nothing else -- and
+    registered in `sys.modules` for the duration, because that is where
+    `inspect.getsourcefile` reads a class's defining file from.
+    """
+    directory.mkdir(parents=True)
+    path = directory / "machine_demo.py"
+    path.write_text(_MACHINE_PRODUCER)
+    spec = importlib.util.spec_from_file_location("machine_demo", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        yield module
+    finally:
+        del sys.modules[spec.name]
+
+
+def published_evidence(directory):
+    """The record `publish` writes for one compile of the producer in `directory`."""
+    with loaded_producer(directory) as module:
+        return _publish_for(module)
+
+
+def _publish_for(module):
+    entry = consumer()
+    request = agreement.observation_request(entry, FULL_KMD)
+    observations = agreement.observe(
+        module.MachineSpec(),
+        module.build,
+        {agreement.digest(request): request},
+        agreement.OriginObserver(),
+    )
+    observations["arch"] = ARCH
+    observations["symbol"] = SYMBOL
+    observations["code_object_sha256"] = PAYLOAD_SHA
+    ukd = {
+        "id": "ukd-demo",
+        "metadata": TestComparison.metadata(),
+        "provenance": {
+            "source": "kernels/demo/attention_dense.py",
+            "builder": "build",
+            "spec": {"head_size": 64},
+        },
+    }
+    agreement.publish(
+        ukd,
+        observations,
+        agreement.canonical_records(
+            [
+                agreement.consumer_record(
+                    ukd,
+                    ENGINE,
+                    FULL_KMD,
+                    {"id": "kdp-demo", "engine": "ued-demo", "arch": [ARCH]},
+                    ARCH,
+                    entry,
+                )
+            ]
+        ),
+    )
+    return ukd["provenance"]["effective_spec"]
+
+
+def strings_in(value):
+    """Every string anywhere inside a JSON-shaped value, keys included."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from strings_in(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from strings_in(item)
+    elif isinstance(value, str):
+        yield value
+
+
+class TestMachineIndependence:
+    """What the shipped record may be a function of: its inputs, and nothing else."""
+
+    def test_two_producer_directories_emit_byte_identical_evidence(self, tmp_path):
+        """The property the other reproducibility tests in this tree cannot see.
+
+        Those compare a serial run against a parallel one, where every producer
+        resolves to the same file, so they agree whether or not the resolved path
+        is published. Two roots of differing depth is what a second machine looks
+        like from inside the observer, and it is the only shape that separates
+        "reproducible here" from "reproducible anywhere".
+        """
+        left = published_evidence(tmp_path / "a")
+        right = published_evidence(tmp_path / "b/deeper/still")
+        assert json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+
+    def test_no_published_value_names_a_location_on_the_building_machine(
+        self, tmp_path
+    ):
+        """No separator and no install root anywhere, keys included.
+
+        Stated over every string rather than over the fields known to have held
+        one, so a path reintroduced under a new name fails here too.
+        """
+        evidence = published_evidence(tmp_path / "a")
+        for value in strings_in(evidence):
+            assert "site-packages" not in value
+            assert "/" not in value and "\\" not in value
+
+    def test_a_producer_identity_carrying_a_path_is_rejected(self):
+        """A four-key identity is refused rather than accepted and ignored.
+
+        The record is the only statement a checker has about what produced the
+        payload, so an identity in a shape this module does not write is one it
+        cannot reason about -- and reading three keys and skipping the fourth
+        would let the fourth say anything at all.
+        """
+        doc, records = shipped_ukd()
+        observations_of(doc)["producer"]["builder"]["file"] = str(
+            Path(__file__).resolve()
+        )
+        with pytest.raises(HkpPackError, match="producing-object identity"):
+            agreement.verify(doc, records, PAYLOAD)
 
 
 class _ReaderArtifact:

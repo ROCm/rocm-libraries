@@ -133,6 +133,7 @@ def validate_skill(skill: Path) -> list[str]:
 
     # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
     claude_commands = {
+        "hipdnn-ingestor-engine",
         "hipdnn-pr-quality",
         "hipdnn-superbuild",
         "hipdnn-superbuild-test",
