@@ -3,12 +3,11 @@
 
 """Direct unit tests for the shared dispatch helpers.
 
-``selector_matches`` and ``make_kernel_id`` live in ``rocke.dispatch.core`` and
-are shared by every operator family, so a bug in either breaks every family at
-once. The family suites only exercise them *indirectly*, which means a helper
-regression would surface as a confusing failure somewhere downstream. These
-tests point straight at the helpers -- pure host logic, no device -- so a break
-is caught at the source and named.
+``selector_matches`` lives in ``rocke.dispatch.core`` and is shared by every
+operator family. ``make_kernel_id`` also lives there and is currently shared by
+attention and KDA. These tests point straight at the helpers -- pure host logic,
+no device -- so a regression is caught at its source rather than through a
+confusing downstream dispatch failure.
 
 The inputs are faithful duck-typed stand-ins: the helpers read attributes and
 ``asdict(spec)``, so a namespace with the right fields and a small dataclass
@@ -107,13 +106,13 @@ def test_spec_id_mismatch_is_rejected_with_reason():
     assert not ok and "spec_id" in why
 
 
-def test_a_request_without_the_pin_fields_raises():
-    """A request type that never declared algorithm/spec_id is a family wiring
-    bug. Each family's private copy read the attributes directly and raised;
-    defaulting them to "auto" here would instead make every candidate match --
-    the pin silently ignored, which is far harder to notice than a traceback."""
-    with pytest.raises(AttributeError):
-        selector_matches(SimpleNamespace(arch="gfx950"), _candidate())
+@pytest.mark.parametrize("field", ("algorithm", "spec_id"))
+def test_a_request_missing_either_pin_field_raises(field):
+    """Each required pin field must fail loudly when a family omits it."""
+    request = _request()
+    delattr(request, field)
+    with pytest.raises(AttributeError, match=field):
+        selector_matches(request, _candidate())
 
 
 def test_pin_is_case_and_whitespace_insensitive():
@@ -129,18 +128,21 @@ def test_pin_is_case_and_whitespace_insensitive():
     assert ok
 
 
-def test_selector_normalization_lives_in_core():
-    """Pin matching and GEMM request hashing share one normalizer."""
+def test_gemm_request_hashing_uses_the_core_normalizer():
+    """GEMM matching and request identity bind the same normalizer."""
     gemm_common = importlib.import_module("rocke.dispatch.gemm.common")
     assert gemm_common.normalize_selector is dispatch_core.normalize_selector
-    assert dispatch_core.normalize_selector("  Chunk_Scan  ") == "chunk_scan"
 
 
 @pytest.mark.parametrize(
     "module_name, attribute",
     (
-        ("dispatch.attention.common", "_selector_matches"),
-        ("dispatch.kda.common", "_selector_matches"),
+        ("dispatch.attention.generic", "_selector_matches"),
+        ("dispatch.attention.gfx1250", "_selector_matches"),
+        ("dispatch.attention.gfx942", "_selector_matches"),
+        ("dispatch.attention.gfx950", "_selector_matches"),
+        ("dispatch.kda.gfx942", "_selector_matches"),
+        ("dispatch.kda.gfx950", "_selector_matches"),
         ("dispatch.grouped_convolution", "selector_matches"),
         ("rocke.dispatch.families.moe", "selector_matches"),
         ("rocke.dispatch.families.norm", "selector_matches"),
@@ -148,8 +150,8 @@ def test_selector_normalization_lives_in_core():
         ("rocke.dispatch.gemm.fp16_rcr", "selector_matches"),
     ),
 )
-def test_every_family_uses_the_core_selector(module_name, attribute):
-    """Every family must bind the canonical helper, not maintain a copy."""
+def test_each_selector_call_site_binds_the_core_helper(module_name, attribute):
+    """Each module that calls a selector name must bind the canonical helper."""
     module = importlib.import_module(module_name)
     assert getattr(module, attribute) is selector_matches
 
@@ -198,21 +200,19 @@ def test_registry_rejects_a_candidate_from_another_family():
         registry.register(_registrable_candidate(family="attention_unified"))
 
 
-def test_a_non_string_pin_raises_rather_than_rejecting_every_candidate():
-    """A pin that is not a string is a wiring bug and must surface as one.
+@pytest.mark.parametrize("field", ("algorithm", "spec_id"))
+@pytest.mark.parametrize("bad", (None, 0, 3.5, ["chunk_scan"]))
+def test_a_non_string_pin_raises_rather_than_rejecting_every_candidate(field, bad):
+    """A non-string pin is a request-wiring bug and must surface as one.
 
-    ``str(request.algorithm).strip()`` would turn ``None`` into ``"none"`` and
-    ``0`` into ``"0"``, matching no candidate -- so the caller sees "no candidate
-    supports request", a routing failure pointing at the registry instead of at
-    their malformed request. Reading the attribute directly raises at the bug.
-    The sibling test covers a MISSING attribute; this covers a present one of
-    the wrong type.
+    Coercion via ``str(...)`` would make every candidate reject the request, so
+    the caller would see a registry failure instead of the malformed field.
+    Exercise both independently normalized pins so neither can regress unseen.
     """
-    cand = _candidate(algorithm="chunk_scan", spec_id="b4")
-    for bad in (None, 0, 3.5, ["chunk_scan"]):
-        req = _request(algorithm=bad)
-        with pytest.raises(AttributeError):
-            selector_matches(req, cand)
+    req = _request()
+    setattr(req, field, bad)
+    with pytest.raises(AttributeError):
+        selector_matches(req, _candidate())
 
 
 def test_the_pin_contract_is_stated_on_the_helpers():

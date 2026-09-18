@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from typing import Tuple
 
 from ...core.arch import ArchTarget
 from ...helpers.split_k import select_split_k
