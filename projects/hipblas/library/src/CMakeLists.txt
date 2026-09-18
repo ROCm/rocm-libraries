@@ -121,9 +121,7 @@ else( )
   # Using legacy FindCUDA variables since FindCUDAToolkit (which provides
   # imported targets) requires CMake 3.17. Include dirs must be added explicitly
   # because legacy variables do not propagate them transitively.
-  target_include_directories( hipblas SYSTEM PUBLIC
-    $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}> )
-  target_link_libraries( hipblas PUBLIC ${CUDA_CUBLAS_LIBRARIES} ${CUDA_LIBRARIES} )
+  target_link_libraries( hipblas PUBLIC CUDA::cublas CUDA::cudart )
 endif( )
 
 # External header includes included as system files

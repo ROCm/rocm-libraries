@@ -109,8 +109,7 @@ foreach( exe IN LISTS hipblas-example-executables)
   else( )
     target_compile_definitions( ${exe} PRIVATE ${HIPBLAS_CUDA_COMPILER_DEFINES} )
 
-    target_include_directories( ${exe} SYSTEM PRIVATE $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}> )
-    target_link_libraries( ${exe} PRIVATE hip::host ${CUDA_LIBRARIES} )
+    target_link_libraries( ${exe} PRIVATE hip::host CUDA::cudart )
   endif( )
 
   set_target_properties( ${exe} PROPERTIES
