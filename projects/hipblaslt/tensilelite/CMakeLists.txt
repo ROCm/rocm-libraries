@@ -92,53 +92,6 @@ if(TENSILELITE_ENABLE_HOST)
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    # mxDataGenerator supplies the gfx950 pre-swizzled MX scale padding helper behind
-    # the StrideScaleA1/StrideScaleB1 custom-kernel semantics. Treat it as optional:
-    # HIPBLASLT_ENABLE_MXDATAGENERATOR is OFF on Windows, and shared/mxdatagenerator
-    # is absent from checkouts that vendor only projects/hipblaslt, so probe for it
-    # instead of hard-requiring it.
-    set(TENSILELITE_HOST_MXDATAGENERATOR ${HIPBLASLT_ENABLE_MXDATAGENERATOR})
-    set(_mxdatagen_target roc::mxDataGenerator)
-    if(TENSILELITE_HOST_MXDATAGENERATOR AND NOT TARGET roc::mxDataGenerator)
-        set(_mxdatagen_src "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator")
-        if(HIPBLASLT_ENABLE_THEROCK)
-            find_package(mxDataGenerator QUIET)
-            if(NOT mxDataGenerator_FOUND)
-                set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
-            endif()
-        elseif(EXISTS "${_mxdatagen_src}/lib/include/mxDataGenerator/PreSwizzle.hpp")
-            # Consume the header-only helper directly rather than add_subdirectory()ing
-            # mxDataGenerator: its CMakeLists emits install() rules unconditionally and
-            # EXCLUDE_FROM_ALL does not suppress them, so vendoring it here republishes
-            # its 25 headers and 3 package files from whatever install tree embeds this
-            # subdirectory. hipSPARSELt embeds it, which put those files in TheRock's
-            # blas artifact alongside support's own copy (rocm-libraries#11105).
-            find_package(OpenMP REQUIRED)
-            add_library(tensilelite-mxdatagenerator-headers INTERFACE)
-            target_include_directories(tensilelite-mxdatagenerator-headers
-                INTERFACE $<BUILD_INTERFACE:${_mxdatagen_src}/lib/include>)
-            # LINK_ONLY: OpenMP::OpenMP_CXX carries -fopenmp in its INTERFACE_COMPILE_OPTIONS.
-            # Propagating that into tensilelite-host's compiles is not merely unnecessary
-            # (the pre-swizzle helper is correct serially) -- it is actively harmful. On the
-            # CI image, -fopenmp re-adds ${ROCM_PATH}/lib/llvm/include as an *implicit system*
-            # include dir to locate omp.h. That demotes the explicit -I for the same directory,
-            # and <llvm/...> includes then fall through to the system LLVM 18 tree in
-            # /usr/include/llvm. tensilelite-host would compile LLVM YAMLIO against LLVM 18
-            # headers while linking ROCm's LLVM 24 libraries -- an ABI mismatch that silently
-            # corrupts llvm::yaml::Input, making TensileLibrary.yaml fail to parse with
-            # "unknown key 'solutions'". Keep the link requirement, drop the compile options.
-            target_link_libraries(tensilelite-mxdatagenerator-headers
-                INTERFACE $<LINK_ONLY:OpenMP::OpenMP_CXX>)
-            set(_mxdatagen_target tensilelite-mxdatagenerator-headers)
-        else()
-            set(TENSILELITE_HOST_MXDATAGENERATOR OFF)
-        endif()
-    endif()
-    if(NOT TENSILELITE_HOST_MXDATAGENERATOR)
-        message(STATUS "tensilelite-host: mxDataGenerator not available; "
-                       "pre-swizzled MX scale strides (StrideScaleA1/B1) are disabled")
-    endif()
-
     target_link_libraries(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
@@ -146,28 +99,9 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device
+            roc::host-numerics-amd-gpu-layout
             ZLIB::ZLIB
     )
-
-    if(TENSILELITE_HOST_MXDATAGENERATOR)
-        # Consume mxDataGenerator's include directories, but take the target itself as a
-        # LINK_ONLY dependency so its INTERFACE_COMPILE_OPTIONS do not reach our compiles.
-        # roc::mxDataGenerator links OpenMP::OpenMP_CXX (shared/mxdatagenerator/CMakeLists.txt),
-        # which carries -fopenmp. On the CI image -fopenmp makes clang re-add
-        # ${ROCM_PATH}/lib/llvm/include as an *implicit system* include dir (to find omp.h).
-        # That demotes the explicit -I for the same directory, and <llvm/...> includes then
-        # fall through to the system LLVM 18 tree under /usr/include/llvm. tensilelite-host
-        # would compile llvm::yaml against LLVM 18 headers while linking ROCm's LLVM 24
-        # libraries: an ABI mismatch that silently corrupts llvm::yaml::Input, so every
-        # TensileLibrary.yaml fails to load with "unknown key 'solutions'".
-        # The pre-swizzle helper is correct serially, so dropping -fopenmp here is safe.
-        get_target_property(_mxdatagen_incs ${_mxdatagen_target} INTERFACE_INCLUDE_DIRECTORIES)
-        if(_mxdatagen_incs)
-            target_include_directories(tensilelite-host PRIVATE ${_mxdatagen_incs})
-        endif()
-        target_link_libraries(tensilelite-host PRIVATE $<LINK_ONLY:${_mxdatagen_target}>)
-        target_compile_definitions(tensilelite-host PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    endif()
 
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})

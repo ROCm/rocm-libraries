@@ -142,7 +142,7 @@ namespace TensileLite::Client
                 }
                 if(dataType == rocisa::DataType::Float4)
                 {
-                    return realOnly(GenerationRecipe::uniformRawInteger({.lower = 0, .upper = 14}));
+                    return realOnly(GenerationRecipe::uniformRawInteger({.lower = 0, .upper = 15}));
                 }
                 if(dataType == rocisa::DataType::Float)
                     return cartesian(

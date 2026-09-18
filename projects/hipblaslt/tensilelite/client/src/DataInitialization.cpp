@@ -34,8 +34,6 @@
 #include <Tensile/Utils.hpp>
 
 #include <hip/hip_runtime.h>
-#include <mxDataGenerator/PreSwizzle.hpp>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1792,14 +1790,14 @@ namespace TensileLite
 
                 auto const cachedSwizzled = m_mxSwizzledDescriptor.find(scaleTensorEnum);
                 bool const hasMatchingSwizzledScale
-                    = swizzleLayout != MxScaleStorageLayout::None
+                    = swizzleLayout != MxScaleStorageLayout::Natural
                       && cachedSwizzled != m_mxSwizzledDescriptor.end()
                       && cachedSwizzled->second == scaleDesc;
 
                 // A canonical-only upload means gpuInput.valid no longer holds a
                 // trustworthy swizzled scale for this tensor, so clear the cache tag
                 // before any later reuse decision observes stale metadata.
-                if(swizzleLayout == MxScaleStorageLayout::None)
+                if(swizzleLayout == MxScaleStorageLayout::Natural)
                     m_mxSwizzledDescriptor.erase(scaleTensorEnum);
 
                 // gfx950 can skip regeneration only when the descriptor is unchanged
@@ -1807,7 +1805,7 @@ namespace TensileLite
                 // scale descriptor. When that cache hit happens, remember that
                 // gpuInput.valid already contains the solution-ready layout.
                 if(m_mxScaleLayout == MxScaleStorageLayout::Gfx950 && descriptorsUnchanged
-                   && (swizzleLayout == MxScaleStorageLayout::None || hasMatchingSwizzledScale))
+                   && (swizzleLayout == MxScaleStorageLayout::Natural || hasMatchingSwizzledScale))
                 {
                     if(hasMatchingSwizzledScale)
                         *preswizzledFlag = true;
