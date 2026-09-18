@@ -104,7 +104,8 @@ namespace
             if(d)
                 (void)rocsparse_destroy_mat_descr(d);
         }
-        MatDescr(const MatDescr&)            = delete;
+        MatDescr(const MatDescr&) = delete;
+
         MatDescr& operator=(const MatDescr&) = delete;
     };
 
@@ -131,7 +132,8 @@ namespace
         {
             handle->properties.maxGridSize[0] = saved;
         }
-        ScopedMaxGridSizeX(const ScopedMaxGridSizeX&)            = delete;
+        ScopedMaxGridSizeX(const ScopedMaxGridSizeX&) = delete;
+
         ScopedMaxGridSizeX& operator=(const ScopedMaxGridSizeX&) = delete;
     };
 
