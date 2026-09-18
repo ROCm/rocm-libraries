@@ -24,6 +24,24 @@ void ComparisonAccumulator::observeReal(size_t logicalIndex, ptrdiff_t observedO
                                         std::optional<bool> allCloseDecision,
                                         const ExactRealEvidence* exactEvidence) {
     ++m_result.compared;
+    // ULP-only validation does not need the general elementwise or norm evidence. Most entries in
+    // a passing numerical result are exactly equal, so count those directly and calculate a ULP
+    // distance only for the exceptional values.
+    if (!m_options.allClose && !m_options.computeElementwiseStatistics &&
+        !m_options.computeFrobenius && m_options.computeUlp && !m_options.reportMatchingElements) {
+        const ScalarCategory ulpCategory = scalarTypeInfo(*m_options.ulpType).category;
+        if (exactEvidence != nullptr && (ulpCategory == ScalarCategory::Boolean ||
+                                         ulpCategory == ScalarCategory::SignedInteger ||
+                                         ulpCategory == ScalarCategory::UnsignedInteger)) {
+            accumulateUlpDistance(static_cast<double>(exactEvidence->difference));
+        } else if (observed == expected ||
+                   (m_options.equalNaNs && std::isnan(observed) && std::isnan(expected))) {
+            ++m_result.ulpCompared;
+        } else {
+            accumulateUlp(expected, observed);
+        }
+        return;
+    }
     m_sawNonFinite = m_sawNonFinite || !std::isfinite(observed) || !std::isfinite(expected);
     if ((!allCloseDecision || *allCloseDecision) && observed == expected &&
         !m_options.computeFrobenius && !m_options.computeUlp && !m_options.reportMatchingElements) {
@@ -189,6 +207,39 @@ void ComparisonAccumulator::observe(size_t logicalIndex, ptrdiff_t observedOffse
     }
 
     if (m_options.allClose && !close) ++m_result.mismatches;
+}
+
+void ComparisonAccumulator::merge(ComparisonAccumulator&& other) {
+    m_result.compared += other.m_result.compared;
+    m_result.mismatches += other.m_result.mismatches;
+    m_result.matchedNaNs += other.m_result.matchedNaNs;
+    m_result.matchedInfinities += other.m_result.matchedInfinities;
+    m_result.nonFiniteMismatches += other.m_result.nonFiniteMismatches;
+    m_result.maxAbsoluteDifference =
+        std::max(m_result.maxAbsoluteDifference, other.m_result.maxAbsoluteDifference);
+    m_result.maxRelativeDifference =
+        std::max(m_result.maxRelativeDifference, other.m_result.maxRelativeDifference);
+    m_result.maximumObservedMagnitude =
+        std::max(m_result.maximumObservedMagnitude, other.m_result.maximumObservedMagnitude);
+    m_result.maximumExpectedMagnitude =
+        std::max(m_result.maximumExpectedMagnitude, other.m_result.maximumExpectedMagnitude);
+    m_result.maximumUlp = std::max(m_result.maximumUlp, other.m_result.maximumUlp);
+    m_result.sumUlp += other.m_result.sumUlp;
+    m_result.ulpCompared += other.m_result.ulpCompared;
+    m_differenceSquares += other.m_differenceSquares;
+    m_observedSquares += other.m_observedSquares;
+    m_expectedSquares += other.m_expectedSquares;
+    m_sawNonFinite = m_sawNonFinite || other.m_sawNonFinite;
+
+    const auto appendSamples = [&](std::vector<Mismatch>& destination,
+                                   std::vector<Mismatch>& source) {
+        for (Mismatch& sample : source) {
+            if (destination.size() >= m_options.maxReportedMismatches) break;
+            destination.push_back(std::move(sample));
+        }
+    };
+    appendSamples(m_result.reportedMismatches, other.m_result.reportedMismatches);
+    appendSamples(m_result.reportedComparisons, other.m_result.reportedComparisons);
 }
 
 ComparisonReport ComparisonAccumulator::finish() {

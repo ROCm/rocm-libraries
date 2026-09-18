@@ -143,6 +143,67 @@ bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape, Index
                         ptrdiff_t& expectedOffset);
 
 template <typename Function>
+void forEachAllOffsetPairRange(const Layout& observedLayout, const Layout& expectedLayout,
+                               IndexOrder indexOrder, size_t first, size_t pastLast,
+                               Function&& function) {
+    if (observedLayout.shape() != expectedLayout.shape())
+        throw std::invalid_argument("Comparison offset traversal shape mismatch.");
+    const Shape& shape = observedLayout.shape();
+    const size_t total = shape.elementCount();
+    if (first > pastLast || pastLast > total)
+        throw std::out_of_range("Comparison traversal range exceeds output shape.");
+    if (first == pastLast) return;
+    if (shape.rank() == 0) {
+        function(0, observedLayout.offset(), expectedLayout.offset());
+        return;
+    }
+
+    const bool firstDimensionFastest = indexOrder == IndexOrder::FirstDimensionFastest;
+    const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
+    const size_t innerSize = shape[innerDimension];
+    std::vector<size_t> coordinates(shape.rank(), 0);
+
+    while (first < pastLast) {
+        const size_t outerIndex = first / innerSize;
+        const size_t firstInner = first % innerSize;
+        size_t remaining = outerIndex;
+        ptrdiff_t observedBase = observedLayout.offset();
+        ptrdiff_t expectedBase = expectedLayout.offset();
+
+        if (firstDimensionFastest) {
+            for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
+                coordinates[dimension] = remaining % shape[dimension];
+                remaining /= shape[dimension];
+                observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
+                                observedLayout.strides()[dimension];
+                expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
+                                expectedLayout.strides()[dimension];
+            }
+        } else {
+            for (size_t dimension = shape.rank() - 1; dimension > 0; --dimension) {
+                const size_t index = dimension - 1;
+                coordinates[index] = remaining % shape[index];
+                remaining /= shape[index];
+                observedBase +=
+                    static_cast<ptrdiff_t>(coordinates[index]) * observedLayout.strides()[index];
+                expectedBase +=
+                    static_cast<ptrdiff_t>(coordinates[index]) * expectedLayout.strides()[index];
+            }
+        }
+
+        const size_t count = std::min(innerSize - firstInner, pastLast - first);
+        for (size_t innerIndex = firstInner; innerIndex < firstInner + count; ++innerIndex) {
+            function(first + innerIndex - firstInner,
+                     observedBase + static_cast<ptrdiff_t>(innerIndex) *
+                                        observedLayout.strides()[innerDimension],
+                     expectedBase + static_cast<ptrdiff_t>(innerIndex) *
+                                        expectedLayout.strides()[innerDimension]);
+        }
+        first += count;
+    }
+}
+
+template <typename Function>
 void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expectedLayout,
                                const OutputSelection& selection, Function&& function) {
     if (observedLayout.shape() != expectedLayout.shape())
@@ -170,51 +231,10 @@ void forEachSelectedOffsetPair(const Layout& observedLayout, const Layout& expec
     }
 
     if (selection.selectsAll() || (selection.first() == 0 && selection.stride() == 1)) {
-        const bool firstDimensionFastest =
-            selection.indexOrder() == IndexOrder::FirstDimensionFastest;
-        const size_t innerDimension = firstDimensionFastest ? 0 : shape.rank() - 1;
-        const size_t innerSize = shape[innerDimension];
         const size_t selectedTotal =
             selection.selectsAll() ? total : std::min(total, selection.maxElements());
-        const size_t outerCount = (selectedTotal + innerSize - 1) / innerSize;
-        std::vector<size_t> coordinates(shape.rank(), 0);
-
-        for (size_t outerIndex = 0; outerIndex < outerCount; ++outerIndex) {
-            size_t remaining = outerIndex;
-            ptrdiff_t observedBase = observedLayout.offset();
-            ptrdiff_t expectedBase = expectedLayout.offset();
-
-            if (firstDimensionFastest) {
-                for (size_t dimension = 1; dimension < shape.rank(); ++dimension) {
-                    coordinates[dimension] = remaining % shape[dimension];
-                    remaining /= shape[dimension];
-                    observedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                    observedLayout.strides()[dimension];
-                    expectedBase += static_cast<ptrdiff_t>(coordinates[dimension]) *
-                                    expectedLayout.strides()[dimension];
-                }
-            } else {
-                for (size_t dimension = shape.rank() - 1; dimension > 0; --dimension) {
-                    const size_t index = dimension - 1;
-                    coordinates[index] = remaining % shape[index];
-                    remaining /= shape[index];
-                    observedBase += static_cast<ptrdiff_t>(coordinates[index]) *
-                                    observedLayout.strides()[index];
-                    expectedBase += static_cast<ptrdiff_t>(coordinates[index]) *
-                                    expectedLayout.strides()[index];
-                }
-            }
-
-            const size_t logicalBase = outerIndex * innerSize;
-            const size_t count = std::min(innerSize, selectedTotal - logicalBase);
-            for (size_t innerIndex = 0; innerIndex < count; ++innerIndex) {
-                function(logicalBase + innerIndex,
-                         observedBase + static_cast<ptrdiff_t>(innerIndex) *
-                                            observedLayout.strides()[innerDimension],
-                         expectedBase + static_cast<ptrdiff_t>(innerIndex) *
-                                            expectedLayout.strides()[innerDimension]);
-            }
-        }
+        forEachAllOffsetPairRange(observedLayout, expectedLayout, selection.indexOrder(), 0,
+                                  selectedTotal, std::forward<Function>(function));
         return;
     }
 

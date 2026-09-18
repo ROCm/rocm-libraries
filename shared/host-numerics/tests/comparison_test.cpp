@@ -65,6 +65,30 @@ void testComparisonProgram() {
                 identicalComplexUlpResult.ulpCompared == 2 * identicalComplex.size(),
             "Encoded-equality comparison counted complex ULP components incorrectly.");
 
+    const std::array<float, 3> ulpOnlyObserved{
+        std::bit_cast<float>(uint32_t{0x7fc00001}),
+        std::numeric_limits<float>::infinity(),
+        std::nextafter(1.0f, 2.0f),
+    };
+    const std::array<float, 3> ulpOnlyExpected{
+        std::bit_cast<float>(uint32_t{0x7fc00002}),
+        std::numeric_limits<float>::infinity(),
+        1.0f,
+    };
+    ComparisonOptions ulpOnly = identicalUlp;
+    ulpOnly.maximumUlpTolerance = 1.0;
+    const ComparisonReport ulpOnlyResult =
+        compare(Tensor::copyNativeStorage(std::span<const float>(ulpOnlyObserved)),
+                Tensor::copyNativeStorage(std::span<const float>(ulpOnlyExpected)), ulpOnly);
+    require(ulpOnlyResult.passed() && ulpOnlyResult.ulpCompared == ulpOnlyExpected.size() &&
+                ulpOnlyResult.maximumUlp == 1.0 && ulpOnlyResult.sumUlp == 1.0,
+            "ULP-only comparison changed matching non-finite or finite-distance evidence.");
+    ulpOnly.equalNaNs = false;
+    require(!compare(Tensor::copyNativeStorage(std::span<const float>(ulpOnlyObserved)),
+                     Tensor::copyNativeStorage(std::span<const float>(ulpOnlyExpected)), ulpOnly)
+                 .passed(),
+            "ULP-only comparison matched NaNs when equalNaNs was disabled.");
+
     for (size_t typeIndex = 0; typeIndex < scalarTypeCount; ++typeIndex) {
         const ScalarType type = static_cast<ScalarType>(typeIndex);
         Tensor expected(type, Shape{16});
@@ -297,6 +321,19 @@ void testComparisonProgram() {
                 exactUnsignedResult.averageUlp == 1.0 && !exactUnsignedResult.ulpPassed &&
                 exactUnsignedResult.reportedMismatches[0].absoluteDifference == 1.0,
             "UInt64 comparison evidence lost adjacent differences above 2^53.");
+    ComparisonOptions exactUnsignedUlpOnly = exactUnsignedOptions;
+    exactUnsignedUlpOnly.allClose = false;
+    exactUnsignedUlpOnly.computeElementwiseStatistics = false;
+    exactUnsignedUlpOnly.computeFrobenius = false;
+    exactUnsignedUlpOnly.maxReportedMismatches = 0;
+    const ComparisonReport exactUnsignedUlpOnlyResult =
+        compare(Tensor::copyNativeStorage(std::span<const uint64_t>(exactUnsignedObserved)),
+                Tensor::copyNativeStorage(std::span<const uint64_t>(exactUnsignedExpected)),
+                exactUnsignedUlpOnly);
+    require(
+        exactUnsignedUlpOnlyResult.maximumUlp == 1.0 && exactUnsignedUlpOnlyResult.sumUlp == 2.0 &&
+            exactUnsignedUlpOnlyResult.ulpCompared == 2 && !exactUnsignedUlpOnlyResult.ulpPassed,
+        "ULP-only UInt64 comparison lost exact differences above 2^53.");
 
     const std::array<int64_t, 3> exactSignedObserved{
         int64_t{1} << 53,
@@ -362,5 +399,48 @@ void testComparisonProgram() {
                 signedExtremeResult.maxAbsoluteDifference ==
                     static_cast<double>(std::numeric_limits<uint64_t>::max()),
             "Runtime comparison overflowed the signed-integer decision.");
+
+    constexpr size_t largeComparisonElements = 600'003;
+    std::vector<float> largeExpected(largeComparisonElements);
+    for (size_t index = 0; index < largeExpected.size(); ++index)
+        largeExpected[index] = static_cast<float>(static_cast<int>(index % 101) - 50);
+    std::vector<float> largeObserved = largeExpected;
+    for (const size_t index : {size_t{3}, largeComparisonElements / 2, largeComparisonElements - 2})
+        largeObserved[index] += 1.0f;
+
+    const Layout largeLayout(Shape{3, largeComparisonElements / 3}, {1, 3});
+    const Tensor largeObservedTensor =
+        Tensor::copyNativeStorage(largeLayout, std::span<const float>(largeObserved));
+    const Tensor largeExpectedTensor =
+        Tensor::copyNativeStorage(largeLayout, std::span<const float>(largeExpected));
+    ComparisonOptions parallelOptions;
+    parallelOptions.computeFrobenius = false;
+    parallelOptions.computeUlp = true;
+    parallelOptions.ulpType = ScalarType::Float32;
+    parallelOptions.maxReportedMismatches = 3;
+    parallelOptions.selection = OutputSelection::all(IndexOrder::FirstDimensionFastest);
+    const ComparisonReport parallelResult =
+        compare(largeObservedTensor, largeExpectedTensor, parallelOptions);
+
+    ComparisonOptions serialOptions = parallelOptions;
+    serialOptions.selection = OutputSelection::strided(0, 1, std::numeric_limits<size_t>::max(),
+                                                       IndexOrder::FirstDimensionFastest);
+    const ComparisonReport serialResult =
+        compare(largeObservedTensor, largeExpectedTensor, serialOptions);
+    require(parallelResult.compared == serialResult.compared &&
+                parallelResult.mismatches == serialResult.mismatches &&
+                parallelResult.matchedNaNs == serialResult.matchedNaNs &&
+                parallelResult.matchedInfinities == serialResult.matchedInfinities &&
+                parallelResult.nonFiniteMismatches == serialResult.nonFiniteMismatches &&
+                parallelResult.maxAbsoluteDifference == serialResult.maxAbsoluteDifference &&
+                parallelResult.maxRelativeDifference == serialResult.maxRelativeDifference &&
+                parallelResult.maximumUlp == serialResult.maximumUlp &&
+                parallelResult.sumUlp == serialResult.sumUlp &&
+                parallelResult.reportedMismatches.size() == 3,
+            "Parallel comparison reduction changed aggregate evidence.");
+    for (size_t index = 0; index < parallelResult.reportedMismatches.size(); ++index)
+        require(parallelResult.reportedMismatches[index].index ==
+                    serialResult.reportedMismatches[index].index,
+                "Parallel comparison reduction changed mismatch report order.");
 }
 }  // namespace host_numerics_test

@@ -22,8 +22,61 @@
 #include "detail/comparison_common.hpp"
 #include "detail/comparison_fast_path.hpp"
 #include "detail/comparison_iteration.hpp"
+#include "detail/threading.hpp"
 
 namespace roc::host_numerics {
+namespace {
+template <typename Observe>
+ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expected,
+                                      const ComparisonOptions& options, Observe&& observe) {
+    const size_t selectedCount = options.selection.selectedCount(observed.elementCount());
+    constexpr size_t minimumElementsPerThread = 500'000;
+    // Keep norm accumulation serial so its rounding order is independent of the OpenMP runtime.
+    // Complete selections can be partitioned into ordered logical ranges without materializing
+    // indices; sparse selections retain their existing traversal.
+    const int threadCount =
+        options.selection.selectsAll() && !options.computeFrobenius
+            ? detail::operationThreadCount(selectedCount, minimumElementsPerThread)
+            : 1;
+
+    if (threadCount <= 1) {
+        detail::ComparisonAccumulator accumulator(options, observed.shape());
+        detail::forEachSelectedOffsetPair(
+            observed.layout(), expected.layout(), options.selection,
+            [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+                observe(accumulator, logicalIndex, observedOffset, expectedOffset);
+            });
+        return accumulator.finish();
+    }
+
+    const size_t partitionCount = static_cast<size_t>(threadCount);
+    std::vector<detail::ComparisonAccumulator> partials;
+    partials.reserve(partitionCount);
+    for (int thread = 0; thread < threadCount; ++thread)
+        partials.emplace_back(options, observed.shape());
+
+    const size_t elementsPerPartition = selectedCount / partitionCount;
+    const size_t remainder = selectedCount % partitionCount;
+    detail::forEachParallelIndex(
+        partitionCount, selectedCount, true, minimumElementsPerThread, [&](size_t partition) {
+            const size_t firstSelected =
+                partition * elementsPerPartition + std::min(partition, remainder);
+            const size_t pastLastSelected =
+                firstSelected + elementsPerPartition + static_cast<size_t>(partition < remainder);
+            detail::forEachAllOffsetPairRange(
+                observed.layout(), expected.layout(), options.selection.indexOrder(), firstSelected,
+                pastLastSelected,
+                [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+                    observe(partials[partition], logicalIndex, observedOffset, expectedOffset);
+                });
+        });
+
+    detail::ComparisonAccumulator accumulator(options, observed.shape());
+    for (auto& partial : partials) accumulator.merge(std::move(partial));
+    return accumulator.finish();
+}
+}  // namespace
+
 ComparisonOptions nearComparisonOptions(double absoluteTolerance) {
     ComparisonOptions options;
     options.absoluteTolerance = absoluteTolerance;
@@ -96,44 +149,46 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
         return compare(observed, expected, detailed);
     }
 
-    detail::ComparisonAccumulator accumulator(options, observed.shape());
     const auto integerCategory = [](ScalarCategory category) {
         return category == ScalarCategory::Boolean || category == ScalarCategory::SignedInteger ||
                category == ScalarCategory::UnsignedInteger;
     };
     if (integerCategory(scalarTypeInfo(observed.type()).category) &&
         integerCategory(scalarTypeInfo(expected.type()).category)) {
-        visitScalarType(observed.type(), [&]<typename ObservedTag>() {
-            visitScalarType(expected.type(), [&]<typename ExpectedTag>() {
-                constexpr ScalarCategory observedCategory =
-                    scalarTypeInfo(ObservedTag::type).category;
-                constexpr ScalarCategory expectedCategory =
-                    scalarTypeInfo(ExpectedTag::type).category;
-                if constexpr ((observedCategory == ScalarCategory::Boolean ||
-                               observedCategory == ScalarCategory::SignedInteger ||
-                               observedCategory == ScalarCategory::UnsignedInteger) &&
-                              (expectedCategory == ScalarCategory::Boolean ||
-                               expectedCategory == ScalarCategory::SignedInteger ||
-                               expectedCategory == ScalarCategory::UnsignedInteger)) {
-                    detail::forEachSelectedOffsetPair(
-                        observed.layout(), expected.layout(), options.selection,
-                        [&](size_t logicalIndex, ptrdiff_t observedOffset,
-                            ptrdiff_t expectedOffset) {
-                            accumulator.observeIntegral(logicalIndex, observedOffset,
-                                                        expectedOffset,
-                                                        detail::loadFastComparisonReal<ObservedTag>(
-                                                            observedStorage, observedOffset),
-                                                        detail::loadFastComparisonReal<ExpectedTag>(
-                                                            expectedStorage, expectedOffset));
-                        });
-                }
-            });
+        return visitScalarType(observed.type(), [&]<typename ObservedTag>() -> ComparisonReport {
+            return visitScalarType(
+                expected.type(), [&]<typename ExpectedTag>() -> ComparisonReport {
+                    constexpr ScalarCategory observedCategory =
+                        scalarTypeInfo(ObservedTag::type).category;
+                    constexpr ScalarCategory expectedCategory =
+                        scalarTypeInfo(ExpectedTag::type).category;
+                    if constexpr ((observedCategory == ScalarCategory::Boolean ||
+                                   observedCategory == ScalarCategory::SignedInteger ||
+                                   observedCategory == ScalarCategory::UnsignedInteger) &&
+                                  (expectedCategory == ScalarCategory::Boolean ||
+                                   expectedCategory == ScalarCategory::SignedInteger ||
+                                   expectedCategory == ScalarCategory::UnsignedInteger)) {
+                        return accumulateComparison(
+                            observed, expected, options,
+                            [&](detail::ComparisonAccumulator& accumulator, size_t logicalIndex,
+                                ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+                                accumulator.observeIntegral(
+                                    logicalIndex, observedOffset, expectedOffset,
+                                    detail::loadFastComparisonReal<ObservedTag>(observedStorage,
+                                                                                observedOffset),
+                                    detail::loadFastComparisonReal<ExpectedTag>(expectedStorage,
+                                                                                expectedOffset));
+                            });
+                    }
+                    throw std::logic_error("Unreachable non-integral comparison dispatch.");
+                });
         });
     } else if (observed.type() == expected.type()) {
-        visitScalarType(observed.type(), [&]<typename Tag>() {
-            detail::forEachSelectedOffsetPair(
-                observed.layout(), expected.layout(), options.selection,
-                [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+        return visitScalarType(observed.type(), [&]<typename Tag>() {
+            return accumulateComparison(
+                observed, expected, options,
+                [&](detail::ComparisonAccumulator& accumulator, size_t logicalIndex,
+                    ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                     if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex) {
                         const ComparisonValue observedValue =
                             detail::loadComparisonValueKnown<Tag>(observedStorage, observedOffset);
@@ -170,15 +225,15 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
                 });
         });
     } else {
-        detail::forEachSelectedOffsetPair(
-            observed.layout(), expected.layout(), options.selection,
-            [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
+        return accumulateComparison(
+            observed, expected, options,
+            [&](detail::ComparisonAccumulator& accumulator, size_t logicalIndex,
+                ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {
                 accumulator.observe(logicalIndex, observedOffset, expectedOffset,
                                     detail::loadComparisonValue(observed, observedOffset),
                                     detail::loadComparisonValue(expected, expectedOffset));
             });
     }
-    return accumulator.finish();
 }
 
 std::string formatComparisonReport(const ComparisonReport& report) {
