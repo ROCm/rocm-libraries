@@ -2,7 +2,7 @@
 # Verifies that kernels correctly handle the case where beta=0 and tensor C is not used
 
 TestParameters:
-  marks: [skip-gfx1250]
+  marks: [skip-gfx1250, skip-gfx1250-strict]
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1

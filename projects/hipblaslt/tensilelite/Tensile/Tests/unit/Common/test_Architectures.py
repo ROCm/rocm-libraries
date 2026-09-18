@@ -294,6 +294,35 @@ def test_splitArchsFromPredicates_empty():
     assert archs == []
     assert variants is None
 
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250-strict"])
+def test_extractArchInfo_reads_the_cu_count_header_for_hyphenated_archs(tmp_path, arch):
+    """Ten of the stepping's logic files use the ``{Architecture, CUCount}`` header,
+    and the pattern that reads it used ``\\w+``, which stops at the hyphen. The
+    header then matches neither alternative and the file is rejected outright with
+    LogicFileError -- so widening it is what lets those ten files be built at all.
+    The plain architecture is parametrized alongside to pin that nothing else moved.
+    """
+    logic = tmp_path / f"{arch}.yaml"
+    logic.write_text(
+        "- {MinimumRequiredVersion: 4.33.0}\n"
+        f"- {arch}\n"
+        f"- {{Architecture: {arch}, CUCount: 96}}\n"
+        "- [Device 0000]\n"
+    )
+
+    info = _extractArchInfo(logic, validateDeviceIds=False)
+
+    assert info.Gfx == arch
+    assert info.CUCount == "cu=96"
+
+
+def test_splitArchsFromPredicates_orders_archs_independently_of_the_request():
+    """This list names output directories and orders compiler flags, so a build
+    must not depend on the order cmake happens to declare GPU_TARGETS in."""
+    expected = ["gfx1250", "gfx908", "gfx942"]
+    assert splitArchsFromPredicates(["gfx942", "gfx1250", "gfx908"])[0] == expected
+    assert splitArchsFromPredicates(["gfx908", "gfx942", "gfx1250"])[0] == expected
+
 def test_verifyPredicate_valid_device_id():
     for device_id in SUPPORTED_BUILD_CHIP_IDS:
         arch = SUPPORTED_BUILD_CHIP_IDS[device_id]
