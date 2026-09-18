@@ -836,8 +836,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                     [&](auto element) { fragment[decltype(element)::value] *= scale; });
             });
         };
-        constexpr bool kEarlyOutputRescale =
-            Geometry::kHeadDimQK == 128 && !Problem::FmhaMask::IsMasking;
+        constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
         if constexpr(kEarlyOutputRescale)
         {
             using Softmax = FmhaTdmV128SplitSoftmax;
