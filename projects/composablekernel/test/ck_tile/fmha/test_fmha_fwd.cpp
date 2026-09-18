@@ -500,7 +500,7 @@ class QuantScale
 
 // hdim 128 is where perhead and blockscale exist. The non-multiple seqlens select the
 // seqlen-padded instances; the last tuple is a tile multiple so the unpadded pack-GQA path
-// is covered too. No fp8 pipeline is generated with bias.
+// is covered too. This sweep pins bias to "n"; fp8 bias + sink is carried by SinkWindowMask.
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QuantScale,
@@ -1583,6 +1583,9 @@ static const std::vector<SinkWindowParam> kSinkWindowParams = {
     // num_sink_loop == 0: sink pointer set, no sink columns, window mask
     {256, "n", 0.0f, 1024, "t:128,30", 1},
     {128, "e", 0.0f, 1024, "t:128,30", 1},
+    // On gfx1250 both bias rows reach qr_tdm, where m is already log2-domain and the sink
+    // pre-seed must carry scale_s. alibi has no fp8 instance, so only fp16/bf16 run it.
+    {128, "a", 0.0f, 1024, "t:128,30", 1},
     // dropout exercises the randval window, which each pipeline guards separately. hdim 128
     // with plain bias routes to async, hdim 256 keeps it on the non-async one.
     {128, "n", 0.2f, 1024, "t:128,30", 1},
