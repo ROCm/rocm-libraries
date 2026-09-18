@@ -1,4 +1,0 @@
-file(GLOB Benchmarks "${BENCHMARK_BINARY_DIR}/benchmark_*")
-foreach(Benchmark IN LISTS Benchmarks)
-  execute_process(COMMAND ${Benchmark})
-endforeach()
