@@ -134,11 +134,11 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
         }
-        if (spec.bufferCount != WaitCountSpec::kUnused) {
+        if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);
-            w->addSrcReg(StinkyRegister(spec.bufferCount));
+            w->addSrcReg(StinkyRegister(spec.loadCount));
             SWaitCntData d;
-            d.vlcnt = spec.bufferCount;
+            d.vlcnt = spec.loadCount;
             w->addModifier<SWaitCntData>(d);
         }
         if (spec.kmCount != WaitCountSpec::kUnused) {

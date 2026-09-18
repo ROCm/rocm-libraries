@@ -148,7 +148,10 @@ def getParameterValueAbbreviation(key, value):
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
-  if "CustomKernelName" in state and state["CustomKernelName"]:
+  ck = state.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name"):
+    return ck["name"]
+  if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
 
   gsuBackup = state["GlobalSplitU"]
@@ -214,13 +217,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
-  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
-  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
-  if state.get("LDSSegmentInterleave") == 1:
-    requiredParametersTemp.add("LDSSegmentInterleave")
-
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
+    if key not in state or key == "CustomKernel":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
@@ -246,7 +244,10 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  if "CustomKernelName" in kernel and kernel["CustomKernelName"]:
+  ck = kernel.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+    fileBase = ck["name"]
+  elif kernel.get("CustomKernelName", ""):
     fileBase = kernel["CustomKernelName"]
   else:
     fileBase = shortenFileBase(splitGSU, kernel)

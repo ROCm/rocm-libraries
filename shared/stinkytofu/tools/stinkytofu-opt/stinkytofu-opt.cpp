@@ -178,11 +178,15 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
+                arg.starts_with("--ds-read-throttle-transition-factor=") ||
+                arg.starts_with("--ds-read-throttle-transition-entries=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--merge-barrier-threshold=") ||
+                arg == "--enable-wmma-hide-budget-prescan" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -301,6 +305,8 @@ static void printKernelConfigHelp(std::ostream& os) {
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -507,12 +513,24 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
         } else if (a.starts_with("--ds-read-throttle-latency=")) {
             passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
+        } else if (a.starts_with("--ds-read-throttle-transition-factor=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
+                std::stod(a.substr(std::string("--ds-read-throttle-transition-factor=").size()));
+        } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
+                std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
         } else if (a.starts_with("--ds-read-per-wmma=")) {
             passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--tensor-load-wmma-space=")) {
+            passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {
             passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
+        } else if (a == "--enable-wmma-hide-budget-prescan") {
+            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+        } else if (a.starts_with("--merge-barrier-threshold=")) {
+            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
     }
 
