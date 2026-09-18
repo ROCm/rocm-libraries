@@ -49,20 +49,33 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
 endfunction()
 
 # Feature definitions for the two single-target grouped quant bridges below.
-# Keep these aligned with dispatcher_common.arch_feature_defines(): standalone
-# CMake builds do not inherit the top-level CK definitions, and host/device FP8
-# encoding must agree. test_quant_review_regressions checks CMake/JIT parity.
+# Keep these aligned with dispatcher_common.arch_feature_defines(). Parent CK
+# builds enable features directory-wide for the union of their GPU targets.
+# Clear those definitions for these bridges before applying the selected arch,
+# so host/device FP8 encoding and the backend match the standalone JIT path.
 function(set_grouped_quant_arch_features TARGET_NAME GFX_ARCH)
+    # Compile options follow directory/target definitions on the command line.
+    # Keep both the undefines and replacement defines here to preserve ordering
+    # without changing the inherited definitions of any sibling target.
+    foreach(_feature IN ITEMS
+            CK_USE_XDL CK_USE_GFX94 CK_USE_GFX950 CK_GFX1030_SUPPORT
+            CK_USE_WMMA CK_TILE_USE_WMMA CK_USE_WMMA_FP8
+            CK_USE_OCP_FP8 CK_TILE_USE_OCP_FP8 CK_USE_FNUZ_FP8
+            CK_USE_NATIVE_MX_SUPPORT CK_GFX950_SUPPORT
+            CK_USE_GFX1250 CK_GFX1250_SUPPORT CK_GFX12_SUPPORT
+            USE_NEW_UNIFIED_FRAMEWORK)
+        target_compile_options(${TARGET_NAME} PRIVATE "-U${_feature}")
+    endforeach()
     if(GFX_ARCH STREQUAL "gfx950" OR GFX_ARCH STREQUAL "gfx1250")
-        target_compile_definitions(${TARGET_NAME} PRIVATE
-            CK_USE_OCP_FP8 CK_TILE_USE_OCP_FP8 CK_USE_NATIVE_MX_SUPPORT)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -DCK_USE_OCP_FP8 -DCK_TILE_USE_OCP_FP8 -DCK_USE_NATIVE_MX_SUPPORT)
     endif()
     if(GFX_ARCH STREQUAL "gfx950")
-        target_compile_definitions(${TARGET_NAME} PRIVATE CK_GFX950_SUPPORT)
+        target_compile_options(${TARGET_NAME} PRIVATE -DCK_GFX950_SUPPORT)
     elseif(GFX_ARCH STREQUAL "gfx1250")
-        target_compile_definitions(${TARGET_NAME} PRIVATE
-            CK_TILE_USE_WMMA=1 CK_GFX12_SUPPORT CK_USE_GFX1250 CK_GFX1250_SUPPORT
-            USE_NEW_UNIFIED_FRAMEWORK=0)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -DCK_TILE_USE_WMMA=1 -DCK_GFX12_SUPPORT -DCK_USE_GFX1250 -DCK_GFX1250_SUPPORT
+            -DUSE_NEW_UNIFIED_FRAMEWORK=0)
     endif()
 endfunction()
 

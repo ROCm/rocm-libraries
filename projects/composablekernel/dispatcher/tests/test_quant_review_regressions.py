@@ -146,13 +146,14 @@ return 0;
     assert run(*([1] * 5), M, N, 192, 192, 192, 1, 1, N, M, N, 1, ctypes.byref(elapsed)) == expected
 
 
+@pytest.mark.parametrize("inherited_arches", [None, "gfx942;gfx1250", "gfx950;gfx942", "gfx1250;gfx950"])
 @pytest.mark.parametrize("explicit", [True, False])
 @pytest.mark.parametrize("arch", [
     "gfx942", "gfx942:sramecc+:xnack-",
     "gfx950", "gfx950:sramecc+:xnack-",
     "gfx1250", "gfx1250:xnack-",
 ])
-def test_cmake_normalizes_explicit_and_inferred_arches(tmp_path, explicit, arch):
+def test_cmake_normalizes_explicit_and_inferred_arches(tmp_path, explicit, arch, inherited_arches):
     if not shutil.which("cmake"):
         pytest.skip("requires CMake")
     source = tmp_path / "source"
@@ -163,10 +164,19 @@ def test_cmake_normalizes_explicit_and_inferred_arches(tmp_path, explicit, arch)
     for op in OPS:
         (headers / f"grouped_gemm_{op}_test.hpp").touch()
     overrides = '\n'.join(f'set(CK_TILE_{op.upper()}_GFX_ARCH "{arch}")' for op in OPS) if explicit else ''
+    # Execute the real parent feature-definition block, including its defaults.
+    parent_features = ""
+    if inherited_arches:
+        parent_cmake = (ROOT.parent / "CMakeLists.txt").read_text()
+        start = parent_cmake.index('if (SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx11|gfx12"')
+        end = parent_cmake.index('if ((SUPPORTED_GPU_TARGETS MATCHES "gfx942"', start)
+        parent_features = f'set(SUPPORTED_GPU_TARGETS "{inherited_arches}")\n' + parent_cmake[start:end]
+    configured_arches = f"{arch};{inherited_arches}" if inherited_arches else arch
     (source / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.16)
 project(quant_cmake_probe LANGUAGES CXX)
 add_library(hip::device INTERFACE IMPORTED)
-set(CMAKE_HIP_ARCHITECTURES "{arch}")
+{parent_features}
+set(CMAKE_HIP_ARCHITECTURES "{configured_arches}")
 {overrides}
 add_subdirectory("{ROOT / 'bindings/ctypes'}" ctypes)
 ''')
@@ -175,10 +185,24 @@ add_subdirectory("{ROOT / 'bindings/ctypes'}" ctypes)
     commands = json.loads((build / "compile_commands.json").read_text())
     from dispatcher_common import arch_feature_defines
 
-    # Compare the standalone CMake command with the working Python compiler
-    # path, including absent flags so gfx1250/OCP settings cannot leak to gfx942.
+    # Compare effective macros, preserving the generated command's -D/-U order.
+    # Checking only flag presence misses inherited definitions and overrides.
     feature_flags = set().union(*(set(arch_feature_defines(a)) for a in ("gfx942", "gfx950", "gfx1250")))
-    feature_flags.add("-DUSE_NEW_UNIFIED_FRAMEWORK=0")
+    feature_flags.update({"-DUSE_NEW_UNIFIED_FRAMEWORK=0", "-DCK_USE_FNUZ_FP8",
+                          "-DCK_USE_XDL", "-DCK_USE_GFX94", "-DCK_USE_GFX950",
+                          "-DCK_USE_WMMA", "-DCK_USE_WMMA_FP8", "-DCK_GFX1030_SUPPORT"})
+    feature_names = {flag[2:].split("=")[0] for flag in feature_flags}
+
+    def effective_features(flags, compiler):
+        result = subprocess.run([compiler, *flags, "-dM", "-E", "-x", "c++", "-"],
+                                input="", capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        macros = {}
+        for line in result.stdout.splitlines():
+            _, name, *value = line.split(maxsplit=2)
+            if name in feature_names:
+                macros[name] = value[0] if value else ""
+        return macros
     for op in OPS:
         command = next(c["command"] for c in commands if c["file"].endswith(f"grouped_gemm_{op}_ctypes_lib.cpp"))
         base = arch.split(":")[0]
@@ -188,5 +212,8 @@ add_subdirectory("{ROOT / 'bindings/ctypes'}" ctypes)
         expected = set(arch_feature_defines(base))
         if base == "gfx1250":
             expected.add("-DUSE_NEW_UNIFIED_FRAMEWORK=0")
-        actual = set(shlex.split(command)) & feature_flags
-        assert actual == expected, f"{op} {arch}: CMake/JIT feature mismatch: {actual ^ expected}"
+        args = shlex.split(command)
+        flags = [arg for arg in args[1:] if arg.startswith(("-D", "-U"))]
+        actual = effective_features(flags, args[0])
+        expected = effective_features(sorted(expected), args[0])
+        assert actual == expected, f"{op} {arch}: CMake/JIT feature mismatch: {actual} != {expected}"
