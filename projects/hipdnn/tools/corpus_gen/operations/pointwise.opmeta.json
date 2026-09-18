@@ -1,0 +1,299 @@
+{
+  "schema_version": "1.0",
+  "operation": "pointwise",
+  "display_name": "Elementwise Binary Pointwise",
+  "description": "Two operands and a result of identical rank-4 extent. Broadcasting is a different operation.",
+  "parameters": {
+    "D0": {
+      "type": "int64"
+    },
+    "D1": {
+      "type": "int64"
+    },
+    "D2": {
+      "type": "int64"
+    },
+    "D3": {
+      "type": "int64"
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "ADD",
+        "MUL",
+        "SUB",
+        "DIV",
+        "MAX_OP",
+        "MIN_OP"
+      ],
+      "description": "FlatBuffers enumerator names; MIN and MAX are reserved words in the schema"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp32",
+        "fp16",
+        "bf16"
+      ]
+    }
+  },
+  "stratification_axis": "working_set",
+  "regimes": {
+    "d0": {
+      "parameter": "D0",
+      "buckets": [
+        1,
+        4,
+        32,
+        256
+      ]
+    },
+    "d1": {
+      "parameter": "D1",
+      "buckets": [
+        1,
+        16,
+        128,
+        1024
+      ]
+    },
+    "d2": {
+      "parameter": "D2",
+      "buckets": [
+        1,
+        14,
+        56,
+        224
+      ]
+    },
+    "d3": {
+      "parameter": "D3",
+      "buckets": [
+        1,
+        14,
+        56,
+        224
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "pointwiseBinary",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "dims",
+        "kind": "expr",
+        "value": [
+          "$q.D0",
+          "$q.D1",
+          "$q.D2",
+          "$q.D3"
+        ]
+      },
+      {
+        "name": "strides",
+        "kind": "strides_of",
+        "of": "dims"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      }
+    ]
+  },
+  "archetypes": [
+    {
+      "name": "conv_activation_nchw",
+      "note": "an activation on a convolution's output, so NCHW with a square spatial extent",
+      "values": {
+        "D0": [
+          1,
+          8,
+          32,
+          64,
+          128
+        ],
+        "D1": [
+          64,
+          128,
+          256,
+          512,
+          1024,
+          2048
+        ],
+        "D2": [
+          7,
+          14,
+          28,
+          56,
+          112,
+          224
+        ],
+        "D3": [
+          "$q.D2"
+        ]
+      }
+    },
+    {
+      "name": "transformer_activation",
+      "note": "an activation on a projection's output: tokens by model width",
+      "values": {
+        "D0": [
+          1,
+          4,
+          8,
+          16,
+          32
+        ],
+        "D1": [
+          1,
+          128,
+          512,
+          2048,
+          8192
+        ],
+        "D2": [
+          1
+        ],
+        "D3": [
+          4096,
+          8192,
+          12288
+        ]
+      }
+    },
+    {
+      "name": "residual_add",
+      "note": "the residual addition around each transformer block",
+      "values": {
+        "D0": [
+          1,
+          4,
+          8,
+          16,
+          32
+        ],
+        "D1": [
+          1,
+          128,
+          512,
+          2048
+        ],
+        "D2": [
+          1
+        ],
+        "D3": [
+          768,
+          1024,
+          4096,
+          8192
+        ]
+      }
+    },
+    {
+      "name": "attention_scores",
+      "note": "a scale or mask applied to the square attention score tensor",
+      "values": {
+        "D0": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "D1": [
+          16,
+          32,
+          96
+        ],
+        "D2": [
+          512,
+          2048,
+          8192
+        ],
+        "D3": [
+          "$q.D2"
+        ]
+      }
+    },
+    {
+      "name": "flat_vector",
+      "note": "a flat elementwise pass, where only the total element count matters",
+      "values": {
+        "D0": [
+          1
+        ],
+        "D1": [
+          1
+        ],
+        "D2": [
+          1
+        ],
+        "D3": [
+          1024,
+          16384,
+          262144,
+          1048576
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "D0": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "D1": {
+      "kind": "multiple",
+      "of": 8,
+      "steps": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    },
+    "D2": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "D3": {
+      "kind": "mirror",
+      "of": "D2",
+      "ratios": [
+        1
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  },
+  "// archetypes": "Pointwise operations are almost never run alone -- they sit on the output of a convolution, a projection or an attention score matrix, and inherit its shape. The archetypes are those tensors, plus the flat case where only the element count matters.",
+  "// neighbourhood": "D3 mirrors D2 at ratio 1 so the square cases stay square; a scaled D3 would turn an attention score tensor into a rectangle no attention produces.",
+  "// elements": "Two inputs and one output. Every declared mode -- ADD, MUL, SUB, DIV, MAX_OP, MIN_OP -- is binary, so the traffic does not vary with it. Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "*": [
+      3,
+      "$q.D0",
+      "$q.D1",
+      "$q.D2",
+      "$q.D3"
+    ]
+  }
+}

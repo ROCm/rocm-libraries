@@ -2,6 +2,8 @@
   "version": "0.1",
   "id": "uhd-solo",
   "name": "Solo static-order heuristic",
-  "kind": "native",
-  "payload": "hipkernel.solo.score"
+  "adapter": "native",
+  "native": {
+    "symbol": "hipkernel.solo.score"
+  }
 }

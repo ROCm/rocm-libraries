@@ -1017,6 +1017,118 @@ loaded is the one named here.")
         ${_rocke_args}
         PACK_JOBS 1)
 
+    # The one set whose source root is built rather than authored: pointwise_model's
+    # heuristic is a generated model, and the descriptor naming it is generated with it so
+    # `features_hash` cannot drift. Assembled here, then packed like any other root.
+    #
+    # Created at configure time because hkp_wire_pack_target refuses a SOURCE_ROOT that is
+    # not a directory, and the copies below only run at build time. The packer walks the
+    # root when it runs, so a root that is empty at configure and filled by the build is
+    # read correctly -- what the configure-time glob inside that function misses is the
+    # retrigger edge, which the explicit dependency below supplies instead.
+    file(MAKE_DIRECTORY "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}")
+
+    # The kernel source is staged at CONFIGURE time, unlike the descriptors beside it. Kernel
+    # embedding reads it with file(READ) while configuring, and hkp_verify_embedded_sources()
+    # requires the embedded file to come from inside this pack's SOURCE_ROOT -- so a copy that
+    # only appeared during the build would be unreadable when it is needed and in the wrong
+    # place when it is checked. Editing it therefore needs a reconfigure, which is already
+    # true of every embedded kernel.
+    file(COPY "${HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR}/kernels"
+         DESTINATION "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}")
+
+    set(_pointwise_model_staged)
+    # Every authored file of the set, listed rather than globbed: a root is packed and
+    # validated whole, so a descriptor missing from here is an unresolved reference at pack
+    # time rather than a file that quietly does not ship.
+    foreach(_authored_file IN ITEMS
+            pointwise_model.kmd.json
+            pointwise_model.ued.json
+            pointwise_model.udd.json
+            pointwise_model_add.kdp.json
+            operation_is_add.umd.json
+            kernel_dtype_matches_graph.umd.json)
+        # make_directory first: an entry may name a subdirectory, and copy_if_different does
+        # not create the parent. It is a no-op for the flat entries.
+        get_filename_component(_authored_subdir "${_authored_file}" DIRECTORY)
+        add_custom_command(
+            OUTPUT "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/${_authored_file}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/${_authored_subdir}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR}/${_authored_file}"
+                    "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/${_authored_file}"
+            DEPENDS "${HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR}/${_authored_file}"
+            COMMENT "hkp: staging authored ${_authored_file}"
+            VERBATIM)
+        list(APPEND _pointwise_model_staged
+             "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/${_authored_file}")
+    endforeach()
+
+    # Both outputs of one command because one run writes both, and the descriptor is only
+    # meaningful beside the model whose hash it carries.
+    set(_pointwise_model_generated
+        "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.uhd.json"
+        "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.bin")
+    add_custom_command(
+        OUTPUT ${_pointwise_model_generated}
+        COMMAND uhd_model_gen "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}"
+        DEPENDS uhd_model_gen
+        COMMENT "hkp: generating the pointwise_model UHD and model artifact"
+        VERBATIM)
+
+    add_custom_target(hkp_pointwise_model_source
+        DEPENDS ${_pointwise_model_staged} ${_pointwise_model_generated})
+
+    hkp_wire_pack_target(
+        NAME ${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
+        SOURCE_ROOT "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${_unit}/${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}"
+        ${_rocke_args}
+        PACK_JOBS 1)
+
+    # The edge the configure-time glob cannot carry: the source root is empty when that
+    # glob runs, so without this the pack could be scheduled before the root is filled and
+    # would pack nothing -- a root with no descriptors being a legal pass.
+    add_dependencies(hkp_packaging_${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
+                     hkp_pointwise_model_source)
+
+    # The model artifact has to land beside the descriptor that names it. The packer moves
+    # descriptors and kpack archives; a heuristic's model file is neither, so it is placed
+    # here, per arch, after the pack has written that arch's folder.
+    #
+    # Sequenced on the pack's stamp rather than on the target, because the pack wipes and
+    # refills OUT_ROOT: a copy that ran first would be deleted, and the descriptor would
+    # name an artifact that is not there. The loader treats that as a model it cannot read
+    # and ranks by declared order instead -- correct by §5 step 7, and indistinguishable
+    # from having no model at all, which is why it must not be left to chance.
+    set(_pointwise_model_artifacts)
+    foreach(_arch IN LISTS _arches)
+        add_custom_command(
+            OUTPUT "${_unit}/${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}/${_arch}/pointwise_model.bin"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.bin"
+                    "${_unit}/${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}/${_arch}/pointwise_model.bin"
+            DEPENDS "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.bin"
+            COMMENT "hkp: placing the pointwise_model artifact for ${_arch}"
+            VERBATIM)
+        list(APPEND _pointwise_model_artifacts
+             "${_unit}/${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}/${_arch}/pointwise_model.bin")
+    endforeach()
+
+    add_custom_target(hkp_pointwise_model_artifact ALL
+        DEPENDS ${_pointwise_model_artifacts})
+
+    # Ordered on the packaging TARGET, not on its stamp file. Depending on the stamp would
+    # copy that rule -- and the whole chain behind it, down to the shared rocKE venv -- into
+    # this target's build.make as well, and make will run a rule it finds in two files twice
+    # at once. That showed up as a pack importing rocke while the venv was still installing.
+    add_dependencies(hkp_pointwise_model_artifact
+                     hkp_packaging_${HIPKERNELPROVIDER_POINTWISE_MODEL_SET})
+
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
 endfunction()
 

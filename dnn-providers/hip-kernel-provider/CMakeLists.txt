@@ -348,6 +348,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
+    # pointwise_model is authored in part and generated in part, so unlike every set above
+    # its source root is assembled in the build tree rather than read from the source tree.
+    # Its heuristic is a trained artifact: uhd_model_gen emits the .uhd.json and the model
+    # together so `features_hash` cannot drift between them, and a committed descriptor
+    # would be free to disagree with the model it names.
+    #
+    # The generated half cannot be written into the packed output, because a pack wipes its
+    # OUT_ROOT and refills it from SOURCE_ROOT -- anything placed there is removed by the
+    # next pack. Assembling a source root first keeps this an ordinary pack rather than a
+    # second staging mechanism beside the packer.
+    #
+    # The authored JSONs stay where they were rather than moving under test_descriptors/:
+    # this set is not authored-whole, so a folder there would invite being wired directly,
+    # which would pack the descriptors without the model they name.
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_SET "pointwise_model")
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/integration_tests/kernel_ingestor_engine/fixtures/pointwise_model")
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/hkp-pointwise-model-source")
+
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR
          "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
@@ -447,6 +467,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
+    # Produces the pointwise_model pack's .uhd.json and its model artifact. Ahead of
+    # descriptor-packaging because that is where the pack is wired, and the staging rules
+    # there name this target -- a dependency cannot be added to a target that does not yet
+    # exist.
+    add_subdirectory(tools/uhd_model_gen)
     add_subdirectory(descriptor-packaging)
 endif()
 
