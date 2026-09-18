@@ -9,6 +9,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+from rocke.core.arch.target import normalize_dtype
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 
@@ -35,9 +36,23 @@ def test_scale_example_contract(a, b, sa, sb):
     )
 
 
-@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp8e4m3", "bf8e5m2"])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        "fp8",
+        "bf8",
+        "fp8e4m3",
+        "bf8e5m2",
+        "fp6",
+        "bf6",
+        "fp6e2m3",
+        "fp6e3m2",
+        "fp4",
+        "fp4e2m1",
+    ],
+)
 @pytest.mark.parametrize("operand", ["a", "b"])
-def test_scale_formats_gemm_cli_accepts_eight_bit_names(monkeypatch, dtype, operand):
+def test_scale_formats_gemm_cli_normalizes_matrix_names(monkeypatch, dtype, operand):
     from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
 
     calls = []
@@ -64,4 +79,4 @@ def test_scale_formats_gemm_cli_accepts_eight_bit_names(monkeypatch, dtype, oper
     argv += [f"--dtype-{operand}", dtype]
     assert example.main(argv) == 0
     assert len(calls) == 1
-    assert getattr(calls[0], f"dtype_{operand}") == dtype
+    assert getattr(calls[0], f"dtype_{operand}") == normalize_dtype(dtype)

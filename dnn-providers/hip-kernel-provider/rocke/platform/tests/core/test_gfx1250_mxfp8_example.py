@@ -50,10 +50,14 @@ def test_mxfp8_formats_and_existing_golden(dtype, selector, ml_name, path):
 @pytest.mark.parametrize(
     "argv,dtypes",
     [
-        ([], ("fp8", "bf8")),
-        (["--dtype", "both"], ("fp8", "bf8")),
-        (["--dtype", "fp8"], ("fp8",)),
-        (["--dtype", "bf8"], ("bf8",)),
+        (["--dtype", "fp8e4m3"], ("fp8e4m3",)),
+        (["--dtype", " FP8 "], ("fp8e4m3",)),
+        (["--dtype", "bf8e5m2"], ("bf8e5m2",)),
+        (["--dtype", " BF8 "], ("bf8e5m2",)),
+        ([], ("fp8e4m3", "bf8e5m2")),
+        (["--dtype", "both"], ("fp8e4m3", "bf8e5m2")),
+        (["--dtype", "fp8"], ("fp8e4m3",)),
+        (["--dtype", "bf8"], ("bf8e5m2",)),
     ],
 )
 def test_mxfp8_cli_selects_formats(monkeypatch, argv, dtypes):

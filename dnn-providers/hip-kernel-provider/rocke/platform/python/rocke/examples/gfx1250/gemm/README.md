@@ -1,5 +1,17 @@
 # gfx1250 scaled GEMM examples
 
+Matrix dtype names normalize through the architecture catalog: `fp8e4m3`,
+`bf8e5m2`, `fp6e2m3`, `fp6e3m2`, and `fp4e2m1`. The short spellings `fp8`,
+`bf8`, `fp6`, `bf6`, and `fp4` remain accepted aliases wherever that matrix
+format is supported. Example argument parsing normalizes aliases before
+checking the family's supported choices. The FP8 and FP6 examples default to
+`both`, which runs their two homogeneous encodings separately.
+
+These matrix names are distinct from scale formats such as `e8m0`. Scales use
+byte storage and packed integer instruction operands; a scale-format name does
+not introduce a scalar IR type or general conversion support. Existing operation
+IDs retain their instruction-format tokens.
+
 Run these modules from an installed rocKE environment, or with the platform's
 `python` directory on `PYTHONPATH`. They require a gfx1250 device, matching
 LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
