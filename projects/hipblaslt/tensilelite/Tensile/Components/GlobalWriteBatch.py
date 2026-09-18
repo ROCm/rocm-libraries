@@ -2719,7 +2719,7 @@ class GlobalWriteBatchWriter:
     if peelInterior:
       maxTt0 = max(e[1] for e in self.batchElements)
       maxBlockIdxN = max(e[0] for e in self.batchElements)
-      interiorCode = self._buildSubtileInteriorStores()
+      interiorCode = self._buildSubtileInteriorStores(forceSlc=fusedA2APushPass)
       boundaryLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_boundary"),
                             "not fully interior -> guarded boundary store body")
       peelEndLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_end"),
@@ -4036,7 +4036,7 @@ class GlobalWriteBatchWriter:
     for q in sorted(groups.keys()):
       self._weaveEmitGroup(module, q)
 
-  def _buildSubtileInteriorStores(self) -> Module:
+  def _buildSubtileInteriorStores(self, forceSlc: bool = False) -> Module:
     """Lever 1 (SubtileBf16EpilogueOpt Stage2) — guard-free/mask-free interior store body.
 
     Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
@@ -4086,7 +4086,7 @@ class GlobalWriteBatchWriter:
     def commitPending(dscnt):
       nonlocal pending
       if pending is not None:
-        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt))
+        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt, forceSlc=forceSlc))
         pending = None
 
     def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0, blockIdxN):
@@ -4094,7 +4094,7 @@ class GlobalWriteBatchWriter:
       if usePermlane16:
         mod.add(self._emit16bitSubtilePairedStore(
           pairAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0,
-          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
         return
       buf = pipeK % 2
       issueMod, globalOffset = self._emitPairedStoreIssue(packBuf[buf], addrBuf[buf],
@@ -4138,7 +4138,7 @@ class GlobalWriteBatchWriter:
           commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
-                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
       else:
         # sba=0 element: defer the SrdD row increment (as the guarded path does).
         if optInc and addrCalc.rowInc:
@@ -4151,7 +4151,7 @@ class GlobalWriteBatchWriter:
           commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
-                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
     # Drain the final pipelined group, then flush any deferred SRD increment.
     commitPending(dscnt=0)
     if pendingInc is not None:
@@ -4475,7 +4475,7 @@ class GlobalWriteBatchWriter:
                          comment="adjusted D addr = addrDVgpr + lane_group*8"))
     return module, globalOffset
 
-  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int, dscnt: int):
+  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int, dscnt: int, forceSlc: bool = False):
     """COMMIT half of the pipelined paired store: wait for this group's ds_bpermute
     (leaving `dscnt` younger ds ops in flight), do the 2 permlane swaps, and emit the
     dwordx4 store.  `dscnt` = number of ds_bpermute from LATER groups still in flight
@@ -4483,7 +4483,7 @@ class GlobalWriteBatchWriter:
     module = Module("pairedStoreCommit")
     ntd = self.kernel["NonTemporalD"]
     isGlc = bool(ntd & 0x1)
-    isSlc = bool(ntd & 0x2)
+    isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
     isNT  = bool(ntd & 0x4)
     module.add(SWaitCnt(dscnt=dscnt, comment=f"[pipeline] wait this group's ds_bpermute; {dscnt} younger ds in flight (tt0={tt0})"))
     module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
