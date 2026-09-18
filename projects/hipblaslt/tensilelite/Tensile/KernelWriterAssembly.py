@@ -14803,7 +14803,7 @@ class KernelWriterAssembly(KernelWriter):
   def getVectorAtomicWidth(self, kernel):
     if kernel["ProblemType"]["DataType"].isHalf() and (not kernel["_GlobalAccumulation"]):
       return 2
-    if kernel.get("_GSUAtomicDestBF16", False):
+    if kernel["GlobalSplitUAlgorithm"] == "AtomicDest":
       # buffer_atomic_pk_add_bf16 consumes one dword = two packed BF16 elements.
       return 2
     return 1

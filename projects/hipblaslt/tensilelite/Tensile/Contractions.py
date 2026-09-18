@@ -808,7 +808,11 @@ class SizeMapping:
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
                    globalAccumulation       = globalAccum,
-                   gsuAtomicDestBF16        = bool(d.get('_GSUAtomicDestBF16', False)),
+                   # AtomicDest resolves globalAccumulation to 0, which the host
+                   # cannot tell apart from "no GSU accumulation at all". Carry it
+                   # as its own flag so the reference validator can widen its
+                   # tolerance by the number of BF16 atomic adds per element.
+                   gsuAtomicDestBF16        = d['GlobalSplitUAlgorithm'] == 'AtomicDest',
                    adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],

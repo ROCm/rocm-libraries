@@ -1981,7 +1981,7 @@ class Solution(collections.abc.Mapping):
       # none. 'SingleBuffer' means one shared fp32 staging buffer that the slices
       # atomically accumulate into, which is a different thing from accumulating
       # into D itself. Consumers that ask "is there a staging buffer" therefore
-      # answer correctly without a _GSUAtomicDestBF16 exception bolted on.
+      # answer correctly without an AtomicDest exception bolted on.
       pass
     elif state["GlobalSplitUAlgorithm"] == 'MultipleBuffer':
       state["_GlobalAccumulation"] = 'MultipleBuffer'
@@ -2008,7 +2008,10 @@ class Solution(collections.abc.Mapping):
     # left a GSU==1 solution generating the kernel GSU>1 solutions then dispatched,
     # with host and device disagreeing on whether D or an fp32 workspace was the
     # atomic target.
-    state["_GSUAtomicDestBF16"] = False
+    #
+    # Everything downstream tests GlobalSplitUAlgorithm directly, so the mode needs
+    # no derived state key of its own; what follows is purely validation. Reaching
+    # the end of the block means the solution is committed to packed atomics.
     if state["GlobalSplitUAlgorithm"] == 'AtomicDest':
       # Asking for AtomicDest commits the solution to packed atomics: it must not
       # silently demote to the fp32-workspace reduction, so anything that cannot
@@ -2064,7 +2067,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason,
                "AtomicDest requires BufferStore (buffer_atomic_pk_add_bf16 addresses D through an SRD)")
         return
-      state["_GSUAtomicDestBF16"] = True
 
     if state["StreamK"] == 0 and state["GlobalSplitU"] == 0:
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
@@ -2295,11 +2297,12 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalAccumulation requires BufferStore (workspace SRD addressing not supported)")
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
-    # _GSUAtomicDestBF16 reduces into D with packed atomics, so it stages nothing
-    # per element of C. Zero here is what drops the WorkspaceCheck predicate
+    # AtomicDest reduces into D with packed atomics, so it stages nothing per
+    # element of C. Zero here is what drops the WorkspaceCheck predicate
     # (Contractions.TaskPredicate only emits it for a non-zero size) and makes
     # requiredWorkspaceSizeGsu report 0 bytes.
-    state["_WorkspaceSizePerElemC"] = 0 if state["_GSUAtomicDestBF16"] else computeBytes
+    state["_WorkspaceSizePerElemC"] = \
+        0 if state["GlobalSplitUAlgorithm"] == 'AtomicDest' else computeBytes
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = computeBytes
@@ -5001,7 +5004,7 @@ class Solution(collections.abc.Mapping):
         else:
           state["StoreVectorWidth"] = state["VectorWidthA"]
 
-    if state.get("_GSUAtomicDestBF16", False):
+    if state["GlobalSplitUAlgorithm"] == 'AtomicDest':
       # buffer_atomic_pk_add_bf16 has no single-element form, so a thread must
       # own its free0 elements in pairs. The divisibility check below turns an
       # incompatible VectorWidthA into a rejection.
@@ -5078,7 +5081,7 @@ class Solution(collections.abc.Mapping):
         (state["ProblemType"]["DataType"].isSingle()) or \
         (state["ProblemType"]["DataType"].isDouble() and state["BufferStore"]) or \
         (state["ProblemType"]["DestDataType"].isInt32()) or \
-        (state["_GSUAtomicDestBF16"]) or \
+        (state["GlobalSplitUAlgorithm"] == 'AtomicDest') or \
         (state["KernelLanguage"] == "Assembly" and
             (state["ProblemType"]["DataType"].isHalf() and not state["ProblemType"]["HighPrecisionAccumulate"]) or
             (state["_GlobalAccumulation"])

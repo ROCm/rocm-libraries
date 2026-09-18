@@ -8183,7 +8183,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # GSU whose atomic target is the BF16 D tensor itself rather than an fp32
     # staging workspace (GlobalSplitUAlgorithm AtomicDest). Accumulation is done
     # by buffer_atomic_pk_add_bf16 on packed element pairs.
-    self.states.useAtomicPkAddBF16 = kernel.get("_GSUAtomicDestBF16", False)
+    self.states.useAtomicPkAddBF16 = kernel["GlobalSplitUAlgorithm"] == "AtomicDest"
 
     # The inst HasAtomicAdd is using is not compatible with int32.
     # 'SingleBuffer' is the fp32 staging workspace, so the atomic target is fp32
