@@ -1177,3 +1177,113 @@ TEST(StreamKFlagBound, StreamK5StaticSubPathKeepsTheWholeBlock)
         << "SK5 on its static sub-path indexes from offset 0, so it keeps the "
            "whole block";
 }
+
+// Cluster masks are trimmed to the problem's N extent. A persistent launch must
+// end on a cluster boundary or include that entire extent, and any partial-tile
+// workgroups must fit the fixed flag region even after the grid is reshaped.
+TEST(StreamKClusterGrid, PersistentRowsRespectRecipientsAndFlagCapacity)
+{
+    struct Case
+    {
+        size_t mTiles, nTiles;
+        int requestedGrid;
+        uint32_t ck;
+        size_t expectedGrid;
+    };
+    const Case cases[] = {
+        {20, 7, 100, 4, 140}, // partial final cluster: retain all seven live rows
+        {20, 12, 100, 4, 160}, // full cluster can round up inside the N extent
+        {20, 2, 100, 4, 40}, // fewer N rows than cluster peers
+        {20, 7, 10, 1, 20}, // requested grid smaller than one M row
+        {20, 7, 100, 1, 100}, // Ck=1 requires no Y alignment
+        {1025, 3, 256, 2, 3075}, // rounding exceeds flags: use complete tiles
+        {1024, 3, 256, 2, 2048}, // exactly fills flags: keep persistent launch
+        {0, 7, 100, 4, 0},
+        {20, 0, 100, 4, 0},
+    };
+    for(const auto& test : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "tiles=" << test.mTiles << "x" << test.nTiles
+                                         << ", grid=" << test.requestedGrid << ", Ck=" << test.ck);
+        StreamK5AnalyticalEnv env;
+        env.solution.sizeMapping.streamK = 3;
+        env.solution.sizeMapping.streamKForceDPOnly = 0;
+        env.solution.sizeMapping.streamKAtomic = 0;
+        env.solution.sizeMapping.clusterDim = TensileLite::dim3(2, test.ck, 1);
+        env.device.skFixedGrid = test.requestedGrid;
+        env.device.skDynamicGrid = 0;
+        auto problem = makeGemmProblem(test.mTiles * 128, test.nTiles * 128, 256);
+        const auto tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+        const auto grid = env.solution.getSKGrid(problem, env.device, tiles,
+                                                 origami::reduction_t::tree);
+        EXPECT_EQ(grid, test.expectedGrid);
+        if(tiles == 0)
+            continue;
+        ASSERT_NE(grid, 0u);
+        EXPECT_EQ(grid % test.mTiles, 0u);
+        const auto gridY = grid / test.mTiles;
+        EXPECT_LE(gridY, test.nTiles);
+        EXPECT_TRUE(gridY % test.ck == 0 || gridY == test.nTiles);
+        EXPECT_TRUE(grid <= StreamKFlagElements || tiles % grid == 0);
+    }
+}
+
+TEST(StreamKClusterGrid, BatchedLaunchPersistsOneCompleteTilePlane)
+{
+    struct Case
+    {
+        size_t mTiles, nTiles, batches;
+        bool forceDPOnly;
+        size_t expectedGrid;
+        uint32_t expectedY, expectedZ;
+    };
+    const Case cases[] = {
+        {2, 7, 2, false, 14, 8, 1},
+        {2, 7, 3, false, 14, 8, 1},
+        {1025, 3, 2, false, 3075, 4, 1}, // full tiles need no flags above 2048
+        {2, 7, 1, false, 8, 4, 1}, // single-batch persistence remains bounded
+        {2, 7, 2, true, 28, 8, 2}, // ForceDPOnly retains its physical batch grid
+    };
+    for(const auto& test : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "tiles=" << test.mTiles << "x" << test.nTiles
+                                         << ", batches=" << test.batches
+                                         << ", ForceDPOnly=" << test.forceDPOnly);
+        StreamK5AnalyticalEnv env;
+        auto& solution = env.solution;
+        solution.sizeMapping.streamK = 3;
+        solution.sizeMapping.streamKForceDPOnly = test.forceDPOnly;
+        solution.sizeMapping.clusterDim = TensileLite::dim3(2, 4, 1);
+        solution.sizeMapping.threadTile = TensileLite::dim3(1, 1, 1);
+        solution.sizeMapping.workGroupMapping = 1;
+        solution.sizeMapping.workGroupMappingXCC = 1;
+        env.device.skFixedGrid = 4;
+        env.device.skDynamicGrid = 0;
+        auto problem = ContractionProblemGemm::GEMM(false, false,
+            test.mTiles * 128, test.nTiles * 128, 256,
+            test.mTiles * 128, 256, test.mTiles * 128, 1.0, false, test.batches);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setParams().setGSU(1);
+        const auto tiles = problem.getNumTiles(solution.sizeMapping, 1);
+        StreamKSettings sk;
+        sk.grid = solution.getSKGrid(problem, env.device, tiles, sk.reduction);
+        EXPECT_EQ(sk.grid, test.expectedGrid);
+
+        // Argument packing only; no GPU allocation or launch is needed.
+        ContractionInputs inputs(nullptr, nullptr, nullptr, nullptr, 1.0f, 1.0f);
+        const auto launch = solution.generateSingleCall<true>(problem, inputs, env.device,
+                                                               sk, GSUSettings{});
+        EXPECT_EQ(launch.numWorkGroups.x, RoundUpToMultiple(uint32_t(test.mTiles), 2u));
+        EXPECT_EQ(launch.numWorkGroups.y, test.expectedY);
+        EXPECT_EQ(launch.numWorkGroups.z, test.expectedZ);
+        const auto packedGrid = static_cast<uint32_t>(
+            KernelArguments::const_iterator(launch.args, "skGrid"));
+        EXPECT_EQ(packedGrid, test.expectedGrid);
+        if(test.batches > 1 && !test.forceDPOnly)
+        {
+            EXPECT_EQ(tiles % sk.grid, 0u);
+            EXPECT_EQ(sk.grid, test.mTiles * test.nTiles);
+        }
+    }
+}

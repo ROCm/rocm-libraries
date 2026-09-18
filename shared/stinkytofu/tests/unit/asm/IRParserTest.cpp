@@ -579,7 +579,9 @@ st.func @compose_vop3_neg_with_mapped_neg() {
 ^entry:
   v0 = "st.v_mov_b32"(-v1) { issueCycles = 1, latencyCycles = 1 }
   v2 = "st.v_add_f32"(v0, v3) {
-    issueCycles = 1, latencyCycles = 5, mod.vop3 = { neg_src0 = true }
+    issueCycles = 1, latencyCycles = 5, mod.vop3 = {
+      neg_src0 = true
+    }
   }
   v0 = "st.v_sub_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
   "st.buffer_store_b32"(v40, v2) { issueCycles = 1, latencyCycles = 1 }

@@ -4075,6 +4075,13 @@ class StreamKTwoTileDPFirst(StreamK):
         # Map SK index to WG
         module.add(self.skIndexToWG(writer, kernel, sTmp))
 
+        # Alpha-zero non-owner slices skip directly to persist close, which
+        # reads this flag even on the first pass before any multicast arrive.
+        if _streamKPersistentMulticast(kernel):
+            flag = self._persistDpMcOpenSgpr(writer, kernel)
+            module.add(SMovB32(dst=sgpr(flag), src=0,
+                               comment="persist USER -3 idle unless this pass arrives"))
+
         # Short circuit if alpha==0 (skip main loop and reading A/B, only do beta * C)
         # To skip main loop in stream-k, we check if this WG is responsible for writing results (ie: WG starts tile)
         # If WG starts tile then set LocalEnd=ItersPerTile to skip fixup step, and set loopCounter to 0 to skip main loop
@@ -4097,10 +4104,6 @@ class StreamKTwoTileDPFirst(StreamK):
         if _streamKPersistentMulticast(kernel):
             skipMc = Label(writer.labels.getNameInc("SK_SkipPassMulticast"), "")
             pgr1CloseWait = self._pgr1PersistDpMcWaitAtClose(kernel)
-            flag = self._persistDpMcOpenSgpr(writer, kernel)
-            if flag is not None:
-                module.add(SMovB32(dst=sgpr(flag), src=0,
-                                   comment="persist USER -3 idle unless this pass arrives"))
             module.add(SCmpEQU32(src0=sgpr(sTmp+3), src1=0,
                                  comment="continuing SK? skip per-pass multicast -3"))
             module.add(SCBranchSCC1(labelName=skipMc.getLabelName(),

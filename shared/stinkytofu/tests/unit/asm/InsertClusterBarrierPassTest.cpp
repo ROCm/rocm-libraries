@@ -1471,6 +1471,38 @@ TEST_F(InsertClusterBarrierPassTest, Rule3SignalAnchorAbortsWhenSccIsLiveAtItsWa
         "SCC live at the wait");
 }
 
+TEST_F(InsertClusterBarrierPassTest, MulticastSkipsRule3AnalysisWithLiveScc) {
+    appendGsu1Preheader();
+    openLoop();
+    // Keep SCC live across a range longer than Rule 3's signal-lead ceiling.
+    // Multicast emits no Rule 3 handshake, so its placement constraints do not apply.
+    for (int i = 0; i < 200; ++i) createWMMA(8 + (i % 8) * 8, (i % 8) * 8, ((i + 1) % 8) * 8);
+    appendHandshake(/*loadS0=*/0, /*loadS1=*/4);
+    createSCselectReadingScc(/*destSgpr=*/91, /*srcSgpr=*/92);
+    closeLoop();
+
+    runPass(kStreamKMulticastOn, /*rule3SignalLeadCycles=*/500);
+
+    const auto [signals, waits] = clusterBarrierCounts();
+    EXPECT_EQ(signals, 0);
+    EXPECT_EQ(waits, 0);
+
+    size_t producerDrains = 0;
+    StinkyInstruction* previous = nullptr;
+    for (IRBase& ir : *bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr || isPseudoInst(inst)) continue;
+        if (const auto* drain = inst->getModifier<SWaitTensorCntData>()) {
+            ASSERT_NE(previous, nullptr);
+            EXPECT_TRUE(isTensorLoad(*previous));
+            EXPECT_EQ(drain->tlcnt, 0);
+            ++producerDrains;
+        }
+        previous = inst;
+    }
+    EXPECT_EQ(producerDrains, 1u);
+}
+
 // The downward correction is allowed through one kind of wall, and this is the
 // shape that asks it to be. The range is held open by the exit branch itself --
 // a branch with no compare of its own, reading what the def above it left -- so

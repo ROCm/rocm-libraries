@@ -552,6 +552,19 @@ def assert_persist_open_until_wavedone(src, base):
     m = re.search(r"s_(?:or|mov)_b32 s(\d+),", lines[or_is[0]])
     assert m, f"Kernel {base!r}: persist-open dst not sN in {lines[or_is[0]]!r}"
     idx = m.group(1)
+    # An alpha-zero SK slice that does not own the tile jumps straight to
+    # SK_CloseLoop, including on its first pass. Its wait flag must already
+    # be zero; otherwise an uninitialized SGPR can cause an unmatched wait.
+    alpha_owner = next((i for i, ln in enumerate(lines)
+                        if "does wg start tile?" in ln and "s_cmp_eq_u32" in ln), None)
+    assert alpha_owner is not None, f"Kernel {base!r}: missing alpha-zero tile-owner check"
+    idle = next((i for i, ln in enumerate(lines)
+                 if "persist USER -3 idle unless this pass arrives" in ln
+                 and re.search(r"\bs_mov_b32 s%s, 0\b" % idx, ln)), None)
+    assert idle is not None and idle < alpha_owner, (
+        f"Kernel {base!r}: initialize persist-open s{idx} before alpha-zero "
+        f"can skip directly to SK_CloseLoop (idle={idle}, alpha={alpha_owner})"
+    )
     first_or = or_is[0]
 
     def _is_persist_close_wait(i, ln):

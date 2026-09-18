@@ -2368,13 +2368,13 @@ namespace TensileLite
             else if(sizeMapping.streamK == 3 && sizeMapping.streamKForceDPOnly == 0
                     && enableCluster)
             {
-                // ForceDPOnly=0 cluster multicast: persistent [nWG0, gridY, batch];
-                // pads handshake-exit. Same DP grid as ForceDPOnly=1.
+                // One physical plane persists across all logical batches.
+                // Pads handshake-exit before the first persistent iteration.
                 rv.numWorkGroups.x = problemNumGroupTiles.x; // nWG0
                 rv.numWorkGroups.y = problemNumGroupTiles.x > 0
                                          ? sk.grid / problemNumGroupTiles.x
                                          : 1; // gridY
-                rv.numWorkGroups.z = problemNumGroupTiles.z; // batch
+                rv.numWorkGroups.z = 1;
             }
             else
             {
@@ -5784,8 +5784,8 @@ namespace TensileLite
             // ~1742 and ~4033) off a base that already skips the work-queue
             // counters. Either way a grid wider than what that indexing reaches
             // would have workgroups writing past the end of their own block.
-            // Every caller reaches skGrid through here and this is the last
-            // write, so it is the one place the bound has to hold.
+            // Cluster reshaping below can increase this grid, so it also
+            // checks the flag bound against its final geometry.
             //
             // Only the launches that actually reach the flags are bounded:
             //
@@ -5858,20 +5858,33 @@ namespace TensileLite
                 self.calculateGrid(dummyWg, tilesMN, problem);
                 size_t nwg0 = tilesMN.x;
                 size_t nwg1 = tilesMN.y;
-                // Cap Y at tilesN. Do not floor to a Ck multiple (drops N-rows)
-                // or inflate when tilesN < Ck (KernelEnd vs handshake).
-                size_t gridY = nwg0 > 0 ? (skGrid + nwg0 - 1) / nwg0 : 1;
+                if(nwg0 == 0 || nwg1 == 0 || tilesMN.z == 0)
+                    return 0;
+
+                // A complete plane advances every cluster peer to the same
+                // next batch. Launching further physical batch planes would
+                // duplicate the work covered by this persistent stride.
+                if(tilesMN.z > 1)
+                    return nwg0 * nwg1;
+
+                // Masks are trimmed to tilesN, not the persistent grid. End at
+                // a complete Ck cluster or at tilesN so no mask names a pad peer
+                // that has already exited. Cap before rounding to bound the sum.
+                size_t gridY = skGrid / nwg0 + (skGrid % nwg0 != 0);
+                gridY = std::min(std::max(gridY, size_t{1}), nwg1);
                 if(ck > 1)
-                {
-                    size_t gridYCk = ((gridY + ck - 1) / ck) * ck;
-                    if(gridYCk <= nwg1)
-                        gridY = gridYCk;
-                }
-                if(gridY > nwg1)
-                    gridY = nwg1;
-                if(gridY < 1)
-                    gridY = 1;
+                    gridY = std::min(RoundUpToMultiple(gridY, ck), nwg1);
                 skGrid = nwg0 * gridY;
+
+                // Whole-row/cluster rounding can exceed the earlier flag bound.
+                // Use full tiles in that case: an arbitrary clamp would break
+                // row divisibility and multicast membership. This grid divides
+                // the tile count, so every workgroup writes complete tiles and
+                // needs no partial-tile flags.
+                if(self.sizeMapping.streamKAtomic == 0
+                   && reductionStrat != origami::reduction_t::parallel
+                   && skGrid > flagEntries && tiles % skGrid != 0)
+                    skGrid = nwg0 * nwg1;
             }
 
             return skGrid;

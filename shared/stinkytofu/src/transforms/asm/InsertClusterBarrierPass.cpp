@@ -1455,6 +1455,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                         auto postIt = afterCooperativeTensorLoadGroup(it, bb);
                         producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
                                                                             : nullptr);
+                        // Multicast needs the drain, but no Rule 3 handshake or anchor analysis.
+                        continue;
                     }
 
                     // Rule 3 speaks for the loop body and nowhere else. Outside a loop there
