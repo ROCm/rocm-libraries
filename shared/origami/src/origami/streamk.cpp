@@ -482,47 +482,21 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
-  // until tuned in a follow-up PR.
-  if (hardware.arch != hardware_t::architecture_t::gfx950)
+
+  if (sm_count_target == 0 || sm_count_target >= hardware.N_CU) {
     return hybrid_mode_t::static_;
+  }
 
-  const size_t MT_M  = config.mt.m;
-  const size_t MT_N  = config.mt.n;
-  const size_t batch = std::max<size_t>(problem.batch, 1);
-  const size_t tiles = compute_number_of_output_tiles(
-      MT_M, MT_N, problem.size.m, problem.size.n, batch);
-
-  // Too little work in the grid for dynamic rebalancing to be worth its
-  // overhead.
-  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
-
-  size_t available_cus = (sm_count_target > 0)
-                             ? std::min<size_t>(sm_count_target, hardware.N_CU)
-                             : hardware.N_CU;
-  if (available_cus == 0) available_cus = hardware.N_CU;
-
-  // No cotenant means static already matches the full CU count -- nothing
-  // left for dynamic to rebalance.
-  const bool has_cotenant = available_cus < hardware.N_CU;
-  if (!has_cotenant) return hybrid_mode_t::static_;
-
-  // Few wavefronts resident per CU means little overlap to absorb a
-  // cotenant's CU-count mismatch on its own, so dynamic rebalancing helps
-  // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
-  // through to the tiles_per_cu check instead.)
-  if (config.occupancy > 0 &&
-      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
-    return hybrid_mode_t::dynamic;
-
-  // At higher occupancy that overlap already absorbs small mismatches, so
-  // dynamic only pays off once the grid is heavily overloaded relative to
-  // the CUs actually available to it.
-  const double tiles_per_cu =
-      static_cast<double>(tiles) / static_cast<double>(available_cus);
-  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
-             ? hybrid_mode_t::dynamic
-             : hybrid_mode_t::static_;
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx942:
+      return gfx942_values::select_hybrid_mode(problem, hardware, config, sm_count_target);
+    case hardware_t::architecture_t::gfx950:
+      return gfx950_values::select_hybrid_mode(problem, hardware, config, sm_count_target);
+    case hardware_t::architecture_t::gfx1201:
+      return gfx1201_values::select_hybrid_mode(problem, hardware, config, sm_count_target);
+    default:
+      return hybrid_mode_t::static_;
+  }
 }
 }  // namespace streamk
 }  // namespace origami

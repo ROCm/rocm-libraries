@@ -5,145 +5,330 @@
  *
  *******************************************************************************/
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <limits>
 #include "common.hpp"
+
+#include <cmath>
+#include <cstddef>
+#include <iterator>
+#include <limits>
+#include <utility>
 
 namespace {
 
-using origami::streamk_hybrid_defaults_t;
+// ---- Compile-time decision-tree validator -----------------------------------
+// Walks if_lte / if_gt links from the root and rejects a table whose children
+// are out of range, self-referential, part of a cycle, or leave a node
+// unreachable from the root. Used in static_asserts so a bad tree can't compile.
+template <class Node>
+constexpr bool tree_dfs(const Node* tree, int n, int node, int leaf_lo, int leaf_hi,
+                        bool* visited, bool* on_stack) {
+  if (node == leaf_lo || node == leaf_hi) return true;  // reached a leaf verdict
+  if (node < 0 || node >= n) return false;              // dangling child index
+  if (on_stack[node]) return false;                     // cycle on the current path
+  if (visited[node]) return true;                       // already proven reachable & acyclic
+  visited[node]  = true;
+  on_stack[node] = true;
+  const bool ok = tree_dfs(tree, n, tree[node].if_lte, leaf_lo, leaf_hi, visited, on_stack)
+               && tree_dfs(tree, n, tree[node].if_gt,  leaf_lo, leaf_hi, visited, on_stack);
+  on_stack[node] = false;
+  return ok;
+}
 
-// Builds a problem with exactly `tiles` output tiles for the given macrotile
-// (a single row of `tiles` tile columns), so callers get precise control over
-// the tile count fed into select_hybrid_mode's gates.
-inline origami::problem_t make_problem_with_tile_count(size_t mt_m,
-                                                       size_t mt_n,
-                                                       size_t tiles,
-                                                       size_t batch = 1) {
-  return make_problem(/*m=*/mt_m,
-                      /*n=*/mt_n * tiles,
-                      /*k=*/64,
-                      origami::transpose_t::T,
-                      origami::transpose_t::N,
-                      batch);
+template <class Node, std::size_t N>
+constexpr bool decision_tree_is_valid(const Node (&tree)[N], int leaf_lo, int leaf_hi) {
+  const int n        = static_cast<int>(N);
+  auto      child_ok = [&](int c) { return c == leaf_lo || c == leaf_hi || (c >= 0 && c < n); };
+
+  for (int i = 0; i < n; ++i) {
+    if (!child_ok(tree[i].if_lte) || !child_ok(tree[i].if_gt)) return false;
+    if (tree[i].if_lte == i || tree[i].if_gt == i) return false;  // self-loop
+  }
+
+  bool visited[N]  = {};
+  bool on_stack[N] = {};
+  if (!tree_dfs(tree, n, 0, leaf_lo, leaf_hi, visited, on_stack)) return false;  // acyclic from root
+  for (std::size_t i = 0; i < N; ++i) {
+    if (!visited[i]) return false;  // node not reachable from the root
+  }
+  return true;
+}
+
+// A small synthetic branching tree used to exercise decision_node traversal:
+//   node 0: tiles <= 480 ? node 1 : dynamic
+//   node 1: occupancy <= 2.5 ? static : dynamic
+// This hits both leaf sentinels and an internal (index) child. threshold_metrics,
+// decision_node and LEAF_* are inherited from the thresholds<Arch> base.
+struct branch_gate : origami::streamk::thresholds<branch_gate> {
+  static constexpr decision_node decision_tree[] = {
+      {threshold_metrics::tiles, 480.0, 1, dynamic_result},
+      {threshold_metrics::occupancy, 2.5, static_result, dynamic_result},
+  };
+};
+
+// The shipped trees must be structurally sound at compile time.
+static_assert(decision_tree_is_valid(origami::streamk::gfx942_values::decision_tree,
+                                     origami::streamk::gfx942_values::static_result,
+                                     origami::streamk::gfx942_values::dynamic_result),
+              "gfx942 decision tree is malformed");
+static_assert(decision_tree_is_valid(origami::streamk::gfx950_values::decision_tree,
+                                     origami::streamk::gfx950_values::static_result,
+                                     origami::streamk::gfx950_values::dynamic_result),
+              "gfx950 decision tree is malformed");
+static_assert(decision_tree_is_valid(branch_gate::decision_tree, branch_gate::static_result,
+                                     branch_gate::dynamic_result),
+              "branch_gate decision tree is malformed");
+
+// Reference mirror of gfx950's deployed 10-leaf tree, evaluated through the same
+// feature_value() the library uses, so the test tracks the header by construction.
+origami::hybrid_mode_t gfx950_expected(const origami::problem_t&  problem,
+                                       const origami::hardware_t& hardware,
+                                       const origami::config_t&   config,
+                                       size_t                     smt) {
+  using origami::streamk::gfx950_values;
+  using threshold_metrics = gfx950_values::threshold_metrics;
+  auto fv = [&](threshold_metrics m) {
+    return gfx950_values::feature_value(m, problem, hardware, config, smt);
+  };
+
+  if (fv(threshold_metrics::grid_efficiency) <= 0.23) {
+    if (fv(threshold_metrics::min_mn) <= 1088.0) {
+      return fv(threshold_metrics::m_dim) <= 3277.0 ? origami::hybrid_mode_t::static_
+                                                     : origami::hybrid_mode_t::dynamic;
+    }
+    return fv(threshold_metrics::tiles) <= 34.0 ? origami::hybrid_mode_t::dynamic
+                                                : origami::hybrid_mode_t::static_;
+  }
+  if (fv(threshold_metrics::tiles_per_cu) <= 0.29) {
+    if (fv(threshold_metrics::static_skgrid) <= 68.0) {
+      return origami::hybrid_mode_t::dynamic;
+    }
+    return fv(threshold_metrics::iters_per_tile) <= 458.0 ? origami::hybrid_mode_t::static_
+                                                          : origami::hybrid_mode_t::dynamic;
+  }
+  if (fv(threshold_metrics::active_cus) <= 240.0) {
+    return origami::hybrid_mode_t::dynamic;
+  }
+  return fv(threshold_metrics::occupancy) <= 2.5 ? origami::hybrid_mode_t::dynamic
+                                                 : origami::hybrid_mode_t::static_;
 }
 
 }  // namespace
 
-TEST_CASE("Origami streamk: select_hybrid_mode tile-count gate is inclusive of the threshold",
+TEST_CASE("Origami streamk: decision_tree validator rejects malformed tables",
           "[origami][streamk][hybrid]") {
-  // Even with a cotenant and occupancy low enough to otherwise force dynamic
-  // unconditionally, a grid at or below MIN_TILES_FOR_DYNAMIC stays static_.
-  auto hardware = make_hardware(950);
-  auto config   = make_config(1, 1, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto at_gate =
-      make_problem_with_tile_count(1, 1, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC);
-  REQUIRE(origami::streamk::select_hybrid_mode(at_gate, hardware, config, hardware.N_CU / 2) ==
-          origami::hybrid_mode_t::static_);
+  using node                  = branch_gate::decision_node;
+  using tm                    = branch_gate::threshold_metrics;
+  constexpr int S             = branch_gate::static_result;
+  constexpr int D             = branch_gate::dynamic_result;
 
-  auto above_gate =
-      make_problem_with_tile_count(1, 1, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
-  REQUIRE(origami::streamk::select_hybrid_mode(above_gate, hardware, config, hardware.N_CU / 2) ==
-          origami::hybrid_mode_t::dynamic);
+  constexpr node good[]        = {{tm::tiles, 480.0, 1, D}, {tm::occupancy, 2.5, S, D}};
+  constexpr node out_of_range[] = {{tm::tiles, 1.0, 5, D}};                        // child 5 >= N
+  constexpr node self_loop[]    = {{tm::tiles, 1.0, 0, D}};                        // points at itself
+  constexpr node cycle[]        = {{tm::tiles, 1.0, 1, S}, {tm::tiles, 1.0, 0, S}};  // 0 -> 1 -> 0
+  constexpr node unreachable[]  = {{tm::tiles, 1.0, S, S}, {tm::tiles, 1.0, S, D}};  // node 1 orphaned
+
+  static_assert(decision_tree_is_valid(good, S, D), "well-formed tree should validate");
+  static_assert(!decision_tree_is_valid(out_of_range, S, D), "out-of-range child must fail");
+  static_assert(!decision_tree_is_valid(self_loop, S, D), "self-loop must fail");
+  static_assert(!decision_tree_is_valid(cycle, S, D), "cycle must fail");
+  static_assert(!decision_tree_is_valid(unreachable, S, D), "unreachable node must fail");
+
+  REQUIRE(decision_tree_is_valid(good, S, D));
+  REQUIRE_FALSE(decision_tree_is_valid(cycle, S, D));
 }
 
-TEST_CASE("Origami streamk: select_hybrid_mode requires a cotenant to go dynamic",
+TEST_CASE("Origami streamk: feature_value derives consistent values",
           "[origami][streamk][hybrid]") {
-  // Large grid and low occupancy alone aren't enough: with no cotenant
-  // holding any CU away from this kernel, static_ is already optimal.
-  auto hardware = make_hardware(950);
-  auto config   = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto problem =
-      make_problem_with_tile_count(128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  using origami::streamk::gfx950_values;
+  using threshold_metrics = gfx950_values::threshold_metrics;
 
-  REQUIRE(origami::streamk::select_hybrid_mode(problem, hardware, config, /*sm_count_target=*/0) ==
-          origami::hybrid_mode_t::static_);
-  REQUIRE(origami::streamk::select_hybrid_mode(
-              problem, hardware, config, /*sm_count_target=*/hardware.N_CU / 2) ==
-          origami::hybrid_mode_t::dynamic);
-}
+  auto         hardware = make_hardware(950);
+  auto         config   = make_config(128, 128, 32, 16, 16, 16, false, 1, 3);
+  auto         problem  = make_problem(4096, 2048, 512);
+  const size_t smt      = hardware.N_CU / 2;
 
-TEST_CASE("Origami streamk: select_hybrid_mode low occupancy goes dynamic unconditionally",
-          "[origami][streamk][hybrid]") {
-  auto hardware = make_hardware(950);
-  auto problem =
-      make_problem_with_tile_count(128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  auto fv = [&](threshold_metrics m) { return gfx950_values::feature_value(m, problem, hardware, config, smt); };
 
-  for (int occupancy = 1;
-       occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC;
-       ++occupancy) {
-    DYNAMIC_SECTION("occupancy=" << occupancy) {
-      auto config = make_config(128, 128, 32, 16, 16, 16, false, 1, occupancy);
-      REQUIRE(origami::streamk::select_hybrid_mode(problem, hardware, config, hardware.N_CU / 2) ==
-              origami::hybrid_mode_t::dynamic);
-    }
+  REQUIRE(fv(threshold_metrics::occupancy) == 3);
+
+  const double tiles = fv(threshold_metrics::tiles);
+  REQUIRE(tiles == 512);
+
+  REQUIRE(fv(threshold_metrics::tiles_per_cu) == Catch::Approx(tiles / static_cast<double>(smt)));
+
+  // New tree features.
+  REQUIRE(fv(threshold_metrics::m_dim) == 4096);
+  REQUIRE(fv(threshold_metrics::min_mn) == 2048);         // min(4096, 2048)
+  REQUIRE(fv(threshold_metrics::active_cus) == static_cast<double>(smt));
+  REQUIRE(fv(threshold_metrics::iters_per_tile) == 16);   // ceil(512 / 32)
+  REQUIRE(fv(threshold_metrics::static_skgrid) > 0.0);
+
+  const double grid_waves = fv(threshold_metrics::grid_waves);
+  if (grid_waves > 0.0) {
+    const double grid_efficiency = fv(threshold_metrics::grid_efficiency);
+    REQUIRE(grid_efficiency > 0.0);
+    REQUIRE(grid_efficiency <= 1.0);
   }
 }
 
-TEST_CASE("Origami streamk: select_hybrid_mode falls back to tiles_per_cu "
-          "once occupancy alone isn't decisive",
+TEST_CASE("Origami streamk: iters_per_tile is NaN when mt.k is zero",
           "[origami][streamk][hybrid]") {
-  // Occupancy above MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC, and occupancy
-  // reported as unknown (<= 0), both defer to the tiles_per_cu threshold.
-  auto hardware      = make_hardware(950);
-  auto available_cus = hardware.N_CU / 2;
-  auto small = make_problem_with_tile_count(128, 128, static_cast<size_t>(available_cus * 8.0));
-  auto big   = make_problem_with_tile_count(128, 128, static_cast<size_t>(available_cus * 9.0));
+  using origami::streamk::gfx950_values;
+  using threshold_metrics = gfx950_values::threshold_metrics;
 
-  for (int occupancy :
-       {0, streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC + 1}) {
-    DYNAMIC_SECTION("occupancy=" << occupancy) {
-      auto config = make_config(128, 128, 32, 16, 16, 16, false, 1, occupancy);
-      REQUIRE(origami::streamk::select_hybrid_mode(small, hardware, config, available_cus) ==
-              origami::hybrid_mode_t::static_);
-      REQUIRE(origami::streamk::select_hybrid_mode(big, hardware, config, available_cus) ==
-              origami::hybrid_mode_t::dynamic);
-    }
+  auto hardware = make_hardware(950);
+  auto config   = make_config(128, 128, 0, 16, 16, 16, false, 1, 2);
+  auto problem  = make_problem(4096, 2048, 512);
+
+  REQUIRE(std::isnan(
+      gfx950_values::feature_value(threshold_metrics::iters_per_tile, problem, hardware, config, hardware.N_CU / 2)));
+}
+
+TEST_CASE("Origami streamk: unknown occupancy maps to NaN",
+          "[origami][streamk][hybrid]") {
+  using origami::streamk::gfx950_values;
+  using threshold_metrics = gfx950_values::threshold_metrics;
+
+  auto hardware = make_hardware(950);
+  auto config   = make_config(128, 128, 32, 16, 16, 16, false, 1, -1);
+  auto problem  = make_problem(4096, 2048, 512);
+
+  const double occ = gfx950_values::feature_value(threshold_metrics::occupancy, problem, hardware, config, hardware.N_CU);
+  REQUIRE(std::isnan(occ));
+}
+
+TEST_CASE("Origami streamk: decision_node traversal follows true/false branches to leaves",
+          "[origami][streamk][hybrid]") {
+  auto         hardware = make_hardware(950);
+  const size_t smt      = hardware.N_CU;
+
+  // tiles == n-tiles for a 128x128 macrotile with m == 128 (one m-tile) and batch 1.
+  auto problem_with_tiles = [](size_t t) { return make_problem(128, static_cast<size_t>(128 * t), 64); };
+
+  SECTION("root false-child leaf: tiles > 480 -> dynamic") {
+    auto problem = problem_with_tiles(500);
+    auto config  = make_config(128, 128, 32, 16, 16, 16, false, 1, 0);
+    REQUIRE(branch_gate::select_hybrid_mode(problem, hardware, config, smt) == origami::hybrid_mode_t::dynamic);
+  }
+  SECTION("root true-child then leaf: tiles <= 480 && occupancy <= 2.5 -> static") {
+    auto problem = problem_with_tiles(100);
+    auto config  = make_config(128, 128, 32, 16, 16, 16, false, 1, 2);
+    REQUIRE(branch_gate::select_hybrid_mode(problem, hardware, config, smt) == origami::hybrid_mode_t::static_);
+  }
+  SECTION("root true-child then other leaf: tiles <= 480 && occupancy > 2.5 -> dynamic") {
+    auto problem = problem_with_tiles(100);
+    auto config  = make_config(128, 128, 32, 16, 16, 16, false, 1, 3);
+    REQUIRE(branch_gate::select_hybrid_mode(problem, hardware, config, smt) == origami::hybrid_mode_t::dynamic);
   }
 }
 
-TEST_CASE("Origami streamk: select_hybrid_mode non-gfx950 always static",
+TEST_CASE("Origami streamk: gfx950 select_hybrid_mode matches the reference tree",
           "[origami][streamk][hybrid]") {
-  // Large grid, cotenant present, low occupancy: would select dynamic on
-  // gfx950, but the architecture guard forces static_ elsewhere.
-  auto config = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto problem =
-      make_problem_with_tile_count(128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC + 1);
+  auto         hardware = make_hardware(950);
+  auto         config   = make_config(128, 128, 32, 16, 16, 16, false, 1, 2);
+  const size_t smt      = hardware.N_CU / 2;
 
-  auto hardware_gfx950 = make_hardware(950);
-  REQUIRE(origami::streamk::select_hybrid_mode(
-              problem, hardware_gfx950, config, hardware_gfx950.N_CU / 2) ==
-          origami::hybrid_mode_t::dynamic);
-
-  auto hardware_gfx942 = make_hardware(942);
-  REQUIRE(origami::streamk::select_hybrid_mode(
-              problem, hardware_gfx942, config, hardware_gfx942.N_CU / 2) ==
-          origami::hybrid_mode_t::static_);
+  for (auto problem : {make_problem(256, 256, 64), make_problem(4096, 2048, 512),
+                       make_problem(8192, 8192, 8192), make_problem(1024, 1024, 64),
+                       make_problem(512, 512, 4096), make_problem(128, 131072, 256),
+                       make_problem(64, 64, 8192), make_problem(4096, 512, 64),
+                       make_problem(2048, 900, 1024), make_problem(300, 300, 128)}) {
+    REQUIRE(origami::streamk::gfx950_values::select_hybrid_mode(problem, hardware, config, smt)
+            == gfx950_expected(problem, hardware, config, smt));
+  }
 }
 
-TEST_CASE("Origami streamk: select_hybrid_mode batch multiplies tiles, crossing the gate",
+TEST_CASE("Origami streamk: gfx942 tree splits on grid_waves",
           "[origami][streamk][hybrid]") {
-  auto hardware = make_hardware(950);
-  auto config   = make_config(128, 128, 32, 16, 16, 16, false, 1, /*occupancy=*/1);
-  auto base     = make_problem_with_tile_count(
-      128, 128, streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC, /*batch=*/1);
-  REQUIRE(origami::streamk::select_hybrid_mode(base, hardware, config, hardware.N_CU / 2) ==
-          origami::hybrid_mode_t::static_);
+  using origami::streamk::gfx942_values;
+  using threshold_metrics = gfx942_values::threshold_metrics;
 
-  auto base_b4  = base;
-  base_b4.batch = 4;
-  REQUIRE(origami::streamk::select_hybrid_mode(base_b4, hardware, config, hardware.N_CU / 2) ==
-          origami::hybrid_mode_t::dynamic);
+  auto         hardware = make_hardware(942);
+  auto         config   = make_config(128, 128, 32, 16, 16, 16, false, 1, 2);
+  const size_t smt      = hardware.N_CU / 2;
+
+  for (auto problem : {make_problem(4096, 2048, 512), make_problem(8192, 8192, 8192),
+                       make_problem(1024, 512, 64)}) {
+    const double gw = gfx942_values::feature_value(threshold_metrics::grid_waves, problem, hardware, config, smt);
+    const auto   expected =
+        (gw > 1.17) ? origami::hybrid_mode_t::dynamic : origami::hybrid_mode_t::static_;
+    REQUIRE(gfx942_values::select_hybrid_mode(problem, hardware, config, smt) == expected);
+  }
+}
+
+TEST_CASE("Origami streamk: outer gate forces static without a genuine CU cap",
+          "[origami][streamk][hybrid]") {
+  struct arch_case {
+    const char*        name;
+    int                arch;
+    origami::config_t  config;
+    origami::problem_t problem;
+  };
+
+  const arch_case cases[] = {
+      {"gfx942", 942, make_config(96, 320, 32, 16, 16, 16, false, 1, 2),
+       make_problem(192, 131072, 256)},
+      {"gfx950", 950, make_config(128, 128, 32, 16, 16, 16, false, 1, 2),
+       make_problem(4096, 2048, 64)},
+  };
+
+  for (auto const& c : cases) {
+    CAPTURE(c.name);
+    auto hardware = make_hardware(c.arch);
+    // No genuine CU cap (0 or >= N_CU) -> outer gate forces static regardless of the tree.
+    REQUIRE(origami::streamk::select_hybrid_mode(c.problem, hardware, c.config, 0)
+            == origami::hybrid_mode_t::static_);
+    REQUIRE(origami::streamk::select_hybrid_mode(c.problem, hardware, c.config, hardware.N_CU)
+            == origami::hybrid_mode_t::static_);
+    // With a genuine cap the top-level dispatch defers to the per-arch tree.
+    const auto capped = origami::streamk::select_hybrid_mode(c.problem, hardware, c.config, hardware.N_CU / 2);
+    const auto arch_verdict = (c.arch == 950)
+        ? origami::streamk::gfx950_values::select_hybrid_mode(c.problem, hardware, c.config, hardware.N_CU / 2)
+        : origami::streamk::gfx942_values::select_hybrid_mode(c.problem, hardware, c.config, hardware.N_CU / 2);
+    REQUIRE(capped == arch_verdict);
+  }
+}
+
+TEST_CASE("Origami streamk: select_hybrid_mode batch feeds tiles through the tree",
+          "[origami][streamk][hybrid]") {
+  auto         hardware = make_hardware(950);
+  auto         config   = make_config(128, 128, 32, 16, 16, 16, false, 1, 2);
+  const size_t smt      = hardware.N_CU / 2;
+  auto         problem  = make_problem(4096, 512, 64);
+
+  problem.batch = 1;
+  REQUIRE(origami::streamk::gfx950_values::select_hybrid_mode(problem, hardware, config, smt)
+          == gfx950_expected(problem, hardware, config, smt));
+
+  problem.batch = 4;
+  REQUIRE(origami::streamk::gfx950_values::select_hybrid_mode(problem, hardware, config, smt)
+          == gfx950_expected(problem, hardware, config, smt));
+}
+
+TEST_CASE("Origami streamk: select_hybrid_mode untuned architecture stays static",
+          "[origami][streamk][hybrid]") {
+  auto hardware = make_hardware(1250);
+  auto config   = make_config(128, 128, 32, 16, 16, 16, false, 1, 1);
+  auto problem  = make_problem(8192, 8192, 8192);
+
+  REQUIRE(origami::streamk::select_hybrid_mode(problem, hardware, config, hardware.N_CU / 2)
+          == origami::hybrid_mode_t::static_);
 }
 
 TEST_CASE("Origami streamk: select_hybrid_mode sm_count_target=0 uses N_CU",
           "[origami][streamk][hybrid]") {
-  auto hardware = make_hardware(950);
-  auto config   = make_config(128, 128, 32);
-  auto problem  = make_problem(4096, 4096, 64);
-  auto a        = origami::streamk::select_hybrid_mode(problem, hardware, config, 0);
-  auto b        = origami::streamk::select_hybrid_mode(problem, hardware, config, hardware.N_CU);
-  REQUIRE(a == b);
+  auto config  = make_config(128, 128, 32);
+  auto problem = make_problem(4096, 4096, 64);
+  for (int arch : {942, 950}) {
+    CAPTURE(arch);
+    auto hardware = make_hardware(arch);
+    auto a        = origami::streamk::select_hybrid_mode(problem, hardware, config, 0);
+    auto b        = origami::streamk::select_hybrid_mode(problem, hardware, config, hardware.N_CU);
+    REQUIRE(a == b);
+    REQUIRE(a == origami::hybrid_mode_t::static_);
+  }
 }
 
 TEST_CASE("Origami streamk: stream_k=0 uses one WG per output tile", "[origami][streamk][flag]") {
