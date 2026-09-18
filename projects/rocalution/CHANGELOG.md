@@ -9,6 +9,7 @@ Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 * Fixed a GPU memory access fault in the Smoothed-Aggregation AMG preconditioner on wave32 (RDNA) hardware.
+* Fixed the host fallback of the Ruge-Stueben AMG extended+i interpolation operator when a row exceeds the LDS capacity.
 
 ## rocALUTION 4.0.1 for ROCm 7.1.0
 
