@@ -197,6 +197,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Needs rocsparse_common.cpp compiled in
   # (appended to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
   unit_test_internal_common_dense_grids.cpp
+  # --- Block-index arithmetic of the remaining common launches [AISPARSE-700] -
+  # Appended after the AISPARSE-699 leaf above, same reasoning. Needs
+  # rocsparse_valset.cpp (already listed), rocsparse_singularity.cpp and the two
+  # rocsparse_dense_transpose*.cpp compiled in (appended to
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  unit_test_internal_common_large_grids.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -280,6 +286,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # axpby_array_batched template instantiations are hidden in librocsparse
   # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled in.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_common.cpp
+  # Added at this leaf for unit_test_internal_common_large_grids.cpp
+  # [AISPARSE-700], same hidden-visibility reason. rocsparse_valset.cpp is
+  # already listed above.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_singularity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_dense_transpose_back.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
