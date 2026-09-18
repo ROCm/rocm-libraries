@@ -317,9 +317,20 @@ globalParameters["ExperimentalLogicDir"] = "/experimental/"
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 defaultGlobalParameters = deepcopy(globalParameters)
 
+# Placeholder gfx target used when a client requests a Tensile library with no
+# real GPU ISA (maps to logic name "none"; HIP fallback YAML still matches).
+STUB_GFX_TARGET = "gfx000"
+
+def isStubGfxTarget(arch: str) -> bool:
+  """Return True if *arch* is Tensile's stub gfx target (gfx000)."""
+  if not arch:
+    return False
+  base = arch.replace(":", "-").split("-", 1)[0]
+  return base == STUB_GFX_TARGET
+
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
-  'all':'_', 'gfx000':'none', 'fallback':'hip',
+  'all':'_', STUB_GFX_TARGET:'none', 'fallback':'hip',
   'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10', 'gfx90c':'vega10',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
