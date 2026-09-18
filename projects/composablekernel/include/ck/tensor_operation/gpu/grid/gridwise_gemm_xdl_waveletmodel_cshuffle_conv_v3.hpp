@@ -954,7 +954,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
         else if(TileMathThreadGroup::IsBelong())
         {
-            auto blockwise_gemm = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1<
+            auto blockwise_gemm = BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1<
                 TileMathThreadGroupSize,
                 ADataType,
                 BDataType,
@@ -968,6 +968,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 KPack,
                 ComputeTypeA,
                 ComputeTypeB,
+                true,
                 true>{};
 
             auto c_thread_buf = blockwise_gemm.GetCThreadBuffer();
@@ -975,7 +976,7 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
             GridwiseGemmMath::template RunMathWavePipeline<HasMainKBlockLoop, TailNum>(
                 a_block_bufs, b_block_bufs, blockwise_gemm, c_thread_buf, num_k_block_main_loop);
 
-            Base::template RunEpilogue<CGlobalMemoryDataOperation, false, false>(
+            Base::template RunEpilogue<CGlobalMemoryDataOperation, false, true>(
                 blockwise_gemm,
                 c_grid_desc_mblock_mperblock_nblock_nperblock,
                 c_thread_buf,
