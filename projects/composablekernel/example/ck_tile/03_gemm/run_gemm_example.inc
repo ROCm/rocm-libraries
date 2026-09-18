@@ -5,6 +5,7 @@
 #include "ck_tile/host/permute_pk_int4.hpp"
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "ck_tile/ops/common/utils.hpp"
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
 
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
@@ -222,7 +223,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                                   const BLayout b_layout                  = BLayout{},
                                   [[maybe_unused]] const CLayout c_layout = CLayout{})
 {
-    // Use GemmTypeConfig to get actual data types for tensor operations
+
     using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType_>;
     using ADataTypeBuf = typename TypeConfig::ADataType;
     using BDataTypeBuf = typename TypeConfig::BDataType;
@@ -304,7 +305,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                 return ck_tile::shuffle_b_v0<GemmConfig>(b_k_n);
             }
         }();
-        // shuffled buffer B for device implementation
+
         if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
         {
             ck_tile::permute_vectors_i4x4_b(b_shuffle_host);
@@ -347,31 +348,42 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-    float ave_time = invoke_gemm<GemmConfig,
-                                 Invoker,
-                                 ADataTypeBuf,
-                                 BDataTypeBuf,
-                                 ck_tile::tuple<>,
-                                 AccDataType,
-                                 CDataType,
-                                 ALayout,
-                                 BLayout,
-                                 ck_tile::tuple<>,
-                                 CLayout>(a_m_k_dev_buf,
-                                          b_k_n_dev_buf,
-                                          c_m_n_dev_buf,
-                                          M,
-                                          N,
-                                          K,
-                                          stride_A,
-                                          stride_B,
-                                          stride_C,
-                                          kbatch,
-                                          n_warmup,
-                                          n_repeat,
-                                          persistent,
-                                          flush_cache,
-                                          rotating_count);
+    auto invoke = [&]<typename Cfg>() {
+        return invoke_gemm<Cfg,
+                           Invoker,
+                           ADataTypeBuf,
+                           BDataTypeBuf,
+                           ck_tile::tuple<>,
+                           AccDataType,
+                           CDataType,
+                           ALayout,
+                           BLayout,
+                           ck_tile::tuple<>,
+                           CLayout>(a_m_k_dev_buf,
+                                    b_k_n_dev_buf,
+                                    c_m_n_dev_buf,
+                                    M,
+                                    N,
+                                    K,
+                                    stride_A,
+                                    stride_B,
+                                    stride_C,
+                                    kbatch,
+                                    n_warmup,
+                                    n_repeat,
+                                    persistent,
+                                    flush_cache,
+                                    rotating_count);
+    };
+
+    float ave_time = ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
+                                                                    ADataTypeBuf,
+                                                                    BDataTypeBuf,
+                                                                    CDataType,
+                                                                    ALayout,
+                                                                    BLayout,
+                                                                    CLayout>(
+        M, N, K, stride_A, stride_B, stride_C, kbatch, invoke);
 
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
