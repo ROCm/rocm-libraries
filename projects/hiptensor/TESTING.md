@@ -265,7 +265,7 @@ hipTensor's test coverage surface is wide: 6 tensor ranks × multiple data types
 Beyond PR validation, nightly runs add:
 
 - `comprehensive` and `full` tier validation on all supported ASIC targets (gfx908, gfx90a, gfx942, gfx950, gfx11xx, gfx12xx).
-- Benchmark runs (`ctest -L '^bench$'` from `<prefix>/bin/hiptensor`) with 5 hot runs; results retained for manual comparison. The `scripts/performance/Benchmark*.sh` scripts are an alternative for running benchmarks outside CTest.
+- Benchmark runs (`ctest` from `<prefix>/bin/hiptensor/bench`) with 5 hot runs and validation off (`-v OFF`); results retained for manual comparison. The `scripts/performance/Benchmark*.sh` scripts are an alternative for running benchmarks outside CTest.
 - FFM simulator full suite (`ffm-full`) for pre-silicon targets.
 - Cross-component smoke: downstream consumers (e.g., libraries built on top of hipTensor) are validated separately by those components' nightly suites.
 
