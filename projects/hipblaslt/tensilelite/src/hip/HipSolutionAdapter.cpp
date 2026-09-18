@@ -571,7 +571,7 @@ namespace TensileLite
             }
 
 #ifdef HIP_HAS_CLUSTER_LAUNCH
-            bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
+            const bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
 #else
             const bool enableCluster = false;
 #endif

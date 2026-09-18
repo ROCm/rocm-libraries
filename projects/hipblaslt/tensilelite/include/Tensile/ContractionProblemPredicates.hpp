@@ -1681,10 +1681,19 @@ namespace TensileLite
                     return (numerator + denominator - 1) / denominator;
                 }
 
-                // Mirrors ContractionProblemGemm::getNumTiles(sizeMapping, 1),
-                // the count solve() uses to build the fallback grid. Kept
-                // separate because a predicate is handed MacroTile0/MacroTile1
-                // as its value rather than the solution's sizeMapping.
+                // The count solve() builds the fallback grid from is
+                // ContractionProblemGemm::getNumTiles(sizeMapping, 1). This is
+                // computed separately because a predicate is handed
+                // MacroTile0/MacroTile1 as its value rather than the solution's
+                // sizeMapping, and it agrees with getNumTiles only for the
+                // single-free-index, unpacked-batch case. getNumTiles multiplies
+                // over every free and batch index and, when packBatchDims is set,
+                // folds batch into the M or N extent before dividing by the macro
+                // tile; this uses index 0 of each and multiplies batch in
+                // afterwards. WorkgroupNumberCheck makes the same simplification,
+                // so the two predicates agree with each other on every shape;
+                // revisit both together if a multi-free-index or packed-batch
+                // contraction ever has to be bounded here.
                 static size_t tiles(ContractionProblemGemm const& problem,
                                     std::array<int, 2> const&     value)
                 {
