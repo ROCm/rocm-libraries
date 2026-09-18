@@ -146,12 +146,6 @@ endif()
 add_executable(tensilelite-client "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 target_link_libraries(tensilelite-client PRIVATE tensilelite-client-common)
 
-# Emit RPATH instead of RUNPATH. RUNPATH is searched after LD_LIBRARY_PATH, so a
-# hipBLASLt installed under ${ROCM_PATH}/lib silently shadows the freshly built
-# libtensilelite-host and the client then reads library files with a stale
-# deserializer. RPATH is searched first and keeps the client on its own build.
-target_link_options(tensilelite-client PRIVATE "-Wl,--disable-new-dtags")
-
 add_executable(cpu-gemm-driver "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_driver.cpp")
 target_link_libraries(cpu-gemm-driver PRIVATE tensilelite-client-common)
 
