@@ -223,7 +223,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         "--input",
         required=True,
         help="Training corpus with feature columns and target: the .parquet dataset "
-        "tools/results_import publishes, or a collected .csv/.json corpus",
+        "uhd_gen/dataset publishes, or a collected .csv/.json corpus",
     )
     feature_source = parser.add_mutually_exclusive_group(required=True)
     feature_source.add_argument("--features", nargs="+", help="Full published feature column names")
@@ -451,7 +451,7 @@ def _run_train(args: argparse.Namespace) -> int:
             else:
                 raise ValueError("training requires --descriptor-tree or --provenance")
             # The suffix decides, in `corpus_io.read_corpus_frame` for every command
-            # alike. `.parquet` is what tools/results_import publishes (RFC 0019.13
+            # alike. `.parquet` is what uhd_gen/dataset publishes (RFC 0019.13
             # §8.3) and is the route a model anyone ships should come by: the dataset
             # carries its own types, so a column empty in one shard and populated in
             # another cannot concatenate to `object` and quietly change what the
@@ -676,7 +676,8 @@ def _run_train(args: argparse.Namespace) -> int:
 
     fb_path = output_dir / "model.bin"
     model_sha256 = convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
-                           training_arches=args.training_arches, model_version=args.model_version,
+                           training_arches=args.training_arches,
+                           model_version=args.model_version,
                            group_by_feature_index=group_index,
                            group_models=group_models or None)
     if not args.keep_lgbm:

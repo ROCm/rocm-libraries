@@ -64,17 +64,21 @@ if(Python3_Interpreter_FOUND)
                 ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
         endif()
 
-        # results_import derives RFC 0019.13 §8.3's tflops and gbs from each operation's
-        # declared flops/elements. Registered beside uhd_gen's suite and for the same reason:
-        # a wrong formula or byte width does not raise, it yields a plausible rate, and every
-        # model trained on that corpus ranks by a number wrong by a constant nobody sees.
-        # Needs no ML dependencies -- it is arithmetic over a declaration and a row.
+        # uhd_gen/dataset derives RFC 0019.13 §8.3's tflops and gbs from the flops and bytes
+        # the engine published beside each problem. Registered beside uhd_gen's suite and for
+        # the same reason: a misread count does not raise, it yields a plausible rate, and
+        # every model trained on that corpus ranks by a number wrong by a constant nobody sees.
+        #
+        # Its own add_test even though it is now a subpackage, because the suite above names
+        # uhd_gen/tests and so would not collect it -- and because this one needs no ML
+        # dependencies. It is arithmetic over a declaration and a row, and it stays runnable
+        # on a machine that collects corpora without training on them.
         add_test(
-            NAME results_import_tests
+            NAME uhd_gen_dataset_tests
             COMMAND ${Python3_EXECUTABLE} -m pytest -q
-                    ${CMAKE_CURRENT_SOURCE_DIR}/results_import/tests
+                    ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-        set_tests_properties(results_import_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+        set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
 
         # corpus_build assembles the SDPA graph corpus a UHD is trained on, from the
         # packed kernel geometries, the recorded model shapes and the declared space.
