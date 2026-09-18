@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -9253,7 +9253,11 @@ namespace rocalution
         assert(cast_ff != NULL);
         assert(cast_fc != NULL);
 
-        constexpr int COARSE = 1;
+        // Column indices of A are used to index the row-based C-F and index maps
+        assert(this->nrow_ == this->ncol_);
+
+        constexpr int       COARSE = 1;
+        constexpr ValueType zero   = static_cast<ValueType>(0);
 
         // Fine to coarse and fine to fine index maps
         int nc = 0;
@@ -9298,8 +9302,9 @@ namespace rocalution
                 continue;
             }
 
-            PtrType nnz_ff = 0;
-            PtrType nnz_fc = 0;
+            PtrType nnz_ff   = 0;
+            PtrType nnz_fc   = 0;
+            bool    has_diag = false;
 
             for(PtrType k = this->mat_.row_offset[i]; k < this->mat_.row_offset[i + 1]; ++k)
             {
@@ -9307,6 +9312,7 @@ namespace rocalution
 
                 if(col == i)
                 {
+                    has_diag = true;
                     ++nnz_ff;
                     continue;
                 }
@@ -9324,6 +9330,14 @@ namespace rocalution
                 {
                     ++nnz_ff;
                 }
+            }
+
+            // The F-F block always needs a diagonal slot, because the interpolation
+            // formula turns it into the placeholder that reproduces the direct term.
+            // Reserve one even when A does not store a diagonal on this row.
+            if(has_diag == false)
+            {
+                ++nnz_ff;
             }
 
             cast_ff->mat_.row_offset[cast_f2f->vec_[i] + 1] = nnz_ff;
@@ -9366,6 +9380,19 @@ namespace rocalution
             PtrType idx_ff = cast_ff->mat_.row_offset[frow];
             PtrType idx_fc = cast_fc->mat_.row_offset[frow];
 
+            // Determine whether A stores a diagonal exactly as the counting pass did, so
+            // that both passes agree on the number of diagonal slots for any column order.
+            bool diag_written = false;
+
+            for(PtrType k = this->mat_.row_offset[i]; k < this->mat_.row_offset[i + 1]; ++k)
+            {
+                if(this->mat_.col[k] == i)
+                {
+                    diag_written = true;
+                    break;
+                }
+            }
+
             for(PtrType k = this->mat_.row_offset[i]; k < this->mat_.row_offset[i + 1]; ++k)
             {
                 int col = this->mat_.col[k];
@@ -9391,10 +9418,27 @@ namespace rocalution
                 }
                 else
                 {
+                    // f2f is monotonic, so the diagonal slot belongs ahead of the first
+                    // fine neighbour past i. Placing it here keeps the columns ascending,
+                    // which the subsequent SpGEMM relies on.
+                    if(diag_written == false && col > i)
+                    {
+                        cast_ff->mat_.col[idx_ff] = frow;
+                        cast_ff->mat_.val[idx_ff] = zero;
+                        ++idx_ff;
+                        diag_written = true;
+                    }
+
                     cast_ff->mat_.col[idx_ff] = cast_f2f->vec_[col];
                     cast_ff->mat_.val[idx_ff] = this->mat_.val[k];
                     ++idx_ff;
                 }
+            }
+
+            if(diag_written == false)
+            {
+                cast_ff->mat_.col[idx_ff] = frow;
+                cast_ff->mat_.val[idx_ff] = zero;
             }
         }
 
@@ -9494,30 +9538,28 @@ namespace rocalution
                     continue;
                 }
 
-                ValueType value = D_q[jj];
-
                 // Locate a_{jj,r}, which is the entry that makes this ext+i rather than
-                // plain extended interpolation
-                for(PtrType k = cast_ff->mat_.row_offset[jj];
-                    k < cast_ff->mat_.row_offset[jj + 1];
+                // plain extended interpolation. It stays zero when row jj has no such
+                // entry, which drops the correction term for this neighbour.
+                ValueType value1 = zero;
+
+                for(PtrType k = cast_ff->mat_.row_offset[jj]; k < cast_ff->mat_.row_offset[jj + 1];
                     ++k)
                 {
-                    if(cast_ff->mat_.col[k] == jj)
-                    {
-                        continue;
-                    }
-
                     if(cast_ff->mat_.col[k] == r)
                     {
-                        ValueType value1 = tmp[k];
-                        value += value1;
-                        D_theta[r] += cast_ff->mat_.val[j] * value1 / value;
+                        value1 = tmp[k];
                         break;
                     }
                 }
 
+                ValueType value = D_q[jj] + value1;
+
+                // A vanishing denominator leaves the coupling out of both the correction
+                // and the scaling, rather than turning the whole row into a NaN
                 if(value != zero)
                 {
+                    D_theta[r] += cast_ff->mat_.val[j] * value1 / value;
                     cast_ff->mat_.val[j] /= value;
                 }
             }
@@ -9539,15 +9581,14 @@ namespace rocalution
         {
             ValueType theta = D_theta[r] + D_w[r];
 
-            if(theta != zero)
-            {
-                theta = static_cast<ValueType>(-1) / theta;
+            // A degenerate denominator leaves the weights undefined. Zeroing row r of the
+            // F-F block makes row r of the product vanish, so the fine point gets no
+            // coarse-grid correction rather than an arbitrary unnormalised one.
+            theta = (theta != zero) ? static_cast<ValueType>(-1) / theta : zero;
 
-                for(PtrType j = cast_ff->mat_.row_offset[r]; j < cast_ff->mat_.row_offset[r + 1];
-                    ++j)
-                {
-                    cast_ff->mat_.val[j] *= theta;
-                }
+            for(PtrType j = cast_ff->mat_.row_offset[r]; j < cast_ff->mat_.row_offset[r + 1]; ++j)
+            {
+                cast_ff->mat_.val[j] *= theta;
             }
         }
 
@@ -9604,8 +9645,10 @@ namespace rocalution
         // Magnitudes are real even when the values are complex
         typedef numeric_traits_t<ValueType> RealType;
 
-        // Which entries of each row survive
-        std::vector<bool> keep(this->nnz_, true);
+        // Which entries of each row survive. This must not be std::vector<bool>: that
+        // packs bits, so writes from threads working on adjacent rows would race on a
+        // shared word and lose updates.
+        std::vector<char> keep(this->nnz_, 1);
         std::vector<int>  row_nnz(this->nrow_, 0);
 
 #ifdef _OPENMP
@@ -9647,7 +9690,7 @@ namespace rocalution
 
                         if(std::abs(this->mat_.val[j]) < drop_coeff)
                         {
-                            keep[j] = false;
+                            keep[j] = 0;
                         }
                         else
                         {
@@ -9690,7 +9733,7 @@ namespace rocalution
 
                         for(PtrType j = row_begin; j < row_end; ++j)
                         {
-                            if(keep[j] == false)
+                            if(keep[j] == 0)
                             {
                                 continue;
                             }
@@ -9720,7 +9763,7 @@ namespace rocalution
 
                         for(PtrType j = row_begin; j < row_end; ++j)
                         {
-                            if(keep[j] == false)
+                            if(keep[j] == 0)
                             {
                                 continue;
                             }
@@ -9735,7 +9778,7 @@ namespace rocalution
                             }
                             else
                             {
-                                keep[j] = false;
+                                keep[j] = 0;
                             }
                         }
                     }
@@ -9979,7 +10022,7 @@ namespace rocalution
                                                       const BaseVector<int>&       f2c,
                                                       const BaseVector<int>&       f2f,
                                                       const BaseMatrix<ValueType>& W,
-                                                      BaseMatrix<ValueType>* prolong) const
+                                                      BaseMatrix<ValueType>*       prolong) const
     {
         const HostVector<int>*          cast_cf  = dynamic_cast<const HostVector<int>*>(&CFmap);
         const HostVector<int>*          cast_f2c = dynamic_cast<const HostVector<int>*>(&f2c);
