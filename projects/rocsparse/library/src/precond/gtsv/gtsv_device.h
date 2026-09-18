@@ -138,17 +138,10 @@ namespace rocsparse
     // |0   w21 1   0||v13'|   |0|
     // |0   w22 0   1||v14'|   |1|
 
-    // bidy is the right-hand side handled by this call. The kernel wrapper drives it
-    // from a grid-stride loop so that a grid.y clamped to the hardware maximum still
-    // covers every right-hand side. It is 64 bit because it now ranges over the full
-    // right-hand side count instead of the clamped grid extent, and it scales the
-    // stride and m_pad column offsets.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_DEVICE_ILF void
-        gtsv_transpose_and_pad_array_shared_device(int64_t       bidy,
-                                                   rocsparse_int m,
+        gtsv_transpose_and_pad_array_shared_device(rocsparse_int m,
                                                    rocsparse_int m_pad,
-                                                   rocsparse_int stride,
                                                    const T* __restrict__ input,
                                                    T* __restrict__ output,
                                                    T pad_value)
@@ -164,7 +157,7 @@ namespace rocsparse
 
         if(gidx < m)
         {
-            stile[tidx] = input[gidx + bidy * stride];
+            stile[tidx] = input[gidx];
         }
         else
         {
@@ -178,7 +171,7 @@ namespace rocsparse
 
         if(k < m_pad)
         {
-            output[k + bidy * m_pad] = stile[BLOCKDIM * lid + wid];
+            output[k] = stile[BLOCKDIM * lid + wid];
         }
 
         // The shared tile is still live above; synchronise before a caller looping
@@ -201,7 +194,11 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_transpose_and_pad_array_shared_device<BLOCKSIZE, BLOCKDIM>(
-                bidy, m, m_pad, stride, input, output, pad_value);
+                m,
+                m_pad,
+                load_pointer(input, bidy, stride),
+                load_pointer(output, bidy, m_pad),
+                pad_value);
         }
     }
 
@@ -234,14 +231,9 @@ namespace rocsparse
         }
     }
 
-    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
-    // from a grid-stride loop, and 64 bit because it scales the stride and m_pad
-    // column offsets over the full right-hand side count.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void gtsv_transpose_back_array_device(int64_t       bidy,
-                                                               rocsparse_int m,
+    ROCSPARSE_DEVICE_ILF void gtsv_transpose_back_array_device(rocsparse_int m,
                                                                rocsparse_int m_pad,
-                                                               rocsparse_int stride,
                                                                const T* __restrict__ input,
                                                                T* __restrict__ output)
     {
@@ -256,7 +248,7 @@ namespace rocsparse
 
         if(k < m)
         {
-            output[k + bidy * stride] = input[gidx + bidy * m_pad];
+            output[k] = input[gidx];
         }
     }
 
@@ -272,7 +264,7 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_transpose_back_array_device<BLOCKSIZE, BLOCKDIM>(
-                bidy, m, m_pad, stride, input, output);
+                m, m_pad, load_pointer(input, bidy, m_pad), load_pointer(output, bidy, stride));
         }
     }
 
@@ -424,14 +416,8 @@ namespace rocsparse
         }
     }
 
-    // bidy is the index of the panel of COLS right-hand sides handled by this call.
-    // The kernel wrapper drives it from a grid-stride loop so that a grid.y clamped
-    // to the hardware maximum still covers every panel. It is 64 bit because it now
-    // ranges over the full panel count instead of the clamped grid extent, and it
-    // scales the m_pad stride into rhs.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t COLS, typename T>
-    ROCSPARSE_DEVICE_ILF void gtsv_LBM_rhs_device(int64_t       bidy,
-                                                  rocsparse_int m_pad,
+    ROCSPARSE_DEVICE_ILF void gtsv_LBM_rhs_device(rocsparse_int m_pad,
                                                   rocsparse_int n,
                                                   rocsparse_int ldb,
                                                   const T* __restrict__ a,
@@ -473,94 +459,94 @@ namespace rocsparse
 
                 if(COLS == 8)
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * iBk;
-                    T rhsk_col1 = rhs[k + gid + m_pad * (COLS * bidy + 1)] * iBk;
-                    T rhsk_col2 = rhs[k + gid + m_pad * (COLS * bidy + 2)] * iBk;
-                    T rhsk_col3 = rhs[k + gid + m_pad * (COLS * bidy + 3)] * iBk;
-                    T rhsk_col4 = rhs[k + gid + m_pad * (COLS * bidy + 4)] * iBk;
-                    T rhsk_col5 = rhs[k + gid + m_pad * (COLS * bidy + 5)] * iBk;
-                    T rhsk_col6 = rhs[k + gid + m_pad * (COLS * bidy + 6)] * iBk;
-                    T rhsk_col7 = rhs[k + gid + m_pad * (COLS * bidy + 7)] * iBk;
+                    T rhsk_col0 = rhs[k + gid] * iBk;
+                    T rhsk_col1 = rhs[k + gid + m_pad * 1] * iBk;
+                    T rhsk_col2 = rhs[k + gid + m_pad * 2] * iBk;
+                    T rhsk_col3 = rhs[k + gid + m_pad * 3] * iBk;
+                    T rhsk_col4 = rhs[k + gid + m_pad * 4] * iBk;
+                    T rhsk_col5 = rhs[k + gid + m_pad * 5] * iBk;
+                    T rhsk_col6 = rhs[k + gid + m_pad * 6] * iBk;
+                    T rhsk_col7 = rhs[k + gid + m_pad * 7] * iBk;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)] = rhsk_col0;
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)] = rhsk_col1;
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)] = rhsk_col2;
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)] = rhsk_col3;
-                    rhs[k + gid + m_pad * (COLS * bidy + 4)] = rhsk_col4;
-                    rhs[k + gid + m_pad * (COLS * bidy + 5)] = rhsk_col5;
-                    rhs[k + gid + m_pad * (COLS * bidy + 6)] = rhsk_col6;
-                    rhs[k + gid + m_pad * (COLS * bidy + 7)] = rhsk_col7;
+                    rhs[k + gid]             = rhsk_col0;
+                    rhs[k + gid + m_pad * 1] = rhsk_col1;
+                    rhs[k + gid + m_pad * 2] = rhsk_col2;
+                    rhs[k + gid + m_pad * 3] = rhsk_col3;
+                    rhs[k + gid + m_pad * 4] = rhsk_col4;
+                    rhs[k + gid + m_pad * 5] = rhsk_col5;
+                    rhs[k + gid + m_pad * 6] = rhsk_col6;
+                    rhs[k + gid + m_pad * 7] = rhsk_col7;
 
                     if(k < (BLOCKDIM - 1) * nblocks)
                     {
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                            -ak_1, rhsk_col0, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)] = rocsparse::fma(
-                            -ak_1, rhsk_col1, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)] = rocsparse::fma(
-                            -ak_1, rhsk_col2, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)] = rocsparse::fma(
-                            -ak_1, rhsk_col3, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 4)] = rocsparse::fma(
-                            -ak_1, rhsk_col4, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 4)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 5)] = rocsparse::fma(
-                            -ak_1, rhsk_col5, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 5)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 6)] = rocsparse::fma(
-                            -ak_1, rhsk_col6, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 6)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 7)] = rocsparse::fma(
-                            -ak_1, rhsk_col7, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 7)]);
+                        rhs[k + nblocks + gid]
+                            = rocsparse::fma(-ak_1, rhsk_col0, rhs[k + nblocks + gid]);
+                        rhs[k + nblocks + gid + m_pad * 1]
+                            = rocsparse::fma(-ak_1, rhsk_col1, rhs[k + nblocks + gid + m_pad * 1]);
+                        rhs[k + nblocks + gid + m_pad * 2]
+                            = rocsparse::fma(-ak_1, rhsk_col2, rhs[k + nblocks + gid + m_pad * 2]);
+                        rhs[k + nblocks + gid + m_pad * 3]
+                            = rocsparse::fma(-ak_1, rhsk_col3, rhs[k + nblocks + gid + m_pad * 3]);
+                        rhs[k + nblocks + gid + m_pad * 4]
+                            = rocsparse::fma(-ak_1, rhsk_col4, rhs[k + nblocks + gid + m_pad * 4]);
+                        rhs[k + nblocks + gid + m_pad * 5]
+                            = rocsparse::fma(-ak_1, rhsk_col5, rhs[k + nblocks + gid + m_pad * 5]);
+                        rhs[k + nblocks + gid + m_pad * 6]
+                            = rocsparse::fma(-ak_1, rhsk_col6, rhs[k + nblocks + gid + m_pad * 6]);
+                        rhs[k + nblocks + gid + m_pad * 7]
+                            = rocsparse::fma(-ak_1, rhsk_col7, rhs[k + nblocks + gid + m_pad * 7]);
                     }
                 }
                 else if(COLS == 4)
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * iBk;
-                    T rhsk_col1 = rhs[k + gid + m_pad * (COLS * bidy + 1)] * iBk;
-                    T rhsk_col2 = rhs[k + gid + m_pad * (COLS * bidy + 2)] * iBk;
-                    T rhsk_col3 = rhs[k + gid + m_pad * (COLS * bidy + 3)] * iBk;
+                    T rhsk_col0 = rhs[k + gid] * iBk;
+                    T rhsk_col1 = rhs[k + gid + m_pad * 1] * iBk;
+                    T rhsk_col2 = rhs[k + gid + m_pad * 2] * iBk;
+                    T rhsk_col3 = rhs[k + gid + m_pad * 3] * iBk;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)] = rhsk_col0;
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)] = rhsk_col1;
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)] = rhsk_col2;
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)] = rhsk_col3;
+                    rhs[k + gid]             = rhsk_col0;
+                    rhs[k + gid + m_pad * 1] = rhsk_col1;
+                    rhs[k + gid + m_pad * 2] = rhsk_col2;
+                    rhs[k + gid + m_pad * 3] = rhsk_col3;
 
                     if(k < (BLOCKDIM - 1) * nblocks)
                     {
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                            -ak_1, rhsk_col0, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)] = rocsparse::fma(
-                            -ak_1, rhsk_col1, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)] = rocsparse::fma(
-                            -ak_1, rhsk_col2, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)] = rocsparse::fma(
-                            -ak_1, rhsk_col3, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)]);
+                        rhs[k + nblocks + gid]
+                            = rocsparse::fma(-ak_1, rhsk_col0, rhs[k + nblocks + gid]);
+                        rhs[k + nblocks + gid + m_pad * 1]
+                            = rocsparse::fma(-ak_1, rhsk_col1, rhs[k + nblocks + gid + m_pad * 1]);
+                        rhs[k + nblocks + gid + m_pad * 2]
+                            = rocsparse::fma(-ak_1, rhsk_col2, rhs[k + nblocks + gid + m_pad * 2]);
+                        rhs[k + nblocks + gid + m_pad * 3]
+                            = rocsparse::fma(-ak_1, rhsk_col3, rhs[k + nblocks + gid + m_pad * 3]);
                     }
                 }
                 else if(COLS == 2)
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * iBk;
-                    T rhsk_col1 = rhs[k + gid + m_pad * (COLS * bidy + 1)] * iBk;
+                    T rhsk_col0 = rhs[k + gid] * iBk;
+                    T rhsk_col1 = rhs[k + gid + m_pad * 1] * iBk;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)] = rhsk_col0;
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)] = rhsk_col1;
+                    rhs[k + gid]             = rhsk_col0;
+                    rhs[k + gid + m_pad * 1] = rhsk_col1;
 
                     if(k < (BLOCKDIM - 1) * nblocks)
                     {
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                            -ak_1, rhsk_col0, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]);
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)] = rocsparse::fma(
-                            -ak_1, rhsk_col1, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)]);
+                        rhs[k + nblocks + gid]
+                            = rocsparse::fma(-ak_1, rhsk_col0, rhs[k + nblocks + gid]);
+                        rhs[k + nblocks + gid + m_pad * 1]
+                            = rocsparse::fma(-ak_1, rhsk_col1, rhs[k + nblocks + gid + m_pad * 1]);
                     }
                 }
                 else
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * iBk;
+                    T rhsk_col0 = rhs[k + gid] * iBk;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)] = rhsk_col0;
+                    rhs[k + gid] = rhsk_col0;
 
                     if(k < (BLOCKDIM - 1) * nblocks)
                     {
-                        rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                            -ak_1, rhsk_col0, rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]);
+                        rhs[k + nblocks + gid]
+                            = rocsparse::fma(-ak_1, rhsk_col0, rhs[k + nblocks + gid]);
                     }
                 }
 
@@ -578,78 +564,61 @@ namespace rocsparse
 
                 if(COLS == 8)
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * det;
-                    T rhsk_col1 = rhs[k + gid + m_pad * (COLS * bidy + 1)] * det;
-                    T rhsk_col2 = rhs[k + gid + m_pad * (COLS * bidy + 2)] * det;
-                    T rhsk_col3 = rhs[k + gid + m_pad * (COLS * bidy + 3)] * det;
-                    T rhsk_col4 = rhs[k + gid + m_pad * (COLS * bidy + 4)] * det;
-                    T rhsk_col5 = rhs[k + gid + m_pad * (COLS * bidy + 5)] * det;
-                    T rhsk_col6 = rhs[k + gid + m_pad * (COLS * bidy + 6)] * det;
-                    T rhsk_col7 = rhs[k + gid + m_pad * (COLS * bidy + 7)] * det;
+                    T rhsk_col0 = rhs[k + gid] * det;
+                    T rhsk_col1 = rhs[k + gid + m_pad * 1] * det;
+                    T rhsk_col2 = rhs[k + gid + m_pad * 2] * det;
+                    T rhsk_col3 = rhs[k + gid + m_pad * 3] * det;
+                    T rhsk_col4 = rhs[k + gid + m_pad * 4] * det;
+                    T rhsk_col5 = rhs[k + gid + m_pad * 5] * det;
+                    T rhsk_col6 = rhs[k + gid + m_pad * 6] * det;
+                    T rhsk_col7 = rhs[k + gid + m_pad * 7] * det;
 
-                    T rhsk_1_col0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] * det;
-                    T rhsk_1_col1 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)] * det;
-                    T rhsk_1_col2 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)] * det;
-                    T rhsk_1_col3 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)] * det;
-                    T rhsk_1_col4 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 4)] * det;
-                    T rhsk_1_col5 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 5)] * det;
-                    T rhsk_1_col6 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 6)] * det;
-                    T rhsk_1_col7 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 7)] * det;
+                    T rhsk_1_col0 = rhs[k + nblocks + gid] * det;
+                    T rhsk_1_col1 = rhs[k + nblocks + gid + m_pad * 1] * det;
+                    T rhsk_1_col2 = rhs[k + nblocks + gid + m_pad * 2] * det;
+                    T rhsk_1_col3 = rhs[k + nblocks + gid + m_pad * 3] * det;
+                    T rhsk_1_col4 = rhs[k + nblocks + gid + m_pad * 4] * det;
+                    T rhsk_1_col5 = rhs[k + nblocks + gid + m_pad * 5] * det;
+                    T rhsk_1_col6 = rhs[k + nblocks + gid + m_pad * 6] * det;
+                    T rhsk_1_col7 = rhs[k + nblocks + gid + m_pad * 7] * det;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = (bk_1 * rhsk_col1 - ck * rhsk_1_col1);
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)]
-                        = (bk_1 * rhsk_col2 - ck * rhsk_1_col2);
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)]
-                        = (bk_1 * rhsk_col3 - ck * rhsk_1_col3);
-                    rhs[k + gid + m_pad * (COLS * bidy + 4)]
-                        = (bk_1 * rhsk_col4 - ck * rhsk_1_col4);
-                    rhs[k + gid + m_pad * (COLS * bidy + 5)]
-                        = (bk_1 * rhsk_col5 - ck * rhsk_1_col5);
-                    rhs[k + gid + m_pad * (COLS * bidy + 6)]
-                        = (bk_1 * rhsk_col6 - ck * rhsk_1_col6);
-                    rhs[k + gid + m_pad * (COLS * bidy + 7)]
-                        = (bk_1 * rhsk_col7 - ck * rhsk_1_col7);
+                    rhs[k + gid]             = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
+                    rhs[k + gid + m_pad * 1] = (bk_1 * rhsk_col1 - ck * rhsk_1_col1);
+                    rhs[k + gid + m_pad * 2] = (bk_1 * rhsk_col2 - ck * rhsk_1_col2);
+                    rhs[k + gid + m_pad * 3] = (bk_1 * rhsk_col3 - ck * rhsk_1_col3);
+                    rhs[k + gid + m_pad * 4] = (bk_1 * rhsk_col4 - ck * rhsk_1_col4);
+                    rhs[k + gid + m_pad * 5] = (bk_1 * rhsk_col5 - ck * rhsk_1_col5);
+                    rhs[k + gid + m_pad * 6] = (bk_1 * rhsk_col6 - ck * rhsk_1_col6);
+                    rhs[k + gid + m_pad * 7] = (bk_1 * rhsk_col7 - ck * rhsk_1_col7);
 
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]
-                        = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)]
-                        = (-ak_1 * rhsk_col1 + bk * rhsk_1_col1);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)]
-                        = (-ak_1 * rhsk_col2 + bk * rhsk_1_col2);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)]
-                        = (-ak_1 * rhsk_col3 + bk * rhsk_1_col3);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 4)]
-                        = (-ak_1 * rhsk_col4 + bk * rhsk_1_col4);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 5)]
-                        = (-ak_1 * rhsk_col5 + bk * rhsk_1_col5);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 6)]
-                        = (-ak_1 * rhsk_col6 + bk * rhsk_1_col6);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 7)]
-                        = (-ak_1 * rhsk_col7 + bk * rhsk_1_col7);
+                    rhs[k + nblocks + gid]             = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
+                    rhs[k + nblocks + gid + m_pad * 1] = (-ak_1 * rhsk_col1 + bk * rhsk_1_col1);
+                    rhs[k + nblocks + gid + m_pad * 2] = (-ak_1 * rhsk_col2 + bk * rhsk_1_col2);
+                    rhs[k + nblocks + gid + m_pad * 3] = (-ak_1 * rhsk_col3 + bk * rhsk_1_col3);
+                    rhs[k + nblocks + gid + m_pad * 4] = (-ak_1 * rhsk_col4 + bk * rhsk_1_col4);
+                    rhs[k + nblocks + gid + m_pad * 5] = (-ak_1 * rhsk_col5 + bk * rhsk_1_col5);
+                    rhs[k + nblocks + gid + m_pad * 6] = (-ak_1 * rhsk_col6 + bk * rhsk_1_col6);
+                    rhs[k + nblocks + gid + m_pad * 7] = (-ak_1 * rhsk_col7 + bk * rhsk_1_col7);
 
                     if(k < (BLOCKDIM - 2) * nblocks)
                     {
                         T tmp1 = -(-ak_1 * ak_2);
                         T tmp2 = (bk * ak_2);
 
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 0)]
-                            += tmp1 * rhsk_col0 - tmp2 * rhsk_1_col0;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 1)]
+                        rhs[k + 2 * nblocks + gid] += tmp1 * rhsk_col0 - tmp2 * rhsk_1_col0;
+                        rhs[k + 2 * nblocks + gid + m_pad * 1]
                             += tmp1 * rhsk_col1 - tmp2 * rhsk_1_col1;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 2)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 2]
                             += tmp1 * rhsk_col2 - tmp2 * rhsk_1_col2;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 3)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 3]
                             += tmp1 * rhsk_col3 - tmp2 * rhsk_1_col3;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 4)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 4]
                             += tmp1 * rhsk_col4 - tmp2 * rhsk_1_col4;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 5)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 5]
                             += tmp1 * rhsk_col5 - tmp2 * rhsk_1_col5;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 6)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 6]
                             += tmp1 * rhsk_col6 - tmp2 * rhsk_1_col6;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 7)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 7]
                             += tmp1 * rhsk_col7 - tmp2 * rhsk_1_col7;
 
                         bk_2 = b[k + 2 * nblocks + gid];
@@ -658,46 +627,37 @@ namespace rocsparse
                 }
                 else if(COLS == 4)
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * det;
-                    T rhsk_col1 = rhs[k + gid + m_pad * (COLS * bidy + 1)] * det;
-                    T rhsk_col2 = rhs[k + gid + m_pad * (COLS * bidy + 2)] * det;
-                    T rhsk_col3 = rhs[k + gid + m_pad * (COLS * bidy + 3)] * det;
+                    T rhsk_col0 = rhs[k + gid] * det;
+                    T rhsk_col1 = rhs[k + gid + m_pad * 1] * det;
+                    T rhsk_col2 = rhs[k + gid + m_pad * 2] * det;
+                    T rhsk_col3 = rhs[k + gid + m_pad * 3] * det;
 
-                    T rhsk_1_col0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] * det;
-                    T rhsk_1_col1 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)] * det;
-                    T rhsk_1_col2 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)] * det;
-                    T rhsk_1_col3 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)] * det;
+                    T rhsk_1_col0 = rhs[k + nblocks + gid] * det;
+                    T rhsk_1_col1 = rhs[k + nblocks + gid + m_pad * 1] * det;
+                    T rhsk_1_col2 = rhs[k + nblocks + gid + m_pad * 2] * det;
+                    T rhsk_1_col3 = rhs[k + nblocks + gid + m_pad * 3] * det;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = (bk_1 * rhsk_col1 - ck * rhsk_1_col1);
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)]
-                        = (bk_1 * rhsk_col2 - ck * rhsk_1_col2);
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)]
-                        = (bk_1 * rhsk_col3 - ck * rhsk_1_col3);
+                    rhs[k + gid]             = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
+                    rhs[k + gid + m_pad * 1] = (bk_1 * rhsk_col1 - ck * rhsk_1_col1);
+                    rhs[k + gid + m_pad * 2] = (bk_1 * rhsk_col2 - ck * rhsk_1_col2);
+                    rhs[k + gid + m_pad * 3] = (bk_1 * rhsk_col3 - ck * rhsk_1_col3);
 
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]
-                        = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)]
-                        = (-ak_1 * rhsk_col1 + bk * rhsk_1_col1);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)]
-                        = (-ak_1 * rhsk_col2 + bk * rhsk_1_col2);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)]
-                        = (-ak_1 * rhsk_col3 + bk * rhsk_1_col3);
+                    rhs[k + nblocks + gid]             = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
+                    rhs[k + nblocks + gid + m_pad * 1] = (-ak_1 * rhsk_col1 + bk * rhsk_1_col1);
+                    rhs[k + nblocks + gid + m_pad * 2] = (-ak_1 * rhsk_col2 + bk * rhsk_1_col2);
+                    rhs[k + nblocks + gid + m_pad * 3] = (-ak_1 * rhsk_col3 + bk * rhsk_1_col3);
 
                     if(k < (BLOCKDIM - 2) * nblocks)
                     {
                         T tmp1 = -(-ak_1 * ak_2);
                         T tmp2 = (bk * ak_2);
 
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 0)]
-                            += tmp1 * rhsk_col0 - tmp2 * rhsk_1_col0;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 1)]
+                        rhs[k + 2 * nblocks + gid] += tmp1 * rhsk_col0 - tmp2 * rhsk_1_col0;
+                        rhs[k + 2 * nblocks + gid + m_pad * 1]
                             += tmp1 * rhsk_col1 - tmp2 * rhsk_1_col1;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 2)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 2]
                             += tmp1 * rhsk_col2 - tmp2 * rhsk_1_col2;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 3)]
+                        rhs[k + 2 * nblocks + gid + m_pad * 3]
                             += tmp1 * rhsk_col3 - tmp2 * rhsk_1_col3;
 
                         bk_2 = b[k + 2 * nblocks + gid];
@@ -706,29 +666,24 @@ namespace rocsparse
                 }
                 else if(COLS == 2)
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * det;
-                    T rhsk_col1 = rhs[k + gid + m_pad * (COLS * bidy + 1)] * det;
+                    T rhsk_col0 = rhs[k + gid] * det;
+                    T rhsk_col1 = rhs[k + gid + m_pad * 1] * det;
 
-                    T rhsk_1_col0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] * det;
-                    T rhsk_1_col1 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)] * det;
+                    T rhsk_1_col0 = rhs[k + nblocks + gid] * det;
+                    T rhsk_1_col1 = rhs[k + nblocks + gid + m_pad * 1] * det;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = (bk_1 * rhsk_col1 - ck * rhsk_1_col1);
+                    rhs[k + gid]             = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
+                    rhs[k + gid + m_pad * 1] = (bk_1 * rhsk_col1 - ck * rhsk_1_col1);
 
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]
-                        = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)]
-                        = (-ak_1 * rhsk_col1 + bk * rhsk_1_col1);
+                    rhs[k + nblocks + gid]             = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
+                    rhs[k + nblocks + gid + m_pad * 1] = (-ak_1 * rhsk_col1 + bk * rhsk_1_col1);
 
                     if(k < (BLOCKDIM - 2) * nblocks)
                     {
                         T tmp1 = -(-ak_1 * ak_2);
                         T tmp2 = (bk * ak_2);
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 0)]
-                            += tmp1 * rhsk_col0 - tmp2 * rhsk_1_col0;
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 1)]
+                        rhs[k + 2 * nblocks + gid] += tmp1 * rhsk_col0 - tmp2 * rhsk_1_col0;
+                        rhs[k + 2 * nblocks + gid + m_pad * 1]
                             += tmp1 * rhsk_col1 - tmp2 * rhsk_1_col1;
 
                         bk_2 = b[k + 2 * nblocks + gid];
@@ -737,19 +692,17 @@ namespace rocsparse
                 }
                 else
                 {
-                    T rhsk_col0 = rhs[k + gid + m_pad * (COLS * bidy + 0)] * det;
+                    T rhsk_col0 = rhs[k + gid] * det;
 
-                    T rhsk_1_col0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)] * det;
+                    T rhsk_1_col0 = rhs[k + nblocks + gid] * det;
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
+                    rhs[k + gid] = (bk_1 * rhsk_col0 - ck * rhsk_1_col0);
 
-                    rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)]
-                        = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
+                    rhs[k + nblocks + gid] = (-ak_1 * rhsk_col0 + bk * rhsk_1_col0);
 
                     if(k < (BLOCKDIM - 2) * nblocks)
                     {
-                        rhs[k + 2 * nblocks + gid + m_pad * (COLS * bidy + 0)]
+                        rhs[k + 2 * nblocks + gid]
                             += -(-ak_1 * ak_2) * rhsk_col0 - (bk * ak_2) * rhsk_1_col0;
 
                         bk_2 = b[k + 2 * nblocks + gid];
@@ -779,75 +732,41 @@ namespace rocsparse
 
                 if(COLS == 8)
                 {
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 1)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 2)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 3)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 4)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 4)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 4)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 5)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 5)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 5)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 6)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 6)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 6)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 7)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 7)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 7)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, rhs[k + nblocks + gid], rhs[k + gid]);
+                    rhs[k + gid + m_pad * 1] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 1], rhs[k + gid + m_pad * 1]);
+                    rhs[k + gid + m_pad * 2] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 2], rhs[k + gid + m_pad * 2]);
+                    rhs[k + gid + m_pad * 3] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 3], rhs[k + gid + m_pad * 3]);
+                    rhs[k + gid + m_pad * 4] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 4], rhs[k + gid + m_pad * 4]);
+                    rhs[k + gid + m_pad * 5] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 5], rhs[k + gid + m_pad * 5]);
+                    rhs[k + gid + m_pad * 6] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 6], rhs[k + gid + m_pad * 6]);
+                    rhs[k + gid + m_pad * 7] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 7], rhs[k + gid + m_pad * 7]);
                 }
                 else if(COLS == 4)
                 {
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 1)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 2)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 3)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, rhs[k + nblocks + gid], rhs[k + gid]);
+                    rhs[k + gid + m_pad * 1] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 1], rhs[k + gid + m_pad * 1]);
+                    rhs[k + gid + m_pad * 2] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 2], rhs[k + gid + m_pad * 2]);
+                    rhs[k + gid + m_pad * 3] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 3], rhs[k + gid + m_pad * 3]);
                 }
                 else if(COLS == 2)
                 {
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 1)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, rhs[k + nblocks + gid], rhs[k + gid]);
+                    rhs[k + gid + m_pad * 1] = rocsparse::fma(
+                        mt_tmp, rhs[k + nblocks + gid + m_pad * 1], rhs[k + gid + m_pad * 1]);
                 }
                 else
                 {
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp,
-                                         rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)],
-                                         rhs[k + gid + m_pad * (COLS * bidy + 0)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, rhs[k + nblocks + gid], rhs[k + gid]);
                 }
 
                 k -= nblocks;
@@ -859,97 +778,89 @@ namespace rocsparse
 
                 if(COLS == 8)
                 {
-                    T tmp0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)];
-                    T tmp1 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)];
-                    T tmp2 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)];
-                    T tmp3 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)];
-                    T tmp4 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 4)];
-                    T tmp5 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 5)];
-                    T tmp6 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 6)];
-                    T tmp7 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 7)];
+                    T tmp0 = rhs[k + nblocks + gid];
+                    T tmp1 = rhs[k + nblocks + gid + m_pad * 1];
+                    T tmp2 = rhs[k + nblocks + gid + m_pad * 2];
+                    T tmp3 = rhs[k + nblocks + gid + m_pad * 3];
+                    T tmp4 = rhs[k + nblocks + gid + m_pad * 4];
+                    T tmp5 = rhs[k + nblocks + gid + m_pad * 5];
+                    T tmp6 = rhs[k + nblocks + gid + m_pad * 6];
+                    T tmp7 = rhs[k + nblocks + gid + m_pad * 7];
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = rocsparse::fma(mt_tmp, tmp1, rhs[k + gid + m_pad * (COLS * bidy + 1)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)]
-                        = rocsparse::fma(mt_tmp, tmp2, rhs[k + gid + m_pad * (COLS * bidy + 2)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)]
-                        = rocsparse::fma(mt_tmp, tmp3, rhs[k + gid + m_pad * (COLS * bidy + 3)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 4)]
-                        = rocsparse::fma(mt_tmp, tmp4, rhs[k + gid + m_pad * (COLS * bidy + 4)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 5)]
-                        = rocsparse::fma(mt_tmp, tmp5, rhs[k + gid + m_pad * (COLS * bidy + 5)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 6)]
-                        = rocsparse::fma(mt_tmp, tmp6, rhs[k + gid + m_pad * (COLS * bidy + 6)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 7)]
-                        = rocsparse::fma(mt_tmp, tmp7, rhs[k + gid + m_pad * (COLS * bidy + 7)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid]);
+                    rhs[k + gid + m_pad * 1]
+                        = rocsparse::fma(mt_tmp, tmp1, rhs[k + gid + m_pad * 1]);
+                    rhs[k + gid + m_pad * 2]
+                        = rocsparse::fma(mt_tmp, tmp2, rhs[k + gid + m_pad * 2]);
+                    rhs[k + gid + m_pad * 3]
+                        = rocsparse::fma(mt_tmp, tmp3, rhs[k + gid + m_pad * 3]);
+                    rhs[k + gid + m_pad * 4]
+                        = rocsparse::fma(mt_tmp, tmp4, rhs[k + gid + m_pad * 4]);
+                    rhs[k + gid + m_pad * 5]
+                        = rocsparse::fma(mt_tmp, tmp5, rhs[k + gid + m_pad * 5]);
+                    rhs[k + gid + m_pad * 6]
+                        = rocsparse::fma(mt_tmp, tmp6, rhs[k + gid + m_pad * 6]);
+                    rhs[k + gid + m_pad * 7]
+                        = rocsparse::fma(mt_tmp, tmp7, rhs[k + gid + m_pad * 7]);
 
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                        mt_tmp1, tmp0, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 1)] = rocsparse::fma(
-                        mt_tmp1, tmp1, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 1)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 2)] = rocsparse::fma(
-                        mt_tmp1, tmp2, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 2)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 3)] = rocsparse::fma(
-                        mt_tmp1, tmp3, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 3)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 4)] = rocsparse::fma(
-                        mt_tmp1, tmp4, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 4)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 5)] = rocsparse::fma(
-                        mt_tmp1, tmp5, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 5)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 6)] = rocsparse::fma(
-                        mt_tmp1, tmp6, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 6)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 7)] = rocsparse::fma(
-                        mt_tmp1, tmp7, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 7)]);
+                    rhs[k - nblocks + gid] = rocsparse::fma(mt_tmp1, tmp0, rhs[k - nblocks + gid]);
+                    rhs[k - nblocks + gid + m_pad * 1]
+                        = rocsparse::fma(mt_tmp1, tmp1, rhs[k - nblocks + gid + m_pad * 1]);
+                    rhs[k - nblocks + gid + m_pad * 2]
+                        = rocsparse::fma(mt_tmp1, tmp2, rhs[k - nblocks + gid + m_pad * 2]);
+                    rhs[k - nblocks + gid + m_pad * 3]
+                        = rocsparse::fma(mt_tmp1, tmp3, rhs[k - nblocks + gid + m_pad * 3]);
+                    rhs[k - nblocks + gid + m_pad * 4]
+                        = rocsparse::fma(mt_tmp1, tmp4, rhs[k - nblocks + gid + m_pad * 4]);
+                    rhs[k - nblocks + gid + m_pad * 5]
+                        = rocsparse::fma(mt_tmp1, tmp5, rhs[k - nblocks + gid + m_pad * 5]);
+                    rhs[k - nblocks + gid + m_pad * 6]
+                        = rocsparse::fma(mt_tmp1, tmp6, rhs[k - nblocks + gid + m_pad * 6]);
+                    rhs[k - nblocks + gid + m_pad * 7]
+                        = rocsparse::fma(mt_tmp1, tmp7, rhs[k - nblocks + gid + m_pad * 7]);
                 }
                 else if(COLS == 4)
                 {
-                    T tmp0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)];
-                    T tmp1 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)];
-                    T tmp2 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 2)];
-                    T tmp3 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 3)];
+                    T tmp0 = rhs[k + nblocks + gid];
+                    T tmp1 = rhs[k + nblocks + gid + m_pad * 1];
+                    T tmp2 = rhs[k + nblocks + gid + m_pad * 2];
+                    T tmp3 = rhs[k + nblocks + gid + m_pad * 3];
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = rocsparse::fma(mt_tmp, tmp1, rhs[k + gid + m_pad * (COLS * bidy + 1)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 2)]
-                        = rocsparse::fma(mt_tmp, tmp2, rhs[k + gid + m_pad * (COLS * bidy + 2)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 3)]
-                        = rocsparse::fma(mt_tmp, tmp3, rhs[k + gid + m_pad * (COLS * bidy + 3)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid]);
+                    rhs[k + gid + m_pad * 1]
+                        = rocsparse::fma(mt_tmp, tmp1, rhs[k + gid + m_pad * 1]);
+                    rhs[k + gid + m_pad * 2]
+                        = rocsparse::fma(mt_tmp, tmp2, rhs[k + gid + m_pad * 2]);
+                    rhs[k + gid + m_pad * 3]
+                        = rocsparse::fma(mt_tmp, tmp3, rhs[k + gid + m_pad * 3]);
 
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                        mt_tmp1, tmp0, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 1)] = rocsparse::fma(
-                        mt_tmp1, tmp1, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 1)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 2)] = rocsparse::fma(
-                        mt_tmp1, tmp2, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 2)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 3)] = rocsparse::fma(
-                        mt_tmp1, tmp3, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 3)]);
+                    rhs[k - nblocks + gid] = rocsparse::fma(mt_tmp1, tmp0, rhs[k - nblocks + gid]);
+                    rhs[k - nblocks + gid + m_pad * 1]
+                        = rocsparse::fma(mt_tmp1, tmp1, rhs[k - nblocks + gid + m_pad * 1]);
+                    rhs[k - nblocks + gid + m_pad * 2]
+                        = rocsparse::fma(mt_tmp1, tmp2, rhs[k - nblocks + gid + m_pad * 2]);
+                    rhs[k - nblocks + gid + m_pad * 3]
+                        = rocsparse::fma(mt_tmp1, tmp3, rhs[k - nblocks + gid + m_pad * 3]);
                 }
                 else if(COLS == 2)
                 {
-                    T tmp0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)];
-                    T tmp1 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 1)];
+                    T tmp0 = rhs[k + nblocks + gid];
+                    T tmp1 = rhs[k + nblocks + gid + m_pad * 1];
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k + gid + m_pad * (COLS * bidy + 1)]
-                        = rocsparse::fma(mt_tmp, tmp1, rhs[k + gid + m_pad * (COLS * bidy + 1)]);
+                    rhs[k + gid] = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid]);
+                    rhs[k + gid + m_pad * 1]
+                        = rocsparse::fma(mt_tmp, tmp1, rhs[k + gid + m_pad * 1]);
 
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                        mt_tmp1, tmp0, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 1)] = rocsparse::fma(
-                        mt_tmp1, tmp1, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 1)]);
+                    rhs[k - nblocks + gid] = rocsparse::fma(mt_tmp1, tmp0, rhs[k - nblocks + gid]);
+                    rhs[k - nblocks + gid + m_pad * 1]
+                        = rocsparse::fma(mt_tmp1, tmp1, rhs[k - nblocks + gid + m_pad * 1]);
                 }
                 else
                 {
-                    T tmp0 = rhs[k + nblocks + gid + m_pad * (COLS * bidy + 0)];
+                    T tmp0 = rhs[k + nblocks + gid];
 
-                    rhs[k + gid + m_pad * (COLS * bidy + 0)]
-                        = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid + m_pad * (COLS * bidy + 0)]);
-                    rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)] = rocsparse::fma(
-                        mt_tmp1, tmp0, rhs[k - nblocks + gid + m_pad * (COLS * bidy + 0)]);
+                    rhs[k + gid]           = rocsparse::fma(mt_tmp, tmp0, rhs[k + gid]);
+                    rhs[k - nblocks + gid] = rocsparse::fma(mt_tmp1, tmp0, rhs[k - nblocks + gid]);
                 }
 
                 k -= 2 * nblocks;
@@ -977,16 +888,23 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < npanels; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_LBM_rhs_device<BLOCKSIZE, BLOCKDIM, COLS>(
-                bidy, m_pad, n, ldb, a, b, c, rhs, mt, pivot);
+                m_pad,
+                n,
+                ldb,
+                a,
+                b,
+                c,
+                load_pointer(rhs, bidy, static_cast<int64_t>(m_pad) * COLS),
+                mt,
+                pivot);
         }
     }
 
-    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
-    // from a grid-stride loop, and 64 bit because it scales the m_pad and
-    // 2 * hipGridDim_x column offsets over the full right-hand side count.
+    // write_shared_spikes selects the right-hand side independent part of the work:
+    // w2, v2, w_scratch and v_scratch hold the reduced spike system alone, so exactly
+    // one call of a grid-stride loop over the right-hand sides must write them.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void gtsv_spike_block_level_device(int64_t       bidy,
-                                                            rocsparse_int m_pad,
+    ROCSPARSE_DEVICE_ILF void gtsv_spike_block_level_device(rocsparse_int m_pad,
                                                             rocsparse_int n,
                                                             rocsparse_int ldb,
                                                             T* __restrict__ rhs,
@@ -996,7 +914,8 @@ namespace rocsparse
                                                             T* __restrict__ v2,
                                                             T* __restrict__ rhs_scratch,
                                                             T* __restrict__ w_scratch,
-                                                            T* __restrict__ v_scratch)
+                                                            T* __restrict__ v_scratch,
+                                                            bool write_shared_spikes)
     {
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
@@ -1016,10 +935,9 @@ namespace rocsparse
         sv[tidx + BLOCKSIZE]
             = (gid < nblocks) ? v[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
-        srhs[tidx]             = (gid < nblocks) ? rhs[gid + m_pad * bidy] : static_cast<T>(0);
-        srhs[tidx + BLOCKSIZE] = (gid < nblocks)
-                                     ? rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
-                                     : static_cast<T>(0);
+        srhs[tidx] = (gid < nblocks) ? rhs[gid] : static_cast<T>(0);
+        srhs[tidx + BLOCKSIZE]
+            = (gid < nblocks) ? rhs[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
         __syncthreads();
 
@@ -1064,7 +982,7 @@ namespace rocsparse
 
         if(gid < nblocks)
         {
-            if(bidy == 0)
+            if(write_shared_spikes)
             {
                 w2[gid]                            = sw[tidx];
                 w2[gid + (BLOCKDIM - 1) * nblocks] = sw[tidx + BLOCKSIZE];
@@ -1072,13 +990,13 @@ namespace rocsparse
                 v2[gid + (BLOCKDIM - 1) * nblocks] = sv[tidx + BLOCKSIZE];
             }
 
-            rhs[gid + m_pad * bidy]                            = srhs[tidx];
-            rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy] = srhs[tidx + BLOCKSIZE];
+            rhs[gid]                            = srhs[tidx];
+            rhs[gid + (BLOCKDIM - 1) * nblocks] = srhs[tidx + BLOCKSIZE];
         }
 
         if(tidx == 0)
         {
-            if(bidy == 0)
+            if(write_shared_spikes)
             {
                 w_scratch[bidx]                = sw[0];
                 w_scratch[hipGridDim_x + bidx] = sw[2 * BLOCKSIZE - 1];
@@ -1087,8 +1005,8 @@ namespace rocsparse
                 v_scratch[hipGridDim_x + bidx] = sv[2 * BLOCKSIZE - 1];
             }
 
-            rhs_scratch[bidx + 2 * hipGridDim_x * bidy]                = srhs[0];
-            rhs_scratch[hipGridDim_x + bidx + 2 * hipGridDim_x * bidy] = srhs[2 * BLOCKSIZE - 1];
+            rhs_scratch[bidx]                = srhs[0];
+            rhs_scratch[hipGridDim_x + bidx] = srhs[2 * BLOCKSIZE - 1];
         }
 
         // The shared spike tiles are still live above; synchronise before a caller
@@ -1115,16 +1033,23 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_spike_block_level_device<BLOCKSIZE, BLOCKDIM>(
-                bidy, m_pad, n, ldb, rhs, w, v, w2, v2, rhs_scratch, w_scratch, v_scratch);
+                m_pad,
+                n,
+                ldb,
+                load_pointer(rhs, bidy, m_pad),
+                w,
+                v,
+                w2,
+                v2,
+                load_pointer(rhs_scratch, bidy, 2 * hipGridDim_x),
+                w_scratch,
+                v_scratch,
+                bidy == 0);
         }
     }
 
-    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
-    // from a grid-stride loop, and 64 bit because it scales the 2 * BLOCKSIZE scratch
-    // offset over the full right-hand side count.
     template <uint32_t BLOCKSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void gtsv_solve_spike_grid_level_device(int64_t       bidy,
-                                                                 rocsparse_int m_pad,
+    ROCSPARSE_DEVICE_ILF void gtsv_solve_spike_grid_level_device(rocsparse_int m_pad,
                                                                  rocsparse_int n,
                                                                  rocsparse_int ldb,
                                                                  T* __restrict__ rhs_scratch,
@@ -1141,8 +1066,8 @@ namespace rocsparse
         sw[tidx + BLOCKSIZE]   = w_scratch[tidx + BLOCKSIZE];
         sv[tidx]               = v_scratch[tidx];
         sv[tidx + BLOCKSIZE]   = v_scratch[tidx + BLOCKSIZE];
-        srhs[tidx]             = rhs_scratch[tidx + 2 * BLOCKSIZE * bidy];
-        srhs[tidx + BLOCKSIZE] = rhs_scratch[tidx + BLOCKSIZE + 2 * BLOCKSIZE * bidy];
+        srhs[tidx]             = rhs_scratch[tidx];
+        srhs[tidx + BLOCKSIZE] = rhs_scratch[tidx + BLOCKSIZE];
 
         __syncthreads();
 
@@ -1212,8 +1137,8 @@ namespace rocsparse
             __syncthreads();
         }
 
-        rhs_scratch[tidx + 2 * BLOCKSIZE * bidy]             = srhs[tidx];
-        rhs_scratch[tidx + BLOCKSIZE + 2 * BLOCKSIZE * bidy] = srhs[tidx + BLOCKSIZE];
+        rhs_scratch[tidx]             = srhs[tidx];
+        rhs_scratch[tidx + BLOCKSIZE] = srhs[tidx + BLOCKSIZE];
 
         // The shared spike tiles are still live above; synchronise before a caller
         // looping over right-hand sides reloads them.
@@ -1234,16 +1159,17 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_solve_spike_grid_level_device<BLOCKSIZE>(
-                bidy, m_pad, n, ldb, rhs_scratch, w_scratch, v_scratch);
+                m_pad,
+                n,
+                ldb,
+                load_pointer(rhs_scratch, bidy, 2 * BLOCKSIZE),
+                w_scratch,
+                v_scratch);
         }
     }
 
-    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
-    // from a grid-stride loop, and 64 bit because it scales the m_pad and
-    // 2 * hipGridDim_x column offsets over the full right-hand side count.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void gtsv_solve_spike_propagate_device(int64_t       bidy,
-                                                                rocsparse_int m_pad,
+    ROCSPARSE_DEVICE_ILF void gtsv_solve_spike_propagate_device(rocsparse_int m_pad,
                                                                 rocsparse_int n,
                                                                 rocsparse_int ldb,
                                                                 T* __restrict__ rhs,
@@ -1269,23 +1195,20 @@ namespace rocsparse
         sv[tidx + BLOCKSIZE]
             = (gid < nblocks) ? v[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
 
-        srhs[tidx + 1] = (gid < nblocks) ? rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
-                                         : static_cast<T>(0);
-        srhs[tidx + 1 + BLOCKSIZE] = (gid < nblocks) ? rhs[gid + m_pad * bidy] : static_cast<T>(0);
+        srhs[tidx + 1] = (gid < nblocks) ? rhs[gid + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
+        srhs[tidx + 1 + BLOCKSIZE] = (gid < nblocks) ? rhs[gid] : static_cast<T>(0);
 
         __syncthreads();
 
         // load in boundary values from scratch pad
         if(tidx == 0)
         {
-            srhs[0] = (bidx > 0) ? rhs_scratch[bidx + hipGridDim_x - 1 + 2 * hipGridDim_x * bidy]
-                                 : static_cast<T>(0);
-            srhs[2 * BLOCKSIZE + 1] = (bidx < hipGridDim_x - 1)
-                                          ? rhs_scratch[bidx + 1 + 2 * hipGridDim_x * bidy]
-                                          : static_cast<T>(0);
+            srhs[0] = (bidx > 0) ? rhs_scratch[bidx + hipGridDim_x - 1] : static_cast<T>(0);
+            srhs[2 * BLOCKSIZE + 1]
+                = (bidx < hipGridDim_x - 1) ? rhs_scratch[bidx + 1] : static_cast<T>(0);
 
-            srhs[BLOCKSIZE + 1] = rhs_scratch[bidx + 2 * hipGridDim_x * bidy];
-            srhs[BLOCKSIZE]     = rhs_scratch[bidx + hipGridDim_x + 2 * hipGridDim_x * bidy];
+            srhs[BLOCKSIZE + 1] = rhs_scratch[bidx];
+            srhs[BLOCKSIZE]     = rhs_scratch[bidx + hipGridDim_x];
         }
 
         __syncthreads();
@@ -1316,8 +1239,8 @@ namespace rocsparse
 
         if(gid < nblocks)
         {
-            rhs[gid + m_pad * bidy]                            = srhs[tidx + 1 + BLOCKSIZE];
-            rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy] = srhs[tidx + 1];
+            rhs[gid]                            = srhs[tidx + 1 + BLOCKSIZE];
+            rhs[gid + (BLOCKDIM - 1) * nblocks] = srhs[tidx + 1];
         }
 
         // The shared spike tiles are still live above; synchronise before a caller
@@ -1340,16 +1263,18 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_solve_spike_propagate_device<BLOCKSIZE, BLOCKDIM>(
-                bidy, m_pad, n, ldb, rhs, w, v, rhs_scratch);
+                m_pad,
+                n,
+                ldb,
+                load_pointer(rhs, bidy, m_pad),
+                w,
+                v,
+                load_pointer(rhs_scratch, bidy, 2 * hipGridDim_x));
         }
     }
 
-    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
-    // from a grid-stride loop, and 64 bit because it scales the m_pad column offset
-    // over the full right-hand side count.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void gtsv_spike_backward_substitution_device(int64_t       bidy,
-                                                                      rocsparse_int m_pad,
+    ROCSPARSE_DEVICE_ILF void gtsv_spike_backward_substitution_device(rocsparse_int m_pad,
                                                                       rocsparse_int n,
                                                                       rocsparse_int ldb,
                                                                       T* __restrict__ rhs,
@@ -1367,16 +1292,13 @@ namespace rocsparse
             return;
         }
 
-        T tmp1 = (gid > 0) ? rhs[gid - 1 + (BLOCKDIM - 1) * nblocks + m_pad * bidy]
-                           : static_cast<T>(0);
-        T tmp2 = (gid + BLOCKDIM < m_pad) ? rhs[gid + 1 + m_pad * bidy] : static_cast<T>(0);
+        T tmp1 = (gid > 0) ? rhs[gid - 1 + (BLOCKDIM - 1) * nblocks] : static_cast<T>(0);
+        T tmp2 = (gid + BLOCKDIM < m_pad) ? rhs[gid + 1] : static_cast<T>(0);
 
         for(rocsparse_int i = 1; i < BLOCKDIM - 1; i++)
         {
-            rhs[gid + i * nblocks + m_pad * bidy]
-                = rhs[gid + i * nblocks + m_pad * bidy] - w[gid + i * nblocks] * tmp1;
-            rhs[gid + i * nblocks + m_pad * bidy]
-                = rhs[gid + i * nblocks + m_pad * bidy] - v[gid + i * nblocks] * tmp2;
+            rhs[gid + i * nblocks] = rhs[gid + i * nblocks] - w[gid + i * nblocks] * tmp1;
+            rhs[gid + i * nblocks] = rhs[gid + i * nblocks] - v[gid + i * nblocks] * tmp2;
         }
     }
 
@@ -1392,7 +1314,7 @@ namespace rocsparse
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_spike_backward_substitution_device<BLOCKSIZE, BLOCKDIM>(
-                bidy, m_pad, n, ldb, rhs, w, v);
+                m_pad, n, ldb, load_pointer(rhs, bidy, m_pad), w, v);
         }
     }
 }
