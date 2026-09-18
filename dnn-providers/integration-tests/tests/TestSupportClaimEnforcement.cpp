@@ -169,6 +169,33 @@ protected:
         drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
     }
 
+    // The same run under report mode: identical query, identical verdicts, but a
+    // broken claim is counted rather than failed. Deliberately shares run()'s wiring
+    // so a difference between the two can only come from the policy.
+    void runReporting(VerificationMode mode,
+                      SupportObservation observation,
+                      bool includeGoldenOutput,
+                      bool engineSucceeds,
+                      ::testing::TestPartResultArray* results)
+    {
+        using ::testing::_;
+        using ::testing::Return;
+
+        ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+            .WillByDefault(Return(std::move(observation)));
+        testing_support::engineWrites(_mocks.engineRunner,
+                                      &fixtures::writeOutput,
+                                      engineSucceeds ? fixtures::K_OUTPUT_VALUE
+                                                     : fixtures::K_OUTPUT_VALUE + 100.0f);
+
+        IntegrationBundleVerificationHarness harness(
+            _mocks.dependencies(testing_support::hostPolicy(mode,
+                                                            /*enforceSupportClaims=*/false,
+                                                            /*reportSupportClaims=*/true)),
+            makeEngineUnderTest());
+        drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
+    }
+
     // The single verdict recorded for this run, for tests that care which one it is.
     static SupportVerdict onlyVerdict(const std::vector<SupportResult>& verdicts)
     {
@@ -720,6 +747,133 @@ TEST_F(TestSupportClaimEnforcement, AThrowOnTheWayToTheCommitStillPublishesTheVe
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("stub: harness bug mid-run"),
               std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Report mode: the same query, the same verdicts, and no test failure.
+//
+// Each of these inverts the enforcement test directly above it in the file. The
+// input is identical and only the policy differs, so a disagreement between the
+// pair can only come from the predicate split -- which is the whole mechanism
+// report mode is made of. Asserting that the verdict is still published matters
+// as much as asserting that nothing failed: a mode that stayed green by skipping
+// the query would pass a bare `anyFailed` check and print an empty summary, which
+// is the one outcome that makes the mode pointless.
+// ---------------------------------------------------------------------------
+
+// Inverts BrokenClaimFailsBeforeReachingTheEngine. Enforcement stops there and
+// substitutes the claim failure for the verification; report mode records the
+// same verdict and lets the graph run, because a claim the engine has stopped
+// honouring says nothing about whether the comparison still passes.
+TEST_F(TestSupportClaimEnforcement, ReportModeCountsABrokenClaimWithoutFailing)
+{
+    using ::testing::_;
+
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    // The inversion: enforcement asserts Times(0) on this exact call.
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
+
+    runReporting(VerificationMode::AUTO,
+                 observed({makeVerdict(SupportVerdict::CLAIM_BROKEN)}),
+                 /*includeGoldenOutput=*/true,
+                 /*engineSucceeds=*/true,
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+
+    // A passing run must not launder the verdict. finalizeClaims() only rewrites
+    // CLAIM_ACCEPTED and UNCLAIMED_SUPPORT, so this survives to the summary's
+    // failure section -- which is the number the measurement is after.
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_EQ(verdicts.front().verdict, SupportVerdict::CLAIM_BROKEN);
+}
+
+// Inverts ErroredQueryFailsBeforeReachingTheEngine. A query that could not be
+// answered is counted the same way -- it is still a cell the ladder cannot rest
+// on, and still not a reason to turn the lane red while it is being counted.
+TEST_F(TestSupportClaimEnforcement, ReportModeCountsAnErroredQueryWithoutFailing)
+{
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    runReporting(VerificationMode::AUTO,
+                 observed({makeVerdict(SupportVerdict::QUERY_ERRORED)}),
+                 /*includeGoldenOutput=*/true,
+                 /*engineSucceeds=*/true,
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_EQ(verdicts.size(), 1u);
+    EXPECT_EQ(verdicts.front().verdict, SupportVerdict::QUERY_ERRORED);
+}
+
+// Inverts UnqueriedSidecarFailsTheRun, and pins the one place report mode had to
+// demote an existing ADD_FAILURE rather than just skip one: the gap is recorded
+// identically, so the counters predict what enforcement would see, but it is a
+// warning on stderr instead of a failed test.
+TEST_F(TestSupportClaimEnforcement, ReportModeRecordsAnUnqueriedSidecarWithoutFailing)
+{
+    ::testing::TestPartResultArray results;
+    std::vector<CoverageUpdate> coverage;
+    testing_support::captureCoverage(_mocks.reporter, coverage);
+
+    runReporting(VerificationMode::AUTO,
+                 SupportObservation{SidecarState::NONE, {}},
+                 /*includeGoldenOutput=*/true,
+                 /*engineSucceeds=*/true,
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    ASSERT_EQ(coverage.size(), 1u);
+    EXPECT_FALSE(coverage.front().queried);
+    EXPECT_TRUE(coverage.front().missedQuery)
+        << "report mode must arrive at enforcement's counters, or it cannot predict it";
+}
+
+// Inverts AcceptedBecomesConfirmedWhenTheRunPasses. Report mode does not stop at
+// the query: the run still happens and the two-phase commit still promotes. That
+// distinction is the whole point of the measurement -- accepted means the engine
+// advertises support, confirmed means the run reached the declared depth -- so a
+// report mode that only ever emitted CLAIM_ACCEPTED would answer the wrong
+// question.
+TEST_F(TestSupportClaimEnforcement, ReportModeStillPromotesAnAcceptedClaimToConfirmed)
+{
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    runReporting(VerificationMode::GOLDEN,
+                 observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+                 /*includeGoldenOutput=*/true,
+                 /*engineSucceeds=*/true,
+                 &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_CONFIRMED);
+}
+
+// Inverts MismatchDemotesTheClaimToFailedInUse. The run is red on its own merits
+// and stays red -- report mode promises not to fail a test *over a claim*, not to
+// suppress a comparison failure. The verdict is still demoted, which is what
+// keeps the summary's "accepted but unconfirmed" section honest.
+TEST_F(TestSupportClaimEnforcement, ReportModeLeavesAnUnrelatedFailureAloneAndStillDemotes)
+{
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    runReporting(VerificationMode::GOLDEN,
+                 observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)}),
+                 /*includeGoldenOutput=*/true,
+                 /*engineSucceeds=*/false,
+                 &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_FAILED_IN_USE);
 }
 
 // NOLINTEND(readability-identifier-naming)

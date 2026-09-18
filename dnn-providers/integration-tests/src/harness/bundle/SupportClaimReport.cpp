@@ -16,7 +16,7 @@ SupportClaimCoverage& supportClaimCoverage()
     return s_coverage;
 }
 
-CoverageUpdate coverageFor(const SupportObservation& observation, bool enforcementExpected)
+CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected)
 {
     const bool read = observation.sidecar == SidecarState::CHECKED;
 
@@ -28,11 +28,11 @@ CoverageUpdate coverageFor(const SupportObservation& observation, bool enforceme
     // cell is covered.
     update.noApplicableClaim = read && !observation.hasApplicableClaim();
     // The graph never opened, so the query was impossible rather than skipped.
-    update.notOpened = enforcementExpected && observation.sidecar == SidecarState::NOT_QUERIED;
-    // NONE with enforcement expected means a sidecar is sitting there and nothing
+    update.notOpened = observationExpected && observation.sidecar == SidecarState::NOT_QUERIED;
+    // NONE with observation expected means a sidecar is sitting there and nothing
     // looked at it, which is a harness bug. NOT_QUERIED is the honest case, already
     // reported where it happened.
-    update.missedQuery = enforcementExpected && observation.sidecar == SidecarState::NONE;
+    update.missedQuery = observationExpected && observation.sidecar == SidecarState::NONE;
     return update;
 }
 

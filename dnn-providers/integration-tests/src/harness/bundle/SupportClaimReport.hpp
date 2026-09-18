@@ -48,15 +48,18 @@ struct CoverageUpdate
     bool queried = false; ///< bump graphsQueried
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
     bool notOpened = false; ///< bump graphsNotOpened
-    /// A sidecar exists and enforcement is on, but the query never happened. The
+    /// A sidecar exists and claim checking is on, but the query never happened. The
     /// run-level guard only fires when *no* graph anywhere was queried, so a partial
-    /// gap needs its own signal; this one fails the individual test.
+    /// gap needs its own signal. Under enforcement this fails the individual test;
+    /// under report mode the caller demotes it to a warning.
     bool missedQuery = false;
 };
 
-// `enforcementExpected` is the harness's shouldEnforceClaims(): a sidecar exists,
-// enforcement is on, and an engine was named to decide against.
-CoverageUpdate coverageFor(const SupportObservation& observation, bool enforcementExpected);
+// `observationExpected` is the harness's shouldObserveClaims(): a sidecar exists,
+// claim checking is on in either mode, and an engine was named to decide against.
+// Deliberately the observe predicate and not the enforce one -- report mode has to
+// arrive at the same counters enforcement would, or it cannot predict it.
+CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected);
 
 class SupportClaimVerdicts
 {

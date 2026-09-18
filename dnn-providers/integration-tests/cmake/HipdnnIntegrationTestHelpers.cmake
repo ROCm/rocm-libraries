@@ -90,10 +90,14 @@
 #   out_var - Variable to receive the command list
 # ~~~
 macro(_build_external_integration_command out_var)
+    # Observation only: every lane prints the support-claim summary, no lane goes red
+    # over a claim. Enforcement (--enforce-support-claims) is a deliberate follow-up
+    # once the numbers this prints have been read.
     set(${out_var}
         $<TARGET_FILE:hipdnn_integration_tests>
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
         --test-engine ${ARG_ENGINE_NAME}
+        --report-support-claims
     )
     if(ARG_TEST_CONFIG)
         list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
@@ -137,7 +141,7 @@ macro(_stage_external_integration_install_test)
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
 
         if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
-            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
+            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\" \"--report-support-claims\"")
             if(ARG_TEST_CONFIG)
                 string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
             endif()
@@ -186,6 +190,7 @@ macro(_add_external_integration_category_suites)
         set(_category_command_args
             "--test-article" "$<TARGET_FILE:${ARG_PLUGIN_TARGET}>"
             "--test-engine" "${ARG_ENGINE_NAME}"
+            "--report-support-claims"
         )
         if(ARG_TEST_CONFIG)
             list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
@@ -214,6 +219,7 @@ macro(_add_external_integration_category_suites)
             set(_category_install_command_args
                 "--test-article" "${_install_plugin}"
                 "--test-engine" "${ARG_ENGINE_NAME}"
+                "--report-support-claims"
             )
             if(ARG_TEST_CONFIG)
                 list(APPEND _category_install_command_args "--test-config" "${_install_config}")

@@ -32,6 +32,13 @@ enum class TensorPlacement
 struct HarnessPolicy
 {
     VerificationMode mode = VerificationMode::AUTO;
+
+    /// Query the sidecar and publish the verdicts. Observation only -- on its own
+    /// a broken claim is counted and printed, never failed.
+    bool reportSupportClaims = false;
+
+    /// Turn a broken claim into a test failure. Implies reportSupportClaims: there
+    /// is nothing to enforce without the query that reports does.
     bool enforceSupportClaims = false;
     TensorPlacement placement = TensorPlacement::DEVICE;
 

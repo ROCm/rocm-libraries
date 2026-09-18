@@ -422,7 +422,7 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 TEST(TestSupportClaimCoverageRules, NoSidecarCountsNothing)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                    /*enforcementExpected=*/false);
+                                    /*observationExpected=*/false);
 
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.noApplicableClaim);
@@ -433,7 +433,7 @@ TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
 {
     const auto update = coverageFor(
         SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::CLAIM_ACCEPTED)}},
-        /*enforcementExpected=*/true);
+        /*observationExpected=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_FALSE(update.noApplicableClaim);
@@ -445,7 +445,7 @@ TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
 TEST(TestSupportClaimCoverageRules, ReadSidecarWithNoVerdictsIsQueriedButUnclaimed)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::CHECKED, {}},
-                                    /*enforcementExpected=*/true);
+                                    /*observationExpected=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_TRUE(update.noApplicableClaim);
@@ -458,7 +458,7 @@ TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
 {
     const auto update = coverageFor(
         SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::UNCLAIMED_SUPPORT)}},
-        /*enforcementExpected=*/true);
+        /*observationExpected=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_TRUE(update.noApplicableClaim);
@@ -468,7 +468,7 @@ TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
 TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                    /*enforcementExpected=*/true);
+                                    /*observationExpected=*/true);
 
     EXPECT_FALSE(update.queried);
     EXPECT_TRUE(update.missedQuery);
@@ -480,7 +480,7 @@ TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NOT_QUERIED, {}},
-                                    /*enforcementExpected=*/true);
+                                    /*observationExpected=*/true);
 
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.missedQuery);
