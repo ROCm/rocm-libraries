@@ -1,0 +1,12 @@
+#!/bin/sh
+
+project="rocprim"
+dotgit_dir="$(git rev-parse --git-dir)"
+project_dir="$(git rev-parse --show-toplevel)/projects/${project}"
+
+echo "Installing hooks..." 
+src_script="${project_dir}/.githooks/pre-commit"
+dst_script="${dotgit_dir}/hooks/pre-commit"
+echo "${src_script} <- ${dst_script}"
+ln -s "${src_script}" "${dst_script}"
+echo "Done!"
