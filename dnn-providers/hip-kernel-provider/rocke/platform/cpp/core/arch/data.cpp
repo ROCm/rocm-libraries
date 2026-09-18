@@ -55,12 +55,6 @@ static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
     {"f32", "fp32"},
     {"float", "fp32"},
     {"fp32", "fp32"},
-    {"fp8", "fp8e4m3"},
-    {"fp8e4m3", "fp8e4m3"},
-    {"bf8", "bf8e5m2"},
-    {"bf8e5m2", "bf8e5m2"},
-    {"fp4", "fp4"},
-    {"fp4e2m1", "fp4"},
     {"iu8", "iu8"},
     {"iu4", "iu4"},
     {"i8", "i8"},
@@ -69,6 +63,16 @@ static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
     {"int4", "i4"},
     {"i32", ROCKE_DTYPE_I32},
     {"int32", ROCKE_DTYPE_I32},
+    {"fp8", "fp8e4m3"},
+    {"fp8e4m3", "fp8e4m3"},
+    {"bf8", "bf8e5m2"},
+    {"bf8e5m2", "bf8e5m2"},
+    {"fp6", "fp6e2m3"},
+    {"fp6e2m3", "fp6e2m3"},
+    {"bf6", "fp6e3m2"},
+    {"fp6e3m2", "fp6e3m2"},
+    {"fp4", "fp4e2m1"},
+    {"fp4e2m1", "fp4e2m1"},
 };
 #define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
 
@@ -1058,7 +1062,7 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * FP4 E2M1 spellings normalize to "fp4"; "fp6" passes through unchanged.
+ * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
@@ -1494,11 +1498,11 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      &lm_mfma_32x32x16_a,
      &lm_mfma_32x32x16_b,
      &lm_mfma_32x32x16_c},
-    /* fp4/fp6 pass through normalize_dtype unchanged; op_ids carry frag lengths
+    /* Low-bit catalog keys use exponent/mantissa names; op_ids carry frag lengths
      * only (no verified maps), per _MMA_FRAGMENT_INFO. */
     {"mma",
-     "fp4",
-     "fp4",
+     "fp4e2m1",
+     "fp4e2m1",
      "fp32",
      16,
      16,
@@ -1512,8 +1516,8 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      NULL,
      NULL},
     {"mma",
-     "fp6",
-     "fp6",
+     "fp6e2m3",
+     "fp6e2m3",
      "fp32",
      16,
      16,
@@ -1837,8 +1841,8 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      NULL,
      &lm_wmma_gfx12_c},
     {"wmma_scale",
-     "fp4",
-     "fp4",
+     "fp4e2m1",
+     "fp4e2m1",
      "fp32",
      16,
      16,
@@ -1882,8 +1886,8 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      NULL,
      &lm_wmma_gfx12_c},
     {"wmma_scale16",
-     "fp4",
-     "fp4",
+     "fp4e2m1",
+     "fp4e2m1",
      "fp32",
      16,
      16,

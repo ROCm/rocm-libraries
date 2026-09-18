@@ -40,8 +40,12 @@ _DTYPE_ALIASES = {
     "fp8e4m3": "fp8e4m3",
     "bf8": "bf8e5m2",
     "bf8e5m2": "bf8e5m2",
-    "fp4": "fp4",
-    "fp4e2m1": "fp4",
+    "fp6": "fp6e2m3",
+    "fp6e2m3": "fp6e2m3",
+    "bf6": "fp6e3m2",
+    "fp6e3m2": "fp6e3m2",
+    "fp4": "fp4e2m1",
+    "fp4e2m1": "fp4e2m1",
     # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
     # (signedness is an instruction operand, not the dtype); "i32" is the
     # integer accumulator. Scalar int spellings pass through for completeness.
