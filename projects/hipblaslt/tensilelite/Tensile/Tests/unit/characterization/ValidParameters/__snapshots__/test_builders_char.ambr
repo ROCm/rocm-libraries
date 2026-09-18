@@ -1376,7 +1376,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernelName',
+    'CustomKernel',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1464,6 +1464,7 @@
     'PrefetchGlobalRead',
     'PrefetchLocalRead',
     'PreloadKernArgs',
+    'ReuseAcrossPersistent',
     'SFCWGM',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
@@ -1603,7 +1604,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1612,7 +1613,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertSummationElementMultiple': dict({
@@ -1682,7 +1683,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernelName': dict({
+    'CustomKernel': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -2451,6 +2452,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ReuseAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',

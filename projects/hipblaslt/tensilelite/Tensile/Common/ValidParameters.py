@@ -421,6 +421,15 @@ validParameters = { # we need to make sure this matches develop
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
+    # StreamK persistent loop: keep the whole K extent of an operand (and its MX
+    # scales) resident in VGPRs across persistent iterations, so every tile after
+    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
+    # traffic. Only valid when every tile a workgroup visits shares that operand,
+    # which the emitted size predicates enforce.
+    #   0 = off (default)
+    #   1 = A resident
+    #   2 = B resident -- planned, not implemented yet
+    "ReuseAcrossPersistent": [0, 1],
     # Split the unroll summation into multiple sections and combine the sections
     # GSU applies only to the unroll summation dimension
     # Set to 0 to disable GSU, kernel code will be generated without GSU support
@@ -634,7 +643,7 @@ validParameters = { # we need to make sure this matches develop
     #   (since C matrix is always coalesced in Free0 index direction and this assertion guarantees the index element multiple)
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree0ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[1] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[1] is usually letter "J"
@@ -642,7 +651,7 @@ validParameters = { # we need to make sure this matches develop
     # Optimizations enabled by AssertFree1ElementMultiple>1:
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
+    "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1103,7 +1112,7 @@ validParameters = { # we need to make sure this matches develop
     #
     # Custom kernels can be included in a BenchmarkProblemSizeGroup by having their name (without file extension) listed under the "CustomKernels"
     # category alongside InitialSolutionParameters, BenchmarkCommonParameters, etc...
-    "CustomKernelName": -1,
+    "CustomKernel": -1,
     # Will allow a kernel to be accepted even when checks determine it's not viable.
     # Intended for use with custom kernels which have confirmed to be correct
     "NoReject": [False, True],
