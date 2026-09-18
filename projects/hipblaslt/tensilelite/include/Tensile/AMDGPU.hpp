@@ -419,6 +419,10 @@ namespace TensileLite
         return static_cast<int>(l) >= static_cast<int>(r);
     }
 
+    /// True for an unpartitioned MI300A, identified as gfx942 at 228 CUs. Other gfx942 parts
+    /// and partitions (MI300X/MI325X/MI308X, CPX/DPX) report different counts and are excluded.
+    TENSILELITEHOST_EXPORT bool isMI300A(Hardware const& hardware);
+
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU::Processor p);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, AMDGPU g);
 } // namespace TensileLite

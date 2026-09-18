@@ -93,6 +93,18 @@ namespace TensileLite
         return (isStandardCUs == 1);
     }
 
+    TENSILELITEHOST_EXPORT bool isMI300A(Hardware const& hardware)
+    {
+        // Unpartitioned MI300A. Deliberately an equality test: gfx942 also ships at 20, 38,
+        // 64, 80, 152 and 304 CUs (see the gfx942_*cu logic directories), so "not the
+        // arch-standard count" would match harvested and partitioned MI300X/MI308X too.
+        constexpr int MI300A_CU_COUNT = 228;
+
+        auto const* gpu = dynamic_cast<AMDGPU const*>(&hardware);
+        return gpu != nullptr && gpu->processor == AMDGPU::Processor::gfx942
+               && gpu->computeUnitCount == MI300A_CU_COUNT;
+    }
+
     TENSILELITEHOST_EXPORT bool AMDGPU::runsKernelTargeting(AMDGPU::Processor other) const
     {
         if(other > this->processor)
