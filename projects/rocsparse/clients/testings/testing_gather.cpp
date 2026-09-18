@@ -128,4 +128,66 @@ INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 
-void testing_gather_extra(const Arguments& arg) {}
+void testing_gather_extra(const Arguments& arg)
+{
+    // Regression test for the gthr element-index overflow.
+    //
+    // Before the fix, gthr_device computed the element index as
+    //   hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x
+    // in narrow arithmetic. Once nnz reaches 2^32 the block-index multiply
+    // wraps around, so the tail of the sparse vector past the wrap point is
+    // never gathered from y. The fix casts the block index to the (64-bit)
+    // index type before the multiply and iterates with a grid-stride loop.
+    //
+    // This drives the 64-bit-index path of rocsparse_gather (which dispatches
+    // to gthr_template) with nnz just past the 2^32 boundary and checks that an
+    // element beyond that boundary is actually gathered. To stay within a
+    // single device allocation everything is initialized on the device and a
+    // single element is probed.
+    using I = int64_t;
+    using T = float;
+
+    static constexpr int64_t two_pow_32 = static_cast<int64_t>(1) << 32;
+
+    // nnz just beyond 2^32 so at least one block has a block index whose
+    // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
+    const I nnz  = two_pow_32 + 512;
+    const I size = 2;
+
+    const rocsparse_index_base base = rocsparse_index_base_zero;
+
+    rocsparse_local_handle handle(arg);
+
+    device_vector<I> dx_ind(nnz);
+    device_vector<T> dx_val(nnz);
+    device_vector<T> dy(size);
+
+    // Filler elements all gather dense entry 0; x_val starts at 0.
+    CHECK_HIP_ERROR(hipMemset(dx_ind, 0, sizeof(I) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dx_val, 0, sizeof(T) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * size));
+
+    // y[1] holds the only non-zero dense value; y[0] stays 0.
+    const T y_one = static_cast<T>(3);
+    CHECK_HIP_ERROR(hipMemcpy(static_cast<T*>(dy) + 1, &y_one, sizeof(T), hipMemcpyHostToDevice));
+
+    // The probe lives past the 2^32 boundary and references dense entry 1, so
+    // after the gather its x_val must equal y[1].
+    const I probe_idx = two_pow_32 + 5;
+    const I probe_ind = 1;
+    CHECK_HIP_ERROR(hipMemcpy(
+        static_cast<I*>(dx_ind) + probe_idx, &probe_ind, sizeof(I), hipMemcpyHostToDevice));
+
+    rocsparse_local_spvec x(size, nnz, dx_ind, dx_val, get_indextype<I>(), base, get_datatype<T>());
+    rocsparse_local_dnvec y(size, dy, get_datatype<T>());
+
+    CHECK_ROCSPARSE_ERROR(testing::rocsparse_gather(handle, y, x));
+
+    // Before the fix the wrapped block index leaves the probe element
+    // ungathered, so x_val[probe] stays 0 instead of y[1] = 3.
+    T x_out = static_cast<T>(0);
+    CHECK_HIP_ERROR(
+        hipMemcpy(&x_out, static_cast<T*>(dx_val) + probe_idx, sizeof(T), hipMemcpyDeviceToHost));
+
+    unit_check_scalar<T>(y_one, x_out);
+}

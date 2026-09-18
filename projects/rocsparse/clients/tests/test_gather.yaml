@@ -149,3 +149,9 @@ Tests:
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
+
+- name: gather_extra
+  category: nightly
+  function: gather_extra
+  host_memory_gb: 1
+  device_memory_gb: 55
