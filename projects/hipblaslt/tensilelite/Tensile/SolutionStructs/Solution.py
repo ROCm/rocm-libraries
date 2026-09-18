@@ -4180,27 +4180,57 @@ class Solution(collections.abc.Mapping):
         if state["ProblemType"][f"SwizzleTensor{tc}"] and not swizzleTcIsTDM:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
-            continue
+            return
           laneSize = swizzleGeometry(state, tc)["laneSize"]
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
+            return
 
+      # The swizzled read delivers this tensor's fragments in a fixed lane->register layout, so its own
+      # VectorWidth must be 1: a stride-VW register axis (VW>1) cannot be produced from the swizzle order
+      # and silently miscomputes in the swizzled tensor's direction. Covers the TDM and non-TDM paths.
       if state["ProblemType"]["SwizzleTensorA"]:
+        if state["VectorWidthA"] != 1:
+          reject(state, printRejectionReason, f"SwizzleTensorA requires VectorWidthA == 1 (got {state['VectorWidthA']})")
+          return
+        # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts the
+        # data out from under those offsets. And the swizzle builds its own TDM descriptor, not iterate.
+        if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
+          reject(state, printRejectionReason, f"SwizzleTensorA requires LdsPadA==0 and LdsBlockSizePerPadA==0 (got {state['LdsPadA']}, {state['LdsBlockSizePerPadA']})")
+          return
+        if state.get("_TDMIterateModeA", False):
+          reject(state, printRejectionReason, "SwizzleTensorA is incompatible with TDMIterateMode (A); swizzle uses its own TDM descriptor")
+          return
         if not state["DirectToVgprA"] and not swizzleAIsTDM:
           reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+          return
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
+          return
 
       if state["ProblemType"]["SwizzleTensorB"]:
+        # VectorWidthB>1 is supported: _localReadSwizzledTDM + lraTileAssignmentSwizzledTDM decompose the
+        # VW-strided N into (nO,nI) so the swizzled read produces the VW-interleaved register layout the
+        # WMMA/acc expect (which also lets the MXSB scale loads widen via the tileSpan). VWB must still
+        # divide MIWaveTile[1] (enforced by the generic VW checks).
+        if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
+          reject(state, printRejectionReason, f"SwizzleTensorB requires LdsPadB==0 and LdsBlockSizePerPadB==0 (got {state['LdsPadB']}, {state['LdsBlockSizePerPadB']})")
+          return
+        if state.get("_TDMIterateModeB", False):
+          reject(state, printRejectionReason, "SwizzleTensorB is incompatible with TDMIterateMode (B); swizzle uses its own TDM descriptor")
+          return
         if not state["DirectToVgprB"] and not swizzleBIsTDM:
           reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+          return
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
+          return
 
         # TODO- NN fails validation due to DTVB + Tail-Loop is not working correctly
         if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN only")
+          return
 
       # Force GRVW the same when UnrollLoopSwapGlobalReadOrder = 1.
       if genGRVWA and state["UnrollLoopSwapGlobalReadOrder"] == 1:
