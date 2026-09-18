@@ -20,12 +20,18 @@ struct GbdtTree;
 struct GbdtTreeBuilder;
 struct GbdtTreeT;
 
+struct GbdtGroup;
+struct GbdtGroupBuilder;
+struct GbdtGroupT;
+
 struct GbdtModel;
 struct GbdtModelBuilder;
 struct GbdtModelT;
 
 bool operator==(const GbdtTreeT &lhs, const GbdtTreeT &rhs);
 bool operator!=(const GbdtTreeT &lhs, const GbdtTreeT &rhs);
+bool operator==(const GbdtGroupT &lhs, const GbdtGroupT &rhs);
+bool operator!=(const GbdtGroupT &lhs, const GbdtGroupT &rhs);
 bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs);
 bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs);
 
@@ -219,23 +225,14 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTreeDirect(
 
 ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtTreeT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
-struct GbdtModelT : public ::flatbuffers::NativeTable {
-  typedef GbdtModel TableType;
+struct GbdtGroupT : public ::flatbuffers::NativeTable {
+  typedef GbdtGroup TableType;
+  double value = 0.0;
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT>> trees{};
-  int32_t num_features = 0;
-  std::string features_hash{};
-  double base_score = 0.0;
-  double learning_rate = 1.0;
-  std::string framework{};
-  std::string training_date{};
-  int64_t num_training_samples = 0;
-  std::string training_objective{};
-  std::vector<std::string> training_arches{};
-  std::string model_version{};
-  GbdtModelT() = default;
-  GbdtModelT(const GbdtModelT &o);
-  GbdtModelT(GbdtModelT&&) FLATBUFFERS_NOEXCEPT = default;
-  GbdtModelT &operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT;
+  GbdtGroupT() = default;
+  GbdtGroupT(const GbdtGroupT &o);
+  GbdtGroupT(GbdtGroupT&&) FLATBUFFERS_NOEXCEPT = default;
+  GbdtGroupT &operator=(GbdtGroupT o) FLATBUFFERS_NOEXCEPT;
 };
 
 /// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
@@ -251,6 +248,111 @@ struct GbdtModelT : public ::flatbuffers::NativeTable {
 /// dump_model() already folds it into leaf_values, so multiplying again double-counts
 /// it. A producer whose leaf values exclude the learning rate must scale them before
 /// serializing. See TreeDataAdapter::score, which implements this formula.
+/// Layer 2 of a grouped model: the trees that rank candidates *within* one group.
+///
+/// A grouped model answers two questions -- which group, then which candidate inside it --
+/// which is one question more than a single tree ensemble can express. MIOpen is the case
+/// that needs it (many solvers, each with its own perf-configs), but nothing here names an
+/// engine: a group is whatever value the grouping feature takes.
+struct GbdtGroup FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef GbdtGroupT NativeTableType;
+  typedef GbdtGroupBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_VALUE = 4,
+    VT_TREES = 6
+  };
+  /// The grouping feature's value that selects this ensemble.
+  double value() const {
+    return GetField<double>(VT_VALUE, 0.0);
+  }
+  bool mutate_value(double _value = 0.0) {
+    return SetField<double>(VT_VALUE, _value, 0.0);
+  }
+  /// Trees ranking candidates within this group. Same evaluation as GbdtModel.trees.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *trees() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *>(VT_TREES);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *mutable_trees() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *>(VT_TREES);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<double>(verifier, VT_VALUE, 8) &&
+           VerifyOffset(verifier, VT_TREES) &&
+           verifier.VerifyVector(trees()) &&
+           verifier.VerifyVectorOfTables(trees()) &&
+           verifier.EndTable();
+  }
+  GbdtGroupT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(GbdtGroupT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<GbdtGroup> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtGroupT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct GbdtGroupBuilder {
+  typedef GbdtGroup Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_value(double value) {
+    fbb_.AddElement<double>(GbdtGroup::VT_VALUE, value, 0.0);
+  }
+  void add_trees(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>> trees) {
+    fbb_.AddOffset(GbdtGroup::VT_TREES, trees);
+  }
+  explicit GbdtGroupBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<GbdtGroup> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<GbdtGroup>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<GbdtGroup> CreateGbdtGroup(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    double value = 0.0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>> trees = 0) {
+  GbdtGroupBuilder builder_(_fbb);
+  builder_.add_value(value);
+  builder_.add_trees(trees);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<GbdtGroup> CreateGbdtGroupDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    double value = 0.0,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *trees = nullptr) {
+  auto trees__ = trees ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>(*trees) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtGroup(
+      _fbb,
+      value,
+      trees__);
+}
+
+::flatbuffers::Offset<GbdtGroup> CreateGbdtGroup(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtGroupT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct GbdtModelT : public ::flatbuffers::NativeTable {
+  typedef GbdtModel TableType;
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT>> trees{};
+  int32_t num_features = 0;
+  std::string features_hash{};
+  double base_score = 0.0;
+  double learning_rate = 1.0;
+  std::string framework{};
+  std::string training_date{};
+  int64_t num_training_samples = 0;
+  std::string training_objective{};
+  std::vector<std::string> training_arches{};
+  std::string model_version{};
+  int32_t group_by_feature_index = -1;
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT>> groups{};
+  GbdtModelT() = default;
+  GbdtModelT(const GbdtModelT &o);
+  GbdtModelT(GbdtModelT&&) FLATBUFFERS_NOEXCEPT = default;
+  GbdtModelT &operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT;
+};
+
 struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef GbdtModelT NativeTableType;
   typedef GbdtModelBuilder Builder;
@@ -265,7 +367,9 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_NUM_TRAINING_SAMPLES = 18,
     VT_TRAINING_OBJECTIVE = 20,
     VT_TRAINING_ARCHES = 22,
-    VT_MODEL_VERSION = 24
+    VT_MODEL_VERSION = 24,
+    VT_GROUP_BY_FEATURE_INDEX = 26,
+    VT_GROUPS = 28
   };
   /// Array of decision trees in the ensemble.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *trees() const {
@@ -345,6 +449,23 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_model_version() {
     return GetPointer<::flatbuffers::String *>(VT_MODEL_VERSION);
   }
+  /// Index into the feature row of the value that names a candidate's group, or -1 for a
+  /// single-layer model. Appended, so every artifact written before this field reads as
+  /// -1 and evaluates exactly as it always did.
+  int32_t group_by_feature_index() const {
+    return GetField<int32_t>(VT_GROUP_BY_FEATURE_INDEX, -1);
+  }
+  bool mutate_group_by_feature_index(int32_t _group_by_feature_index = -1) {
+    return SetField<int32_t>(VT_GROUP_BY_FEATURE_INDEX, _group_by_feature_index, -1);
+  }
+  /// Layer 2, one entry per group value. Empty for a single-layer model. `trees` above is
+  /// layer 1 either way: alone it ranks candidates, and with these it ranks the groups.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *groups() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *>(VT_GROUPS);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *mutable_groups() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *>(VT_GROUPS);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TREES) &&
@@ -367,6 +488,10 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVectorOfStrings(training_arches()) &&
            VerifyOffset(verifier, VT_MODEL_VERSION) &&
            verifier.VerifyString(model_version()) &&
+           VerifyField<int32_t>(verifier, VT_GROUP_BY_FEATURE_INDEX, 4) &&
+           VerifyOffset(verifier, VT_GROUPS) &&
+           verifier.VerifyVector(groups()) &&
+           verifier.VerifyVectorOfTables(groups()) &&
            verifier.EndTable();
   }
   GbdtModelT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -411,6 +536,12 @@ struct GbdtModelBuilder {
   void add_model_version(::flatbuffers::Offset<::flatbuffers::String> model_version) {
     fbb_.AddOffset(GbdtModel::VT_MODEL_VERSION, model_version);
   }
+  void add_group_by_feature_index(int32_t group_by_feature_index) {
+    fbb_.AddElement<int32_t>(GbdtModel::VT_GROUP_BY_FEATURE_INDEX, group_by_feature_index, -1);
+  }
+  void add_groups(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>> groups) {
+    fbb_.AddOffset(GbdtModel::VT_GROUPS, groups);
+  }
   explicit GbdtModelBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -434,11 +565,15 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(
     int64_t num_training_samples = 0,
     ::flatbuffers::Offset<::flatbuffers::String> training_objective = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> training_arches = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> model_version = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> model_version = 0,
+    int32_t group_by_feature_index = -1,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>> groups = 0) {
   GbdtModelBuilder builder_(_fbb);
   builder_.add_num_training_samples(num_training_samples);
   builder_.add_learning_rate(learning_rate);
   builder_.add_base_score(base_score);
+  builder_.add_groups(groups);
+  builder_.add_group_by_feature_index(group_by_feature_index);
   builder_.add_model_version(model_version);
   builder_.add_training_arches(training_arches);
   builder_.add_training_objective(training_objective);
@@ -462,7 +597,9 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
     int64_t num_training_samples = 0,
     const char *training_objective = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *training_arches = nullptr,
-    const char *model_version = nullptr) {
+    const char *model_version = nullptr,
+    int32_t group_by_feature_index = -1,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *groups = nullptr) {
   auto trees__ = trees ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>(*trees) : 0;
   auto features_hash__ = features_hash ? _fbb.CreateString(features_hash) : 0;
   auto framework__ = framework ? _fbb.CreateString(framework) : 0;
@@ -470,6 +607,7 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
   auto training_objective__ = training_objective ? _fbb.CreateString(training_objective) : 0;
   auto training_arches__ = training_arches ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*training_arches) : 0;
   auto model_version__ = model_version ? _fbb.CreateString(model_version) : 0;
+  auto groups__ = groups ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>(*groups) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       trees__,
@@ -482,7 +620,9 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
       num_training_samples,
       training_objective__,
       training_arches__,
-      model_version__);
+      model_version__,
+      group_by_feature_index,
+      groups__);
 }
 
 ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -549,6 +689,59 @@ inline ::flatbuffers::Offset<GbdtTree> CreateGbdtTree(::flatbuffers::FlatBufferB
 }
 
 
+inline bool operator==(const GbdtGroupT &lhs, const GbdtGroupT &rhs) {
+  return
+      (lhs.value == rhs.value) &&
+      (lhs.trees.size() == rhs.trees.size() && std::equal(lhs.trees.cbegin(), lhs.trees.cend(), rhs.trees.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT> const &b) { return (a == b) || (a && b && *a == *b); }));
+}
+
+inline bool operator!=(const GbdtGroupT &lhs, const GbdtGroupT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline GbdtGroupT::GbdtGroupT(const GbdtGroupT &o)
+      : value(o.value) {
+  trees.reserve(o.trees.size());
+  for (const auto &trees_ : o.trees) { trees.emplace_back((trees_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT(*trees_) : nullptr); }
+}
+
+inline GbdtGroupT &GbdtGroupT::operator=(GbdtGroupT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(value, o.value);
+  std::swap(trees, o.trees);
+  return *this;
+}
+
+inline GbdtGroupT *GbdtGroup::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<GbdtGroupT>(new GbdtGroupT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void GbdtGroup::UnPackTo(GbdtGroupT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = value(); _o->value = _e; }
+  { auto _e = trees(); if (_e) { _o->trees.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->trees[_i]) { _e->Get(_i)->UnPackTo(_o->trees[_i].get(), _resolver); } else { _o->trees[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->trees.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<GbdtGroup> GbdtGroup::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtGroupT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateGbdtGroup(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<GbdtGroup> CreateGbdtGroup(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtGroupT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const GbdtGroupT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _value = _o->value;
+  auto _trees = _o->trees.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> (_o->trees.size(), [](size_t i, _VectorArgs *__va) { return CreateGbdtTree(*__va->__fbb, __va->__o->trees[i].get(), __va->__rehasher); }, &_va ) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtGroup(
+      _fbb,
+      _value,
+      _trees);
+}
+
+
 inline bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs) {
   return
       (lhs.trees.size() == rhs.trees.size() && std::equal(lhs.trees.cbegin(), lhs.trees.cend(), rhs.trees.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
@@ -561,7 +754,9 @@ inline bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs) {
       (lhs.num_training_samples == rhs.num_training_samples) &&
       (lhs.training_objective == rhs.training_objective) &&
       (lhs.training_arches == rhs.training_arches) &&
-      (lhs.model_version == rhs.model_version);
+      (lhs.model_version == rhs.model_version) &&
+      (lhs.group_by_feature_index == rhs.group_by_feature_index) &&
+      (lhs.groups.size() == rhs.groups.size() && std::equal(lhs.groups.cbegin(), lhs.groups.cend(), rhs.groups.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &b) { return (a == b) || (a && b && *a == *b); }));
 }
 
 inline bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs) {
@@ -579,9 +774,12 @@ inline GbdtModelT::GbdtModelT(const GbdtModelT &o)
         num_training_samples(o.num_training_samples),
         training_objective(o.training_objective),
         training_arches(o.training_arches),
-        model_version(o.model_version) {
+        model_version(o.model_version),
+        group_by_feature_index(o.group_by_feature_index) {
   trees.reserve(o.trees.size());
   for (const auto &trees_ : o.trees) { trees.emplace_back((trees_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT(*trees_) : nullptr); }
+  groups.reserve(o.groups.size());
+  for (const auto &groups_ : o.groups) { groups.emplace_back((groups_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT(*groups_) : nullptr); }
 }
 
 inline GbdtModelT &GbdtModelT::operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT {
@@ -596,6 +794,8 @@ inline GbdtModelT &GbdtModelT::operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT {
   std::swap(training_objective, o.training_objective);
   std::swap(training_arches, o.training_arches);
   std::swap(model_version, o.model_version);
+  std::swap(group_by_feature_index, o.group_by_feature_index);
+  std::swap(groups, o.groups);
   return *this;
 }
 
@@ -619,6 +819,8 @@ inline void GbdtModel::UnPackTo(GbdtModelT *_o, const ::flatbuffers::resolver_fu
   { auto _e = training_objective(); if (_e) _o->training_objective = _e->str(); }
   { auto _e = training_arches(); if (_e) { _o->training_arches.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->training_arches[_i] = _e->Get(_i)->str(); } } else { _o->training_arches.resize(0); } }
   { auto _e = model_version(); if (_e) _o->model_version = _e->str(); }
+  { auto _e = group_by_feature_index(); _o->group_by_feature_index = _e; }
+  { auto _e = groups(); if (_e) { _o->groups.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->groups[_i]) { _e->Get(_i)->UnPackTo(_o->groups[_i].get(), _resolver); } else { _o->groups[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->groups.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<GbdtModel> GbdtModel::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -640,6 +842,8 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
   auto _training_objective = _o->training_objective.empty() ? 0 : _fbb.CreateString(_o->training_objective);
   auto _training_arches = _o->training_arches.size() ? _fbb.CreateVectorOfStrings(_o->training_arches) : 0;
   auto _model_version = _o->model_version.empty() ? 0 : _fbb.CreateString(_o->model_version);
+  auto _group_by_feature_index = _o->group_by_feature_index;
+  auto _groups = _o->groups.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> (_o->groups.size(), [](size_t i, _VectorArgs *__va) { return CreateGbdtGroup(*__va->__fbb, __va->__o->groups[i].get(), __va->__rehasher); }, &_va ) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       _trees,
@@ -652,7 +856,9 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
       _num_training_samples,
       _training_objective,
       _training_arches,
-      _model_version);
+      _model_version,
+      _group_by_feature_index,
+      _groups);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::GbdtModel *GetGbdtModel(const void *buf) {

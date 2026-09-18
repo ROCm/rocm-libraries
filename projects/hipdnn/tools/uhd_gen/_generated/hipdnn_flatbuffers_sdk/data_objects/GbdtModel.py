@@ -6,19 +6,6 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-# @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
-#
-# This is the model artifact format for UHD's default shipping path. The model
-# is exported from LightGBM or XGBoost training and converted to this FlatBuffer
-# format at build time.
-#
-# Prediction: sum leaf_values from all trees after traversal, then add base_score:
-#     score = base_score + sum(leaf_values)
-#
-# learning_rate is metadata only and must NOT be applied here. LightGBM's
-# dump_model() already folds it into leaf_values, so multiplying again double-counts
-# it. A producer whose leaf values exclude the learning rate must scale them before
-# serializing. See TreeDataAdapter::score, which implements this formula.
 class GbdtModel(object):
     __slots__ = ['_tab']
 
@@ -161,8 +148,45 @@ class GbdtModel(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
+    # Index into the feature row of the value that names a candidate's group, or -1 for a
+    # single-layer model. Appended, so every artifact written before this field reads as
+    # -1 and evaluates exactly as it always did.
+    # GbdtModel
+    def GroupByFeatureIndex(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(26))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Int32Flags, o + self._tab.Pos)
+        return -1
+
+    # Layer 2, one entry per group value. Empty for a single-layer model. `trees` above is
+    # layer 1 either way: alone it ranks candidates, and with these it ranks the groups.
+    # GbdtModel
+    def Groups(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            from hipdnn_flatbuffers_sdk.data_objects.GbdtGroup import GbdtGroup
+            obj = GbdtGroup()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # GbdtModel
+    def GroupsLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # GbdtModel
+    def GroupsIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
+        return o == 0
+
 def GbdtModelStart(builder):
-    builder.StartObject(11)
+    builder.StartObject(13)
 
 def Start(builder):
     GbdtModelStart(builder)
@@ -245,12 +269,31 @@ def GbdtModelAddModelVersion(builder, modelVersion):
 def AddModelVersion(builder, modelVersion):
     GbdtModelAddModelVersion(builder, modelVersion)
 
+def GbdtModelAddGroupByFeatureIndex(builder, groupByFeatureIndex):
+    builder.PrependInt32Slot(11, groupByFeatureIndex, -1)
+
+def AddGroupByFeatureIndex(builder, groupByFeatureIndex):
+    GbdtModelAddGroupByFeatureIndex(builder, groupByFeatureIndex)
+
+def GbdtModelAddGroups(builder, groups):
+    builder.PrependUOffsetTRelativeSlot(12, flatbuffers.number_types.UOffsetTFlags.py_type(groups), 0)
+
+def AddGroups(builder, groups):
+    GbdtModelAddGroups(builder, groups)
+
+def GbdtModelStartGroupsVector(builder, numElems):
+    return builder.StartVector(4, numElems, 4)
+
+def StartGroupsVector(builder, numElems):
+    return GbdtModelStartGroupsVector(builder, numElems)
+
 def GbdtModelEnd(builder):
     return builder.EndObject()
 
 def End(builder):
     return GbdtModelEnd(builder)
 
+import hipdnn_flatbuffers_sdk.data_objects.GbdtGroup
 import hipdnn_flatbuffers_sdk.data_objects.GbdtTree
 try:
     from typing import List
@@ -273,6 +316,8 @@ class GbdtModelT(object):
         trainingObjective = None,
         trainingArches = None,
         modelVersion = None,
+        groupByFeatureIndex = -1,
+        groups = None,
     ):
         self.trees = trees  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.GbdtTree.GbdtTreeT]]
         self.numFeatures = numFeatures  # type: int
@@ -285,6 +330,8 @@ class GbdtModelT(object):
         self.trainingObjective = trainingObjective  # type: Optional[str]
         self.trainingArches = trainingArches  # type: Optional[List[Optional[str]]]
         self.modelVersion = modelVersion  # type: Optional[str]
+        self.groupByFeatureIndex = groupByFeatureIndex  # type: int
+        self.groups = groups  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.GbdtGroup.GbdtGroupT]]
 
     @classmethod
     def InitFromBuf(cls, buf, pos):
@@ -328,6 +375,15 @@ class GbdtModelT(object):
             for i in range(gbdtModel.TrainingArchesLength()):
                 self.trainingArches.append(gbdtModel.TrainingArches(i))
         self.modelVersion = gbdtModel.ModelVersion()
+        self.groupByFeatureIndex = gbdtModel.GroupByFeatureIndex()
+        if not gbdtModel.GroupsIsNone():
+            self.groups = []
+            for i in range(gbdtModel.GroupsLength()):
+                if gbdtModel.Groups(i) is None:
+                    self.groups.append(None)
+                else:
+                    gbdtGroup_ = hipdnn_flatbuffers_sdk.data_objects.GbdtGroup.GbdtGroupT.InitFromObj(gbdtModel.Groups(i))
+                    self.groups.append(gbdtGroup_)
 
     # GbdtModelT
     def Pack(self, builder):
@@ -357,6 +413,14 @@ class GbdtModelT(object):
             trainingArches = builder.EndVector()
         if self.modelVersion is not None:
             modelVersion = builder.CreateString(self.modelVersion)
+        if self.groups is not None:
+            groupslist = []
+            for i in range(len(self.groups)):
+                groupslist.append(self.groups[i].Pack(builder))
+            GbdtModelStartGroupsVector(builder, len(self.groups))
+            for i in reversed(range(len(self.groups))):
+                builder.PrependUOffsetTRelative(groupslist[i])
+            groups = builder.EndVector()
         GbdtModelStart(builder)
         if self.trees is not None:
             GbdtModelAddTrees(builder, trees)
@@ -376,5 +440,8 @@ class GbdtModelT(object):
             GbdtModelAddTrainingArches(builder, trainingArches)
         if self.modelVersion is not None:
             GbdtModelAddModelVersion(builder, modelVersion)
+        GbdtModelAddGroupByFeatureIndex(builder, self.groupByFeatureIndex)
+        if self.groups is not None:
+            GbdtModelAddGroups(builder, groups)
         gbdtModel = GbdtModelEnd(builder)
         return gbdtModel
