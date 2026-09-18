@@ -250,8 +250,8 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
-    src += rtc_kint_type_decl(specs.itype);
     src += chirp_rtc_wide_type_decl(specs.itype);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
