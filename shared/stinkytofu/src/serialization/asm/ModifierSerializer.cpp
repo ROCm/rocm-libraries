@@ -200,11 +200,17 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers — offset plus the temporal hint / cache scope used by
-// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
-// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
+// GLOBALModifiers — cache-control bits, offset, temporal hint, and cache scope.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     os << ", mod.global = { offset = " << mod.offset;
+    if (mod.glc) os << ", glc = true";
+    if (mod.slc) os << ", slc = true";
+    if (mod.dlc) os << ", dlc = true";
+    if (mod.lds) os << ", lds = true";
+    if (mod.isStore) os << ", isStore = true";
+    if (mod.hasGLCModifier) os << ", hasGLCModifier = true";
+    if (mod.hasSC0Modifier) os << ", hasSC0Modifier = true";
+    if (mod.hasDLCModifier) os << ", hasDLCModifier = true";
     if (hasTemporalHint(mod.th)) {
         os << ", th = \"" << toString(mod.th) << "\"";
     }
@@ -534,9 +540,13 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
-                                          parseTemporalHint(getStr(fields, "th", "")),
-                                          parseMUBUFScope(getStr(fields, "scope", ""))));
+        inst->addModifier(GLOBALModifiers(
+            getInt(fields, "offset", 0), parseTemporalHint(getStr(fields, "th", "")),
+            parseMUBUFScope(getStr(fields, "scope", "")), getBool(fields, "glc", false),
+            getBool(fields, "slc", false), getBool(fields, "dlc", false),
+            getBool(fields, "lds", false), getBool(fields, "isStore", false),
+            getBool(fields, "hasGLCModifier", false), getBool(fields, "hasSC0Modifier", false),
+            getBool(fields, "hasDLCModifier", false)));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         TemporalHint th = parseTemporalHint(getStr(fields, "th", ""));

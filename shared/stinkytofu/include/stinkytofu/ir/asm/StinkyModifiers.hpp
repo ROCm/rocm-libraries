@@ -401,20 +401,40 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     TemporalHint th;
 };
 
-// Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
-// plus the temporal hint and cache scope used by global_prefetch_b8 (gfx1250
-// gl2-prefetch). The hint/scope mirror rocisa's GLOBALModifiers defaults
-// (TH_NONE / SCOPE_NONE are not printed); offset-only ops leave them default.
+// Modifiers for global_* memory ops. Mirrors rocisa's GLOBALModifiers,
+// including cache-control bits and gfx12+ temporal hint / cache scope.
 struct GLOBALModifiers : public TypedModifier<GLOBALModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
 
     GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_NONE,
-                    MUBUFScope scope = MUBUFScope::SCOPE_NONE)
-        : TypedModifier<GLOBALModifiers>(), offset(offset), th(th), scope(scope) {}
+                    MUBUFScope scope = MUBUFScope::SCOPE_NONE, bool glc = false, bool slc = false,
+                    bool dlc = false, bool lds = false, bool isStore = false,
+                    bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                    bool hasDLCModifier = false)
+        : TypedModifier<GLOBALModifiers>(),
+          offset(offset),
+          th(th),
+          scope(scope),
+          glc(glc),
+          slc(slc),
+          dlc(dlc),
+          lds(lds),
+          isStore(isStore),
+          hasGLCModifier(hasGLCModifier),
+          hasSC0Modifier(hasSC0Modifier),
+          hasDLCModifier(hasDLCModifier) {}
 
     int offset;
     TemporalHint th;
     MUBUFScope scope;
+    uint32_t glc : 1;
+    uint32_t slc : 1;
+    uint32_t dlc : 1;
+    uint32_t lds : 1;
+    uint32_t isStore : 1;
+    uint32_t hasGLCModifier : 1;
+    uint32_t hasSC0Modifier : 1;
+    uint32_t hasDLCModifier : 1;
 };
 
 struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
