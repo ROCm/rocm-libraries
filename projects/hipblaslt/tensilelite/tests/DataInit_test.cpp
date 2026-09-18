@@ -108,7 +108,6 @@ namespace
         return problem;
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
     {
         using namespace TensileLite::Client;
@@ -192,8 +191,6 @@ namespace
         setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
         return args;
     }
-
-#endif
 
 } // namespace
 
@@ -375,19 +372,22 @@ TEST(HostNumericsDataInitialization, HandlesIndexedAndEncodedRandomModes)
 
 #ifndef _WIN32
 #ifdef TENSILE_USE_FP4
-    constexpr size_t                                  logicalFP4Elements = 65;
+    constexpr size_t                                  logicalFP4Elements = 1024;
     std::array<uint8_t, (logicalFP4Elements + 1) / 2> packedFP4{};
     initializeHostBufferWithHostNumerics(rocisa::DataType::Float4,
                                          InitMode::RandomNarrow,
                                          packedFP4.data(),
                                          logicalFP4Elements,
                                          fixedInitializationKey);
+    bool observedEncodingFifteen = false;
     for(size_t index = 0; index < logicalFP4Elements; ++index)
     {
         const uint8_t byte = packedFP4[index / 2];
         const uint8_t raw  = index % 2 == 0 ? byte & 0xfU : byte >> 4;
-        EXPECT_LE(raw, 14);
+        EXPECT_LE(raw, 15);
+        observedEncodingFifteen |= raw == 15;
     }
+    EXPECT_TRUE(observedEncodingFifteen);
 #endif
 #endif
 }
@@ -963,7 +963,6 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
     EXPECT_EQ(bytes, kStrideElems);
 }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
 {
     hipDeviceProp_t prop{};
@@ -1008,7 +1007,6 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
 
     EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
 }
-#endif
 
 // =============================================================================
 //   Section 4 — direct calls into TensileLite::Client::detail

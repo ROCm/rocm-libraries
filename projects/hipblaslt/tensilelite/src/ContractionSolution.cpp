@@ -39,6 +39,7 @@
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
 #include <origami/streamk.hpp>
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -61,6 +62,19 @@
 
 namespace TensileLite
 {
+    namespace
+    {
+        // Batch stride for pre-swizzled gfx950 MX scales.
+        size_t preSwizzledScaleBatchStride(TensorDescriptor const&      tensor,
+                                           [[maybe_unused]] char const* semantic)
+        {
+            using namespace roc::host_numerics::amd_gpu_layout;
+            return planMxScaleStorage(
+                       {tensor.sizes()[1], tensor.sizes()[0]}, 0, MxScaleStorageLayout::Gfx950)
+                .physicalByteCount;
+        }
+    }
+
     std::string toString(CustomArgSemantic arg)
     {
         static const std::array<std::string, static_cast<int>(CustomArgSemantic::COUNT)> CustomArgSemanticStrings = {

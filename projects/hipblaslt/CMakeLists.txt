@@ -279,6 +279,7 @@ endif()
 set(_hipblaslt_host_numerics_enabled FALSE)
 if(HIPBLASLT_ENABLE_CLIENT
         OR TENSILELITE_ENABLE_CLIENT
+        OR TENSILELITE_ENABLE_HOST
         OR TENSILELITE_BUILD_TESTING)
     set(_hipblaslt_host_numerics_enabled TRUE)
 endif()
