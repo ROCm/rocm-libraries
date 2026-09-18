@@ -31,7 +31,13 @@ from ...core.ir import (
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
-_LOWBIT_FORMATS = {"fp8e4m3": "fp8", "bf8e5m2": "bf8", "fp6e2m3": "fp6", "fp6e3m2": "bf6", "fp4e2m1": "fp4"}
+_LOWBIT_FORMATS = {
+    "fp8e4m3": "fp8",
+    "bf8e5m2": "bf8",
+    "fp6e2m3": "fp6",
+    "fp6e3m2": "bf6",
+    "fp4e2m1": "fp4",
+}
 _LOWBIT_DTYPES = frozenset(_LOWBIT_FORMATS)
 _OUTPUT_DTYPES = {"fp16", "f16", "bf16"}
 _SCALE_DTYPES = {"fp16", "f16", "fp32", "f32"}
@@ -145,7 +151,10 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
 
     if spec.M <= 0 or spec.N <= 0 or spec.K <= 0:
         return False, f"M/N/K must be positive (got M={spec.M}, N={spec.N}, K={spec.K})"
-    if normalize_dtype(spec.dtype_a) not in _LOWBIT_DTYPES or normalize_dtype(spec.dtype_b) not in _LOWBIT_DTYPES:
+    if (
+        normalize_dtype(spec.dtype_a) not in _LOWBIT_DTYPES
+        or normalize_dtype(spec.dtype_b) not in _LOWBIT_DTYPES
+    ):
         return False, (
             f"A/B must be fp8, bf8, fp6, bf6, or fp4 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
         )
