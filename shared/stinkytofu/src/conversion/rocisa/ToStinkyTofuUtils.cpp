@@ -1597,11 +1597,10 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
-            // is itself a valid (if extreme) value for the former and a valid enumerator for the
-            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
-            // other DAG-scheduler knobs below.
-            moduleOptions.DsReadPerWmma = -1;
+            // Sentinels: DsReadPerWmma / DsReadOrder / throttle / Rule3 lead default to -1
+            // (= unset) via ModuleOptions; Gfx1250Backend resolves unset knobs through
+            // SchedulingKnobHeuristics. DsReadOrder keeps an explicit -1 here because 0 is
+            // a valid enumerator (ProgramOrder) and must not mean "not provided".
             moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
