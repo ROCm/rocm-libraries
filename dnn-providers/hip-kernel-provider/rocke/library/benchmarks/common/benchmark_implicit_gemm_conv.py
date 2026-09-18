@@ -1424,6 +1424,8 @@ def _build_wgrad_one(args_tuple):
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     else:
         # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
@@ -1529,6 +1531,8 @@ def _build_wgrad_two_stage_one(args_tuple):
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     elif split_k == 0:
         # Runtime split-K is atomic, not two-stage — skip.

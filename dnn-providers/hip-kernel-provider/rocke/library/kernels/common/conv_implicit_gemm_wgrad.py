@@ -1191,6 +1191,8 @@ def build_implicit_gemm_conv_wgrad(
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=arch,
+            groups=spec.problem.groups,
+            block_size=spec.block_size,
         )
         spec = _dc_replace(spec, split_k=decision.split_k)
 

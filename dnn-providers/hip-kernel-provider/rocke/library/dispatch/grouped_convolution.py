@@ -674,7 +674,11 @@ def _resolve_wgrad_split_k(
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
         ).split_k
+    # The helper already keeps groups*split_k inside the z limit on the auto
+    # path; this clamp still has to run for an explicitly requested split_k.
     split_k = max(1, min(requested, _MAX_GRID_DIM_Z // max(1, p.groups)))
     # When the packed-atomic epilogue cannot represent this problem, two-stage
     # is the only way to keep split_k > 1. Delegate rather than re-deriving the
