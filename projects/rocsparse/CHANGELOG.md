@@ -3,6 +3,12 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.2.0
+
+### Resolved issues
+* Fixed an integer overflow in `rocsparse_csr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion. ELL element counts are now stored in 64-bit arithmetic, and ELL element indices are computed using 64-bit types in the CSR-to-ELL, CSR-to-HYB, ELL-to-CSR, and HYB-to-CSR conversion kernels.
+* Fixed a second integer overflow in `rocsparse_csr2hyb`, in the maximum ELL row width check. `2 * (csr_nnz - 1)` was evaluated in 32-bit arithmetic, so for matrices with more than 2^30 (~1.07 billion) nonzeros the allowed width became negative and the conversion rejected every ELL width with `rocsparse_status_invalid_value`. The check is now evaluated in 64-bit arithmetic.
+
 ## (Unreleased) rocSPARSE 5.1.0
 
 ### Added

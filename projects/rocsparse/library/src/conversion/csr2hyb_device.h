@@ -95,9 +95,9 @@ namespace rocsparse
             if(p < ell_width)
             {
                 // Fill ELL part
-                rocsparse_int idx = ELL_IND(ai, p++, m, ell_width);
-                ell_col_ind[idx]  = csr_col_ind[aj];
-                ell_val[idx]      = csr_val[aj];
+                int64_t idx      = ELL_IND(ai, p++, static_cast<int64_t>(m), ell_width);
+                ell_col_ind[idx] = csr_col_ind[aj];
+                ell_val[idx]     = csr_val[aj];
             }
             else
             {
@@ -112,9 +112,9 @@ namespace rocsparse
         // Pad remaining ELL structure
         for(rocsparse_int aj = row_end - row_begin; aj < ell_width; ++aj)
         {
-            rocsparse_int idx = ELL_IND(ai, aj, m, ell_width);
-            ell_col_ind[idx]  = -1;
-            ell_val[idx]      = static_cast<T>(0);
+            int64_t idx      = ELL_IND(ai, aj, static_cast<int64_t>(m), ell_width);
+            ell_col_ind[idx] = -1;
+            ell_val[idx]     = static_cast<T>(0);
         }
     }
 }

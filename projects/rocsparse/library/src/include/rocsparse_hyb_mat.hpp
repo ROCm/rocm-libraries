@@ -44,7 +44,10 @@ struct _rocsparse_hyb_mat
     rocsparse_hyb_partition partition = rocsparse_hyb_partition_auto;
 
     // ELL matrix part
-    rocsparse_int  ell_nnz{};
+    // ell_nnz holds ell_width * m, which can exceed the range of a 32-bit
+    // integer even for moderately sized matrices (a single dense row pushes
+    // ell_width up). It must be 64-bit to size the ELL allocations safely.
+    int64_t        ell_nnz{};
     rocsparse_int  ell_width{};
     rocsparse_int* ell_col_ind{};
     void*          ell_val{};

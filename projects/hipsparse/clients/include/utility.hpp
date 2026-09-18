@@ -7639,7 +7639,7 @@ struct testhyb
     int                     m;
     int                     n;
     hipsparseHybPartition_t partition;
-    int                     ell_nnz;
+    int64_t                 ell_nnz;
     int                     ell_width;
     int*                    ell_col_ind;
     void*                   ell_val;
@@ -7685,7 +7685,7 @@ template <typename T>
 void host_hybmv(int                  m,
                 int                  n,
                 T                    alpha,
-                int                  ell_nnz,
+                int64_t              ell_nnz,
                 int                  ell_width,
                 const int*           ell_col_ind,
                 const T*             ell_val,
@@ -7709,8 +7709,8 @@ void host_hybmv(int                  m,
             T sum = zero;
             for(int p = 0; p < ell_width; ++p)
             {
-                int idx = ELL_IND(i, p, m, ell_width);
-                int col = ell_col_ind[idx] - idx_base;
+                int64_t idx = ELL_IND(i, p, static_cast<int64_t>(m), ell_width);
+                int     col = ell_col_ind[idx] - idx_base;
 
                 if(col >= 0 && col < n)
                 {

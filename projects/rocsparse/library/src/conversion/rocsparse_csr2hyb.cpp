@@ -162,8 +162,10 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     // Correct by index base
     csr_nnz -= descr->base;
 
-    // Maximum ELL row width allowed
-    rocsparse_int max_row_nnz = 2 * (csr_nnz - 1) / m + 1;
+    // Maximum ELL row width allowed. 2 * (csr_nnz - 1) overflows a 32-bit
+    // rocsparse_int once csr_nnz exceeds 2^30, which flips max_row_nnz negative
+    // and rejects every ell_width, so evaluate it in 64-bit.
+    int64_t max_row_nnz = 2 * (static_cast<int64_t>(csr_nnz) - 1) / m + 1;
 
     // Check user_ell_width
     if(partition_type == rocsparse_hyb_partition_user)
@@ -246,7 +248,7 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     }
 
     // Compute ELL non-zeros
-    hyb->ell_nnz = hyb->ell_width * m;
+    hyb->ell_nnz = static_cast<int64_t>(hyb->ell_width) * m;
 
     // Allocate ELL part
     if(hyb->ell_nnz > 0)
