@@ -1267,6 +1267,10 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
         reinterpret_cast<__attribute__((address_space(3))) T*>(
             reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
 
+    constexpr index_t offset_limit = 1 << 16; // 65536
+    constexpr uint32_t static_dst_offset_ =
+        std::min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
+
     uint32_t save_exec;
 
     if constexpr(bytes_per_thread == 1)
@@ -1274,16 +1278,14 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
         asm volatile("s_mov_b32 %0, exec_lo\n\t"
                      "v_cmpx_le_u32  1, %5\n\t"
                      "global_load_async_to_lds_b8 %1, %2, %3, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0\n\t"
-                     "s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_ge_u32  0, %5\n\t"
+                     "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b8 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
                      : "=s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset) * sizeof(T))),
+                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T))),
+                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
                        "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
                        "v"(dst_vector_t(0))
                      : "memory");
@@ -1293,16 +1295,14 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
         asm volatile("s_mov_b32 %0, exec_lo\n\t"
                      "v_cmpx_le_u32  1, %5\n\t"
                      "global_load_async_to_lds_b32 %1, %2, %3, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0\n\t"
-                     "s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_ge_u32  0, %5\n\t"
+                     "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b32 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
                      : "=s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset) * sizeof(T))),
+                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T))),
+                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
                        "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
                        "v"(dst_vector_t(0))
                      : "memory");
@@ -1312,16 +1312,14 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
         asm volatile("s_mov_b32 %0, exec_lo\n\t"
                      "v_cmpx_le_u32  1, %5\n\t"
                      "global_load_async_to_lds_b64 %1, %2, %3, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0\n\t"
-                     "s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_ge_u32  0, %5\n\t"
+                     "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b64 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
                      : "=s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset) * sizeof(T))),
+                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T))),
+                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
                        "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
                        "v"(dst_vector_t(0))
                      : "memory");
@@ -1331,16 +1329,14 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
         asm volatile("s_mov_b32 %0, exec_lo\n\t"
                      "v_cmpx_le_u32  1, %5\n\t"
                      "global_load_async_to_lds_b128 %1, %2, %3, offset:%4\n\t"
-                     "s_mov_b32 exec_lo %0\n\t"
-                     "s_mov_b32 %0, exec_lo\n\t"
-                     "v_cmpx_ge_u32  0, %5\n\t"
+                     "s_not_b32 exec_lo, exec_lo\n\t"
                      "ds_store_b128 %1 %6, offset:%4\n\t"
                      "s_mov_b32 exec_lo %0"
                      : "=s"(save_exec)
                      : "v"(static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr))),
-                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset) * sizeof(T))),
+                       "v"(static_cast<uint32_t>((global_offset - static_dst_offset_) * sizeof(T))),
                        "s"(reinterpret_cast<uint64_t>(global_ptr)),
-                       "n"(static_cast<uint32_t>(static_dst_offset * sizeof(T))),
+                       "n"(static_cast<uint32_t>(static_dst_offset_ * sizeof(T))),
                        "v"(static_cast<uint32_t>(is_src_valid ? 1 : 0)),
                        "v"(dst_vector_t(0))
                      : "memory");
