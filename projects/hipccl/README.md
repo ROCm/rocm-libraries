@@ -2,9 +2,7 @@
 
 Working area for consolidating rocPRIM, hipCUB, rocThrust, and libhipcxx into a
 single hipCCL project, mirroring the role [NVIDIA/cccl](https://github.com/NVIDIA/cccl)
-plays for CUB, Thrust, and libcudacxx. See
-[`../../docs/hipccl-repository-split-proposal.md`](../../docs/hipccl-repository-split-proposal.md)
-for the full extraction plan.
+plays for CUB, Thrust, and libcudacxx. 
 
 This directory temporarily has two parallel copies while that transition is
 in progress:
@@ -27,5 +25,4 @@ was brought in as a starting point for that same effort.
 The original `projects/rocprim`, `projects/hipcub`, `projects/rocthrust`
 directories are untouched and remain fully functional - this is additive, not
 a cutover. Removing them (and repointing everything that currently depends on
-those paths) is a separate, later step; see the proposal doc's Phase 6 for
-what that involves.
+those paths) is a separate, later step.
