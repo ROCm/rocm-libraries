@@ -164,9 +164,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                       QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
-    static_assert(!(kBlockScale && kHasSink),
-                  "qr_tdm pipeline: BLOCKSCALE + sink would read the wrong descale block");
-
     static_assert(!kBlockScale || kHwGemm1Scale,
                   "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
 
@@ -360,7 +357,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(kHasLogitsSoftCap)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -589,7 +587,15 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         do
         {
-            [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
+            // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
+            // physical_seqlen_k_start. k_origin below and the blockscale descale index
+            // (k_descale in the kBlockScale sweep, v_descale in pack_v_scale) address the
+            // same tile, so they share this one expression -- a sink-blind index here
+            // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
+            const index_t kv_tile_start =
+                (num_sink_loop > i_total_loops)
+                    ? kv_load_start + i_total_loops * kN0
+                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
             [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
@@ -677,15 +683,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
             else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             {
-                const auto current_k_origin = [&]() {
-                    const bool in_sink = (num_sink_loop > i_total_loops);
-                    if(in_sink)
-                        return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                    else
-                        return make_tuple(
-                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-                }();
-                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                const auto current_k_origin = make_tuple(kv_tile_start, 0);
+                constexpr auto s_spans      = decltype(s_acc)::get_distributed_spans();
                 sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
                         const auto tile_idx = get_x_indices_from_distributed_indices(
@@ -699,16 +698,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            // Sink-aware k_origin: in sink phase, tiles start at 0;
-            // in normal phase, tiles start at physical_seqlen_k_start.
-            const auto k_origin = [&]() {
-                const bool in_sink_phase = (num_sink_loop > i_total_loops);
-                if(in_sink_phase)
-                    return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                else
-                    return make_tuple(
-                        kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-            }();
+            const auto k_origin = make_tuple(kv_tile_start, 0);
 
             if constexpr(kHasUnevenSplits)
             {
@@ -1060,7 +1050,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(kHasLogitsSoftCap)
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -1306,7 +1297,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
+            // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
+            // physical_seqlen_k_start. k_origin below and the blockscale descale index
+            // (k_descale in the kBlockScale sweep, v_descale in pack_v_scale) address the
+            // same tile, so they share this one expression -- a sink-blind index here
+            // trails the loaded column by physical_seqlen_k_start - sink_seq_end.
+            const index_t kv_tile_start =
+                (num_sink_loop > i_total_loops)
+                    ? kv_load_start + i_total_loops * kN0
+                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
             [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
 
@@ -1395,15 +1394,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
             else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             {
-                const auto current_k_origin = [&]() {
-                    const bool in_sink = (num_sink_loop > i_total_loops);
-                    if(in_sink)
-                        return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                    else
-                        return make_tuple(
-                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-                }();
-                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                const auto current_k_origin = make_tuple(kv_tile_start, 0);
+                constexpr auto s_spans      = decltype(s_acc)::get_distributed_spans();
                 sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
                         const auto tile_idx = get_x_indices_from_distributed_indices(
@@ -1421,15 +1413,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
-            // Sink-aware k_origin (prefill path)
-            const auto k_origin = [&]() {
-                const bool in_sink_phase = (num_sink_loop > i_total_loops);
-                if(in_sink_phase)
-                    return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                else
-                    return make_tuple(
-                        kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-            }();
+            const auto k_origin = make_tuple(kv_tile_start, 0);
 
             if constexpr(kHasUnevenSplits)
             {
