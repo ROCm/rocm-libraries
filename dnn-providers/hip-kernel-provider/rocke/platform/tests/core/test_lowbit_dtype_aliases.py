@@ -81,6 +81,10 @@ def test_supported_aliases_preserve_lowered_kernel():
                 block_k=block_k,
             )
             explicit = replace(spec, dtype_a=canonical, dtype_b=canonical)
+            mixed_case = replace(spec, dtype_a=" " + short.upper() + " ", dtype_b=short)
+            assert spec == explicit == mixed_case
+            assert spec.dtype_a == spec.dtype_b == canonical
+            assert hash(spec) == hash(explicit) == hash(mixed_case)
             a, b = build_block_scaled_gemm(spec), build_block_scaled_gemm(explicit)
             assert block_scaled_gemm_signature(spec) == block_scaled_gemm_signature(
                 explicit
