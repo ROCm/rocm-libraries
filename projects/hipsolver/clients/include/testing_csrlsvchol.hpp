@@ -1,11 +1,12 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
 
 #include "clientcommon.hpp"
 #include "hipsolverSp.hpp"
+#include "hipsolver_timer.hpp"
 
 template <bool HOST, typename T>
 void csrlsvchol_checkBadArgs(hipsolverSpHandle_t       handle,
@@ -307,7 +308,7 @@ void csrlsvchol_getPerfData(hipsolverSpHandle_t       handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
@@ -326,7 +327,7 @@ void csrlsvchol_getPerfData(hipsolverSpHandle_t       handle,
                                             hX,
                                             testcase);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_csrlsvchol(HOST,
                              handle,
                              n,
@@ -340,9 +341,9 @@ void csrlsvchol_getPerfData(hipsolverSpHandle_t       handle,
                              reorder,
                              dX.data(),
                              hSingularity.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool HOST, typename T>
@@ -502,7 +503,7 @@ void testing_csrlsvchol(Arguments& argus)
                                          testcase);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             csrlsvchol_getPerfData<HOST, T>(handle,
                                             n,
                                             nnzA,
@@ -569,7 +570,7 @@ void testing_csrlsvchol(Arguments& argus)
                                          testcase);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             csrlsvchol_getPerfData<HOST, T>(handle,
                                             n,
                                             nnzA,

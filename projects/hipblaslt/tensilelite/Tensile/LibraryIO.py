@@ -578,6 +578,11 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     dict), then applies :func:`reorderSolutionsParams` so the three naming
     fields lead each solution block, matching merge output.
 
+    ``InternalSupportParams.KernArgsVersion`` is dropped: it is bound to the
+    generator version rather than being a tuning result, so logic files follow
+    ``defaultInternalSupportParams`` instead of pinning a layout that goes
+    stale. The ``.s`` metadata and benchmark solution files still carry it.
+
     Args:
         state: One solution entry after library-logic serialization.
 
@@ -591,7 +596,8 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     for key in sorted(state.keys()):
         value = state[key]
         if key == "InternalSupportParams" and isinstance(value, dict):
-            out[key] = dict(sorted(value.items()))
+            out[key] = {k: v for k, v in sorted(value.items())
+                        if k != "KernArgsVersion"}
         else:
             out[key] = value
     bundle = {"Solutions": [out]}
@@ -656,7 +662,7 @@ def parseLibraryLogicData(
     )
 
     # unpack solution
-    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
+    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
         # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
         for key, val in libDefaults.items():
             if key not in solutionState:
@@ -668,7 +674,7 @@ def parseLibraryLogicData(
         if "KernelLanguage" not in solutionState.keys():
             solutionState["KernelLanguage"] = defaultSolution["KernelLanguage"]
         if "CustomKernelName" not in solutionState.keys():
-            solutionState["CustomKernelName"] = defaultSolution["CustomKernelName"]
+            solutionState["CustomKernelName"] = defaultSolution.get("CustomKernelName", "")
 
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
@@ -677,11 +683,23 @@ def parseLibraryLogicData(
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
-        if solutionState["CustomKernelName"]:
+        customKernelName = None
+        ck = solutionState.get("CustomKernel")
+        if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+            customKernelName = ck["name"]
+        elif solutionState.get("CustomKernelName", ""):
+            customKernelName = solutionState["CustomKernelName"]
+
+        if customKernelName:
             isp = {}
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
-            customConfig = getCustomKernelConfig(solutionState["CustomKernelName"], isp)
+            try:
+                customConfig = getCustomKernelConfig(customKernelName, isp)
+            except (RuntimeError, KeyError, TypeError) as e:
+                printWarning(f"Skipping custom kernel '{customKernelName}': "
+                             f"missing or invalid custom.config ({e})")
+                return None
             for key, value in customConfig.items():
                 solutionState[key] = value
 
@@ -717,7 +735,12 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
-    solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    resetTypeMismatchCollector()
+    allSolutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    skipped = sum(1 for s in allSolutions if s is None)
+    if skipped:
+        printWarning(f"Skipped {skipped} solution(s) due to missing or invalid custom.config")
+    solutions = [s for s in allSolutions if s is not None]
     typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
