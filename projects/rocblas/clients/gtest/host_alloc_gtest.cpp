@@ -55,6 +55,27 @@ namespace
     private:
         size_t m_was;
     };
+
+    // rocblas_init_nan / rocblas_nan_rng only force a NaN exponent; sign and
+    // mantissa are random. A fixed 0xFF fill can therefore match live guard
+    // bytes and under-count mismatches. Invert the actual m_guard bytes so
+    // every written byte is guaranteed to differ.
+    hipError_t overwrite_post_guard_inverted(device_vector<float>& dv,
+                                             size_t                first_elem,
+                                             size_t                n_bytes)
+    {
+        const auto* src = reinterpret_cast<const unsigned char*>(d_vector<float>::m_guard)
+                          + first_elem * sizeof(float);
+        unsigned char flipped[12];
+        if(n_bytes > sizeof(flipped))
+            return hipErrorInvalidValue;
+        for(size_t i = 0; i < n_bytes; ++i)
+            flipped[i] = static_cast<unsigned char>(~src[i]);
+        return hipMemcpy(static_cast<float*>(dv) + dv.nmemb() + first_elem,
+                         flipped,
+                         n_bytes,
+                         hipMemcpyDefault);
+    }
 }
 
 // Guard-detection tests: verify that device_vector_check catches writes into the
@@ -161,10 +182,9 @@ TEST(host_alloc, guard_no_false_positive_on_clean_alloc)
 }
 
 // Byte-diagnostic tests: verify that device_vector_check reports the correct differing-byte
-// count and first-byte index via the report_guard_corruption lambda. Both tests rely on
-// rocblas_init_nan producing 0x7FC00000 (quiet NaN) for float, which differs from 0xFF in
-// all four bytes on little-endian IEEE 754 systems, giving a deterministic byte count and
-// a predictable first-differing-byte index.
+// count and first-byte index via the report_guard_corruption lambda. Corruption is the
+// bitwise inverse of d_vector<float>::m_guard so every written byte differs, independent
+// of rocblas_nan_rng's random NaN payload.
 
 TEST(host_alloc, guard_reports_byte_count)
 {
@@ -178,14 +198,13 @@ TEST(host_alloc, guard_reports_byte_count)
             GTEST_SKIP() << "device allocation unavailable";
     }
 
-    // 3 floats × 4 bytes = 12 guard bytes corrupted. 0xFF differs from every byte of
-    // 0x7FC00000 on little-endian, so the diagnostic must report "12 post-guard".
+    // 3 floats × 4 bytes = 12 guard bytes inverted, so the diagnostic must report
+    // "12 post-guard" regardless of the random NaN payload in m_guard.
     EXPECT_NONFATAL_FAILURE(
         {
             device_vector<float> dv(1024);
-            ASSERT_EQ(hipMemset(static_cast<float*>(dv) + dv.nmemb(), 0xFF, 3 * sizeof(float)),
-                      hipSuccess)
-                << "hipMemset failed; byte-count diagnostic was never exercised";
+            ASSERT_EQ(overwrite_post_guard_inverted(dv, 0, 3 * sizeof(float)), hipSuccess)
+                << "post-guard invert failed; byte-count diagnostic was never exercised";
         },
         "12 post-guard");
 }
@@ -203,13 +222,13 @@ TEST(host_alloc, guard_reports_first_byte_index)
     }
 
     // Element 5 starts at byte offset 5 × sizeof(float) = 20 into the post-guard.
-    // Bytes 0–19 remain intact; the diagnostic must report "first at byte 20".
+    // Bytes 0–19 remain intact; inverting those four live guard bytes makes the
+    // first mismatch byte 20 regardless of the random NaN payload.
     EXPECT_NONFATAL_FAILURE(
         {
             device_vector<float> dv(1024);
-            ASSERT_EQ(hipMemset(static_cast<float*>(dv) + dv.nmemb() + 5, 0xFF, sizeof(float)),
-                      hipSuccess)
-                << "hipMemset failed; first-byte-index diagnostic was never exercised";
+            ASSERT_EQ(overwrite_post_guard_inverted(dv, 5, sizeof(float)), hipSuccess)
+                << "post-guard invert failed; first-byte-index diagnostic was never exercised";
         },
         "first at byte 20");
 }
