@@ -30,16 +30,29 @@
 
 namespace rocsparse
 {
-    // Perform dense matrix transposition
+    // Perform dense matrix transposition.
+    //
+    // AISPARSE-700: row_offset is the first row of the DIMX-row panel this block
+    // handles. The kernel wrapper supplies it from a grid-stride loop, so a grid.x
+    // clamped against the device limit still covers every row of A and B. It also
+    // replaces `blockIdx.x * DIMX`, which is unsigned-int arithmetic and wrapped at
+    // 2^32 rows even in the int64_t instantiation this file dispatches to above
+    // INT32_MAX.
     template <uint32_t DIMX, uint32_t DIMY, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void dense_transpose_device(
-        I m, I n, T alpha, const T* __restrict__ A, int64_t lda, T* __restrict__ B, int64_t ldb)
+    ROCSPARSE_DEVICE_ILF void dense_transpose_device(int64_t row_offset,
+                                                     I       m,
+                                                     I       n,
+                                                     T       alpha,
+                                                     const T* __restrict__ A,
+                                                     int64_t lda,
+                                                     T* __restrict__ B,
+                                                     int64_t ldb)
     {
         const uint32_t lid = threadIdx.x & (DIMX - 1);
         const uint32_t wid = threadIdx.x / DIMX;
 
-        const I row_A = blockIdx.x * DIMX + lid;
-        const I row_B = blockIdx.x * DIMX + wid;
+        const int64_t row_A = row_offset + lid;
+        const int64_t row_B = row_offset + wid;
 
         __shared__ T sdata[DIMX][DIMX];
 
@@ -99,16 +112,21 @@ namespace rocsparse
                                                 int64_t  B_stride,
                                                 bool     is_host)
     {
-        const auto i     = hipBlockIdx_y;
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        rocsparse::dense_transpose_device<DIM_X, DIM_Y>(m,
-                                                        n,
-                                                        (is_host) ? alpha
-                                                                  : alpha + i * alpha_stride,
-                                                        A + i * A_stride,
-                                                        lda,
-                                                        B + i * B_stride,
-                                                        ldb);
+        const auto i           = hipBlockIdx_y;
+        const auto alpha       = rocsparse::load_scalar_device_host(alpha_device_host);
+        const auto alpha_batch = (is_host) ? alpha : alpha + i * alpha_stride;
+
+        // Grid-stride over the row panels: grid.x is clamped against the device
+        // limit, so one grid sweep only covers hipGridDim_x * DIM_X rows. The bound
+        // uses none but block-uniform values, so all threads of a block run the same
+        // number of iterations and stay convergent at the __syncthreads() inside the
+        // device function.
+        for(int64_t row_offset = static_cast<int64_t>(hipBlockIdx_x) * DIM_X; row_offset < m;
+            row_offset += static_cast<int64_t>(hipGridDim_x) * DIM_X)
+        {
+            rocsparse::dense_transpose_device<DIM_X, DIM_Y>(
+                row_offset, m, n, alpha_batch, A + i * A_stride, lda, B + i * B_stride, ldb);
+        }
     }
 
     template <typename I, typename T>
@@ -126,11 +144,21 @@ namespace rocsparse
                                    int64_t                ldb,
                                    int64_t                B_stride)
     {
+        // Clamp grid.x against the device limit; m is int64_t and the kernel
+        // grid-strides over the row panels the clamp drops (AISPARSE-700). Computed
+        // here rather than through a shared helper because AISPARSE-696 (PR #11512)
+        // has not merged and rocsparse_common.h/.hpp are a live conflict zone
+        // (AISPARSE-677/678/696); once it lands this is
+        //   rocsparse::get_grid_size(rocsparse::ceil_div(m, 32),
+        //                            handle->properties.maxGridSize[0]);
+        const int64_t grid_x = rocsparse::min(
+            (m - 1) / 32 + 1, static_cast<int64_t>(handle->properties.maxGridSize[0]));
+
         if(mode == rocsparse_pointer_mode_host)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::dense_transpose_strided_batched_kernel<32, 8, I, T>),
-                dim3((m - 1) / 32 + 1, batch_count),
+                dim3(grid_x, batch_count),
                 dim3(32 * 8),
                 0,
                 handle->stream,
@@ -151,7 +179,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::dense_transpose_strided_batched_kernel<32, 8>),
-                dim3((m - 1) / 32 + 1, batch_count),
+                dim3(grid_x, batch_count),
                 dim3(32 * 8),
                 0,
                 handle->stream,
