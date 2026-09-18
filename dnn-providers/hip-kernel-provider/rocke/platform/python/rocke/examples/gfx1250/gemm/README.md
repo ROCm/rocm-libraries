@@ -18,11 +18,13 @@ The examples share argument parsing, the spec-driven builder, compiler,
 launcher, and numerical verifier. Numerical tests use opt-in fixtures in
 `tests/instances/conftest.py` and are independently runnable by family.
 
-The target-independent aliases in `core/dtypes.py` also recognize `fp4e2m1`, `fp6e2m3`, and
-`fp6e3m2` (`fp4`, `fp6`, `bf6`). Recognition does not imply that a target
-supports an atom; use its catalog to query support. Packed gfx1250 FP4,
-FP6, mixed formats, and alternative scale formats are separate extensions.
+The target-independent aliases in `core/dtypes.py` normalize logical format
+names. Recognition does not imply that a target supports an atom; use its
+catalog to query supported operand formats and shapes. Each example defines
+its accepted matrix and scale formats.
 
 `e8m0` identifies a scale format carried in bytes and packed integer operands.
-It is not a general scalar IR type or conversion API. Operation IDs retain
-their instruction-format tokens.
+It is not a general scalar IR type or conversion API. Native scaled WMMA uses
+one `wmma_scaled` catalog family. Its operation IDs encode the matrix source
+and result dtypes and each source's scale format and block size; the backend
+selects the LLVM intrinsic and packed operand types from that contract.

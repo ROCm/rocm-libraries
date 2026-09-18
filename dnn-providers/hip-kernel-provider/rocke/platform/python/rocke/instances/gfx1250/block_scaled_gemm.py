@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from ...core.dtypes import normalize_dtype
+from ...core.arch import ArchTarget, MmaScaleOperand
 from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
     BF16,
@@ -121,6 +122,21 @@ class BlockScaledGemmSpec:
         return self.matrix_path
 
 
+def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
+    scale = MmaScaleOperand(
+        "e8m0" if spec.scale_dtype == "i8" else spec.scale_dtype, spec.block_k
+    )
+    return target.mma.op_for_shape(
+        family="wmma_scaled",
+        src_dtypes=(spec.dtype_a, spec.dtype_b, spec.dtype_acc),
+        dst_dtype=spec.dtype_acc,
+        src_scales=(scale, scale, None),
+        m=_BLOCK_M,
+        n=_BLOCK_N,
+        k=_WMMA_SCALE_K,
+    )
+
+
 def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for the gfx1250 block-scaled GEMM contract."""
     from ...core.arch import ArchTarget
@@ -160,15 +176,7 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
     family = matrix_path if native_scale else "wmma"
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
-    if native_scale and (
-        _canon_lowbit(spec.dtype_a),
-        _canon_lowbit(spec.dtype_b),
-    ) not in (("fp8", "fp8"), ("bf8", "bf8")):
-        return (
-            False,
-            "native gfx1250 SCALE/SCALE16 supports matching fp8 or bf8 operands",
-        )
-    if not target.mma.has_shape(
+    if not native_scale and not target.mma.has_shape(
         family=family,
         a_dtype=_canon_lowbit(spec.dtype_a),
         b_dtype=_canon_lowbit(spec.dtype_b),
@@ -188,21 +196,22 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if spec.layout != "RCR":
         return False, f"block_scaled_gemm supports RCR only (got {spec.layout!r})"
     if native_scale:
-        if spec.scale_dtype not in ("e8m0", "i8"):
-            return False, (
-                "native gfx1250 SCALE/SCALE16 requires packed E8M0 scale bytes "
-                f"(got {spec.scale_dtype!r})"
-            )
-        scale_op = gfx1250_scaled_wmma(
-            f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
-        )
-        assert scale_op is not None
-        required_block_k = scale_op.scales.block_k
+        required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:
             return False, (
                 f"{matrix_path} requires block_k={required_block_k} E8M0 groups "
                 f"(got {spec.block_k})"
             )
+        try:
+            atom = _native_scaled_atom(spec, target)
+        except ValueError as exc:
+            return False, str(exc)
+        if atom is None:
+            return (
+                False,
+                "no gfx1250 scaled WMMA atom for the requested operand and scale contract",
+            )
+
     else:
         try:
             _wire_scale_dtype(spec.scale_dtype)
@@ -272,17 +281,17 @@ def _as_f32(b: IRBuilder, v):
 def build_block_scaled_gemm(
     spec: BlockScaledGemmSpec, arch: str = "gfx1250"
 ) -> KernelDef:
-    """Build a gfx1250 FP8/BF8 block-scaled GEMM (RCR, ``C = A @ B^T``).
+    """Build a gfx1250 block-scaled GEMM (RCR, ``C = A @ B^T``).
 
     One wave (32 lanes) computes one 16x16 output tile without LDS. The legacy
     ``wmma`` path uses K=64 FP8/BF8 atoms, accumulates each ``block_k`` group,
     and applies FP16/FP32 A/B scales in software. The native ``wmma_scale`` and
-    ``wmma_scale16`` paths use K=128 FP8/BF8 atoms and pass packed E8M0 scale bytes
+    ``wmma_scale16`` paths use K=128 scaled WMMA atoms and pass packed E8M0 scale bytes
     directly to the instruction, with K=32 and K=16 scale groups respectively.
 
     Lane ``l`` owns output column ``l % 16`` and rows
     ``(l // 16) * 8 : (l // 16 + 1) * 8``. Legacy matrix fragments carry 32
-    low-bit bytes per lane as ``<8 x i32>``. Native FP8 fragments carry 64 bytes as
+    low-bit bytes per lane as ``<8 x i32>``. For FP8/BF8, native fragments carry 64 bytes as
     ``<16 x i32>`` as four 16-byte K chunks, alternating chunks between lane
     halves. Both paths use the gfx12 column-distributed ``<8 x f32>``
     accumulator layout.
@@ -298,14 +307,13 @@ def build_block_scaled_gemm(
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
     scale_ty = I8 if native_scale else _scale_type(spec.scale_dtype)
-    op_id = (
-        f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
-        if native_scale
-        else _wmma_op_id(spec.dtype_a, spec.dtype_b)
+    atom = (
+        _native_scaled_atom(spec, ArchTarget.from_gfx(arch)) if native_scale else None
     )
+    op_id = atom.op_id if atom is not None else _wmma_op_id(spec.dtype_a, spec.dtype_b)
     scale_op = gfx1250_scaled_wmma(op_id)
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
-    frag_words = 16 if native_scale else _ACC
+    frag_words = atom.srcs[0].frag_len if atom is not None else _ACC
     a_frag_ty = VectorType(I32, frag_words)
 
     groups = spec.K // spec.block_k

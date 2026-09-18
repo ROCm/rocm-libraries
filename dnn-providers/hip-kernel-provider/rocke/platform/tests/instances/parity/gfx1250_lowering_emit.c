@@ -145,22 +145,34 @@ static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* op_id)
 
 static void build_wmma_scale(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp8_fp8");
+    wmma_scaled(
+        b,
+        false,
+        "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32");
 }
 
 static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_bf8_bf8");
+    wmma_scaled(
+        b,
+        false,
+        "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b32.src1_bf8e5m2_e8m0_b32.src2_fp32.dst_fp32");
 }
 
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp8_fp8");
+    wmma_scaled(
+        b,
+        true,
+        "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32");
 }
 
 static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_bf8_bf8");
+    wmma_scaled(
+        b,
+        true,
+        "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b16.src1_bf8e5m2_e8m0_b16.src2_fp32.dst_fp32");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning

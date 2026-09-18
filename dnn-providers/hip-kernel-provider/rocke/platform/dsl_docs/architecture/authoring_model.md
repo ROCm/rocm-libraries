@@ -31,6 +31,46 @@ Matrix-operation choices start from the exact gfx target. Resolve
 and validate the operation's wave and layout contract. The exact catalog is
 listed in [`kernel_taxonomy.md`](./kernel_taxonomy.md).
 
+MMA metadata uses `srcs[0]`, `srcs[1]`, `srcs[2]`, and `dst`: the first two
+sources are multiplicands, the third is the accumulator input, and `dst` is
+the result. A source's optional `MmaScaleOperand(dtype, block_size)` describes
+its scale values independently of the matrix dtype and packed register type.
+
+For scaled operations, query the complete contract and pass the selected atom
+to `IRBuilder.mma`:
+
+```python
+from rocke.core.arch import ArchTarget, MmaScaleOperand
+
+scale = MmaScaleOperand("e8m0", 32)
+atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+    family="wmma_scaled",
+    src_dtypes=("fp8", "fp8", "fp32"),
+    dst_dtype="fp32",
+    src_scales=(scale, scale, None),
+    m=16, n=16, k=128,
+)
+assert atom is not None
+# result = builder.mma(atom, src0, src1, src2, scale0, scale1)
+```
+
+Omitting `src_scales` leaves scales unconstrained. Passing a three-entry tuple
+matches every source exactly; `None` in that tuple means unscaled. Enumeration
+and existence queries may match several records, while `op_for_shape` and
+`select_largest_k` reject an ambiguous selection. The C indexed query functions
+use the same rules: a NULL scale array is unconstrained, and `{NULL, 0}` requests
+an unscaled source. Scale value formats are `e8m0`, `e4m3`, and `e5m3`, with
+`fp8e4m3` accepted as an alias for `e4m3`; actual target support comes from the
+catalog.
+
+Scaled-WMMA IDs have the form
+`wmma.scaled.<MxNxK>.src0_<dtype>_<scale>_b<block>.src1_<dtype>_<scale>_b<block>.src2_<dtype>.dst_<dtype>`.
+They describe a semantic contract independently of LLVM intrinsic names and
+packed carriers. Existing `wmma_scale*_f32_*` IDs and their dedicated builder
+wrappers are retired; serialized IR using those IDs must be regenerated.
+Use `tile.mma` with a resolved catalog atom. Other MMA operation IDs retain
+their existing spelling.
+
 Kernel definitions in
 [`<platform_root>/python/rocke/instances/`](../../python/rocke/instances/) and
 [`<library_root>/kernels/`](../../../library/kernels/) follow the same

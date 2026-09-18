@@ -612,7 +612,7 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         )
 
     def _emit_wmma_scale(self, lowerer, op) -> None:
-        """Emit the ROCm 7.13+ gfx1250 SCALE/SCALE16 FP8/FP4 call."""
+        """Emit the gfx1250 SCALE/SCALE16 intrinsic using the resolved operand contract."""
         if lowerer._flavor != "llvm23":
             raise NotImplementedError(
                 f"{op.name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
@@ -622,12 +622,11 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         spec = gfx1250_scaled_wmma(op.name)
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
-        mode = "scale16" if spec.scale16 else "scale"
-        # Declaration keys are shared across matrix dtypes: the ABI is identical.
-        decl_key = f"wmma.{mode}.gfx1250.f32.16x16x128.fp8.fp8"
-        intrinsic = f"llvm.amdgcn.wmma.{mode}.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
+        # Declarations describe physical signatures, independently of matrix encodings.
+        decl_key = spec.declaration_key
+        intrinsic = spec.intrinsic
         scale_ty = spec.scales.llvm_type
-        fmt = spec.matrix_format
+        fmt0, fmt1 = spec.matrix_formats
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
@@ -637,11 +636,11 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt}, <16 x i32> {lowerer._operand(a)}, "
-            f"i32 {fmt}, <16 x i32> {lowerer._operand(b)}, "
+            f"i32 {fmt0}, {spec.matrix_llvm_types[0]} {lowerer._operand(a)}, "
+            f"i32 {fmt1}, {spec.matrix_llvm_types[1]} {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i32 0, i32 0, {scale_ty} {lowerer._operand(a_scale)}, "
-            f"i32 0, i32 0, {scale_ty} {lowerer._operand(b_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

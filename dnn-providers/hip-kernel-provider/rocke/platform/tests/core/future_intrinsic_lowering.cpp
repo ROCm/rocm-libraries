@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -793,10 +794,15 @@ void case_gfx1250_scaled_wmma()
             rocke_value_t* fragment = rocke_b_vec_concat(b, lo, hi);
             rocke_value_t* c = rocke_b_global_load_vN(b, accum, lane, rocke_f32(), 8, 0);
             rocke_value_t* scale = rocke_b_global_load(b, scales, lane, v.scale_type(), 1);
-            rocke_value_t* d = v.scale16 ? rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(
-                                               b, fragment, fragment, c, scale, scale)
-                                         : rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(
-                                               b, fragment, fragment, c, scale, scale);
+            const char* src_dtypes[3] = {"fp8", "fp8", "fp32"};
+            const int block = v.scale16 ? 16 : 32;
+            const rocke_mma_scale_operand_t scales_query[3]
+                = {{"e8m0", block}, {"e8m0", block}, {NULL, 0}};
+            const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+            const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape_indexed(
+                &target->mma, "wmma_scaled", src_dtypes, "fp32", scales_query, 16, 16, 128);
+            rocke_value_t* extra[2] = {scale, scale};
+            rocke_value_t* d = rocke_b_mma(b, atom->op_id, fragment, fragment, c, extra, 2);
             rocke_b_global_store(b, accum, lane, rocke_b_vec_extract(b, d, 0), 1);
         };
         const char* name = v.scale16 ? "wmma_scale16" : "wmma_scale";

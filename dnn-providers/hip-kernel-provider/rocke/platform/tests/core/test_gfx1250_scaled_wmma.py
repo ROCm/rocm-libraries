@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, MmaScaleOperand
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
+from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.instances.gfx1250.block_scaled_gemm import (
@@ -16,6 +17,21 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
+
+
+def _scaled_atom(dtype="fp8", scale16=False):
+    scale = MmaScaleOperand("e8m0", 16 if scale16 else 32)
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        src_dtypes=(dtype, dtype, "fp32"),
+        dst_dtype="fp32",
+        src_scales=(scale, scale, None),
+        m=16,
+        n=16,
+        k=128,
+    )
+    assert atom is not None
+    return atom
 
 
 def _build_scaled_atom(*, scale16: bool):
@@ -30,20 +46,73 @@ def _build_scaled_atom(*, scale16: bool):
     fragment = b.vec_concat(lo, hi)
     c = b.global_load_vN(accum, lane, F32, 8)
     scale = b.global_load(scales, lane, scale_ty)
-    if scale16:
-        d = b.wmma_scale16_f32_16x16x128_fp8_fp8(fragment, fragment, c, scale, scale)
-    else:
-        d = b.wmma_scale_f32_16x16x128_fp8_fp8(fragment, fragment, c, scale, scale)
+    d = b.mma(_scaled_atom(scale16=scale16), fragment, fragment, c, scale, scale)
     b.global_store(accum, lane, b.vec_extract(d, 0))
     return b.kernel
 
 
 class TestGfx1250ScaledWmma(unittest.TestCase):
+    def test_matrix_formats_share_intrinsic_declarations(self):
+        b = IRBuilder("shared_scaled_wmma_declarations")
+        matrix = b.param("matrix", PtrType(I32, "global"), readonly=True)
+        accum = b.param("accum", PtrType(F32, "global"))
+        lane = b.thread_id_x()
+        lo = b.global_load_vN(matrix, lane, I32, 8)
+        hi = b.global_load_vN(matrix, b.add(lane, b.const_i32(8)), I32, 8)
+        fragment = b.vec_concat(lo, hi)
+        c = b.global_load_vN(accum, lane, F32, 8)
+        for mode, scale_ty in (("scale", I32), ("scale16", I64)):
+            scale_ptr = b.param(
+                f"{mode}_ptr", PtrType(scale_ty, "global"), readonly=True
+            )
+            scale = b.global_load(scale_ptr, lane, scale_ty)
+            for dtype in ("fp8", "bf8"):
+                c = b.mma(
+                    _scaled_atom(dtype, mode == "scale16"),
+                    fragment,
+                    fragment,
+                    c,
+                    scale,
+                    scale,
+                )
+        b.global_store(accum, lane, b.vec_extract(c, 0))
+        llvm = lower_kernel_to_llvm(b.kernel, arch="gfx1250", llvm_flavor="llvm23")
+        for mode, scale_ty in (("scale", "i32"), ("scale16", "i64")):
+            intrinsic = (
+                f"llvm.amdgcn.wmma.{mode}.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
+            )
+            with self.subTest(mode=mode):
+                self.assertEqual(llvm.count(f"declare <8 x float> @{intrinsic}("), 1)
+                calls = [
+                    line
+                    for line in llvm.splitlines()
+                    if f"call <8 x float> @{intrinsic}(" in line
+                ]
+                self.assertEqual(len(calls), 2)
+                for selector, call in enumerate(calls):
+                    self.assertEqual(call.count(f"i32 {selector}, <16 x i32>"), 2)
+                    self.assertEqual(call.count(f", {scale_ty} %"), 2)
+
+    def test_semantic_ids_survive_serialization(self):
+        for scale16 in (False, True):
+            kernel = _build_scaled_atom(scale16=scale16)
+            text = serialize(kernel)
+            self.assertIn(_scaled_atom(scale16=scale16).op_id, text)
+            restored = parse(text)
+            self.assertEqual(
+                lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23"),
+                lower_kernel_to_llvm(restored, arch="gfx1250", llvm_flavor="llvm23"),
+            )
+            self.assertEqual(
+                lower_kernel_to_hip(kernel, arch="gfx1250"),
+                lower_kernel_to_hip(restored, arch="gfx1250"),
+            )
+
     def test_catalog_fragment_lengths(self):
         target = ArchTarget.from_gfx("gfx1250")
         for op_id in (
-            "wmma_scale_f32_16x16x128_fp8_fp8",
-            "wmma_scale16_f32_16x16x128_fp8_fp8",
+            "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32",
+            "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32",
         ):
             with self.subTest(op_id=op_id):
                 op = target.mma.by_op_id(op_id)
@@ -107,6 +176,27 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     _build_scaled_atom(scale16=scale16), arch="gfx1250"
                 )
                 self.assertIn(builtin, hip)
+
+    def test_scaled_hip_dispatch_preserves_neutral_and_concrete_ops(self):
+        for scale16 in (False, True):
+            mode = "wmma_scale16" if scale16 else "wmma_scale"
+            for dtype, selector in (("fp8", 0), ("bf8", 1)):
+                with self.subTest(mode=mode, dtype=dtype):
+                    kernel = _build_scaled_atom(scale16=scale16)
+                    call = next(op for op in kernel.body.ops if op.name == "tile.mma")
+                    op_id = _scaled_atom(dtype, scale16).op_id
+                    call.attrs["op_id"] = op_id
+                    neutral = lower_kernel_to_hip(kernel, arch="gfx1250")
+                    self.assertIn(
+                        f"__builtin_amdgcn_{mode}_f32_16x16x128_f8f6f4({selector},",
+                        neutral,
+                    )
+                    call.name = f"tile.{call.attrs.pop('op_id')}"
+                    self.assertEqual(
+                        neutral, lower_kernel_to_hip(kernel, arch="gfx1250")
+                    )
+                    with self.assertRaisesRegex(NotImplementedError, "not available"):
+                        lower_kernel_to_hip(kernel, arch="gfx942")
 
     def test_native_block_scaled_gemm_uses_packed_e8m0_in_instruction(self):
         for matrix_path, block_k, scale_ty, fragment_load, load_count in (
@@ -181,7 +271,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("matching fp8 or bf8 operands", why)
+        self.assertIn("requested operand and scale contract", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",
@@ -207,7 +297,9 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     NotImplementedError, "not yet wired for gfx1250"
                 ) as error:
                     lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
-                self.assertIn(f"{mode}_f32_16x16x128_bf8_bf8", str(error.exception))
+                self.assertIn(_scaled_atom("bf8", scale16).op_id, str(error.exception))
+                with self.assertRaisesRegex(NotImplementedError, "no HIP lowering"):
+                    lower_kernel_to_hip(kernel, arch="gfx1250")
 
 
 if __name__ == "__main__":

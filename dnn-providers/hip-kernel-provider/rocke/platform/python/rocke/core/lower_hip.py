@@ -310,6 +310,12 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        if (
+            op.name.startswith("tile.wmma.")
+            and gfx1250_scaled_wmma(op.name) is not None
+        ):
+            self._emit_wmma_gfx1250_scaled(op)
+            return
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no HIP lowering for op {op.name!r}")
@@ -527,7 +533,7 @@ class _Lowerer:
 
         The HIP source path has no ISA backend (it emits ``__builtin_amdgcn_*``
         directly), so the ``op_id`` is mapped back to the concrete
-        ``tile.<op_id>`` op and dispatched through the existing per-op handler.
+        ``tile.<op_id>`` op and passed through the shared operation dispatcher.
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
@@ -653,18 +659,6 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
-    def _op_tile_wmma_scale_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op)
-
-    def _op_tile_wmma_scale_f32_16x16x128_bf8_bf8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op)
-
-    def _op_tile_wmma_scale16_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op)
-
-    def _op_tile_wmma_scale16_f32_16x16x128_bf8_bf8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op)
-
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
@@ -681,7 +675,7 @@ class _Lowerer:
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         op_id = spec.op_id
-        fmt = spec.matrix_format
+        fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
@@ -691,8 +685,9 @@ class _Lowerer:
         )
         self._emit(
             f"f32x8 {_name(op.result)} = {builtin}("
-            f"{fmt}, {_name(a)}, {fmt}, {_name(b)}, (int16_t)0, {_name(c)}, "
-            f"0, 0, {_name(a_scale)}, 0, 0, {_name(b_scale)}, false, false);"
+            f"{fmt0}, {_name(a)}, {fmt1}, {_name(b)}, (int16_t)0, {_name(c)}, "
+            f"0, {spec.scale_formats[0]}, {_name(a_scale)}, "
+            f"0, {spec.scale_formats[1]}, {_name(b_scale)}, false, false);"
         )
 
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:

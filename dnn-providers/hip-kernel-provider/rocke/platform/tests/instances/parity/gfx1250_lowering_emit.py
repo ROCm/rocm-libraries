@@ -19,6 +19,7 @@
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
+from rocke.core.arch import ArchTarget, MmaScaleOperand
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -77,7 +78,18 @@ def _wmma_k64(a_kind, b_kind):
 def _wmma_scaled(a_kind, b_kind, scale_mode):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
-    op_id = f"wmma_{scale_mode}_f32_16x16x128_{a_kind}_{b_kind}"
+    scale = MmaScaleOperand("e8m0", 16 if scale_mode == "scale16" else 32)
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        src_dtypes=(a_kind, b_kind, "fp32"),
+        dst_dtype="fp32",
+        src_scales=(scale, scale, None),
+        m=16,
+        n=16,
+        k=128,
+    )
+    assert atom is not None
+    op_id = atom.op_id
 
     def build(b: IRBuilder) -> None:
         a_ptr = b.param(

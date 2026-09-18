@@ -78,14 +78,15 @@ static const char* h_elem_scalar(const rocke_type_t* t)
  * reusing the original attrs map reproduces the Python emission exactly. */
 static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const rocke_scaled_wmma_op_t* spec = rocke_gfx1250_scaled_wmma_from_op(op);
-    if(!spec)
+    const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!atom)
     {
         return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
     }
+    const rocke_scaled_wmma_op_t contract = rocke_scaled_wmma_contract(atom);
+    const rocke_scaled_wmma_op_t* spec = &contract;
     const char* op_id = spec->op_id;
     const bool scale16 = spec->scales.block_k == 16;
-    const int fmt = spec->matrix_format;
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
     if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
@@ -102,15 +103,17 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     }
     rocke_h_emitf(lw,
                   "f32x8 %s = %s(%d, %s, %d, %s, (int16_t)0, %s, "
-                  "0, 0, %s, 0, 0, %s, false, false);",
+                  "0, %d, %s, 0, %d, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
                   builtin,
-                  fmt,
+                  spec->matrix_formats[0],
                   rocke_h_name(lw, op->operands[0]),
-                  fmt,
+                  spec->matrix_formats[1],
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
+                  spec->scale_formats[0],
                   rocke_h_name(lw, op->operands[3]),
+                  spec->scale_formats[1],
                   rocke_h_name(lw, op->operands[4]));
     return lw->status;
 }

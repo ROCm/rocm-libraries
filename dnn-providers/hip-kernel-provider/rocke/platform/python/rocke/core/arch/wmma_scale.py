@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .target import ArchTarget, MmaOp
+
 
 @dataclass(frozen=True)
 class E8M0ScalePacking:
@@ -33,31 +35,69 @@ class E8M0ScalePacking:
 
 @dataclass(frozen=True)
 class ScaledWmmaOp:
-    """One supported matrix format and its packed E8M0 scale contract."""
+    """Backend packing derived from a supported catalog operand contract."""
 
-    op_id: str
-    matrix_dtype: str
+    atom: MmaOp
+    matrix_formats: tuple[int, int]
+    scale_formats: tuple[int, int]
     scales: E8M0ScalePacking
+
+    @property
+    def op_id(self) -> str:
+        return self.atom.op_id
 
     @property
     def scale16(self) -> bool:
         return self.scales.block_k == 16
 
     @property
-    def matrix_format(self) -> int:
-        return {"fp8": 0, "bf8": 1}[self.matrix_dtype]
+    def matrix_llvm_types(self) -> tuple[str, str]:
+        return tuple(f"<{src.frag_len} x i32>" for src in self.atom.srcs[:2])
 
+    @property
+    def intrinsic_suffix(self) -> str:
+        atom = self.atom
+        return (
+            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.dst.frag_len}f32."
+            f"v{atom.srcs[0].frag_len}i32.v{atom.srcs[1].frag_len}i32"
+        )
 
-_SCALE = E8M0ScalePacking(count=4, block_k=32)
-_SCALE16 = E8M0ScalePacking(count=8, block_k=16)
-_GFX1250_WMMA_SCALE = {
-    op_id: ScaledWmmaOp(op_id=op_id, matrix_dtype=dtype, scales=packing)
-    for family, packing in (("wmma_scale", _SCALE), ("wmma_scale16", _SCALE16))
-    for dtype in ("fp8", "bf8")
-    for op_id in (f"{family}_f32_16x16x128_{dtype}_{dtype}",)
-}
+    @property
+    def intrinsic(self) -> str:
+        mode = "scale16" if self.scale16 else "scale"
+        return f"llvm.amdgcn.wmma.{mode}.{self.intrinsic_suffix}"
+
+    @property
+    def declaration_key(self) -> str:
+        return f"wmma.scale.block{self.scales.block_k}.gfx1250.{self.intrinsic_suffix}"
 
 
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
-    """Resolve a catalog ID or concrete tile op name; reject unknown variants."""
-    return _GFX1250_WMMA_SCALE.get(op_id.removeprefix("tile."))
+    """Resolve a catalog contract; LLVM selectors are backend details."""
+    atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(op_id.removeprefix("tile."))
+    if atom is None or atom.family != "wmma_scaled":
+        return None
+    formats = {"fp8e4m3": 0, "bf8e5m2": 1}
+    src0, src1, src2 = atom.srcs
+    # The current backend signatures require matching E8M0 scale packing.
+    # Keep these restrictions here, independently of the catalog query model.
+    if (
+        src0.dtype not in formats
+        or src1.dtype not in formats
+        or src0.scale is None
+        or src0.scale != src1.scale
+        or src0.scale.dtype != "e8m0"
+        or src2.scale is not None
+        or src2.dtype != "fp32"
+        or atom.dst.dtype != "fp32"
+        or atom.shape != (16, 16, 128)
+    ):
+        raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")
+    return ScaledWmmaOp(
+        atom=atom,
+        matrix_formats=(formats[src0.dtype], formats[src1.dtype]),
+        scale_formats=(0, 0),  # E8M0 for each source.
+        scales=E8M0ScalePacking(
+            count=atom.k // src0.scale.block_size, block_k=src0.scale.block_size
+        ),
+    )

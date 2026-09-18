@@ -85,10 +85,6 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
-    "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale_f32_16x16x128_bf8_bf8": "mxacc",
-    "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
-    "wmma_scale16_f32_16x16x128_bf8_bf8": "mxacc",
 }
 
 
@@ -134,8 +130,8 @@ def _check_cachepolicy(op: str, value: int) -> int:
     return v
 
 
-def _mma_c_frag_len(op_id: str) -> int:
-    """Accumulator fragment length for ``op_id`` from the arch SSOT.
+def _mma_dst_frag_len(op_id: str) -> int:
+    """``dst`` fragment length for ``op_id`` from the arch SSOT.
 
     Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
@@ -143,7 +139,7 @@ def _mma_c_frag_len(op_id: str) -> int:
     """
     from rocke.core.arch import target as _arch
 
-    frag_len = _arch._frag_info(op_id).c_frag_len
+    frag_len = _arch._frag_info(op_id).dst.frag_len
     if frag_len <= 0:
         raise ValueError(
             f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
@@ -152,16 +148,21 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_is_int(op_id: str) -> bool:
-    """True when ``op_id`` accumulates in i32 (integer WMMA).
+def _mma_dst_is_int(op_id: str) -> bool:
+    """True when ``op_id`` produces i32 (integer WMMA).
 
-    Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    Sourced from the arch catalog's ``dst`` dtype
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_dst_dtype``), imported
+    lazily. Op_ids absent from the catalog default to an f32 ``dst``.
     """
     from rocke.core.arch import target as _arch
 
-    return _arch._op_id_c_dtype().get(op_id) == "i32"
+    return _arch._op_id_dst_dtype().get(op_id) == "i32"
+
+
+# Compatibility aliases for code that historically used C as the result role.
+_mma_c_frag_len = _mma_dst_frag_len
+_mma_c_is_int = _mma_dst_is_int
 
 
 @dataclass(frozen=True)
@@ -1830,15 +1831,15 @@ class IRBuilder:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
         ``op`` is either an :class:`~rocke.core.arch.MmaOp` (preferred — its
-        ``op_id`` and ``c_frag_len`` drive the lowering) or a raw ``op_id``
+        ``op_id`` and ``dst`` fragment metadata drive the lowering) or a raw ``op_id``
         string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
         attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
         backend (:meth:`rocke.core.isa.ISABackend.emit_mma`), which emits the
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x float>`` (the per-lane
-        accumulator length the atom produces). When ``op`` is an ``op_id``
+        The result vector type is ``<dst.frag_len x float>`` (the per-lane
+        result length the atom produces). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
@@ -1850,22 +1851,28 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
-        c_frag_len = (
-            op.c_frag_len
-            if hasattr(op, "c_frag_len") and op.c_frag_len
-            else _mma_c_frag_len(op_id)
+        dst_frag_len = (
+            op.dst.frag_len
+            if hasattr(op, "dst") and op.dst.frag_len
+            else _mma_dst_frag_len(op_id)
         )
         # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
+        # i32; everything else in f32. Prefer the atom's own dst dtype when ``op``
         # is an MmaOp, else resolve from the arch SSOT via op_id.
-        c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
-        c_elem = I32 if is_int_acc else F32
-        hint = _MMA_RESULT_HINT.get(op_id, "acc")
+        dst_dtype = op.dst.dtype if hasattr(op, "dst") else None
+        is_int_acc = (
+            dst_dtype == "i32" if dst_dtype is not None else _mma_dst_is_int(op_id)
+        )
+        dst_elem = I32 if is_int_acc else F32
+        hint = (
+            "mxacc"
+            if op_id.startswith("wmma.scaled.")
+            else _MMA_RESULT_HINT.get(op_id, "acc")
+        )
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(c_elem, c_frag_len)],
+            [VectorType(dst_elem, dst_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result
@@ -1964,38 +1971,6 @@ class IRBuilder:
     def wmma_gfx1250_f32_16x16x64_bf8_bf8(self, a: Value, b: Value, c: Value) -> Value:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
-
-    def wmma_scale_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE FP8 WMMA with packed E8M0 scale operands.
-
-        A and B are ``<16 x i32>`` fragments (64 FP8 bytes per lane), C is
-        ``<8 x f32>``, and each scale operand is one i32 packing four E8M0
-        bytes for the instruction's four K=32 scale blocks.
-        """
-        return self.mma("wmma_scale_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
-
-    def wmma_scale16_f32_16x16x128_fp8_fp8(
-        self,
-        a: Value,
-        b: Value,
-        c: Value,
-        a_scale: Value,
-        b_scale: Value,
-    ) -> Value:
-        """gfx1250 native SCALE16 FP8 WMMA with eight packed E8M0 scales.
-
-        The matrix and accumulator fragments match
-        :meth:`wmma_scale_f32_16x16x128_fp8_fp8`; each scale operand is i64
-        because SCALE16 carries eight K=16 E8M0 scale bytes.
-        """
-        return self.mma("wmma_scale16_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
