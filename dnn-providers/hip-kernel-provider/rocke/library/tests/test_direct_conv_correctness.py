@@ -607,7 +607,7 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 
     from rocke import compile_kernel
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_direct_grouped import (
+    from kernels.common.conv_direct_grouped import (
         DirectConvDgradSpec,
         DirectConvProblem,
         build_direct_conv_dgrad,

@@ -485,7 +485,7 @@ def build_direct_conv_16c(
         ch_block = decoded["ch_block"]
         group_in_wg = decoded["group_in_wg"]
         W_lds = decoded["W_lds"]
-        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_CHUNKS))
+        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_VEC4))
         abs_group = b.add(b.mul(g_tile, c_BG), group_in_wg)
         chunk_meta.append(
             {
@@ -1378,7 +1378,7 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         ch_block = decoded["ch_block"]
         group_in_wg = decoded["group_in_wg"]
         W_lds = decoded["W_lds"]
-        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_CHUNKS))
+        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_VEC4))
         abs_group = b.add(b.mul(g_tile, c_BG), group_in_wg)
         chunk_meta.append(
             {
@@ -1813,7 +1813,7 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
         ch_block = decoded["ch_block"]
         group_in_wg = decoded["group_in_wg"]
         W_lds = decoded["W_lds"]
-        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_CHUNKS))
+        in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_VEC4))
         abs_group = b.add(b.mul(g_tile, c_BG), group_in_wg)
         chunk_meta.append(
             {
@@ -2993,8 +2993,37 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class DirectTransposeWeightsDgradSpec:
+    """Spec for :func:`build_direct_transpose_weights_dgrad`."""
+
+    problem: "DirectConvProblem"
+
+
+@dataclass(frozen=True)
+class DirectReorganizeWeightsSpec:
+    """Spec for :func:`build_direct_reorganize_weights`."""
+
+    problem: "DirectConvProblem"
+    fold_k32: bool = False
+
+
+@dataclass(frozen=True)
+class DirectCoalescedWeightsDgradSpec:
+    """Spec for :func:`build_direct_coalesced_weights_dgrad`."""
+
+    problem: "DirectConvProblem"
+
+
+@dataclass(frozen=True)
+class DirectMfmaDgradSpec:
+    """Spec for :func:`build_direct_mfma_dgrad`; wraps a fprop spec."""
+
+    problem: "DirectConvSpec"
+
+
 def build_direct_transpose_weights_dgrad(
-    problem: "DirectConvProblem", arch: str = "gfx950"
+    spec: "DirectTransposeWeightsDgradSpec", arch: str = "gfx950"
 ) -> "KernelDef":
     """Transpose W from [total_K, KH, KW, cpg] to [total_C, KH, KW, kpg] with
     spatial flip: ``W_T[c, r', s', k] = W[k, KH-1-r', KW-1-s', c]`` per group.
@@ -3009,7 +3038,7 @@ def build_direct_transpose_weights_dgrad(
     Grid: (KH * KW * groups, ceil(kpg / 64), ceil(cpg / 64))
     Block: (64, 1, 1)
     """
-    p = problem
+    p = spec.problem
     BLOCK = 64
 
     b = IRBuilder(f"direct_transpose_weights_dgrad_{p.short()}")
@@ -3108,7 +3137,7 @@ def direct_dgrad_coalesced_workspace_bytes(
 
 
 def build_direct_reorganize_weights(
-    problem: "DirectConvProblem", arch: str = "gfx950", fold_k32: bool = False
+    spec: "DirectReorganizeWeightsSpec", arch: str = "gfx950"
 ) -> "KernelDef":
     """Reorganize W_T[total_C, KH, KW, kpg] → W_coa[blocks, 64, 4] for coalesced preload.
 
@@ -3132,7 +3161,8 @@ def build_direct_reorganize_weights(
     Grid: (groups * KH * KW * N_K_ATOMS * N_M_TILES, 1, 1)
     Block: (64, 1, 1)
     """
-    p = problem
+    p = spec.problem
+    fold_k32 = spec.fold_k32
     K_ATOM_SZ = 32 if fold_k32 else 16
     ELEMS_PER_LANE = 8 if fold_k32 else 4
     N_K_ATOMS = p.kpg // K_ATOM_SZ  # kpg = cpg of transposed fprop
@@ -3223,7 +3253,7 @@ def build_direct_reorganize_weights(
 
 
 def build_direct_coalesced_weights_dgrad(
-    problem: "DirectConvProblem", arch: str = "gfx950"
+    spec: "DirectCoalescedWeightsDgradSpec", arch: str = "gfx950"
 ) -> "KernelDef":
     """Build a weight-transpose kernel that writes W in the coalesced MFMA preload format.
 
@@ -3240,7 +3270,7 @@ def build_direct_coalesced_weights_dgrad(
     Grid: (groups * KH * KW * N_K_ATOMS * N_M_TILES, 1, 1)
     Block: (64, 1, 1)
     """
-    p = problem
+    p = spec.problem
     N_K_ATOMS = (p.kpg + 15) // 16  # kpg_orig → cpg of transposed fprop
     N_M_TILES = (p.cpg + 15) // 16  # cpg_orig → kpg of transposed fprop
     WAVE = 64
@@ -3330,7 +3360,7 @@ def build_direct_coalesced_weights_dgrad(
 
 
 def build_direct_mfma_dgrad(
-    fprop_spec: "DirectConvSpec", arch: str = "gfx950"
+    spec: "DirectMfmaDgradSpec", arch: str = "gfx950"
 ) -> "Tuple[KernelDef, KernelDef]":
     """Build the two kernels for the MFMA dgrad pipeline.
 
@@ -3349,6 +3379,7 @@ def build_direct_mfma_dgrad(
     Use :func:`make_dgrad_fprop_spec` to build the spec from the original
     conv problem automatically.
     """
+    fprop_spec = spec.problem
     orig_p = fprop_spec.problem
     # Reconstruct original problem from the transposed fprop spec.
     # orig.cpg = fprop.kpg, orig.kpg = fprop.cpg,
@@ -3368,7 +3399,9 @@ def build_direct_mfma_dgrad(
         PAD=orig_p.KH - 1 - orig_p.PAD,  # undo the PAD swap
         stride=1,
     )
-    transpose_kernel = build_direct_transpose_weights_dgrad(orig_problem, arch=arch)
+    transpose_kernel = build_direct_transpose_weights_dgrad(
+        DirectTransposeWeightsDgradSpec(problem=orig_problem), arch=arch
+    )
     fprop_kernel = build_direct_conv(fprop_spec, arch=arch)
     return transpose_kernel, fprop_kernel
 
@@ -3475,7 +3508,7 @@ class DirectConvDgradSpec:
         return self.block_groups * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -3505,7 +3538,7 @@ def is_valid_dgrad_spec(
     The dgrad kernel uses scalar FMA (no MFMA), so there are no MFMA-atom
     constraints on cpg or kpg alignment.  stride > 1 is supported.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)
@@ -3790,7 +3823,7 @@ class DirectDepthwiseDgradSpec:
         return self.block_waves * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -3812,7 +3845,7 @@ def is_valid_depthwise_dgrad_spec(
     spec: DirectDepthwiseDgradSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a depthwise dgrad spec on ``arch``."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)
@@ -4041,7 +4074,7 @@ class DirectDepthwiseDgradStreamSpec:
         return self.block_waves * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -4063,7 +4096,7 @@ def is_valid_depthwise_dgrad_stream_spec(
     spec: DirectDepthwiseDgradStreamSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a ho-streaming depthwise dgrad spec."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)
