@@ -6963,10 +6963,28 @@ namespace rocalution
                                                                       prolong->matrix_,
                                                                       NULL);
 
+        if(err == true)
+        {
+            // Fill P
+            err = csr_ptr->matrix_->AMGSmoothedAggregationProlongFill(global_col_begin,
+                                                                      global_col_end,
+                                                                      lumping_strat,
+                                                                      relax,
+                                                                      *connections.vector_,
+                                                                      *aggregates.vector_,
+                                                                      *aggregate_root_nodes.vector_,
+                                                                      *i64zero_vec.vector_,
+                                                                      *f2c_map.vector_,
+                                                                      *zero_mat.matrix_,
+                                                                      prolong->matrix_,
+                                                                      NULL,
+                                                                      NULL);
+        }
+
         // LCOV_EXCL_START
         if((err == false) && (csr_ptr->is_host_() == true) && (csr_ptr->GetFormat() == CSR))
         {
-            LOG_INFO("Computation of LocalMatrix::ILU0Factorize() failed");
+            LOG_INFO("Computation of LocalMatrix::AMGSmoothedAggregation() failed");
             csr_ptr->Info();
             FATAL_ERROR(__FILE__, __LINE__);
         }
@@ -7054,23 +7072,6 @@ namespace rocalution
                 prolong->MoveToAccelerator();
             }
             // LCOV_EXCL_STOP
-        }
-        else
-        {
-            // Fill P
-            csr_ptr->matrix_->AMGSmoothedAggregationProlongFill(global_col_begin,
-                                                                global_col_end,
-                                                                lumping_strat,
-                                                                relax,
-                                                                *connections.vector_,
-                                                                *aggregates.vector_,
-                                                                *aggregate_root_nodes.vector_,
-                                                                *i64zero_vec.vector_,
-                                                                *f2c_map.vector_,
-                                                                *zero_mat.matrix_,
-                                                                prolong->matrix_,
-                                                                NULL,
-                                                                NULL);
         }
 
 #ifdef DEBUG_MODE
