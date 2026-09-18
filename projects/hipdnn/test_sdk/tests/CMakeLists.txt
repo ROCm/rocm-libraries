@@ -58,6 +58,8 @@ add_executable(
     utilities/TestVectorLoggingUtils.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
     utilities/cpu_graph_executor/TestBlockScaleDequantizeSignatureKey.cpp
+    utilities/cpu_graph_executor/TestBlockScaleQuantizePlan.cpp
+    utilities/cpu_graph_executor/TestBlockScaleQuantizeSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp

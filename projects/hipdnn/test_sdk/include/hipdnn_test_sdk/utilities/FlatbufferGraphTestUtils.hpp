@@ -2689,9 +2689,16 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
-    const std::vector<int64_t>& strides = {65536, 1024, 32, 1},
-    const std::vector<int64_t>& dims = {2, 64, 32, 32},
+    const std::vector<int64_t>& ioDims = {2, 64, 32, 32},
+    const std::vector<int64_t>& ioStrides = {65536, 1024, 32, 1},
+    const std::vector<int64_t>& scaleDims = {2, 2, 32, 32},
+    const std::vector<int64_t>& scaleStrides = {2048, 1024, 32, 1},
+    const int32_t blockSize = 32,
     hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -2701,17 +2708,14 @@ inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> scaleDims = {2, 2, 32, 32};
-    const std::vector<int64_t> scaleStrides = {2048, 1024, 32, 1};
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", inputDataType, &ioStrides, &ioDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", inputDataType, &strides, &dims));
+        builder, 2, "y", outputDataType, &ioStrides, &ioDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", inputDataType, &strides, &dims));
-
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 3, "scale", inputDataType, &scaleStrides, &scaleDims));
+        builder, 3, "scale", scaleDataType, &scaleStrides, &scaleDims));
 
     auto blockScaleQuantizeAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
@@ -2719,7 +2723,7 @@ inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
             1, // x uid
             2, // y uid
             3, // scale uid
-            32, // block_size
+            blockSize, // block_size
             axis,
             false // transpose
         );
