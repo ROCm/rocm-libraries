@@ -186,6 +186,76 @@ def test_physical_max_vgpr_reg_caps(isa, expected):
 
 
 # ---------------------------------------------------------------------------
+# gfx11 WGP geometry: 128 KB LDS pool and wave-size-aware SIMD multiplier
+# ---------------------------------------------------------------------------
+
+def test_gfx11_lds_limited_occupancy_uses_wgp_pool():
+    """gfx11 LDS-limited occupancy divides the 128 KB WGP pool, not 64 KB.
+
+    40 KB of LDS: the WGP pool fits 131072 // 40960 = 3 workgroups; the per-CU
+    64 KB value fit only 65536 // 40960 = 1.  Every other limiter is slack here
+    (8 VGPRs, 66 SGPRs, 128 threads), so LDS is what getOccupancy returns.
+    """
+    kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
+    assert kw.states.archCaps["DeviceLDS"] == 65536
+    assert kw.getLdsLimitedOccupancy(65536, 40960, 1024) == 1  # old per-CU pool
+    occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
+               sgprs=66, ldsBytes=40960, doubleVgpr=True)
+    assert occ == 3
+
+
+def test_non_gfx11_lds_limited_occupancy_keeps_per_cu_pool():
+    """Non-RDNA arches keep the per-CU DeviceLDS value, undoubled.
+
+    gfx950 has 160 KB per CU, so 80 KB of LDS allows 2 workgroups.  A doubled
+    pool would have reported 4.
+    """
+    kw = _make_writer(_init_rocisa((9, 5, 0)))
+    occ = _occ(kw, numThreads=256, vgprs=8, accvgprs=0,
+               sgprs=66, ldsBytes=81920, doubleVgpr=False)
+    assert occ == 2
+
+
+@pytest.mark.parametrize(
+    "numThreads,expected",
+    [
+        (256, 8),   # mult = 256/(32*4) = 2 -> cap 16//2; legacy mult 1 gave 16
+        (512, 4),   # mult = 512/(32*4) = 4 -> cap 16//4; legacy mult 2 gave 8
+    ],
+)
+def test_gfx11_multiplier_uses_wavefront_size(numThreads, expected):
+    """The workgroup->per-SIMD multiplier is numThreads/(wavefront*4) on gfx11.
+
+    A wave32 workgroup covers twice as many SIMD wave slots as the hardcoded
+    wave64 divisor (256) assumed, so the MaxWavesPerSimd cap binds twice as
+    early.  8 VGPRs keeps the register term slack so only the cap is observed.
+    """
+    kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
+    assert kw.states.archCaps["MaxWavesPerSimd"] == 16
+    assert kw.getVgprOccupancy(numThreads=numThreads, vgprs=8, doubleVgpr=True) == expected
+
+
+def test_gfx12_keeps_legacy_wave64_multiplier():
+    """gfx12 stays on the hardcoded 256 divisor pending its own benchmarking.
+
+    512 wave32 threads: the legacy multiplier is 2 (cap 16//2 = 8); the
+    wave-size-aware one would be 4 (cap 4).
+    """
+    kw = _make_writer(_init_rocisa((12, 0, 0)), (12, 0, 0))
+    assert kw.getVgprOccupancy(numThreads=512, vgprs=8, doubleVgpr=True) == 8
+
+
+def test_gfx11_wide_workgroup_exhausts_vgpr_file():
+    """Occupancy 0 when one workgroup cannot fit in the per-SIMD VGPR file.
+
+    1024 wave32 threads -> mult 8; 256 VGPRs align to ceil(256/24)*24 = 264, so
+    264 * 8 = 2112 > the 1536-VGPR file and getVgprOccupancy reports 0.
+    """
+    kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
+    assert kw.getVgprOccupancy(numThreads=1024, vgprs=256, doubleVgpr=True) == 0
+
+
+# ---------------------------------------------------------------------------
 # gfx950-specific hardware caps validation
 # ---------------------------------------------------------------------------
 
