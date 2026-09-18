@@ -52,6 +52,10 @@ struct DumpStinkyModulePassConfig {
     /// its extension replaced by ".s", or "<stirPath>.s" if there is no extension.
     std::string asmPath;
 
+    /// If non-empty, also write SSA live ranges and peak pressure here, or to
+    /// stdout for "-". A function without attached SSA prints a header only.
+    std::string ssaLiveOut;
+
     AsmPrinterOptions printerOptions{};
     AsmEmitterOptions emitterOptions{};
 };

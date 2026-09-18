@@ -9,7 +9,9 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/analysis/asm/ssa/SSALiveIntervals.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/Function.hpp"
 
 namespace {
 std::string pathWithSuffix(const std::string& path, const std::string& newExtWithDot) {
@@ -50,6 +52,32 @@ void dumpAssembly(const std::vector<const stinkytofu::Function*>& functions,
     for (const stinkytofu::Function* function : functions) emitter.emit(out, *function);
 }
 
+/// Live ranges and peak pressure, one section per function.
+void dumpLiveIntervals(const std::vector<const stinkytofu::Function*>& functions,
+                       const stinkytofu::DumpStinkyModulePassConfig& config) {
+    if (config.ssaLiveOut.empty()) return;
+
+    auto write = [&functions](std::ostream& os) {
+        for (const stinkytofu::Function* function : functions) {
+            os << "@" << function->getName();
+            if (!function->hasAttachedSSA()) {
+                os << " no attached SSA\n";
+                continue;
+            }
+            os << "\n" << stinkytofu::computeSSALiveIntervals(*function).toString();
+        }
+    };
+
+    if (config.ssaLiveOut == "-") {
+        write(std::cout);
+        return;
+    }
+
+    std::ofstream out(config.ssaLiveOut, std::ios::out | std::ios::trunc);
+    assert(out && "[DumpStinkyModulePass] Failed to open ssaLiveOut");
+    write(out);
+}
+
 void dumpFunctions(const std::vector<const stinkytofu::Function*>& functions,
                    const std::string& fallbackName,
                    const stinkytofu::DumpStinkyModulePassConfig& config) {
@@ -72,6 +100,7 @@ void dumpFunctions(const std::vector<const stinkytofu::Function*>& functions,
     }
 
     dumpAssembly(functions, fallbackName, config);
+    dumpLiveIntervals(functions, config);
 }
 
 void dumpModule(const stinkytofu::StinkyAsmModule& module,
@@ -87,6 +116,7 @@ void dumpModule(const stinkytofu::StinkyAsmModule& module,
     }
 
     dumpAssembly(module.getFunctions(), module.getName(), config);
+    dumpLiveIntervals(module.getFunctions(), config);
 }
 }  // namespace
 

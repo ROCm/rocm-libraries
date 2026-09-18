@@ -160,6 +160,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VPrngB32(vgpr(0), vgpr(1));
         case logical::VCndMaskB32:
             return VCndMaskB32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VCndMaskB16:
+            return VCndMaskB16(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VLShiftLeftB16:
             return VLShiftLeftB16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VLShiftLeftB32:
@@ -634,6 +636,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SFf1B32(sgpr(0), sgpr(1));
         case logical::SBfmB32:
             return SBfmB32(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SBfmB64:
+            return SBfmB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SMovkI32:
             return SMovkI32(sgpr(0), sgpr(1));
         case logical::SSExtI16toI32:
@@ -731,6 +735,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SAtomicInc(sgpr(0), sgpr(1), sgpr(2));
         case logical::SAtomicDec:
             return SAtomicDec(sgpr(0), sgpr(1));
+        case logical::SAtomicCmpswapX2:
+            return SAtomicCmpswapX2(sgpr(0, 4), sgpr(1), sgpr(2));
+        case logical::SAtomicUmaxX2:
+            return SAtomicUmaxX2(sgpr(0, 2), sgpr(1), sgpr(2));
         case logical::SCSelectB64:
             return SCSelectB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SCmpKEQU32:
@@ -861,6 +869,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VXorB32, "v_xor_b32"},
     {logical::VAndOrB32, "v_and_or_b32"},
     {logical::VCndMaskB32, "v_cndmask_b32"},
+    {logical::VCndMaskB16, "v_cndmask_b16"},
     // Vector Shift
     {logical::VLShiftLeftB32, "v_lshlrev_b32"},
     {logical::VLShiftRightB32, "v_lshrrev_b32"},
@@ -1112,12 +1121,15 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SStoreB512,
         logical::SAtomicInc,
         logical::SAtomicDec,
+        logical::SAtomicCmpswapX2,
+        logical::SAtomicUmaxX2,
         logical::SCSelectB64,
         logical::SCmpKEQU32,
         logical::SCmpKGeU32,
         logical::SCmpKGtU32,
         logical::SCmpKLGU32,
         logical::SFlbitI32B32,
+        logical::SBfmB64,
         logical::VPermlane16SwapB32,
         logical::VPermlane32SwapB32,
         logical::BufferLoadB16,

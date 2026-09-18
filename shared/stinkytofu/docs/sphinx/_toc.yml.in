@@ -50,6 +50,10 @@ subtrees:
     title: SSA representation
   - file: developer/lift-asm-registers-to-ssa-pass.md
     title: Lift Asm registers to SSA pass
+  - file: developer/register-allocation.md
+    title: Register allocation on attached SSA
+  - file: developer/register-allocation-GreedyAllocator.md
+    title: The greedy allocator
 
 - caption: Reference
   entries:

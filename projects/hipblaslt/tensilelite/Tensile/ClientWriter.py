@@ -525,7 +525,8 @@ def problemSizeParams(problemType, problem, factorDim):
             "Invalid number of problem type indices: {0} - Indices: {1}, problemSize: {2}".format(len(problem.sizes), numIndices,
             ', '.join(map(str, problem.sizes))))
 
-    problemSizeArg = ('problem-size', ','.join(map(str, problem.sizes[:numIndices])))
+    sizes = list(problem.sizes[:numIndices])
+    problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
     rv.insert(0, problemSizeArg)
 
     rv.append(('a-strides', ",".join(map(str, astrides))))
@@ -699,6 +700,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('metadata-layout', problemType.metadataLayout)
         param('high-precision-accumulate', problemType.highPrecisionAccumulate)
         param('strided-batched', problemType.stridedBatched)
+        if globalParameters["BatchMode"] != 0:
+          param('batch-mode', globalParameters["BatchMode"])
         param('grouped-gemm', problemType.groupedGemm)
 
         probIdx = 0

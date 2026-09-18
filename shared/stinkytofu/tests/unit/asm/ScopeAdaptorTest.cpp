@@ -27,7 +27,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
-#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
 
