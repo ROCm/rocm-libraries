@@ -88,8 +88,8 @@ class BlockScaledGemmSpec:
     M: int
     N: int
     K: int
-    dtype_a: str = "fp8"
-    dtype_b: str = "fp8"
+    dtype_a: str = "fp8e4m3"
+    dtype_b: str = "fp8e4m3"
     dtype_c: str = "bf16"
     dtype_acc: str = "fp32"
     scale_dtype: str = "fp32"
@@ -99,6 +99,10 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dtype_a", normalize_dtype(self.dtype_a))
+        object.__setattr__(self, "dtype_b", normalize_dtype(self.dtype_b))
 
     @property
     def block_size(self) -> int:
