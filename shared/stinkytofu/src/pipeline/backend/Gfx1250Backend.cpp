@@ -40,6 +40,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/DsLoadBridgeSubstitutionPass.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
@@ -281,7 +282,11 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     // Whole-kernel expert SCHED_MODE=2: wait-alu insertion + mode2 enable.
     if (moduleOptions.EnableESM2) {
-        mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
+        // EXPERIMENT: anchor the bridge from the ds side instead of the prefetch side.
+        // The aperture pair comes from the TensileLite sgpr pool; -1 disables the pass.
+        // mpm.addPass(createFunctionToModuleAdaptor(createPrefetchBridgeSubstitutionPass()));
+        mpm.addPass(createFunctionToModuleAdaptor(
+            createDsLoadBridgeSubstitutionPass(moduleOptions.LdsApertureBaseSgpr)));
         mpm.addPass(createInsertWaitAluModulePass({moduleOptions.EnableESM2TrackValuVsrc,
                                                    /*sharedOrderCountFollowers=*/true,
                                                    /*xdlCountFromNextWmma=*/true}));

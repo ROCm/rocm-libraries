@@ -41,6 +41,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
+#include "stinkytofu/transforms/asm/DsLoadBridgeSubstitutionPass.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -398,6 +399,11 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"PrefetchBridgeSubstitutionPass",
      [](const auto&) { return createPrefetchBridgeSubstitutionPass(); }},
+    // args: the low sgpr of the LDS-aperture pair used as the FLAT saddr.
+    {"DsLoadBridgeSubstitutionPass",
+     [](const std::vector<std::string>& args) {
+         return createDsLoadBridgeSubstitutionPass(args.empty() ? -1 : std::stoi(args[0]));
+     }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},

@@ -348,6 +348,9 @@ class StateValues:
   # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
   # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
   swPrefetchAbsBaseSgprPendingCheckIn: int = -1
+  # Even-aligned SGPR pair holding the LDS aperture base for the ESM2 ds->flat bridge.
+  # Held for the whole kernel; stinkytofu writes it at entry. -1 = off.
+  ldsApertureBaseSgpr: int               = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -7102,6 +7105,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
                                "SwInstructionPrefetchAbsBaseSgpr": int(
                                    self.states.swPrefetchAbsBaseSgpr),
+                               # Even-aligned pair reserved in _initKernel for the ESM2
+                               # ds->flat bridge; -1 makes the bridge pass a no-op.
+                               "LdsApertureBaseSgpr": int(
+                                   self.states.ldsApertureBaseSgpr),
                                # Arch capability read by Gfx1250HazardPass: XNACK replay
                                # can reorder in-flight memory ops, so the pass inserts
                                # s_wait_xcnt drains to order them.
@@ -10282,6 +10289,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         self.sgprPool.checkIn(absBaseIdx)
       for guardSgpr in prefetchPreloadGuard:
+        self.sgprPool.checkIn(guardSgpr)
+
+    # ESM2 ds->flat bridge: reserve the pair stinkytofu loads with src_shared_base. It is
+    # read by flat_loads in the main loop, so it is never checked back in. Same preload
+    # guard as the abs base above: stinkytofu writes it at entry, where s[0:MaxSgprPreload)
+    # still holds live-in kernargs.
+    self.states.ldsApertureBaseSgpr = -1
+    if kernel.get("EnableStinkyTofuESM2", False) and self.states.version == (12, 5, 0):
+      aperturePreloadGuard = []
+      if kernel["PreloadKernArgs"]:
+        while True:
+          guardSgpr = self.sgprPool.checkOut(1, "LdsAperturePreloadGuard", preventOverflow=False)
+          if guardSgpr >= self.states.archCaps["MaxSgprPreload"]:
+            self.sgprPool.checkIn(guardSgpr)
+            break
+          aperturePreloadGuard.append(guardSgpr)
+      apertureIdx = self.sgprPool.checkOutAligned(2, 2, tag="LdsApertureBase", preventOverflow=False)
+      assert apertureIdx % 2 == 0, "LDS aperture base SGPR pair must be even-aligned"
+      assert (not kernel["PreloadKernArgs"]) or apertureIdx >= self.states.archCaps["MaxSgprPreload"], \
+        "LDS aperture base SGPR must not alias the kernarg preload region"
+      self.states.ldsApertureBaseSgpr = apertureIdx
+      for guardSgpr in aperturePreloadGuard:
         self.sgprPool.checkIn(guardSgpr)
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:

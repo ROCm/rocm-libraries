@@ -408,7 +408,8 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
             // Special registers are singletons, no index suffix needed.
             if (reg.reg.type == RegType::VCC || reg.reg.type == RegType::VCC_LO ||
                 reg.reg.type == RegType::VCC_HI || reg.reg.type == RegType::EXEC ||
-                reg.reg.type == RegType::EXEC_LO || reg.reg.type == RegType::EXEC_HI) {
+                reg.reg.type == RegType::EXEC_LO || reg.reg.type == RegType::EXEC_HI ||
+                reg.reg.type == RegType::SRC_SHARED_BASE) {
                 break;
             }
 

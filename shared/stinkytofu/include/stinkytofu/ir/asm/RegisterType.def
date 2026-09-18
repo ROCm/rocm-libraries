@@ -41,6 +41,8 @@ REGISTER_TYPE(VCC_HI,      "vcc_hi",      "Vector Condition Code (high)")
 REGISTER_TYPE(EXEC,        "exec",        "Execution mask")
 REGISTER_TYPE(EXEC_LO,     "exec_lo",     "Execution mask (low)")
 REGISTER_TYPE(EXEC_HI,     "exec_hi",     "Execution mask (high)")
+// Read-only 64-bit LDS aperture base, used to build FLAT addresses that reach LDS.
+REGISTER_TYPE(SRC_SHARED_BASE, "src_shared_base", "LDS aperture base")
 
 // Below are pseudo register definition.
 REGISTER_TYPE(PSEUDO_START,"PSEUDO_START","The beginning of all pseudo-register types")
