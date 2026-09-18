@@ -20,14 +20,14 @@ GlobalParameters:
   # PrintTensorC: 1
   # PrintTensorD: 1
   # PrintTensorRef: 1
-  NumWarmups: 2
+  NumWarmups: 1000
   EnqueuesPerSync: 1000
   PrintWinnersOnly: True
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
   SkipSlowSolutionRatio: 0.0
-    #RotatingBufferSize: 256
+  RotatingBufferSize: 384
 
 
 BenchmarkProblems:
