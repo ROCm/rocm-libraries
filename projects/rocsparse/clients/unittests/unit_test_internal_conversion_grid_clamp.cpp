@@ -271,3 +271,234 @@ TEST_F(ConversionGrids, gebsr2csr_nnz_grid_stride)
     EXPECT_EQ(rocsparse_destroy_mat_descr(descr_A), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_mat_descr(descr_C), rocsparse_status_success);
 }
+namespace
+{
+    // A CSR sparsity pattern with `per_row` entries in every row, except that
+    // row `long_row` (when >= 0) gets `long_row_nnz` entries instead. Columns
+    // are 0, 1, 2, ... within each row, so the transpose is easy to predict.
+    struct csr_pattern
+    {
+        std::vector<rocsparse_int> row_ptr;
+        std::vector<rocsparse_int> col_ind;
+        std::vector<float>         val;
+        rocsparse_int              m   = 0;
+        rocsparse_int              n   = 0;
+        rocsparse_int              nnz = 0;
+
+        csr_pattern(rocsparse_int m_,
+                    rocsparse_int per_row,
+                    rocsparse_int long_row     = -1,
+                    rocsparse_int long_row_nnz = 0)
+            : m(m_)
+        {
+            row_ptr.push_back(0);
+            for(rocsparse_int r = 0; r < m; ++r)
+            {
+                const rocsparse_int count = (r == long_row) ? long_row_nnz : per_row;
+                for(rocsparse_int k = 0; k < count; ++k)
+                {
+                    col_ind.push_back(k);
+                    val.push_back(static_cast<float>(r * 1000 + k));
+                }
+                row_ptr.push_back(static_cast<rocsparse_int>(col_ind.size()));
+            }
+            nnz = row_ptr.back();
+            n   = (per_row > long_row_nnz) ? per_row : long_row_nnz;
+        }
+
+        // Row index of every non-zero, in CSR order: exactly what csr2coo must
+        // produce.
+        std::vector<rocsparse_int> expected_coo_row_ind() const
+        {
+            std::vector<rocsparse_int> expected(nnz);
+            for(rocsparse_int r = 0; r < m; ++r)
+            {
+                for(rocsparse_int k = row_ptr[r]; k < row_ptr[r + 1]; ++k)
+                {
+                    expected[k] = r;
+                }
+            }
+            return expected;
+        }
+    };
+}
+
+// ===========================================================================
+// AISPARSE-685 -- csr2coo
+//
+// csr2coo_kernel runs 256 threads per block and assigns one wavefront of
+// WF_SIZE threads per row, so a block covers 256 / WF_SIZE rows and the launcher
+// asks for ceil(WF_SIZE * m / 256) blocks. The launcher picks WF_SIZE from
+// nnz / m, so the eight call sites are reached by varying the density; every
+// case below is shaped to land on one of them and to need more blocks than the
+// clamp allows.
+//
+// This kernel is the one with barriers: two __syncthreads() around a shared
+// all_short_rows flag and a per-wavefront short_rows array, plus a third added
+// at the bottom of the new stride loop to separate one iteration's reads of
+// those from the next iteration's writes. The stride bound is built only from
+// hipBlockIdx_x, hipGridDim_x, the kernel argument m and compile-time constants,
+// so every thread of a block runs the same number of iterations and reaches all
+// three barriers together.
+// ===========================================================================
+
+namespace
+{
+    void run_csr2coo_clamped(rocsparse_handle handle, const csr_pattern& p, const char* which)
+    {
+        device_vector<rocsparse_int> d_row_ptr(p.row_ptr);
+        device_vector<rocsparse_int> d_coo_row_ind(std::vector<rocsparse_int>(p.nnz, -1));
+        ASSERT_NE(d_row_ptr.ptr, nullptr);
+        ASSERT_NE(d_coo_row_ind.ptr, nullptr);
+
+        {
+            ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+            ASSERT_EQ(rocsparse_csr2coo(handle,
+                                        d_row_ptr.ptr,
+                                        p.nnz,
+                                        p.m,
+                                        d_coo_row_ind.ptr,
+                                        rocsparse_index_base_zero),
+                      rocsparse_status_success);
+            UT_CHECK_HIP(hipDeviceSynchronize());
+        }
+
+        EXPECT_EQ(first_mismatch(to_host(d_coo_row_ind), p.expected_coo_row_ind()), -1)
+            << "csr2coo (" << which << ") did not cover all " << p.m
+            << " rows with grid.x clamped to " << clamped_grid_x << " blocks";
+    }
+}
+
+// nnz/m selects the wavefront size: <4 -> 2, <8 -> 4, <16 -> 8, <32 -> 16,
+// <64 -> 32, <128 -> 64, <256 -> 128, else 256. One case per call site.
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf2)
+{
+    run_csr2coo_clamped(handle, csr_pattern(1000, 1), "wf2");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf4)
+{
+    run_csr2coo_clamped(handle, csr_pattern(500, 5), "wf4");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf8)
+{
+    run_csr2coo_clamped(handle, csr_pattern(400, 10), "wf8");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf16)
+{
+    run_csr2coo_clamped(handle, csr_pattern(300, 20), "wf16");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf32)
+{
+    run_csr2coo_clamped(handle, csr_pattern(200, 40), "wf32");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf64)
+{
+    run_csr2coo_clamped(handle, csr_pattern(100, 100), "wf64");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf128)
+{
+    run_csr2coo_clamped(handle, csr_pattern(100, 200), "wf128");
+}
+
+TEST_F(ConversionGrids, csr2coo_grid_stride_wf256)
+{
+    run_csr2coo_clamped(handle, csr_pattern(50, 300), "wf256");
+}
+
+// The long-row branch. A row with more than 8 * WF_SIZE non-zeros clears the
+// shared all_short_rows flag, which sends the whole block through the second
+// half of the kernel after the second __syncthreads(). This is the case that
+// would deadlock or read stale shared state if the stride bound were not
+// block-uniform, so it is pinned separately: 600 rows of one entry each with a
+// single 5000-entry row gives nnz/m == 9, which lands on WF_SIZE 8 and a
+// long-row threshold of 64.
+TEST_F(ConversionGrids, csr2coo_grid_stride_long_row_branch)
+{
+    run_csr2coo_clamped(handle, csr_pattern(600, 1, 300, 5000), "long row");
+}
+
+// ===========================================================================
+// AISPARSE-685 -- csr2csc
+//
+// csr2csc_permute_kernel runs 512 threads per block, one thread per non-zero, so
+// 2048 non-zeros ask for 4 blocks against a clamp of 3. The action must be
+// numeric: the symbolic path never reaches this kernel.
+// ===========================================================================
+
+TEST_F(ConversionGrids, csr2csc_grid_stride)
+{
+    const csr_pattern p(64, 32); // 64 x 32, 2048 non-zeros, every row identical
+
+    device_vector<rocsparse_int> d_row_ptr(p.row_ptr);
+    device_vector<rocsparse_int> d_col_ind(p.col_ind);
+    device_vector<float>         d_val(p.val);
+    device_vector<rocsparse_int> d_csc_col_ptr(std::vector<rocsparse_int>(p.n + 1, -1));
+    device_vector<rocsparse_int> d_csc_row_ind(std::vector<rocsparse_int>(p.nnz, -1));
+    device_vector<float>         d_csc_val(std::vector<float>(p.nnz, -1.0f));
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_csr2csc_buffer_size(handle,
+                                            p.m,
+                                            p.n,
+                                            p.nnz,
+                                            d_row_ptr.ptr,
+                                            d_col_ind.ptr,
+                                            rocsparse_action_numeric,
+                                            &buffer_size),
+              rocsparse_status_success);
+
+    device_vector<char> d_buffer(buffer_size);
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse_scsr2csc(handle,
+                                     p.m,
+                                     p.n,
+                                     p.nnz,
+                                     d_val.ptr,
+                                     d_row_ptr.ptr,
+                                     d_col_ind.ptr,
+                                     d_csc_val.ptr,
+                                     d_csc_row_ind.ptr,
+                                     d_csc_col_ptr.ptr,
+                                     rocsparse_action_numeric,
+                                     rocsparse_index_base_zero,
+                                     d_buffer.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    // Host transpose of the same pattern: column c holds rows 0..m-1 in order,
+    // because every row of the source has the identical column list 0..n-1.
+    std::vector<rocsparse_int> expected_col_ptr(p.n + 1);
+    std::vector<rocsparse_int> expected_row_ind(p.nnz);
+    std::vector<float>         expected_val(p.nnz);
+    for(rocsparse_int c = 0; c <= p.n; ++c)
+    {
+        expected_col_ptr[c] = c * p.m;
+    }
+    for(rocsparse_int c = 0; c < p.n; ++c)
+    {
+        for(rocsparse_int r = 0; r < p.m; ++r)
+        {
+            expected_row_ind[c * p.m + r] = r;
+            expected_val[c * p.m + r]     = static_cast<float>(r * 1000 + c);
+        }
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_csc_col_ptr), expected_col_ptr), -1)
+        << "csr2csc column pointers wrong with grid.x clamped to " << clamped_grid_x;
+    EXPECT_EQ(first_mismatch(to_host(d_csc_row_ind), expected_row_ind), -1)
+        << "csr2csc_permute_kernel did not cover all " << p.nnz
+        << " non-zeros (row indices) with grid.x clamped to " << clamped_grid_x;
+    EXPECT_EQ(first_mismatch(to_host(d_csc_val), expected_val), -1)
+        << "csr2csc_permute_kernel did not cover all " << p.nnz
+        << " non-zeros (values) with grid.x clamped to " << clamped_grid_x;
+}
