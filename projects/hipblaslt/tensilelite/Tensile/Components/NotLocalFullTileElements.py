@@ -70,7 +70,7 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         # A packed bf16 atomic always writes an element pair, so the edge
         # variant cannot narrow to 1. AF0EM>=2 keeps every pair inside a column,
         # which is what makes the wider edge store safe.
-        minStoreVectorWidth = 2 if (kernel.get("_GSUAtomicDestBF16", False) and \
+        minStoreVectorWidth = 2 if (kernel["GlobalSplitUAlgorithm"] == "AtomicDest" and \
             (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1)) else 1
 
         # handle mfma 4x4 instruction
