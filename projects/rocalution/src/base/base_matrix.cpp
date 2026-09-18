@@ -1110,6 +1110,15 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                               const BaseVector<int>& f2f,
+                                               BaseMatrix<ValueType>* A_FC,
+                                               BaseMatrix<ValueType>* A_FF) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
     bool BaseMatrix<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
                                                    const BaseVector<int>&       f2c,
                                                    const BaseVector<int>&       f2f,

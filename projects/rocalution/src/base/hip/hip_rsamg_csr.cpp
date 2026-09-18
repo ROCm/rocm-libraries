@@ -1640,6 +1640,96 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                                            const BaseVector<int>& f2f,
+                                                            BaseMatrix<ValueType>* A_FC,
+                                                            BaseMatrix<ValueType>* A_FF) const
+    {
+        const HIPAcceleratorVector<int>* cast_cf
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&CFmap);
+        const HIPAcceleratorVector<int>* cast_f2f
+            = dynamic_cast<const HIPAcceleratorVector<int>*>(&f2f);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_fc
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FC);
+        HIPAcceleratorMatrixCSR<ValueType>* cast_ff
+            = dynamic_cast<HIPAcceleratorMatrixCSR<ValueType>*>(A_FF);
+
+        assert(cast_cf != NULL);
+        assert(cast_f2f != NULL);
+        assert(cast_fc != NULL);
+        assert(cast_ff != NULL);
+
+        hipStream_t stream = HIPSTREAM(_get_backend_descriptor()->HIP_stream_current);
+
+        int nf = cast_ff->nrow_;
+
+        if(nf == 0)
+        {
+            return true;
+        }
+
+        ValueType* D_lambda = NULL;
+        ValueType* D_beta   = NULL;
+        ValueType* D_tmp    = NULL;
+        ValueType* D_tau    = NULL;
+        ValueType* D_w      = NULL;
+
+        allocate_hip(nf, &D_lambda);
+        allocate_hip(nf, &D_beta);
+        allocate_hip(nf, &D_tmp);
+        allocate_hip(nf, &D_tau);
+        allocate_hip(nf, &D_w);
+
+        set_to_zero_hip(256, nf, D_lambda, false, stream);
+        set_to_zero_hip(256, nf, D_beta, false, stream);
+        set_to_zero_hip(256, nf, D_tmp, false, stream);
+        set_to_zero_hip(256, nf, D_tau, false, stream);
+        set_to_zero_hip(256, nf, D_w, false, stream);
+
+        kernel_csr_rs_mmextpe_diagonals<256>
+            <<<(this->nrow_ - 1) / 256 + 1, 256, 0, stream>>>(this->nrow_,
+                                                              this->mat_.row_offset,
+                                                              this->mat_.val,
+                                                              cast_cf->vec_,
+                                                              cast_f2f->vec_,
+                                                              cast_ff->mat_.row_offset,
+                                                              cast_ff->mat_.col,
+                                                              cast_ff->mat_.val,
+                                                              cast_fc->mat_.row_offset,
+                                                              cast_fc->mat_.val,
+                                                              D_lambda,
+                                                              D_beta,
+                                                              D_tmp,
+                                                              D_w);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        kernel_csr_rs_mmextpe_tau<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
+            nf, cast_ff->mat_.row_offset, cast_ff->mat_.col, cast_ff->mat_.val, D_tmp, D_tau);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        kernel_csr_rs_mmextpe_scale<256><<<(nf - 1) / 256 + 1, 256, 0, stream>>>(
+            nf,
+            cast_ff->mat_.row_offset,
+            cast_ff->mat_.col,
+            cast_ff->mat_.val,
+            cast_fc->mat_.row_offset,
+            cast_fc->mat_.val,
+            D_lambda,
+            D_beta,
+            D_tau,
+            D_w);
+        CHECK_HIP_ERROR(__FILE__, __LINE__);
+
+        free_hip(&D_lambda);
+        free_hip(&D_beta);
+        free_hip(&D_tmp);
+        free_hip(&D_tau);
+        free_hip(&D_w);
+
+        return true;
+    }
+
+    template <typename ValueType>
     bool HIPAcceleratorMatrixCSR<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>& CFmap,
                                                                 const BaseVector<int>& f2c,
                                                                 const BaseVector<int>& f2f,

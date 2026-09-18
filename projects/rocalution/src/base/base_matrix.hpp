@@ -747,6 +747,15 @@ namespace rocalution
         * preserved. */
         virtual bool RSInterpolationTruncation(float trunc_factor, int max_elmts);
 
+        /** \brief Scale the F-F and F-C blocks in-place such that their product yields the
+        * extended+e interpolation weights. Unlike extended+i, this redistributes the
+        * F-neighbour influence using the average of the strong F-F couplings, which needs
+        * no lookup of the reverse coupling and hence no communication. */
+        virtual bool RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                    const BaseVector<int>& f2f,
+                                    BaseMatrix<ValueType>* A_FC,
+                                    BaseMatrix<ValueType>* A_FF) const;
+
         /** \brief Assemble the prolongation operator from the F-point interpolation
         * weights, inserting the identity at the coarse points */
         virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,

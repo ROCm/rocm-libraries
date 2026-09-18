@@ -7559,7 +7559,21 @@ namespace rocalution
                   (const void*&)S,
                   prolong);
 
-        this->RSMMExtInterpolation_(CFmap, S, prolong);
+        this->RSMMExtInterpolation_(CFmap, S, false, prolong);
+    }
+
+    template <typename ValueType>
+    void LocalMatrix<ValueType>::RSMMExtPEInterpolation(const LocalVector<int>&  CFmap,
+                                                        const LocalVector<bool>& S,
+                                                        LocalMatrix<ValueType>*  prolong) const
+    {
+        log_debug(this,
+                  "LocalMatrix::RSMMExtPEInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        this->RSMMExtInterpolation_(CFmap, S, true, prolong);
     }
 
     template <typename ValueType>
@@ -7614,8 +7628,12 @@ namespace rocalution
     template <typename ValueType>
     void LocalMatrix<ValueType>::RSMMExtInterpolation_(const LocalVector<int>&  CFmap,
                                                        const LocalVector<bool>& S,
+                                                       bool                     ext_pe,
                                                        LocalMatrix<ValueType>*  prolong) const
     {
+        const char* name = ext_pe ? "LocalMatrix::RSMMExtPEInterpolation()"
+                                  : "LocalMatrix::RSMMExtPIInterpolation()";
+
         assert(prolong != NULL);
         assert(this != prolong);
         assert(this->is_host_() == CFmap.is_host_());
@@ -7636,7 +7654,7 @@ namespace rocalution
             csr_mat.ConvertToCSR();
             mat = &csr_mat;
 
-            LOG_VERBOSE_INFO(2, "*** warning: RSMMExtInterpolation is performed in CSR format");
+            LOG_VERBOSE_INFO(2, std::string("*** warning: ") + name + " is performed in CSR format");
         }
 
         // Fine to coarse and fine to fine maps
@@ -7662,20 +7680,28 @@ namespace rocalution
         // LCOV_EXCL_START
         if(err == false)
         {
-            LOG_INFO("Computation of RSMMExtInterpolation failed");
+            LOG_INFO("Computation of " << name << " failed");
             this->Info();
             FATAL_ERROR(__FILE__, __LINE__);
         }
         // LCOV_EXCL_STOP
 
 
-        err = mat->matrix_->RSMMExtPIScale(
-            *CFmap.vector_, *f2f.vector_, *A_FC.matrix_, A_FF.matrix_);
+        if(ext_pe)
+        {
+            err = mat->matrix_->RSMMExtPEScale(
+                *CFmap.vector_, *f2f.vector_, A_FC.matrix_, A_FF.matrix_);
+        }
+        else
+        {
+            err = mat->matrix_->RSMMExtPIScale(
+                *CFmap.vector_, *f2f.vector_, *A_FC.matrix_, A_FF.matrix_);
+        }
 
         // LCOV_EXCL_START
         if(err == false)
         {
-            LOG_INFO("Computation of RSMMExtInterpolation failed");
+            LOG_INFO("Computation of " << name << " failed");
             this->Info();
             FATAL_ERROR(__FILE__, __LINE__);
         }
@@ -7697,7 +7723,7 @@ namespace rocalution
         // LCOV_EXCL_START
         if(err == false)
         {
-            LOG_INFO("Computation of RSMMExtInterpolation failed");
+            LOG_INFO("Computation of " << name << " failed");
             this->Info();
             FATAL_ERROR(__FILE__, __LINE__);
         }

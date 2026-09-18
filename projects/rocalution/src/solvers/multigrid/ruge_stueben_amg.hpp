@@ -64,7 +64,8 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetInterpolationType(InterpolationType type);
 
-        /** \brief Enable FF1 interpolation limitation */
+        /** \brief Enable FF1 interpolation limitation. This has no effect on MM
+        * interpolation. */
         ROCALUTION_EXPORT
         void SetInterpolationFF1Limit(bool FF1);
 

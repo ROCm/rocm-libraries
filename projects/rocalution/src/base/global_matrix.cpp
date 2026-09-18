@@ -4114,6 +4114,53 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSMMExtPEInterpolation(const LocalVector<int>&  CFmap,
+                                                         const LocalVector<bool>& S,
+                                                         GlobalMatrix<ValueType>* prolong) const
+    {
+        log_debug(this,
+                  "GlobalMatrix::RSMMExtPEInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        assert(prolong != NULL);
+        assert(this != prolong);
+
+        assert(prolong->GetFormat() == CSR);
+
+        assert(this->is_host_() == prolong->is_host_());
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // The matrix-matrix formulation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSMMExtPEInterpolation() is not implemented for more than "
+                     "one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSMMExtPEInterpolation(CFmap, S, &prolong->matrix_interior_);
+
+        // Prolongation PM
+        prolong->CreateParallelManager_();
+        prolong->pm_self_->SetMPICommunicator(this->pm_->comm_);
+
+        prolong->pm_self_->SetGlobalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetGlobalNcol(prolong->matrix_interior_.GetN());
+
+        prolong->pm_self_->SetLocalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetLocalNcol(prolong->matrix_interior_.GetN());
+    }
+
+    template <typename ValueType>
     void GlobalMatrix<ValueType>::RSExtPIInterpolation(const LocalVector<int>&  CFmap,
                                                        const LocalVector<bool>& S,
                                                        bool                     FF1,

@@ -433,6 +433,10 @@ namespace rocalution
                                     const BaseVector<int>&       f2f,
                                     const BaseMatrix<ValueType>& A_FC,
                                     BaseMatrix<ValueType>*       A_FF) const;
+        virtual bool RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                    const BaseVector<int>& f2f,
+                                    BaseMatrix<ValueType>* A_FC,
+                                    BaseMatrix<ValueType>* A_FF) const;
         virtual bool RSInterpolationTruncation(float trunc_factor, int max_elmts);
 
         virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,

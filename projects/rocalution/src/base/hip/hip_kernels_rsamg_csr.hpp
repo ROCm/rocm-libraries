@@ -2427,6 +2427,187 @@ namespace rocalution
         }
     }
 
+    // Average of the strong F-F couplings, row sums of the F-C block, the resulting
+    // redistribution factor, and what remains of the row sum of A
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpe_diagonals(I nrow,
+                                             const J* __restrict__ csr_row_ptr,
+                                             const T* __restrict__ csr_val,
+                                             const int* __restrict__ cf,
+                                             const I* __restrict__ f2f,
+                                             const J* __restrict__ ff_row_ptr,
+                                             const I* __restrict__ ff_col_ind,
+                                             const T* __restrict__ ff_val,
+                                             const J* __restrict__ fc_row_ptr,
+                                             const T* __restrict__ fc_val,
+                                             T* __restrict__ D_lambda,
+                                             T* __restrict__ D_beta,
+                                             T* __restrict__ D_tmp,
+                                             T* __restrict__ D_w)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+        constexpr T   zero   = static_cast<T>(0);
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        I r = f2f[row];
+
+        T lambda = zero;
+        I count  = 0;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            // The diagonal of row r of the F-F block sits at column r
+            if(ff_col_ind[j] != r)
+            {
+                lambda = lambda + ff_val[j];
+                ++count;
+            }
+        }
+
+        if(count != 0)
+        {
+            lambda = lambda / static_cast<T>(count);
+        }
+
+        T beta = zero;
+
+        for(J j = fc_row_ptr[r]; j < fc_row_ptr[r + 1]; ++j)
+        {
+            beta = beta + fc_val[j];
+        }
+
+        T sum = zero;
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            sum = sum + csr_val[k];
+        }
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            if(ff_col_ind[j] != r)
+            {
+                sum = sum - ff_val[j];
+            }
+        }
+
+        D_lambda[r] = lambda;
+        D_beta[r]   = beta;
+        D_w[r]      = sum - beta;
+
+        if(lambda + beta != zero)
+        {
+            D_tmp[r] = lambda / (beta + lambda);
+        }
+    }
+
+    // Couple each row to the redistribution factors of its F-neighbours. This reads the
+    // unscaled F-F block, so it has to complete before anything is scaled
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpe_tau(I nf,
+                                       const J* __restrict__ ff_row_ptr,
+                                       const I* __restrict__ ff_col_ind,
+                                       const T* __restrict__ ff_val,
+                                       const T* __restrict__ D_tmp,
+                                       T* __restrict__ D_tau)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        T tau = static_cast<T>(0);
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            I jj = ff_col_ind[j];
+
+            if(jj != r)
+            {
+                tau = tau + ff_val[j] * D_tmp[jj];
+            }
+        }
+
+        D_tau[r] = tau;
+    }
+
+    // Scale both blocks such that their product yields the ext+e weights
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpe_scale(I nf,
+                                         const J* __restrict__ ff_row_ptr,
+                                         const I* __restrict__ ff_col_ind,
+                                         T* __restrict__ ff_val,
+                                         const J* __restrict__ fc_row_ptr,
+                                         T* __restrict__ fc_val,
+                                         const T* __restrict__ D_lambda,
+                                         const T* __restrict__ D_beta,
+                                         const T* __restrict__ D_tau,
+                                         const T* __restrict__ D_w)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        T value = D_w[r] + D_tau[r];
+
+        if(value != zero)
+        {
+            value = static_cast<T>(-1) / value;
+        }
+
+        T theta = D_beta[r] + D_lambda[r];
+
+        J diag_idx = -1;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            if(ff_col_ind[j] == r)
+            {
+                diag_idx = j;
+            }
+            else
+            {
+                ff_val[j] = ff_val[j] * value;
+            }
+        }
+
+        if(diag_idx >= 0)
+        {
+            ff_val[diag_idx] = value * theta;
+        }
+
+        if(theta != zero)
+        {
+            theta = static_cast<T>(1) / theta;
+        }
+
+        for(J j = fc_row_ptr[r]; j < fc_row_ptr[r + 1]; ++j)
+        {
+            fc_val[j] = fc_val[j] * theta;
+        }
+    }
+
     // Coarse points are injected, fine points take their row of interpolation weights
     template <unsigned int BLOCKSIZE, typename I, typename J>
     __launch_bounds__(BLOCKSIZE) __global__

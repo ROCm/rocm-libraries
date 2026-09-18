@@ -101,6 +101,9 @@ namespace rocalution
             case MMExtPI:
                 interpolation = "MM Ext+i";
                 break;
+            case MMExtPE:
+                interpolation = "MM Ext+e";
+                break;
             }
 
             LOG_INFO("AMG number of levels " << this->levels_);
@@ -142,6 +145,9 @@ namespace rocalution
             break;
         case MMExtPI:
             interpolation = "MM Ext+i";
+            break;
+        case MMExtPE:
+            interpolation = "MM Ext+e";
             break;
         }
 
@@ -348,6 +354,9 @@ namespace rocalution
             break;
         case MMExtPI:
             op.RSMMExtPIInterpolation(CFmap, S, pro);
+            break;
+        case MMExtPE:
+            op.RSMMExtPEInterpolation(CFmap, S, pro);
             break;
         }
 

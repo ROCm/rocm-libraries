@@ -1234,6 +1234,12 @@ namespace rocalution
                                     const LocalVector<bool>& S,
                                     LocalMatrix<ValueType>*  prolong) const;
 
+        /** \brief Ruge Stueben Ext+e Interpolation, in matrix-matrix formulation */
+        ROCALUTION_EXPORT
+        void RSMMExtPEInterpolation(const LocalVector<int>&  CFmap,
+                                    const LocalVector<bool>& S,
+                                    LocalMatrix<ValueType>*  prolong) const;
+
         /** \brief Truncate an interpolation operator, keeping at most \p max_elmts entries
         * per row and dropping those below \p trunc_factor times the largest magnitude of
         * their row. Surviving entries are rescaled to preserve the row sum. */
@@ -1346,6 +1352,7 @@ namespace rocalution
     private:
         void RSMMExtInterpolation_(const LocalVector<int>&  CFmap,
                                    const LocalVector<bool>& S,
+                                   bool                     ext_pe,
                                    LocalMatrix<ValueType>*  prolong) const;
 
         // Pointer from the base matrix class to the current
