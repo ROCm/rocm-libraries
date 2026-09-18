@@ -163,10 +163,6 @@ static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
     wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_bf8_bf8");
 }
 
-static void build_wmma_scale_fp4(rocke_ir_builder_t* b) {}
-
-static void build_wmma_scale16_fp4(rocke_ir_builder_t* b) {}
-
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
  * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */

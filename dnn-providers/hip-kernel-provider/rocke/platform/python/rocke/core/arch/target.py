@@ -23,7 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..scaled_wmma import SCALED_WMMA_OPS
+from .wmma_scale import SCALED_WMMA_OPS
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
