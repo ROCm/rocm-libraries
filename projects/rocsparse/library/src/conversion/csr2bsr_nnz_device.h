@@ -58,7 +58,6 @@ namespace rocsparse
         __shared__ bool found[BLOCKSIZE / WFSIZE];
         __shared__ J    nnzb_per_row[BLOCKSIZE / WFSIZE];
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         // The bound must stay block-uniform so the __syncthreads() below stay convergent.
         for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
         {
@@ -161,7 +160,6 @@ namespace rocsparse
         __shared__ J    nnzb_per_row;
         __shared__ J    shared[BLOCKSIZE];
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         // The bound must stay block-uniform so the __syncthreads() below stay convergent.
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
@@ -263,7 +261,6 @@ namespace rocsparse
         I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys)
                      + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
             J block_col    = 0;

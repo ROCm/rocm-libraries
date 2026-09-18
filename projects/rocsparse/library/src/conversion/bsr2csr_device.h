@@ -60,7 +60,6 @@ namespace rocsparse
             return;
         }
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
             I start = bsr_row_ptr[bid] - bsr_base;
@@ -128,7 +127,6 @@ namespace rocsparse
             return;
         }
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
             I start = bsr_row_ptr[bid] - bsr_base;
@@ -185,7 +183,6 @@ namespace rocsparse
     {
         J tid = hipThreadIdx_x;
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
             I start = bsr_row_ptr[bid] - bsr_base;

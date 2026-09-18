@@ -67,7 +67,6 @@ namespace rocsparse
         __shared__ bool table[BLOCKSIZE / WFSIZE];
         __shared__ T    data[(BLOCKSIZE / WFSIZE) * BLOCKDIM * BLOCKDIM];
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
         {
             J block_row = (BLOCKSIZE / WFSIZE) * bid + wid;
@@ -196,7 +195,6 @@ namespace rocsparse
         __shared__ bool table;
         __shared__ T    data[BLOCKDIM * BLOCKDIM];
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         // The bound must stay block-uniform so the __syncthreads() below stay convergent.
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
@@ -335,7 +333,6 @@ namespace rocsparse
             = temp2 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
         T* csr_value = temp3 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
 
-        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
             J bsr_row_start = bsr_row_ptr[block_id] - bsr_base;
