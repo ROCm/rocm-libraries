@@ -1681,34 +1681,43 @@ namespace TensileLite
                     return (numerator + denominator - 1) / denominator;
                 }
 
-                // The count solve() builds the fallback grid from is
-                // ContractionProblemGemm::getNumTiles(sizeMapping, 1). This is
-                // computed separately because a predicate is handed
-                // MacroTile0/MacroTile1 as its value rather than the solution's
-                // sizeMapping, so it cannot consult sizeMapping.packBatchDims.
+                // Mirrors ContractionProblemGemm::getNumTiles(sizeMapping, 1), the
+                // count solve() builds the fallback grid from: the product of every
+                // free index on each side divided by its macro tile, times the
+                // product of every batch index.
                 //
-                // Every batch index is accumulated, matching getNumTiles, rather
-                // than taking batchSize(0) the way WorkgroupNumberCheck and the
-                // LeadingFree*SizesGreaterOrEqual predicates do. Those carry an
-                // assert(batchIndices().size() <= 1) that compiles out of a release
-                // build, and undercounting here would admit a grid that then wraps,
-                // which is the failure this predicate exists to prevent.
+                // Every index is accumulated rather than taking index 0, the way
+                // WorkgroupNumberCheck and the LeadingFree*SizesGreaterOrEqual
+                // predicates do. Those carry an assert(batchIndices().size() <= 1)
+                // that compiles out of a release build. Taking index 0 alone
+                // under-counts a multi-free-index or multi-batch contraction, and
+                // under-counting admits a grid that then wraps, which is precisely
+                // the failure this predicate exists to prevent.
                 //
-                // Two divergences from getNumTiles remain, both of which can only
-                // make this over-count and therefore only reject more: it uses
-                // freeSizeA/B index 0 rather than the product over every free
-                // index, and when packBatchDims is set getNumTiles folds batch into
-                // the M or N extent before dividing by the macro tile while this
-                // multiplies it in afterwards.
+                // Computed here rather than delegated because a predicate is handed
+                // MacroTile0/MacroTile1 as its value and never sees the solution's
+                // sizeMapping, so it cannot consult packBatchDims. That is the one
+                // remaining divergence: when packBatchDims is set getNumTiles folds
+                // batch into the M or N extent before the macro-tile divide, while
+                // this multiplies it in afterwards. That direction can only
+                // over-count, so it can only reject more, which is the safe way to
+                // be wrong.
                 static size_t tiles(ContractionProblemGemm const& problem,
                                     std::array<int, 2> const&     value)
                 {
+                    size_t freeA = 1;
+                    for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+                        freeA *= problem.freeSizeA(i);
+
+                    size_t freeB = 1;
+                    for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+                        freeB *= problem.freeSizeB(i);
+
                     size_t batch = 1;
                     for(size_t i = 0; i < problem.batchIndices().size(); i++)
                         batch *= problem.batchSize(i);
 
-                    return ceilDiv(problem.freeSizeA(0), value[0])
-                           * ceilDiv(problem.freeSizeB(0), value[1]) * batch;
+                    return ceilDiv(freeA, value[0]) * ceilDiv(freeB, value[1]) * batch;
                 }
 
                 // The launch narrows the 64-bit work-item count

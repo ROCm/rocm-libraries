@@ -336,6 +336,49 @@ TEST(Predicates, StreamKWorkgroupNumberCheck_EveryBatchIndexCounted)
            "batchSize(0) would give 2^20 and wrongly admit this shape";
 }
 
+TEST(Predicates, StreamKWorkgroupNumberCheck_EveryFreeIndexCounted)
+{
+    using namespace TensileLite;
+    // Same argument as the batch case, on the free indices. getNumTiles()
+    // multiplies every free size before dividing by the macro tile
+    // (ContractionProblem.cpp, the m_freeIndicesA / m_freeIndicesB loops), so
+    // taking freeSizeA(0) alone under-counts a multi-free-index contraction
+    // and admits a grid that then wraps.
+    //
+    // Sized to land one tile past the bound, so it also pins the boundary:
+    // ceil(4096*4096 / 16) * ceil(256 / 16) == 2^24 == UINT32_MAX/256 + 1,
+    // while ceil(4096 / 16) * ceil(256 / 16) == 4096 and would be admitted.
+    constexpr int macroTile0 = 16;
+    constexpr int macroTile1 = 16;
+
+    // bound = l; A = i,n,l,k; B = l,j,k; C = D = i,n,j,k. i and n are both
+    // free on A, j is free on B, k is batch.
+    const std::string   id    = "Contraction_l_Ainlk_Bljk_Cinjk_Dinjk";
+    std::vector<size_t> sizes = {/*i=*/4096, /*n=*/4096, /*j=*/256, /*k=*/1, /*l=*/48};
+
+    auto problem = ContractionProblemGemm::FromIndexSizes(id,
+                                                          sizes,
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          0.0);
+
+    ASSERT_EQ(problem.freeIndicesA().size(), 2u)
+        << "the fixture must actually carry two free indices on A";
+    ASSERT_EQ(problem.freeSizeA(0) * problem.freeSizeA(1), 4096u * 4096u);
+
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "tiles across both free indices is one past the bound; counting only "
+           "freeSizeA(0) would give 4096 and wrongly admit this shape";
+}
+
 TEST(Predicates, StreamKWorkgroupNumberCheck_NonRepresentableDimension_Rejected)
 {
     using namespace TensileLite;
