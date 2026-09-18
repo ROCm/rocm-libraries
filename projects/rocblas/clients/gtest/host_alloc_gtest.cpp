@@ -60,9 +60,8 @@ namespace
     // mantissa are random. A fixed 0xFF fill can therefore match live guard
     // bytes and under-count mismatches. Invert the actual m_guard bytes so
     // every written byte is guaranteed to differ.
-    hipError_t overwrite_post_guard_inverted(device_vector<float>& dv,
-                                             size_t                first_elem,
-                                             size_t                n_bytes)
+    hipError_t
+        overwrite_post_guard_inverted(device_vector<float>& dv, size_t first_elem, size_t n_bytes)
     {
         const auto* src = reinterpret_cast<const unsigned char*>(d_vector<float>::m_guard)
                           + first_elem * sizeof(float);
@@ -71,10 +70,8 @@ namespace
             return hipErrorInvalidValue;
         for(size_t i = 0; i < n_bytes; ++i)
             flipped[i] = static_cast<unsigned char>(~src[i]);
-        return hipMemcpy(static_cast<float*>(dv) + dv.nmemb() + first_elem,
-                         flipped,
-                         n_bytes,
-                         hipMemcpyDefault);
+        return hipMemcpy(
+            static_cast<float*>(dv) + dv.nmemb() + first_elem, flipped, n_bytes, hipMemcpyDefault);
     }
 }
 
