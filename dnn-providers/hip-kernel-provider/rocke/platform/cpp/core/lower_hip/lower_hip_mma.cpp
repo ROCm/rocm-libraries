@@ -27,13 +27,13 @@
  * getattr-dispatch raises immediately and we reproduce that same rejection.
  * Every opcode is registered in the dispatch table; none is dropped.
  */
+#include <stdio.h> /* snprintf */
+#include <stdlib.h> /* atoi     */
+
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/wmma_scale_internal.h"
-
-#include <stdio.h> /* snprintf */
-#include <stdlib.h> /* atoi     */
 
 namespace ckc
 {
@@ -85,7 +85,8 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     }
     const char* op_id = spec->op_id;
     const bool scale16 = spec->scales.block_k == 16;
-    const int fmt = spec->matrix_format;
+    const int fmt_a = spec->matrix_format;
+    const int fmt_b = spec->matrix_format_b;
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
     if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
@@ -105,9 +106,9 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
                   "0, 0, %s, 0, 0, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
                   builtin,
-                  fmt,
+                  fmt_a,
                   rocke_h_name(lw, op->operands[0]),
-                  fmt,
+                  fmt_b,
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
                   rocke_h_name(lw, op->operands[3]),

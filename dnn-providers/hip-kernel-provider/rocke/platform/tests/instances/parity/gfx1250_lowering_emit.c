@@ -148,19 +148,19 @@ static void build_wmma_scale(rocke_ir_builder_t* b)
     wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp8_fp8");
 }
 
-static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
-{
-    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_bf8_bf8");
-}
-
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
     wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp8_fp8");
 }
 
-static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
+static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_bf8_bf8");
+    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp4_fp4");
+}
+
+static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp4_fp4");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
@@ -283,8 +283,12 @@ static void build_async_store(rocke_ir_builder_t* b)
     rocke_value_t* lds_ptr = rocke_b_smem_addr_of(b, smem);
     const int widths[] = {1, 4, 8, 16};
     for(int i = 0; i < 4; ++i)
-        rocke_b_global_store_async_from_lds(
-            b, out, lds_ptr, widths[i], widths[i], /*cachepolicy=*/3);
+        rocke_b_global_store_async_from_lds(b,
+                                            out,
+                                            lds_ptr,
+                                            widths[i],
+                                            widths[i],
+                                            /*cachepolicy=*/3);
     rocke_b_ret(b);
 }
 
@@ -359,6 +363,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_bf8_bf8, "gfx1250"},
     {build_wmma_scale, "gfx1250"},
     {build_wmma_scale16, "gfx1250"},
+    {build_wmma_scale_fp4, "gfx1250"},
+    {build_wmma_scale16_fp4, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},
@@ -373,12 +379,52 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_bf8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_fp6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_bf6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_fp4", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_bf8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_bf6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp4", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_bf8", false},
     {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_bf6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp4", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_bf8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp6", false},
     {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_bf6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp4", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf8", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp6", false},
+    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf6", false},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_bf8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_fp6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_bf6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_fp4", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_bf8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_bf6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp4", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_bf8", true},
     {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_bf6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp4", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_bf8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp6", true},
     {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_bf6", true},
-    {build_wmma_scale_bf8, "gfx1250"},
-    {build_wmma_scale16_bf8, "gfx1250"},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp4", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf8", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp6", true},
+    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf6", true},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

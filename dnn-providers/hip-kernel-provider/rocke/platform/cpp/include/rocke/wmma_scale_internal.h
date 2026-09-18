@@ -23,6 +23,7 @@ typedef struct rocke_scaled_wmma_op
 {
     const char* op_id;
     int matrix_format;
+    int matrix_format_b;
     rocke_e8m0_scale_packing_t scales;
 } rocke_scaled_wmma_op_t;
 
@@ -31,14 +32,56 @@ static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma(const char
     static const rocke_e8m0_scale_packing_t scale = {/*count=*/4, /*block_k=*/32};
     static const rocke_e8m0_scale_packing_t scale16 = {/*count=*/8, /*block_k=*/16};
     static const rocke_scaled_wmma_op_t ops[] = {
-        {"wmma_scale_f32_16x16x128_fp8_fp8", 0, scale},
-        {"wmma_scale_f32_16x16x128_bf8_bf8", 1, scale},
-        {"wmma_scale16_f32_16x16x128_fp8_fp8", 0, scale16},
-        {"wmma_scale16_f32_16x16x128_bf8_bf8", 1, scale16},
-        {"wmma_scale_f32_16x16x128_fp6_fp6", 2, scale},
-        {"wmma_scale_f32_16x16x128_bf6_bf6", 3, scale},
-        {"wmma_scale16_f32_16x16x128_fp6_fp6", 2, scale16},
-        {"wmma_scale16_f32_16x16x128_bf6_bf6", 3, scale16},
+        {"wmma_scale_f32_16x16x128_fp8_fp8", 0, 0, scale},
+        {"wmma_scale_f32_16x16x128_fp8_bf8", 0, 1, scale},
+        {"wmma_scale_f32_16x16x128_fp8_fp6", 0, 2, scale},
+        {"wmma_scale_f32_16x16x128_fp8_bf6", 0, 3, scale},
+        {"wmma_scale_f32_16x16x128_fp8_fp4", 0, 4, scale},
+        {"wmma_scale_f32_16x16x128_bf8_fp8", 1, 0, scale},
+        {"wmma_scale_f32_16x16x128_bf8_bf8", 1, 1, scale},
+        {"wmma_scale_f32_16x16x128_bf8_fp6", 1, 2, scale},
+        {"wmma_scale_f32_16x16x128_bf8_bf6", 1, 3, scale},
+        {"wmma_scale_f32_16x16x128_bf8_fp4", 1, 4, scale},
+        {"wmma_scale_f32_16x16x128_fp6_fp8", 2, 0, scale},
+        {"wmma_scale_f32_16x16x128_fp6_bf8", 2, 1, scale},
+        {"wmma_scale_f32_16x16x128_fp6_fp6", 2, 2, scale},
+        {"wmma_scale_f32_16x16x128_fp6_bf6", 2, 3, scale},
+        {"wmma_scale_f32_16x16x128_fp6_fp4", 2, 4, scale},
+        {"wmma_scale_f32_16x16x128_bf6_fp8", 3, 0, scale},
+        {"wmma_scale_f32_16x16x128_bf6_bf8", 3, 1, scale},
+        {"wmma_scale_f32_16x16x128_bf6_fp6", 3, 2, scale},
+        {"wmma_scale_f32_16x16x128_bf6_bf6", 3, 3, scale},
+        {"wmma_scale_f32_16x16x128_bf6_fp4", 3, 4, scale},
+        {"wmma_scale_f32_16x16x128_fp4_fp8", 4, 0, scale},
+        {"wmma_scale_f32_16x16x128_fp4_bf8", 4, 1, scale},
+        {"wmma_scale_f32_16x16x128_fp4_fp6", 4, 2, scale},
+        {"wmma_scale_f32_16x16x128_fp4_bf6", 4, 3, scale},
+        {"wmma_scale_f32_16x16x128_fp4_fp4", 4, 4, scale},
+        {"wmma_scale16_f32_16x16x128_fp8_fp8", 0, 0, scale16},
+        {"wmma_scale16_f32_16x16x128_fp8_bf8", 0, 1, scale16},
+        {"wmma_scale16_f32_16x16x128_fp8_fp6", 0, 2, scale16},
+        {"wmma_scale16_f32_16x16x128_fp8_bf6", 0, 3, scale16},
+        {"wmma_scale16_f32_16x16x128_fp8_fp4", 0, 4, scale16},
+        {"wmma_scale16_f32_16x16x128_bf8_fp8", 1, 0, scale16},
+        {"wmma_scale16_f32_16x16x128_bf8_bf8", 1, 1, scale16},
+        {"wmma_scale16_f32_16x16x128_bf8_fp6", 1, 2, scale16},
+        {"wmma_scale16_f32_16x16x128_bf8_bf6", 1, 3, scale16},
+        {"wmma_scale16_f32_16x16x128_bf8_fp4", 1, 4, scale16},
+        {"wmma_scale16_f32_16x16x128_fp6_fp8", 2, 0, scale16},
+        {"wmma_scale16_f32_16x16x128_fp6_bf8", 2, 1, scale16},
+        {"wmma_scale16_f32_16x16x128_fp6_fp6", 2, 2, scale16},
+        {"wmma_scale16_f32_16x16x128_fp6_bf6", 2, 3, scale16},
+        {"wmma_scale16_f32_16x16x128_fp6_fp4", 2, 4, scale16},
+        {"wmma_scale16_f32_16x16x128_bf6_fp8", 3, 0, scale16},
+        {"wmma_scale16_f32_16x16x128_bf6_bf8", 3, 1, scale16},
+        {"wmma_scale16_f32_16x16x128_bf6_fp6", 3, 2, scale16},
+        {"wmma_scale16_f32_16x16x128_bf6_bf6", 3, 3, scale16},
+        {"wmma_scale16_f32_16x16x128_bf6_fp4", 3, 4, scale16},
+        {"wmma_scale16_f32_16x16x128_fp4_fp8", 4, 0, scale16},
+        {"wmma_scale16_f32_16x16x128_fp4_bf8", 4, 1, scale16},
+        {"wmma_scale16_f32_16x16x128_fp4_fp6", 4, 2, scale16},
+        {"wmma_scale16_f32_16x16x128_fp4_bf6", 4, 3, scale16},
+        {"wmma_scale16_f32_16x16x128_fp4_fp4", 4, 4, scale16},
     };
     if(!op_id)
     {

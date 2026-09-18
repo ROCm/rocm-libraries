@@ -237,6 +237,8 @@ CONFIGS = [
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale16"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
@@ -259,18 +261,12 @@ _SCALED_PAIRS = [
     (a, b)
     for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
     for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
-    if a == b and a in ("fp6", "bf6")
+    if (a, b) not in (("fp8", "fp8"), ("fp4", "fp4"))
 ]
 CONFIGS.extend(
     (_wmma_scaled(a, b, mode), "gfx1250")
     for mode in ("scale", "scale16")
     for a, b in _SCALED_PAIRS
-)
-
-
-# Homogeneous BF8 belongs to the eight-bit example contract.
-CONFIGS.extend(
-    (_wmma_scaled("bf8", "bf8", mode), "gfx1250") for mode in ("scale", "scale16")
 )
 
 

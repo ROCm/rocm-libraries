@@ -190,7 +190,8 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
     }
     const bool scale16 = spec->scales.block_k == 16;
-    const int fmt = spec->matrix_format;
+    const int fmt_a = spec->matrix_format;
+    const int fmt_b = spec->matrix_format_b;
     char concrete_name[160];
     snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
     op_name = concrete_name;
@@ -249,9 +250,9 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
                    "i32 0, i32 0, %s %s, i1 false, i1 false)",
                    mma_result_name(L, op),
                    intrinsic,
-                   fmt,
+                   fmt_a,
                    rocke_ll_operand(L, op->operands[0]),
-                   fmt,
+                   fmt_b,
                    rocke_ll_operand(L, op->operands[1]),
                    rocke_ll_operand(L, op->operands[2]),
                    scale_ty,

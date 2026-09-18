@@ -1,4 +1,4 @@
-# gfx1250 block-scaled GEMM examples
+# gfx1250 scaled GEMM examples
 
 Matrix dtype names normalize through the architecture catalog: `fp8e4m3`,
 `bf8e5m2`, `fp6e2m3`, `fp6e3m2`, and `fp4e2m1`. The short spellings `fp8`,
@@ -12,27 +12,57 @@ byte storage and packed integer instruction operands; a scale-format name does
 not introduce a scalar IR type or general conversion support. Existing operation
 IDs retain their instruction-format tokens.
 
-Each example selects one homogeneous input family and reuses the shared
-spec-driven builder, compiler, launcher, and numerical verifier.
+Run these modules from an installed rocKE environment, or with the platform's
+`python` directory on `PYTHONPATH`. They require a gfx1250 device, matching
+LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 
-| Module | Matrix inputs | Block scales |
+| Example | Matrix inputs | Scale contract |
 | --- | --- | --- |
-| `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on A and B | E8M0 |
-| `mxfp6_gemm` | FP6 E2M3 or E3M2 on A and B | E8M0 |
+| `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on both operands | E8M0 |
+| `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
 
-Run from an environment with rocKE installed and a visible gfx1250 device:
-
-```bash
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6
+```sh
+python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
+python -m rocke.examples.gfx1250.gemm.mxfp4_gemm --compile-route hip --case all
 ```
 
-Defaults use SCALE with K=32 scale groups. Add `--matrix-path wmma_scale16`
-for K=16 groups, `--compile-route hip` for HIP compilation, or `--case all`
-for neutral, one-sided, combined, and isolated scale-group fixtures.
-The `mixed` fixture name means combined A/B scale variation, not mixed dtypes.
-See [FP6.md](FP6.md) for the packed FP6 input contract. FP6 does not require FP4.
+Each example constructs a family-specific spec and invokes the shared verifier
+to prepare inputs, pack them, compile once, launch, and compare with an
+independent decoded reference. M and N must be positive multiples of 16; the
+bounded correctness fixtures support K=128 and K=256, with BF16 output.
+
+The default `wmma_scale` instruction uses one E8M0 scale per 32 K elements.
+`--matrix-path wmma_scale16` explicitly selects the native 16-element block
+variant. Scale bytes are packed in increasing K-group order. FP8 uses one byte
+per value; [FP4 uses two values per byte, low nibble first](FP4_SCALE.md).
+
+`--case all` checks neutral scales, independent A/B scales, varying scales, and
+every scale group. These bounded exact fixtures do not establish arbitrary-input
+rounding, special-value semantics, or performance. The kernel builders and
+runtime/packing utilities are shared; each example exposes one input contract.
+
+The generic `block_scaled_gemm_verify` CLI remains available for regression
+testing and the older software-scaled WMMA path. That older path is not the
+default in the focused MX examples.
+
+## FP6 and mixed matrix formats
+
+`mxfp6_gemm --dtype fp6` and `mxfp6_gemm --dtype bf6` select homogeneous
+six-bit inputs. See [FP6.md](FP6.md) for packing. These families have their
+own examples and numerical groups.
+
+`mixed_scaled_gemm` selects different A/B formats, with independent packed
+row strides and fragments. Its default is FP8 x FP4; it also accepts FP6/BF6.
+It rejects equal canonical formats and uses E8M0 scales on both operands.
+
+```bash
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --dtype-a fp8 --dtype-b fp4
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --dtype-a fp6 --dtype-b bf6 --compile-route hip
+```
+
+The verifier's `mixed` case means combined A/B scale variation; the example's
+matrix choices determine whether the input dtypes are homogeneous or mixed.
 
 `mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
 homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
