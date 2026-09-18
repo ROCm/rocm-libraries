@@ -136,13 +136,13 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
                 sliding_window=128,
                 use_fp8=True,
             )
-            ok, why = au.supports_native_unified_attention_tiled(problem)
+            ok, why = au.supports_native_unified_attention_tiled(problem, "gfx1250")
             self.assertTrue(ok, why)
-            spec = au._tiled_spec_from_problem(problem)
+            spec = au._tiled_spec_from_problem(problem, "gfx1250")
             self.assertEqual(spec.kernel_name().split("_")[2], "tiled")
             self.assertEqual(spec.num_warps, 1)
             self.assertEqual(spec.block_q, 2)
-            meta = au._get_2d_launch_meta(problem, au._tiled_cache_key(problem))
+            meta = au._get_2d_launch_meta(problem, au._tiled_cache_key(problem, "gfx1250"))
             self.assertEqual(meta.block, (32, 1, 1))
             self.assertEqual(meta.grid, (8, 6, 1))
         finally:
@@ -408,9 +408,9 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
                 use_sinks=True,
                 use_fp8=True,
             )
-            ok, why = au.supports_native_unified_attention_3d_tiled(problem)
+            ok, why = au.supports_native_unified_attention_3d_tiled(problem, "gfx1250")
             self.assertTrue(ok, why)
-            spec = au._tiled_3d_spec_from_problem(problem)
+            spec = au._tiled_3d_spec_from_problem(problem, "gfx1250")
             self.assertEqual(spec.block_q, 2)
             self.assertGreaterEqual(spec.num_segments, 1)
             Spec, _, _, _, _ = au._tiled_3d_impl("gfx1250")
@@ -533,12 +533,12 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
                 shapes = qwen3_decode_attention_shapes(kv_storage_dtype=kv_storage)
                 for shape in shapes:
                     problem = self._decode_problem(shape)
-                    ok, why = au.supports_native_unified_attention_3d_tiled(problem)
+                    ok, why = au.supports_native_unified_attention_3d_tiled(problem, "gfx1250")
                     self.assertTrue(ok, f"{kv_storage} kv{shape.kv_len}: {why}")
                     (_SegSpec, ReduceSpec, build_seg, build_red, _) = au._tiled_3d_impl(
                         "gfx1250"
                     )
-                    seg_spec = au._tiled_3d_spec_from_problem(problem)
+                    seg_spec = au._tiled_3d_spec_from_problem(problem, "gfx1250")
                     ll = lower_kernel_to_llvm(
                         build_seg(seg_spec, arch="gfx1250"), arch="gfx1250"
                     )
