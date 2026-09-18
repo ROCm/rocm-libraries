@@ -2787,11 +2787,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     reaches the builder at all and could not lower for the comparison.
     """
 
-    # fp16, not bf16: at D128 the bf16 exp2_fast policy has a seqlen_q cut at
-    # 4096, which makes the body shape-dependent and correctly takes those specs
-    # OFF the runtime path (see _exp2_fast_is_shape_dependent). fp16 is flat
-    # across that boundary, so it is the config the collapse actually applies to.
-    # test_bf16_d128_default_stays_off_the_runtime_path pins the exclusion.
+    # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
+    # that the exp2_fast policy reads compile-time config only.
+    # test_bf16_d128_default_is_on_the_runtime_path covers the bf16 D128 config
+    # that used to be excluded.
     _BASE_KWARGS = dict(
         batch=1,
         seqlen_q=2048,
@@ -2924,40 +2923,42 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             "would pass vacuously",
         )
 
-    def test_bf16_d128_default_stays_off_the_runtime_path(self):
-        """``_exp2_fast_is_shape_dependent`` still excludes bf16 D128 -- now for nothing.
+    def test_bf16_d128_default_is_on_the_runtime_path(self):
+        """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
 
-        It was load-bearing while ``_use_exp2_fast`` cut on ``seqlen_q``: two shapes
-        straddling that cut shared a cache key AND a kernel name (``_tuning_name_tags``
-        emits no token when the resolved value matches the policy) while lowering to
-        different IR. With the cut moved to ``persistent``, the policy reads no shape
-        at all, so the body no longer forks and the exclusion is pure conservatism.
+        This config was once excluded from the runtime path, because the policy
+        then cut on ``seqlen_q``: the emitted softmax was a function of the shape,
+        and since ``_tuning_name_tags`` emits no token when the resolved value
+        matches the policy, two shapes straddling the cut would have shared a cache
+        key AND a kernel name while lowering to different IR -- a stale binary that
+        the name assert in ``run_attention_dense_torch`` cannot catch.
 
-        Pinned here as the fact the follow-up commit acts on: the exclusion survives,
-        its justification does not.
+        The policy now reads compile-time config only, so the exclusion is gone.
+        Asserted in the strong direction, byte-level: the same body must lower for
+        shapes on either side of the retired 4096 boundary. If someone reintroduces
+        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
+        than silently reopening the collision.
         """
         from dataclasses import replace
 
         bf16 = self._spec(**{**self._BASE_KWARGS, "dtype": "bf16"})
-        self.assertFalse(bf16.runtime_shape)
-        self.assertEqual(bf16.runtime_param_fields, ())
+        self.assertTrue(
+            bf16.runtime_shape,
+            "bf16 D128 lowers one body for every shape; it belongs on the "
+            "runtime path",
+        )
+        self.assertEqual(bf16.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
 
-        # The two sides of the retired cut now resolve the same way. The IR still
-        # differs, but only because the exclusion keeps the shape baked -- that is
-        # the circularity the follow-up commit breaks.
         lo = replace(bf16, seqlen_q=2048, seqlen_kv=2048)
         hi = replace(bf16, seqlen_q=4096, seqlen_kv=4096)
-        self.assertEqual(lo.resolved_use_exp2_fast(), hi.resolved_use_exp2_fast())
-        self.assertNotEqual(self._ir_sha(lo), self._ir_sha(hi))
-
-        pinned = self._spec(
-            **{**self._BASE_KWARGS, "dtype": "bf16", "use_exp2_fast": True}
+        self.assertEqual(
+            lo.resolved_use_exp2_fast(),
+            hi.resolved_use_exp2_fast(),
+            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "policy collides two bodies in one cache slot under a single name",
         )
-        self.assertTrue(
-            pinned.runtime_shape,
-            "pinning use_exp2_fast short-circuits the guard, so the spec "
-            "belongs back on the runtime path",
-        )
+        self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))
+        self.assertEqual(lo.kernel_name(), hi.kernel_name())
 
     def test_persistent_stays_baked(self):
         """The gating holds the excluded sub-mode baked, through the shipped

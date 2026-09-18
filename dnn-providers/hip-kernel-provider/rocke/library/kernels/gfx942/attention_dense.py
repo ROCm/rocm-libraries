@@ -470,16 +470,18 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         one of those sub-modes is later admitted on gfx942, it lands already excluded
         rather than silently claiming a cache identity its body does not have.
 
-        The :func:`_exp2_fast_is_shape_dependent` term is gfx942-only and has no
-        gfx950 twin -- it is the one leak the shared predicate does not cover. See
-        that function for why it is a genuine per-shape body rather than bookkeeping."""
+        Every other knob that forks the body -- :func:`_use_exp2_fast` included --
+        is a function of compile-time config only, never of the problem shape, so
+        none of them can leak a per-shape body past this predicate. Keep it that
+        way: a policy that reads a shape field would make two shapes share a cache
+        key AND a kernel name while lowering to different IR, which neither the
+        name assert nor this predicate can catch."""
         return not (
             self.persistent
             or self.ragged
             or self.varlen
             or self.paged
             or self.sliding_window > 0
-            or _exp2_fast_is_shape_dependent(self)
         )
 
     @property
@@ -694,27 +696,6 @@ def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     if dtype == "bf16" and head_size == 128 and not persistent:
         return False
     return True
-
-
-def _exp2_fast_is_shape_dependent(spec: "Gfx942AttentionDenseSpec") -> bool:
-    """Whether ``spec``'s resolved exp2_fast decision is a function of the shape.
-
-    VESTIGIAL, and retired in the follow-up commit. It guarded the window in which
-    :func:`_use_exp2_fast` cut on ``seqlen``: at the tri-state default, on bf16 D128,
-    the emitted softmax then forked per shape, so the spec had to be held off the
-    runtime-shape path or two shapes would share a cache key AND a kernel name while
-    lowering to different IR -- a stale-binary bug ``_DENSE_LAUNCHER_CACHE`` would
-    serve and the name assert in ``run_attention_dense_torch`` could not catch,
-    because the names agree.
-
-    With the cut now on ``persistent`` (compile-time), no shape reaches the policy
-    and this over-approximates: it still excludes every bf16 D128 default-grid spec
-    from the runtime-shape path, purely conservatively. Kept here only to keep this
-    commit to the policy change; the next one deletes it and re-blesses the goldens.
-    """
-    if spec.use_exp2_fast is not None:
-        return False
-    return spec.dtype == "bf16" and spec.head_size == 128
 
 
 def _use_cfvst(head_size: int, dtype: str) -> bool:

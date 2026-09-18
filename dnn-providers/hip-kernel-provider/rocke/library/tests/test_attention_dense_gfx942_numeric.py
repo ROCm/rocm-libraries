@@ -66,8 +66,7 @@ _COHORT = [
     ("fp16", 128, 16, 4, True, True),  # flagship persistent
     ("bf16", 128, 16, 4, True, True),  # bf16 D128 persistent (the VGPR-starved config)
     # bf16 D128 default: the plain-exp2 arm -- the one config _use_exp2_fast turns
-    # off, and it does so on the grid, at every seqlen. Still held off the
-    # runtime-shape path by the (now vestigial) _exp2_fast_is_shape_dependent.
+    # off, and it does so on the grid, at every seqlen.
     ("bf16", 128, 16, 4, False, True),
     ("fp16", 64, 16, 16, False, True),  # D64 MHA default
     ("bf16", 64, 16, 4, True, True),  # D64 bf16 persistent (the wpe=4 config)
@@ -208,9 +207,9 @@ def test_one_binary_serves_every_shape():
     Paired with the numeric check at both shapes so the test cannot pass by
     reusing one binary that happens to be wrong for the second shape.
 
-    fp16, not bf16: bf16 D128 at the exp2_fast tri-state default is still held OFF
-    the runtime path by ``_exp2_fast_is_shape_dependent``, so it would fail the
-    shared-key precondition rather than the property under test.
+    fp16 is the flagship default config; bf16 D128 would serve equally well now
+    that no dtype forks the body on shape, but this is the path dispatch ships
+    most of.
     """
     import torch
     import torch.nn.functional as F

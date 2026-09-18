@@ -209,8 +209,12 @@ _NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale"})
 # when one base rejects one of them (e.g. use_cfvst=True is legal only at fp16 D128).
 _SPEC_PERTURBATIONS = {
     "batch": (2, 4),
-    "seqlen_q": (4096,),
-    "seqlen_kv": (4096,),
+    # Two values each, and the persistent base is the one that exercises them: on the
+    # default grid the shape is read from kernel params (``runtime_shape``), so no
+    # seqlen perturbation moves the body there. 4096 is a no-op against the persistent
+    # base, which pins 4096 to get a legal P4 grid -- hence 2048 as the live candidate.
+    "seqlen_q": (4096, 2048),
+    "seqlen_kv": (4096, 2048),
     "num_query_heads": (32, 8),
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
@@ -269,6 +273,18 @@ _INJECTIVITY_BASES = {
         num_query_heads=32,
     ),
 }
+
+
+def _baked_spec(**kw) -> Gfx942AttentionDenseSpec:
+    """A spec whose emitted body still BAKES the problem shape.
+
+    The default grid is ``runtime_shape``: batch and both seqlens are read from
+    kernel params, so one binary serves every shape and those fields are absent
+    from the symbol by design. The persistent grid is the remaining sub-mode that
+    bakes them -- it is therefore where the "shape is in the name" properties are
+    still meaningful, and where a name collision would be a real stale-binary bug.
+    """
+    return _spec(**{**_INJECTIVITY_BASES["persistent_d128_fp16"], **kw})
 
 
 def _injectivity_field_ids():
@@ -398,15 +414,37 @@ def test_kernel_name_covers_every_baked_parameter(field):
     )
 
 
-def test_kernel_name_is_batch_unique():
-    names = {gfx942_kernel_name(_spec(batch=b)) for b in (1, 2, 4, 8)}
+def test_kernel_name_is_batch_unique_where_batch_is_baked():
+    """On the baked (persistent) grid, batch must reach the symbol.
+
+    This is the collision that once shipped: the body indexed with a baked batch
+    while the name omitted it, so the second launch was served the first config's
+    HSACO out of ``_DENSE_LAUNCHER_CACHE`` and read out of bounds. Asserted only
+    where batch is genuinely baked -- on the default grid it is a kernel param and
+    its absence from the name is correct, not a collision (see
+    :func:`test_kernel_name_drops_batch_on_the_runtime_shape_grid`).
+    """
+    names = {gfx942_kernel_name(_baked_spec(batch=b)) for b in (1, 2, 4, 8)}
     assert len(names) == 4, f"batch must disambiguate the kernel name, got {names}"
-    assert "_b4_" in gfx942_kernel_name(_spec(batch=4))
+    assert "_b4_" in gfx942_kernel_name(_baked_spec(batch=4))
+
+
+def test_kernel_name_drops_batch_on_the_runtime_shape_grid():
+    """The other direction: one binary per shape means no batch token at all.
+
+    A batch token here would be a silent duplicate compile per batch size -- safe,
+    but it would mean the runtime-shape path is not actually delivering the single
+    binary it claims. Byte-level, so it fails if the body starts baking batch again.
+    """
+    lo, hi = _spec(batch=1), _spec(batch=4)
+    assert lo.runtime_shape
+    assert gfx942_kernel_name(lo) == gfx942_kernel_name(hi)
+    assert _ir_body_sha(lo) == _ir_body_sha(hi)
 
 
 def test_build_bakes_batch_into_the_emitted_symbol():
-    assert build_attention_dense(_spec(batch=4), arch="gfx942").name != (
-        build_attention_dense(_spec(batch=1), arch="gfx942").name
+    assert build_attention_dense(_baked_spec(batch=4), arch="gfx942").name != (
+        build_attention_dense(_baked_spec(batch=1), arch="gfx942").name
     )
 
 
