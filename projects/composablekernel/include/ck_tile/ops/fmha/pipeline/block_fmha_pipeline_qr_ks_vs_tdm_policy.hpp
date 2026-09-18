@@ -220,9 +220,11 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     numeric_traits<typename Problem::KDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::VDataType>::PackedSize == 1;
 
-// The streamed fast path is qualified only for dense, aligned FP8->BF16 per-tensor
-// attention on the measured fp8 tiling. Other configurations retain the original
-// recurrence.
+// The streamed fast path is qualified for aligned FP8->BF16 attention on the measured
+// fp8 tiling, per-tensor or per-block, masked or not. It is mainly a register-pressure
+// fix: per-block scaling otherwise crosses 256 VGPRs and pays upper-bank addressing on
+// every access, which costs it a wave of occupancy. Other configurations retain the
+// original recurrence.
 template <typename Problem>
 inline constexpr bool is_qr_tdm_dense_fp8_v =
     is_qr_tdm_padding_enabled_problem_v<Problem> &&
@@ -233,12 +235,12 @@ inline constexpr bool is_qr_tdm_dense_fp8_v =
             std::is_same_v<typename Problem::SaccDataType, float>&&
                 std::is_same_v<typename Problem::SMPLComputeDataType, float>&&
                     std::is_same_v<typename Problem::OaccDataType, float> &&
-    !Problem::kIsGroupMode && !Problem::kPadSeqLenQ && !Problem::kPadSeqLenK &&
-    !Problem::kPadHeadDimQ && !Problem::kPadHeadDimV && !Problem::kStoreLSE && !Problem::kHasSink &&
-    !Problem::kHasDropout && !Problem::kHasLogitsSoftCap && !Problem::FmhaMask::IsMasking &&
+    !Problem::kIsGroupMode && !Problem::kStoreLSE && !Problem::kHasSink &&
+    !Problem::kHasDropout && !Problem::kHasLogitsSoftCap &&
     !Problem::kUseTrLoad && !Problem::kSkipMinSeqlenQ &&
     Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-    Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR;
+    (Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
+     Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE);
 
 struct QrTdmScaledQK : WarpGemmWmma_f32_16x16x128_f8f6f4<fp8_t, fp8_t, true>
 {
