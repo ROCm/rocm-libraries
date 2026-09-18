@@ -101,26 +101,31 @@ void testIndexedGeneration() {
             "Pre-encoded absolute-integer generation changed the encoded sequence.");
 
     const Shape alternatingShape{17, 19, 2};
-    for (const IndexOrder order :
-         {IndexOrder::FirstDimensionFastest, IndexOrder::LastDimensionFastest}) {
-        const Layout alternatingLayout =
-            order == IndexOrder::FirstDimensionFastest
-                ? Layout::contiguousFirstDimensionFastest(alternatingShape)
-                : Layout::contiguousLastDimensionFastest(alternatingShape);
-        Tensor alternatingWhole(ScalarType::Float4E2M1, alternatingLayout);
-        Tensor alternatingElementwise(ScalarType::Float4E2M1, alternatingLayout);
-        const GenerationRecipe alternatingRecipe = GenerationRecipe::realOnly(
-            GenerationRecipe::uniformInteger({.lower = -4, .upper = 4})
-                .withAlternatingSign({.dimensions = {0, 1}, .negativeWhenOdd = false}),
-            {.seed = 0x14142135, .indexOrder = order});
-        generate(alternatingWhole, alternatingRecipe);
-        for (size_t index = 0; index < alternatingWhole.elementCount(); ++index)
-            generateAt(alternatingElementwise, index, alternatingRecipe);
-        require(std::equal(alternatingWhole.rawEncodedBackingStorage().begin(),
-                           alternatingWhole.rawEncodedBackingStorage().end(),
-                           alternatingElementwise.rawEncodedBackingStorage().begin(),
-                           alternatingElementwise.rawEncodedBackingStorage().end()),
-                "Pre-encoded alternating generation changed the encoded sequence.");
+    for (const ScalarType type :
+         {ScalarType::Float64, ScalarType::Float32, ScalarType::Float16, ScalarType::BFloat16,
+          ScalarType::Float8E4M3, ScalarType::Float4E2M1, ScalarType::Int32, ScalarType::Int8,
+          ScalarType::Int4}) {
+        for (const IndexOrder order :
+             {IndexOrder::FirstDimensionFastest, IndexOrder::LastDimensionFastest}) {
+            const Layout alternatingLayout =
+                order == IndexOrder::FirstDimensionFastest
+                    ? Layout::contiguousFirstDimensionFastest(alternatingShape)
+                    : Layout::contiguousLastDimensionFastest(alternatingShape);
+            Tensor alternatingWhole(type, alternatingLayout);
+            Tensor alternatingElementwise(type, alternatingLayout);
+            const GenerationRecipe alternatingRecipe = GenerationRecipe::realOnly(
+                GenerationRecipe::uniformInteger({.lower = -4, .upper = 4})
+                    .withAlternatingSign({.dimensions = {0, 1}, .negativeWhenOdd = false}),
+                {.seed = 0x14142135, .indexOrder = order});
+            generate(alternatingWhole, alternatingRecipe);
+            for (size_t index = 0; index < alternatingWhole.elementCount(); ++index)
+                generateAt(alternatingElementwise, index, alternatingRecipe);
+            require(std::equal(alternatingWhole.rawEncodedBackingStorage().begin(),
+                               alternatingWhole.rawEncodedBackingStorage().end(),
+                               alternatingElementwise.rawEncodedBackingStorage().begin(),
+                               alternatingElementwise.rawEncodedBackingStorage().end()),
+                    "Pre-encoded alternating generation changed the encoded sequence.");
+        }
     }
 
     for (const ScalarType type :

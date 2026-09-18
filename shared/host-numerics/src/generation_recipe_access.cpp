@@ -932,6 +932,8 @@ struct GenerationRecipeAccess {
         if (!isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
 
         constexpr ScalarCategory category = scalarTypeInfo(Tag::type).category;
+        constexpr bool signedNumerical =
+            category == ScalarCategory::FloatingPoint || category == ScalarCategory::SignedInteger;
         constexpr bool lowPrecisionFloatingPoint = category == ScalarCategory::FloatingPoint &&
                                                    scalarTypeInfo(Tag::type).storageBits <= 16;
         constexpr bool discretePattern =
@@ -944,33 +946,36 @@ struct GenerationRecipeAccess {
             bound.component.unaryTransform_ == Component::UnaryTransform::None &&
             bound.component.affineValue_.scale == 1.0 && bound.component.affineValue_.offset == 0.0;
         if (!isUnmodifiedComponent<Pattern>(bound.component) &&
-            !(lowPrecisionFloatingPoint && discretePattern && onlyAlternatingSign))
+            !(signedNumerical && discretePattern && onlyAlternatingSign))
             return false;
 
-        if constexpr (lowPrecisionFloatingPoint && discretePattern) {
-            const auto encodedValues = prepareEncodedDiscreteValues<Tag>(pattern);
-            if (encodedValues.size != 0) {
-                const uint64_t seed = recipe.settings_.seed;
-                const uint64_t domain = randomDomain(bound);
-                if (onlyAlternatingSign) {
-                    const auto negativeEncodedValues =
-                        prepareEncodedDiscreteValues<Tag>(pattern, true);
-                    const PreparedAlternatingSign alternating = prepareAlternatingSign(
-                        bound.component, destination.shape(), recipe.settings_.indexOrder);
+        if constexpr (signedNumerical && discretePattern) {
+            if (lowPrecisionFloatingPoint || onlyAlternatingSign) {
+                const auto encodedValues = prepareEncodedDiscreteValues<Tag>(pattern);
+                if (encodedValues.size != 0) {
+                    const uint64_t seed = recipe.settings_.seed;
+                    const uint64_t domain = randomDomain(bound);
+                    if (onlyAlternatingSign) {
+                        const auto negativeEncodedValues =
+                            prepareEncodedDiscreteValues<Tag>(pattern, true);
+                        const PreparedAlternatingSign alternating = prepareAlternatingSign(
+                            bound.component, destination.shape(), recipe.settings_.indexOrder);
+                        return generateContiguousEncodedValues<Tag>(
+                            destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                                const size_t selected =
+                                    counterRandom(seed, domain, logicalIndex) % encodedValues.size;
+                                return alternating.negates(logicalIndex)
+                                           ? negativeEncodedValues.values[selected]
+                                           : encodedValues.values[selected];
+                            });
+                    }
                     return generateContiguousEncodedValues<Tag>(
                         destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
-                            const size_t selected =
-                                counterRandom(seed, domain, logicalIndex) % encodedValues.size;
-                            return alternating.negates(logicalIndex)
-                                       ? negativeEncodedValues.values[selected]
-                                       : encodedValues.values[selected];
+                            return encodedValues.values[counterRandom(seed, domain, logicalIndex) %
+                                                        encodedValues.size];
                         });
                 }
-                return generateContiguousEncodedValues<Tag>(
-                    destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
-                        return encodedValues
-                            .values[counterRandom(seed, domain, logicalIndex) % encodedValues.size];
-                    });
+                if (onlyAlternatingSign) return false;
             }
         }
 
