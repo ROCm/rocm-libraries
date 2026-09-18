@@ -41,7 +41,7 @@
 #include <stdexcept>
 #include <stdlib.h>
 
-#include "client/include/Utility.hpp"
+#include "Utility.hpp"
 
 #include <Tensile/hip/HipHardware.hpp>
 
@@ -483,4 +483,3 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                       "condition to write to file"
                    << std::endl;
 }
-
