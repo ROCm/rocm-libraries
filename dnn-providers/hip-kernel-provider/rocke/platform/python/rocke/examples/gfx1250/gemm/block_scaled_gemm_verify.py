@@ -373,7 +373,9 @@ def main(argv: list[str] | None = None) -> int:
         type=normalize_dtype,
         choices=sorted(_LOWBIT_DTYPES),
     )
-    p.add_argument("--dtype-b", type=normalize_dtype, choices=sorted(_LOWBIT_DTYPES), default=None)
+    p.add_argument(
+        "--dtype-b", type=normalize_dtype, choices=sorted(_LOWBIT_DTYPES), default=None
+    )
     p.add_argument("--tol", type=float, default=2e-2, help="legacy WMMA tolerance only")
     p.add_argument(
         "--matrix-path", default="wmma", choices=("wmma", "wmma_scale", "wmma_scale16")
