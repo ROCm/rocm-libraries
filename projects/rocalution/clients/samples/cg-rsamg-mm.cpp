@@ -89,7 +89,7 @@ int main(int argc, char* argv[])
     RugeStuebenAMG<LocalMatrix<double>, LocalVector<double>, double> p;
 
     p.SetCoarseningStrategy(CoarseningStrategy::PMIS);
-    p.SetInterpolationType(InterpolationType::ExtPI);
+    p.SetInterpolationType(InterpolationType::MMExtPI);
     p.SetInterpolationTruncationFactor(0.0);
     p.SetInterpolationMaxElmts(4);
     p.SetCoarsestLevel(20);
