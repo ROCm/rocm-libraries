@@ -131,16 +131,26 @@ function(TensileCreateLibraryFiles
   endif()
 
   # Each generator process owns one variant of an ISA-keyed capability map.
+  # "all" implies gfx1250-strict too, but strict cannot share an invocation with
+  # gfx1250/all (see configureCompilerTarget), so it always needs its own child.
   set(_strict_target "")
-  if("gfx1250-strict" IN_LIST Tensile_ARCHITECTURE AND NOT _tensile_strict_child)
+  if(("gfx1250-strict" IN_LIST Tensile_ARCHITECTURE OR "all" IN_LIST Tensile_ARCHITECTURE)
+     AND NOT _tensile_strict_child)
     set(_strict_args)
     foreach(_option IN LISTS options)
       if(Tensile_${_option})
         list(APPEND _strict_args ${_option})
       endif()
     endforeach()
+    # EMBED_LIBRARY/EMBED_KEY are intentionally not forwarded to the strict child:
+    # it only produces the gfx1250-strict catalog (copied into the parent output
+    # below). Forwarding them would make the child call add_library() with the
+    # same embedded-library target name as the parent, colliding in a mixed build.
     foreach(_option IN LISTS oneValueArgs)
-      if(DEFINED Tensile_${_option} AND NOT _option STREQUAL "VAR_PREFIX")
+      if(DEFINED Tensile_${_option}
+         AND NOT _option STREQUAL "VAR_PREFIX"
+         AND NOT _option STREQUAL "EMBED_LIBRARY"
+         AND NOT _option STREQUAL "EMBED_KEY")
         list(APPEND _strict_args ${_option} "${Tensile_${_option}}")
       endif()
     endforeach()
