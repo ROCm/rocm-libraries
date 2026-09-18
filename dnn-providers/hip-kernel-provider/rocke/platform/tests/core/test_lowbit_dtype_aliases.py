@@ -4,7 +4,7 @@
 
 import pytest
 from rocke.core.arch import ArchTarget
-from rocke.core.arch.target import normalize_dtype
+from rocke.core.dtypes import normalize_dtype
 
 
 @pytest.mark.parametrize(

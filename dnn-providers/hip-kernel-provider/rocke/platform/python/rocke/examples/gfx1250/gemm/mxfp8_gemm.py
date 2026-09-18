@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from ....core.arch.target import normalize_dtype
+from ....core.dtypes import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec
 from ._scaled_gemm_example import argument_parser, verify
 

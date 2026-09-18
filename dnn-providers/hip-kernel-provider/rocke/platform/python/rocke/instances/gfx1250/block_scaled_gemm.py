@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ...core.arch.target import normalize_dtype
+from ...core.dtypes import normalize_dtype
 from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
     BF16,

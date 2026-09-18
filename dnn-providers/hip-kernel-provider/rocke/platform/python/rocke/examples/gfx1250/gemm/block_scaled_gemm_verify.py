@@ -29,7 +29,7 @@ import numpy as np
 
 from ....helpers import compile_kernel
 from ....helpers.compile import compile_kernel_via_hipcc
-from ....core.arch.target import normalize_dtype
+from ....core.dtypes import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import (
     _LOWBIT_DTYPES,
     BlockScaledGemmSpec,

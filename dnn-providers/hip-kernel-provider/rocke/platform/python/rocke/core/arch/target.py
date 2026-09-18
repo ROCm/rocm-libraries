@@ -18,53 +18,16 @@ See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Re-export for callers using the original architecture entry point.
+from ..dtypes import normalize_dtype
+
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
-
-# Canonical dtype spellings used as catalog keys. Instance/spec dtype strings
-# are normalised through this map so "f16"/"half" and "fp16" all resolve.
-_DTYPE_ALIASES = {
-    "f16": "fp16",
-    "half": "fp16",
-    "fp16": "fp16",
-    "bf16": "bf16",
-    "bfloat16": "bf16",
-    "f32": "fp32",
-    "float": "fp32",
-    "fp32": "fp32",
-    "fp8": "fp8e4m3",
-    "fp8e4m3": "fp8e4m3",
-    "bf8": "bf8e5m2",
-    "bf8e5m2": "bf8e5m2",
-    "fp6": "fp6e2m3",
-    "fp6e2m3": "fp6e2m3",
-    "bf6": "fp6e3m2",
-    "fp6e3m2": "fp6e3m2",
-    "fp4": "fp4e2m1",
-    "fp4e2m1": "fp4e2m1",
-    # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
-    # (signedness is an instruction operand, not the dtype); "i32" is the
-    # integer accumulator. Scalar int spellings pass through for completeness.
-    "iu8": "iu8",
-    "iu4": "iu4",
-    "i8": "i8",
-    "int8": "i8",
-    "i4": "i4",
-    "int4": "i4",
-    "i32": "i32",
-    "int32": "i32",
-}
-
-
-def normalize_dtype(name: str) -> str:
-    """Map a dtype spelling to its canonical catalog key."""
-    key = name.strip().lower()
-    return _DTYPE_ALIASES.get(key, key)
-
 
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
@@ -1140,9 +1103,79 @@ def known_arches() -> Tuple[str, ...]:
     return tuple(sorted(_load_specs()))
 
 
+def target_id_from_isa(isa: str) -> str:
+    """Extract the target ID from a COMGR ISA name.
+
+    ``compile_kernel(..., isa=...)`` passes its ``isa`` argument here. That
+    value may come from an example's ``--isa`` option, a fixed string in a
+    script, or the compile helper's ``gfx950`` default. See the input paths
+    documented in :mod:`rocke.helpers.compile`.
+
+    For ``amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-``, this returns
+    ``gfx942:sramecc+:xnack-``, keeping any profile or feature suffix.
+    It also accepts a target ID without the ISA prefix.
+
+    The result starts at the last ``gfx`` in the input. If there is no
+    ``gfx``, the input is returned unchanged. This does not validate the name.
+    """
+
+    start = isa.rfind("gfx")
+    return isa[start:] if start >= 0 else isa
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
+
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved.
+
+    An unknown name is reduced to its leading ``gfx`` token when possible.
+    This does not check support; :meth:`ArchTarget.from_gfx` requires a
+    matching catalog entry.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    arches = known_arches()
+    if target_without_features in arches:
+        return target_without_features
+    for arch in sorted(arches, key=len, reverse=True):
+        if target_without_features.startswith(f"{arch}-"):
+            return arch
+    match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
+    return match.group(1) if match else target_without_features
+
+
+def compiler_target_from_target_id(target_id: str) -> str:
+    """Derive the target name that the compile helpers pass to COMGR or hipcc.
+
+    Removes profile suffixes such as ``-strict`` using
+    :func:`base_arch_from_target_id`, but keeps features after ``:``.
+    For example, ``gfx1250-strict`` becomes ``gfx1250``, while
+    ``gfx942:sramecc+:xnack-`` stays unchanged.
+
+    This only converts the string. COMGR or hipcc checks whether the target
+    and its features are supported when compilation runs.
+    """
+
+    target_without_features, separator, features = target_id.partition(":")
+    base_arch = base_arch_from_target_id(target_id)
+    if target_without_features.startswith(f"{base_arch}-"):
+        target_without_features = base_arch
+    if separator:
+        return f"{target_without_features}:{features}"
+    return target_without_features
+
+
 def arch_from_isa(isa: str) -> str:
-    """Extract the gfx token from an isa triple like ``amdgcn-amd-amdhsa--gfx942``."""
-    return isa.rsplit("-", 1)[-1] if "-" in isa else isa
+    """Extract a target ID from a COMGR ISA name, then derive its base architecture.
+
+    Combines :func:`target_id_from_isa` and :func:`base_arch_from_target_id`.
+    For example, ``amdgcn-amd-amdhsa--gfx942:xnack-`` becomes ``gfx942``.
+    """
+
+    return base_arch_from_target_id(target_id_from_isa(isa))
 
 
 def validate_arch(arch: Optional[str]) -> None:

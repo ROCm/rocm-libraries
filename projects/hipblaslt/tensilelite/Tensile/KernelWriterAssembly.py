@@ -27,7 +27,7 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, fin
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueSet, SignatureBase
-from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, True16Modifiers, \
+from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       MUBUFModifiers, SMEMModifiers, EXEC, VCC, RegisterContainer, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
@@ -12806,9 +12806,9 @@ class KernelWriterAssembly(KernelWriter):
                       sel = [0,1,1,0] if isHigh16Bits else [0,0,0,0]
                       localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="A convert fp8 to f16"))
                     else:
-                      sel = 1 if isHigh16Bits else 0
+                      # byte_sel is a byte index 0..3, so use 2 (not 1) to match SDWA BYTE_2.
                       if noSDWA:
-                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(byte_sel=[sel]), comment="convert C to fp32"))
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(byte_sel=[2 if isHigh16Bits else 0]), comment="convert C to fp32"))
                       else:
                         src_sel = SelectBit.BYTE_2 if isHigh16Bits else SelectBit.BYTE_0
                         localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
@@ -12856,7 +12856,10 @@ class KernelWriterAssembly(KernelWriter):
                         localWriteCVTCode.add(VCvtScaleFP8toF16(dst=paramList[0], src=new_src, scale=0x3f800000, vop3=VOP3PModifiers(op_sel=sel), comment="C convert fp8 to f16"))
                       else:
                         if noSDWA:
-                          localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(op_sel=[1 if isHigh16Bits else 0]), comment="convert C to fp32"))
+                          # Map the chosen SDWA src_sel (BYTE_0/1/2/3) to the VOP3 byte index.
+                          byte_sel_int = {SelectBit.BYTE_0: 0, SelectBit.BYTE_1: 1,
+                                          SelectBit.BYTE_2: 2, SelectBit.BYTE_3: 3}[src_sel]
+                          localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, vop3=VOP3PModifiers(byte_sel=[byte_sel_int]), comment="convert C to fp32"))
                         else:
                           localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src, sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
                         localWriteCVTCode.add(ECvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sel=HighBitSel.HIGH if isHigh16Bits else HighBitSel.LOW, comment="convert C to fp16"))
@@ -16436,6 +16439,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["CompactLoopStore"]:
       edgeModule.add(self.defineSgpr("CLSm0Base", 1))
       edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
+      if self.states.useGateResidual:
+        edgeModule.add(self.defineSgpr("CLSGateRowInc", 1))
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
@@ -16716,6 +16721,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # Free dedicated CLS SGPRs after all batches / activation branches.
     if kernel["CompactLoopStore"]:
+      if self.states.useGateResidual:
+        edgeModule.add(self.undefineSgpr("CLSGateRowInc"))
       edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
       edgeModule.add(self.undefineSgpr("CLSm0Base"))
 
@@ -17304,6 +17311,9 @@ class KernelWriterAssembly(KernelWriter):
     # CLS: seed the SRD chain on elt0/batch0. C uses tmpS01+1 so D's primer is kept.
     if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))) and not isWorkspace:
       _stmp = (tmpS01 + 1) if (tc == 'C' and kernel["CompactLoopStore"]) else tmpS01
+      # Gate has its own stride and must preserve C/D's delayed increments.
+      if tc == 'Gate' and kernel["CompactLoopStore"]:
+        _stmp = "CLSGateRowInc"
       module.add(addrCalc.incrementToNextRow(kernel, tc, ss, _stmp, forceinitrow0=1, bpeType=bpeType,
                                              overrideAfterPrimerRows=overrideAfterPrimerRows))
 
@@ -17911,7 +17921,9 @@ class KernelWriterAssembly(KernelWriter):
         # Does not support hi/lo yet
         if kernel["ProblemType"]["ComputeDataType"].isSingle():
           if biasDataType.isHalf():
-            module.add(VCvtF32toF16(dst=vgpr(tmpVgprN), src=vgpr(tmpVgprN), comment="convert to FP16"))
+            # sel=LOW writes vN.l (VPackF16toB32 packs adjacent pairs); true16 on
+            # NoSDWA, SDWA WORD_0 on legacy.
+            module.add(ECvtF32toF16(dst=vgpr(tmpVgprN), src=vgpr(tmpVgprN), sel=HighBitSel.LOW, comment="convert to FP16"))
             if vi % 2 == 1 and enablePack:
               module.add(VPackF16toB32(dst=vgpr(tmpVgprN - 1), src0=vgpr(tmpVgprN - 1), src1=vgpr(tmpVgprN), \
                          comment="Pack with neighbor"))

@@ -18,7 +18,7 @@ The examples share argument parsing, the spec-driven builder, compiler,
 launcher, and numerical verifier. Numerical tests use opt-in fixtures in
 `tests/instances/conftest.py` and are independently runnable by family.
 
-The global architecture aliases also recognize `fp4e2m1`, `fp6e2m3`, and
+The target-independent aliases in `core/dtypes.py` also recognize `fp4e2m1`, `fp6e2m3`, and
 `fp6e3m2` (`fp4`, `fp6`, `bf6`). Recognition does not imply that a target
 supports an atom; use its catalog to query support. Packed gfx1250 FP4,
 FP6, mixed formats, and alternative scale formats are separate extensions.
