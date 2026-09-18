@@ -86,6 +86,30 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
+  # CPU-only host-ASAN admission. This is a positive allowlist of the 12 suites
+  # (101 tests) validated under ASAN with leak detection on a machine without
+  # GPU device nodes. Newly added suites, IntegrationGpu suites, MX suites, and
+  # fixtures that construct HIP resources are excluded by default.
+  host-asan:
+    description: "GPU-independent provider unit tests for host ASAN"
+    test_patterns:
+      - "*TestHipblasltEngine.*"
+      - "*TestHipblasltEngineManager.*"
+      - "*TestHipblasltEnginePluginApi.*"
+      - "*TestHipblasltHandleFactory.*"
+      - "*TestHipblasltHipdnnEnginePluginExecutionContext.*"
+      - "*TestHipblasltHipdnnEnginePluginHandle.*"
+      - "*TestHipblasltMatmulDesc.*"
+      - "*TestHipblasltMatrixLayout.*"
+      - "*TestHipblasltMatrixTransformDesc.*"
+      - "*TestHipblasltPluginApi.*"
+      - "*TestHipblasltUtils.*"
+      - "*TestMatmulParams.*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "host-asan"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
@@ -95,3 +119,4 @@ execution_settings:
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
     ffm-quick: 7200       # 2 hours
+    host-asan: 2700       # 45 minutes
