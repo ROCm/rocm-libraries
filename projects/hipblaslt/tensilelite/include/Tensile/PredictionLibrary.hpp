@@ -57,51 +57,6 @@ namespace TensileLite
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
-        // How many trailing solution_list entries came from somewhere other
-        // than this library's own table, appended by mergeSolutions(). Zero
-        // unless TENSILE_MERGE_EQUALITY_POOL asked for the merge.
-        std::size_t mergedEntryCount = 0;
-
-        // Where the merged entries start. Everything below this is the
-        // Prediction table as the library file declared it.
-        std::size_t mergedBegin() const
-        {
-            return solution_list.size() - mergedEntryCount;
-        }
-
-        /**
-         * @brief Append one ranking candidate, keeping the two lists aligned.
-         *
-         * findTopSolutions resolves a ranked result through
-         * solution_list[config.index], so config.index must be the position
-         * this entry lands at and the two lists must stay the same length. Both
-         * facts are established here and nowhere else: a second place that
-         * appends would be a second place that can dispatch the wrong kernel.
-         */
-        void addEntry(int                         solutionIndex,
-                      std::shared_ptr<MySolution> solution,
-                      origami::config_t           config)
-        {
-            config.index = solution_list.size();
-            solution_list.emplace_back(solutionIndex, std::move(solution));
-            origami_config_list.emplace_back(config);
-        }
-
-        /**
-         * @brief Append a candidate that came from another logic row.
-         *
-         * Counted separately so the entry can be reported as not having been
-         * in the table Origami was fitted on, and so serializing the library
-         * back out writes the original table.
-         */
-        void addMergedEntry(int                         solutionIndex,
-                            std::shared_ptr<MySolution> solution,
-                            origami::config_t           config)
-        {
-            addEntry(solutionIndex, std::move(solution), std::move(config));
-            mergedEntryCount++;
-        }
-
         static std::string Type()
         {
             return "Prediction";

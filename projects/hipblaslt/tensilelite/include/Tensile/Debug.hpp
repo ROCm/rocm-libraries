@@ -72,19 +72,6 @@ namespace TensileLite
 
         bool usePredictionLibrary() const;
 
-        // Whether to put the Equality row's kernels into the Prediction
-        // library's Origami pool at library load, so rank_configs ranks the
-        // merged set rather than the Prediction table alone. Off unless
-        // TENSILE_MERGE_EQUALITY_POOL says otherwise, because it changes which
-        // kernel every selection on an affected problem type returns.
-        //
-        // The two pools are disjoint by construction, and Origami cannot order
-        // a large part of what this adds -- the non-temporal short-circuit
-        // scores it DBL_MAX at every shape -- so the merged ranking is expected
-        // to carry unrankable entries and ties. That is what the knob exists to
-        // expose, not a defect to compensate for.
-        bool mergeEqualityIntoPredictionPool() const;
-
         bool printLibraryLogicIndex() const;
 
         // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at
@@ -190,7 +177,6 @@ namespace TensileLite
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
         bool        m_predictionLib       = false;
-        bool        m_mergeEqualityPool   = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;

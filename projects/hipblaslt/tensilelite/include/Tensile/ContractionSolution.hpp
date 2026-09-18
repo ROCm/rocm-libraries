@@ -1082,13 +1082,6 @@ namespace TensileLite
         LinearModel           linearModel;
         MatchingTag           tag{MatchingTag::Others};
 
-        // Set once, at library load, for a kernel the Equality row contributed
-        // to the Prediction library's ranking pool. Unlike tag, which selection
-        // rewrites on the solutions it returns, this records where the kernel
-        // came from and is never written again, which is what lets a trace
-        // attribute a measured winner to a pool Origami cannot rank.
-        bool fromEqualityPool = false;
-
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;

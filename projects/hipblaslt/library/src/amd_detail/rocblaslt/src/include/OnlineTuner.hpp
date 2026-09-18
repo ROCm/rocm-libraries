@@ -73,11 +73,11 @@ namespace rocblaslt
  * call with that problem. statistic() decides how a candidate's repeats are
  * reduced to the one score the winner is chosen on.
  *
- * Some candidates may come from a source the ranking cannot order at all,
- * either because equalitySlots() of the positions were reserved for them or
- * because they were merged into the pool the ranking runs over. Either way the
- * trace records which candidates arrived that way, so a win can be attributed
- * to a kernel the cost model could not have chosen.
+ * equalitySlots() of those positions may be filled by the caller from a source
+ * the ranking cannot order at all. Such a candidate has to occupy a slot rather
+ * than sit below the exploration window, because nothing outside the window is
+ * ever measured; the trace records which candidates arrived that way so a win
+ * can be attributed.
  *
  * Timing is deferred-read. beginMeasurement() hands back an event pair for the
  * caller to wrap the launch with, and the elapsed time is only read on a later
@@ -232,18 +232,6 @@ namespace rocblaslt
         }
 
         /**
-     * @brief Whether TENSILE_MERGE_EQUALITY_POOL was set for this process.
-     *
-     * Reported on the trace so a run identifies which arm produced it. The
-     * merge happens at library load and is independent of equalitySlots(); the
-     * two can be set separately, together, or not at all.
-     */
-        bool poolMerged() const
-        {
-            return m_poolMerged;
-        }
-
-        /**
      * @brief The pinned winner for a problem, or nullptr while it is still
      * being explored.
      *
@@ -291,23 +279,22 @@ namespace rocblaslt
      * position within rankedSolutionIndices to promote to the front, or -1 to
      * leave the caller's ordering alone.
      *
-     * equalitySourced, where it is not empty, is parallel to
-     * rankedSolutionIndices and says of each candidate whether it came from the
-     * Equality pool rather than from the Origami ranking. A reserved slot puts
-     * those candidates in a run; merging the pools puts them wherever the
-     * ranking happens to place them, which is why this is per candidate rather
-     * than a range. It is only read when the problem is registered, which fixes
-     * each candidate's provenance for the life of the process, and it is
-     * reported on the register and winner trace lines.
+     * [equalityBegin, equalityBegin + equalityCount) names the contiguous run
+     * of rankedSolutionIndices the caller sourced from the Equality pool rather
+     * than from the Origami ranking. It is only read when the problem is
+     * registered, which fixes each candidate's provenance for the life of the
+     * process, and it is reported on the register and winner trace lines.
      */
-        int selectCandidate(size_t                      problemKey,
-                            const std::vector<int>&     rankedSolutionIndices,
-                            const std::vector<uint8_t>& equalitySourced = {})
+        int selectCandidate(size_t                  problemKey,
+                            const std::vector<int>& rankedSolutionIndices,
+                            int                     equalityBegin = 0,
+                            int                     equalityCount = 0)
         {
             if(!m_enabled)
                 return -1;
 
-            return selectCandidateImpl(problemKey, rankedSolutionIndices, equalitySourced);
+            return selectCandidateImpl(
+                problemKey, rankedSolutionIndices, equalityBegin, equalityCount);
         }
 
         /**
@@ -383,28 +370,30 @@ namespace rocblaslt
         // before a winner is picked, so samples already paid for are not thrown
         // away. m_declined counts launches refused because the cap was full.
         //
-        // m_equalitySource is parallel to m_candidates where it is not empty,
-        // and records which of them the caller sourced from the Equality pool.
+        // [m_equalityBegin, m_equalityEnd) are the m_candidates positions the
+        // caller filled from the Equality pool.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
             std::vector<std::vector<float>> m_samples;
             std::vector<int>                m_issued;
             std::vector<PendingMeasurement> m_pending;
-            std::vector<uint8_t>            m_equalitySource;
-            int                             m_calls    = 0;
-            int                             m_declined = 0;
-            int                             m_winner   = -1;
-            bool                            m_gaveUp   = false;
-            bool                            m_resolved = false;
+            int                             m_calls         = 0;
+            int                             m_declined      = 0;
+            int                             m_winner        = -1;
+            int                             m_equalityBegin = 0;
+            int                             m_equalityEnd   = 0;
+            bool                            m_gaveUp        = false;
+            bool                            m_resolved      = false;
         };
 
         OnlineTuner();
         ~OnlineTuner();
 
-        int  selectCandidateImpl(size_t                      problemKey,
-                                 const std::vector<int>&     rankedSolutionIndices,
-                                 const std::vector<uint8_t>& equalitySourced);
+        int  selectCandidateImpl(size_t                  problemKey,
+                                 const std::vector<int>& rankedSolutionIndices,
+                                 int                     equalityBegin,
+                                 int                     equalityCount);
         void harvestPendingImpl(size_t problemKey);
         bool beginMeasurementImpl(size_t      problemKey,
                                   int         solutionIndex,
@@ -413,10 +402,11 @@ namespace rocblaslt
 
         // The remainder require m_mutex, held shared where they only read and
         // exclusively where they mutate state or the event pool.
-        void registerProblem(size_t                      problemKey,
-                             ProblemState&               state,
-                             const std::vector<int>&     rankedSolutionIndices,
-                             const std::vector<uint8_t>& equalitySourced);
+        void registerProblem(size_t                  problemKey,
+                             ProblemState&           state,
+                             const std::vector<int>& rankedSolutionIndices,
+                             int                     equalityBegin,
+                             int                     equalityCount);
         bool fromEquality(const ProblemState& state, int candidate) const;
         int  nextCandidate(const ProblemState& state) const;
         int  measurableCandidate(const ProblemState& state, int solutionIndex) const;
@@ -434,7 +424,6 @@ namespace rocblaslt
         int       m_repeats       = 0;
         int       m_equalitySlots = 0;
         bool      m_verbose       = false;
-        bool      m_poolMerged    = false;
         Statistic m_statistic     = Statistic::Median;
 
         std::unordered_map<size_t, ProblemState> m_problems;

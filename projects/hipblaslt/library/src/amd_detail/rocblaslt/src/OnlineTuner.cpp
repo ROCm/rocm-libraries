@@ -168,12 +168,6 @@ namespace rocblaslt
         m_equalitySlots
             = std::min(std::max(envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_EQUALITY_SLOTS", 0), 0),
                        std::max(m_topK - 1, 0));
-
-        // Read only to label the trace with the arm it was produced under. The
-        // merge itself happens at library load, in the Prediction library, and
-        // this says nothing about whether any kernel was actually merged -- a
-        // problem type with no Equality row is unaffected by the knob.
-        m_poolMerged = envInt("TENSILE_MERGE_EQUALITY_POOL", 0) != 0;
     }
 
     // The pooled events are deliberately not destroyed. This is a function-local
@@ -182,9 +176,10 @@ namespace rocblaslt
     // leaking the handles costs nothing.
     OnlineTuner::~OnlineTuner() {}
 
-    int OnlineTuner::selectCandidateImpl(size_t                      problemKey,
-                                         const std::vector<int>&     rankedSolutionIndices,
-                                         const std::vector<uint8_t>& equalitySourced)
+    int OnlineTuner::selectCandidateImpl(size_t                  problemKey,
+                                         const std::vector<int>& rankedSolutionIndices,
+                                         int                     equalityBegin,
+                                         int                     equalityCount)
     {
         if(rankedSolutionIndices.empty())
             return -1;
@@ -201,7 +196,7 @@ namespace rocblaslt
 
         ProblemState& state = m_problems[problemKey];
         if(state.m_candidates.empty())
-            registerProblem(problemKey, state, rankedSolutionIndices, equalitySourced);
+            registerProblem(problemKey, state, rankedSolutionIndices, equalityBegin, equalityCount);
 
         if(!state.m_resolved)
         {
@@ -367,10 +362,11 @@ namespace rocblaslt
         return true;
     }
 
-    void OnlineTuner::registerProblem(size_t                      problemKey,
-                                      ProblemState&               state,
-                                      const std::vector<int>&     rankedSolutionIndices,
-                                      const std::vector<uint8_t>& equalitySourced)
+    void OnlineTuner::registerProblem(size_t                  problemKey,
+                                      ProblemState&           state,
+                                      const std::vector<int>& rankedSolutionIndices,
+                                      int                     equalityBegin,
+                                      int                     equalityCount)
     {
         const size_t count
             = std::min(rankedSolutionIndices.size(), static_cast<size_t>(m_topK));
@@ -380,22 +376,12 @@ namespace rocblaslt
         state.m_samples.resize(count);
         state.m_issued.assign(count, 0);
 
-        // The caller's flags cover its whole ranked list, which may be longer
-        // than the exploration window; anything past the window is not a
-        // candidate and so has no provenance to record. A shorter list than
-        // the window leaves the rest unflagged rather than reading past it.
-        // Left empty when nothing is flagged, so the common case stores nothing.
-        const size_t flagged = std::min(count, equalitySourced.size());
-
-        if(std::any_of(equalitySourced.begin(),
-                       equalitySourced.begin() + flagged,
-                       [](uint8_t flag) { return flag != 0; }))
-        {
-            state.m_equalitySource.assign(count, 0);
-            std::copy(equalitySourced.begin(),
-                      equalitySourced.begin() + flagged,
-                      state.m_equalitySource.begin());
-        }
+        // The caller's range is against its whole ranked list, which may be
+        // longer than the exploration window; anything past the window is not
+        // a candidate and so has no provenance to record.
+        state.m_equalityBegin = std::min(std::max(equalityBegin, 0), static_cast<int>(count));
+        state.m_equalityEnd   = std::min(state.m_equalityBegin + std::max(equalityCount, 0),
+                                       static_cast<int>(count));
 
         // Nothing to compare against, so the problem is born resolved with no
         // winner and every later call takes the read-only path.
@@ -413,8 +399,7 @@ namespace rocblaslt
             msg << " candidates=" << count << " repeats=" << m_repeats << " sols=";
             for(size_t i = 0; i < count; ++i)
                 msg << (i ? "," : "") << state.m_candidates[i];
-            msg << " eqslots=" << m_equalitySlots << " eqmerge=" << (m_poolMerged ? 1 : 0)
-                << " src=";
+            msg << " eqslots=" << m_equalitySlots << " src=";
             for(size_t i = 0; i < count; ++i)
                 msg << (i ? "," : "")
                     << (fromEquality(state, static_cast<int>(i)) ? c_equalitySource
@@ -426,8 +411,7 @@ namespace rocblaslt
 
     bool OnlineTuner::fromEquality(const ProblemState& state, int candidate) const
     {
-        return candidate >= 0 && static_cast<size_t>(candidate) < state.m_equalitySource.size()
-               && state.m_equalitySource[candidate] != 0;
+        return candidate >= state.m_equalityBegin && candidate < state.m_equalityEnd;
     }
 
     int OnlineTuner::nextCandidate(const ProblemState& state) const
@@ -519,7 +503,7 @@ namespace rocblaslt
                 << " declined=" << state.m_declined
                 << " gaveup=" << (state.m_gaveUp ? 1 : 0)
                 << " stat=" << statisticName(m_statistic) << " eqslots=" << m_equalitySlots
-                << " eqmerge=" << (m_poolMerged ? 1 : 0) << " src="
+                << " src="
                 << (winnerIndex < 0 ? c_noSource
                                     : (fromEquality(state, winnerIndex) ? c_equalitySource
                                                                         : c_rankedSource))

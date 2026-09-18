@@ -25,8 +25,6 @@
  *******************************************************************************/
 
 #pragma once
-#include <Tensile/Serialization/Base.hpp>
-
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/SingleSolutionLibrary.hpp>
 
@@ -40,75 +38,6 @@ namespace TensileLite
 {
     namespace Serialization
     {
-        /**
-         * @brief Project a solution's sizeMapping onto the fields Origami models.
-         *
-         * Lifted out of the Prediction table's deserialization so that kernels
-         * merged into the pool from elsewhere are described to Origami by the
-         * same code. Two copies of this could drift and rank the same kernel
-         * differently depending on which row it arrived through.
-         *
-         * index is left for ProblemPredictionLibrary::addEntry to fill in.
-         */
-        template <typename MySolution>
-        origami::config_t makeOrigamiConfig(MySolution const& solution)
-        {
-            origami::dim3_t origami_mi;
-            if(solution.sizeMapping.matrixInstruction[0] == 0
-               && solution.sizeMapping.matrixInstruction[1] == 0
-               && solution.sizeMapping.matrixInstruction[2] == 0)
-            {
-                // Override dot2 instruction with vector lane widths
-                origami_mi = {1, 1, 64};
-            }
-            else
-            {
-                origami_mi
-                    = {static_cast<size_t>(solution.sizeMapping.matrixInstruction[0]),
-                       static_cast<size_t>(solution.sizeMapping.matrixInstruction[1]),
-                       static_cast<size_t>(solution.sizeMapping.matrixInstruction[2])};
-            }
-
-            if(Debug::Instance().printPropertyEvaluation()
-               && solution.sizeMapping.CUOccupancy <= 0)
-            {
-                std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
-                          << solution.sizeMapping.CUOccupancy << " (<=0) for solution '"
-                          << solution.kernelName << "'; clamping to 1 in origami config.\n";
-            }
-
-            return origami::config_t{
-                .mt = {solution.sizeMapping.macroTile.x,
-                       solution.sizeMapping.macroTile.y,
-                       solution.sizeMapping.depthU},
-                .mi                       = origami_mi,
-                .hand_optimized_main_loop = (solution.sizeMapping.customMainLoopScheduling > 0)
-                                                ? true
-                                                : false,
-                .subtile                  = solution.sizeMapping.useSubtileImpl,
-                .occupancy
-                = std::max(solution.sizeMapping.CUOccupancy, static_cast<int>(1)),
-                .workgroup_mapping         = solution.sizeMapping.workGroupMapping,
-                .cache_hints_a             = solution.sizeMapping.nonTemporalA,
-                .cache_hints_b             = solution.sizeMapping.nonTemporalB,
-                .cache_hints_d             = solution.sizeMapping.NonTemporalD,
-                .workspace_size            = std::numeric_limits<size_t>::max(),
-                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                .stream_k                  = solution.sizeMapping.streamK,
-                .index                     = 0,
-                .grvw_a                    = static_cast<std::size_t>(solution.sizeMapping.grvwA),
-                .grvw_b                    = static_cast<std::size_t>(solution.sizeMapping.grvwB),
-                .gwvw_d                    = static_cast<std::size_t>(solution.sizeMapping.gwvwD),
-                .backend                   = origami::tensile_params_t{
-                    .local_split_u        = solution.sizeMapping.LocalSplitU,
-                    .direct_to_lds_a      = solution.sizeMapping.DirectToLdsA,
-                    .direct_to_lds_b      = solution.sizeMapping.DirectToLdsB,
-                    .wave_group_m         = solution.sizeMapping.waveGroup[0],
-                    .wave_group_n         = solution.sizeMapping.waveGroup[1],
-                    .prefetch_global_read = solution.sizeMapping.PrefetchGlobalRead,
-                },
-            };
-        }
 
         template <typename MyProblem, typename MySolution, typename IO>
         struct MappingTraits<ProblemPredictionLibrary<MyProblem, MySolution>, IO>
@@ -128,15 +57,10 @@ namespace TensileLite
                 std::vector<int> mappingIndices;
                 if(iot::outputting(io))
                 {
-                    // Only the table's own entries, so that a library whose
-                    // pool was merged writes back out the table it was read
-                    // from rather than baking the merge into the file.
-                    const std::size_t count = lib.mergedBegin();
+                    mappingIndices.reserve(lib.solution_list.size());
 
-                    mappingIndices.reserve(count);
-
-                    for(std::size_t i = 0; i < count; i++)
-                        mappingIndices.push_back(lib.solution_list[i].first);
+                    for(auto const& pair : lib.solution_list)
+                        mappingIndices.push_back(pair.first);
 
                     iot::mapRequired(io, "table", mappingIndices);
                 }
@@ -148,8 +72,9 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(int index : mappingIndices)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
                     {
+                        int index = mappingIndices[local_index];
                         auto slnIter = ctx->solutions->find(index);
                         if(slnIter == ctx->solutions->end())
                         {
@@ -161,8 +86,69 @@ namespace TensileLite
                         else
                         {
                             auto solution = slnIter->second;
+                            lib.solution_list.emplace_back(index, solution);
 
-                            lib.addEntry(index, solution, makeOrigamiConfig(*solution));
+                            origami::dim3_t origami_mi;
+                            if(solution->sizeMapping.matrixInstruction[0] == 0
+                               && solution->sizeMapping.matrixInstruction[1] == 0
+                               && solution->sizeMapping.matrixInstruction[2] == 0)
+                            {
+                                // Override dot2 instruction with vector lane widths
+                                origami_mi = {1, 1, 64};
+                            }
+                            else
+                            {
+                                origami_mi = {
+                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[0]),
+                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[1]),
+                                    static_cast<size_t>(
+                                        solution->sizeMapping.matrixInstruction[2])};
+                            }
+
+                            if(Debug::Instance().printPropertyEvaluation()
+                               && solution->sizeMapping.CUOccupancy <= 0)
+                            {
+                                std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                                          << solution->sizeMapping.CUOccupancy
+                                          << " (<=0) for solution '" << solution->kernelName
+                                          << "'; clamping to 1 in origami config.\n";
+                            }
+                            origami::config_t origami_config = {
+                                .mt = {solution->sizeMapping.macroTile.x,
+                                       solution->sizeMapping.macroTile.y,
+                                       solution->sizeMapping.depthU},
+                                .mi = origami_mi,
+                                .hand_optimized_main_loop
+                                = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
+                                                                                       : false,
+                                .subtile                   = solution->sizeMapping.useSubtileImpl,
+                                .occupancy
+                                = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
+                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
+                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
+                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .cache_hints_d             = solution->sizeMapping.NonTemporalD,
+                                .workspace_size            = std::numeric_limits<size_t>::max(),
+                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .stream_k                  = solution->sizeMapping.streamK,
+                                .index                     = local_index,
+                                .grvw_a                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwA),
+                                .grvw_b                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwB),
+                                .gwvw_d                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.gwvwD),
+                                .backend                   = origami::tensile_params_t{
+                                    .local_split_u        = solution->sizeMapping.LocalSplitU,
+                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
+                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                    .wave_group_m         = solution->sizeMapping.waveGroup[0],
+                                    .wave_group_n         = solution->sizeMapping.waveGroup[1],
+                                    .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
+                                },
+                            };
+
+                            lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
                 }

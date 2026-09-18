@@ -28,18 +28,11 @@
 
 #include <Tensile/Serialization/Base.hpp>
 #include <Tensile/Serialization/Predicates.hpp>
-#include <Tensile/Serialization/PredictionLibrary.hpp>
 
-#include <Tensile/ContractionProblemPredicates.hpp>
-#include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
-#include <Tensile/MatchingLibrary.hpp>
-#include <Tensile/PredictionLibrary.hpp>
-#include <Tensile/SingleSolutionLibrary.hpp>
 
 #include <set>
 #include <type_traits>
-#include <unordered_set>
 
 #include <tensilelitehost/export.h>
 
@@ -47,93 +40,6 @@ namespace TensileLite
 {
     namespace Serialization
     {
-        /**
-         * @brief Put the Equality row's kernels into the Prediction row's pool.
-         *
-         * The two rows sit side by side in one ProblemSelectionLibrary but only
-         * one of them is ever consulted: findTopSolutions skips Equality and
-         * Range outright whenever the prediction library is in use
-         * (ExactLogicLibrary.hpp, the predictionLib guard). So the Equality
-         * kernels are unreachable through ranking, and on this workload they
-         * are unreachable through their own row too -- it keys on an exact
-         * [M, N, batch, K] and matches none of the benchmark shapes. Moving
-         * them into the pool is what puts them in front of rank_configs.
-         *
-         * Deliberately not filtered. A large share of these kernels cannot be
-         * ranked at any shape, and others will tie with each other to the last
-         * bit of predicted latency; both are the behaviour under study.
-         *
-         * Runs at deserialization, before the library is reachable by any
-         * other thread, so nothing here needs to be synchronised.
-         */
-        template <typename MyProblem, typename MySolution, typename MyPredicate>
-        void mergeEqualityIntoPredictionPool(
-            std::vector<LibraryRow<MyProblem, MySolution, MyPredicate>>& rows)
-        {
-            using Matching   = ProblemMatchingLibrary<MyProblem, MySolution>;
-            using Prediction = ProblemPredictionLibrary<MyProblem, MySolution>;
-            using Single     = SingleSolutionLibrary<MyProblem, MySolution>;
-
-            std::shared_ptr<Prediction>              prediction;
-            std::vector<std::shared_ptr<MySolution>> equality;
-
-            for(auto const& row : rows)
-            {
-                if(auto found = std::dynamic_pointer_cast<Prediction>(row.second))
-                {
-                    prediction = found;
-                    continue;
-                }
-
-                // The same test the rest of this library uses to recognise the
-                // Equality row, rather than trusting row order.
-                if(!dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
-                    continue;
-
-                auto matching = std::dynamic_pointer_cast<Matching>(row.second);
-                if(!matching || !matching->table)
-                    continue;
-
-                // GetAll() is the whole table rather than what some problem
-                // matches, which is the point: there is no problem yet.
-                for(auto const& entry : matching->table->GetAll())
-                {
-                    if(auto single = std::dynamic_pointer_cast<Single>(entry))
-                    {
-                        if(single->solution)
-                            equality.push_back(single->solution);
-                    }
-                }
-            }
-
-            if(!prediction || equality.empty() || prediction->mergedEntryCount)
-                return;
-
-            // The table lists a pinned winner per benchmarked size, so one
-            // kernel can appear under many sizes; the pool wants it once.
-            std::unordered_set<int> seen;
-            for(auto const& entry : prediction->solution_list)
-                seen.insert(entry.first);
-
-            for(auto const& solution : equality)
-            {
-                if(!seen.insert(solution->index).second)
-                    continue;
-
-                solution->fromEqualityPool = true;
-                prediction->addMergedEntry(
-                    solution->index, solution, makeOrigamiConfig(*solution));
-            }
-
-            if(Debug::Instance().printLibraryVersion())
-            {
-                std::cerr << "TensileLite: merged " << prediction->mergedEntryCount
-                          << " Equality kernels into a Prediction pool of "
-                          << prediction->mergedBegin() << ", giving "
-                          << prediction->origami_config_list.size() << " configs to rank\n";
-            }
-        }
-
         template <typename MyProblem, typename MySolution, typename IO>
         struct MappingTraits<HardwareSelectionLibrary<MyProblem, MySolution>, IO>
         {
@@ -157,11 +63,6 @@ namespace TensileLite
             static void mapping(IO& io, Library& lib)
             {
                 iot::mapRequired(io, "rows", lib.rows);
-
-                // Both rows the merge needs are in this one library, and they
-                // are only both present now that the whole list has been read.
-                if(!iot::outputting(io) && Debug::Instance().mergeEqualityIntoPredictionPool())
-                    mergeEqualityIntoPredictionPool(lib.rows);
             }
 
             const static bool flow = false;
