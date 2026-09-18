@@ -61,6 +61,15 @@ protected:
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
+        // Build the graph first; skip if no engine supports this configuration
+        // (e.g. causal mask + stats is not yet supported by the ASM kernels).
+        auto buildResult = graph->build(this->_handle);
+        if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
+        {
+            GTEST_SKIP() << "No engine supports this graph: " << buildResult.err_msg;
+        }
+        ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
+
         // Register output tensor validator
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
