@@ -365,6 +365,11 @@ if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
       target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+      # Host-only instrumentation, as for the library target: device-side
+      # __profd_* globals crash the HIP runtime at profile dump (AISPARSE-778).
+      target_compile_options(${_cov_tgt} PRIVATE
+        "SHELL:-Xarch_device -fno-profile-instr-generate"
+        "SHELL:-Xarch_device -fno-coverage-mapping")
       target_link_libraries(${_cov_tgt} PRIVATE -fprofile-instr-generate)
     endif()
   endforeach()

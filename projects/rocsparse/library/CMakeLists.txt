@@ -142,6 +142,13 @@ endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  # Instrument host code only. Device-side instrumentation emits __profd_*
+  # device globals that the HIP runtime fails to register when the profile is
+  # dumped at process exit, killing the test binary after every test has
+  # passed (AISPARSE-778).
+  target_compile_options(rocsparse PRIVATE
+    "SHELL:-Xarch_device -fno-profile-instr-generate"
+    "SHELL:-Xarch_device -fno-coverage-mapping")
   target_link_libraries(rocsparse PRIVATE -fprofile-instr-generate)
 endif()
 
