@@ -33,13 +33,23 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void identity_kernel(I n, I* p)
     {
-        I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        // AISPARSE-686. `hipBlockIdx_x * BLOCKSIZE` is unsigned-int arithmetic --
+        // both operands are unsigned int -- so it wrapped at 2^32 before it was ever
+        // assigned to I, and there was no grid-stride loop to cover a grid.x that the
+        // caller clamped against the device limit. The id is formed in int64_t now --
+        // not in I, because the caller may clamp grid.x, so BLOCKSIZE * hipGridDim_x
+        // is no longer bounded by n.
+        //
+        // Block-uniform stride bound: every term is hipBlockIdx_x, hipGridDim_x, a
+        // kernel argument or a compile-time constant. This kernel has no
+        // __syncthreads(), and the early `return` it used to take is now the loop
+        // condition itself.
+        const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
 
-        if(gid >= n)
+        for(int64_t gid = static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x; gid < n;
+            gid += stride)
         {
-            return;
+            p[gid] = static_cast<I>(gid);
         }
-
-        p[gid] = gid;
     }
 }

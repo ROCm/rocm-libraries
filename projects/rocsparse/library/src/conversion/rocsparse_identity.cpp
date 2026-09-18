@@ -24,10 +24,30 @@
 #include "internal/conversion/rocsparse_inverse_permutation.h"
 #include "rocsparse_utility.hpp"
 
+#include "rocsparse_common.hpp"
 #include "rocsparse_gcreate_identity_permutation.hpp"
 #include "rocsparse_identity.hpp"
 
 #include "identity_device.h"
+
+namespace
+{
+    // Blocks needed to cover `n` items at BLOCKSIZE items each, clamped to the device
+    // grid.x limit. identity_kernel grid-strides over whatever the clamp drops.
+    //
+    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
+    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
+    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
+    // #11512 lands the body below is the one-line
+    //   return rocsparse::get_grid_size(rocsparse::ceil_div(n, BLOCKSIZE),
+    //                                   handle->properties.maxGridSize[0]);
+    template <uint32_t BLOCKSIZE>
+    int64_t grid_size_x(rocsparse_handle handle, int64_t n)
+    {
+        return rocsparse::min((n - 1) / BLOCKSIZE + 1,
+                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
+    }
+}
 
 template <typename I>
 rocsparse_status rocsparse::create_identity_permutation_core(rocsparse_handle handle, I n, I* p)
@@ -37,8 +57,13 @@ rocsparse_status rocsparse::create_identity_permutation_core(rocsparse_handle ha
     // Stream
     hipStream_t stream = handle->stream;
 
+// AISPARSE-686. n is the template index type I, 64-bit on the int64_t
+// instantiations, and the block count computed from it was narrowed into a dim3
+// with no clamp and nothing behind it. The threshold -- 1.0995e12 elements -- is
+// not reachable, which is why this is P3, but the grid is clamped now and
+// identity_kernel grid-strides over the tail.
 #define IDENTITY_DIM 512
-    dim3 identity_blocks((n - 1) / IDENTITY_DIM + 1);
+    dim3 identity_blocks(grid_size_x<IDENTITY_DIM>(handle, n));
     dim3 identity_threads(IDENTITY_DIM);
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::identity_kernel<IDENTITY_DIM>),

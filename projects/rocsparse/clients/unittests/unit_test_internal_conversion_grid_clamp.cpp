@@ -502,3 +502,384 @@ TEST_F(ConversionGrids, csr2csc_grid_stride)
         << "csr2csc_permute_kernel did not cover all " << p.nnz
         << " non-zeros (values) with grid.x clamped to " << clamped_grid_x;
 }
+// ===========================================================================
+// AISPARSE-686 -- create_identity_permutation
+//
+// identity_kernel runs 512 threads per block, so 5000 elements ask for 10 blocks
+// against a clamp of 3. 5000 is deliberately not a multiple of 512.
+// ===========================================================================
+
+TEST_F(ConversionGrids, identity_grid_stride)
+{
+    constexpr rocsparse_int n = 5000;
+
+    device_vector<rocsparse_int> d_p(std::vector<rocsparse_int>(n, -1));
+    ASSERT_NE(d_p.ptr, nullptr);
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse_create_identity_permutation(handle, n, d_p.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    std::vector<rocsparse_int> expected(n);
+    std::iota(expected.begin(), expected.end(), 0);
+
+    EXPECT_EQ(first_mismatch(to_host(d_p), expected), -1)
+        << "create_identity_permutation did not cover all " << n
+        << " elements with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// ===========================================================================
+// AISPARSE-686 -- convert_array
+//
+// Every kernel in rocsparse_convert_array.cpp runs 1024 threads per block, so
+// 10007 items ask for 10 blocks against a clamp of 3 and roughly 70% of each
+// array is reached only by the stride loop. 10007 is deliberately prime.
+//
+// Three of the eight kernels are plain element-parallel copies; the other five
+// finish with a block reduction and one atomic, which the stride loop must not
+// run once per sweep. They now accumulate per thread and reduce once, so the
+// out-of-range and conversion-error cases below double as checks that the
+// reduction still sees work done in later sweeps.
+// ===========================================================================
+
+namespace
+{
+    constexpr size_t convert_nitems = 10007;
+}
+
+// copy_indexbase_iarray_mix_safe: the index-base overload.
+TEST_F(ConversionGrids, convert_array_indexbase_grid_stride)
+{
+    std::vector<int32_t> source(convert_nitems);
+    std::iota(source.begin(), source.end(), 0);
+
+    device_vector<int32_t> d_source(source);
+    device_vector<int64_t> d_target(std::vector<int64_t>(convert_nitems, -1));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_indextype_i64,
+                                           d_target.ptr,
+                                           rocsparse_index_base_one,
+                                           rocsparse_indextype_i32,
+                                           d_source.ptr,
+                                           rocsparse_index_base_zero),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    std::vector<int64_t> expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        expected[i] = static_cast<int64_t>(i) + 1;
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (index base) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// The out-of-range counter of the same kernel. The offending value sits in the
+// last third of the array, past everything the clamped grid reaches in its first
+// sweep, so this only fails with rocsparse_status_type_mismatch if the stride
+// loop ran AND its per-thread accumulator survived into the block reduction.
+TEST_F(ConversionGrids, convert_array_indexbase_out_of_range_found_by_stride_loop)
+{
+    std::vector<int64_t> source(convert_nitems, 0);
+    source[convert_nitems - 1] = int64_t{1} << 40; // far beyond int32_t
+
+    device_vector<int64_t> d_source(source);
+    device_vector<int32_t> d_target(std::vector<int32_t>(convert_nitems, -1));
+
+    ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+    EXPECT_EQ(rocsparse::convert_array(handle,
+                                       convert_nitems,
+                                       rocsparse_indextype_i32,
+                                       d_target.ptr,
+                                       rocsparse_index_base_zero,
+                                       rocsparse_indextype_i64,
+                                       d_source.ptr,
+                                       rocsparse_index_base_zero),
+              rocsparse_status_type_mismatch)
+        << "convert_array missed an out-of-range value at item " << convert_nitems - 1
+        << " with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// copy_iarray_mix_safe: the strided (increment) overload.
+TEST_F(ConversionGrids, convert_array_increment_grid_stride)
+{
+    std::vector<int32_t> source(convert_nitems);
+    std::iota(source.begin(), source.end(), 0);
+
+    device_vector<int32_t> d_source(source);
+    device_vector<int64_t> d_target(std::vector<int64_t>(convert_nitems, -1));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_indextype_i64,
+                                           d_target.ptr,
+                                           int64_t{1},
+                                           rocsparse_indextype_i32,
+                                           d_source.ptr,
+                                           int64_t{1}),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    std::vector<int64_t> expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        expected[i] = static_cast<int64_t>(i);
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (increment) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// copy_farray_mix_safe_kernel_t<double, float>: a plain widening copy, no
+// reduction.
+TEST_F(ConversionGrids, convert_array_data_widening_grid_stride)
+{
+    std::vector<float> source(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        source[i] = static_cast<float>(i);
+    }
+
+    device_vector<float>  d_source(source);
+    device_vector<double> d_target(std::vector<double>(convert_nitems, -1.0));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_datatype_f64_r,
+                                           d_target.ptr,
+                                           rocsparse_datatype_f32_r,
+                                           d_source.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    std::vector<double> expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        expected[i] = static_cast<double>(i);
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (f32 -> f64) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// copy_farray_mix_safe_kernel_t<float, double>: the narrowing copy, which is one
+// of the kernels carrying a block-wide max reduction of the conversion error.
+// Every element is exactly representable in float, so the values must all match
+// and the reduction must report no error.
+TEST_F(ConversionGrids, convert_array_data_narrowing_grid_stride)
+{
+    std::vector<double> source(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        source[i] = static_cast<double>(i);
+    }
+
+    device_vector<double> d_source(source);
+    device_vector<float>  d_target(std::vector<float>(convert_nitems, -1.0f));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_datatype_f32_r,
+                                           d_target.ptr,
+                                           rocsparse_datatype_f64_r,
+                                           d_source.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    std::vector<float> expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        expected[i] = static_cast<float>(i);
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (f64 -> f32) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// ===========================================================================
+// AISPARSE-686 -- extract
+//
+// extract_count_kernel and internal_extract_fill_kernel both run 1024 threads
+// per block with one thread per sequence (row, for a row-direction CSR source),
+// so 5000 rows ask for 5 blocks against a clamp of 3. The two must move together
+// because the fill consumes the prefix sums the count produced; if either stride
+// loop is missing, the extracted matrix is short.
+// ===========================================================================
+
+void run_extract(rocsparse_handle handle, int grid_limit)
+{
+    // 5000 x 5000 with one non-zero per row on the diagonal. Extracting the
+    // lower triangle with a non-unit diagonal keeps every entry, so the answer
+    // is the input and any row the kernels miss is immediately visible.
+    constexpr rocsparse_int m = 5000;
+
+    std::vector<rocsparse_int> row_ptr(m + 1);
+    std::vector<rocsparse_int> col_ind(m);
+    std::vector<float>         val(m);
+    for(rocsparse_int r = 0; r < m; ++r)
+    {
+        row_ptr[r] = r;
+        col_ind[r] = r;
+        val[r]     = static_cast<float>(r + 1);
+    }
+    row_ptr[m] = m;
+
+    device_vector<rocsparse_int> d_row_ptr(row_ptr);
+    device_vector<rocsparse_int> d_col_ind(col_ind);
+    device_vector<float>         d_val(val);
+
+    device_vector<rocsparse_int> d_t_row_ptr(std::vector<rocsparse_int>(m + 1, -1));
+    device_vector<rocsparse_int> d_t_col_ind(std::vector<rocsparse_int>(m, -1));
+    device_vector<float>         d_t_val(std::vector<float>(m, -1.0f));
+
+    // NOTE: the source is built with the NON-const creator even though every
+    // extract entry point takes a rocsparse_const_spmat_descr. That is not a
+    // stylistic choice. rocsparse_extract_descr_default_t::run() reads
+    // source->row_data and source->col_data (rocsparse_extract_alg_default.cpp)
+    // while reading source->const_val_data for the values, and
+    // rocsparse_create_const_csr_descr leaves row_data/col_data null and fills
+    // only the const_* members, so a genuinely const source faults the count
+    // kernel on a null pointer. That is a pre-existing defect unrelated to
+    // AISPARSE-684/685/686 and is deliberately not fixed here; this test simply
+    // avoids it.
+    rocsparse_spmat_descr source = nullptr;
+    rocsparse_spmat_descr target = nullptr;
+
+    ASSERT_EQ(rocsparse_create_csr_descr(&source,
+                                         m,
+                                         m,
+                                         m,
+                                         d_row_ptr.ptr,
+                                         d_col_ind.ptr,
+                                         d_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    ASSERT_EQ(rocsparse_create_csr_descr(&target,
+                                         m,
+                                         m,
+                                         0,
+                                         d_t_row_ptr.ptr,
+                                         d_t_col_ind.ptr,
+                                         d_t_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
+                                         rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    const rocsparse_fill_mode fill_mode = rocsparse_fill_mode_lower;
+    const rocsparse_diag_type diag_type = rocsparse_diag_type_non_unit;
+    ASSERT_EQ(rocsparse_spmat_set_attribute(
+                  target, rocsparse_spmat_fill_mode, &fill_mode, sizeof(fill_mode)),
+              rocsparse_status_success);
+    ASSERT_EQ(rocsparse_spmat_set_attribute(
+                  target, rocsparse_spmat_diag_type, &diag_type, sizeof(diag_type)),
+              rocsparse_status_success);
+    const rocsparse_matrix_type matrix_type = rocsparse_matrix_type_triangular;
+    ASSERT_EQ(rocsparse_spmat_set_attribute(
+                  target, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)),
+              rocsparse_status_success);
+
+    rocsparse_extract_descr descr = nullptr;
+    ASSERT_EQ(rocsparse_create_extract_descr(&descr, source, target, rocsparse_extract_alg_default),
+              rocsparse_status_success);
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_extract_buffer_size(
+                  handle, descr, source, target, rocsparse_extract_stage_analysis, &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> d_buffer(buffer_size ? buffer_size : size_t{1});
+
+    int64_t nnz = -1;
+    {
+        ScopedMaxGridSizeX clamp(handle, grid_limit);
+        ASSERT_EQ(rocsparse_extract(handle,
+                                    descr,
+                                    source,
+                                    target,
+                                    rocsparse_extract_stage_analysis,
+                                    buffer_size,
+                                    d_buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_extract_nnz(handle, descr, &nnz), rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    EXPECT_EQ(nnz, static_cast<int64_t>(m))
+        << "extract_count_kernel did not count all " << m << " rows with grid.x clamped to "
+        << clamped_grid_x << " blocks";
+
+    ASSERT_EQ(rocsparse_csr_set_pointers(target, d_t_row_ptr.ptr, d_t_col_ind.ptr, d_t_val.ptr),
+              rocsparse_status_success);
+
+    size_t compute_buffer_size = 0;
+    ASSERT_EQ(
+        rocsparse_extract_buffer_size(
+            handle, descr, source, target, rocsparse_extract_stage_compute, &compute_buffer_size),
+        rocsparse_status_success);
+    device_vector<char> d_compute_buffer(compute_buffer_size ? compute_buffer_size : size_t{1});
+
+    {
+        ScopedMaxGridSizeX clamp(handle, grid_limit);
+        ASSERT_EQ(rocsparse_extract(handle,
+                                    descr,
+                                    source,
+                                    target,
+                                    rocsparse_extract_stage_compute,
+                                    compute_buffer_size,
+                                    d_compute_buffer.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_t_col_ind), col_ind), -1)
+        << "internal_extract_fill_kernel did not fill all " << m << " rows with grid.x clamped to "
+        << clamped_grid_x << " blocks";
+    EXPECT_EQ(first_mismatch(to_host(d_t_val), val), -1)
+        << "internal_extract_fill_kernel did not fill all " << m
+        << " values with grid.x clamped to " << clamped_grid_x << " blocks";
+
+    EXPECT_EQ(rocsparse_destroy_extract_descr(descr), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_spmat_descr(target), rocsparse_status_success);
+    EXPECT_EQ(rocsparse_destroy_spmat_descr(source), rocsparse_status_success);
+}
+
+// A control case at a grid.x limit far above what the launch asks for, so the
+// same 5000 rows run through a full, unclamped grid. It pins the stride loop as
+// a pure extension: with one iteration per thread the kernels must produce
+// exactly what they produced before this change.
+TEST_F(ConversionGrids, extract_unclamped_control)
+{
+    run_extract(handle, 1 << 20);
+}
+
+TEST_F(ConversionGrids, extract_grid_stride)
+{
+    run_extract(handle, clamped_grid_x);
+}
