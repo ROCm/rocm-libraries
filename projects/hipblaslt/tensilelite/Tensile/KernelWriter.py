@@ -940,8 +940,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if scheduleIterAlg == 0:
       # simple schedule, just add the modules in-order
       if kernel["HalfPLR"]:
-        # A/B packing is still illegal for HalfPLR. MXBlock=MI_K splat is
-        # different: v_perm lives in packMXSA/B even with UnrollMajor LDS.
+        # A/B packing is still illegal for HalfPLR. MXBlock=MI_K splat v_perm
+        # is emitted next to the consuming WMMA in mfmaIter, not in packMXSA/B.
         if len(packCode.flatitems()) != 0:
           for it in packCode.items():
             name = getattr(it, "name", "") or ""
@@ -1311,19 +1311,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       instPerPackMXSB = 0
       mxUnitA = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"] if kernel["ProblemType"]["MXBlockA"] else 0
       mxUnitB = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"] if kernel["ProblemType"]["MXBlockB"] else 0
-      # MXBlock=MI_K: one v_perm per loaded WaveTile (splat e8 -> SSSS), even with UnrollMajor LDS.
-      # TileSpan halves ds_loads (partner WaveTile via matrix_*_scale:1), so splat count halves too.
-      lrMX = Component.LocalRead.find(self)
+      # MXBlock=MI_K splat v_perm is JIT'd next to the WMMA in mfmaIter, so it
+      # is not a pack item for SIA3.
       if kernel["ProblemType"]["MXBlockA"] and mxUnitA == 1:
-        instPerPackMXSA = kernel["MIWaveTileA"]
-        if lrMX.getMxsTileSpanInfo(kernel, "MXSA", 0, self.states.asmCaps) is not None:
-          instPerPackMXSA //= 2
+        instPerPackMXSA = 0
       elif kernel["ProblemType"]["MXBlockA"] and (not kernel["UnrollMajorLDSMXSA"]):
         instPerPackMXSA = int(kernel["MIInputPerThreadMXSA"] * kernel["ProblemType"]["DataTypeMXSA"].numRegisters() * instPerRegPackMX)
       if kernel["ProblemType"]["MXBlockB"] and mxUnitB == 1:
-        instPerPackMXSB = kernel["MIWaveTileB"]
-        if lrMX.getMxsTileSpanInfo(kernel, "MXSB", 1, self.states.asmCaps) is not None:
-          instPerPackMXSB //= 2
+        instPerPackMXSB = 0
       elif kernel["ProblemType"]["MXBlockB"] and (not kernel["UnrollMajorLDSMXSB"]):
         instPerPackMXSB = int(kernel["MIInputPerThreadMXSB"] * kernel["ProblemType"]["DataTypeMXSB"].numRegisters() * instPerRegPackMX)
 

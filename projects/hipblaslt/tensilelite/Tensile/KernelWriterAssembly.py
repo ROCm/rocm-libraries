@@ -66,7 +66,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-  VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
+  VPermB32, VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
   GlobalLoadB32, GlobalLoadB64, GlobalLoadB96, GlobalLoadB128, GlobalLoadD16B16, GlobalLoadD16HIB16, \
   GlobalLoadD16U8, GlobalLoadD16HIU8, \
   GlobalStoreB8, GlobalStoreB16, GlobalStoreB32, GlobalStoreB64, GlobalStoreB128, GlobalStoreD16HIB16
@@ -8758,6 +8758,166 @@ class KernelWriterAssembly(KernelWriter):
     return abStr
 
   ##############################################################################
+  # MXBlock=MI_K splat: keep packed e8 raw in the last VGPR that WMMA reads from
+  # this load group, v_perm that dword to SSSS dests, overwrite raw last.
+  ##############################################################################
+  def _mxSplatInPlace(self, kernel, tc):
+    if "MXS" not in tc:
+      return False
+    mxTc = tc[3]
+    mxBlock = kernel["ProblemType"].get("MXBlock%s"%mxTc, 0)
+    if not mxBlock:
+      return False
+    return kernel["MatrixInstK"] // mxBlock == 1
+
+  def _iterMfmaIdxAB(self, kernel, tPA, tPB, u=0):
+    # Must match mfmaIter's idxOuter/idxInner walk (including HalfPLRA swap
+    # and numSubTiles split) so last-used is the last MXS VGPR that walk emits.
+    outer = 1
+    loopSwap = False
+    if (kernel["ProblemType"]["DataType"].isComplex() and tPB["tile01Idx"]) or kernel["HalfPLRA"]:
+      outer = 0
+      loopSwap = True
+    inner = 1 - outer
+    idxOuter_start = 0
+    idxInner_start = 0
+    idxOuter_stop = kernel["MIWaveTile"][outer]
+    idxInner_stop = kernel["MIWaveTile"][inner]
+    numSubTiles = kernel["numSubTiles"]
+    if numSubTiles > 1 and not self.states.inTailLoop:
+      outerBy2 = (kernel["MIWaveTile"][outer] // numSubTiles)
+      innerBy2 = (kernel["MIWaveTile"][inner] // numSubTiles)
+      outerMod2 = (kernel["MIWaveTile"][outer] % numSubTiles)
+      innerMod2 = (kernel["MIWaveTile"][inner] % numSubTiles)
+      idxHalfO = u // numSubTiles
+      idxHalfI = u % numSubTiles
+      idxOuter_start = (outerBy2 + outerMod2) * idxHalfO
+      idxInner_start = (innerBy2 + innerMod2) * idxHalfI
+      idxOuter_stop = kernel["MIWaveTile"][outer] - (1 - idxHalfO) * outerBy2
+      idxInner_stop = kernel["MIWaveTile"][inner] - (1 - idxHalfI) * innerBy2
+    for idxOuter in range(idxOuter_start, idxOuter_stop):
+      for idxInner in range(idxInner_start, idxInner_stop):
+        idx0 = idxInner
+        idx1 = idxOuter
+        if loopSwap:
+          idx0, idx1 = idx1, idx0
+        idxA = idx0 if tPB["tile01Idx"] else idx1
+        idxB = idx1 if tPB["tile01Idx"] else idx0
+        yield idxA, idxB
+
+  def _iterMxSplatMapped(self, kernel, tP_MX):
+    tPA = getattr(self, "tPA", None)
+    tPB = getattr(self, "tPB", None)
+    if tPA is None or tPB is None:
+      return
+    numSubTiles = kernel.get("numSubTiles", 1)
+    uVals = range(numSubTiles * numSubTiles) if (numSubTiles > 1 and not self.states.inTailLoop) else [0]
+    tc = tP_MX["tensorChar"]
+    for uu in uVals:
+      for idxA, idxB in self._iterMfmaIdxAB(kernel, tPA, tPB, uu):
+        idx = idxA if tc == "MXSA" else idxB
+        mapped, _ = self.mxsTileSpanScaleSel(kernel, tP_MX, idx)
+        yield mapped
+
+  def mxSplatLastUsedInGroup(self, kernel, tP_MX, valuStart, groupBytes):
+    last = None
+    for mapped in self._iterMxSplatMapped(kernel, tP_MX):
+      if valuStart <= mapped < valuStart + groupBytes:
+        last = mapped
+    if last is None:
+      last = valuStart + groupBytes - 1
+    return last
+
+  def mxSplatLoadDestStart(self, kernel, tP_MX, valuStart, groupBytes, numVgpr):
+    # Wide ds_load_b64/b128 dest must be even / 4-aligned. last-used +7 is
+    # illegal as a b64 dest and would also write +8 (next PLR buffer).
+    lastUsed = self.mxSplatLastUsedInGroup(kernel, tP_MX, valuStart, groupBytes)
+    if numVgpr <= 1:
+      return lastUsed
+    destStart = lastUsed - numVgpr + 1
+    destStart -= destStart % numVgpr
+    if destStart < valuStart:
+      destStart = valuStart
+    end = valuStart + groupBytes
+    if destStart + numVgpr > end:
+      destStart = end - numVgpr
+      destStart -= destStart % numVgpr
+      if destStart < valuStart:
+        destStart = valuStart
+    return destStart
+
+  def _mxSplatNoteLoad(self, tc, bufferIdx, iui, valuStart):
+    if not hasattr(self, "_mxSplatGen"):
+      self._mxSplatGen = {}
+    key = (tc, bufferIdx, iui, valuStart)
+    self._mxSplatGen[key] = self._mxSplatGen.get(key, 0) + 1
+
+  def _emitMxSplatBeforeWmma(self, kernel, tP_MX, mappedIdx, innerUnroll, vregSetIdx,
+                             vgprPerInputMX, m, u, iui, imod):
+    tc = tP_MX["tensorChar"]
+    if not self._mxSplatInPlace(kernel, tc):
+      return
+    instruction = tP_MX["localReadInstruction"]
+    groupBytes = int(instruction.blockWidth * 4)
+    if groupBytes <= 0:
+      return
+    valuStart = (mappedIdx // groupBytes) * groupBytes
+    numVgpr = int(ceil(instruction.blockWidth))
+    lastAbs = self.mxSplatLastUsedInGroup(kernel, tP_MX, valuStart, groupBytes)
+    destStart = self.mxSplatLoadDestStart(kernel, tP_MX, valuStart, groupBytes, numVgpr)
+    key = (tc, m, iui, valuStart)
+    gen = getattr(self, "_mxSplatGen", {}).get(key, 0)
+    if not hasattr(self, "_mxSplatEmitted"):
+      self._mxSplatEmitted = {}
+      self._mxSplatGenSeen = {}
+    if self._mxSplatGenSeen.get(key) != gen:
+      self._mxSplatEmitted[key] = set()
+      self._mxSplatGenSeen[key] = gen
+    emitted = self._mxSplatEmitted[key]
+    if mappedIdx in emitted:
+      return
+
+    def _perm(destIdx):
+      byteOff = destIdx - valuStart
+      srcIdx = destStart + byteOff // 4
+      srcStr = self.generateSrcStrForMFMA(kernel, tP_MX, innerUnroll, vregSetIdx,
+                                          vgprPerInputMX, m, u, iui, srcIdx)
+      dstStr = self.generateSrcStrForMFMA(kernel, tP_MX, innerUnroll, vregSetIdx,
+                                          vgprPerInputMX, m, u, iui, destIdx)
+      imod.add(VPermB32(
+          dst=vgpr(dstStr),
+          src0=vgpr(srcStr),
+          src1=vgpr(srcStr),
+          src2="0x%08x" % (0x01010101 * (byteOff % 4)),
+          comment="splat MX byte %u -> SSSS" % byteOff))
+      emitted.add(destIdx)
+
+    def _pendingInRange(lo, hi, skip=None):
+      pending = []
+      seen = set(emitted)
+      for mapped in self._iterMxSplatMapped(kernel, tP_MX):
+        if lo <= mapped < hi and mapped != skip and mapped not in seen:
+          pending.append(mapped)
+          seen.add(mapped)
+      return pending
+
+    # Overwriting a raw load vgpr kills that dword; extract its other bytes first.
+    if destStart <= mappedIdx < destStart + numVgpr:
+      dword = mappedIdx - destStart
+      lo = valuStart + 4 * dword
+      hi = min(lo + 4, valuStart + groupBytes)
+      for destIdx in _pendingInRange(lo, hi, skip=mappedIdx):
+        _perm(destIdx)
+
+    if mappedIdx != lastAbs:
+      _perm(mappedIdx)
+      return
+    # Killing raw last: extract every other byte this group still needs.
+    for destIdx in _pendingInRange(valuStart, valuStart + groupBytes, skip=lastAbs):
+      _perm(destIdx)
+    _perm(lastAbs)
+
+  ##############################################################################
   # MXS TileSpan scale-select
   #
   # With the TileSpan optimization, N MXS scale ds_loads collapse to N/2 loads: within
@@ -9870,6 +10030,12 @@ class KernelWriterAssembly(KernelWriter):
                                         a=src0_0, b=src1_1, **acc2_args, neg=neg_flag,\
                                         comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+                if kernel["ProblemType"]["MXBlockA"]:
+                  self._emitMxSplatBeforeWmma(kernel, tPA["MX"], mxsaIdx, innerUnroll, vregSetIdx,
+                                              vgprPerInputMXSA, m, u, iui, imod)
+                if kernel["ProblemType"]["MXBlockB"]:
+                  self._emitMxSplatBeforeWmma(kernel, tPB["MX"], mxsbIdx, innerUnroll, vregSetIdx,
+                                              vgprPerInputMXSB, m, u, iui, imod)
                 block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
                 imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \

@@ -991,6 +991,57 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 }
 
 // ---------------------------------------------------------------------------
+// Parent VALUs (feedsWmma) unlock one WMMA at a time: issue the parents of
+// the WMMA about to fire, then that WMMA, then the next WMMA's parents.
+// Without this filter Phase B dumps every ready parent VALU before the first
+// WMMA (perm0, perm1, wmma0, wmma1).
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, ParentValuIssuesOnlyForTargetWmma) {
+    createVAddInBlock(bb, arch, /*destReg=*/10, /*src0Reg=*/11, /*src1Reg=*/13);
+    StinkyInstruction* w0 = createWmmaScaleF8(/*destStart=*/32, /*src0Start=*/50);
+    ASSERT_NE(w0, nullptr);
+    w0->addSrcReg(StinkyRegister("v", 10, 1));
+
+    createVAddInBlock(bb, arch, /*destReg=*/20, /*src0Reg=*/21, /*src1Reg=*/22);
+    StinkyInstruction* w1 = createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/200);
+    ASSERT_NE(w1, nullptr);
+    w1->addSrcReg(StinkyRegister("v", 20, 1));
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "target-parent unlock must not drop instructions";
+
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind;
+        if (mnem.find("wmma") != std::string_view::npos)
+            kind = "wmma";
+        else if (mnem.find("v_add") != std::string_view::npos)
+            kind = "valu";
+        else
+            continue;
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"valu", 10},
+        {"wmma", 32},
+        {"valu", 20},
+        {"wmma", 100},
+    };
+    EXPECT_EQ(seq, expected) << "parent VALU of WMMA #1 must not issue before WMMA #0";
+}
+
+// ---------------------------------------------------------------------------
 // Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
 // a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
 // issued inside that WMMA's latency window, because the load could clobber a

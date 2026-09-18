@@ -632,8 +632,8 @@ class LocalReadMFMA(LocalRead):
         numVgpr           = int(ceil(instruction.blockWidth))
 
         valufIdx = 0
-        # MXBlock=MI_K: ds_load packed e8s into Valu+0, then v_perm high dests
-        # first so the packed source can be splat in-place last (no extra tmp).
+        # MXBlock=MI_K: ds_load packed e8s into the last VGPR WMMA reads from
+        # this group; v_perm is JIT'd in mfmaIter (not dumped into pack).
         splatInPlace = mxUnit == 1
         for vIdx in range(0, numVectorsPerTile):
             tileSpanBaseValuiIdx = valufIdx
@@ -648,12 +648,20 @@ class LocalReadMFMA(LocalRead):
                     readModule = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
                 bytesThisLoad = int(instruction.blockWidth * bpr)
                 valuStart = vIdx * vectorWidth + eIdx * bytesThisLoad
-                # mxUnit==1: load packed e8s at valuStart, then splat each byte
-                # in-place to SSSS. TileSpan still uses this layout: each group
-                # occupies VW registers (partner WaveTile is the other half-wave
-                # of the same VGPRs, selected later by matrix_*_scale:1).
+                # mxUnit==1: load packed e8s into the last N VGPRs of this group
+                # (hardware-aligned; last-used +7 is illegal as ds_load_b64 dest),
+                # then JIT v_perm from those raw dwords (mfmaIter).
+                # TileSpan still uses this layout: each group occupies VW
+                # registers (partner WaveTile is the other half-wave of the same
+                # VGPRs, selected later by matrix_*_scale:1).
                 if splatInPlace:
-                    destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuStart), numVgpr)
+                    destStart = valuStart + bytesThisLoad - numVgpr
+                    if hasattr(writer, "mxSplatLoadDestStart"):
+                        destStart = writer.mxSplatLoadDestStart(
+                            kernel, tP, valuStart, bytesThisLoad, numVgpr)
+                    destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, destStart), numVgpr)
+                    if hasattr(writer, "_mxSplatNoteLoad"):
+                        writer._mxSplatNoteLoad(tc, bufferIdx, iui, valuStart)
                 else:
                     destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
 
@@ -682,18 +690,8 @@ class LocalReadMFMA(LocalRead):
                 ds = DSModifiers(na=1, offset=paramList[0])
                 LocalReadX = instruction.getInst()
                 self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=readModule, comment=comment)
-                if splatInPlace:
-                    # High dests first so byte b lives until Valu+valuStart is overwritten last.
-                    # TileSpan: splat the loaded half-wave only; WMMA reads the partner
-                    # WaveTile from those same SSSS dwords via matrix_{a,b}_scale:1.
-                    for b in range(bytesThisLoad - 1, -1, -1):
-                        srcVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuStart + b // bpr))
-                        pack.add(VPermB32(
-                            dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuStart + b)),
-                            src0=srcVgpr,
-                            src1=srcVgpr,
-                            src2="0x%08x"%(0x01010101 * (b % 4)),
-                            comment="splat MX byte %u -> SSSS"%b))
+                # mxUnit==1 v_perm is emitted next to the WMMA that first reads
+                # that byte (KernelWriterAssembly._emitMxSplatBeforeWmma).
                 if not mxsTileSpan:
                     valufIdx += numVgpr
             if mxsTileSpan:
