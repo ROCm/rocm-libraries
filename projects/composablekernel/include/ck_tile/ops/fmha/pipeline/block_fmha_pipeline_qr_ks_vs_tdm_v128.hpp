@@ -395,9 +395,9 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
-        constexpr bool kUseCountdownLoop = kQKHeaddim == 128 && !FmhaMask::IsMasking &&
-                                           !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
-        bool even_buffer          = true;
+        constexpr bool kUseCountdownLoop = kQKHeaddim == 128 && !FmhaMask::IsMasking && !kHasSink &&
+                                           BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+        bool even_buffer           = true;
         index_t i_total_loops      = 0;
         index_t remaining_loops    = num_total_loop;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
@@ -752,8 +752,9 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
             }
 
             constexpr bool kDeferTensorReady =
-                kUseCountdownLoop && Policy::kUseCustomQkStageSchedule &&
-                Policy::kUseOutputFragments && Policy::kUseSplitSoftmax && kNWarp == 1;
+                kQKHeaddim == 128 && !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                Policy::kUseCustomQkStageSchedule && Policy::kUseOutputFragments &&
+                Policy::kUseSplitSoftmax && kNWarp == 1;
             if constexpr(!kDeferTensorReady)
                 s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
             if constexpr(!Policy::kUseCustomQkStageSchedule)
@@ -839,6 +840,11 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                                 const auto col = k_origin.at(I0) + tile_idx.at(I1);
                                 if constexpr(kHasSink)
                                     return mask.IsOutOfSinkBound(row, col);
+                                else if constexpr(kQKHeaddim == 128 &&
+                                                  std::is_same_v<
+                                                      FmhaMask,
+                                                      SimplifiedGenericAttentionMask<true>>)
+                                    return mask.IsOutOfBoundUnsigned(row, col);
                                 else
                                     return mask.IsOutOfBound(row, col);
                             });
