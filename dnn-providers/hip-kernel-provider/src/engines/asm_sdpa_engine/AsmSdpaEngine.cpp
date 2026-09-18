@@ -3,13 +3,112 @@
 
 #include "AsmSdpaEngine.hpp"
 
+#include <exception>
+#include <map>
+#include <string>
+
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/HipEngineFeatures.hpp>
+
+#include "version.h"
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#endif
 
 namespace asm_sdpa_engine
 {
 
-AsmSdpaEngine::AsmSdpaEngine() = default;
+namespace
+{
+
+/// What this build of the engine was, for a model that claims to have measured it.
+///
+/// `<provider>/asm-sdpa-fwd/<digest>`, where the digest is computed at configure time over
+/// the vendored FORWARD kernels, the CSVs codegen reads to describe them, and this
+/// engine's forward dispatch sources (CMakeLists.txt, HKP_ASM_SDPA_FWD_REVISION).
+///
+/// A deployed L1 model records this exact string as RFC 0019 §4.1's
+/// `trained_against.selector_revision`, and the loader refuses a model whose recorded
+/// value is not the one the provider reports. The string is therefore an expiry rule, and
+/// it has to name what actually moves the measurements it is protecting.
+///
+/// It used to name the provider release. That is too wide in one direction and too narrow
+/// in the other: `0.2.0 -> 0.2.1` for a change that cannot touch this engine expired both
+/// shipped models -- symptom: UNAVAILABLE on every engine-selection query -- while a
+/// vendored kernel swap under a fixed version expired nothing, which is the silent
+/// direction, because L1 is the score compared ACROSS engines and a stale estimate changes
+/// which engine is selected rather than merely misreporting a number. The git hash was
+/// already rejected for the first reason; the release version is the same mistake, one
+/// step smaller.
+///
+/// A backward-only kernel drop leaves this alone by construction: a backward kernel cannot
+/// move a forward throughput number, and the digest does not read one.
+#ifndef HKP_ASM_SDPA_FWD_REVISION
+// A build that did not compute the digest must not silently mint a revision that outlives
+// a kernel change; it reports one no shipped model can match instead.
+#define HKP_ASM_SDPA_FWD_REVISION "undetermined"
+#endif
+constexpr const char* SELECTOR_REVISION
+    = "hip-kernel-provider/asm-sdpa-fwd/" HKP_ASM_SDPA_FWD_REVISION;
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// Resolves AsmSdpaEngine::L1_MODEL_IDS through the descriptor catalog the provider has
+/// already parsed (RFC 0019 Open Question 7, RESOLVED). Never throws: with no descriptor
+/// tree installed the catalog is empty, nothing resolves, and the engine reports
+/// UNAVAILABLE exactly as it did before any model existed.
+void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
+{
+    namespace ingestor = hipdnn_plugin_sdk::ingestor;
+    std::map<std::string, ingestor::DescriptorId> declared;
+    for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
+    {
+        try
+        {
+            declared.emplace(arch, hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+        }
+        catch(const std::exception& error)
+        {
+            // A compiled-in literal, so this is an authoring bug in this file rather than
+            // anything a deployment can cause. Logged and skipped rather than thrown: a
+            // throw here would take the whole provider down over one unusable model.
+            HIPDNN_PLUGIN_LOG_ERROR("asm sdpa: declared L1 model id '"
+                                    << id << "' for arch '" << arch
+                                    << "' is not a UUID: " << error.what());
+        }
+    }
+
+    const auto resolved = ingestor::resolveDeclaredEnginePredictions(
+        hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog(),
+        AsmSdpaEngine::engineName(),
+        SELECTOR_REVISION,
+        declared);
+    for(const auto& [arch, model] : resolved.byArch)
+    {
+        binding.bind(arch, ingestor::UhdKernelHeuristic::configFrom(model));
+    }
+    for(const auto& [arch, refusal] : resolved.refused)
+    {
+        binding.markUnusable(arch, refusal.status, refusal.reason);
+    }
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
+
+} // namespace
+
+AsmSdpaEngine::AsmSdpaEngine()
+{
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    bindDeclaredL1Models(_l1Models);
+#endif
+}
 
 void AsmSdpaEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
 {
@@ -19,6 +118,11 @@ void AsmSdpaEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
 int64_t AsmSdpaEngine::id() const
 {
     return staticId();
+}
+
+const char* AsmSdpaEngine::selectorRevision()
+{
+    return SELECTOR_REVISION;
 }
 
 int64_t AsmSdpaEngine::staticId()
@@ -57,16 +161,59 @@ void AsmSdpaEngine::getDetails(
     handle.storeEngineDetailsDetachedBuffer(dataPtr, std::move(detachedBuffer));
 }
 
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPrediction(
+    Handle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+    hipdnnEnginePredictionKind_t kind,
+    bool evaluate) const
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    EnginePredictionT result;
+    result.engine_id = id();
+    result.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION ? PredictionKind::CONFIGURATION
+                                                                 : PredictionKind::ENGINE;
+    result.status = PredictionStatus::UNAVAILABLE;
+    if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
+    {
+        // RFC 0019 §11.2's "A only (opaque)" row: this engine exposes no catalog and no
+        // knobs, so it selects its own kernel and has no exact configuration to name.
+        result.reason = "ASM SDPA selects its own kernel and predicts no exact configuration";
+        return result;
+    }
+    try
+    {
+        const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
+        const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
+        return _l1Models.predict(
+            id(), engineName(), SELECTOR_REVISION, device.gcnArchName, features, evaluate);
+    }
+    catch(const std::exception& error)
+    {
+        // An unreadable device or an unbuildable feature row is a missing answer, not a
+        // claim of bad performance: applicability is untouched (§11.2).
+        result.reason = error.what();
+        return result;
+    }
+}
+
 size_t AsmSdpaEngine::getMaxWorkspaceSize(
     const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))
         {
-            return pb->getMaxWorkspaceSize(handle, opGraph, Settings{});
+            const auto bytes = pb->getMaxWorkspaceSize(handle, opGraph, Settings{});
+            if(const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(engineConfig);
+               limit && bytes > static_cast<uint64_t>(*limit))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "ASM SDPA exceeds the workspace limit");
+            }
+            return bytes;
         }
     }
 
@@ -86,6 +233,14 @@ void AsmSdpaEngine::initializeExecutionContext(
     {
         if(pb->isApplicable(handle, opGraph))
         {
+            if(const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(engineConfig);
+               limit
+               && pb->getMaxWorkspaceSize(handle, opGraph, Settings{})
+                      > static_cast<uint64_t>(*limit))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "ASM SDPA exceeds the workspace limit");
+            }
             pb->buildPlan(handle, opGraph, engineConfig, executionContext);
             return;
         }
