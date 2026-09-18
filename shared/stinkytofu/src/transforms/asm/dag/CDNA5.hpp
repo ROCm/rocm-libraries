@@ -971,6 +971,8 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
 // isPipeOp instruction does. That is why this reports a veto rather than joining the
 // cycles wait channel of getMaxSrcDataWait / getHazardWait.
 bool CDNA5ReadyQueue::pipeOpGateBlocks(DAGNode* node) const {
+    // Nothing to recover without va_vsrc tracking: the gate is pure cost there.
+    if (!getPassContext().getPassFeatureConfig().dagFeatures.enableESM2TrackValuVsrc) return false;
     if (node == nullptr) return false;
     for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
         const HazardRule& rule = hw_.hazards.rules[ruleIdx];
