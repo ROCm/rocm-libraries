@@ -5,9 +5,11 @@ versioned, and packaged as a single project, mirroring the role
 [NVIDIA/cccl](https://github.com/NVIDIA/cccl) plays for CUB, Thrust, and libcudacxx.
 
 > [!IMPORTANT]
-> This is a first-pass scaffold living temporarily inside `rocm-libraries` at
-> `projects/hipccl/hipccl3/`. See [`../../../docs/hipccl-repository-split-proposal.md`](../../../docs/hipccl-repository-split-proposal.md)
-> for the longer-term plan to extract this into its own `ROCm/hipCCL` repository.
+> This is a first-pass scaffold living inside `rocm-libraries` at
+> `projects/hipccl/hipccl3/`, and stays there - the earlier plan to extract
+> hipCCL into its own `ROCm/hipCCL` repository (see
+> [`../../../docs/hipccl-repository-split-proposal.md`](../../../docs/hipccl-repository-split-proposal.md))
+> has been dropped; that document is kept for historical context only.
 > A sibling directory, `projects/hipccl/hipccl2/`, exists purely for backward
 > compatibility (a loose, unbound copy of rocPRIM/hipCUB/rocThrust as they exist
 > in `rocm-libraries` today) and is intentionally *not* unified the way this
@@ -65,10 +67,10 @@ what's left to do.
   rocprim/hipcub/rocthrust via a CACHE-variable override (each of their
   `CMakeLists.txt` was given a small guard for this). libhipcxx's own versioning
   has not been looked at.
-- **Unified packaging**: each of rocprim/hipcub/rocthrust still calls its own
-  `rocm_create_package(...)` independently (three separate `.deb`/`.rpm`
-  packages will be produced today, not one `hipccl` package). Producing a
-  single combined package is follow-up work.
+- **Unified packaging**: done - see [`../README.md`](../README.md#hipccl3-unified-build-versioning-and-packaging)
+  for how the single `hipccl` CPack package and the `find_package(hipccl)`
+  CMake config work. License aggregation there is still a best-effort
+  placeholder pending real legal review.
 - **CI**: see `.github/README.md` - the workflows here are a staged copy, not
   yet live (GitHub Actions only reads `.github/` at the repository root, and
   this directory is currently nested inside `rocm-libraries`).
