@@ -479,6 +479,18 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
+    // Pre-scan: mark VALU/transcendental nodes that directly feed a matrix op.
+    // CDNA5ReadyQueue routes feedsWmma nodes to wmmaParentValuQueue (Phase B).
+    for (unsigned i = 0; i < regionSize; ++i) {
+        if (!isVectorALU(*dagNodes[i].inst) && !isTranscendental(*dagNodes[i].inst)) continue;
+        for (unsigned succId : dagGraph[i]) {
+            if (isMatrixInstruction(*dagNodes[succId].inst)) {
+                dagNodes[i].feedsWmma = true;
+                break;
+            }
+        }
+    }
+
     // Pre-scan: flag producers feeding a hazarded consumer, per the arch's hazard rule
     // table (a data-driven table of fixed producer->consumer cycle gaps keyed by register
     // file — e.g. SALU sgpr -> SMEM/tensor_load/VMEM address, VALU vgpr -> VMEM

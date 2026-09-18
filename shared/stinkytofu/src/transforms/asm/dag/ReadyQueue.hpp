@@ -62,6 +62,10 @@ struct DAGNode {
     // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
     // based on DsReadOrder config and WMMA consumer analysis.
     unsigned dsReadPriority = UINT_MAX;
+    // True when this VALU/transcendental has a direct matrix DAG successor.
+    // CDNA5ReadyQueue routes these to wmmaParentValuQueue (Phase B unlock).
+    // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
+    bool feedsWmma = false;
     // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
     int requiredMsb = -1;
