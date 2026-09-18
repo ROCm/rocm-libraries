@@ -6037,20 +6037,14 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                info,
                                          int                 bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
-        return hipsolverSgetrfBatched(handle,
-                                      m,
-                                      n,
-                                      A,
-                                      lda,
-                                      workOnDevice,
-                                      lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
-                                      stP,
-                                      info,
-                                      bc);
+    case C_NORMAL:
+        return hipsolverSgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, ipiv, stP, info, bc);
+    case C_NORMAL_ALT:
+        return hipsolverSgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, nullptr, 0, info, bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -6074,20 +6068,14 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                info,
                                          int                 bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
-        return hipsolverDgetrfBatched(handle,
-                                      m,
-                                      n,
-                                      A,
-                                      lda,
-                                      workOnDevice,
-                                      lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
-                                      stP,
-                                      info,
-                                      bc);
+    case C_NORMAL:
+        return hipsolverDgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, ipiv, stP, info, bc);
+    case C_NORMAL_ALT:
+        return hipsolverDgetrfBatched(
+            handle, m, n, A, lda, workOnDevice, lworkOnDevice, nullptr, 0, info, bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
@@ -6111,9 +6099,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                          int*                info,
                                          int                 bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverCgetrfBatched(handle,
                                       m,
                                       n,
@@ -6121,8 +6109,20 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
                                       lda,
                                       (hipFloatComplex*)workOnDevice,
                                       lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
+                                      ipiv,
                                       stP,
+                                      info,
+                                      bc);
+    case C_NORMAL_ALT:
+        return hipsolverCgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      (hipFloatComplex*)workOnDevice,
+                                      lworkOnDevice,
+                                      nullptr,
+                                      0,
                                       info,
                                       bc);
     default:
@@ -6148,9 +6148,9 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
                                          int*                    info,
                                          int                     bc)
 {
-    switch(API)
+    switch(api2marshal(API, NPVT))
     {
-    case API_NORMAL:
+    case C_NORMAL:
         return hipsolverZgetrfBatched(handle,
                                       m,
                                       n,
@@ -6158,8 +6158,20 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
                                       lda,
                                       (hipDoubleComplex*)workOnDevice,
                                       lworkOnDevice,
-                                      NPVT ? nullptr : ipiv,
+                                      ipiv,
                                       stP,
+                                      info,
+                                      bc);
+    case C_NORMAL_ALT:
+        return hipsolverZgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      (hipDoubleComplex*)workOnDevice,
+                                      lworkOnDevice,
+                                      nullptr,
+                                      0,
                                       info,
                                       bc);
     default:

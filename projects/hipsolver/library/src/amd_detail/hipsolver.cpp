@@ -6784,11 +6784,14 @@ try
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_sgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-    rocsolver_sgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
+        rocsolver_sgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
+    if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
+        return npvt_status;
     if(sz > INT_MAX)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
@@ -6815,11 +6818,14 @@ try
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_dgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-    rocsolver_dgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
+        rocsolver_dgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
+    if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
+        return npvt_status;
     if(sz > INT_MAX)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
@@ -6846,11 +6852,14 @@ try
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_cgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-    rocsolver_cgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
+        rocsolver_cgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
+    if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
+        return npvt_status;
     if(sz > INT_MAX)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
@@ -6877,11 +6886,14 @@ try
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
     hipsolverStatus_t status = hipsolver::rocblas2hip_status(
         rocsolver_zgetrf((rocblas_handle)handle, m, n, nullptr, lda, nullptr, nullptr));
-    rocsolver_zgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr);
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
+        rocsolver_zgetrf_npvt((rocblas_handle)handle, m, n, nullptr, lda, nullptr));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
         return status;
+    if(npvt_status != HIPSOLVER_STATUS_SUCCESS)
+        return npvt_status;
     if(sz > INT_MAX)
         return HIPSOLVER_STATUS_INTERNAL_ERROR;
 
