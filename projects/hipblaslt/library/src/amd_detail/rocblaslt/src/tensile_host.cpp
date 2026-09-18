@@ -639,15 +639,22 @@ namespace
         }
     }
 
+    /// Alignment of the zero-point region within the scaleA allocation. Part of
+    /// the public layout contract documented on
+    /// HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT, so it cannot be changed here
+    /// alone: the client-side generator in w4a16_datagen.hpp lays the region out
+    /// to match, and the two have to agree byte for byte.
+    constexpr size_t c_blockScaleAZeroPointAlignment = 256;
+
     /// Byte offset of the packed int4 zero-point region inside the single
-    /// allocation the user passes as scaleA: the bf16 scales come first, then
-    /// the zero-points at the next 128-byte boundary. Mirrors the layout
-    /// documented on HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT.
+    /// allocation the user passes as scaleA: the scales come first, then the
+    /// zero-points at the next c_blockScaleAZeroPointAlignment boundary.
     inline size_t blockScaleAZeroPointOffset(int64_t m, int64_t k, int groupSize)
     {
         const size_t scaleBytes
             = static_cast<size_t>(m) * TensileLite::CeilDivide<size_t>(k, groupSize) * 2;
-        return TensileLite::RoundUpToMultiple<size_t>(scaleBytes, 128);
+        return TensileLite::RoundUpToMultiple<size_t>(scaleBytes,
+                                                      c_blockScaleAZeroPointAlignment);
     }
 
     /// True for the asymmetric w4a16 modes, i.e. those whose scale allocation

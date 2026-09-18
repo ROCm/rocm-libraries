@@ -69,13 +69,19 @@ namespace w4a16
             base[byteIdx] = static_cast<uint8_t>((base[byteIdx] & 0xF0) | raw);
     }
 
+    /// Alignment of the zero-point region within the scaleA allocation. Must
+    /// match c_blockScaleAZeroPointAlignment in tensile_host.cpp, which is where
+    /// the library derives the pointer it hands the kernel; the two cannot be
+    /// shared through a header because one side is library-internal.
+    constexpr size_t zeroPointAlignment = 256;
+
     /// Byte offset of the zero-point region inside the single allocation the
     /// user passes as scaleA: the scales come first, then the zero-points at the
-    /// next 128-byte boundary.
+    /// next zeroPointAlignment boundary.
     inline size_t zeroPointOffset(int64_t m, int64_t kGroups)
     {
         const size_t scaleBytes = static_cast<size_t>(m) * static_cast<size_t>(kGroups) * 2;
-        return (scaleBytes + 127) / 128 * 128;
+        return (scaleBytes + zeroPointAlignment - 1) / zeroPointAlignment * zeroPointAlignment;
     }
 
     /// Total bytes of the scaleA allocation, scales plus any zero-point region.
