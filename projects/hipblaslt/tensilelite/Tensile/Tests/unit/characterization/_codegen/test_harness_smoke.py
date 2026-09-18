@@ -3,14 +3,13 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 """Phase G0 smoke test — proves the CPU-only codegen-emit harness works and is
-deterministic, and pins a compact golden digest of the emitted assembly.
+deterministic, and records compact kernel-identity results.
 
 The emit itself is what drives coverage of ``KernelWriterAssembly`` /
 ``KernelWriter``; this single gfx942 kernel already exercises thousands of lines
-of the emitter. We snapshot a *digest* (deterministic kernel name + emit return
-code + line count + sha256 of the canonicalized text) rather than the full
-~200KB of assembly, to keep the golden compact while still catching any change
-in emitted bytes.
+of the emitter. Identity snapshots record kernel selection and status. Tests
+that protect a particular generated behavior assert a focused source pattern
+instead of hashing all compiler-dependent instructions.
 """
 
 import os
@@ -22,7 +21,14 @@ from codegen_harness import (
     canonicalize_asm,
     emit_kernels_from_logic,
 )
-from config_harness import emit_kernels_from_config
+from config_harness import (
+    _select_benchmark_problem,
+    assert_config_emits,
+    benchmark_problem_fingerprint,
+    emit_kernels_from_config,
+    golden_digest,
+    solutions_from_config,
+)
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -46,6 +52,8 @@ _CONFIG = os.path.join(
     "gfx950",
     "subtile3_gr_variants.yaml",
 )
+
+_MULTI_PROBLEM_CONFIG = "Tensile/Tests/common/gemm/use_beta_false.yaml"
 
 
 def _pin_rocisa(arch, wavefront):
@@ -116,6 +124,89 @@ def test_canonicalize_neutralizes_random_labels():
     assert canon.count("_LBL0") == 2  # def + reference preserved as a pair
     assert canon.count("_LBL1") == 2
     assert canonicalize_asm(canon) == canon  # idempotent
+
+
+def test_config_source_patterns_observe_named_instruction(monkeypatch):
+    results = [
+        (
+            "Cijk_kernel",
+            '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n'
+            "v_cvt_f32_i32 v0, v0\n" + "s_nop 0\n" * 50,
+            0,
+        )
+    ]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    assert_config_emits(
+        "unused.yaml",
+        "gfx942",
+        validate_source=True,
+        required_source_patterns=(("integer-to-float conversion", r"^v_cvt_f32_i32\b"),),
+    )
+
+
+def test_config_source_patterns_reject_missing_instruction(monkeypatch):
+    results = [
+        (
+            "Cijk_kernel",
+            '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n'
+            "v_mov_b32 v0, v0\n" + "s_nop 0\n" * 50,
+            0,
+        )
+    ]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    with pytest.raises(AssertionError, match="integer-to-float conversion"):
+        assert_config_emits(
+            "unused.yaml",
+            "gfx942",
+            validate_source=True,
+            required_source_patterns=(("integer-to-float conversion", r"^v_cvt_f32_i32\b"),),
+        )
+
+
+def test_config_emit_smoke_can_allow_known_errors(monkeypatch):
+    results = [("kernel-ok", "", 0), ("kernel-error", "", -2)]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    assert_config_emits("unused.yaml", "gfx942", all_ok=False)
+
+
+def test_config_emit_smoke_rejects_unexpected_error(monkeypatch):
+    results = [("kernel-ok", "", 0), ("kernel-error", "", -2)]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    with pytest.raises(AssertionError, match="kernel-error"):
+        assert_config_emits("unused.yaml", "gfx942")
+
+
+def test_config_harness_selects_problem_entry():
+    first = solutions_from_config(
+        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=0
+    )
+    second = solutions_from_config(
+        _MULTI_PROBLEM_CONFIG, arch="gfx942", limit_solutions=1, problem_index=1
+    )
+
+    assert first and second
+    assert first[0]["ProblemType"]["UseScaleCD"] is False
+    assert second[0]["ProblemType"]["UseScaleCD"] is True
+
+
+def test_problem_fingerprint_selection_survives_reordering():
+    first = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]
+    selected = [{"OperationType": "GEMM", "DataType": "H"}, {"ForkParameters": []}]
+    fingerprint = benchmark_problem_fingerprint(selected)
+
+    assert _select_benchmark_problem([first, selected], "config.yaml", 0, fingerprint) == selected
+    assert _select_benchmark_problem([selected, first], "config.yaml", 0, fingerprint) == selected
+
+
+def test_problem_fingerprint_selection_rejects_missing_group():
+    entries = [[{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]]
+
+    with pytest.raises(ValueError, match="does not exist"):
+        _select_benchmark_problem(entries, "config.yaml", 0, "not-present")
 
 
 def test_emit_golden_digest(snapshot):
