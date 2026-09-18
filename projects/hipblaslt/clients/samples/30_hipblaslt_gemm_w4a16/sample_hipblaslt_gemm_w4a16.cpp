@@ -2,18 +2,13 @@
 // SPDX-License-Identifier: MIT
 //
 // w4a16: D = alpha * dequant(A) * B + beta * C, where
-//   A is HIP_R_4I      -- signed int4 weights, two per byte, element 2n in the
-//                         low nibble of byte n
-//   B is HIP_R_16BF    -- bf16 activations
-//   the A scale is a dense [M][ceil(K/G)] HIP_R_16BF tensor, one scale per G
-//   consecutive K elements of a row of A (G = 32 or 128), symmetric (no
-//   zero-point), selected with HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,128}_16BF_EXT.
+//   A is HIP_R_4I    -- signed int4 weights, two per byte, element 2n low
+//   B is HIP_R_16BF  -- bf16 activations
+//   the A scale is a dense [M][ceil(K/G)] bf16 tensor, one scale per G
+//   consecutive K elements of a row of A (G = 32 or 128), symmetric,
+//   selected with HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,128}_EXT.
 //
-// The kernel dequantizes A after the global load and before the LDS write, so
-// the inner loop is an ordinary bf16 GEMM.
-//
-// This sample is deliberately standalone (no Runner<> helper) because there is
-// no host arithmetic type for int4.
+// Standalone (no Runner<> helper): there is no host arithmetic type for int4.
 
 #include <hip/hip_runtime.h>
 #include <hip/library_types.h>
@@ -65,9 +60,8 @@ static float bf16_to_f32(uint16_t h)
 
 int main()
 {
-    // Column-major, TN: A is k x m with lda = k, B is k x n with ldb = k. That
-    // makes A row-major [M][K] with K contiguous, which is what the group scale
-    // layout assumes.
+    // Column-major TN: A is k x m (lda = k), B is k x n (ldb = k), so A is
+    // row-major [M][K] with K contiguous, as the scale layout assumes.
     const int64_t m = 128, n = 128, k = 256;
     const int64_t groupSize = 32;
     const int64_t nGroups   = (k + groupSize - 1) / groupSize;
@@ -117,8 +111,7 @@ int main()
     CHECK_LT(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)));
     CHECK_LT(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB)));
 
-    // The group scale: mode first, then the pointer. Setting the pointer on a
-    // descriptor whose A scale mode is still None would default it to Scalar.
+    // Mode before pointer: a pointer set while the mode is None defaults to Scalar.
     hipblasLtMatmulMatrixScale_t scaleMode = (groupSize == 32)
                                                  ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT
                                                  : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT;
@@ -151,7 +144,9 @@ int main()
     std::vector<uint16_t> got(size_t(m) * n);
     CHECK_HIP(hipMemcpy(got.data(), dD, got.size() * 2, hipMemcpyDeviceToHost));
 
-    double maxErr = 0;
+    // D is bf16, so the expected error is its own rounding: one ulp is 2^-8 of
+    // the magnitude. An absolute number would say nothing on its own.
+    double maxErr = 0, maxRef = 0, maxUlps = 0;
     for(int64_t j = 0; j < n; j++)
         for(int64_t i = 0; i < m; i++)
         {
@@ -160,10 +155,19 @@ int main()
                 acc += double(aQ[size_t(i) * k + kk])
                        * bf16_to_f32(scaleA[size_t(i) * nGroups + kk / groupSize])
                        * bf16_to_f32(bH[size_t(j) * k + kk]);
-            maxErr = std::max(maxErr, std::fabs(bf16_to_f32(got[size_t(j) * m + i]) - alpha * acc));
+            const double ref = alpha * acc;
+            const double err = std::fabs(bf16_to_f32(got[size_t(j) * m + i]) - ref);
+            maxErr = std::max(maxErr, err);
+            maxRef = std::max(maxRef, std::fabs(ref));
+            if(ref != 0)
+                maxUlps = std::max(maxUlps, err / std::ldexp(std::fabs(ref), -8));
         }
+    const bool ok = maxUlps <= 2.0;
     std::cout << "w4a16 " << m << "x" << n << "x" << k << " G=" << groupSize
-              << " max_abs_err=" << maxErr << "\n";
+              << " max_abs_err=" << maxErr << " max|ref|=" << maxRef
+              << " max_bf16_ulps=" << maxUlps << (ok ? "  PASS\n" : "  FAIL\n");
+    if(!ok)
+        return 1;
 
     CHECK_LT(hipblasLtMatmulPreferenceDestroy(pref));
     CHECK_LT(hipblasLtMatmulDescDestroy(desc));
