@@ -5882,7 +5882,22 @@ class KernelWriterAssembly(KernelWriter):
       module.add(vectorStaticDivide(tReg, lReg, miN, tmpVgprRes, "kM = L // MI_N"))
       module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), blockOff, tmpSgprInfo, "kM * (MI_N*innerK)"))
       module.add(vectorStaticRemainder(dummy, lReg, lReg, miN, tmpVgprRes, tmpSgprInfo, "nIdx = L mod MI_N"))
-      module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro = nIdx*innerK + kM*blockOff"))
+      vw = kernel["VectorWidth%s" % tP["tensorChar"]]
+      if vw > 1:
+        # VectorWidth>1: a lane's per-tile N stride is VW, so its 16 columns span VW nO-tiles. Decompose
+        # nVWB = VW*nIdx into nO_lane (//MI_N) and nI_lane (%MI_N):
+        #   lro += nO_lane*nOStride + nI_lane*innerK   (eIdx phase + vIdx group are in the ds_load imm).
+        depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
+        nOStride = miN * depthU
+        nOReg    = self.vgprPool.checkOut(1, "nOLaneSwizTDM")
+        module.add(vectorStaticMultiply(vgpr(lReg), vgpr(lReg), vw, tmpSgprInfo, "nVWB = VW * nIdx"))
+        module.add(vectorStaticDivide(nOReg, lReg, miN, tmpVgprRes, "nO_lane = nVWB // MI_N"))
+        module.add(vectorStaticRemainder(dummy, lReg, lReg, miN, tmpVgprRes, tmpSgprInfo, "nI_lane = nVWB mod MI_N"))
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(nOReg), nOStride, vgpr(tReg), tmpSgprInfo, "lro += nO_lane*nOStride"))
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro += nI_lane*innerK"))
+        self.vgprPool.checkIn(nOReg)
+      else:
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro = nIdx*innerK + kM*blockOff"))
       # Multi-wave N split: this wave's nO band. Mirror LraTileAssignment's wtid0 term.
       # wtid0 = (Serial // (waveWidth*MIWaveGroup[0])) % MIWaveGroup[1]. N-waves interleave at
       # MI_N granularity (strideWave == one nO), and a wave's MIWaveTile sub-tiles stride by
@@ -5890,7 +5905,9 @@ class KernelWriterAssembly(KernelWriter):
       if num1DWaves > 1:
         depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
         nOStride = miN * depthU
-        strideWaveN = nOStride
+        # VectorWidth>1 widens each wave's tile span to VW nO-tiles, so the N-waves interleave at
+        # VW*MI_N (VW nO-tiles) granularity -> the per-wave nO-band offset scales by VW. vw==1 -> nOStride.
+        strideWaveN = vw * nOStride
         dividedForWaveId = waveWidth if tile01 == 0 else waveWidth * miWaveGroup[0]
         wReg = self.vgprPool.checkOut(1, "waveSwizTDM")
         module.add(vectorStaticDivide(wReg, "Serial", dividedForWaveId, tmpVgprRes, "wtid = Serial // (waveWidth*MIWaveGroup[0])"))

@@ -773,12 +773,21 @@ class LocalReadMFMA(LocalRead):
         # the WMMA consumer reads through the same getHalfPLRValuStr mapping, so the swizzled reader
         # must target the group register too (else it fills Valu_X while WMMA reads Valu_G -> garbage).
         halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c" % tc]
+        # VectorWidth>1: the WMMA/store interleave the free dim into VW column-phases. A logical MI-tile
+        # group vIdx (0..numVecPerTile) owns VW nO-tiles (strided by the wave interleave nWaveN); the eIdx
+        # phase (0..vw) shifts one column (+innerK) within that group. The per-lane N stride becomes VW
+        # (handled in lraTileAssignmentSwizzledTDM). Register block order stays nt=vIdx*vw+eIdx to match
+        # the acc->arch layout. vw==1 -> vIdx=nt, eIdx=0 -> byte-identical to the flat nt-major loop.
+        vw            = kernel["VectorWidth%s" % tc]
+        numVecPerTile = numNtile // vw
         for nt in range(numNtile):
+            vIdx = nt // vw
+            eIdx = nt %  vw
             for r in range(numKChunk):
                 # localReadOffset carries the K-sub-iteration progression in the immediate (like the
                 # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
                 # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
-                off = nt * nWaveN * nOStride + r * kOStride + swapByteOff + int(tP["localReadOffset"])
+                off = vIdx * vw * nWaveN * nOStride + eIdx * innerK + r * kOStride + swapByteOff + int(tP["localReadOffset"])
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)
