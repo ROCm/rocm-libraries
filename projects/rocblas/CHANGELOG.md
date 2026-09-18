@@ -37,6 +37,10 @@ rocBLAS documentation is available at
 * Fix Level 2 `trsv` and Level 3 `trsm`, `trtri`, `trmm`, and `gemmt` returning `rocblas_status_success` when an internal GEMM, GEMV, vector copy, or block helper failed. Those statuses are now returned to the caller. On the negative-`incx` path, a failed `trsv` also restores the caller's input vector, which the solve reverses in place.
 * Fix `rocblas_get_commit_hash_string` writing past the caller's buffer. The length check compared against the size of a pointer, so a buffer shorter than the commit hash was accepted, and the copy omitted the terminating null. `rocblas_get_version_string` and `rocblas_get_commit_hash_string` now require the size reported by the matching `*_size` query, including the terminating null.
 
+### Added
+
+* CMake `ROCBLAS_TENSILE_ARCH_SKIPLIST` to skip GPU targets during Tensile library generation while still compiling the rocBLAS library for all `GPU_TARGETS`. Defaults to `gfx1250-strict`. If every `GPU_TARGETS` entry is skipped, Tensile builds its stub `gfx000` target when that logic exists. GEMM on a skipped architecture uses hipBLASLt or source kernels instead of aborting Tensile initialization.
+
 ## rocBLAS 5.7.0 for ROCm 10.1.0
 
 ### Added
