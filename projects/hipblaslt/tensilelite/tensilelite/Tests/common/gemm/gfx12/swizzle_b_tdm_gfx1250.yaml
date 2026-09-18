@@ -490,3 +490,83 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
         - ActivationArgs:
           - [Enum: none]
+  -
+    - # ProblemType, TN, MXF8 swizzle-B, VWB=2 (VectorWidth>1 on the swizzled tensor).
+      # Regression guard for swizzled-TDM VectorWidthB>1: the read decomposes the VW-strided N into
+      # (nO,nI) (per-lane) plus an eIdx column phase + vIdx tile-group in the ds_load immediate, and
+      # scales the multi-wave nO-band offset by VW, so the swizzled B lands in the VW-interleaved
+      # register layout the WMMA/acc consume. Must PASS (garbage before the fix). Also lets MXSB scale
+      # loads widen (ds_load count ~halves via the tileSpan).
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+      SwizzleTensorB: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]
+        - HalfPLR: [1]
+        - TDMIterateMode: [-1]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[2,4]]
+        - LDSSegmentInterleave: [-1]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [True]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+        - ActivationArgs:
+          - [Enum: none]
