@@ -13,6 +13,10 @@
 #include "ck_tile/ops/fmha/detail/fmha_dtype_traits.hpp"
 #include "ck_tile/ops/fmha/pipeline/fmha_tdm_v128_config.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_v128_schedule.hpp"
+#include "ck_tile/ops/fmha/pipeline/fmha_n128_prepared_k_probe.hpp"
+#include "ck_tile/ops/fmha/pipeline/fmha_n128_prepared_v_probe.hpp"
+#include "ck_tile/ops/fmha/pipeline/fmha_n128_affine_k_probe.hpp"
+#include "ck_tile/ops/fmha/pipeline/fmha_n128_affine_v_probe.hpp"
 
 namespace ck_tile {
 
@@ -298,7 +302,8 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                                    const BBlockTensor& b_block_tensor,
                                    NextBBlockTensor& next_b_block_tensor,
                                    const BTileWindow& b_lds_window,
-                                   SoftmaxTokenEmitter& emit_softmax_token)
+                                   SoftmaxTokenEmitter& emit_softmax_token,
+                                   const FmhaN128PreparedKProbe::Address* prepared_stage0 = nullptr)
     {
         using Executor = ScheduleExecutor;
         using Kind     = FmhaTdmV128LoadKind;
@@ -308,6 +313,33 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                       (Stage == Executor::Schedule::kNumQkStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount));
 
+        const auto affine_k0 = [&]() {
+            if constexpr(Geometry::kHeadDimQK == 128 && Stage == 0)
+            {
+                if(prepared_stage0 != nullptr)
+                    return *prepared_stage0;
+            }
+            if constexpr(Geometry::kHeadDimQK == 128 && Stage < 3)
+                return FmhaN128PreparedKProbe::Prepare<0>(b_lds_window);
+            else
+                return FmhaN128PreparedKProbe::Address{};
+        }();
+        const auto affine_v0 = [&]() {
+            if constexpr(Geometry::kHeadDimQK == 128 && Stage == 3)
+                return FmhaN128PreparedKProbe::Prepare<0>(b_lds_window);
+            else
+                return FmhaN128PreparedKProbe::Address{};
+        }();
+        constexpr bool kLeadFirstLoad =
+            Geometry::kHeadDimQK == 128 && (Stage == 0 || Stage == 3);
+        if constexpr(kLeadFirstLoad)
+        {
+            if constexpr(Stage == 0)
+                FmhaN128AffineKProbe::Load<Stage, 0>(next_b_block_tensor, b_lds_window, affine_k0);
+            else
+                FmhaN128AffineVProbe::Load<0>(next_b_block_tensor, b_lds_window, affine_v0);
+            __builtin_amdgcn_sched_barrier(0);
+        }
         auto emit_wmma = [&](auto, auto wmma) {
             RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
                 c_block_tensor, a_block_tensor, b_block_tensor);
@@ -315,13 +347,29 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
         auto emit_token = [&](auto kind, auto access) {
             if constexpr(decltype(kind)::value == Kind::KRead)
             {
-                KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
-                                                                         b_lds_window);
+                if constexpr(kLeadFirstLoad && decltype(access)::value == 0)
+                {
+                    // Access0 was issued before WMMA0; do not issue it twice.
+                }
+                else if constexpr(Geometry::kHeadDimQK == 128 && Stage < 3)
+                    FmhaN128AffineKProbe::Load<Stage, decltype(access)::value>(
+                        next_b_block_tensor, b_lds_window, affine_k0);
+                else
+                    KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
+                                                                             b_lds_window);
             }
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
-                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
-                                                                    b_lds_window);
+                if constexpr(kLeadFirstLoad && decltype(access)::value == 0)
+                {
+                    // Access0 was issued before WMMA0; do not issue it twice.
+                }
+                else if constexpr(Geometry::kHeadDimQK == 128 && Stage == 3)
+                    FmhaN128AffineVProbe::Load<decltype(access)::value>(
+                        next_b_block_tensor, b_lds_window, affine_v0);
+                else
+                    VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
+                                                                        b_lds_window);
             }
             else
             {
@@ -351,7 +399,8 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                                                    const ABlockTensor& a_block_tensor,
                                                    const BBlockTensor& b_block_tensor,
                                                    NextBBlockTensor& next_b_block_tensor,
-                                                   const BTileWindow& b_lds_window)
+                                                   const BTileWindow& b_lds_window,
+                                                   const FmhaN128PreparedKProbe::Address* prepared_stage0 = nullptr)
     {
         auto emit_no_softmax = [](auto, auto) {};
         RunQkScheduledStageWithSoftmax<Stage>(block_gemm,
@@ -360,7 +409,8 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                                               b_block_tensor,
                                               next_b_block_tensor,
                                               b_lds_window,
-                                              emit_no_softmax);
+                                              emit_no_softmax,
+                                              prepared_stage0);
     }
 
     template <index_t WmmaOrdinal,
@@ -486,11 +536,48 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                       (Stage == Executor::Schedule::kNumPvStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kKSuLoadCount));
 
+        FmhaN128PreparedKProbe::Address affine_k0{};
+        FmhaN128PreparedKProbe::Address prepared_v1{};
+        constexpr bool kLeadFirstLoad =
+            Geometry::kHeadDimQK == 128 && (Stage == 0 || Stage == 3);
+        if constexpr(kLeadFirstLoad)
+        {
+            if constexpr(Stage == 0)
+            {
+                prepared_v1 = FmhaN128PreparedKProbe::Prepare<1>(b_lds_window);
+                __builtin_amdgcn_sched_barrier(0);
+                VLoad::template LoadAccess<0>(next_b_block_tensor, b_lds_window);
+            }
+            else
+            {
+                affine_k0 = FmhaN128PreparedKProbe::Prepare<0>(b_lds_window);
+                FmhaN128AffineKProbe::Load<Stage, 0>(next_b_block_tensor, b_lds_window, affine_k0);
+            }
+            __builtin_amdgcn_sched_barrier(0);
+        }
+        auto emit_prepared_wmma = [&](auto stage, auto wmma) {
+            if constexpr(!kLeadFirstLoad && Geometry::kHeadDimQK == 128 && Stage == 0 &&
+                         decltype(wmma)::value == 0)
+            {
+                prepared_v1 = FmhaN128PreparedKProbe::Prepare<1>(b_lds_window);
+                __builtin_amdgcn_sched_barrier(0);
+            }
+            if constexpr(!kLeadFirstLoad && Geometry::kHeadDimQK == 128 && Stage == 3 &&
+                         decltype(wmma)::value == 0)
+            {
+                affine_k0 = FmhaN128PreparedKProbe::Prepare<0>(b_lds_window);
+            }
+            emit_wmma(stage, wmma);
+        };
         auto emit_token = [&](auto kind, auto access) {
             if constexpr(decltype(kind)::value == Kind::KRead)
             {
-                KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
-                                                                         b_lds_window);
+                if constexpr(Geometry::kHeadDimQK == 128 && Stage == 3)
+                    FmhaN128AffineKProbe::Load<3, decltype(access)::value>(
+                        next_b_block_tensor, b_lds_window, affine_k0);
+                else
+                    KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
+                                                                            b_lds_window);
             }
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
@@ -505,7 +592,19 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
-        Executor::template ExecutePvStage<Stage>(emit_wmma, emit_token, emit_point);
+        auto emit_prepared_token = [&](auto kind, auto access) {
+            if constexpr(kLeadFirstLoad && decltype(access)::value == 0)
+            {
+                // Access0 was issued before WMMA0; do not issue it twice.
+            }
+            else if constexpr(Geometry::kHeadDimQK == 128 && Stage == 0 &&
+                         decltype(kind)::value == Kind::VRead && decltype(access)::value == 1)
+                FmhaN128PreparedVProbe::Load<1>(next_b_block_tensor, b_lds_window, prepared_v1);
+            else
+                emit_token(kind, access);
+        };
+
+        Executor::template ExecutePvStage<Stage>(emit_prepared_wmma, emit_prepared_token, emit_point);
         WaitPvStageTail<Stage>();
     }
 
@@ -543,7 +642,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
     CK_TILE_HOST_DEVICE static constexpr bool UseCompilerMax()
     {
         // Let the allocator place score tuples above the inline-asm low-VGPR range.
-        return (Geometry::kHeadDimQK == 128 && Problem::FmhaMask::IsMasking) ||
+        return (Geometry::kHeadDimQK == 128) ||
                (Geometry::kHeadDimQK == 192 && !Problem::kIsGroupMode &&
                 !Problem::FmhaMask::IsMasking &&
                 std::is_same_v<remove_cvref_t<typename Problem::QDataType>, bf16_t> &&
@@ -710,7 +809,11 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
             score, row_max, row_sum, output, log2e_scale, delta_m0, delta_m1);
     }
 
-    template <typename Problem, typename ScoreTensor, typename RowTensor, typename Fragments>
+    template <typename Problem,
+              bool WaitTensorAfterMax = false,
+              typename ScoreTensor,
+              typename RowTensor,
+              typename Fragments>
     CK_TILE_DEVICE static void RunSplitSoftmaxFragments(ScoreTensor& score,
                                                         RowTensor& row_max,
                                                         RowTensor& row_sum,
@@ -720,6 +823,26 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
         float delta_m0;
         float delta_m1;
         RunSplitSoftmaxPart01<Problem>(score, row_max, log2e_scale, delta_m0, delta_m1);
+
+        if constexpr(WaitTensorAfterMax)
+            s_wait_tensorcnt_barrier<kVPrefetchTensorCount>();
+
+        const auto rescale_output = [&](float scale_m0, float scale_m1) {
+            static_for<0, OutputFragments::kNumFragments, 1>{}([&](auto ordinal) {
+                constexpr index_t d_msb = decltype(ordinal)::value / OutputFragments::kNumN;
+                const float scale       = d_msb < 2 ? scale_m0 : scale_m1;
+                auto& fragment          = output.at(ordinal);
+                static_for<0, OutputFragments::kElementsPerFragment, 1>{}(
+                    [&](auto element) { fragment[decltype(element)::value] *= scale; });
+            });
+        };
+        constexpr bool kEarlyOutputRescale =
+            Geometry::kHeadDimQK == 128 && !Problem::FmhaMask::IsMasking;
+        if constexpr(kEarlyOutputRescale)
+        {
+            using Softmax = FmhaTdmV128SplitSoftmax;
+            rescale_output(Softmax::Exp2(delta_m0), Softmax::Exp2(delta_m1));
+        }
 
         float output_scale_m0;
         float output_scale_m1;
@@ -732,13 +855,10 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                                                  output_scale_m0,
                                                  output_scale_m1);
 
-        static_for<0, OutputFragments::kNumFragments, 1>{}([&](auto ordinal) {
-            constexpr index_t d_msb = decltype(ordinal)::value / OutputFragments::kNumN;
-            const float scale       = d_msb < 2 ? output_scale_m0 : output_scale_m1;
-            auto& fragment          = output.at(ordinal);
-            static_for<0, OutputFragments::kElementsPerFragment, 1>{}(
-                [&](auto element) { fragment[decltype(element)::value] *= scale; });
-        });
+        if constexpr(!kEarlyOutputRescale)
+        {
+            rescale_output(output_scale_m0, output_scale_m1);
+        }
     }
 
     template <typename Problem>
@@ -1034,7 +1154,20 @@ template <typename Geometry>
 using FmhaTdmV128DefaultTuning = std::conditional_t<
     std::is_same_v<Geometry, LegacyD192Geometry>,
     LegacyD192Tuning,
-    FmhaTdmV128Tuning<0, 0, sequence<0, 0, 0, 0>, sequence<0, 0, 0, 0>, true, false, 1, Geometry>>;
+    FmhaTdmV128Tuning<1,
+                      1,
+                      sequence<Geometry::kKSuLoadCount,
+                               Geometry::kKSuLoadCount,
+                               Geometry::kKSuLoadCount,
+                               Geometry::kVStageLoadCount>,
+                      sequence<Geometry::kVStageLoadCount,
+                               Geometry::kVStageLoadCount,
+                               Geometry::kVStageLoadCount,
+                               Geometry::kKSuLoadCount>,
+                      true,
+                      true,
+                      1,
+                      Geometry>>;
 
 template <typename Problem>
 using FmhaTdmV128PolicyFor =

@@ -395,7 +395,11 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
+        constexpr bool kUseCountdownLoop = kQKHeaddim == 128 && !FmhaMask::IsMasking &&
+                                           !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+        bool even_buffer          = true;
         index_t i_total_loops      = 0;
+        index_t remaining_loops    = num_total_loop;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
@@ -415,7 +419,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
         static_assert(k_lds_insts <= Geometry::kKSuLoadCount &&
                       v_lds_insts == Geometry::kVStageLoadCount);
 
-        s_wait_tensorcnt_barrier<0>();
+        s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
         auto k_tile = [&]() {
             if constexpr(Policy::kUseFullHeadKSuQk)
                 return null_tensor{};
@@ -449,11 +453,42 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
             auto current_p_tile = make_static_distributed_tensor<PDataType>(
                 Policy::template MakePRegTileDistribution<Problem>());
 
+            const auto qk_stage0_base = [&]() {
+                if constexpr(Geometry::kHeadDimQK == 128 && Policy::kUseCustomQkStageSchedule)
+                {
+                    auto next_su_window = make_tile_window(
+                        k_lds_read_view,
+                        make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
+                        {Geometry::kQkSuColumns, 0},
+                        Policy::template MakeKSuRegTileDistribution<Problem>());
+                    next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+                    return FmhaN128PreparedKProbe::Prepare<0>(next_su_window);
+                }
+                else
+                {
+                    return FmhaN128PreparedKProbe::Address{};
+                }
+            }();
+            __builtin_amdgcn_sched_barrier(0);
+
             // Reuse the V LDS buffer only after the preceding reads have completed.
             block_sync_lds<k_lds_insts>();
             move_tile_window(v_dram_window, {kN0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
+                         std::is_same_v<VDataType, bf16_t>)
+            {
+                v_dram_window.tdm_load_to_lds(
+                    tdm_config_v,
+                    v_lds_write_window,
+                    make_null_tile_window(v_dram_window.get_window_lengths()),
+                    number<-1>{},
+                    bool_constant<true>{});
+            }
+            else
+            {
+                load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            }
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             if constexpr(Policy::kUseCustomQkStageSchedule)
@@ -615,7 +650,8 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                                 q_tile,
                                 k_su_tile,
                                 k_su_tile_next,
-                                k_lds_su_read_window);
+                                k_lds_su_read_window,
+                                &qk_stage0_base);
 
                             k_su_tile = k_su_tile_next;
                         }
@@ -715,7 +751,11 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                 });
             }
 
-            s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
+            constexpr bool kDeferTensorReady =
+                kUseCountdownLoop && Policy::kUseCustomQkStageSchedule &&
+                Policy::kUseOutputFragments && Policy::kUseSplitSoftmax && kNWarp == 1;
+            if constexpr(!kDeferTensorReady)
+                s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>();
             if constexpr(!Policy::kUseCustomQkStageSchedule)
             {
                 v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -724,6 +764,11 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
 
             // Sink-aware k_origin (prefill path)
             const auto k_origin = [&]() {
+                if constexpr(kUseCountdownLoop)
+                {
+                    // V's window already points one prefetched tile ahead.
+                    return make_tuple(v_dram_window.get_window_origin().at(I0) - kN0, 0);
+                }
                 const bool in_sink_phase = (num_sink_loop > i_total_loops);
                 if(in_sink_phase)
                     return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
@@ -732,39 +777,72 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                         kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
             }();
 
-            if constexpr(kHasUnevenSplits)
+            if constexpr(kUseCountdownLoop)
             {
-                const bool needs_tail_predicate = !Policy::kSkipExactFullTilePredicate ||
-                                                  k_origin.at(I0) + kN0 > physical_seqlen_k_end;
-                if(i_total_loops == (num_total_loop - 1) && needs_tail_predicate)
+                bool need_split_check = false;
+                if constexpr(kHasUnevenSplits)
                 {
-                    set_tile_if(s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-
-                                    {
-                                        return physical_seqlen_k_end_ <= col;
-                                    }
-                                });
+                    const bool needs_tail_predicate = !Policy::kSkipExactFullTilePredicate ||
+                                                      k_origin.at(I0) + kN0 > physical_seqlen_k_end;
+                    need_split_check = remaining_loops == 1 && needs_tail_predicate;
                 }
-            }
+                bool need_mask_check = false;
+                if constexpr(kPadSeqLenK)
+                    need_mask_check = mask.IsEdgeTile(
+                        q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
 
-            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
-            {
-                bool need_perpixel_check =
-                    mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
-                if(need_perpixel_check)
+                // Both original passes assign the same value; preserve their predicate union.
+                if(__builtin_expect(need_split_check || need_mask_check, false))
                 {
                     set_tile_if(
                         s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                             const auto row = q_origin.at(I0) + tile_idx.at(I0);
                             const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                            if constexpr(kHasSink)
-                                return mask.IsOutOfSinkBound(row, col);
-                            else
-                                return mask.IsOutOfBound(row, col);
+                            return (need_split_check && physical_seqlen_k_end <= col) ||
+                                   (need_mask_check && mask.IsOutOfBound(row, col));
                         });
+                }
+            }
+            else
+            {
+                if constexpr(kHasUnevenSplits)
+                {
+                    const bool needs_tail_predicate = !Policy::kSkipExactFullTilePredicate ||
+                                                      k_origin.at(I0) + kN0 > physical_seqlen_k_end;
+                    const bool is_last_loop = kUseCountdownLoop
+                                                  ? remaining_loops == 1
+                                                  : i_total_loops == (num_total_loop - 1);
+                    if(is_last_loop && needs_tail_predicate)
+                    {
+                        set_tile_if(
+                            s_acc,
+                            -numeric<SMPLComputeDataType>::infinity(),
+                            [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
+                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+
+                                {
+                                    return physical_seqlen_k_end_ <= col;
+                                }
+                            });
+                    }
+                }
+
+                if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+                {
+                    bool need_perpixel_check = mask.IsEdgeTile(
+                        q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                    if(need_perpixel_check)
+                    {
+                        set_tile_if(
+                            s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                                const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                if constexpr(kHasSink)
+                                    return mask.IsOutOfSinkBound(row, col);
+                                else
+                                    return mask.IsOutOfBound(row, col);
+                            });
+                    }
                 }
             }
 
@@ -806,7 +884,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                                   std::is_same_v<SMPLComputeDataType, float>);
                     if constexpr(Policy::kUseOutputFragments)
                     {
-                        Policy::template RunSplitSoftmaxFragments<Problem>(
+                        Policy::template RunSplitSoftmaxFragments<Problem, kDeferTensorReady>(
                             s_new, m, l, o_acc, scale_s);
                     }
                     else
@@ -970,7 +1048,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
         const index_t num_pipeline_loop = num_total_loop;
         do
         {
-            bool is_even_loop    = i_total_loops % 2 == 0;
+            bool is_even_loop    = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
             auto k_lds_write_ptr = is_even_loop ? static_cast<KDataType* __restrict__>(smem_ptrk0)
                                                 : static_cast<KDataType* __restrict__>(smem_ptrk1);
             auto k_lds_read_ptr  = is_even_loop ? static_cast<KDataType* __restrict__>(smem_ptrk1)
@@ -980,8 +1058,16 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
             auto v_lds_read_ptr  = is_even_loop ? static_cast<VDataType* __restrict__>(smem_ptrv0)
                                                 : static_cast<VDataType* __restrict__>(smem_ptrv1);
             mainloop(k_lds_write_ptr, k_lds_read_ptr, v_lds_write_ptr, v_lds_read_ptr);
-            i_total_loops++;
-        } while(i_total_loops < num_pipeline_loop);
+            if constexpr(kUseCountdownLoop)
+            {
+                even_buffer = !even_buffer;
+                --remaining_loops;
+            }
+            else
+            {
+                i_total_loops++;
+            }
+        } while(kUseCountdownLoop ? remaining_loops > 0 : i_total_loops < num_pipeline_loop);
 
         if constexpr(kStoreLSE)
         {

@@ -98,15 +98,15 @@ using FmhaTdmV128GeometryFor =
 template <typename Geometry>
 struct FmhaTdmV128Layout
 {
-    static_assert(std::is_same_v < Geometry,
-                  FmhaTdmV128Geometry < typename Geometry::QDataType,
-                  typename Geometry::KDataType,
-                  typename Geometry::VDataType,
-                  typename Geometry::PDataType,
-                  Geometry::kHeadDimQK,
-                  32,
-                  32 >>>
-                  , "Only native 16-bit D128/D192 LDS layouts are supported");
+    static_assert(std::is_same_v<Geometry,
+                                 FmhaTdmV128Geometry<typename Geometry::QDataType,
+                                                     typename Geometry::KDataType,
+                                                     typename Geometry::VDataType,
+                                                     typename Geometry::PDataType,
+                                                     Geometry::kHeadDimQK,
+                                                     32,
+                                                     32>>,
+                  "Only native 16-bit D128/D192 LDS layouts are supported");
     static constexpr index_t kKPhysicalStride = Geometry::kHeadDimQK + 8;
     static constexpr index_t kVPhysicalStride = 144;
     static constexpr index_t kVPadAmount      = 7;
