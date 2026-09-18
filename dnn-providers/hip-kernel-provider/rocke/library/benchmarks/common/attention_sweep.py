@@ -13,13 +13,34 @@ across arches and the next fix lands once.
 from __future__ import annotations
 
 
-def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, iters):
+def run_sweep(
+    shape,
+    data,
+    sw,
+    is_fp8,
+    bench,
+    *,
+    arch,
+    stream_handle,
+    warmup,
+    iters,
+    candidate_prefix="",
+    tuning_id_prefix="",
+    limit=0,
+):
     """Time every engine the dispatcher registry offers for this problem.
 
     Builds one :class:`~dispatch.attention.AttentionRequest`, calls
     :func:`~dispatch.attention.attention_sweep_space` (the deduped spec of every
     *supported* candidate), groups the offered engines by their launched path,
     and times each distinct path via ``run_unified_attention_torch``.
+
+    The sweep space includes the opt-in tuning candidates, which expand to tens
+    of thousands of specs for one shape -- far more than a live bench can time.
+    ``candidate_prefix`` / ``tuning_id_prefix`` narrow it to one geometry or
+    codepath, and ``limit`` caps how many specs are timed (0 = no cap). An
+    unfiltered, uncapped call is only sensible on a registry with the tuning
+    candidates excluded.
 
     Returns a dict keyed by launched path. Each value is either a timed entry
     ``{"ms", "engines", "kernel", "out"}`` or -- if that one path raised --
@@ -53,7 +74,13 @@ def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, it
         num_cus=bench.num_sms,
     )
 
-    specs = attention_sweep_space(req)
+    specs = attention_sweep_space(
+        req,
+        candidate_prefix=candidate_prefix,
+        tuning_id_prefix=tuning_id_prefix,
+    )
+    if limit and len(specs) > limit:
+        specs = specs[:limit]
     problem = bench._problem(shape, sw, is_fp8)
 
     entries = {}

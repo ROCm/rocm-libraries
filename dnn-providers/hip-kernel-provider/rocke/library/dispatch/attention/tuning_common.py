@@ -74,6 +74,11 @@ _GFX950_TRANSPOSED_BASE = {
     "use_mfma_32x32": True,
     "use_transposed_qk_32x32": True,
 }
+# Masks for the lever-3 sched_barrier, using the AMDGPU bits documented on
+# ``Builder.sched_group_barrier`` (0x008 MFMA, 0x100 DS read). 0 is a hard
+# fence; the non-zero masks let compute (and LDS reads) cross while the post-QK
+# VMEM prefetch -- the thing the lever exists to hold back -- stays behind it.
+_SCHED_BARRIER_MASKS = (0, 0x008, 0x108)
 _GFX942_X8_BASE = {"use_mfma_32x32x8": True}
 _GFX942_TRANSPOSED_BASE = {
     "use_mfma_32x32x8": True,
@@ -107,6 +112,17 @@ def _gfx950_profile_dicts(codepath: str) -> Iterable[dict[str, object]]:
             {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
         )
         yield from profiles
+        # The sched_barrier fence is emitted only in the narrow QK loop, so it
+        # belongs to this codepath alone. Swept standalone and on top of the
+        # V-double-buffer schedule, which is the pairing the production
+        # heuristic ties it to.
+        for mask in _SCHED_BARRIER_MASKS:
+            yield {"use_sched_barrier": True, "sched_barrier_mask": mask}
+            yield {
+                "use_v_double_buffer": True,
+                "use_sched_barrier": True,
+                "sched_barrier_mask": mask,
+            }
         return
     if codepath == "wide32":
         base = {"use_mfma_32x32": True}
@@ -154,6 +170,10 @@ def _gfx950_profile_dicts(codepath: str) -> Iterable[dict[str, object]]:
         {"use_k_single_buffer": True, "use_q_direct_reg": True},
         {"kv_ring_depth": 3},
         {"use_q_direct_reg": True},
+        # Q re-read needs the transposed path and a surviving Q_lds, so it is
+        # only legal here and never alongside the direct-register Q gather --
+        # that pairing is rejected by the spec rather than filtered out here.
+        {"use_q_reread": True},
         {"use_grouped_kv2_softmax": True},
         {"use_fast_paged_kv_desc": True},
         {"use_agpr_alloc_zero": True},
@@ -307,7 +327,15 @@ def _explicit_configs(
         if variant.arch == "gfx950" and variant.codepath != "narrow":
             pad_options = (None, 8, 16)
         interleave_options: Sequence[Optional[Tuple[int, int]]] = (None,)
-        if variant.arch == "gfx950" and variant.codepath == "transposed32":
+        if (
+            variant.arch == "gfx950"
+            and variant.codepath == "transposed32"
+            # The interleave hint and the sched_barrier fence steer the post-RA
+            # scheduler against each other. That pair is rejected by the 2D
+            # emitter rather than by ``__post_init__``, so it would survive spec
+            # construction and only fail once something built it.
+            and not profile.get("use_sched_barrier")
+        ):
             interleave_options = (None, (0, 1), (1, 1), (2, 4))
         mask_phase_options = (
             (False, True)

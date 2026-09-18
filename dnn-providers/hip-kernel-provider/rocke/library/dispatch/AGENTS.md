@@ -249,9 +249,8 @@ family wraps those methods (`registered_*_combos`, `*_sweep_space`,
 its standalone dense spec rather than the unified path label.
 
 `attention_sweep_space(req)` is the unified 2D/3D slice of that primitive: the
-deduped spec of every candidate that supports `req` and carries a `path`. It
-can time 2D/3D paths from the **prefill** harness only; the dedicated decode
-benchmarks have no sweep lane. The prefill benches
+deduped spec of every candidate that supports `req` and carries a `path`. The
+prefill benches
 (`benchmarks/gfx{942,950}/attention/prefill/benchmark_prefill2d_live.py`) consume
 it via the opt-in `--variants sweep` lane — a shared helper
 (`benchmarks/common/attention_sweep.py:run_sweep`) that times each launched path
@@ -259,6 +258,23 @@ the registry offers and records which engine names mapped to it. Contract tests:
 `tests/dispatch/attention/test_sweep_space.py`. The same enumeration for GEMM,
 KDA, grouped conv, MoE, and norm is the family `*_sweep_space` /
 `dispatch_*_all` wrappers.
+
+**The sweep space is large, and the lanes that walk it must be filtered.** One
+gfx950 prefill shape offers ~65k specs, because each tuning candidate expands
+its knob space per request. Every consumer therefore takes
+`candidate_prefix` / `tuning_id_prefix`: `run_sweep` (exposed as
+`--sweep-candidate-prefix` / `--sweep-tuning-id-prefix` / `--sweep-limit` on
+both prefill benches) and the table sweeps under
+`benchmarks/gfx950/attention/{decode,prefill}/`.
+
+`benchmarks/common/attention_combo_sweep.py` is the arch-parameterized HW lane:
+it walks `registered_attention_combos` for an arbitrary shape grid on gfx942 or
+gfx950, launches dense and unified specs through their respective runners,
+checks each against an SDPA reference, and streams one JSONL row per config so a
+fault loses only the config that caused it. It names no candidate — the set
+comes from the registry, so registering a candidate is enough to have it swept.
+`--list-only` runs on a CPU host; `--limit`/`--offset` make a full run
+resumable.
 
 Framework-phase caveat: because geometry is deferred (see below), engines that
 route to the same launched path collapse to one timed entry. The decode benches

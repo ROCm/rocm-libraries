@@ -724,6 +724,24 @@ def main() -> int:
         "'sweep' times every engine the dispatcher registry offers for each "
         "problem (one entry per launched path).",
     )
+    ap.add_argument(
+        "--sweep-candidate-prefix",
+        default="",
+        help="restrict the 'sweep' lane to candidates whose name starts with this "
+        "(e.g. attention_gfx950_u2d_transposed32). The registry offers tens of "
+        "thousands of tuning specs per shape, so narrow it or use --sweep-limit.",
+    )
+    ap.add_argument(
+        "--sweep-tuning-id-prefix",
+        default="",
+        help="restrict the 'sweep' lane to tuning ids with this prefix",
+    )
+    ap.add_argument(
+        "--sweep-limit",
+        type=int,
+        default=0,
+        help="cap how many specs the 'sweep' lane times per shape (0 = no cap)",
+    )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
     ap.add_argument("--iterations", type=int, default=50)
@@ -886,6 +904,9 @@ def main() -> int:
                         stream_handle=_bench_stream_handle(),
                         warmup=args.warmup,
                         iters=args.iterations,
+                        candidate_prefix=args.sweep_candidate_prefix,
+                        tuning_id_prefix=args.sweep_tuning_id_prefix,
+                        limit=args.sweep_limit,
                     )
                     if not sweep_entries:
                         print(f"  [sweep] no eligible engines for {tag} sw={sw}")
