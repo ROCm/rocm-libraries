@@ -3,8 +3,8 @@
 """
 Test for evaluateEnableESM2TrackValuVsrc() in Solution.py.
 
-The ESM2 VALU-src VA_VDST stamp (EnableESM2TrackValuVsrc) is derived from the
-Sparse problem type: on for sparse, off otherwise.
+The ESM2 VALU-src VA_VDST stamp (EnableESM2TrackValuVsrc) is on for every kernel.
+It was previously derived from the Sparse problem type.
 """
 
 from pathlib import Path
@@ -19,9 +19,11 @@ def _func_body() -> str:
     return source[start : start + 500]
 
 
-def test_derives_from_sparse():
-    """The flag must be derived from state["ProblemType"]["Sparse"]."""
-    assert 'state["ProblemType"]["Sparse"]' in _func_body()
+def test_enabled_unconditionally():
+    """The flag must be on regardless of problem type."""
+    body = _func_body()
+    assert "return True" in body
+    assert 'state["ProblemType"]["Sparse"]' not in body
 
 
 def test_state_key_assigned():
