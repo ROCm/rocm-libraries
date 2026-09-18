@@ -74,6 +74,77 @@ void testIndexedGeneration() {
                        packedRawElementwise.rawEncodedBackingStorage().end()),
             "Whole-tensor and elementwise packed raw generation encodings differ.");
 
+    Tensor choiceWhole(ScalarType::Float8E4M3, Shape{257});
+    Tensor choiceElementwise(ScalarType::Float8E4M3, Shape{257});
+    const GenerationRecipe choiceRecipe = GenerationRecipe::realOnly(
+        GenerationRecipe::choice({.values = {-3.0, -0.5, 0.0, 1.5, 6.0}}), {.seed = 0x31415926});
+    generate(choiceWhole, choiceRecipe);
+    for (size_t index = 0; index < choiceWhole.elementCount(); ++index)
+        generateAt(choiceElementwise, index, choiceRecipe);
+    require(std::equal(choiceWhole.rawEncodedBackingStorage().begin(),
+                       choiceWhole.rawEncodedBackingStorage().end(),
+                       choiceElementwise.rawEncodedBackingStorage().begin(),
+                       choiceElementwise.rawEncodedBackingStorage().end()),
+            "Pre-encoded choice generation changed the encoded sequence.");
+
+    Tensor absoluteWhole(ScalarType::Float6E2M3, Shape{257});
+    Tensor absoluteElementwise(ScalarType::Float6E2M3, Shape{257});
+    const GenerationRecipe absoluteRecipe = GenerationRecipe::realOnly(
+        GenerationRecipe::absoluteUniformInteger({.lower = -7, .upper = 7}), {.seed = 0x16180339});
+    generate(absoluteWhole, absoluteRecipe);
+    for (size_t index = 0; index < absoluteWhole.elementCount(); ++index)
+        generateAt(absoluteElementwise, index, absoluteRecipe);
+    require(std::equal(absoluteWhole.rawEncodedBackingStorage().begin(),
+                       absoluteWhole.rawEncodedBackingStorage().end(),
+                       absoluteElementwise.rawEncodedBackingStorage().begin(),
+                       absoluteElementwise.rawEncodedBackingStorage().end()),
+            "Pre-encoded absolute-integer generation changed the encoded sequence.");
+
+    const Shape alternatingShape{17, 19, 2};
+    for (const IndexOrder order :
+         {IndexOrder::FirstDimensionFastest, IndexOrder::LastDimensionFastest}) {
+        const Layout alternatingLayout =
+            order == IndexOrder::FirstDimensionFastest
+                ? Layout::contiguousFirstDimensionFastest(alternatingShape)
+                : Layout::contiguousLastDimensionFastest(alternatingShape);
+        Tensor alternatingWhole(ScalarType::Float4E2M1, alternatingLayout);
+        Tensor alternatingElementwise(ScalarType::Float4E2M1, alternatingLayout);
+        const GenerationRecipe alternatingRecipe = GenerationRecipe::realOnly(
+            GenerationRecipe::uniformInteger({.lower = -4, .upper = 4})
+                .withAlternatingSign({.dimensions = {0, 1}, .negativeWhenOdd = false}),
+            {.seed = 0x14142135, .indexOrder = order});
+        generate(alternatingWhole, alternatingRecipe);
+        for (size_t index = 0; index < alternatingWhole.elementCount(); ++index)
+            generateAt(alternatingElementwise, index, alternatingRecipe);
+        require(std::equal(alternatingWhole.rawEncodedBackingStorage().begin(),
+                           alternatingWhole.rawEncodedBackingStorage().end(),
+                           alternatingElementwise.rawEncodedBackingStorage().begin(),
+                           alternatingElementwise.rawEncodedBackingStorage().end()),
+                "Pre-encoded alternating generation changed the encoded sequence.");
+    }
+
+    for (const ScalarType type :
+         {ScalarType::Float8E4M3, ScalarType::Float8E5M2, ScalarType::Float8E4M3Fnuz,
+          ScalarType::Float8E5M2Fnuz, ScalarType::Float6E2M3, ScalarType::Float6E3M2,
+          ScalarType::Float4E2M1}) {
+        for (const UniformRealGenerationParameters parameters :
+             {UniformRealGenerationParameters{.lower = -0.5, .upper = 0.5},
+              UniformRealGenerationParameters{.lower = -1000.0, .upper = 1000.0}}) {
+            Tensor uniformWhole(type, Shape{16385});
+            Tensor uniformElementwise(type, Shape{16385});
+            const GenerationRecipe uniformRecipe = GenerationRecipe::realOnly(
+                GenerationRecipe::uniformReal(parameters), {.seed = 0x27182818});
+            generate(uniformWhole, uniformRecipe);
+            for (size_t index = 0; index < uniformWhole.elementCount(); ++index)
+                generateAt(uniformElementwise, index, uniformRecipe);
+            require(std::equal(uniformWhole.rawEncodedBackingStorage().begin(),
+                               uniformWhole.rawEncodedBackingStorage().end(),
+                               uniformElementwise.rawEncodedBackingStorage().begin(),
+                               uniformElementwise.rawEncodedBackingStorage().end()),
+                    "Uniform-real lookup changed the encoded sequence.");
+        }
+    }
+
     std::vector<std::byte> packedStorage(4, std::byte{0});
     packedStorage.back() = std::byte{0xc0};
     Tensor packedConstant = Tensor::takeOwnershipOfEncodedBackingStorage(
@@ -134,10 +205,14 @@ void testIndexedGeneration() {
 
     Tensor packedOneThread(ScalarType::Float6E3M2, Shape{8192});
     Tensor packedFourThreads(ScalarType::Float6E3M2, Shape{8192});
+    const GenerationRecipe packedParallelRecipe = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformInteger({.lower = -28, .upper = 28})
+            .withAlternatingSign({.dimensions = {0}, .negativeWhenOdd = true}),
+        {.seed = 0x1020304050607080ULL});
     omp_set_num_threads(1);
-    generate(packedOneThread, parallelRecipe);
+    generate(packedOneThread, packedParallelRecipe);
     omp_set_num_threads(4);
-    generate(packedFourThreads, parallelRecipe);
+    generate(packedFourThreads, packedParallelRecipe);
     require(std::equal(packedOneThread.rawEncodedBackingStorage().begin(),
                        packedOneThread.rawEncodedBackingStorage().end(),
                        packedFourThreads.rawEncodedBackingStorage().begin(),

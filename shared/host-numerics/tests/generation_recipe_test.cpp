@@ -92,8 +92,13 @@ void testValueSemanticsAndExamples() {
     const Tensor finiteEncoded = generate(ScalarType::Float8E5M2, Shape{1024}, finiteEncodedRecipe);
     const Tensor finiteEncodedRepeat =
         generate(ScalarType::Float8E5M2, Shape{1024}, finiteEncodedRecipe);
+    Tensor finiteEncodedElementwise(ScalarType::Float8E5M2, Shape{1024});
+    for (size_t index = 0; index < finiteEncodedElementwise.elementCount(); ++index)
+        generateAt(finiteEncodedElementwise, index, finiteEncodedRecipe);
     requireEqualStorage(finiteEncoded, finiteEncodedRepeat,
                         "Uniform finite encoded generation was not deterministic.");
+    requireEqualStorage(finiteEncoded, finiteEncodedElementwise,
+                        "Bulk uniform finite encoded generation changed the encoded sequence.");
     for (size_t index = 0; index < finiteEncoded.elementCount(); ++index)
         require(std::isfinite(finiteEncoded.loadAs<double>({index})),
                 "Uniform finite encoded generation produced a non-finite value.");

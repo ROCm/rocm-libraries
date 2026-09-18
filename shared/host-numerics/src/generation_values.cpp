@@ -248,8 +248,7 @@ double randomEncodedExponentValue(const RandomEncodedExponentGenerationParameter
     }
 }
 
-uint64_t uniformFiniteEncodedValue(ScalarType type, uint64_t seed, uint64_t domain,
-                                   size_t logicalIndex) {
+std::span<const uint8_t> finiteEncodedValues(ScalarType type) {
     const ScalarTypeInfo& info = scalarTypeInfo(type);
     if ((info.category != ScalarCategory::FloatingPoint &&
          info.category != ScalarCategory::Scale) ||
@@ -284,6 +283,12 @@ uint64_t uniformFiniteEncodedValue(ScalarType type, uint64_t seed, uint64_t doma
     const std::vector<uint8_t>& candidates = candidatesByType[static_cast<size_t>(type)];
     if (candidates.empty())
         throw std::invalid_argument("Scalar type has no finite encoded values.");
+    return candidates;
+}
+
+uint64_t uniformFiniteEncodedValue(ScalarType type, uint64_t seed, uint64_t domain,
+                                   size_t logicalIndex) {
+    const std::span<const uint8_t> candidates = finiteEncodedValues(type);
     return candidates[counterRandom(seed, domain, logicalIndex) % candidates.size()];
 }
 }  // namespace roc::host_numerics::detail

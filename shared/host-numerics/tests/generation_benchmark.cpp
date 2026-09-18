@@ -49,7 +49,8 @@ Options parseOptions(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
         std::cout << "Usage: host-numerics-generation-benchmark "
                      "<scalar-type> "
-                     "<zero|constant|uniform-integer|uniform-real|normal|sine|serial> "
+                     "<zero|constant|choice|uniform-integer|alternating-integer|"
+                     "absolute-uniform-integer|uniform-real|uniform-encoded|normal|sine|serial> "
                      "<rows> <columns> <batches> <warmups> <iterations>\n";
         std::exit(0);
     }
@@ -71,16 +72,24 @@ GenerationRecipe generationRecipe(std::string_view name) {
     Component component = [&] {
         if (name == "zero") return GenerationRecipe::zero();
         if (name == "constant") return GenerationRecipe::constant({.value = 0.25});
+        if (name == "choice")
+            return GenerationRecipe::choice({.values = {-2.0, -0.5, 0.0, 1.0, 3.0}});
         if (name == "uniform-integer")
             return GenerationRecipe::uniformInteger({.lower = -2, .upper = 2});
+        if (name == "alternating-integer")
+            return GenerationRecipe::uniformInteger({.lower = -2, .upper = 2})
+                .withAlternatingSign({.dimensions = {0, 1}, .negativeWhenOdd = false});
+        if (name == "absolute-uniform-integer")
+            return GenerationRecipe::absoluteUniformInteger({.lower = -2, .upper = 2});
         if (name == "uniform-real")
             return GenerationRecipe::uniformReal({.lower = -0.5, .upper = 0.5});
+        if (name == "uniform-encoded") return GenerationRecipe::uniformFiniteEncodedValue();
         if (name == "normal") return GenerationRecipe::normal({});
         if (name == "sine") return GenerationRecipe::sine();
         if (name == "serial") return GenerationRecipe::serialIndex();
         throw std::invalid_argument(
-            "Recipe must be zero, constant, uniform-integer, uniform-real, normal, sine, or "
-            "serial.");
+            "Recipe must be zero, constant, choice, uniform-integer, alternating-integer, "
+            "absolute-uniform-integer, uniform-real, uniform-encoded, normal, sine, or serial.");
     }();
     return GenerationRecipe::realOnly(std::move(component), {.seed = 17});
 }
