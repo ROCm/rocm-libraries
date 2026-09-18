@@ -3,17 +3,12 @@
 """Both homogeneous eight-bit formats are usable from the focused example."""
 
 import argparse
-from dataclasses import replace
-import hashlib
-import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.arch.target import normalize_dtype
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.dtypes import normalize_dtype
 from rocke.examples.gfx1250.gemm import _scaled_gemm_example, mxfp8_gemm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
     make_case_inputs,
@@ -21,25 +16,18 @@ from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
 )
 from rocke.instances.gfx1250.block_scaled_gemm import build_block_scaled_gemm
 
-_GOLDENS = json.loads(Path(__file__).with_name("gfx1250_mxfp8_llvm23.json").read_text())
-
 
 @pytest.mark.parametrize(
     "dtype,selector,ml_name", [("fp8", 0, "float8_e4m3fn"), ("bf8", 1, "float8_e5m2")]
 )
 @pytest.mark.parametrize("path", ["wmma_scale", "wmma_scale16"])
-def test_mxfp8_formats_and_existing_golden(dtype, selector, ml_name, path):
+def test_mxfp8_formats_and_hip_selectors(dtype, selector, ml_name, path):
     ml = pytest.importorskip("ml_dtypes")
     spec = mxfp8_gemm.make_spec(
         argparse.Namespace(m=32, n=48, k=256, dtype=dtype, matrix_path=path)
     )
     assert spec.dtype_a == spec.dtype_b == normalize_dtype(dtype)
-    kernel = build_block_scaled_gemm(replace(spec, name="fp6_test"))
-    llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
-    assert (
-        hashlib.sha256(llvm.encode()).hexdigest()
-        == _GOLDENS[f"{path}/{dtype}/{dtype}/e8m0/e8m0"]
-    )
+    kernel = build_block_scaled_gemm(spec)
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert f"__builtin_amdgcn_{path}_f32_16x16x128_f8f6f4({selector}," in hip
     inputs = make_case_inputs(spec, "mixed")

@@ -1,6 +1,0 @@
-{
-  "wmma_scale/bf8/bf8/e8m0/e8m0": "58930ce80326df951f1c13fc57efd5dd895251dedc7dcd72a29b15e1ae5860fa",
-  "wmma_scale/fp8/fp8/e8m0/e8m0": "7a37dd799b3babf3e7357edeaaa7f0d466a677f461087cef2b6cbd455bdada6f",
-  "wmma_scale16/bf8/bf8/e8m0/e8m0": "20ee6884c4f6ea6d6c3454822377eb88aecd4081f4b7d296920fbd3417e4c0ed",
-  "wmma_scale16/fp8/fp8/e8m0/e8m0": "18f36023f8cae46fc6f099cdae42d9b489f13ce9f43444238a3c419d5696ac62"
-}

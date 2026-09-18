@@ -1115,7 +1115,24 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
+          "message": "tile.wmma_scale_f32_16x16x128_bf8_bf8 requires llvm23 (ROCm 7.13+), got llvm20",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
+          "message": "tile.wmma_scale_f32_16x16x128_fp8_fp8 requires llvm23 (ROCm 7.13+), got llvm20",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
+          "message": "tile.wmma_scale16_f32_16x16x128_bf8_bf8 requires llvm23 (ROCm 7.13+), got llvm20",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
+          "message": "tile.wmma_scale16_f32_16x16x128_fp8_fp8 requires llvm23 (ROCm 7.13+), got llvm20",
+          "type": "NotImplementedError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -1126,7 +1143,7 @@
           "gfx942": 31,
           "gfx950": 81
         },
-        "expected_failures": 0,
+        "expected_failures": 4,
         "families": {
           "attention": 14,
           "attention_d128_swa": 1,
@@ -2262,7 +2279,24 @@
           "status": "ok"
         }
       },
-      "expected_failures": {},
+      "expected_failures": {
+        "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
+          "message": "tile.wmma_scale_f32_16x16x128_bf8_bf8 requires llvm23 (ROCm 7.13+), got llvm22",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
+          "message": "tile.wmma_scale_f32_16x16x128_fp8_fp8 requires llvm23 (ROCm 7.13+), got llvm22",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
+          "message": "tile.wmma_scale16_f32_16x16x128_bf8_bf8 requires llvm23 (ROCm 7.13+), got llvm22",
+          "type": "NotImplementedError"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
+          "message": "tile.wmma_scale16_f32_16x16x128_fp8_fp8 requires llvm23 (ROCm 7.13+), got llvm22",
+          "type": "NotImplementedError"
+        }
+      },
       "summary": {
         "arches": {
           "gfx11-generic": 1,
@@ -2273,7 +2307,7 @@
           "gfx942": 31,
           "gfx950": 81
         },
-        "expected_failures": 0,
+        "expected_failures": 4,
         "families": {
           "attention": 14,
           "attention_d128_swa": 1,
@@ -3176,6 +3210,38 @@
           "sha256": "4602cb57a8b57916659d91de9dd76756616541649600d7c8596d4073c39f48c4",
           "status": "ok"
         },
+        "gemm/gfx1250/mxfp8/wmma_scale/bf8e5m2": {
+          "arch": "gfx1250",
+          "bytes": 87339,
+          "family": "gemm",
+          "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale_block_scaled_bf8_bf8_M32N48K256_bk32_t16x16x128_wmma_scale",
+          "sha256": "11d69f432274ae05c41449645050b93034a0d411811130cc5b057abc5c8834bc",
+          "status": "ok"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale/fp8e4m3": {
+          "arch": "gfx1250",
+          "bytes": 87339,
+          "family": "gemm",
+          "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale_block_scaled_fp8_fp8_M32N48K256_bk32_t16x16x128_wmma_scale",
+          "sha256": "094da13dc1d3249da64c13185df2cfc44eb913fa940a38274d3bb7e1cc569948",
+          "status": "ok"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale16/bf8e5m2": {
+          "arch": "gfx1250",
+          "bytes": 92233,
+          "family": "gemm",
+          "kernel_name": "irhash_mxfp8_bf8e5m2_wmma_scale16_block_scaled_bf8_bf8_M32N48K256_bk16_t16x16x128_wmma_scale16",
+          "sha256": "2ab30988dfa2bd120babd756d3d2d17bd444a1bbcabfe426ad99722bc8130209",
+          "status": "ok"
+        },
+        "gemm/gfx1250/mxfp8/wmma_scale16/fp8e4m3": {
+          "arch": "gfx1250",
+          "bytes": 92233,
+          "family": "gemm",
+          "kernel_name": "irhash_mxfp8_fp8e4m3_wmma_scale16_block_scaled_fp8_fp8_M32N48K256_bk16_t16x16x128_wmma_scale16",
+          "sha256": "2e4e68d15ffa755e78bca8dd468eef8e345418cae2b5e5ace7b4761e2faf0f05",
+          "status": "ok"
+        },
         "gemm/gfx1250/t32x32x32": {
           "arch": "gfx1250",
           "bytes": 26610,
@@ -3415,7 +3481,7 @@
           "gfx11-generic": 1,
           "gfx1151": 10,
           "gfx1201": 7,
-          "gfx1250": 4,
+          "gfx1250": 8,
           "gfx90a": 5,
           "gfx942": 31,
           "gfx950": 81
@@ -3433,12 +3499,12 @@
           "conv_wgrad_reduce": 3,
           "conv_wgrad_two_stage": 2,
           "deep_fused_conv": 9,
-          "gemm": 13,
+          "gemm": 17,
           "grouped_gemm": 1,
           "kda_chunkwise": 13,
           "moe": 9
         },
-        "ok_cases": 139
+        "ok_cases": 143
       }
     }
   },
