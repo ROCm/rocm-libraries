@@ -350,6 +350,12 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->ds.has_value()) {
         asmInst->addModifier<DSModifiers>(irInst->ds.value());
     }
+    if (irInst->flat.has_value()) {
+        asmInst->addModifier<FLATModifiers>(irInst->flat.value());
+    }
+    if (irInst->global.has_value()) {
+        asmInst->addModifier<GLOBALModifiers>(irInst->global.value());
+    }
     if (irInst->mubuf.has_value()) {
         asmInst->addModifier<MUBUFModifiers>(irInst->mubuf.value());
     }
@@ -387,9 +393,13 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         MFMAModifiers mod;
         if (irInst->getOpcode() == logical::MFMA) {
             const MFMAData* data = irInst->asMFMA();
-            if (data && data->neg) {
-                mod.negBits.negLo = {1, 1, 0};
-                mod.negBits.numSrcs = 2;
+            if (data) {
+                mod.reuseA = data->reuseA;
+                mod.reuseB = data->reuseB;
+                if (data->neg) {
+                    mod.negBits.negLo = {1, 1, 0};
+                    mod.negBits.numSrcs = 2;
+                }
             }
             // gfx1250 f8f6f4-family WMMA carries per-matrix input formats
             // (matrix_a_fmt:MATRIX_FMT_FP6 ...). Emit them via MatrixFmtModifiers.
@@ -426,12 +436,15 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
                 MatrixScaleFmt scaleFmtA = scaleFmtFromStr(data->mxScaleATypeStr);
                 MatrixScaleFmt scaleFmtB = scaleFmtFromStr(data->mxScaleBTypeStr);
                 if (!data->matrixAFmt.empty() || !data->matrixBFmt.empty() ||
-                    scaleFmtA != MatrixScaleFmt::NONE || scaleFmtB != MatrixScaleFmt::NONE) {
+                    scaleFmtA != MatrixScaleFmt::NONE || scaleFmtB != MatrixScaleFmt::NONE ||
+                    data->mxScaleASel != 0 || data->mxScaleBSel != 0) {
                     MatrixFmtModifiers fmts;
                     if (!data->matrixAFmt.empty()) fmts.fmtA = parseMatrixFmt(data->matrixAFmt);
                     if (!data->matrixBFmt.empty()) fmts.fmtB = parseMatrixFmt(data->matrixBFmt);
                     fmts.scaleFmtA = scaleFmtA;
                     fmts.scaleFmtB = scaleFmtB;
+                    fmts.scaleSelA = data->mxScaleASel;
+                    fmts.scaleSelB = data->mxScaleBSel;
                     asmInst->addModifier<MatrixFmtModifiers>(fmts);
                 }
             }

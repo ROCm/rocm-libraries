@@ -88,6 +88,8 @@ class LogicalInstruction : public IRBase {
     std::optional<DPPModifiers> dpp;           ///< Data parallel processing modifier
     std::optional<SDWAModifiers> sdwa;         ///< Sub-dword addressing modifier
     std::optional<DSModifiers> ds;             ///< LDS/GDS modifier
+    std::optional<FLATModifiers> flat;         ///< Flat/global atomic memory modifier
+    std::optional<GLOBALModifiers> global;     ///< Global memory modifier
     std::optional<MUBUFModifiers> mubuf;       ///< MUBUF (buffer load/store) modifier
     std::optional<VOP3PModifiers> vop3;        ///< VOP3P (op_sel) modifier
     std::optional<True16Modifiers> true16;     ///< True16 (.l/.h half-select) modifier
