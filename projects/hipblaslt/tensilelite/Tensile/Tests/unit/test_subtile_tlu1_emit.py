@@ -75,6 +75,12 @@ class _Writer:
         self.vgprPool = _Pool()
         self.sgprPool = _Pool(200)
         self.agprPool = _Pool()
+        # published by applyLdsLayout in the real flow
+        self.ldsStartOffsetA = 0
+        self.ldsStartOffsetB = 4096
+        self.ldsStartOffsetMXSA = 8192
+        self.ldsStartOffsetMXSB = 8704
+        self.ldsTotalSize = 16384
 
     def strideRef(self, tc, idx):
         from rocisa.container import sgpr
@@ -407,3 +413,17 @@ def test_ds_read_without_the_swizzled_lds_image(stack):
     LR._lraTileAssignment_tlu(writer, kernel, Module(), ti)
     item = LR.emitSingleDsRead(ti, 0, 0, 0, _DstTile([0, 1]), swizzled=False)
     assert item is not None
+
+
+def test_lr_fp8_legacy_addressing_is_emitted():
+    """The fp8 legacy LR path pairs both operands off the writer's tile state."""
+    kernel = _kernel()
+    writer = _Writer()
+    tiA = TileInfo(AB_GEOMETRY_MAP["AB_B8"], "A", writer, kernel)
+    tiB = TileInfo(AB_GEOMETRY_MAP["AB_B8"], "B", writer, kernel)
+    for tc, ti in (("a", tiA), ("b", tiB)):
+        LR._allocLROffsetRegisters(ti.lr.config.tag, ti.lr, ti, writer, kernel)
+        setattr(writer.states, tc, type("S", (), {"tileInfo": ti})())
+    module = Module()
+    LR._lraTileAssignment_fp8_legacy(writer, kernel, module)
+    assert module.items()
