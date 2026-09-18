@@ -181,7 +181,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         )
         ok, why = is_valid_spec(bad_dtype)
         self.assertFalse(ok)
-        self.assertIn("matching fp8 or bf8 operands", why)
+        self.assertIn("matching fp8, bf8, or fp4 operands", why)
 
         bad_block = BlockScaledGemmSpec(
             name="bad_block",

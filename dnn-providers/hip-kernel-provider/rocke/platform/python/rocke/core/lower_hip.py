@@ -659,10 +659,16 @@ class _Lowerer:
     def _op_tile_wmma_scale_f32_16x16x128_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_scaled(op)
 
+    def _op_tile_wmma_scale_f32_16x16x128_fp4_fp4(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_scaled(op)
+
     def _op_tile_wmma_scale16_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_scaled(op)
 
     def _op_tile_wmma_scale16_f32_16x16x128_bf8_bf8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_scaled(op)
+
+    def _op_tile_wmma_scale16_f32_16x16x128_fp4_fp4(self, op: Op) -> None:
         self._emit_wmma_gfx1250_scaled(op)
 
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
