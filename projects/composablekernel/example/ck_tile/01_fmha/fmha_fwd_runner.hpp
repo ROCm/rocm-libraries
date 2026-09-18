@@ -566,6 +566,19 @@ fwd_result fmha_fwd_run(mode_enum mode,
         return fwd_result::invalid_args;
     }
 
+    // Every descale is dequantized_max/quantized_max with quantized_max taken as the format
+    // maximum, which treats the tensors as the image of an fp32 tensor whose amax is qkv_max.
+    // That only describes a fill saturating the format, and init=3 alone does. Under any other
+    // fill the descale contradicts its own tensor: at init=uf the logits land near 1e-4, a sink
+    // token becomes the row maximum, every P value collapses onto one number and its rounding
+    // turns into a pure gain on the output. Only validation reads those numbers, so a timing-only
+    // run is left alone.
+    if(qscale.type != quant_scale_enum::no_scale && init_method != "3" && do_validation != 0)
+    {
+        std::cerr << "qscale=" << qscale_str << " requires -init=3 when validating" << std::endl;
+        return fwd_result::invalid_args;
+    }
+
     bool s_randval = false;
     if(p_drop > 0.0f && do_validation)
     {
@@ -950,17 +963,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 std::copy(slopes.begin(), slopes.end(), alibi_slope_host.begin() + i_b * nhead);
             }
         }
-    }
-    // Every descale below is dequantized_max/quantized_max with quantized_max taken as the
-    // format maximum, which treats the tensors as the image of an fp32 tensor whose amax is
-    // qkv_max. That only describes a fill saturating the format, and init=3 alone does. Under
-    // any other fill the descale contradicts its own tensor: at init=uf the logits land near
-    // 1e-4, a sink token becomes the row maximum, every P value collapses onto one number and
-    // its rounding turns into a pure gain on the output.
-    if(qscale.type != quant_scale_enum::no_scale && init_method != "3")
-    {
-        std::cerr << "qscale=" << qscale_str << " requires -init=3" << std::endl;
-        return fwd_result::invalid_args;
     }
 
     if constexpr(is_mx)
