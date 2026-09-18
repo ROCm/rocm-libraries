@@ -62,6 +62,14 @@ std::string bluestein_single_rtc_kernel_name(const BluesteinSingleSpecs& specs)
     return kernel_name;
 }
 
+// Type wide enough to hold the full tx * tx product for any tx that
+// integer_type can express.
+static std::string chirp_rtc_wide_type_decl(const KIntType& itype)
+{
+    return itype == KIntType::U64 ? "typedef __uint128_t wide_type;\n"
+                                  : "typedef unsigned long long wide_type;\n";
+}
+
 std::string bluestein_single_rtc(const std::string& kernel_name, const BluesteinSingleSpecs& specs)
 {
     auto length               = specs.length;
@@ -191,10 +199,11 @@ static std::string bluestein_multi_chirp_rtc(const std::string&         kernel_n
     func.arguments.append(twl);
     func.arguments.append(dir);
 
-    Variable tx{"tx", "size_t"};
+    Variable tx{"tx", "wide_type"};
     Variable val{"val", "scalar_type"};
 
-    func.body += Declaration{tx, "threadIdx.x + blockIdx.x * blockDim.x"};
+    func.body
+        += Declaration{tx, "threadIdx.x + static_cast<integer_type>(blockIdx.x) * blockDim.x"};
     func.body += Declaration{val, CallExpr{"scalar_type", {Literal{"0.0"}, Literal{"0.0"}}}};
 
     func.body
@@ -205,6 +214,8 @@ static std::string bluestein_multi_chirp_rtc(const std::string&         kernel_n
                         {Assign{val, CallExpr{"TWLstep3", {twiddles_large, (tx * tx) % (2 * N)}}}}};
     func.body += ElseIf{twl == 4,
                         {Assign{val, CallExpr{"TWLstep4", {twiddles_large, (tx * tx) % (2 * N)}}}}};
+    func.body += ElseIf{twl == 5,
+                        {Assign{val, CallExpr{"TWLstep5", {twiddles_large, (tx * tx) % (2 * N)}}}}};
 
     func.body += MultiplyAssign(val.y(), CallExpr{"real_type_t<scalar_type>", {dir}});
 
@@ -239,6 +250,7 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
+    src += chirp_rtc_wide_type_decl(specs.itype);
     src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
@@ -293,7 +305,8 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable chirp{"chirp", "scalar_type", true};
     Variable out_elem{"out_elem", "scalar_type"};
 
-    func.body += Declaration{tx, "threadIdx.x + blockIdx.x * blockDim.x"};
+    func.body
+        += Declaration{tx, "threadIdx.x + static_cast<integer_type>(blockIdx.x) * blockDim.x"};
 
     func.body += If{tx >= totalWI, {Return{}}};
 

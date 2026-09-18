@@ -166,7 +166,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
     else
     {
         generator.gridDim
-            = {(static_cast<unsigned int>(count) - 1) / LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL + 1};
+            = {static_cast<unsigned int>((count - 1) / LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL + 1)};
         generator.blockDim = {LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL};
     }
 
@@ -205,8 +205,10 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
     {
         int twl = 0;
 
-        if(data.node->large1D > (size_t)256 * 256 * 256 * 256)
+        if(data.node->large1D > (size_t)256 * 256 * 256 * 256 * 256)
             throw std::runtime_error("large1D twiddle size too large error");
+        else if(data.node->large1D > (size_t)256 * 256 * 256 * 256)
+            twl = 5;
         else if(data.node->large1D > (size_t)256 * 256 * 256)
             twl = 4;
         else if(data.node->large1D > (size_t)256 * 256)

@@ -666,6 +666,19 @@ INSTANTIATE_TEST_SUITE_P(adhoc_kint_index_boundary,
                                                                    adhoc_kint_index_tokens)),
                          accuracy_test::TestName);
 
+// Test cases for 64-bit index kernels that require large twiddle arrays.
+const auto adhoc_64_bit_idx_twiddle_large_tokens = {
+    // clang-format off
+    // CS_L1D_TRTRT 
+    "complex_forward_len_8589934592_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8589934592_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_64_bit_idx_twiddle_large,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_64_bit_idx_twiddle_large_tokens)),
+    accuracy_test::TestName);
+
 inline auto param_even_real_odd_base_index()
 {
     std::vector<fft_params> params;
