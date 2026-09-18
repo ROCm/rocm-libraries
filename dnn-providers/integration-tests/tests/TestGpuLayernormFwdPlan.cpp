@@ -232,7 +232,8 @@ template <typename XType,
 void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
                             const TensorLayout& layout,
                             int64_t normalizedDimCount,
-                            float tolerance)
+                            float tolerance,
+                            DataType epsilonDataType = DataType::UNSET)
 {
     const auto normalizedDim = static_cast<int64_t>(ioDims.size()) - normalizedDimCount;
 
@@ -267,7 +268,10 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
     auto meanInvVarianceDataType = nativeTypeToDataType<MeanInvVarianceType>();
     auto computeDataType = nativeTypeToDataType<ComputeType>();
-    auto epsilonDataType = computeDataType;
+    if(epsilonDataType == DataType::UNSET)
+    {
+        epsilonDataType = computeDataType;
+    }
 
     const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -404,6 +408,14 @@ TEST(TestGpuLayernormFwdPlanFp32, ExecutePlanNhwc)
 
     runPlanExecuteVsCpuRef<float, float, float, float, float>(
         {5, 4, 3, 2}, TensorLayout::NHWC, 3, layernorm::getTolerance<float>());
+}
+
+TEST(TestGpuLayernormFwdPlanFp32, ExecutePlanNchwWithDoubleEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<float, float, float, float, float>(
+        {5, 4, 3, 2}, TensorLayout::NCHW, 3, layernorm::getTolerance<float>(), DataType::DOUBLE);
 }
 
 // =========================

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "EpsilonTestUtils.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -57,16 +58,8 @@ inline flatbuffers::FlatBufferBuilder
     tensors.push_back(CreateTensorAttributesDirect(
         builder, biasUid, "bias", scaleBiasDataType, &biasStrides, &biasDims));
     const std::vector<int64_t> epsilonDimsStrides = {1};
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder,
-                                     epsilonUid,
-                                     "epsilon",
-                                     epsilonDataType,
-                                     &epsilonDimsStrides,
-                                     &epsilonDimsStrides,
-                                     false,
-                                     TensorValue::Float32Value,
-                                     builder.CreateStruct(Float32Value(epsilon)).Union()));
+    tensors.push_back(createEpsilonTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType));
+
     if(meanUid.has_value() && meanDims.has_value() && meanStrides.has_value()
        && meanInvVarianceDataType.has_value())
     {
