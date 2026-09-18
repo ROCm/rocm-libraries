@@ -1464,6 +1464,7 @@
     'PrefetchGlobalRead',
     'PrefetchLocalRead',
     'PreloadKernArgs',
+    'ReuseAcrossPersistent',
     'SFCWGM',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
@@ -2451,6 +2452,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ReuseAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
