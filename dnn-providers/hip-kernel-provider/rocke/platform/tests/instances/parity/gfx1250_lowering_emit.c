@@ -363,8 +363,6 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_bf8_bf8, "gfx1250"},
     {build_wmma_scale, "gfx1250"},
     {build_wmma_scale16, "gfx1250"},
-    {build_wmma_scale_fp4, "gfx1250"},
-    {build_wmma_scale16_fp4, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},
