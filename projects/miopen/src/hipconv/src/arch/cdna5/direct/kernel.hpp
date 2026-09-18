@@ -899,6 +899,18 @@ public:
             return false;
         if(cfg_.aligned && gk * sizeof_data_type(par.output_type) % 16 != 0)
             return false;
+        // On gfx1250 a TDM load whose innermost extent ends mid-dword corrupts a concurrent
+        // ds_load_tr16_b128, and only dgrad gathers the weights with that instruction.
+        //
+        // gc sizes the input prefetch and gk the weight tile, so an odd value of either
+        // ends that load mid-dword at a 2-byte element. At 4 bytes every extent spans whole
+        // dwords. See docs/cdna5-dgrad-sub-dword-hazard.md.
+        if(par.direction == hipconv::Direction::Dgrad)
+        {
+            const int items_per_dword = 4 / cfg_.elem_bytes;
+            if(gc % items_per_dword != 0 || gk % items_per_dword != 0)
+                return false;
+        }
 
         return true;
     }

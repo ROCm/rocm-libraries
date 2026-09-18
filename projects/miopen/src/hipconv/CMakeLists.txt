@@ -15,12 +15,13 @@ set(HIPCONV_BASELINE_GPU gfx942)
 # it from the build machine's own devices, so this has to precede project(). A
 # consumer that sets CMAKE_HIP_ARCHITECTURES itself, as TheRock's toolchain does,
 # skips this. Entries naming no offload target are dropped, hipconv serving no
-# generic target.
+# generic target. A '-strict' suffix names a specific silicon revision rather than a
+# generic family, so it is kept.
 if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     set(_hipconv_gpus "")
     foreach(_hipconv_gpu IN LISTS GPU_TARGETS)
         string(REGEX REPLACE ":.*" "" _hipconv_logical "${_hipconv_gpu}")
-        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+$")
+        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+(-strict)?$")
             list(APPEND _hipconv_gpus "${_hipconv_gpu}")
         else()
             message(STATUS
@@ -95,6 +96,20 @@ if(HIPCONV_LINE_TABLES)
     string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
 endif()
 
+# Device LTO costs up to 8x on the kernels this library exists to provide.
+#
+# Some ROCm clangs default the AMDGCN LTO mode to full, and under that pipeline the
+# register allocator spills into direct_wgrad's software-pipelined row loop. The
+# computation is unchanged and no test can see it. docs/rocm-device-lto-regression.md
+# has the measurements; ROCm/llvm-project#4434 is the upstream report.
+#
+# Carried on the targets rather than in CMAKE_HIP_FLAGS because a consumer may compile
+# these sources as CXX -- MIOpen does -- and then the HIP flags never reach them.
+option(HIPCONV_OFFLOAD_LTO "Leave the compiler's device LTO default alone" OFF)
+if(NOT HIPCONV_OFFLOAD_LTO)
+    set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -152,7 +167,8 @@ target_include_directories(hipconv
 # Position-independent so the static lib can link into libMIOpen.so
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
-target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
+                                       ${HIPCONV_DEVICE_COMPILE_OPTIONS})
 if(HIPCONV_ENABLE_POINTWISE)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_POINTWISE)
