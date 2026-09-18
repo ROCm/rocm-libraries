@@ -362,6 +362,7 @@ public:
     std::string smoother            = "";
     std::string matrix              = "";
     std::string coarsening_strategy = "";
+    std::string interpolation_type  = "";
     std::string matrix_type         = "";
 
     int pre_smooth     = 2;
@@ -369,6 +370,10 @@ public:
     int ordering       = 1;
     int cycle          = 0;
     int rebuildnumeric = 0;
+
+    // Interpolation truncation
+    float trunc_factor = 0.0f;
+    int   p_max_elmts  = 0;
 
     unsigned int format;
 
@@ -408,6 +413,10 @@ public:
         this->rebuildnumeric = rhs.rebuildnumeric;
 
         this->coarsening_strategy = rhs.coarsening_strategy;
+        this->interpolation_type  = rhs.interpolation_type;
+
+        this->trunc_factor = rhs.trunc_factor;
+        this->p_max_elmts  = rhs.p_max_elmts;
 
         this->format = rhs.format;
 

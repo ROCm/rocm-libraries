@@ -30,6 +30,9 @@
 typedef std::tuple<int, std::string, unsigned int, int, int, int, int, int, int, std::string>
     rsamg_tuple;
 
+// size, format, use_acc, interpolation type, truncation factor, max elements per row
+typedef std::tuple<int, unsigned int, int, std::string, float, int> rsamg_interp_tuple;
+
 std::vector<int>          rsamg_size                = {63, 134};
 std::vector<std::string>  rsamg_smoother            = {"Jacobi"};
 std::vector<unsigned int> rsamg_format              = {1, 7};
@@ -40,6 +43,21 @@ std::vector<int>          rsamg_scaling             = {0, 1};
 std::vector<int>          rsamg_rebuildnumeric      = {0, 1};
 std::vector<int>          rsamg_use_acc             = {1};
 std::vector<std::string>  rsamg_coarsening_strategy = {"PMIS"};
+
+// The interpolation operators are swept separately, so that adding one does not multiply
+// the whole parameter matrix above. Truncation is a post-pass shared by all of them, and
+// crossing its two parameters covers each of them on its own as well as both together.
+// ExtPI_FF1 is the classical Ext+I operator with the FF1 limit enabled, which is the only
+// operator the limit applies to, so it is one more entry here rather than a dimension of
+// its own. These keep their own size and format so that the emulation modes below, which
+// trim the matrix above, cannot leave them empty.
+std::vector<std::string> rsamg_interpolation_type
+    = {"Direct", "ExtPI", "ExtPI_FF1", "MMExtPI", "MMExtPE"};
+std::vector<int>          rsamg_interp_size        = {63};
+std::vector<unsigned int> rsamg_interp_format      = {1};
+std::vector<int>          rsamg_interp_use_acc     = {1};
+std::vector<float>        rsamg_interp_trunc       = {0.0f, 0.2f};
+std::vector<int>          rsamg_interp_max_elmts   = {0, 4};
 
 // Function to update tests if environment variable is set
 void update_rsamg()
@@ -71,6 +89,9 @@ void update_rsamg()
         rsamg_rebuildnumeric.insert(rsamg_rebuildnumeric.end(), {0, 1});
         rsamg_use_acc.push_back(0);
         rsamg_coarsening_strategy.push_back("Greedy");
+
+        // Exercise the host implementation of every interpolation operator as well
+        rsamg_interp_use_acc.push_back(0);
     }
 
     if(is_env_var_set("ROCALUTION_EMULATION_SMOKE"))
@@ -168,3 +189,56 @@ INSTANTIATE_TEST_CASE_P(ruge_stueben_amg,
                                          testing::ValuesIn(rsamg_rebuildnumeric),
                                          testing::ValuesIn(rsamg_use_acc),
                                          testing::ValuesIn(rsamg_coarsening_strategy)));
+
+class parameterized_ruge_stueben_amg_interpolation
+    : public testing::TestWithParam<rsamg_interp_tuple>
+{
+protected:
+    parameterized_ruge_stueben_amg_interpolation() {}
+    virtual ~parameterized_ruge_stueben_amg_interpolation() {}
+    virtual void SetUp() {}
+    virtual void TearDown() {}
+};
+
+Arguments setup_rsamg_interpolation_arguments(rsamg_interp_tuple tup)
+{
+    Arguments arg;
+    arg.size               = std::get<0>(tup);
+    arg.format             = std::get<1>(tup);
+    arg.use_acc            = std::get<2>(tup);
+    arg.interpolation_type = std::get<3>(tup);
+    arg.trunc_factor       = std::get<4>(tup);
+    arg.p_max_elmts        = std::get<5>(tup);
+
+    // Every interpolation operator here needs the PMIS C/F splitting
+    arg.coarsening_strategy = "PMIS";
+    arg.smoother            = "Jacobi";
+    arg.pre_smooth          = 1;
+    arg.post_smooth         = 1;
+    arg.cycle               = 0;
+    arg.ordering            = 0;
+    arg.rebuildnumeric      = 0;
+
+    return arg;
+}
+
+TEST_P(parameterized_ruge_stueben_amg_interpolation, ruge_stueben_amg_interpolation_float)
+{
+    Arguments arg = setup_rsamg_interpolation_arguments(GetParam());
+    ASSERT_EQ(testing_ruge_stueben_amg<float>(arg), true);
+}
+
+TEST_P(parameterized_ruge_stueben_amg_interpolation, ruge_stueben_amg_interpolation_double)
+{
+    Arguments arg = setup_rsamg_interpolation_arguments(GetParam());
+    ASSERT_EQ(testing_ruge_stueben_amg<double>(arg), true);
+}
+
+INSTANTIATE_TEST_CASE_P(ruge_stueben_amg_interpolation,
+                        parameterized_ruge_stueben_amg_interpolation,
+                        testing::Combine(testing::ValuesIn(rsamg_interp_size),
+                                         testing::ValuesIn(rsamg_interp_format),
+                                         testing::ValuesIn(rsamg_interp_use_acc),
+                                         testing::ValuesIn(rsamg_interpolation_type),
+                                         testing::ValuesIn(rsamg_interp_trunc),
+                                         testing::ValuesIn(rsamg_interp_max_elmts)));
