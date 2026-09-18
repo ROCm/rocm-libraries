@@ -143,6 +143,68 @@ def _wg_K(p: ConvProblem) -> int:
     return base * p.Do if p.is_3d else base
 
 
+def wgrad_atomic_store_vec(
+    p: ConvProblem, dtype_d: str, vector_size_c: Optional[int] = None
+) -> int:
+    """The dW store-vector width the packed-atomic cshuffle epilogue will use.
+
+    Mirrors the width computation in
+    :func:`_emit_wgrad_split_k_cshuffle_epilogue` so callers can see the number
+    the emitter will pick without building the kernel.
+    """
+    if vector_size_c is not None:
+        return vector_size_c
+    grouped = p.groups > 1
+    _vc_C = p.cpg if grouped else p.C
+    _vc_K = p.kpg if grouped else p.K
+    # split_k=1 semantics: the cshuffle atomic path is not contraindicated by a
+    # wide store_vec, so it asks for the widest that divides the channel dim.
+    _, __, vec_c = WgradConvSpec.default_vector_sizes(_vc_C, _vc_K, dtype_d, split_k=1)
+    return vec_c
+
+
+def wgrad_atomic_epilogue_available(
+    p: ConvProblem, dtype_d: str, vector_size_c: Optional[int] = None
+) -> Tuple[bool, str]:
+    """Can split-K reach this problem through the *packed atomic* epilogue?
+
+    The single source of truth for that question, shared by
+    :meth:`WgradConvSpec.validate`, :func:`is_valid_wgrad_spec` and the
+    dispatcher's split-K resolution. Three copies of this rule is how the
+    dispatcher came to hand the builder a spec the builder then rejected.
+
+    A 16-bit dW is written with ``global_atomic_pk_add_bf16``/``_f16``, which
+    stores a ``<2 x dtype>`` pair at a flat ``m * wg_N + n`` element index with
+    ``n`` rounded down to even. That needs both:
+
+    * an even dW row length ``wg_N = Z*Y*X*(C/groups)`` -- otherwise the pair is
+      not dword-aligned; and
+    * an even store-vector width -- the epilogue emits ``sv/2`` pairs per
+      thread, so ``sv == 1`` (which is what a depthwise ``cpg == 1`` yields)
+      produces no pair at all.
+
+    gfx9 has no scalar 16-bit atomic add to fall back on, so when this returns
+    False the only ways to keep ``split_k > 1`` are the two-stage f32-workspace
+    path or an fp32 dW. An fp32 dW uses a scalar ``atomicrmw fadd f32`` and is
+    unconditionally fine.
+    """
+    if dtype_d not in ("bf16", "fp16"):
+        return True, "ok"
+    wgN = _wg_N(p)
+    sv = wgrad_atomic_store_vec(p, dtype_d, vector_size_c)
+    if wgN % 2 != 0 or sv % 2 != 0:
+        return False, (
+            f"split_k atomic with dtype_d={dtype_d!r} requires an even dW row "
+            f"length wg_N=Z*Y*X*(C/groups) and an even store-vector width (packed "
+            f"<2 x dtype> atomic pairs are dword-aligned only on an even row, and "
+            f"sv=1 leaves no partner); got wg_N={wgN}, store_vec={sv} "
+            f"(Z={p.Z if p.is_3d else 1}, Y={p.Y}, X={p.X}, cpg={p.cpg}). Use "
+            f"two_stage=True (or force_deterministic=True) to reach split-K via "
+            f"the f32 workspace path, which emits no atomics."
+        )
+    return True, "ok"
+
+
 # ---------------------------------------------------------------------
 # Descriptors
 # ---------------------------------------------------------------------
@@ -483,26 +545,6 @@ class WgradConvSpec:
                 "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
                 "with split_k=1 there is nothing to reduce and two_stage is a no-op"
             )
-        if self.split_k == 0 or self.split_k > 1:
-            if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
-                raise ValueError(
-                    f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
-                    f"(got {self.data.dtype_d!r})"
-                )
-            if self.data.dtype_d in ("bf16", "fp16") and self.problem.cpg % 2 != 0:
-                raise ValueError(
-                    f"split_k atomic with dtype_d={self.data.dtype_d!r} requires even cpg "
-                    f"(packed <2 x dtype> atomic pairs must stay within one filter "
-                    f"position; the packed dW inner dim is cpg=C/groups); "
-                    f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
-                )
-        # The cshuffle requirement is an atomic-epilogue constraint only. Neither
-        # split_k == 1 (direct store) nor two_stage (f32 workspace store) emits
-        # packed atomics, so the default epilogue is fine for both. Gating on
-        # _needs_atomic rather than on dtype alone keeps the non-atomic 16-bit
-        # output path reachable -- it is the only one WMMA wgrad can use, since
-        # WMMA rejects cshuffle.
-        #
         # force_deterministic is folded in here rather than relied on being
         # already promoted: build_implicit_gemm_conv_wgrad promotes it to
         # two_stage before calling validate(), but validate() is a public method
@@ -510,12 +552,43 @@ class WgradConvSpec:
         # specs. Without this term such a spec is reported valid by
         # is_valid_wgrad_spec and then raises here -- the two predicates must
         # agree. Mirrors effective_two_stage_v in the C++ is_valid_wgrad_spec.
-        _effective_two_stage = self.two_stage or (
-            self.force_deterministic and self.split_k > 1
-        )
+        #
+        # The `split_k > 1` term is load-bearing, not defensive: the builder
+        # computes `_is_two_stage = split_k > 1 and two_stage`, so at
+        # split_k == 0 (runtime degree) a two_stage spec still lands on the
+        # *atomic* epilogue. Dropping the term here would exempt exactly that
+        # spec from the atomic gates below and re-open the admits/build hole
+        # one axis over.
+        _effective_two_stage = (
+            self.two_stage or self.force_deterministic
+        ) and self.split_k > 1
         _needs_atomic = (
             self.split_k == 0 or self.split_k > 1
         ) and not _effective_two_stage
+        if _needs_atomic:
+            if self.data.dtype_d not in ("fp32", "bf16", "fp16"):
+                raise ValueError(
+                    f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
+                    f"(got {self.data.dtype_d!r})"
+                )
+            # The packed <2 x dtype> atomic addresses dW as a flat
+            # `m * wg_N + n` element index and always rounds n down to even, so
+            # the pair occupies elements (2i, 2i+1) of a dW *row*. The pair is
+            # therefore dword-aligned iff the row length wg_N = Y*X*cpg is even.
+            # Gate on wg_N, not on cpg alone: cpg odd with an even Y*X (e.g.
+            # cpg=3, X=2) is perfectly safe, and rejecting it needlessly pushed
+            # depthwise-adjacent shapes off split-K entirely.
+            _ok, _why = wgrad_atomic_epilogue_available(
+                self.problem, self.data.dtype_d, self.vector_size_c
+            )
+            if not _ok:
+                raise ValueError(_why)
+        # The cshuffle requirement is an atomic-epilogue constraint only. Neither
+        # split_k == 1 (direct store) nor two_stage (f32 workspace store) emits
+        # packed atomics, so the default epilogue is fine for both. Gating on
+        # _needs_atomic rather than on dtype alone keeps the non-atomic 16-bit
+        # output path reachable -- it is the only one WMMA wgrad can use, since
+        # WMMA rejects cshuffle.
         if (
             _needs_atomic
             and self.data.dtype_d in ("bf16", "fp16")
@@ -802,7 +875,11 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # force_deterministic is promoted to two_stage by the builder, but this
     # predicate is public and is reached on un-promoted specs, so fold it in.
     # Mirrors effective_two_stage_v in the C++ is_valid_wgrad_spec.
-    _effective_two_stage = spec.two_stage or (spec.force_deterministic and sk > 1)
+    # The `sk > 1` term mirrors the builder's
+    # `_is_two_stage = split_k > 1 and two_stage`: at sk == 0 a two_stage spec
+    # still lands on the atomic epilogue, so it must stay subject to the atomic
+    # gates below. See the matching comment in WgradConvSpec.validate().
+    _effective_two_stage = (spec.two_stage or spec.force_deterministic) and sk > 1
     # The two-stage workspace-store epilogue is MFMA-only. The packed *atomic*
     # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
     # split-K itself is fine on wave32 -- but _emit_wgrad_workspace_store_epilogue
@@ -816,22 +893,21 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"two-stage deterministic wgrad is CDNA-only (got family 'wmma' on "
             f"{arch}); the workspace-store epilogue has no WMMA variant"
         )
-    if _is_atomic and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
+    _needs_atomic = _is_atomic and not _effective_two_stage
+    if _needs_atomic and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
         return False, (
             f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
             f"(got {spec.data.dtype_d!r})"
         )
-    if (
-        _is_atomic
-        and spec.data.dtype_d in ("bf16", "fp16")
-        and spec.problem.cpg % 2 != 0
-    ):
-        return False, (
-            f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires even cpg "
-            f"(packed <2 x dtype> atomic pairs must stay within one filter "
-            f"position; the packed dW inner dim is cpg=C/groups); "
-            f"got cpg={spec.problem.cpg}"
+    # Mirror of the wg_N-parity gate in WgradConvSpec.validate(); see the
+    # rationale there. The invariant is an even dW *row length*, not an even
+    # cpg, and it does not apply when the epilogue is the f32 workspace store.
+    if _needs_atomic:
+        _ok, _why = wgrad_atomic_epilogue_available(
+            spec.problem, spec.data.dtype_d, spec.vector_size_c
         )
+        if not _ok:
+            return False, _why
     # Atomic-epilogue constraint only: the packed atomic store emits zero-fill
     # pairs at the scattered MFMA layout, so it needs cshuffle's contiguous
     # pairs. Two cases are not on it. At split_k == 1 the epilogue is a direct
@@ -2366,7 +2442,6 @@ def _emit_wgrad_split_k_cshuffle_epilogue(
         )
         _cshuffle_kwargs["max_store_vec"] = vec_c
 
-    wg_M_v = b.const_i32(_wg_M(p))
     wg_N_v = b.const_i32(_wg_N(p))
 
     # Grouped: shift block_m_off by group*kpg so the atomic addresses land in
@@ -2376,8 +2451,24 @@ def _emit_wgrad_split_k_cshuffle_epilogue(
         eff_grid = dc_replace(
             grid, block_m_off=b.add(grid.block_m_off, b.mul(group, c_kpg))
         )
+        # The M bound must follow the offset into absolute-row space, and it
+        # has to be this group's slab END, not the global K.
+        #
+        # Two ways to get it wrong, both of which produce a wrong answer rather
+        # than a crash:
+        #   - bounding against the PER-GROUP wg_M (=kpg) leaves the guard
+        #     `m < kpg` false for every group above 0, so the grid silently
+        #     drops its atomics and only group 0's dW slab is written;
+        #   - bounding against the global K lets a CTA whose tile_m exceeds kpg
+        #     (the depthwise/thin-group case, e.g. kpg=8 with tile_m=64) spill
+        #     its tail rows into the NEXT groups' slabs and atomically add
+        #     foreign partial sums there.
+        # The correct bound is group*kpg + kpg, which is <= K by construction.
+        # The N axis needs no adjustment because the group rides on M only.
+        wg_M_v = b.add(b.mul(group, c_kpg), c_kpg)
     else:
         eff_grid = grid
+        wg_M_v = b.const_i32(_wg_M(p))
 
     CShuffleEpilogue.from_grid(
         atom=atom, grid=eff_grid, **_cshuffle_kwargs

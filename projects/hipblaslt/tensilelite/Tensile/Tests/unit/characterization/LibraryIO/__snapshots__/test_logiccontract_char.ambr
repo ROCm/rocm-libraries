@@ -111,6 +111,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -362,6 +363,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -601,6 +603,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -855,6 +858,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -1126,6 +1130,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -1377,6 +1382,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -1642,6 +1648,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -1896,6 +1903,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -2150,6 +2158,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -2392,6 +2401,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -2646,6 +2656,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,
@@ -2899,6 +2910,7 @@
       'PrefetchGlobalRead': 1,
       'PrefetchLocalRead': 1,
       'PreloadKernArgs': True,
+      'ReuseAcrossPersistent': 0,
       'SFCWGM': list([
         list([
           1,

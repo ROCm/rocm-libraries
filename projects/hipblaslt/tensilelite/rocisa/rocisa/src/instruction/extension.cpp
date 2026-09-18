@@ -108,6 +108,11 @@ void ext_inst(nb::module_ m)
           nb::arg("hasSMulHi") = false,
           nb::arg("sign")      = false,
           nb::arg("comment")   = "");
+    m.def("t16",
+          &rocisa::t16,
+          nb::arg("reg"),
+          nb::arg("sel"),
+          "NoSDWA-gated true16 half-select: tags reg .l/.h on true16, unchanged on legacy.");
     m.def("ECvtF16toF32",
           &rocisa::ECvtF16toF32,
           nb::arg("dst"),
