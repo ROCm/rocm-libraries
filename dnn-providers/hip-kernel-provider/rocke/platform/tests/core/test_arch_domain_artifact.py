@@ -27,15 +27,17 @@ different places:
 A host can only ever measure its own LLVM, so a flavor with no matching
 toolchain is skipped, never failed — "we did not get an answer" must not be
 recorded as "the answer is no". Same reason the artifact distinguishes
-``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``
-and ``toolchain_crash`` (no data).
+``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``,
+``toolchain_crash`` and ``toolchain_timeout`` (no data).
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -61,6 +63,7 @@ _STATUSES = {
     G.STATUS_ARCH_ABSENT,
     G.STATUS_TARGET_UNSUPPORTED,
     G.STATUS_TOOLCHAIN_CRASH,
+    G.STATUS_TOOLCHAIN_TIMEOUT,
     G.STATUS_PROBE_ERROR,
 }
 
@@ -167,6 +170,95 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
                         self.assertEqual(cell.get("verified_on"), flavor)
                         if status in _NEEDS_EVIDENCE:
                             self.assertTrue(cell.get("evidence"), "no diagnostic")
+
+    def test_every_column_records_how_it_was_measured(self):
+        """`clang` says which compiler answered, not which question it was asked.
+
+        Those are different facts, and the difference is not academic: the same
+        toolchain build reports ``ok`` or fails to terminate for the same key
+        depending on the optimisation level the probe used, because -O3 can
+        delete the call being probed. A column that carries only the compiler
+        identity cannot be told apart from one measured the wrong way, which is
+        how a false ``ok`` survived in the llvm20 column long enough to be
+        committed.
+
+        Asserted on the committed artifact rather than on a fresh run, because
+        this is exactly the check a host with no toolchain can still make.
+        """
+        for flavor, path in _columns():
+            with self.subTest(flavor=flavor):
+                tc = json.loads(path.read_text())["toolchain"]
+                self.assertIsInstance(tc.get("generator"), int)
+                self.assertGreaterEqual(tc["generator"], G.GENERATOR)
+                self.assertIn(
+                    "-O0",
+                    tc.get("probe_cflags", []),
+                    "column measured without -O0: the IR pipeline can delete "
+                    "the probed call, so its `ok` cells prove nothing",
+                )
+                self.assertGreater(tc.get("probe_timeout_s", 0), 0)
+
+
+class AvailableCpusTest(unittest.TestCase):
+    """The worker cap must reflect this process's share, not the host's size.
+
+    `os.cpu_count()` reports the machine. On a scheduler-pinned host or in a
+    container it overstates by orders of magnitude -- observed at 384 against
+    an affinity of 2 -- and the sweep sized itself accordingly. Oversubscribing
+    is not just slow here: the probes already run near the resource limits the
+    cap exists to stay under, and a `probe_error` that depends on load makes
+    the artifact nondeterministic and `--check` flaky.
+    """
+
+    def _root(self, files: dict[str, str]) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel, text in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        return root
+
+    def test_a_cpu_quota_caps_the_worker_count(self):
+        # Asserted as "<= 1", not "== 1": affinity also feeds the minimum, so
+        # the guarantee is that a quota can only ever lower the answer.
+        for label, files in (
+            ("v2", {"cpu.max": "100000 100000"}),
+            (
+                "v1",
+                {"cpu/cpu.cfs_quota_us": "100000", "cpu/cpu.cfs_period_us": "100000"},
+            ),
+        ):
+            with self.subTest(cgroup=label):
+                self.assertLessEqual(G._available_cpus(self._root(files)), 1)
+
+    def test_a_fractional_quota_still_leaves_one_worker(self):
+        """Half a CPU is a *rate*, not half a process. Rounding down gives a
+        zero-worker pool, which is a hang rather than a slow sweep."""
+        root = self._root({"cpu.max": "50000 100000"})
+        self.assertEqual(G._available_cpus(root), 1)
+
+    def test_no_quota_does_not_lower_the_answer(self):
+        """`max` and a negative v1 quota both mean unlimited -- neither is a
+        cap of zero, which is what parsing them as numbers would produce."""
+        for label, files in (
+            ("v2-max", {"cpu.max": "max 100000"}),
+            (
+                "v1-negative",
+                {"cpu/cpu.cfs_quota_us": "-1", "cpu/cpu.cfs_period_us": "100000"},
+            ),
+            ("absent", {}),
+        ):
+            with self.subTest(cgroup=label):
+                root = self._root(files)
+                self.assertEqual(
+                    G._available_cpus(root), G._available_cpus(root / "nope")
+                )
+
+    def test_the_answer_is_always_a_usable_worker_count(self):
+        for files in ({}, {"cpu.max": "garbage"}, {"cpu.max": "0 0"}):
+            with self.subTest(files=sorted(files)):
+                self.assertGreaterEqual(G._available_cpus(self._root(files)), 1)
 
 
 class ArchDomainRegenerationTest(unittest.TestCase):

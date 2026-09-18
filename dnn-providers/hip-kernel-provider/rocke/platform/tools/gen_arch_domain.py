@@ -107,7 +107,42 @@ STATUS_NAME_ABSENT = "name_absent"
 STATUS_ARCH_ABSENT = "arch_absent"
 STATUS_TARGET_UNSUPPORTED = "target_unsupported"
 STATUS_TOOLCHAIN_CRASH = "toolchain_crash"
+STATUS_TOOLCHAIN_TIMEOUT = "toolchain_timeout"
 STATUS_PROBE_ERROR = "probe_error"
+
+# Bumped when the probe *semantics* change -- not when this file is merely
+# edited -- and recorded into every column so a committed answer can be told
+# apart from one an older generator measured.
+#
+# The need is not hypothetical. The llvm20 column blessed before `-O0` became
+# mandatory records `ok` for six arches on
+# `llvm.amdgcn.raw.ptr.buffer.load.async.lds`, and the current generator cannot
+# reproduce that on the same toolchain build because the probe does not
+# terminate at all: at -O3 the call was deleted before it could hang, and the
+# empty module linked. Nothing in the artifact said which generator wrote it,
+# so the only way to find that out was to re-measure and notice the
+# contradiction.
+#
+#   1 -- initial, probes at -O3
+#   2 -- probes at -O0, per-probe timeout, provenance recorded
+GENERATOR = 2
+
+# Hoisted out of `_probe` so the artifact can record the flags that actually
+# ran rather than a hand-copied list that drifts from them. `-O0` is the one
+# that decides correctness (see `_probe`), which is exactly why a column must
+# carry proof it was used.
+PROBE_CFLAGS = ("-O0", "-nogpulib")
+
+# A probe that has not answered in this long is not going to. A probe module is
+# a single declare and a single call, and the normal cost is tens of
+# milliseconds, so this is roughly three orders of magnitude of headroom.
+#
+# The budget exists to bound the *sweep*, not to hurry any one probe. Without
+# it a single non-terminating probe hangs the whole run, `--check` never
+# returns, and the drift gate's own subprocess timeout fires 30 minutes later
+# as an error rather than a verdict -- one unlucky key takes down the gate for
+# every host running that flavor.
+PROBE_TIMEOUT_S = 60
 
 
 def _bootstrap_sys_path() -> None:
@@ -163,6 +198,10 @@ def _param_type(param: str) -> tuple[str, bool]:
 
 
 _DECL_RE = re.compile(r"^declare\s+(.+?)\s+@([\w.]+)\((.*)\)\s*$")
+
+# `Segmentation fault (core dumped)` vs `Segmentation fault` is a property of
+# the host's core-dump settings, not of the crash. See `_crash_reason`.
+_CORE_DUMPED_RE = re.compile(r"\s*\(core dumped\)\s*$")
 
 # The buffer fat pointer is not a legal kernel-argument type and cannot be
 # produced by an addrspacecast, so it is the one operand we still pass poison
@@ -370,6 +409,14 @@ def _crash_reason(diag: str) -> str:
     directories and the resource-dir path. Committing that would make the
     artifact differ between hosts for no informational gain, so keep only the
     pass name and the signal.
+
+    The signal name needs the same treatment for a less obvious reason: the
+    driver appends `(core dumped)` only when the kernel actually wrote one,
+    which depends on the host's `ulimit -c` and core_pattern rather than on
+    anything about the compiler. Leaving it in makes the committed evidence
+    differ between two machines that observed the identical crash, so `--check`
+    reports drift where there is none -- the one failure mode a drift gate
+    cannot afford.
     """
     parts = []
     for line in diag.splitlines():
@@ -377,7 +424,8 @@ def _crash_reason(diag: str) -> str:
         if s.startswith("Running pass"):
             parts.append(s.rstrip("."))
         elif "unable to execute command:" in s:
-            parts.append(s.split("unable to execute command:")[-1].strip())
+            reason = s.split("unable to execute command:")[-1].strip()
+            parts.append(_CORE_DUMPED_RE.sub("", reason).strip())
     return "; ".join(parts[-2:])[:200] or "clang crashed"
 
 
@@ -392,7 +440,13 @@ def _first_error(text: str) -> str:
     return (text.strip().splitlines() or ["(no diagnostic)"])[0][:200]
 
 
-def _probe(clang: str, path: Path, arch: str, out: Path) -> tuple[str, str]:
+def _probe(
+    clang: str,
+    path: Path,
+    arch: str,
+    out: Path,
+    timeout: float = PROBE_TIMEOUT_S,
+) -> tuple[str, str]:
     """Compile AND LINK one probe module for one arch.
 
     `-nogpulib` is required, not an optimisation: without it clang links the
@@ -410,25 +464,45 @@ def _probe(clang: str, path: Path, arch: str, out: Path) -> tuple[str, str]:
     reported ok for a target where the instruction does not exist. Nine of the
     149 keys are foldable this way. -O0 keeps the call alive to ISel, which is
     the only place that can answer the question.
+
+    Keeping the call alive also exposes probes that never terminate -- llvm20
+    spins indefinitely on `raw.ptr.buffer.load.async.lds` for every arch that
+    can target it -- so the timeout is part of the same bargain rather than a
+    defensive extra. A probe that runs out of budget is reported as
+    `toolchain_timeout` and never as `arch_absent`: not finishing is not an
+    answer about the target.
     """
-    proc = subprocess.run(
-        [
-            clang,
-            "-x",
-            "ir",
-            "-O0",
-            "-nogpulib",
-            "-target",
-            "amdgcn-amd-amdhsa",
-            f"-mcpu={arch}",
-            "-o",
-            str(out),
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    argv = [
+        clang,
+        "-x",
+        "ir",
+        *PROBE_CFLAGS,
+        "-target",
+        "amdgcn-amd-amdhsa",
+        f"-mcpu={arch}",
+        "-o",
+        str(out),
+        str(path),
+    ]
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            # Run from the scratch directory, not from wherever the sweep was
+            # invoked. Probing is *expected* to crash clang -- that is what
+            # `toolchain_crash` records -- and a crash on a host with core dumps
+            # enabled drops a multi-megabyte `core` next to the caller. Run the
+            # sweep from a checkout and those land in the worktree.
+            cwd=str(out.parent),
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            STATUS_TOOLCHAIN_TIMEOUT,
+            f"clang did not terminate within {timeout:g}s",
+        )
     return _classify(proc.returncode, (proc.stderr or proc.stdout).strip())
 
 
@@ -469,6 +543,59 @@ def _flavor_of_clang(identity: str) -> str | None:
     """Best-effort LLVM major from `clang --version`, as a flavor string."""
     m = re.search(r"clang version (\d+)", identity)
     return f"llvm{m.group(1)}" if m else None
+
+
+def _available_cpus(cgroup_root: Path = Path("/sys/fs/cgroup")) -> int:
+    """CPUs this process may actually use, not the CPUs the host has.
+
+    `os.cpu_count()` reports the machine. Inside a container it is the wrong
+    number by a wide margin -- a sweep launched in a two-CPU container on a
+    large host sized itself for the host and ran six clang processes against
+    two cores. That is not merely slow: the probes are already near the
+    resource limits this cap exists to stay under (see the call site), and
+    oversubscription is how a `probe_error` starts depending on load.
+
+    Three sources, narrowest first. Affinity covers cpuset pinning, `cpu.max`
+    covers a CFS quota (cgroup v2, then v1) -- a quota is a *rate*, so a
+    fractional share rounds up to one whole worker rather than to zero.
+
+    `cgroup_root` is a parameter so the quota branch is reachable from a test.
+    Neither this host nor the probe containers impose a quota, so left
+    hardcoded it would be the one path nothing ever executes.
+    """
+    counts = []
+
+    getaffinity = getattr(os, "sched_getaffinity", None)
+    if getaffinity is not None:
+        try:
+            counts.append(len(getaffinity(0)))
+        except OSError:
+            pass
+
+    for quota_path, period_path in (
+        (cgroup_root / "cpu.max", None),
+        (
+            cgroup_root / "cpu" / "cpu.cfs_quota_us",
+            cgroup_root / "cpu" / "cpu.cfs_period_us",
+        ),
+    ):
+        try:
+            if period_path is None:
+                quota_s, period_s = quota_path.read_text().split()[:2]
+            else:
+                quota_s = quota_path.read_text().strip()
+                period_s = period_path.read_text().strip()
+            # "max" (v2) and a negative quota (v1) both mean unlimited.
+            if quota_s == "max":
+                continue
+            quota, period = int(quota_s), int(period_s)
+            if quota > 0 and period > 0:
+                counts.append(max(1, -(-quota // period)))
+        except (OSError, ValueError):
+            continue
+
+    counts.append(os.cpu_count() or 4)
+    return max(1, min(counts))
 
 
 def main() -> int:
@@ -643,7 +770,7 @@ def main() -> int:
     # clang's own thread pool. Those surface as probe_error, and a probe_error
     # that depends on machine load would make the artifact nondeterministic and
     # `--check` flaky. Staying cheap is worth more here than being fast.
-    jobs = args.jobs or min(8, (os.cpu_count() or 4))
+    jobs = args.jobs or min(8, _available_cpus())
     results: dict[str, dict[str, dict[str, str]]] = {k: {} for k in keys}
 
     def record(key: str, arch: str, status: str, evidence: str) -> None:
@@ -671,7 +798,14 @@ def main() -> int:
     # permanent compiler crash. A genuine crash (permlane64 on the wave64
     # targets) reproduces serially, so the retry separates the two. Cells that
     # survive stay as they were, which is the honest answer.
-    unstable = (STATUS_PROBE_ERROR, STATUS_TOOLCHAIN_CRASH)
+    #
+    # A timeout retries on the same budget rather than a larger one. The retry
+    # is there to remove contention, not to grant more time: if 60 uncontended
+    # seconds are not enough for a module this small, more seconds will not
+    # change the verdict, and raising the budget only to watch a known hang
+    # spin costs the whole sweep. A probe that was merely starved by a loaded
+    # host clears the same bar easily once it has the machine to itself.
+    unstable = (STATUS_PROBE_ERROR, STATUS_TOOLCHAIN_CRASH, STATUS_TOOLCHAIN_TIMEOUT)
     retry = [(k, a) for k, a in work if results[k][a]["status"] in unstable]
     if retry:
         print(f"   retrying {len(retry)} unclassified/crashed probe(s) serially...")
@@ -689,10 +823,19 @@ def main() -> int:
             "is unvalidated on this host by construction. See "
             "dsl_docs/development/arch_axis_proposal.md."
         ),
+        # Provenance. `clang` alone identifies the compiler but not how it was
+        # asked, and the two questions have different answers: the same
+        # toolchain build reports `ok` or hangs for the same key depending on
+        # the optimisation level the probe used. A column that does not carry
+        # these fields was written by generator 1 and cannot be trusted where
+        # it says `ok`.
         "toolchain": {
             "flavor": flavor,
             "clang": identity,
             "arches": arches,
+            "generator": GENERATOR,
+            "probe_cflags": list(PROBE_CFLAGS),
+            "probe_timeout_s": PROBE_TIMEOUT_S,
         },
         "keys": results,
         # What this LLVM resolved each surviving declare to. Mostly identical
