@@ -33,6 +33,15 @@ from . import _canvas as cv
 # rest of the loop is prefetch. A kernel with NO combining op simply has no compute flow (correct).
 COMBINING_OPS = ("mma",)
 
+# ---- logical AXIS NAMES -- derived, never assumed -------------------------------------------------
+# A recording carries NO axis names: `strides` / `tile_desc.shape` are positional. The only two sources
+# are the lane tag (itself derived from the recorded space name) and the driver's own convention
+# (`auto_pipeline` already writes ("N","K") for B, ("M","K") for A, ("M","N") for C). So the named dims
+# are used ONLY when the recording actually contains a COMBINING op -- `_operand` falls back to "C" for
+# anything unmatched, so on a non-combining recording naming its axes "M"/"N" would be an invention.
+_COMBINE_DIMS = {"A": ("M", "K"), "B": ("N", "K"), "C": ("M", "N")}
+_POSITIONAL_DIMS = ("d0", "d1")
+
 # ---- lane / operand colours (A = blue, B = green, C/accumulator = orange) ------------------------
 _FILL = {"A": "#cfe3f7", "B": "#d7eecf", "C": "#f7e2c9"}
 _EDGE = "#333333"
@@ -69,8 +78,12 @@ def _origin_uses_iv(origin: Any) -> bool:
 
 
 def _operand(node: Any) -> str:
-    """Which logical operand lane a node sits on (A / B / C). Ops + the accumulator fill ride C."""
-    if node.kind in ("fill", "mma", "reorder", "cross_lane"):
+    """Which logical operand lane a node sits on (A / B / C), from the node ALONE. The accumulator fill
+    and the combining op genuinely ride C. A ``reorder``/``cross_lane`` does NOT -- it inherits the lane
+    of whatever produced the value it consumes, which only the dataflow graph knows; this returns the "C"
+    default and :func:`_resolve_reg_lanes` overrides it. (Forcing every transform onto C is what labelled
+    the A/B operand bridges as C-epilogue work.)"""
+    if node.kind in ("fill", "mma"):
         return "C"
     name = (getattr(node, "space_name", "") or "").lower()
     if "lds_a" in name or name == "%a":
@@ -80,32 +93,143 @@ def _operand(node: Any) -> str:
     return "C"
 
 
+def _value_edges(nodes: list) -> list[tuple[int, int]]:
+    """Producer -> consumer edges by SSA Value identity, straight off the recorded nodes."""
+    producer = {n.produces: n.seq for n in nodes if getattr(n, "produces", None) is not None}
+    return [(producer[c], n.seq) for n in nodes for c in getattr(n, "consumes", ())
+            if c in producer and producer[c] != n.seq]
+
+
+def forward_reach(edges: list[tuple[int, int]]):
+    """``reach(seq) -> set`` of nodes reachable FORWARD (producer -> consumer) from ``seq``. ONE home --
+    the flow segmenter in ``auto_pipeline`` delegates here rather than keeping a second copy."""
+    succ: dict[int, list[int]] = {}
+    for f, t in edges:
+        succ.setdefault(f, []).append(t)
+
+    def reach(seq: int) -> set[int]:
+        seen: set[int] = set()
+        stack = [seq]
+        while stack:
+            for m in succ.get(stack.pop(), []):
+                if m not in seen:
+                    seen.add(m)
+                    stack.append(m)
+        return seen
+
+    return reach
+
+
+def rmw_spaces(nodes: list) -> set[int]:
+    """The memory spaces this recording BOTH globally loads and globally stores -- i.e. read-modify-write
+    buffers (the epilogue re-reads its own output tile). ONE home: the block-diagram caption and the flow
+    segmenter both route on this same recorded fact, never on a GEMM noun like "beta*C"."""
+    glob = [n for n in nodes if getattr(n, "space", "") == "global"]
+    loaded = {getattr(n, "space_id", None) for n in glob if n.kind == "load"}
+    stored = {getattr(n, "space_id", None) for n in glob if n.kind == "store"}
+    return {s for s in loaded & stored if s is not None}
+
+
+def same_distribution(enc_a: Any, enc_b: Any) -> bool:
+    """Do two distributions place data identically? Compared by FORWARD MAP (slot -> coord), never by
+    encoding identity/equality: structurally different encodings can place data the same way, and the tile
+    SHAPE lives on the TileDesc, not the encoding -- so raw encoding equality answers a different question."""
+    if enc_a is None or enc_b is None:
+        return False
+    from ..transforms import as_forward_map
+    try:
+        return as_forward_map(enc_a) == as_forward_map(enc_b)
+    except Exception:
+        return False
+
+
+def _resolve_reg_lanes(nodes: list, lanes: dict[int, str]) -> None:
+    """In-place: give every ``reorder``/``cross_lane`` the lane of the node that PRODUCED the value it
+    consumes. An LDS/global read on an operand space tags A/B; a combining op or the fill tags C. Nodes are
+    walked in recorded order, so a chain (read -> reorder -> reorder) resolves transitively."""
+    producer = {n.produces: n.seq for n in nodes if getattr(n, "produces", None) is not None}
+    for n in nodes:
+        if n.kind not in ("reorder", "cross_lane"):
+            continue
+        src = next((producer[c] for c in getattr(n, "consumes", ()) if c in producer), None)
+        if src is not None:
+            lanes[n.seq] = lanes[src]
+
+
+def _stride1_caption(node: Any, dims: tuple[str, ...]) -> str:
+    """Name the tensor's stride-1 (CONTIGUOUS) axis, DERIVED from the recorded strides.
+
+    ✗ NEVER a "row-major"/"col-major" word: the major word points at a DIFFERENT physical axis for each of
+    A / B / C, which is exactly how a hardcoded ``"col-major (M-contig)"`` survived on an N-stride-1 C. The
+    stride-1 axis is the whole fact -- say only that. ✗ Never "coalesced" either: contiguity is a per-tensor
+    stride fact, coalescing is a wave-level lane-major property and is not this diagram's verdict to make.
+    If the stride-1 axis is not unique (no extent>1 axis at stride 1, or several), state the RAW recorded
+    strides rather than guessing one."""
+    strides = tuple(getattr(node, "strides", None) or ())
+    shape = getattr(getattr(node, "tile_desc", None), "shape", None)
+    hits = [i for i, s in enumerate(strides)
+            if isinstance(s, int) and s == 1 and (shape is None or int(shape[i]) > 1)]
+    if len(hits) == 1 and hits[0] < len(dims):
+        return f"{dims[hits[0]]} stride-1 (contiguous)"
+    return f"strides {strides}"
+
+
+def _reg_op_detail(node: Any, lane: str, *, src: Any, feeds_combine: bool, to_store_order: bool) -> str:
+    """The italic second line of a transform block, DERIVED from what the transform actually BRIDGES (its
+    recorded producer; whether it feeds a combining op; whether it lands in the recorded store's
+    distribution) -- never from its node kind. Captioning every transform "(C epilogue)" labelled the A/B
+    operand bridges as C work.
+
+    Kept SHORT and in the same "-> destination" grammar as the neighbouring blocks ("-> other buf",
+    "<- cur buf"): the loop lane's boxes are 1.7 units wide, and a fuller phrase overprints its neighbour.
+    The long form ("operand bridge -- the price of the wide read") belongs on the flow panel title, where
+    there is room."""
+    if lane in ("A", "B") and getattr(src, "space", None) in ("lds", "global") and feeds_combine:
+        return "-> MMA order"
+    if src is not None and src.kind in COMBINING_OPS:
+        return "-> store order" if to_store_order else "from MMA acc"
+    return ""                            # endpoints not both recognised -> claim nothing
+
+
 def _label(node: Any, lane: str) -> str:
+    """The block's bold caption: the node and the lane it rides, in one consistent grammar
+    (``LDS read A`` / ``reorder A`` / ``global store C``). The transform's ROLE is the italic
+    detail line (:func:`_reg_op_detail`), not part of the name."""
     k = node.kind
     if k == "fill":
         return f"fill {lane} acc\n= 0"
     if k == "mma":
         return "MMA\nA x B -> C"
-    if k == "reorder":
-        return "reorder\n(C epilogue)"
-    if k == "cross_lane":
-        return "cross-lane\n(C epilogue)"
+    if k in ("reorder", "cross_lane"):
+        return f"{'reorder' if k == 'reorder' else 'cross-lane'} {lane}"
     sp = getattr(node, "space", "")
     verb = {("global", "load"): "global load", ("global", "store"): "global store",
             ("lds", "load"): "LDS read", ("lds", "store"): "LDS store"}.get((sp, k), k)
     return f"{verb} {lane}"
 
 
-def _sublabel(node: Any, phase: str) -> str:
+def _sublabel(node: Any, phase: str, *, dims: tuple[str, ...] = _POSITIONAL_DIMS,
+              stages_to_lds: bool = False, is_rmw: bool = False, reg_detail: str = "") -> str:
+    """The block's italic second line -- ONE line (it is drawn as a single label inside a 0.92-high box).
+
+    A global LOAD is a staging PREFETCH only if its value actually reaches an LDS store (the POSITIVE test
+    comes first: "does not reach an LDS store" is vacuously true for a load whose consumer was never
+    recorded, so a negative test alone would silently mislabel a recording gap). Otherwise, if its space is
+    also globally stored, it is the read-modify-write input. Otherwise: say nothing -- silence is honest,
+    an invented "prefetch k=0" on an epilogue re-read is not."""
     sp, k = getattr(node, "space", ""), node.kind
+    if k in ("reorder", "cross_lane"):
+        return reg_detail
     if sp == "lds" and k == "store":
         return "-> buf 0" if phase == "prologue" else "-> other buf"
     if sp == "lds" and k == "load":
         return "<- cur buf" if phase == "loop" else "<- last buf"
     if sp == "global" and k == "load":
-        return "prefetch k+1" if phase == "loop" else "prefetch k=0"
+        if stages_to_lds:
+            return "prefetch k+1" if phase == "loop" else "prefetch k=0"
+        return "read-modify-write input" if is_rmw else ""
     if sp == "global" and k == "store":
-        return "col-major (M-contig)"
+        return _stride1_caption(node, dims)
     return ""
 
 
@@ -120,14 +244,35 @@ class Block:
     sublabel: str
     produces: int | None = None       # id() of the SSA Value this node yields
     consumes: tuple[int, ...] = ()     # id()s of the SSA Values this node reads
+    space_id: int | None = None        # identity of the memory space (a global buffer that is BOTH
+                                       # loaded and stored is a read-modify-write target)
 
 
 def extract_blocks(pipeline: Any) -> tuple[list[Block], int | None, int | None]:
-    """Ordered blocks + the loop-body seq span ``(lo, hi)`` (``None`` if the pipeline has no K-loop)."""
+    """Ordered blocks + the loop-body seq span ``(lo, hi)`` (``None`` if the pipeline has no K-loop).
+
+    Lanes and captions are DERIVED from the recorded dataflow graph, not from node kind: a transform takes
+    the lane of its producer, a global load is a prefetch only if it reaches an LDS store, a global store
+    names its own stride-1 axis. Axis NAMES are used only when the recording has a combining op."""
     nodes = list(pipeline.nodes)
     loop_seqs = [n.seq for n in nodes if _origin_uses_iv(getattr(n, "origin", None))]
     lo = min(loop_seqs) if loop_seqs else None
     hi = max(loop_seqs) if loop_seqs else None
+
+    by_seq = {n.seq: n for n in nodes}
+    edges = _value_edges(nodes)
+    reach = forward_reach(edges)
+    producer = {n.produces: n.seq for n in nodes if getattr(n, "produces", None) is not None}
+    combine = {n.seq for n in nodes if n.kind in COMBINING_OPS}
+    lds_stores = {n.seq for n in nodes if getattr(n, "space", "") == "lds" and n.kind == "store"}
+    rmw = rmw_spaces(nodes)
+    gstore = next((n for n in nodes
+                   if getattr(n, "space", "") == "global" and n.kind == "store"), None)
+    store_enc = getattr(getattr(gstore, "tile_desc", None), "layout", None)
+
+    lanes = {n.seq: _operand(n) for n in nodes}
+    _resolve_reg_lanes(nodes, lanes)
+
     blocks: list[Block] = []
     for n in nodes:
         if lo is None:
@@ -138,11 +283,20 @@ def extract_blocks(pipeline: Any) -> tuple[list[Block], int | None, int | None]:
             phase = "loop"
         else:
             phase = "epilogue"
-        lane = _operand(n)
+        lane = lanes[n.seq]
+        dims = _COMBINE_DIMS.get(lane, _POSITIONAL_DIMS) if combine else _POSITIONAL_DIMS
+        src = by_seq.get(next((producer[c] for c in getattr(n, "consumes", ()) if c in producer), None))
+        detail = _reg_op_detail(n, lane, src=src, feeds_combine=bool(reach(n.seq) & combine),
+                                to_store_order=same_distribution(getattr(n, "tgt_enc", None), store_enc))
+        label = _label(n, lane)
+        sublabel = _sublabel(n, phase, dims=dims, reg_detail=detail,
+                             stages_to_lds=bool(reach(n.seq) & lds_stores),
+                             is_rmw=getattr(n, "space_id", None) in rmw)
         blocks.append(Block(seq=n.seq, kind=n.kind, space=getattr(n, "space", "reg"), lane=lane,
-                            phase=phase, label=_label(n, lane), sublabel=_sublabel(n, phase),
+                            phase=phase, label=label, sublabel=sublabel,
                             produces=getattr(n, "produces", None),
-                            consumes=tuple(getattr(n, "consumes", ()))))
+                            consumes=tuple(getattr(n, "consumes", ())),
+                            space_id=getattr(n, "space_id", None)))
     return blocks, lo, hi
 
 
@@ -156,9 +310,7 @@ def _dataflow_edges(blocks: list[Block]) -> list[tuple[int, int]]:
     consumes a Value that node ``p`` produced. This is the recorded data dependency graph -- no layout or
     kind assumptions. (The one dependency it CANNOT see is the accumulator carried across the ``scf.for``
     iter-arg boundary, which rebinds the Value -- reconstructed separately by :func:`_acc_bridge`.)"""
-    producer = {b.produces: b.seq for b in blocks if b.produces is not None}
-    return [(producer[c], b.seq) for b in blocks for c in b.consumes
-            if c in producer and producer[c] != b.seq]
+    return _value_edges(blocks)
 
 
 def _loop_lanes(blocks: list[Block], edges: list[tuple[int, int]]) -> dict[int, str]:

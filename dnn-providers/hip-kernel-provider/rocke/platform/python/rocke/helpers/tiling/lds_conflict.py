@@ -238,32 +238,68 @@ def _lane_dwords(accesses, dtype_bytes):
 
 def simulate(accesses, arch, dtype_bytes):
     """Address-map driver: build per-(half-wave, phase) histograms from the exact `accesses`
-    ({lane, reg0, base, vw}) and apply the port rule via `simulate_hist`. Returns the per-instruction
-    result plus `conflicts_per_access` and the `detail` histograms.
+    ({lane, reg0, base, vw}) and apply the port rule via `simulate_hist`. Returns the summed
+    result plus `conflicts_per_access`, `n_instr`, and the `detail` histograms.
+
+    PER INSTRUCTION, THEN SUMMED -- never folded into one pseudo-instruction. `simulate_hist` is a
+    PER-INSTRUCTION predictor (lds_banks.md 1.4: "The counter is per instruction; a store forced to a
+    narrow width issues several instructions, each measured with only its own footprint"), and the
+    emit issues ONE hardware op per `vw` registers, so a `register_count > vw` descriptor is
+    `ceil(register_count/vw)` instructions (`PipelineTransaction.op_fanout`). `reg0` IS the
+    instruction index, so the accesses are grouped by it and each group is priced on its OWN
+    histograms and its OWN footprint; IDX / BC / productive then SUM over instructions -- exactly how
+    `analyze_read` aggregates the read path.
+
+    Folding every phase of every instruction into one histogram set and taking the per-half-wave MAX
+    over ALL of them (the previous behaviour) silently DISCARDS every instruction after the first
+    (MAX of N equal-cost instructions is one instruction's cost) while the footprint -- and therefore
+    the productive floor -- still counts them all. That under-reports the conflict, and it under-reports
+    it all the way to 0.00 for an evenly-costed 2-instruction store. A single-instruction descriptor
+    (op_fanout == 1) has exactly one group and is numerically unchanged by this.
 
     KNOWN LIMITATION: the emit-derived address map under-scales the multi-run footprint for
     forced-narrow stores; drive full validation from `simulate_hist` with the measured histograms.
     The single-contiguous-run configs (natural A b64 / B b128 stores) reproduce end-to-end."""
     a = arch_lds(arch)
-    lane_dw = _lane_dwords(accesses, dtype_bytes)
-    ndw = max(len(v) for v in lane_dw.values())
+    by_op = defaultdict(list)
+    for ac in accesses:
+        by_op[ac["reg0"]].append(ac)       # one hardware op per (lane, reg0) run -- reg0 keys the instr
 
-    hists = {}
-    footprint = set()
-    for hw in range(0, a.WAVE, a.HALF):
-        for ph in range(ndw):
-            seen = defaultdict(set)
-            for lane in range(hw, hw + a.HALF):
-                dws = lane_dw.get(lane)
-                if not dws or ph >= len(dws):
-                    continue
-                d = dws[ph]
-                footprint.add(d)
-                seen[d % a.NB].add(d)
-            hists[(hw, ph)] = {b: len(s) for b, s in seen.items()}
-    r = simulate_hist(hists, len(footprint), a)
+    totals = {"IDX": 0, "BC": 0, "productive": 0}
+    detail, depths, phase_base = {}, [], 0
+    for reg0 in sorted(by_op):
+        lane_dw = _lane_dwords(by_op[reg0], dtype_bytes)
+        ndw = max(len(v) for v in lane_dw.values())
+
+        hists = {}
+        footprint = set()
+        for hw in range(0, a.WAVE, a.HALF):
+            for ph in range(ndw):
+                seen = defaultdict(set)
+                for lane in range(hw, hw + a.HALF):
+                    dws = lane_dw.get(lane)
+                    if not dws or ph >= len(dws):
+                        continue
+                    d = dws[ph]
+                    footprint.add(d)
+                    seen[d % a.NB].add(d)
+                hists[(hw, ph)] = {b: len(s) for b, s in seen.items()}
+        r = simulate_hist(hists, len(footprint), a)
+        for k in totals:
+            totals[k] += r[k]
+        depths.append(max((max(h.values()) for h in hists.values() if h), default=1))
+        # Phases are renumbered GLOBALLY across instructions (instr 1's phase 0 becomes phase `ndw`)
+        # so `detail` stays one flat {(half_wave, phase): hist} map -- identical for op_fanout == 1,
+        # and never silently overwriting instruction 0's histogram with instruction 1's.
+        for (hw, ph), h in hists.items():
+            detail[(hw, phase_base + ph)] = h
+        phase_base += ndw
+
+    r = dict(totals)
     r["conflicts_per_access"] = r["BC"] / r["productive"] if r["productive"] else 0.0
-    r["detail"] = hists
+    r["n_instr"] = len(by_op)
+    r["per_instruction_max_depth"] = depths
+    r["detail"] = detail
     return r
 
 
@@ -840,12 +876,20 @@ def store_datum(store_desc, tile_free, arch, strides, dtype_name, *, origin, lds
     acc, vw = addr_map(store_desc, strides, origin=origin, n_lanes=a.WAVE, dtype_name=dtype_name,
                        lds_swizzle=lds_swizzle)
     datum = {}
-    for ac in acc:
+    # Phases are numbered per LANE and run CONTINUOUSLY across the lane's runs, so a multi-instruction
+    # store (register_count > vw, e.g. 16 regs at vw=8 -> two ds_write_b128) keeps BOTH instructions.
+    # Restarting the phase index at 0 per run made instruction 1 OVERWRITE instruction 0's entries, so
+    # every consumer of this map (`_locate_collision`, the 3-panel renderer) silently analyzed the LAST
+    # instruction while claiming to show the store. Identical numbering for a single-run descriptor.
+    next_phase = defaultdict(int)
+    for ac in sorted(acc, key=lambda x: (x["lane"], x["reg0"])):
         d0 = ac["base"] // per_dword
-        for ph in range(vw // per_dword):
-            elem = ac["base"] + per_dword * ph
-            datum[(ac["lane"], ph)] = (elem // strides[0], elem % strides[0], d0 + ph,
-                                       (d0 + ph) % a.NB)
+        ph0 = next_phase[ac["lane"]]
+        next_phase[ac["lane"]] += vw // per_dword
+        for i in range(vw // per_dword):
+            elem = ac["base"] + per_dword * i
+            datum[(ac["lane"], ph0 + i)] = (elem // strides[0], elem % strides[0], d0 + i,
+                                            (d0 + i) % a.NB)
     return acc, vw, datum
 
 
@@ -972,16 +1016,22 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fi
     subj = f"pad{subject_pad}" if subject_pad else "pad0"
     # The provenance line is the figure's own claim about where its number came from. It is built from
     # the SAME branch that gated it above, so a watermarked figure can never carry a "MEASURED" line.
+    # The BC/IDX/productive quoted below are the WHOLE store's (summed over its `n_instr` hardware
+    # ops), while the panels draw ONE representative instruction -- say so when they differ, or the
+    # reader will try to reconcile a 2-op total against a 1-op picture. conflicts/access is a ratio and
+    # is the same either way, which is why it is the headline number.
+    scope = ("" if r["n_instr"] == 1 else
+             f", whole store = {r['n_instr']} x {wtag}; panels show 1 instruction")
     if provenance == "measured":
         cpa, watermark = measured_cpa, None
         prov_line = (f"MEASURED (rocprof, real {a.name}) conflicts/access = {measured_cpa:.2f}  "
                      f"(sim reproduces to the integer: BC={r['BC']}, IDX={r['IDX']}, "
-                     f"productive={r['productive']})")
+                     f"productive={r['productive']}{scope})")
     else:
         cpa, watermark = cpa0, "SIMULATED"
         prov_line = (f"SIMULATED ({a.name} model, selftest PASS -- NO per-case hardware) "
                      f"conflicts/access = {cpa0:.2f}  (BC={r['BC']}, IDX={r['IDX']}, "
-                     f"productive={r['productive']})")
+                     f"productive={r['productive']}{scope})")
     suptitle = (
         f"{kernel_label} {operand_label}-store LDS bank conflict  ({wtag}, {macro_label}, "
         f"{a.name} NB={a.NB})\nK-alias: LDS row stride = {per_dword * (tile_free + subject_pad)} "

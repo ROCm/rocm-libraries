@@ -296,3 +296,125 @@ def test_lds_read_flow_gains_a_no_box_reorder_panel():
     assert "interleave_idx(" in final.transform               # DERIVED reorder arrow, not a bare string
     assert final.box_lines() and final.box_lines()[0].startswith("src:")   # the ONE box, on the requested panel
     assert final.info and "v_perm" in final.info[0]           # the cost is stated on the panel
+
+
+# --------------------------------------------------------------------------------------------------
+# Selection + routing are DERIVED from the recorded graph, never from POSITION or node kind.
+# --------------------------------------------------------------------------------------------------
+
+
+def _interleaved():
+    """The interleaved demo: four operand-side reorders recorded BEFORE the C-shuffle, so 'the first
+    reorder' and 'the C-shuffle' are different ops -- the shape that made a position-based pick wrong."""
+    from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import build_interleaved_gemm
+    (_k, _m), pipe = tr.record_build(build_interleaved_gemm, 256, 256, 64)
+    return pipe
+
+
+def test_select_c_shuffle_is_not_the_first_recorded_reorder():
+    """Taking the FIRST reorder picks an operand-side bridge, then captions the epilogue panel from it.
+    Selection is by reachability: the transform hanging off the combining op's OUTPUT."""
+    pipe = _interleaved()
+    reorders = [o for o in pipe.ops if o.kind in ("reorder", "cross_lane")]
+    assert len(reorders) == 5
+    chosen = ap.select_c_shuffle(pipe)
+    assert chosen.seq != reorders[0].seq            # ✗ position
+    assert chosen.seq == reorders[-1].seq           # the one produced by the MMA
+    # CRC has a single reorder, so the two agree there -- the old code passed by luck, not by rule.
+    assert ap.select_c_shuffle(_record()[2]).seq == [o.seq for o in _record()[2].ops
+                                                     if o.kind == "reorder"][0]
+
+
+def test_select_c_shuffle_survives_a_broken_store_chain():
+    """When the epilogue's elementwise combine is not a recorded verb the SSA chain reorder -> store is
+    ABSENT, so forward reach finds nothing. BACKWARD reach (produced by a combining op) still identifies
+    it -- that recorded mma -> reorder edge is the definition of an epilogue transform."""
+    from rocke.tests.helpers.tiling.visualization.test_block_diagram import _rmw_recording
+    pipe = _rmw_recording()
+    assert ap.select_c_shuffle(pipe).seq == 1
+
+
+def test_select_c_shuffle_refuses_rather_than_guesses():
+    """No candidate at all -> raise, naming what was searched. Never fall through to a panel."""
+    import types
+    empty = types.SimpleNamespace(nodes=[], transactions=[], ops=[], spaces={}, lds_spaces=lambda: [])
+    with pytest.raises(ap.EpilogueSelectionError, match="cannot identify the C-shuffle"):
+        ap.select_c_shuffle(empty)
+
+
+def test_epilogue_refuses_an_unknown_classification(monkeypatch, tmp_path):
+    """The `/layout-viz` rule: an `unknown` classification must STOP AND ASK. It must NEVER collapse into
+    the DIRECT branch, whose caption CLAIMS 'native == store order'."""
+    from rocke.helpers.tiling.visualization import kernel_stages as ks
+    monkeypatch.setattr(ap, "classify_epilogue", None, raising=False)
+    monkeypatch.setattr(ks, "classify_epilogue", lambda *_a, **_k: ("unknown", "forced"))
+    with pytest.raises(ap.EpilogueSelectionError, match="unknown"):
+        ap.view(_record()[2], flow="epilogue", out_path=str(tmp_path / "e.png"))
+
+
+def test_operand_bridge_joins_its_operand_flow_not_the_epilogue():
+    """A transform INHERITS THE ROLE OF ITS PRODUCER -- it is the price of the hop that produced its
+    input. The demo's global-load-side bridges join `prefetch`; only the MMA-fed one is `epilogue`.
+    Routing every transform to `epilogue` by node kind swallowed four of five."""
+    flows = {(f.role, f.lane): f for f in ap.segment_flows(_interleaved())}
+    assert set(flows[("prefetch", "A")].seqs) >= {3}      # the A coop-store bridge, with its own operand
+    assert set(flows[("prefetch", "B")].seqs) >= {4}
+    epi = flows[("epilogue", "C")]
+    assert len(epi.seqs) == 2                             # the C-shuffle + the global store, nothing else
+
+
+def test_rmw_read_is_folded_into_the_epilogue_not_left_an_orphan_copy():
+    """A global load from a space this recording also STORES is the epilogue's read-modify-write input.
+    Left as a `copy` it segmented into a lone orphan flow with its own panel."""
+    from rocke.tests.helpers.tiling.visualization.test_block_diagram import _rmw_recording
+    flows = ap.segment_flows(_rmw_recording())
+    assert all(f.role != "copy" for f in flows)
+    assert set(next(f for f in flows if f.role == "epilogue").seqs) == {1, 2, 3}
+
+
+# --------------------------------------------------------------------------------------------------
+# Cooperative partition: WHICH axis the waves split is DERIVED, never assumed to be the free dim.
+# --------------------------------------------------------------------------------------------------
+
+
+def _coop(split, tile_free=256, tile_k=32, n_waves=8, vw=8):
+    """A cooperative (free, K) macro-load descriptor whose ``n_waves`` waves split ``split`` ("K" or the
+    free dim). Each lane still takes ``vw`` contiguous free elements; only which axis carries `wave_dist`
+    differs, so the two cases are otherwise identical."""
+    from rocke.helpers.tiling import make_tile_desc
+    free_lanes = tile_free // vw if split == "K" else tile_free // (vw * n_waves)
+    k_lanes = 64 // free_lanes
+    wave_dist = [1, n_waves] if split == "K" else [n_waves, 1]
+    return make_tile_desc(
+        shape=[tile_free, tile_k], thread_tile=[vw, 1], thread_dist=[free_lanes, k_lanes],
+        thread_order=[1, 0], block_repeat=[1, tile_k // (k_lanes * (n_waves if split == "K" else 1))],
+        wave_dist=wave_dist, wave_size=64)
+
+
+def test_coop_partition_derives_the_split_axis_both_ways():
+    """`wave_dist=[1, n_waves]` splits K with every wave covering the FULL free extent; `[n_waves, 1]`
+    splits the free dim. The old rule -- 'the free axis is the one with the smaller per-wave span' --
+    silently assumed the second, so the first came out with its two axes swapped."""
+    k_split = ap.coop_partition(_coop("K"), n_waves=8, wave_size=64, axis_names=("M", "K"))
+    assert k_split["split"] == ["K"] and k_split["covered"] == ["M"]
+    assert k_split["axes"]["M"]["extent"] == 256 and k_split["axes"]["K"]["extent"] == 32
+    free_split = ap.coop_partition(_coop("free"), n_waves=8, wave_size=64, axis_names=("M", "K"))
+    assert free_split["split"] == ["M"] and free_split["covered"] == ["K"]
+
+
+def test_wave_footprint_is_the_real_coordinate_set():
+    """Wave w of a K-splitting fetch touches a NON-CONTIGUOUS K set and the whole free extent."""
+    part = ap.coop_partition(_coop("K"), n_waves=8, wave_size=64, axis_names=("M", "K"))
+    fp = ap.wave_footprint(part, 0)
+    assert fp["K"] == (0, 1, 16, 17)                       # ✗ not the range 0..17
+    assert fp["M"] == tuple(range(256))
+    note = ap._coop_note(part, 0)
+    assert note == "K{0,1,16,17} x full M[0:256]"
+    assert "[0:18]" not in note                            # the extent that never existed
+
+
+def test_fmt_footprint_never_ranges_a_noncontiguous_set():
+    """A range over a gapped set invents coordinates the wave never touches."""
+    assert ap._fmt_footprint("K", (0, 1, 2, 3)) == "K[0:4]"          # contiguous -> a range
+    assert ap._fmt_footprint("K", (0, 1, 16, 17)) == "K{0,1,16,17}"  # gapped -> the set
+    assert ap._fmt_footprint("M", tuple(range(12))) == "M[0:12]"

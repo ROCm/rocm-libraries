@@ -9,8 +9,9 @@ argument-hint: <atom/tile spec or encoding> [view] [knobs]
 You are the **hands** that drive the tiling viz tools; the **MMA Kernel Expert** is the **brain** you dispatch
 for every layout decision (WHICH distribution/encoding). Render what the expert/user specifies, **VERIFY in
 code that the render matches the request before showing it**, then read each diagnostic back in plain language.
-✗ Never invent a distribution or default to canonical. If under-specified or a result is odd, STOP and consult
-the expert or ask the user (`../shared/prerequisites.md`, "Consult, Don't Improvise").
+✗ Never invent a distribution, a VIEW, or a view LIST — and never default to canonical. If under-specified or
+a result is odd, STOP and consult the expert or ask the user (`../shared/prerequisites.md`, "Consult, Don't
+Improvise").
 
 ## Which path? (pick ONE front door)
 
@@ -21,6 +22,14 @@ the expert or ask the user (`../shared/prerequisites.md`, "Consult, Don't Improv
   **Task patterns**.
 - **"Is X a bank conflict / how many / why?"** → NOT here → **`/bank-conflict`** (empirical: rocprof + a
   validated simulator).
+
+**Before ANY render: is there a RECORDING?** Workflow A, every L0/L1 view and every sweep runs off
+`record_build(build_fn, …)` — a real kernel or a skeleton. **No recording ⇒ the sweep is UNAVAILABLE.**
+That is a STOP, not a cue to improvise: say so, and send the caller to author the skeleton
+(`/rocke-tiling-api` Design&Emit) — a skeleton suffices, it need not be the finished kernel.
+✗ NEVER substitute hand-picked Workflow B panels for an unavailable sweep. A pile of individually-correct
+panels is not a sweep — it is a different artifact wearing the sweep's name, and it silently hides which
+stages were never looked at.
 
 ## What this skill can do
 
@@ -127,8 +136,16 @@ token (`_w<N>` / `_macro`) is the ONLY in-file config bit.
 Otherwise ✗ do NOT invent a path — ASK where to write (suggest `helpers/tiling/tmp/<sweep>/` per the temp-file
 policy). Run the two gates first; offer cleanup at the end.
 
-## Workflow B — single hand-specified view
+## Workflow B — ONE hand-specified view (the cardinality IS the rule)
 
+**B renders ONE view, named by the requester.** Two or three explicitly-named panels are still B — run them
+one at a time. **A LIST is the smell:** if you are composing a *set* of views, you are hand-building a sweep.
+STOP — use A, or report the sweep unavailable (above).
+
+0. **CONSENT — the view list is NOT yours.** The requester (the user, or the architect) names the view.
+   ✗ NEVER compose, extend, or "round out" the set yourself — not a companion panel, not an extra angle,
+   not a counterfactual you think would help. Something looks missing ⇒ ASK, name it and why, and wait.
+   Inventing a VIEW is the same failure as inventing a DISTRIBUTION and is forbidden on the same terms.
 1. **Settle the output dir FIRST** (reuse the session dir; if ambiguous, ✗ never pick silently — ASK).
 2. **Parse** — atom/tile spec (or a raw encoding/forward-map), which A/B/C dists, which view, knobs, optional
    trace `(m,k)×(n,k)`. An unpinned "interleaved" is a GAP — ✗ don't default to canonical; get the concrete

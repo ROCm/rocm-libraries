@@ -100,3 +100,98 @@ def test_accumulator_carry_is_bridged_not_value_chained():
     blocks, _lo, _hi = bd.extract_blocks(_record())
     assert bd._acc_bridge(blocks) == [(0, 9), (9, 14)]
     assert (0, 9) not in set(bd._dataflow_edges(blocks))    # bridged, not a Value edge (no double-draw)
+
+
+# --------------------------------------------------------------------------------------------------
+# Captions are DERIVED from the recording -- regression cover for the hardcoded-caption defects.
+# Every assertion below is a caption that USED to be a fixed string asserting something false.
+# --------------------------------------------------------------------------------------------------
+
+
+def _interleaved():
+    """The interleaved demo: an N-stride-1 C (the opposite major to CRC) AND four operand-side reorders
+    ahead of the C-shuffle -- the two shapes a hardcoded caption got wrong."""
+    from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import build_interleaved_gemm
+    (_k, _m), pipe = tr.record_build(build_interleaved_gemm, 256, 256, 64)
+    return pipe
+
+
+def test_global_store_caption_names_the_recorded_stride1_axis():
+    """The global-store sublabel is DERIVED from the recorded strides, so the two kernels -- whose C
+    tensors have OPPOSITE contiguous axes -- get opposite captions. A hardcoded "col-major (M-contig)"
+    was right for one and asserted the exact opposite of the other's recorded strides."""
+    for pipe, want in ((_record(), "M stride-1 (contiguous)"),        # CRC   C (M,N) strides (1, ldc)
+                       (_interleaved(), "N stride-1 (contiguous)")):  # demo  C (M,N) strides (ldc, 1)
+        store = next(b for b in bd.extract_blocks(pipe)[0]
+                     if b.space == "global" and b.kind == "store")
+        assert store.sublabel == want
+
+
+def test_no_caption_claims_a_major():
+    """A "row-major"/"col-major" word names a DIFFERENT physical axis for each of A/B/C, which is how the
+    wrong caption survived. The stride-1 axis is the whole fact -- no major word may reappear."""
+    for pipe in (_record(), _interleaved()):
+        text = " ".join(b.label + " " + b.sublabel for b in bd.extract_blocks(pipe)[0]).lower()
+        assert "major" not in text and "contig)" not in text.replace("(contiguous)", "")
+
+
+def test_operand_bridges_are_not_labelled_c_epilogue():
+    """A transform takes the lane of the node that PRODUCED its input, and is captioned by what it
+    BRIDGES. The demo's four operand-side reorders are A/B work; only the transform hanging off the MMA
+    is the C-shuffle. Captioning every reorder "(C epilogue)" mislabelled four of five."""
+    blocks = {b.seq: b for b in bd.extract_blocks(_interleaved())[0]}
+    reorders = [b for b in blocks.values() if b.kind == "reorder"]
+    assert len(reorders) == 5
+    operand = [b for b in reorders if b.lane in ("A", "B")]
+    assert len(operand) == 4 and {b.lane for b in operand} == {"A", "B"}
+    assert all("C" not in b.label + b.sublabel for b in operand)   # ✗ never "(C epilogue)" on an A/B bridge
+    c_shuffle = [b for b in reorders if b.lane == "C"]
+    assert len(c_shuffle) == 1
+    assert (c_shuffle[0].label, c_shuffle[0].sublabel) == ("reorder C", "-> store order")
+
+
+def test_epilogue_reread_is_not_captioned_a_prefetch():
+    """A global load is a staging PREFETCH only if it reaches an LDS store. A load from a space this
+    recording also STORES is the read-modify-write input (an epilogue re-reading its own output tile) --
+    captioning it "prefetch k=0" claimed a staging role it does not have."""
+    pipe = _rmw_recording()
+    blocks = {b.seq: b for b in bd.extract_blocks(pipe)[0]}
+    assert blocks[2].sublabel == "read-modify-write input"
+    assert "prefetch" not in blocks[2].sublabel
+    assert bd.rmw_spaces(pipe.nodes) == {9}
+
+
+def test_ambiguous_strides_state_the_raw_fact_rather_than_guess():
+    """No unique stride-1 axis -> print the recorded strides, never invent a contiguous axis."""
+    import types
+    node = types.SimpleNamespace(strides=(4, 8), tile_desc=types.SimpleNamespace(shape=(4, 4)))
+    assert bd._stride1_caption(node, ("M", "N")) == "strides (4, 8)"
+
+
+def _rmw_recording():
+    """A minimal READ-MODIFY-WRITE epilogue recording, built from the committed descriptor API (no kernel
+    needed): combine -> transform -> [unrecorded elementwise] -> global store, with a global LOAD from the
+    SAME space the store targets. The transform -> store SSA chain is deliberately BROKEN, because that is
+    exactly what a kernel whose elementwise epilogue bypasses the recorded verbs produces."""
+    import types
+
+    from rocke.helpers.tiling import make_tile_desc
+
+    td = make_tile_desc(shape=[8, 8], thread_tile=[1, 1], thread_dist=[8, 8], wave_size=64)
+
+    def node(seq, kind, **kw):
+        base = dict(seq=seq, kind=kind, space="reg", space_name="", space_id=None, origin=None,
+                    produces=None, consumes=(), strides=None, tile_desc=None, tgt_enc=None,
+                    dtype_name="f32")
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    nodes = [node(0, "mma", produces=100),
+             node(1, "reorder", produces=101, consumes=(100,), tgt_enc=td.layout),
+             node(2, "load", space="global", space_name="%C", space_id=9, produces=102,
+                  strides=(8, 1), tile_desc=td),
+             node(3, "store", space="global", space_name="%C", space_id=9, consumes=(999,),
+                  strides=(8, 1), tile_desc=td)]
+    ops = [n for n in nodes if n.kind in ("mma", "reorder")]
+    return types.SimpleNamespace(nodes=nodes, transactions=[n for n in nodes if n.kind in ("load", "store")],
+                                 ops=ops, spaces={9: "%C"}, lds_spaces=lambda: [])

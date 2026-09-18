@@ -81,6 +81,45 @@ Emit these as explicit directives; consume their results and iterate.
 5. **Author** the kernel in IRBuilder + the tiling API; keep it bit-exact (integer inputs vs a numpy golden).
 6. **Propose API gaps** — see below.
 
+**Sizing the macro tile: LDS footprint CAN outrank arithmetic intensity — treat it as a knob, not a derivation.**
+A larger macro tile raises reuse per byte, but its LDS cost lowers workgroups/CU and so removes the latency
+hiding that keeps the matrix pipe fed. These pull in OPPOSITE directions and neither wins a priori. Do NOT
+derive a macro tile from arithmetic intensity alone and present it as settled — that reasoning has justified a
+tile that later measured well off the best. Put the macro tile, `tile_k`, the wave split, the cooperative-load
+width and the MMA atom in the **Knobs** table, enumerate which combinations BUILD, FIT the LDS budget, **and
+divide the problem shape** (cheap, CPU-only) before spending GPU time, then sweep. That third test is not
+optional: a knob passing the first two can still be arithmetically invalid for this M/N/K, and without edge
+predication that failure is SILENT.
+For example, on one GEMM the best config sat at the smallest footprint **swept**, but the ordering was **not monotonic**
+in footprint — a mid-size footprint measured worst of all, below one twice its size, and the spread from worst
+to best footprint was roughly a THIRD of the achieved throughput. So it is first-order, not a last-percent
+polish — sweep it early. And the non-monotonicity is the point: footprint is a knob with a non-obvious
+optimum, not a gradient to descend. Note also what was NOT
+swept; a superlative like "the smallest that factors" is earned only by enumerating that region, and it is easy
+to assert it over a region you never visited. The transferable part is the **shape of the trade**, not its
+outcome.
+
+**Sweep disciplines — most of these were learned by being wrong:**
+- **Sweep, don't substitute a derivation for a measurement.** A correctly-derived single-config recommendation
+  has lost to the sweep more than once — including one that was right about its own mechanism and still slowest.
+- **A conclusion can be conditional on another knob.** A wave-split ranking established at one macro tile did
+  not carry to another: the split that was the live question at a large tile was not the winner at the small
+  one. When a knob changes, re-sweep the neighbourhood rather than carrying the old ranking forward.
+- **Two different designs landing on the SAME number is evidence of a shared limit** — go profile it rather
+  than continuing to tune either one. (Levers aimed at one bottleneck may also fail to stack, so measure a
+  combination before assuming it adds; the supported half of this bullet is the shared-limit reading.)
+- **Coupled knobs are not predictable, and that is the ARGUMENT FOR making them knobs.** Atom, macro tile,
+  `tile_k`, wave split and load width interact through occupancy, issue slots, bank maps and per-lane run
+  widths at once. Nobody derives that lattice correctly in advance — so the deliverable is not a predicted
+  winner, it is a parameterised builder plus a swept table. When you cannot predict, EXPOSE and SWEEP; reserve
+  derivation for pruning the space (what BUILDS, FITS and is VALID), not for picking the answer inside it.
+- **A timing-only sweep cannot detect an invalid config.** A benchmark path with synthetic inputs and no
+  verification will happily time a kernel reading out of bounds or computing the wrong extent: it reports a
+  number, not a fault, and a config doing slightly too much work looks slightly FAST. **Verify each config once
+  at a small shape before trusting any of its timings**, and put every validity guard in the builder that all
+  paths share, never in one caller. Guard ordering matters: the guards whose absence yields a WRONG ANSWER
+  rather than an exception must come first, ahead of anything that can raise for another reason.
+
 ### Unknown algorithms — LEARN and PERSIST (your standing duty)
 You are open to **any** algorithm, not just GEMM. When the problem is one we haven't tiled before:
 - **Offer to learn it.** Work it through *with the user*: derive its data-movement + compute structure, its

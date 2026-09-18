@@ -82,7 +82,9 @@ that is WHY it is cheap (and why non-adjacent registers / multiple atoms never i
 **Thread-tile transpose.** Each thread owns a rectangular 2-D patch (A M×K, B N×K, C M×N), vectorizable two
 ways; switching is a pure **in-register reorder** (no re-load, no cross-lane). **MMA-ready = K-vectorize both**
 (A run = fixed M, K running; B = fixed N, K running). Load coalesced along the contiguous axis, reach MMA-ready
-by transpose. **Never strided-load to avoid a reorder** — wide load + cheap reorder wins. That reorder is the
+by transpose. **Default to the wide load and pay the reorder; deviate only to repair a bank map, and measure it.** The
+mechanism and its exception live under "Putting K on the LDS stride-1 axis" in Hard-won heuristics — that
+bullet is the single home; this line is the directive. That reorder is the
 **price of the wide coalesced load**, priced on the §7a cost ladder and DERIVED per case
 (`transforms.reorder_between` → `classify_transform`/`name_permutation`; `/layout-viz` draws it as an explicit
 reg→reg stage) — never hardcoded, subordinate to the binding stage. C is interleaved too;
@@ -122,10 +124,42 @@ cheap. **Tier: free-symmetry(free) < `reorder` dword-aligned < `reorder` sub-dwo
 **Interleaved thread-tile knobs (`DPT×KPT`; DPT = free-dim atoms, KPT = `k_ab_per_lane·k_iter`).** Restrictions:
 the **tile is an integer multiple of the atom** (`m/n/k_iter ∈ ℤ⁺`, not power-of-2); the **VECTOR width** is
 where power-of-2 ≤ 128-bit applies (`VW ∈ {1,2,4} dwords`); `interleave_idx<1,KPT,DPT·KPT>` (the in-register
-transpose) needs `gather==1`; **in-register interleave / C de-interleave needs the 16×16 atom** (32×32 accum,
-f64, RDNA go cross-lane — flag them); soundness needs `A.K==B.K` (holds for any tile shape — **no square-only
-restriction**); C de-interleave stays in-register only if the derived C's per-lane ownership is a rectangular
-M×N tile. **C de-interleave is INTRA-LANE:** gathering a lane's M-contiguous C values into an aligned register
+transpose) needs `gather==1`; soundness needs `A.K==B.K` (holds for any tile shape — **no square-only
+restriction**); C de-interleave stays in-register as long as the derived C's per-lane ownership is a set of
+**congruent, evenly-spaced patches** — one patch is the easy case, not the requirement. **A multi-patch
+accumulator (32×32 and anything like it) is therefore NOT disqualified from an interleaved layout.** How to
+construct it, for any atom on any arch:
+  0. **Precondition, check it first:** `R · atom.mn == wave_size`. The free-axis lane level and the N lane
+     level must multiply to exactly one wave — that arithmetic is the whole reason the bijection validator
+     passes at rank 2. Fail-fast on it; an atom that breaks it builds a silently wrong lane map.
+  1. Read the accumulator's shape from the traits SSOT: patches per lane `P` = `CMN`, lane-rows `R` = `M/CM`,
+     inner run `V` = `CM/CMN`. Never hand-type them; a new atom or arch then needs no new table.
+  2. Factor the free axis into levels `(P, R, V, free_sub)`. Send `R` to the **lane**, and `P`, `V`,
+     `free_sub` to **registers**. Every level claimed exactly once satisfies the bijection validator at rank 2
+     — no unmerge is needed *for the accumulator descriptor itself*. (An epilogue that CHUNKS the accumulator
+     still needs one: the chunk's rank-3 form is what carries the lane level's place value in a tensor stride.)
+  3. Confirm against `derive_c_distribution` (ground truth) slot-by-slot, then `classify_transform` the
+     C-shuffle against the SAME lane's store order.
+  A single-patch atom is the `P == 1` degenerate case of this same construction, so one code path covers both.
+  Where this has been run it came out sound with **zero** `cross_lane` in the chain — an encoding property, so
+  the *constructibility* should transfer; re-derive rather than assume, especially on a different wave size.
+  Whether a bigger atom is FASTER is a separate, per-kernel question — for example, on one GEMM it **won (+8%),
+  tied, AND lost (−5%)** at different configs of that same kernel. It is a KNOB; sweep it, never assume it
+  either way, and re-sweep the neighbouring knobs when you change it (a wave-split ordering can inverse).
+  **The arithmetic behind the losses, which DOES transfer:** every free-dim-vectorised stage gets a per-lane
+  contiguous run of `wave_free / atom.mn` elements — so at a FIXED wave tile, doubling the atom HALVES the
+  LDS-read width and the C-store width together. Push it to one atom across a free axis and that stage
+  degenerates to **one element per lane** — i.e. a single-element access whose width is just the dtype's size,
+  on the operand read AND the C traffic, not merely a narrower C. Size the wave tile with the atom, not after
+  it.
+  Structural constraints that bind: the wave tile must be a whole number of atoms on BOTH free axes, and
+  `tile_k` must be a multiple of the atom's K.
+  **Check the operand precondition PER ROW; it is not implied by the wave size.** `free_lanes·k_lanes ==
+  wave_size` fails exactly when a lane holds the atom's whole K (`ABK == K`, so `k_lanes == 1` and K is not
+  spread across lanes) — the gfx11-era `wmma_*_16x16x16_*_w32` family is the known-failing set. Most dense
+  wave32 rows PASS it, and no dense wave64 row fails, so "wave32 doesn't work" is false; scan the catalogue
+  instead. (The accumulator-side precondition in step 0 holds for every dense square row, so the two do not
+  fail together.) **f64 is untested by this construction — re-derive before assuming.** **C de-interleave is INTRA-LANE:** gathering a lane's M-contiguous C values into an aligned register
 quad is register-moves-only **even when the 4 values come from 4 different atoms** (non-adjacent registers).
 Non-adjacent registers ≠ different lanes; it is cross-lane ONLY if the target re-owns lanes.
 
@@ -135,7 +169,7 @@ Both describe how LABELS flow relative to the machine (NOT the vectorization axi
 label == position; direct, no derivation/free-symmetry; but locked to native placement (a store-friendly layout can
 force strided/cross-lane). **Interleaved**: you choose which label rides each slot (label ≠ position, derived)
 to serve coalescing/reuse/store — pays a dtype-graded reorder unless a symmetry makes it free. **Interleaved
-hallmark:** lane owns a contiguous rectangular patch → register order ≠ canonical (the structured transpose to
+hallmark:** lane owns one or more congruent, evenly-spaced patches → register order ≠ canonical (the transpose to
 the other vectorization axis) → that transpose is `reorder` not `cross_lane` (`classify_transform` confirms).
 This is the IN-THREAD transpose (same lane, other vectorization axis) — **not** the canonical↔interleaved
 *lane-ownership* bridge across a multi-atom wave tile, which re-owns lanes and IS `cross_lane` (or free via the
@@ -168,8 +202,31 @@ transition? + bit-exact.
   emit Cᵀ, reposition back). To SHOW it: `/layout-viz` coalescing view.
 - **The objective has a zero point** — when global-contiguous, LDS-bank, and MMA-K axes align (directly or via
   a free symmetry), transform cost AND conflict → ~0 and that chain wins outright. Recognize it and stop.
+- **Putting K on the LDS stride-1 axis has a structural cost — price it, don't assume it either way.** The
+  free dim is the axis along which the lanes of a K-group are consecutive. Put K there instead and the free dim
+  becomes a strided row index whose lane step is the per-lane tile width, capping reachable banks at
+  `NB / gcd(dwords(DPT·row_stride), NB)`. **Convert the PRODUCT to dwords, not each term** — dividing both by
+  the pack factor divides by it twice and gives the wrong answer. A pad DOES help: it changes `row_stride`, and
+  recovers the reach to at best `NB / gcd(DPT/pack, NB)` — `DPT` in dwords again, so at a packed dtype the
+  recovery is BETTER than the element count suggests (f16 with a 2-element per-lane width reaches all `NB`
+  banks, not half). What no pad removes is the per-lane width in dwords. This is arithmetic and transfers; what it COSTS does
+  not. So treat the in-register operand bridge as the price of keeping the free dim stride-1, and check whether
+  that price is hidden before trying to remove it.
+  *For example, on one GEMM (f16, 16×16×16, interleaved, free-dim-contiguous operands):* moving the
+  transpose into LDS addressing was sound, bit-exact and cost zero `v_perm` — and lost by ~3×, because the
+  transpose reappeared as LDS cycles on the READ side, which carried several times the per-lane traffic of the
+  store side. That ratio is a property of that kernel's read:store traffic, not a constant — re-derive it.
+  (Supersedes the older "never narrow the load to dodge the reorder", which gave the right answer for the wrong
+  reason and would wrongly veto a narrowing that fixes a bank map — see the LDS Expert's load-width lever.)
 - **Calibrate, don't assume** — cost coefficients come from sweeps vs measured bandwidth + bit-exact. "It
   doesn't look canonical" is not evidence; the GPU arbitrates.
+- **An instruction-count ledger is a weak predictor ACROSS pipes.** MFMA, VALU and LDS contend for different
+  resources, so "more instructions" on one does not imply slower. State which pipe each count lands on, and let
+  a measurement decide. *For example, on one GEMM at a fixed 128x128 tile / wave 64x64 / tile_k=16 / widest derived load width —
+  and the sign INVERTS at a narrower pinned width, so quote the whole config or the example is not
+  reproducible — where the bigger atom HALVED the MFMA issue count rather than trading one-for-one:* the
+  ledger predicted
+  a 5-15% loss and it instead won ~3% — the longer MFMA cast a wider shadow and the extra reads fit inside it. The lesson is the failure mode of the ledger, not a rule that bigger atoms win.
 
 ### Output Format
 

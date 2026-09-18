@@ -96,6 +96,141 @@ def test_the_two_predictors_split_by_design_do_not_try_to_unify_them():
     assert lc.is_conflict_free(FIX_STRIDE_DW, WTAG, a, pad0_depth=DEPTH16), "stripe rule IS the fix oracle (== GPU)"
 
 
+# --------------------------------------------------------------------------------------------------
+# MULTI-INSTRUCTION stores (`op_fanout > 1`). The emit issues one hardware op per `vw` registers, so a
+# descriptor with `register_count > vw` is SEVERAL `ds_write_*`. `simulate_hist` is a PER-INSTRUCTION
+# predictor (lds_banks.md 1.4), so `simulate` must price each instruction on its own histograms and its
+# own footprint and SUM -- the way `analyze_read` already does. Folding every phase of every
+# instruction into one pseudo-instruction and taking the per-half-wave MAX silently drops every
+# instruction after the first (MAX of N equal-cost instructions == one of them) while the footprint
+# still counts them all, which under-reports the conflict -- to 0.00 for an evenly-costed 2-op store.
+# This regime had NO coverage: every corpus row goes through `simulate_hist` with a hand-built
+# single-instruction histogram, and every descriptor any test or probe ever measured has op_fanout 1.
+# --------------------------------------------------------------------------------------------------
+def _coop_store(tile_free, tile_k, n_waves):
+    """The LDS store descriptor (K, free) for a coop band -- `n_waves` sets the registers per lane and
+    therefore the op fan-out (fewer waves -> each wave carries more of the tile -> more store ops)."""
+    return _transpose_desc(_macro_coop_descs_crc(tile_free, tile_k, n_waves))
+
+
+def _sim(store_desc, strides):
+    acc, _vw, _datum = lc.store_datum(store_desc, strides[0], lc.GFX90A, strides, "f16",
+                                      origin=(0, 0), lds_swizzle=False)
+    return lc.simulate(acc, arch=lc.GFX90A, dtype_bytes=2)
+
+
+def test_a_two_instruction_store_counts_BOTH_instructions():
+    """op_fanout 2 vs 1 at the SAME physical geometry (same tile, same width, same K-alias depth): the
+    two-op store does exactly TWICE the work -- twice the served cycles AND twice the productive floor
+    -- so `conflicts/access`, a RATIO, is unchanged. The folded model returned IDX 32 / BC 16 for the
+    two-op case (one instruction's served cycles against two instructions' footprint) and so reported
+    1.0 where the hardware-anchored per-instruction rule says 3.0."""
+    one = _sim(_coop_store(256, 32, 16), (256, 1))       # regcount 8 == vw -> 1 x ds_write_b128
+    two = _sim(_coop_store(256, 32, 8), (256, 1))        # regcount 16     -> 2 x ds_write_b128
+
+    assert one["n_instr"] == 1 and two["n_instr"] == 2
+    for key in ("IDX", "BC", "productive"):
+        assert two[key] == 2 * one[key], f"{key}: two-op store must not collapse onto one instruction"
+    assert two["conflicts_per_access"] == pytest.approx(one["conflicts_per_access"], abs=1e-9)
+    assert two["conflicts_per_access"] == pytest.approx(3.0, abs=1e-9)
+    assert two["per_instruction_max_depth"] == [DEPTH16, DEPTH16]
+
+
+def test_a_single_instruction_store_is_numerically_untouched():
+    """The guard on the fix: op_fanout 1 is the regime every measurement was taken in, so it must come
+    out bit-identical. These are the GPU-confirmed numbers for the depth-16 b128 A store."""
+    one = _sim(_coop_store(256, 32, 16), (256, 1))
+    assert (one["IDX"], one["BC"], one["productive"]) == (32, 24, 8)
+    assert one["conflicts_per_access"] == pytest.approx(3.0, abs=1e-9)
+
+
+def test_simulate_agrees_with_the_per_instruction_predictor_instruction_by_instruction():
+    """The CONTRACT, stated against the authoritative predictor rather than a copied number:
+    `simulate` over a multi-op address map must equal `simulate_hist` applied to each instruction's own
+    histograms and own footprint, summed. `simulate_hist` is what `selftest` validates against rocprof,
+    so this ties the multi-op path to the measured corpus instead of to itself."""
+    strides = (256, 1)
+    desc = _coop_store(256, 32, 8)
+    acc, vw, _datum = lc.store_datum(desc, strides[0], lc.GFX90A, strides, "f16", origin=(0, 0),
+                                     lds_swizzle=False)
+    r = lc.simulate(acc, arch=lc.GFX90A, dtype_bytes=2)
+
+    by_op = {}
+    for ac in acc:                                   # reg0 identifies the hardware op
+        by_op.setdefault(ac["reg0"], []).append(ac)
+    assert len(by_op) == r["n_instr"] == 2
+
+    total = {"IDX": 0, "BC": 0, "productive": 0}
+    for ops in by_op.values():
+        hists, footprint = {}, set()
+        for hw in (0, 32):
+            for ph in range(vw // 2):                # f16: 2 elems per dword
+                seen = {}
+                for ac in ops:
+                    if not hw <= ac["lane"] < hw + lc.GFX90A.HALF:
+                        continue
+                    d = ac["base"] // 2 + ph
+                    footprint.add(d)
+                    seen.setdefault(d % lc.GFX90A.NB, set()).add(d)
+                hists[(hw, ph)] = {b: len(s) for b, s in seen.items()}
+        per = lc.simulate_hist(hists, len(footprint), lc.GFX90A)
+        for k in total:
+            total[k] += per[k]
+    assert {k: r[k] for k in total} == total
+
+
+def test_the_two_op_arithmetic_lands_on_a_measured_corpus_row():
+    """The hardware anchor, free of any descriptor: a b128 instruction over 8 banks at max_depth 4 with
+    a 256-dword footprint is a ROW OF THE ROCPROF CORPUS (IDX 16, BC 8 -> 1.00 conflicts/access). Two
+    such instructions must still be 1.00 -- 32 served cycles against a productive floor of 16. The
+    folded model produced 16 and 16, i.e. 0.00, which is the shape of the defect this pins."""
+    row = [r for r in lc._VALIDATION_CORPUS["gfx90a"]["hists"]
+           if r[1:] == (8, 4, 4, 256, 16, 8)]
+    assert row, "the anchoring measured row is gone from the corpus"
+    per = lc.simulate_hist(lc._uniform(8, 4, 2, 4), 256, lc.GFX90A)
+    assert (per["IDX"], per["BC"], per["productive"]) == (16, 8, 8)
+    idx, bc, prod = 2 * per["IDX"], 2 * per["BC"], 2 * per["productive"]
+    assert (idx, bc, prod) == (32, 16, 16) and bc / prod == pytest.approx(1.0, abs=1e-9)
+
+
+def test_store_datum_does_not_let_the_second_instruction_overwrite_the_first():
+    """The address map numbers phases per LANE, continuing across the lane's ops, so a two-op store has
+    2 x (dwords per op) phases. Restarting at 0 per op made op 1 overwrite op 0's entries, and every
+    consumer of the map -- `_locate_collision`, the 3-panel renderer -- then analyzed the LAST
+    instruction while labelling the figure with the whole store."""
+    strides = (256, 1)
+    _acc, vw, two = lc.store_datum(_coop_store(256, 32, 8), strides[0], lc.GFX90A, strides, "f16",
+                                   origin=(0, 0), lds_swizzle=False)
+    _acc, _vw, one = lc.store_datum(_coop_store(256, 32, 16), strides[0], lc.GFX90A, strides, "f16",
+                                    origin=(0, 0), lds_swizzle=False)
+    dwords_per_op = vw // 2
+    assert max(ph for (_l, ph) in one) + 1 == dwords_per_op
+    assert max(ph for (_l, ph) in two) + 1 == 2 * dwords_per_op, "an instruction was overwritten"
+    # op 0 occupies phases [0, dwords_per_op) and op 1 the next block -- distinct dwords, so the two
+    # instructions are both present rather than one written twice.
+    lane0 = [two[(0, ph)][2] for ph in range(2 * dwords_per_op)]
+    assert len(set(lane0)) == len(lane0)
+    assert lane0[:dwords_per_op] == [one[(0, ph)][2] for ph in range(dwords_per_op)], (
+        "phase 0..n must still be the FIRST instruction, as the renderer assumes")
+
+
+def test_analyze_store_and_the_figure_carry_the_multi_op_result(tmp_path):
+    """End to end on a two-op store: the report's conflicts/access is the per-instruction one (the
+    number the corpus validates), the report says how many instructions it summed, and the figure --
+    which draws ONE instruction -- annotates that its BC/IDX totals cover the whole store, so the two
+    scales can never be silently mixed."""
+    descs = lc.ProbeDescs(coop_native=None, coop_store=_coop_store(256, 32, 8), wave_read=None)
+    png = tmp_path / "fanout2.png"
+    rep = lc.analyze_store(descs, mode="simulate", tile_free=256, wtag=WTAG, arch=lc.GFX90A,
+                           kernel_label="T", operand_label="A", dims_label="M", tile_k=32, n_waves=8,
+                           macro_label="macro 256x256, waves 2x4, tile_k=32", strides=(256, 1),
+                           dtype_name="f16", origin=(0, 0), lds_swizzle=False, render_to=str(png))
+    assert rep.sim["n_instr"] == 2
+    assert rep.conflicts_per_access == pytest.approx(3.0, abs=1e-9)
+    assert rep.fix_pad == 16 and rep.located["nway"] == DEPTH16
+    assert png.exists() and png.stat().st_size > 0
+
+
 def test_analyze_store_runs_both_gates_end_to_end_at_depth16(tmp_path):
     """FIX 1 + FIX 2 together, on the exact tripping geometry, CPU-only: a stub `measure` returns the
     simulator's own prediction so the HW gate passes trivially, exercising recommend_pad + the render's

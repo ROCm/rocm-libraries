@@ -51,6 +51,14 @@ makes expert prose meaningful, so streaming it buries the decision.
   strides, never "row/col-major".
 - **Take expert parameters VERBATIM** into the design. If an expert contradicts a locked param, CHALLENGE it
   with the expert — never silently reconcile.
+- **Expert disagreement becomes a KNOB, not a debate.** Two experts disagreeing is normal and is not a problem
+  to adjudicate in front of the user. Resolve it in exactly two steps: (1) can a DERIVATION settle it — an
+  encoding constructed, a classifier run, an arithmetic gate? Then run it; that is the answer, and only the
+  answer is reported. (2) If nothing available settles it, **STOP arbitrating.** It becomes a **named knob**:
+  the competing values, the one test that would decide it, and a default to ship with. It enters the Knobs
+  table and Open decisions. Never run adjudication rounds between experts to break a tie that only
+  measurement can break, and never surface the exchange — the user sees a knob row, not an argument.
+  *A disagreement that survives one derivation attempt is data about the design, not a dispute to win.*
 - **Derive tool inputs from the RECORDING, never type them.** `/bank-conflict`'s config (`strides`, `origin`,
   `lds_swizzle`, `dtype_name`, `wtag`) must be pulled off the recorded transaction, exactly as
   `verify_lds_roundtrip` does. A hand-filled config is a second source of truth that drifts, and its failure
@@ -321,8 +329,18 @@ The report is the primary user-facing output; Iterate updates sections in place 
   **correctness (rung 5): <bit-exact max_abs_diff 0.0 | NOT YET PROVEN | UNVALIDATED (no target GPU)>**
   perf (rung 6): <measured | not run>
 
-### Design parameters
-| dtypes | MMA atom | macro | wave | thread | threads | waves (m×n) | buffering | LDS stride/pad/swizzle |
+### Design parameters — the CONSTANTS, and how each was concluded
+| parameter | value | how it was concluded |
+(One row per settled constant: dtypes, MMA atom, macro/wave/thread tiles, threads, waves m×n, buffering,
+ LDS stride/pad/swizzle, K-step, occupancy, grid. "How concluded" is ONE plain-English clause — the gate it
+ fell out of, the expert that derived it, or "GIVEN by the user". Not a citation, not a consult reference:
+ "forced — the only width that keeps every thread busy at both K-steps" beats "per D12/G1".)
+
+### Knobs — what is NOT settled, and what each one tests
+| knob | values | default to ship | what it would settle | what decides it |
+(Every unsettled choice lands here: a user lever, an expert disagreement no derivation could break, a
+ SIMULATED number awaiting counters. A knob is not a failure — it is the honest shape of a design whose
+ remaining questions need measurement. If this table is empty, say so explicitly.)
 
 ### Pipeline
 <pictograph: every stage, its function, the resources it uses>

@@ -352,35 +352,30 @@ class Flow:
     repr_seq: int
 
 
-def _forward_reach(edges: list[tuple[int, int]]):
-    """Return ``reach(seq) -> set`` of nodes reachable FORWARD (producer->consumer) from ``seq``."""
-    succ: dict[int, list[int]] = {}
-    for f, t in edges:
-        succ.setdefault(f, []).append(t)
-
-    def reach(seq: int) -> set[int]:
-        seen: set[int] = set()
-        stack = [seq]
-        while stack:
-            for m in succ.get(stack.pop(), []):
-                if m not in seen:
-                    seen.add(m)
-                    stack.append(m)
-        return seen
-
-    return reach
+_forward_reach = _bd.forward_reach          # ONE home for the reachability walk (block_diagram owns it)
 
 
-def _flow_role(b, *, reach, combine, gstore, lanes_feeding_compute) -> str:
+def _flow_role(b, *, reach, combine, gstore, lanes_feeding_compute, reg_src=None, rmw=frozenset()) -> str:
     """Classify one block into a generic flow role from its (space, kind) + graph reachability -- no GEMM
-    assumption. ``lanes_feeding_compute`` = the operand lanes whose LDS is read into a combining op."""
+    assumption. ``lanes_feeding_compute`` = the operand lanes whose LDS is read into a combining op;
+    ``reg_src`` maps a register op's seq to its producer's ``(kind, space)``; ``rmw`` = the global spaces
+    this recording both loads and stores."""
     sp, k = b.space, b.kind
     if k in _bd.COMBINING_OPS or k == "fill":
         return "compute"
-    if k in ("reorder", "cross_lane"):
-        return "epilogue"
     hits_combine = bool(reach(b.seq) & combine)
     hits_gstore = bool(reach(b.seq) & gstore)
+    if k in ("reorder", "cross_lane"):
+        # Route a transform by the GRAPH, never by its kind. A transform INHERITS THE ROLE OF ITS PRODUCER:
+        # it is the price of the memory hop that produced its input, not a peer stage, so it is drawn
+        # attached to that hop (an operand bridge joins its operand's `lds_read`; a coop-store bridge joins
+        # that operand's `prefetch`). The ONE exception is a transform hanging off a COMBINING op's output
+        # -- that is epilogue work. Testing the producer FIRST also keeps the C-reuse case (a finished C
+        # tile reordered to feed a downstream MMA) in the epilogue, where forward reach alone misroutes it.
+        src_kind, src_role = (reg_src or {}).get(b.seq, (None, None))
+        if src_kind in _bd.COMBINING_OPS or src_role is None:
+            return "epilogue"
+        return src_role
     if sp == "global" and k == "store":
         return "epilogue" if combine else "copy"       # a store fed by a combine is the epilogue sink
     if sp == "lds" and k == "load":
@@ -392,6 +387,14 @@ def _flow_role(b, *, reach, combine, gstore, lanes_feeding_compute) -> str:
             return "prefetch"
         if hits_combine:
             return "load"                              # direct global->register operand load (no LDS)
+        # MIGRATION MARKER. A global load from a space this recording ALSO globally stores is a
+        # read-modify-write input -- the epilogue re-reading its own output tile. It cannot be detected by
+        # reachability today because the elementwise combine that joins them (raw `vec_insert`/`fma`) is
+        # not a registered verb, so the SSA chain load -> combine -> store is absent from the recording.
+        # When an elementwise verb joins the recorder's registry (§10, one registry line) this predicate
+        # becomes redundant: the chain resolves by plain reachability and this branch can be deleted.
+        if b.space_id is not None and b.space_id in rmw:
+            return "epilogue"
         return "copy"
     return "standalone"
 
@@ -413,10 +416,24 @@ def segment_flows(pipeline: Any) -> list[Flow]:
     # lanes whose LDS is READ into a combining op -> their staging is a prefetch (else a plain copy).
     lanes_feeding_compute = {b.lane for b in blocks
                              if b.space == "lds" and b.kind == "load" and (reach(b.seq) & combine)}
+    rmw = _bd.rmw_spaces(pipeline.nodes)                # global spaces both loaded and stored (one home)
+    kw = dict(reach=reach, combine=combine, gstore=gstore,
+              lanes_feeding_compute=lanes_feeding_compute, rmw=rmw)
+    # TWO PASSES: classify the memory hops first, then let each transform INHERIT ITS PRODUCER'S role. A
+    # transform's role is not knowable from its own (space, kind) -- it is a property of the hop it prices.
+    by_seq = {b.seq: b for b in blocks}
+    producer = {b.produces: b.seq for b in blocks if b.produces is not None}
+    roles = {b.seq: _flow_role(b, **kw) for b in blocks if b.kind not in ("reorder", "cross_lane")}
+    reg_src: dict[int, tuple] = {}
+    for b in blocks:                                    # recorded order -> a chain of transforms resolves
+        if b.kind in ("reorder", "cross_lane"):
+            s = next((producer[c] for c in b.consumes if c in producer), None)
+            if s is not None:
+                reg_src[b.seq] = (by_seq[s].kind, roles.get(s))
+            roles[b.seq] = _flow_role(b, reg_src=reg_src, **kw)
     groups: dict[tuple[str, str], list[int]] = {}
     for b in blocks:
-        role = _flow_role(b, reach=reach, combine=combine, gstore=gstore,
-                          lanes_feeding_compute=lanes_feeding_compute)
+        role = roles[b.seq]
         lane = b.lane if role not in ("compute", "epilogue") else "C"
         groups.setdefault((role, lane), []).append(b.seq)
     in_loop = set(range(lo, hi + 1)) if lo is not None else set()
@@ -647,6 +664,82 @@ def _prefetch_descs(pipeline, operand, wave_size):
     return sid, store, gload, dtype, eb, n_waves, tile_free, dims
 
 
+class CoopPartitionError(RuntimeError):
+    """Raised when a cooperative fetch's per-wave coordinate sets are not a clean per-axis partition."""
+
+
+def _fmt_footprint(name: str, coords: tuple) -> str:
+    """Render a coordinate SET honestly. A contiguous run prints as a range; a NON-contiguous set prints as
+    a set. ✗ Never collapse ``{0,1,16,17}`` to ``[0:18]`` -- that invents 14 coordinates the wave never
+    touches, and reading it as an extent is how a K footprint ended up printed on the M axis."""
+    if not coords:
+        return f"{name}{{}}"
+    lo, hi = coords[0], coords[-1]
+    if list(coords) == list(range(lo, hi + 1)):
+        return f"{name}[{lo}:{hi + 1}]"
+    if len(coords) <= 8:
+        return f"{name}{{{','.join(map(str, coords))}}}"
+    return f"{name}{{{','.join(map(str, coords[:4]))},...}} ({len(coords)} values)"
+
+
+def coop_partition(desc: Any, *, n_waves: int, wave_size: int, axis_names: tuple[str, ...]) -> dict:
+    """How a COOPERATIVE fetch is divided among the waves -- DERIVED per axis from the recorded
+    distribution, never from a span heuristic.
+
+    For each axis, compare every wave's coordinate SET against the macro tile's: an axis where all waves
+    carry the full set is COVERED, an axis where they differ is SPLIT. (The old rule -- "the free axis is
+    the one with the smaller per-wave span" -- silently assumes the waves split the free dim. A kernel whose
+    ``wave_dist`` splits K instead, with every wave covering the full free extent, gets the two axes
+    swapped, and a K footprint is then printed on the M axis.)
+
+    Returns ``{"axes": {name: {"extent", "coords", "split"}}, "split": [names], "covered": [names],
+    "n_waves", "shape": (n0, n1) | None}``. ``shape`` is the wave grid over the split axes; a partition
+    whose classes are not a clean product raises :class:`CoopPartitionError` (loud, never silent)."""
+    from .kernel_stages import coop_forward_map
+
+    cm = coop_forward_map(desc, n_waves=n_waves, wave_size=wave_size)
+    nax = len(axis_names)
+    macro = [sorted({c[i] for c in cm.values()}) for i in range(nax)]
+    per_wave = [[sorted({c[i] for (t, _r), c in cm.items() if w * wave_size <= t < (w + 1) * wave_size})
+                 for i in range(nax)] for w in range(n_waves)]
+    axes, split, covered = {}, [], []
+    for i, name in enumerate(axis_names):
+        is_split = any(per_wave[w][i] != macro[i] for w in range(n_waves))
+        axes[name] = {"extent": len(macro[i]), "coords": tuple(macro[i]), "split": is_split}
+        (split if is_split else covered).append(name)
+    # the wave grid over the split axes: distinct coordinate classes per split axis must multiply out to
+    # n_waves, else the partition is irregular and there is no honest grid to draw.
+    classes = [len({tuple(per_wave[w][axis_names.index(nm)]) for w in range(n_waves)}) for nm in split]
+    shape = tuple(classes) if classes else None
+    prod = 1
+    for c in classes:
+        prod *= c
+    if classes and prod != n_waves:
+        bad = next(w for w in range(n_waves)
+                   if any(per_wave[w][i] not in (macro[i], per_wave[0][i]) for i in range(nax)))
+        raise CoopPartitionError(
+            f"cooperative fetch partition is irregular: split axes {split} give {classes} classes, which "
+            f"do not multiply to {n_waves} waves (first wave breaking the product structure: {bad}). "
+            "Refusing to draw a wave grid that does not exist.")
+    return {"axes": axes, "split": split, "covered": covered, "n_waves": n_waves, "shape": shape,
+            "per_wave": per_wave, "axis_names": axis_names}
+
+
+def wave_footprint(part: dict, wave: int) -> dict:
+    """One wave's footprint under a :func:`coop_partition`: ``{name: coords}`` per axis."""
+    names = part["axis_names"]
+    return {nm: tuple(part["per_wave"][wave][i]) for i, nm in enumerate(names)}
+
+
+def _coop_note(part: dict, wave: int) -> str:
+    """One-line, DERIVED description of what wave ``wave`` fetches: the split axes with the wave's real
+    coordinate set, and the covered axes stated as full."""
+    fp = wave_footprint(part, wave)
+    bits = [_fmt_footprint(nm, fp[nm]) for nm in part["split"]]
+    bits += [f"full {nm}[0:{part['axes'][nm]['extent']}]" for nm in part["covered"]]
+    return " x ".join(bits) if bits else "the full tile (replicated)"
+
+
 def _view_prefetch_flow(pipeline, *, operand, scope, buffer, wave, out_path):
     """PREFETCH flow: the memory-source -> memory-sink chain **global load -> LDS store** for one operand,
     rendered as global tile -> registers -> LDS banks. ``scope='wave'`` shows one wave's band (small +
@@ -657,10 +750,16 @@ def _view_prefetch_flow(pipeline, *, operand, scope, buffer, wave, out_path):
     arch, wave_size = _arch_wave(pipeline)
     sid, store, gload, dtype, eb, n_waves, tile_free, dims = _prefetch_descs(pipeline, operand, wave_size)
     tile_k = int(gload.tile_desc.shape[1])                     # coop load (free, K): the K extent
-    coop_free = tile_free // n_waves                           # one wave's free band
     where = f"all {n_waves} waves" if scope == "macro" else f"wave {wave}"
-    note = (f"full {tile_free}x{tile_k} {operand} macro tile, all {n_waves} waves" if scope == "macro"
-            else f"wave {wave}: {coop_free}x{tile_k} band of the {tile_free}x{tile_k} {operand} macro tile")
+    if scope == "macro":
+        note = f"full {tile_free}x{tile_k} {operand} macro tile, all {n_waves} waves"
+    else:
+        # DERIVE the wave's real footprint from the recorded distribution. ✗ NEVER `tile_free // n_waves`:
+        # that assumes the waves split the FREE dim, and a `wave_dist=[1, n_waves]` kernel splits K with
+        # every wave covering the full free extent -- the title then contradicts the panel beneath it.
+        part = coop_partition(gload.tile_desc, n_waves=n_waves, wave_size=wave_size,
+                              axis_names=(dims[0], dims[1]))
+        note = (f"wave {wave}: {_coop_note(part, wave)} of the {tile_free}x{tile_k} {operand} macro tile")
     pipe = flow_load_phase(
         load_desc=gload.tile_desc, store_desc=store.tile_desc, dims=dims, nbanks=_ARCH_NBANKS[arch],
         elem_bytes=eb, lds_base_bytes=buffer * tile_free * eb, dest="lds", scope=scope, macro_note=note,
@@ -693,9 +792,11 @@ def _lds_load_shade(pipeline, mma_op, operand, op_enc):
     from ..transforms import as_forward_map
 
     sid = next((s for s in pipeline.lds_spaces() if _operand_of(pipeline.spaces[s]) == operand), None)
-    rd = sid is not None and next((t for t in pipeline.transactions if t.space_id == sid and t.kind == "load"), None)
+    # REACHABILITY, not a direct edge: an operand bridge (`reorder`) between the read and the matrix
+    # instruction is exactly the case this shade exists to illustrate, so a direct test drops it silently.
+    rd = sid is not None and _read_feeding_combine(pipeline, mma_op, sid)
     st = sid is not None and next((t for t in pipeline.transactions if t.space_id == sid and t.kind == "store"), None)
-    if not rd or not st or rd.produces not in mma_op.consumes:
+    if not rd or not st:
         return None
     _, af = lds_inputs(st.tile_desc, stride=int(st.strides[0]), swizzle=st.swizzle or None)   # true layout strides
     _, af_rd = lds_inputs(rd.tile_desc, stride=int(rd.strides[0]), swizzle=rd.swizzle or None)
@@ -738,6 +839,17 @@ def _view_compute_flow(pipeline, *, lds_view, operand, wave, out_path):
                       title=f"COMPUTE flow [{dtype}->{cst.dtype_name}]: LDS read A/B -> MMA (A x B) -> C")
 
 
+def _read_feeding_combine(pipeline, mma_op, space_id):
+    """The LDS read on ``space_id`` that FEEDS ``mma_op`` -- by REACHABILITY, not by a direct
+    ``produces in consumes`` edge. A kernel that bridges its operands puts a ``reorder`` between the read
+    and the matrix instruction, so the direct test finds nothing and the readback stage silently vanishes
+    (taking the tee's A/B transaction shading with it). Reachability covers both shapes."""
+    reach = _bd.forward_reach(_bd._value_edges(list(pipeline.nodes)))
+    return next((t for t in pipeline.transactions
+                 if t.space_id == space_id and t.kind == "load"
+                 and (t.produces in mma_op.consumes or mma_op.seq in reach(t.seq))), None)
+
+
 def _operand_lds_stages(pipeline, mma_op, operand, wave_size):
     """DETECT (from the recorded graph, no assumptions) which memory stages an MMA operand actually has:
     - ``rd`` : the LDS read whose ``produces`` is in ``mma.consumes`` (a real producer->consumer edge) -> READBACK
@@ -748,18 +860,17 @@ def _operand_lds_stages(pipeline, mma_op, operand, wave_size):
     st = rd = None
     if sid is not None:
         st = next((t for t in pipeline.transactions if t.space_id == sid and t.kind == "store"), None)
-        rd = next((t for t in pipeline.transactions if t.space_id == sid and t.kind == "load"
-                   and t.produces in mma_op.consumes), None)
+        rd = _read_feeding_combine(pipeline, mma_op, sid)
     coop = st is not None and _lane_span(st.tile_desc.layout) > wave_size
     return {"sid": sid, "st": st, "rd": rd, "coop": coop, "has_store": st is not None, "has_read": rd is not None}
 
 
-def _wave_free_band(pipeline, mma_op, operand, op_enc, wave, wave_size):
-    """DERIVE this wave's macro band for an operand: (free_extent, n_bands, this_band, K-extent). The MMA operand
-    convention (NOT an assumption -- it is the operand definition) is axis 0 = the FREE output dim (M for A,
-    N for B) and axis 1 = the shared K/contraction dim. ``n_bands`` = macro/wave element-count ratio (frame-
-    agnostic); the wave's band = the M/N offset resolved from the read's SYMBOLIC ORIGIN at this wave's tid,
-    falling back to the coop-store free position (flagged ``derived``)."""
+def _wave_free_band(pipeline, mma_op, operand, op_enc, wave, wave_size, dim):
+    """DERIVE this wave's macro band for an operand: (free_extent, n_bands, this_band, K-extent) plus the
+    cooperative-fetch PARTITION. The MMA operand convention (NOT an assumption -- it is the operand
+    definition) is axis 0 = the FREE output dim (M for A, N for B) and axis 1 = the shared K dim.
+    ``n_bands`` = macro/wave element-count ratio (frame-agnostic); the wave's band comes from the read's
+    SYMBOLIC ORIGIN at this wave's tid."""
     from .kernel_stages import coop_forward_map
     from ..transforms import as_forward_map
     stg = _operand_lds_stages(pipeline, mma_op, operand, wave_size)
@@ -770,24 +881,31 @@ def _wave_free_band(pipeline, mma_op, operand, op_enc, wave, wave_size):
     if st is None:                                                          # no cooperative store -> no macro sense
         return None
     nw = _lane_span(st.tile_desc.layout) // wave_size
+    # The LDS STORE descriptor indexes the (K, free) LDS memref -- the package-wide convention this module
+    # already stands on (`_view_lds_store` reads tile_k off `shape[0]`; `render_lds_store` documents it).
+    part = coop_partition(st.tile_desc, n_waves=nw, wave_size=wave_size, axis_names=("K", dim))
     cm = coop_forward_map(st.tile_desc, n_waves=nw, wave_size=wave_size)
     n_bands = max(1, len(set(cm.values())) // len(set(wv.values())))        # element-count ratio (frame-agnostic)
-    band, derived, fetch = 0, False, None
-    reg = [c for (t, r), c in cm.items() if wave * wave_size <= t < (wave + 1) * wave_size]
-    if reg:                                                                # this wave's COOP-FETCH strip (1/n_waves)
-        me = [max(c[i] for c in cm.values()) for i in (0, 1)]
-        sp = [max(c[i] for c in reg) - min(c[i] for c in reg) for i in (0, 1)]
-        fax = 0 if sp[0] < sp[1] else 1                                    # store-frame free axis = smaller span
-        fetch = (min(c[fax] for c in reg), max(c[fax] for c in reg) + 1)   # the wave's fetch strip in macro coords
-        band = (fetch[0] * n_bands) // (me[fax] + 1)                       # fallback band from the fetch position
+    band, derived = 0, False
     if stg["rd"] is not None and getattr(stg["rd"], "origin", None):
         try:                                                              # M/N offset at k=0 = the non-zero comp
             res = resolve_origin(stg["rd"].origin, {"k": 0, "tid": wave * wave_size,
                                                     "block_id": {0: 0, 1: 0, 2: 0}})
             band, derived = int(max(res)) // free_ext, True
         except Exception:
-            pass
-    return {"free_ext": free_ext, "n_bands": n_bands, "band": band % n_bands, "fetch": fetch, "n_waves": nw,
+            derived = False
+    if not derived:
+        # The POSITIONAL fallback (band from the wave's fetch position) is DEFINED ONLY when the waves split
+        # the operand's own FREE axis. If they split K, a wave's K position says NOTHING about which M/N band
+        # it computes -- the old arithmetic merely landed on 0 by luck. Loud, not silent.
+        if dim not in part["split"]:
+            raise CoopPartitionError(
+                f"operand {operand}: the cooperative fetch splits {part['split'] or ['nothing']}, not the "
+                f"free axis {dim}, so the wave's fetch position gives NO band -- and the read origin could "
+                "not be resolved. Refusing to invent a band.")
+        i = part["axis_names"].index(dim)
+        band = (part["per_wave"][wave][i][0] * n_bands) // part["axes"][dim]["extent"]
+    return {"free_ext": free_ext, "n_bands": n_bands, "band": band % n_bands, "part": part, "n_waves": nw,
             "derived": derived, "stg": stg, "wK": wK}
 
 
@@ -803,8 +921,8 @@ def _view_wave_localization(pipeline, *, wave, out_path):
     if mma_op is None:
         raise ValueError("localization view requires a wave-tile MMA op -- this pipeline has none")
     _, wave_size = _arch_wave(pipeline)
-    A = _wave_free_band(pipeline, mma_op, "A", mma_op.a_enc, wave, wave_size)
-    B = _wave_free_band(pipeline, mma_op, "B", mma_op.b_enc, wave, wave_size)
+    A = _wave_free_band(pipeline, mma_op, "A", mma_op.a_enc, wave, wave_size, "M")
+    B = _wave_free_band(pipeline, mma_op, "B", mma_op.b_enc, wave, wave_size, "N")
     if not (A and A["stg"]["coop"]) and not (B and B["stg"]["coop"]):
         raise ValueError("localization view requires a COOPERATIVE macro store (lane span > wave size); none found")
     wM, wN, wK = A["free_ext"], B["free_ext"], A["wK"]
@@ -836,11 +954,36 @@ def _view_wave_localization(pipeline, *, wave, out_path):
     def operand_row(y, D, dim, other, x_mma_edge):                  # draw ONLY the stages this operand has
         stg = D["stg"]; ext, nb, bd = D["free_ext"], D["n_bands"], D["band"]
         readx = 6.0
-        if stg["coop"] and D["fetch"]:                             # COOP FETCH strip (1/n_waves), only if cooperative
-            nw, (f0, f1) = D["n_waves"], D["fetch"]
-            sidx = f0 // max(1, (ext * nb) // nw)                  # which fetch-strip row (of n_waves)
-            block(0.3, y, 2.4, 3.6, nw, 1, lambda r, c: (f"{dim}[{f0}:{f1}]" if r == sidx else ""), (sidx, 0))
-            ax.text(1.5, y + 3.9, f"macro {dim} {ext*nb}x{wK}\ncoop FETCH (1/{nw} strip)", ha="center", fontsize=8)
+        if stg["coop"]:                                            # COOP FETCH, only if cooperative
+            # The strip IS a picture of the wave partition, so its cells must be the partition CLASSES along
+            # the axis the waves actually split -- DERIVED (`coop_partition`), never the free axis by
+            # assumption. Cells carry the wave's REAL coordinate set (a set when it is not contiguous).
+            part, nw = D["part"], D["n_waves"]
+            names, pw = part["axis_names"], part["per_wave"]
+            split = part["split"]
+            e = [part["axes"][n]["extent"] for n in names]
+            if len(split) == 1:
+                i = names.index(split[0])
+                classes = sorted({tuple(pw[w][i]) for w in range(nw)})
+                sidx = classes.index(tuple(pw[wave][i]))
+                block(0.3, y, 2.4, 3.6, len(classes), 1,
+                      lambda r, c: (_fmt_footprint(split[0], classes[r]) if r == sidx else ""), (sidx, 0))
+                head = f"coop FETCH: {nw} waves split {split[0]}"
+            elif len(split) == 2:
+                i0, i1 = names.index(split[0]), names.index(split[1])
+                c0 = sorted({tuple(pw[w][i0]) for w in range(nw)})
+                c1 = sorted({tuple(pw[w][i1]) for w in range(nw)})
+                hi = (c0.index(tuple(pw[wave][i0])), c1.index(tuple(pw[wave][i1])))
+                block(0.3, y, 2.4, 3.6, len(c0), len(c1),
+                      lambda r, c: (f"{_fmt_footprint(split[0], c0[r])}\n{_fmt_footprint(split[1], c1[c])}"
+                                    if (r, c) == hi else ""), hi)
+                head = f"coop FETCH: {len(c0)}x{len(c1)} waves split {split[0]} x {split[1]}"
+            else:                                                  # no axis split -> a replicated fetch
+                block(0.3, y, 2.4, 3.6, 1, 1, lambda r, c: "full tile", (0, 0))
+                head = f"coop FETCH: all {nw} waves fetch the full tile (replicated)"
+            ax.text(1.5, y + 3.9,
+                    f"macro {dim} {e[0]}x{e[1]}  ({names[0]} x {names[1]})\n{head}\n"
+                    f"this wave: {_coop_note(part, wave)}", ha="center", fontsize=8)
         if stg["has_store"]:
             ldsbox(3.5, y + 0.6, "LDS")
             ax.annotate("", xy=(3.5, y + 1.8), xytext=(2.7, y + 1.8), arrowprops=arw)
@@ -874,6 +1017,8 @@ def _view_compute_physical(pipeline, *, operand, wave, out_path):
     lands in registers). Addressing uses the RECORDED read descriptor (the one ``verify_lds_roundtrip``
     validated); the register labels are the MMA-operand encoding. All physical params DERIVED."""
     from .kernel_stages import flow_lds_load_placement
+    from .layout_render import FlowStage, Pipeline, RegisterFileComponent
+    from ..transforms import as_forward_map, reorder_between
 
     arch, wave_size = _arch_wave(pipeline)
     sid = next(s for s in pipeline.lds_spaces() if _operand_of(pipeline.spaces[s]) == operand)
@@ -883,13 +1028,98 @@ def _view_compute_physical(pipeline, *, operand, wave, out_path):
     operand_enc = mma_op.a_enc if operand == "A" else mma_op.b_enc   # the MMA operand the read feeds
     dtype = read.dtype_name
     dims = ("N", "K") if operand == "B" else ("M", "K")
+    eb = _elem_bytes(dtype)
+    # The OPERAND BRIDGE, if the kernel has one: the recorded transform between THIS read and the matrix
+    # instruction. Without it the strip is labelled end-to-end with the POST-bridge (MMA-ready) encoding, so
+    # the landing looks MMA-ready and the bridge -- "the price of the wide LDS read" -- disappears. Taken
+    # from the recording (its own src/tgt encodings), never reconstructed.
+    bridge = _operand_bridge(pipeline, read, mma_op)
+    landing_enc = bridge.src_enc if bridge is not None else operand_enc
     pipe = flow_lds_load_placement(
-        read_desc=read.tile_desc, flow_desc=operand_enc, dims=dims, nbanks=_ARCH_NBANKS[arch],
-        elem_bytes=_elem_bytes(dtype), n_waves=1, wave_size=wave_size, cooperative=False, wave=wave,
+        read_desc=read.tile_desc, flow_desc=landing_enc, dims=dims, nbanks=_ARCH_NBANKS[arch],
+        elem_bytes=eb, n_waves=1, wave_size=wave_size, cooperative=False, wave=wave,
         stride=int(read.strides[0]), swizzle=read.swizzle or None,
         store_desc=store.tile_desc, store_stride=int(store.strides[0]), store_swizzle=store.swizzle or None,
         title=f"COMPUTE flow {operand} [{dtype}] PHYSICAL: LDS banks -> MMA-operand registers (wave {wave})")
+    if bridge is not None:
+        tgt_fm = as_forward_map(bridge.tgt_enc)
+        rp = reorder_between(as_forward_map(bridge.src_enc), tgt_fm, pack=max(1, 32 // (eb * 8)))
+        # FLAT shade (hue = lane%8): this panel is the RESULT of an in-register reorder, not a memory
+        # transaction -- there is no vectorized-access time order to tint by.
+        pipe = Pipeline(stages=pipe.stages + (
+            FlowStage(f"wave {wave} registers (MMA-ready operand, tid x vreg)",
+                      RegisterFileComponent(fwd_map=tgt_fm, dims=dims, color_mode="first8",
+                                            dtype_bits=eb * 8, shade_map={k: 0 for k in tgt_fm}),
+                      source="mma_op.a_enc" if operand == "A" else "mma_op.b_enc",
+                      dist=bridge.tgt_enc, info=(rp.cost,) if rp is not None else (),
+                      transform="operand bridge (in-register reorder)\n"
+                                f"{rp.label if rp is not None else bridge.note}"),),
+            title=f"LDS READ flow {operand} [{dtype}]: LDS banks -> landing registers -> in-register "
+                  f"reorder (the price of the wide read) -> MMA-operand registers (wave {wave})")
     return pipe.render_panels(_with_dtype(out_path, dtype))
+
+
+def _operand_bridge(pipeline, read, mma_op):
+    """The recorded transform sitting BETWEEN ``read`` and the matrix instruction, if the kernel has one
+    (``None`` when the read feeds the combining op directly). Found on the recorded graph: a transform the
+    read reaches, which itself reaches the combining op."""
+    nodes = list(pipeline.nodes)
+    reach = _bd.forward_reach(_bd._value_edges(nodes))
+    downstream = reach(read.seq)
+    return next((o for o in pipeline.ops
+                 if o.kind in ("reorder", "cross_lane") and o.seq in downstream
+                 and mma_op.seq in reach(o.seq)), None)
+
+
+class EpilogueSelectionError(RuntimeError):
+    """Raised when the recording does not identify EXACTLY ONE C-shuffle for the epilogue flow, or when
+    the epilogue branch is undetermined. A refusal, never a degenerate panel."""
+
+
+def select_c_shuffle(pipeline: Any) -> Any:
+    """Which recorded transform is the C-SHUFFLE (the one feeding the global store) -- by REACHABILITY,
+    never by position. Taking the FIRST ``reorder`` in the recording picks an A-operand bridge on any
+    kernel that bridges its operands, and then mis-captions the panel.
+
+    Three DERIVED tests, in order (each narrows; the first that yields exactly one wins):
+      1. FORWARD reach -- a transform whose value reaches the global store over recorded edges.
+      2. BACKWARD reach -- a transform whose consumed value was produced by a COMBINING op. This is the
+         definition of an epilogue transform ("it acts on a combining op's output") and it survives the
+         case where the SSA chain transform -> store is BROKEN because the epilogue's elementwise combine
+         is not a registered verb (§10) -- the recorded ``mma -> reorder`` edge is still there.
+      3. DISTRIBUTION match (tie-break only) -- among the step-2 candidates, those whose target places data
+         exactly as the recorded global-store transaction does. Demoted to a tie-break on purpose: a kernel
+         that stores through a DIFFERENT descriptor (a transposed store, an LDS round-trip epilogue) would
+         be wrongly rejected by it, even though the graph plainly shows the transform hanging off the MMA.
+    Raises :class:`EpilogueSelectionError` rather than guessing."""
+    reos = [o for o in pipeline.ops if o.kind in ("reorder", "cross_lane")]
+    nodes = list(pipeline.nodes)
+    edges = _bd._value_edges(nodes)
+    reach, back = _bd.forward_reach(edges), _bd.forward_reach([(t, f) for f, t in edges])
+    gstores = {n.seq for n in nodes if getattr(n, "space", "") == "global" and n.kind == "store"}
+    combine = {n.seq for n in nodes if n.kind in _bd.COMBINING_OPS}
+    cst = next((n for n in nodes if getattr(n, "space", "") == "global" and n.kind == "store"), None)
+    store_enc = getattr(getattr(cst, "tile_desc", None), "layout", None)
+
+    fwd = [o for o in reos if reach(o.seq) & gstores]
+    if len(fwd) == 1:
+        return fwd[0]
+    bwd = [o for o in reos if back(o.seq) & combine]
+    if len(bwd) == 1:
+        return bwd[0]
+    match = [o for o in (bwd or reos) if _bd.same_distribution(o.tgt_enc, store_enc)]
+    if len(match) == 1:
+        return match[0]
+    raise EpilogueSelectionError(
+        "cannot identify the C-shuffle for the epilogue flow.\n"
+        f"  reorder/cross_lane ops in the recording: seqs {[o.seq for o in reos]}\n"
+        f"  reaching the global store by recorded edges: {[o.seq for o in fwd]}\n"
+        f"  produced by a combining op:                 {[o.seq for o in bwd]}\n"
+        f"  matching the recorded C-store distribution ({getattr(cst, 'space_name', '?')}): "
+        f"{[o.seq for o in match]}\n"
+        "Refusing to render: an unidentified C-shuffle would be drawn as 'native == store order', "
+        "which is a CLAIM, not a recorded fact. Either supply the C-shuffle explicitly, or record the "
+        "epilogue's elementwise ops so the SSA chain reorder -> global store is complete.")
 
 
 def _view_epilogue_flow(pipeline, *, out_path):
@@ -899,10 +1129,12 @@ def _view_epilogue_flow(pipeline, *, out_path):
     is auto-classified. Recording-only + derived dtypes."""
     from .kernel_stages import classify_epilogue
     from .layout_render import FlowStage, LogicalTileComponent, MmaTee, Pipeline, RegisterFileComponent
-    from ..transforms import as_forward_map, reorder_between
+    from ..transforms import as_forward_map, describe_edge, reorder_between
 
     mma_op = next(o for o in pipeline.ops if o.kind == "mma")
-    reo = next((o for o in pipeline.ops if o.kind in ("reorder", "cross_lane")), None)
+    # REACHABILITY, not position: the first recorded reorder is an A-operand bridge on any kernel that
+    # bridges its operands. Raises rather than falling through to a degenerate panel.
+    reo = select_c_shuffle(pipeline)
     reads = [t for t in pipeline.transactions if t.space == "lds" and t.kind == "load"]
     cst = next(t for t in pipeline.transactions if t.space == "global" and t.kind == "store")
     ab_bits, c_bits = _elem_bytes(reads[0].dtype_name) * 8, _elem_bytes(cst.dtype_name) * 8
@@ -911,10 +1143,20 @@ def _view_epilogue_flow(pipeline, *, out_path):
                  a_dtype_bits=ab_bits, b_dtype_bits=ab_bits, c_dtype_bits=c_bits,
                  dims_a=("M", "K"), dims_b=("N", "K"), dims_c=("M", "N"))
     c_native = tee.c_mapping()                                 # {(lane,reg)->(m,n)} the machine accumulator
-    c_store_desc = reo.tgt_enc if reo is not None else None    # the recorded C-store distribution
-    branch, _note = classify_epilogue(c_native, c_store_desc)
-    if c_store_desc is None or branch not in ("reorder", "cross_lane"):
-        # DIRECT epilogue: native C IS the store order -> one register file, no shuffle arrow.
+    c_store_desc = reo.tgt_enc                                 # the recorded C-store distribution
+    branch, note = classify_epilogue(c_native, c_store_desc)
+    if branch == "unknown":
+        # An `unknown` classification must STOP AND ASK -- it must NEVER collapse into the DIRECT branch,
+        # whose caption asserts "native == store order". That assertion is a CLAIM about the layout, and it
+        # is exactly the claim that was false (8064 of 8192 slots) when this fell through silently.
+        raise EpilogueSelectionError(
+            f"classify_epilogue returned 'unknown' ({note}). The native accumulator and the recorded "
+            "C-store distribution are not reconcilable by a single transform, so the epilogue branch is "
+            "undetermined. NOT rendering a 'direct' panel -- 'native == store order' is a claim, not a "
+            "recorded fact. ASK the user which epilogue applies (direct / in-register reorder / LDS "
+            "round-trip).")
+    if branch not in ("reorder", "cross_lane"):
+        # DIRECT epilogue: classify_epilogue PROVED native == store order -> one register file, no arrow.
         pipe = Pipeline(stages=(FlowStage("C registers (native == store order)",
                                           RegisterFileComponent(fwd_map=c_native, dims=("M", "N"),
                                                                 dtype_bits=c_bits,
@@ -985,6 +1227,26 @@ def _view_epilogue_flow(pipeline, *, out_path):
                         source="c_store_desc", reorder=True,
                         transform=f"C-shuffle (in-register reorder)\n{_c_shuffle.label}",
                         info=(_c_shuffle.cost,), dist=c_store_desc),
+              ]
+    # READ-MODIFY-WRITE source, if this recording has one: a global LOAD from the very space the epilogue
+    # STORES to (the epilogue re-reads its own output tile). Without this it segments as an orphan `copy`
+    # flow and gets a lone, illegible panel. Its arrow is DERIVED by `describe_edge` and printed verbatim --
+    # ✗ never a hardcoded "identity", which would be the same class of bug as the caption defects above.
+    rmw = _bd.rmw_spaces(pipeline.nodes)
+    rmw_rd = next((t for t in pipeline.transactions
+                   if t.space == "global" and t.kind == "load" and t.space_id in rmw), None)
+    if rmw_rd is not None:
+        rd_fm = as_forward_map(rmw_rd.tile_desc.layout)
+        kind, why = describe_edge(store_fm, rd_fm, src_dims=("M", "N"), tgt_dims=("M", "N"))
+        stages.append(
+            FlowStage(f"read-modify-write source registers (global load {rmw_rd.space_name})",
+                      RegisterFileComponent(fwd_map=rd_fm, dims=("M", "N"),
+                                            dtype_bits=_elem_bytes(rmw_rd.dtype_name) * 8,
+                                            color_mode="first8", shade_map={k: 0 for k in rd_fm},
+                                            groups=_c_lane_groups(rd_fm)),
+                      source="rmw_read.tile_desc", dist=rmw_rd.tile_desc.layout,
+                      transform=f"read-modify-write: combined in registers — {kind}\n[{why}]"))
+    stages += [
               # 64x64 stored tile: PER-LANE-PATCH grouping keeps it legible. Shade is the SAME b128-capped, stride-
               # driven store-transaction shade (passed explicitly, so it never falls back to the component's
               # uncapped/row-major default) -- the wide run falls on the C store's real stride-1 axis.

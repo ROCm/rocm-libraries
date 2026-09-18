@@ -69,6 +69,10 @@ configs **and** by independently reproducing the measured `productive` (= footpr
   The dword-phases of ONE instruction pipeline through the port → MAX over phases per half-wave (this holds
   for `ds_write_b64`/`b128` and for the two dwords of `ds_write2_b32`). The counter is **per instruction**;
   a store forced to a narrow width issues several instructions, each measured with only its own footprint.
+  A descriptor with `register_count > vw` is likewise SEVERAL stores (`op_fanout = ceil(reg/vw)`): price each
+  on its OWN histograms and its OWN footprint and **SUM** (`IDX`, `BC`, `productive` all add), exactly as the
+  read path does. Folding all the instructions' phases into one MAX drops every instruction after the first
+  while still counting their footprint — it under-reports, to 0.00 for an evenly-costed 2-op store.
   Validated bit-exact (IDX and BC) on A/B × {b64, b128, b32} × {pad0, pad8} and the masked active-lane sweep.
   **This is a WRITE rule** — reads use the §1 per-address replay model, now characterised in §1.5.
 

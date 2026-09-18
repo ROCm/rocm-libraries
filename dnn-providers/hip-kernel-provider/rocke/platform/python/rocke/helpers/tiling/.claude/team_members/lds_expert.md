@@ -103,6 +103,47 @@ apply the cheapest lever, **re-measuring after each** (the bottleneck migrates):
    access) — the "proper" fix, but it changes the whole chain (global/MMA-read/C), so it can just move the
    conflict; measure end-to-end.
 
+**The cooperative-load WIDTH can be a bank-map lever, not only a bandwidth choice — and it is usually
+overlooked.** A cooperative global->LDS store has a "one K value per served group" property that keeps the LDS
+row stride OUT of the store's bank map entirely (and so makes every pad inert).
+
+**Test it by counting, not by a formula.** Dump the address map and count **the distinct K rows one served
+group touches**. One row -> the property holds. Two or more -> it does not, and the row stride is back in the
+map. That count is the primitive: it has no preconditions, no identity to satisfy, and nothing to convert.
+`free_lanes >= HALF` (lanes on the FREE axis vs the arch's served-group size from `ArchLDS`, never hardcoded)
+is a convenient SHORTHAND for the same thing, and `tile_free / vw` is a shorthand for THAT which is true only
+for some descriptors. Every layer of shorthand is a chance to be wrong; the count never is.
+
+**Why the shorthand breaks — the causes are not the obvious ones.** Splitting lanes across both axes is
+INNOCENT: descriptors that put some lanes on K still match the identity exactly. The two mechanisms that
+actually break it are (a) **the waves split the FREE axis**, so `tile_free` is a block extent while the lane
+count is per-wave, and (b) **a lane owns several vector-width runs along free**, because the access width caps
+at the per-lane byte ceiling. The overstatement factor is `waves_along_free x runs_per_lane` — measured cases
+of that shape exist, and there the formula says the property HOLDS and pads are inert while the real map puts
+a couple of lanes on each free row, spans many K rows, and responds strongly to a pad. Silent, and in the
+dangerous direction.
+
+**Narrowing the width raises the free-axis lane count** and can restore the property, at proportionally more
+store instructions — ladder step 2, beside the narrowing swizzle, and a knob to SWEEP rather than a fix to
+assume.
+
+Scope: the property is about lanes-per-served-group, so it is **atom-free for the bank map** (though which
+side of it you can reach is atom-constrained through the K-split), and **dtype-free only at >=2-byte elements**
+(at sub-dword sizes lanes share a dword and this stops applying). `HALF` is the physically right quantity by
+the arbitration argument, but on the only validated arch `HALF == NB`, so nothing yet distinguishes them —
+treat it as reasoned, not measured, and do not extrapolate a value to another wave size.
+
+**Separate the GEOMETRY from the COST — the same split this file already uses on the read side.** The geometry
+is PROVEN and free to check: below the threshold a served group provably straddles several K rows and the
+stride re-enters the map. That is an address-map fact, true by construction. The COST is what is open: whether
+that geometry actually spends replay cycles here. What supports it is a **controlled within-config A/B on the
+width knob alone** (tile size, footprint and read descriptors all held fixed) showing a wall-time win, plus a
+**confounded zero/non-zero counter contrast** across the threshold — confounded because those two configs
+differ in several ways at once. What is NOT established is that the coop STORE is the part that improved: the
+counter was a whole-kernel aggregate that never isolated it, and the validated write-port model prices both
+widths the same, so the model does not reproduce the effect that moved the clock. Per rule 1 that is a
+sim-vs-hardware mismatch to report and offer to repair. Run a store-mirror probe before attributing it.
+
 **Floor/instruction tradeoff (gfx90a NB=32, 32-lane group; full ladder in `lds_banks.md`):** a
 contiguity-preserving swizzle floors at `group/(NB/(W/2))`-way — `b128`→4-way @1× instrs, `b64`→2-way @2×,
 `b32`→0-way @4×. Conflict ↓ and instructions ↑ together; the sweet spot is bottleneck-dependent, not narrowest.
