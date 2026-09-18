@@ -5691,7 +5691,13 @@
       "gfx942",
       "gfx950"
     ],
-    "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.0 26014 7b800a19466229b8479a78de19143dc33c3ab9b5)",
-    "flavor": "llvm22"
+    "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)",
+    "flavor": "llvm22",
+    "generator": 2,
+    "probe_cflags": [
+      "-O0",
+      "-nogpulib"
+    ],
+    "probe_timeout_s": 60
   }
 }
