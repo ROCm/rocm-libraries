@@ -12,6 +12,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
@@ -19,11 +20,19 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
 )
 
-if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
+if(NOT WIN32)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/collective_rendezvous_gtest.cpp
+    )
+endif()
+
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_bench_gtest.cpp
     )
 endif()
 

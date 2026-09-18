@@ -670,6 +670,14 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/a2a/hipblaslt-bench-a2a-launch"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT benchmarks
+        )
+    endif()
+
     # Cotenant CU-contention helper: the kernel and its launcher install side by
     # side in bin/ so hipblaslt-cotenant finds the precompiled kernel next to it.
     # POSIX-only (see clients/CMakeLists.txt); not built/installed on Windows.

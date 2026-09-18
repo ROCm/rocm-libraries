@@ -165,6 +165,30 @@ add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src
 target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
 target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+    find_package(NUMA REQUIRED)
+    find_package(hsa-runtime64 REQUIRED)
+    find_package(hsakmt REQUIRED)
+
+    include(HsakmtLinkInterface)
+    hipblaslt_sanitize_hsakmt_link_interface()
+
+    # samples/30_hipblaslt_a2a_sdma reuses these targets and this variable from
+    # the enclosing scope.
+    set(HIPBLASLT_SDMA_QUEUE_INCLUDE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/client/include")
+
+    add_executable(hipblaslt-bench-a2a "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_a2a.cpp")
+    target_link_libraries(hipblaslt-bench-a2a
+        PRIVATE hipblaslt-clients-common hip::device
+                hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
+    target_include_directories(hipblaslt-bench-a2a
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench/include"
+                "${HIPBLASLT_SDMA_QUEUE_INCLUDE_DIR}")
+
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/scripts/a2a/hipblaslt-bench-a2a-launch" "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-bench-a2a-launch" COPYONLY)
+endif()
+
 # CU-contention cotenant helper (clients/scripts/cotenant). A standalone HIP
 # binary, compiled as CXX so it picks up GPU_TARGETS via hip::device like the
 # other clients (the project does not enable the HIP language). POSIX-only
@@ -202,6 +226,13 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             ${CMAKE_DL_LIBS}
     )
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
+    if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+        target_include_directories(hipblaslt-test
+            PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench/include"
+                    "${HIPBLASLT_SDMA_QUEUE_INCLUDE_DIR}")
+        target_link_libraries(hipblaslt-test
+            PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
+    endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()

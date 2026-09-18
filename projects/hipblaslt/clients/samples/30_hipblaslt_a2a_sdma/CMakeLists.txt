@@ -12,13 +12,6 @@ if(NOT HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_A2A_SDMA_SAMPLE requires HIPBLASLT_ENABLE_GEMM_A2A_FUSION=ON")
 endif()
 
-find_package(NUMA REQUIRED)
-find_package(hsa-runtime64 REQUIRED)
-find_package(hsakmt REQUIRED)
-
-include(HsakmtLinkInterface)
-hipblaslt_sanitize_hsakmt_link_interface()
-
 add_executable(sample_a2a_sdma
     "${CMAKE_CURRENT_SOURCE_DIR}/sample_a2a_sdma.cpp")
 target_link_libraries(sample_a2a_sdma
@@ -28,6 +21,5 @@ target_link_libraries(sample_a2a_sdma
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/sample_a2a_sdma.cpp
     PROPERTIES
-        COMPILE_OPTIONS
-            "-I${CMAKE_CURRENT_SOURCE_DIR}/../../../tensilelite/client/include"
+        COMPILE_OPTIONS "-I${HIPBLASLT_SDMA_QUEUE_INCLUDE_DIR}"
 )

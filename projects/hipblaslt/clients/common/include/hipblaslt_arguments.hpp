@@ -109,6 +109,8 @@ struct Arguments
     int64_t ldd[MAX_SUPPORTED_NUM_PROBLEMS];
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
+    int64_t a2a_extent;
+
     int32_t batch_count;
     int32_t batch_mode;
 
@@ -165,6 +167,7 @@ struct Arguments
 
     // bytes
     uint8_t devices;
+    uint8_t a2a_world;
 
     int8_t norm_check;
     int8_t allclose_check;
@@ -256,6 +259,7 @@ struct Arguments
     OPER(ldc) SEP                    \
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
+    OPER(a2a_extent) SEP             \
     OPER(batch_count) SEP            \
     OPER(batch_mode) SEP             \
     OPER(batch_offset_a) SEP         \
@@ -294,6 +298,7 @@ struct Arguments
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
+    OPER(a2a_world) SEP              \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
