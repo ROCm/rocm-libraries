@@ -1138,6 +1138,12 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
+            # computeLoadSrd asserts the free dim and MT are multiples of the
+            # 16B load's element count, which is 8 at 2 bytes per element.  The
+            # fp4 arm below sets the same guarantee at 32; without it a bf16
+            # TLU=1 solution clears validation and then trips that assert.
+            key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
+            state[key] = max(state[key], 8)
             bpeTLU = 2.0
           elif dtype.isFloat4():
             # Two fp4 share a byte, so an odd free-dim extent leaves the K

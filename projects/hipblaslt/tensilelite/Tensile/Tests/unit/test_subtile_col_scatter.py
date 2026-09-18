@@ -22,6 +22,7 @@ from Tensile.Components.Subtile.SubtileTLUSwizzle import (
     _buildColScatter,
     selectTLUColScatter,
     selectTLUSwizzle,
+    tluElemsPerRead,
 )
 
 pytestmark = pytest.mark.unit
@@ -33,7 +34,8 @@ _COL_SCATTER_STACKS = (8, 16)
 
 
 def _cs(n):
-    return _buildColScatter(n, _INST_M, _INST_K, _BPE, _WAVE)
+    return _buildColScatter(n, _INST_M, _INST_K, _BPE, _WAVE,
+                            tluElemsPerRead(_BPE))
 
 
 def _tile(stack=16, bpe=0.5, perStrip=1, kSplit=1):
@@ -91,8 +93,12 @@ def test_read_stride_matches_the_emitted_offset_for_the_shipped_stack():
 
 
 def test_a_stack_the_derivation_cannot_express_is_rejected():
-    """At N=32 the K step degenerates to 0, so the stack must be refused."""
-    with pytest.raises(AssertionError, match="col_scatter derives stacks"):
+    """At N=32 the read no longer steps whole col-groups, so it must be refused.
+
+    That guard replaced an explicit stack whitelist; it is what stops cgDelta
+    reaching 0, which would leave the LR read not stepping in K.
+    """
+    with pytest.raises(ValueError, match="col_scatter needs"):
         _cs(32)
 
 
