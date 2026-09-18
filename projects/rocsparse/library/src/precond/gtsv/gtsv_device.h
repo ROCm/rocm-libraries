@@ -196,10 +196,8 @@ namespace rocsparse
                                                     T* __restrict__ output,
                                                     T pad_value)
     {
-        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
-        // so grid-stride over them. The bound depends only on n, hipBlockIdx_y and
-        // hipGridDim_y, all block uniform, so every thread of a block runs the same
-        // number of iterations and stays convergent at the barrier below.
+        // The bound is block uniform, so the barrier inside the device function
+        // stays convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_transpose_and_pad_array_shared_device<BLOCKSIZE, BLOCKDIM>(
@@ -271,9 +269,6 @@ namespace rocsparse
                                           const T* __restrict__ input,
                                           T* __restrict__ output)
     {
-        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
-        // so grid-stride over them. The bound is block uniform and this kernel has no
-        // shared state, so no extra barrier is needed.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_transpose_back_array_device<BLOCKSIZE, BLOCKDIM>(
@@ -974,15 +969,9 @@ namespace rocsparse
                              const T* __restrict__ mt,
                              const rocsparse_int* __restrict__ pivot)
     {
-        // grid.y indexes panels of COLS right-hand sides and is clamped to the
-        // hardware maximum, so grid-stride over the panels: advancing the panel index
-        // by one advances the right-hand side base by the vector width COLS. The
-        // launch sites only pick COLS > 1 when n is an exact multiple of COLS, so
-        // n / COLS is the exact panel count. The bound depends only on n, COLS,
-        // hipBlockIdx_y and hipGridDim_y, all block uniform, so every thread of a
-        // block runs the same number of iterations.
-        // Evaluated in 64 bit: COLS is an unsigned template parameter, so a plain
-        // n / COLS would promote n to unsigned.
+        // The launch sites only pick COLS > 1 when n is an exact multiple of COLS, so
+        // n / COLS is the exact panel count. Evaluated in 64 bit: COLS is an unsigned
+        // template parameter, so a plain n / COLS would promote n to unsigned.
         const int64_t npanels = static_cast<int64_t>(n) / COLS;
 
         for(int64_t bidy = hipBlockIdx_y; bidy < npanels; bidy += hipGridDim_y)
@@ -1121,10 +1110,7 @@ namespace rocsparse
                                        T* __restrict__ w_scratch,
                                        T* __restrict__ v_scratch)
     {
-        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
-        // so grid-stride over them. The bound depends only on n, hipBlockIdx_y and
-        // hipGridDim_y, all block uniform, so every thread of a block runs the same
-        // number of iterations and the barriers inside the device function stay
+        // The bound is block uniform, so the barriers inside the device function stay
         // convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
@@ -1243,12 +1229,7 @@ namespace rocsparse
                                             const T* __restrict__ w_scratch,
                                             const T* __restrict__ v_scratch)
     {
-        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
-        // so grid-stride over them. This is the single kernel behind all nine spike
-        // stage launches (grid.x is fixed at 1 and only the block size differs), so one
-        // loop covers all of them. The bound depends only on n, hipBlockIdx_y and
-        // hipGridDim_y, all block uniform, so every thread of a block runs the same
-        // number of iterations and the barriers inside the device function stay
+        // The bound is block uniform, so the barriers inside the device function stay
         // convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
@@ -1354,10 +1335,7 @@ namespace rocsparse
                                            const T* __restrict__ v,
                                            const T* __restrict__ rhs_scratch)
     {
-        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
-        // so grid-stride over them. The bound depends only on n, hipBlockIdx_y and
-        // hipGridDim_y, all block uniform, so every thread of a block runs the same
-        // number of iterations and the barriers inside the device function stay
+        // The bound is block uniform, so the barriers inside the device function stay
         // convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
@@ -1411,9 +1389,6 @@ namespace rocsparse
                                                  const T* __restrict__ w,
                                                  const T* __restrict__ v)
     {
-        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
-        // so grid-stride over them. The bound is block uniform and this kernel has no
-        // shared state, so no extra barrier is needed.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_spike_backward_substitution_device<BLOCKSIZE, BLOCKDIM>(

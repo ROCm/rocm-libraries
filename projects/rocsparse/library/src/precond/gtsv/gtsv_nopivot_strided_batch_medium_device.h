@@ -224,12 +224,8 @@ namespace rocsparse
                                                              T* __restrict__ du_spike,
                                                              T* __restrict__ B_spike)
     {
-        // n is the batch count. grid.y is clamped to the hardware maximum, so
-        // grid-stride over the batch, matching the small path which puts the batch on
-        // grid.x with a bounds check. The bound depends only on n, hipBlockIdx_y and
-        // hipGridDim_y, all block uniform, so every thread of a block runs the same
-        // number of iterations and the barriers inside the device function stay
-        // convergent.
+        // n is the batch count. The bound is block uniform, so the barriers inside the
+        // device function stay convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_device<BLOCKSIZE>(bidy,
@@ -390,9 +386,7 @@ namespace rocsparse
                                                               const T* __restrict__ B_spike,
                                                               T* __restrict__ B)
     {
-        // n is the batch count. grid.y is clamped to the hardware maximum, so
-        // grid-stride over the batch. The bound is block uniform and this kernel has
-        // no shared state, so no extra barrier is needed.
+        // n is the batch count.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_device<BLOCKSIZE>(bidy,

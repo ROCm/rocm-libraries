@@ -251,16 +251,9 @@ namespace rocsparse
                                                 T* __restrict__ du_spike,
                                                 T* __restrict__ B_spike)
     {
-        // grid.y indexes blocks of NUM_RHS right-hand sides and is clamped to the
-        // hardware maximum, so grid-stride over those blocks: one step of the loop
-        // advances the right-hand side base by NUM_RHS, matching the
-        // NUM_RHS * bidy + rhs indexing inside. This mirrors the small path, which
-        // puts the same count on grid.x. The bound depends only on n, NUM_RHS,
-        // hipBlockIdx_y and hipGridDim_y, all block uniform, so every thread of a
-        // block runs the same number of iterations and the barriers inside the device
-        // function stay convergent.
         // Evaluated in 64 bit: NUM_RHS is an unsigned template parameter, so a plain
-        // (n - 1) / NUM_RHS would promote n - 1 to unsigned.
+        // (n - 1) / NUM_RHS would promote n - 1 to unsigned. The bound is block
+        // uniform, so the barriers inside the device function stay convergent.
         const int64_t nblocks_rhs = (static_cast<int64_t>(n) - 1) / NUM_RHS + 1;
 
         for(int64_t bidy = hipBlockIdx_y; bidy < nblocks_rhs; bidy += hipGridDim_y)
@@ -452,10 +445,6 @@ namespace rocsparse
                                                  const T* __restrict__ B_spike,
                                                  T* __restrict__ B)
     {
-        // grid.y indexes blocks of NUM_RHS right-hand sides and is clamped to the
-        // hardware maximum, so grid-stride over those blocks, stepping the right-hand
-        // side base by NUM_RHS. The bound is block uniform and this kernel has no
-        // shared state, so no extra barrier is needed.
         // Evaluated in 64 bit: NUM_RHS is an unsigned template parameter, so a plain
         // (n - 1) / NUM_RHS would promote n - 1 to unsigned.
         const int64_t nblocks_rhs = (static_cast<int64_t>(n) - 1) / NUM_RHS + 1;
