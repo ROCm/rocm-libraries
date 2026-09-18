@@ -8,6 +8,7 @@
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 using namespace stinkytofu;
@@ -36,6 +37,47 @@ class RegisterBudgetTest : public ::testing::Test {
 };
 
 }  // namespace
+
+TEST_F(RegisterBudgetTest, NextEvenBaseSitsOnTheFirstFreeEvenIndex) {
+    mov(/*dst=*/7, /*src=*/3);
+    EXPECT_EQ(highestRegisterCount(*func, RegType::S), 8u);
+    EXPECT_EQ(nextEvenRegisterBase(*func, RegType::S), 8u);
+
+    mov(/*dst=*/8, /*src=*/0);
+    EXPECT_EQ(highestRegisterCount(*func, RegType::S), 9u);
+    EXPECT_EQ(nextEvenRegisterBase(*func, RegType::S), 10u);
+}
+
+TEST_F(RegisterBudgetTest, AReusableBlockEndsInsideWhatTheKernelAlreadyDeclares) {
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, 32);
+    mov(/*dst=*/57, /*src=*/0);
+    EXPECT_EQ(highestRegisterCount(*func, RegType::S), 58u);
+
+    // A pair lands on s[56:57] and a pair-plus-scratch on s[54:56]: both end at
+    // the 58 already declared, so neither costs a register.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/2), 56u);
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3), 54u);
+
+    // Capping at the pair above stacks a second block clear of the first.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3, /*limit=*/56), 52u);
+}
+
+TEST_F(RegisterBudgetTest, NothingIsReusableWhenNoBlockIsProvablyFree) {
+    mov(/*dst=*/57, /*src=*/0);
+
+    // No published dispatch line, and unpublished cannot read as zero: s[54:56]
+    // may be preloaded kernargs the kernel reads but never names, so the caller
+    // has to stay above everything instead.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3), std::nullopt);
+    EXPECT_EQ(nextEvenRegisterBase(*func, RegType::S), 58u);
+
+    // Published, but the whole range sits in the prefix the dispatch fills.
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, 58);
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3), std::nullopt);
+
+    // No room for the block at all.
+    EXPECT_EQ(reusableEvenSgprBase(*func, /*width=*/3, /*limit=*/2), std::nullopt);
+}
 
 TEST_F(RegisterBudgetTest, CountsOnePastTheHighestIndexUsed) {
     mov(/*dst=*/7, /*src=*/3);
