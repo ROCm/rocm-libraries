@@ -177,6 +177,52 @@ class TestAttentionTuningRegistry(unittest.TestCase):
         )
         self.assertEqual(result.spec.kernel_spec.num_segments, 64)
 
+    def _specs_for(self, prefix, **req_kw):
+        candidate = next(c for c in attention_candidates() if c.name.startswith(prefix))
+        req = replace(
+            _request(**req_kw),
+            algorithm=candidate.algorithm,
+            spec_id=candidate.spec_id,
+        )
+        return candidate.sweep_space(req)
+
+    def test_narrow_codepath_registers_the_sched_barrier_lever(self):
+        """The fence is emitted only in the narrow QK loop, so that is the
+        codepath that has to offer it -- with its mask, which changes codegen."""
+        specs = self._specs_for("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        masks = {
+            s.kernel_spec.sched_barrier_mask
+            for s in specs
+            if s.kernel_spec.use_sched_barrier
+        }
+        self.assertEqual(masks, {0, 0x008, 0x108})
+
+    def test_transposed_codepath_registers_q_reread(self):
+        specs = self._specs_for("attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm")
+        self.assertTrue(any(s.kernel_spec.use_q_reread for s in specs))
+        # Re-read needs a surviving Q_lds; direct-register Q never stages one.
+        self.assertFalse(
+            any(
+                s.kernel_spec.use_q_reread and s.kernel_spec.use_q_direct_reg
+                for s in specs
+            )
+        )
+
+    def test_no_registered_spec_pairs_the_fence_with_the_interleave_hint(self):
+        """The 2D emitter rejects that pair, and it does so at build time rather
+        than in ``__post_init__`` -- so an offered spec would survive selection
+        and only fail once a sweep tried to build it."""
+        for prefix in (
+            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+            "attention_gfx950_u2d_transposed32_nw2_mw32_t4xb_llvm",
+        ):
+            with self.subTest(candidate=prefix):
+                for spec in self._specs_for(prefix):
+                    ks = spec.kernel_spec
+                    self.assertFalse(
+                        ks.use_sched_barrier and ks.use_softmax_mfma_interleave
+                    )
+
     def test_candidate_sweep_expands_valid_unique_specs(self):
         candidate = next(
             c
