@@ -91,7 +91,7 @@ def test_has_custom_kernel_false_empty_name(tmp_path, snapshot):
 def test_handle_non_custom_returns_false(snapshot):
     # No CustomKernelName -> early (sol, False), sol unchanged.
     sol = {"SolutionIndex": 0}
-    out, is_custom = handleCustomKernel(sol, {})
+    out, is_custom, _ = handleCustomKernel(sol, {})
     assert {"is_custom": is_custom, "sol": out} == snapshot
 
 
@@ -100,7 +100,7 @@ def test_handle_custom_mi_length_4(monkeypatch, snapshot):
     config = {"MatrixInstruction": [16, 16, 16, 1], "WorkGroup": [16, 16, 1]}
     monkeypatch.setattr(hck_mod, "getCustomKernelConfig", lambda name, d: dict(config))
     sol = {"CustomKernelName": "DummyKernel", "SolutionIndex": 0}
-    out, is_custom = handleCustomKernel(sol, {})
+    out, is_custom, _ = handleCustomKernel(sol, {})
     assert {"is_custom": is_custom, "sol": out} == snapshot
 
 
@@ -113,7 +113,7 @@ def test_handle_custom_mi_wrong_length_runs_hint(monkeypatch, isa_info_map, snap
         "CustomKernelName": "DummyKernel", "SolutionIndex": 0,
         "WavefrontSize": 64, "ProblemType": {"DataType": "h"},
     }
-    out, is_custom = handleCustomKernel(sol, isa_info_map)
+    out, is_custom, _ = handleCustomKernel(sol, isa_info_map)
     assert {
         "is_custom": is_custom,
         "matrix_instruction": out["MatrixInstruction"],
