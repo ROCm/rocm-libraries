@@ -78,6 +78,27 @@ public:
     }
 };
 
+// Only declared when <hip/hip_bf16.h> has actually been included by the translation unit
+// (most RTC-compiled kernels never include it, relying on hip_bfloat16 above instead).
+#ifdef HIP_INCLUDE_HIP_HIP_BF16_H
+template <>
+class numeric_limits<__hip_bfloat16>
+{
+public:
+    static __device__ __hip_bfloat16 max() noexcept
+    {
+        // data = 0x7F7F
+        return static_cast<__hip_bfloat16>(0x1.FEp+127f);
+    }
+
+    static __device__ __hip_bfloat16 min() noexcept
+    {
+        // data = 0x0080
+        return static_cast<__hip_bfloat16>(0x1p-14f);
+    }
+};
+#endif
+
 #if HIP_PACKAGE_VERSION_FLAT >= 6001024024ULL
 
 template <>
