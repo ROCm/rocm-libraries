@@ -193,6 +193,15 @@ def _disableUnsupportedRuntimeStaggerU(state):
   # StaggerU path off too (KernelWriter already gates staggerUCode off for clusters).
   if state.get("ClusterDim", [1, 1]) != [1, 1]:
     _disableRuntimeStaggerU(state)
+  # ReuseAcrossPersistent holds A across every tile the persistent workgroup
+  # visits, so the summation start has to be the same for all of them. Mappings 1
+  # and 3 take it from wg1 and 4 moves it every tile, which leaves A at the fill
+  # tile's offset while B is reloaded at the new one and the two are multiplied
+  # across different K windows -- measured wrong on gfx1250. Compile-time StaggerU
+  # is only half of it: the kernel reads its stagger from the runtime field alone
+  # when SupportCustomStaggerU is set, so the whole path has to go.
+  if state.get("ReuseAcrossPersistent", 0):
+    _disableRuntimeStaggerU(state)
 
 
 def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):

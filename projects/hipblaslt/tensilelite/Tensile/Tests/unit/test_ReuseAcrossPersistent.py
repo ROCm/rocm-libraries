@@ -479,6 +479,47 @@ def test_rap_rejects_unsupported_combinations(
 
 
 # ---------------------------------------------------------------------------
+# StaggerU. RAP holds A across every tile the persistent workgroup visits, so a
+# summation start that moves from tile to tile multiplies resident A against a B
+# reloaded at a different K offset; mapping 1 was measured returning wrong
+# results on gfx1250. Rejecting a non-zero StaggerU would not be enough, because
+# the compile-time value is not where the kernel reads its stagger: with
+# SupportCustomStaggerU set it reads the runtime field and nothing else, so a
+# kernel built at StaggerU 0 still takes whatever the host packs. RAP therefore
+# joins the other features that turn the whole path off.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({}, id="already_zero_at_compile_time"),
+        pytest.param(
+            {"StaggerU": 32, "StaggerUMapping": 1, "StaggerUStride": 256},
+            id="asked_for_the_mapping_measured_wrong",
+        ),
+        pytest.param(
+            # Mapping 0 is the same offset for every tile RAP visits, so it would
+            # survive on its own. Turned off anyway, and pinned here so the rule
+            # is not later narrowed to the mappings that bite.
+            {"StaggerU": 32, "StaggerUMapping": 0, "StaggerUStride": 256},
+            id="asked_for_an_otherwise_safe_mapping",
+        ),
+    ],
+)
+def test_rap_turns_the_runtime_stagger_path_off(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides
+):
+    # PAP off, or PAP's own TDM disable does this first and the test would pass
+    # without RAP having done anything.
+    sol, out = _derive(
+        gfx1250_iim, assembler, capsys, PrefetchAcrossPersistent=0, **overrides
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["ReuseAcrossPersistent"] == 1
+    assert (sol["StaggerU"], sol["StaggerUMapping"], sol["StaggerUStride"]) == (0, 0, 0)
+    assert sol["InternalSupportParams"]["SupportCustomStaggerU"] is False
+
+
+# ---------------------------------------------------------------------------
 # k_max model. Pinned to the two audited gfx1250 configs, whose true bounds were
 # measured by sweeping the resident k-tile count until rapCheckStoreNeutrality
 # fired: MacroTile 64x256 clears k=8 and trips at 9, 64x512 clears k=3 at 4.
