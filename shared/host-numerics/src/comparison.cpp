@@ -78,6 +78,11 @@ ComparisonReport compare(const Tensor& observed, const Tensor& expected,
     const auto observedStorage = observed.rawEncodedBackingStorage();
     const auto expectedStorage = expected.rawEncodedBackingStorage();
 
+    if (observed.type() == expected.type()) {
+        if (const auto encoded = detail::exactEncodedComparisonReport(observed, expected, options))
+            return *encoded;
+    }
+
     if (observed.type() == expected.type() && detail::allCloseOnlyComparison(options)) {
         ComparisonReport result = visitScalarType(observed.type(), [&]<typename Tag>() {
             return detail::compareAllCloseOnlyKnown<Tag>(observed, expected, options);

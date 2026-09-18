@@ -121,16 +121,29 @@ inline bool encodedValuesAreIdentical(const Tensor& observed, const Tensor& expe
     return true;
 }
 
+inline std::optional<ComparisonReport> exactEncodedComparisonReport(
+    const Tensor& observed, const Tensor& expected, const ComparisonOptions& options) {
+    // Exact encoded equality determines all-close and zero-distance ULP evidence without decoding.
+    // Statistics, norms, and matching-element reports still require visiting the logical values.
+    if (options.computeElementwiseStatistics || options.computeFrobenius ||
+        options.reportMatchingElements || !encodedValuesAreIdentical(observed, expected, options))
+        return std::nullopt;
+
+    ComparisonReport result;
+    result.compared = observed.elementCount();
+    result.allCloseEvaluated = options.allClose;
+    result.ulpEvaluated = options.maximumUlpTolerance.has_value();
+    if (options.computeUlp) {
+        const size_t componentsPerElement =
+            scalarTypeInfo(observed.type()).category == ScalarCategory::Complex ? 2 : 1;
+        result.ulpCompared = result.compared * componentsPerElement;
+    }
+    return result;
+}
+
 template <typename Tag>
 ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& expected,
                                           const ComparisonOptions& options) {
-    if (encodedValuesAreIdentical(observed, expected, options)) {
-        ComparisonReport result;
-        result.compared = observed.elementCount();
-        result.allCloseEvaluated = true;
-        return result;
-    }
-
     const auto observedStorage = observed.rawEncodedBackingStorage();
     const auto expectedStorage = expected.rawEncodedBackingStorage();
     const auto run = [&]<typename Predicate>(Predicate predicate) {
