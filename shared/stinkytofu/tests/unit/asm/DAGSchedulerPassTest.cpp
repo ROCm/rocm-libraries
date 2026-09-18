@@ -676,28 +676,34 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetDistributesBarrierWorkPerWindow) {
     EXPECT_EQ(budget.windows[2].issueBudget, 3);
     EXPECT_EQ(budget.windows[3].issueBudget, 2);
 
-    // No actual ds_load DAG nodes exist in this synthetic barrier-only setup
-    // (dsLoadInstructionCount == 0), so there is no "free" (non-barrier) ds
-    // work to spread on top of the barrier-attributed counts: dsLoadBudget is
-    // exactly the ds-only portion of issueBudget already asserted above (here,
-    // all of it, since these barriers contribute nothing but ds_load counts),
-    // and the tail bucket stays empty.
-    EXPECT_EQ(budget.windows[0].dsLoadBudget, 2);
-    EXPECT_EQ(budget.windows[1].dsLoadBudget, 1);
-    EXPECT_EQ(budget.windows[2].dsLoadBudget, 3);
-    EXPECT_EQ(budget.windows[3].dsLoadBudget, 2);
-    EXPECT_EQ(budget.dsLoadTailBudget, 0);
+    // dsLoadBudget is a flat fill of dsReadPerWmmaCap for every window AND
+    // the tail slot -- deliberately IGNORING the barrier-driven issueBudget
+    // values asserted above. This migration is a relocation of the ds cap
+    // into analyzeWmmaHideBudget, not a behavior change: the actual cap
+    // value must stay identical to the pre-migration flat fill
+    // (dsTargetPerWindow_.assign(windows, dsReadPerWmma())), which never
+    // consulted barrier data either.
+    EXPECT_EQ(budget.windows[0].dsLoadBudget, 100);
+    EXPECT_EQ(budget.windows[1].dsLoadBudget, 100);
+    EXPECT_EQ(budget.windows[2].dsLoadBudget, 100);
+    EXPECT_EQ(budget.windows[3].dsLoadBudget, 100);
+    EXPECT_EQ(budget.dsLoadTailBudget, 100);
 }
 
 // ---------------------------------------------------------------------------
-// Property: ds_loads with no barrier relationship at all ("free" ds_loads)
-// are spread evenly across every WMMA window PLUS the tail slot (the region
-// segment after the last WMMA, which has no window entry since there's no
-// WMMA left to hold back there). This is the mechanism that replaces the
-// standalone dsTargetPerWindow_ pre-pass: one source of truth for "how many
-// ds_loads belong in window w" shared with the hold-back-next-WMMA logic.
+// Property: dsLoadBudget is a flat fill of dsReadPerWmmaCap for every window
+// PLUS the tail slot (the region segment after the last WMMA, which has no
+// window entry since there's no WMMA left to hold back there) -- regardless
+// of the region's actual ds_load count. This is the ds cap migrated into
+// analyzeWmmaHideBudget: one source of truth for "how many ds_loads belong
+// in window w" shared with the hold-back-next-WMMA logic, but deliberately
+// NO behavior change from the pre-migration flat fill (an even-spread
+// redesign that diluted the per-window cap below dsReadPerWmmaCap was tried
+// and found to regress real hardware: it starves the in-flight ds_load
+// pipeline depth and forces a full-drain wait instead of smooth
+// partial-overlap pipelining -- see git history).
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, WmmaHideBudgetSpreadsFreeDsLoadsAcrossWindowsAndTail) {
+TEST_F(DAGSchedulerPassTest, WmmaHideBudgetDsCapIsFlatFillNotEvenSpread) {
     createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
     createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
     for (int i = 0; i < 5; ++i)
@@ -709,22 +715,22 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetSpreadsFreeDsLoadsAcrossWindowsAndTai
 
     ASSERT_EQ(budget.windows.size(), 2u);
     EXPECT_EQ(budget.dsLoadInstructionCount, 5);
-    // 5 free ds_loads / 3 slots (2 windows + 1 tail) = base 1, remainder 2:
-    // the first 2 slots (both real windows here) get 2, the tail gets 1.
-    EXPECT_EQ(budget.windows[0].dsLoadBudget, 2);
-    EXPECT_EQ(budget.windows[1].dsLoadBudget, 2);
-    EXPECT_EQ(budget.dsLoadTailBudget, 1)
-        << "free ds_loads must spread into the tail slot too, not just windows "
-           "that still have a WMMA to hold back";
+    EXPECT_EQ(budget.windows[0].dsLoadBudget, 100)
+        << "dsLoadBudget must be the flat dsReadPerWmmaCap, not a fraction of "
+           "the region's actual ds_load count";
+    EXPECT_EQ(budget.windows[1].dsLoadBudget, 100);
+    EXPECT_EQ(budget.dsLoadTailBudget, 100)
+        << "the tail slot must also get the flat cap, matching the "
+           "pre-migration flat fill's behavior at the region's last (implicit) "
+           "window";
 }
 
 // ---------------------------------------------------------------------------
 // Property: dsReadPerWmmaCap (dagFeatures.dsReadPerWmma /
-// StinkyTofuDsReadPerWmma) still ceilings the *free* ds_load share per
-// window/tail, even though the target itself now comes from the even spread
-// rather than a flat fill. Regression test: this parameter was silently
-// dropped when the ds cap migrated into analyzeWmmaHideBudget, since the
-// analysis had no way to hear about it.
+// StinkyTofuDsReadPerWmma) is the actual per-window/tail value used, at any
+// configured magnitude -- confirms the parameter survived the migration into
+// analyzeWmmaHideBudget (it was silently dropped in an earlier version of
+// this migration, since the analysis had no way to hear about it).
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCapsFreeDsLoadsAtConfiguredPerWmma) {
     createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
@@ -733,9 +739,6 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCapsFreeDsLoadsAtConfiguredPerWmma) {
         createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
 
     const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
-    // Same 5 free ds_loads / 2 windows + tail setup as
-    // WmmaHideBudgetSpreadsFreeDsLoadsAcrossWindowsAndTail (uncapped result:
-    // {2, 2}, tail 1), but capped at 1 per slot here.
     const RegionHideBudget budget = analyzeWmmaHideBudget(
         regionDag, /*barriers=*/{}, /*wmmaHideBudgetBase=*/0, /*dsReadPerWmmaCap=*/1);
 

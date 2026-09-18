@@ -136,43 +136,30 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                              << " perWindow=" << perWindow << " remainder=" << remainder << "\n");
     }
 
-    // Step 3.5: snapshot the ds_load-only portion of issueBudget attributed by
-    // Steps 2/3 above (before Step 4 mixes in non-ds work), then spread any
-    // ds_load with no barrier relationship at all evenly across every window
-    // PLUS one virtual tail slot (the region segment after the last WMMA,
-    // which has no window entry since there's no WMMA left to hold back
-    // there). Floored at 1 per slot whenever any free ds_load remains: a hard
-    // 0 here could strand a load some other, unmodeled constraint (e.g. a
-    // WMMA-src-overlap hazard) forces into exactly that slot. Each slot's free
-    // share (only the free share -- never the barrier-attributed snapshot
-    // above) is also ceilinged at dsReadPerWmmaCap, so the
-    // dagFeatures.dsReadPerWmma / StinkyTofuDsReadPerWmma tuning knob still
-    // bounds how many *unconstrained* ds_loads a window can take.
-    for (WmmaWindowBudget& window : budget.windows) window.dsLoadBudget = window.issueBudget;
+    // Step 3.5: dsLoadBudget is a flat fill of dsReadPerWmmaCap (every window
+    // plus the virtual tail slot for the region segment after the last WMMA)
+    // -- deliberately the SAME per-window value the standalone flat-fill
+    // (dsTargetPerWindow_) used before this migration, so this step is a
+    // relocation of where the ds cap lives, not a behavior change: the ds
+    // cap and the hold-back-next-WMMA decision (issueBudget /
+    // cumulativeWmmaHideBudget_) now live in one place instead of two
+    // independently-computed values that could disagree, but the actual cap
+    // number the scheduler sees is unchanged. issueBudget (Steps 2/3 above)
+    // is intentionally NOT folded into dsLoadBudget: it already serves its
+    // own, unrelated purpose (hold-back-next-WMMA) and mixing it in here
+    // would reintroduce a real behavior change (a tried, measured
+    // regression: diluting the per-window ds cap below dsReadPerWmmaCap
+    // starves the in-flight ds_load pipeline and forces a full-drain wait
+    // (wait_dscnt 0) instead of a smooth partial-overlap pipeline). Any
+    // future even-spread redesign should build on top of this unified
+    // location rather than forking away from it again.
     {
-        int attributedDsLoads = 0;
-        for (const WmmaWindowBudget& window : budget.windows)
-            attributedDsLoads += window.dsLoadBudget;
-        const int freeDsLoads = std::max(0, budget.dsLoadInstructionCount - attributedDsLoads);
-        const int slots = budget.numWindows() + 1;  // +1 = virtual tail slot
-        const int perSlot = freeDsLoads / slots;
-        const int remainder = freeDsLoads % slots;
-        const int cap = dsReadPerWmmaCap > 0 ? dsReadPerWmmaCap : std::numeric_limits<int>::max();
-        for (int i = 0; i < budget.numWindows(); ++i) {
-            int share = perSlot + (i < remainder ? 1 : 0);
-            if (freeDsLoads > 0) share = std::max(share, 1);
-            share = std::min(share, cap);
-            budget.windows[static_cast<size_t>(i)].dsLoadBudget += share;
-        }
-        int tailShare = perSlot + (budget.numWindows() < remainder ? 1 : 0);
-        if (freeDsLoads > 0) tailShare = std::max(tailShare, 1);
-        tailShare = std::min(tailShare, cap);
-        budget.dsLoadTailBudget += tailShare;
-        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis free ds spread] dsLoadInstructionCount="
-                             << budget.dsLoadInstructionCount << " attributedDsLoads="
-                             << attributedDsLoads << " freeDsLoads=" << freeDsLoads
-                             << " slots=" << slots << " dsReadPerWmmaCap=" << dsReadPerWmmaCap
-                             << " tailShare=" << tailShare << "\n");
+        const int flatCap =
+            dsReadPerWmmaCap > 0 ? dsReadPerWmmaCap : std::numeric_limits<int>::max();
+        for (WmmaWindowBudget& window : budget.windows) window.dsLoadBudget = flatCap;
+        budget.dsLoadTailBudget = flatCap;
+        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis ds cap] dsReadPerWmmaCap="
+                             << dsReadPerWmmaCap << " flatCap=" << flatCap << "\n");
     }
 
     // Step 4: place remaining non-DS-load instructions in the first 50% of WMMA
