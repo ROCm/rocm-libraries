@@ -122,6 +122,7 @@ namespace rocRoller
         COMGR_CHECK(amd_comgr_get_data(execData, &dataOutSize, result.data()));
 
         // Cleanup
+        COMGR_CHECK(amd_comgr_release_data(execData));
         COMGR_CHECK(amd_comgr_destroy_data_set(assemblyDataSet));
         COMGR_CHECK(amd_comgr_destroy_data_set(relocatableDataSet));
         COMGR_CHECK(amd_comgr_destroy_data_set(execDataSet));
