@@ -245,6 +245,9 @@ function(roc_host_numerics_enable_blas_backend)
         PRIVATE
             CBLAS::CBLAS
     )
+    if(TARGET OpenMP::OpenMP_CXX)
+        target_link_libraries(host-numerics-blas PRIVATE OpenMP::OpenMP_CXX)
+    endif()
     target_sources(host-numerics-blas
         PUBLIC
             FILE_SET HEADERS
