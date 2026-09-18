@@ -213,9 +213,15 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                      rocMod.offset, hasSCOPEModifier);
 }
 
-stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod,
+                                                   const std::map<std::string, int>& asmCaps) {
+    bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
+    bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
+    bool hasDLCModifier = asmCaps.count("HasDLCModifier") && asmCaps.at("HasDLCModifier");
     return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
-                                       convertMUBUFScope(rocMod.scope));
+                                       convertMUBUFScope(rocMod.scope), rocMod.glc, rocMod.slc,
+                                       rocMod.dlc, rocMod.lds, rocMod.isStore, hasGLCModifier,
+                                       hasSC0Modifier, hasDLCModifier);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -730,7 +736,8 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
-        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers,
+            [&](const auto& mod) { return convertGLOBALModifiers(mod, asmCaps); })
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -747,8 +754,8 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             // whose modifier handling must not change here.
             if (typed->modifier.has_value()) {
                 const auto& gm = typed->modifier.value();
-                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(stinkytofu::GLOBALModifiers(
-                    gm.offset, convertTemporalHint(gm.th), convertMUBUFScope(gm.scope)));
+                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
+                    convertGLOBALModifiers(gm, asmCaps));
             }
         }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
