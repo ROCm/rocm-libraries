@@ -308,8 +308,9 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     if _IS_WINDOWS:
         # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` /
         # ``%ROCM_PATH%\bin`` / ``%ROCM_HOME%\bin`` then the bare DLL name
-        # (resolved via the default DLL search path). The comgr DLL carries a
-        # version suffix, so glob it.
+        # (resolved via the default DLL search path). Packagings disagree on
+        # whether the comgr DLL carries a version suffix, so the unversioned name
+        # is tried first and suffixed variants are globbed after it.
         for root_env in ("HIP_PATH", "ROCM_PATH", "ROCM_HOME"):
             root = os.environ.get(root_env)
             if not root:
