@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -159,6 +159,22 @@ option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
 set( HIPBLASLT_VERSION 1.2.2 CACHE STRING "The version of HipBLASLt to be used" )
 
+# GPU_TARGETS remains the full offload list for the rocBLAS library (hip::device).
+# Tensile_ARCHITECTURE is that list minus ROCBLAS_TENSILE_ARCH_SKIPLIST.
+# If every offload target is skipped, Tensile builds the gfx000 stub when present.
+if( BUILD_WITH_TENSILE AND NOT BUILD_WITH_HIPBLASLT_ONLY )
+  include(tensile-arch-skiplist)
+  rocblas_filter_tensile_arch_skiplist(GPU_TARGETS ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                       _tensile_archs _tensile_excluded_archs)
+  set(_tensile_logic "${Tensile_LOGIC}")
+  if(NOT _tensile_logic)
+    set(_tensile_logic "asm_full")
+  endif()
+  rocblas_tensile_use_stub_if_empty(_tensile_archs
+    "${CMAKE_CURRENT_SOURCE_DIR}/library/src/blas3/Tensile/Logic/${_tensile_logic}"
+    "${GPU_TARGETS}" "${ROCBLAS_TENSILE_ARCH_SKIPLIST}")
+endif()
+
 if( BUILD_WITH_HIPBLASLT_ONLY )
   set( BUILD_WITH_HIPBLASLT ON )
   set( BUILD_WITH_TENSILE OFF )
@@ -185,8 +201,12 @@ endfunction( )
 
 if(NOT SKIP_LIBRARY)
   if( BUILD_WITH_TENSILE )
+    if(_tensile_excluded_archs)
+      message(STATUS "Skipping in Tensile (ROCBLAS_TENSILE_ARCH_SKIPLIST): ${_tensile_excluded_archs}")
+    endif()
+
     # we will have expanded "all" for tensile to ensure consistency as we have local rules
-    set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
+    set( Tensile_ARCHITECTURE "${_tensile_archs}" CACHE STRING "Tensile to use which architecture?" FORCE)
     list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
     set( TENSILE_VERSION 4.48.0 CACHE STRING "The version of Tensile to be used")
@@ -236,6 +256,9 @@ if(NOT SKIP_LIBRARY)
 endif()
 
 message(STATUS "Using GPU_TARGETS: ${GPU_TARGETS}")
+if( BUILD_WITH_TENSILE )
+  message(STATUS "Using Tensile_ARCHITECTURE: ${Tensile_ARCHITECTURE}")
+endif()
 
 # Find HIP dependencies
 if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
@@ -245,6 +268,8 @@ endif( )
 
 # setup rocblas defines used for both the library and clients
 if( BUILD_WITH_TENSILE )
+    rocblas_tensile_arch_skiplist_c_literals(ROCBLAS_TENSILE_ARCH_SKIPLIST
+                                             ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS)
     list(APPEND TENSILE_DEFINES BUILD_WITH_TENSILE)
     if( Tensile_SEPARATE_ARCHITECTURES )
         list(APPEND TENSILE_DEFINES ROCBLAS_TENSILE_SEPARATE_ARCH=1)
@@ -256,10 +281,15 @@ if( BUILD_WITH_TENSILE )
   else()
         list(APPEND TENSILE_DEFINES ROCBLAS_TENSILE_LAZY_LOAD=0)
   endif()
+    list(APPEND TENSILE_DEFINES
+      "ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS=${ROCBLAS_TENSILE_ARCH_SKIPLIST_C_LITERALS}")
 endif()
 
 if( BUILD_WITH_HIPBLASLT )
   list( APPEND HIPBLASLT_DEFINES BUILD_WITH_HIPBLASLT )
+  if( BUILD_WITH_HIPBLASLT_ONLY )
+    list( APPEND HIPBLASLT_DEFINES BUILD_WITH_HIPBLASLT_ONLY )
+  endif()
   rocm_package_add_dependencies(DEPENDS "hipblaslt >= ${HIPBLASLT_VERSION}")
 endif()
 

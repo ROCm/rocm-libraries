@@ -54,6 +54,7 @@ from .Common import (
     getArchitectureName,
     gfxName,
     globalParameters,
+    isStubGfxTarget,
     printExit,
     printWarning,
     splitArchs,
@@ -656,8 +657,10 @@ def buildObjectFileNames(
 
     kernelHelperObjNames = [ko.getKernelName() for ko in kernelHelperObjs]
 
-    # Source based kernels are built for all supported architectures
+    # Source based kernels are built for requested compileable architectures.
+    # gfx000 is a Tensile stub and is not a compiler offload target.
     sourceArchs, _ = splitArchs()
+    sourceArchs = [arch for arch in sourceArchs if not isStubGfxTarget(arch)]
 
     # Asm based kernels target the configured ISA
     asmArchs = collections.defaultdict(list)
@@ -1483,9 +1486,16 @@ def TensileCreateLibrary():
     ]
 
     requestedArchs, cmdlineArchs = splitArchs()
-    if all(a.split(":")[0] not in supportedArchs for a in cmdlineArchs):
+    compileableArchs = [a for a in cmdlineArchs if not isStubGfxTarget(a)]
+    if compileableArchs and all(a.split(":")[0] not in supportedArchs for a in compileableArchs):
         printExit(
             f"No requested architecture is supported by ROCm {globalParameters['HipClangVersion']}\n  Requested {', '.join(requestedArchs)}\n  Supported {', '.join(supportedArchs)}"
+        )
+    if cmdlineArchs and not compileableArchs:
+        tPrint(
+            1,
+            "# Requested only Tensile stub gfx target(s); "
+            "generating library catalogs without device kernel compilation",
         )
 
     manifestFile = libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME
@@ -1577,19 +1587,23 @@ def TensileCreateLibrary():
     for fileName in staticFiles:
         shutil.copy(os.path.join(globalParameters["SourcePath"], fileName), outputPath)
 
-    codeObjectFiles, kernels, solutions = writeKernels(
-        outputPath,
-        args["CxxCompiler"],
-        globalParameters["ClangOffloadBundlerPath"],
-        args,
-        solutions,
-        kernels,
-        kernelHelperObjs,
-        kernelWriterSource,
-        kernelWriterAssembly,
-        removeTemporaries=removeTemporaries,
-        libraryPath=libraryDir(outputPath, requestedArchs),
-    )
+    if compileableArchs:
+        codeObjectFiles, kernels, solutions = writeKernels(
+            outputPath,
+            args["CxxCompiler"],
+            globalParameters["ClangOffloadBundlerPath"],
+            args,
+            solutions,
+            kernels,
+            kernelHelperObjs,
+            kernelWriterSource,
+            kernelWriterAssembly,
+            removeTemporaries=removeTemporaries,
+            libraryPath=libraryDir(outputPath, requestedArchs),
+        )
+    else:
+        tPrint(1, "# Skipping device kernel compilation for stub gfx target")
+        codeObjectFiles = []
 
     sanityCheck(
         sourceLibPaths,
@@ -1604,7 +1618,13 @@ def TensileCreateLibrary():
     newLibraryDir = libraryDir(outputPath, requestedArchs)
     newLibraryDir.mkdir(parents=True, exist_ok=True)
 
-    masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
+    catalogArchs = list(supportedArchs)
+    for arch in requestedArchs:
+        base = arch.split("-xnack")[0]
+        if isStubGfxTarget(base) and base not in catalogArchs:
+            catalogArchs.append(base)
+
+    masterFileList = generateMasterFileList(masterLibraries, catalogArchs, lazyLoading)
 
     tPrint(1, f"# Writing {len(masterFileList)} solution selection catalog(s)")
     for name, lib in masterFileList:

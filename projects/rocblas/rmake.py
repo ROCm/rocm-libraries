@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -114,6 +114,9 @@ def parse_args():
 
     experimental_opts.add_argument('-l', '--logic', dest='tensile_logic', type=str, required=False, default="asm_full",
                         help='Specify the Tensile logic target, e.g., asm_full, asm_lite, etc. (optional, default: asm_full)')
+
+    experimental_opts.add_argument(     '--tensile-arch-skiplist', dest='tensile_arch_skiplist', type=str, required=False, default="",
+                        help='Semi-colon separated GPU targets skipped during Tensile library generation. rocBLAS still compiles for all -a/--architecture targets. (optional, e.g. "gfx1250-strict")')
 
     experimental_opts.add_argument(    '--lazy-library-loading', dest='tensile_lazy_library_loading', required=False, default=True, action='store_true',
                         help='Enable on-demand loading of Tensile Library files, speeds up the rocblas initialization. (Default is enabled)')
@@ -504,6 +507,8 @@ def config_cmd():
         cmake_options.append(f"-DTensile_CODE_OBJECT_VERSION=default")
         if args.tensile_logic:
             cmake_options.append(f"-DTensile_LOGIC={args.tensile_logic}")
+        if args.tensile_arch_skiplist:
+            cmake_options.append(f'-DROCBLAS_TENSILE_ARCH_SKIPLIST=\"{args.tensile_arch_skiplist}\"')
         if args.tensile_fork:
             cmake_options.append(f"-Dtensile_fork={args.tensile_fork}")
         if args.tensile_tag:
