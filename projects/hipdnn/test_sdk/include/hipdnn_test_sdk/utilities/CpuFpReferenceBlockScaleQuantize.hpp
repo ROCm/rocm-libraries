@@ -126,8 +126,11 @@ public:
                                         + " and block size " + std::to_string(blockSize) + ".");
         }
 
-        // Maximum representable value for the output data type
+        // Limit values for output data type
         const auto maxOutVal = static_cast<double>(std::numeric_limits<YDataType>::max());
+        const auto minOutValCompute
+            = static_cast<ComputeDataType>(std::numeric_limits<YDataType>::lowest());
+        const auto maxOutValCompute = static_cast<ComputeDataType>(maxOutVal);
 
         auto quantizeFunc = [&](const std::vector<int64_t>& scaleIndices) {
             const auto blockStart = scaleIndices[targetAxis] * blockSize;
@@ -154,9 +157,11 @@ public:
             {
                 elementIndices[targetAxis] = i;
                 const auto xVal = static_cast<ComputeDataType>(x.getHostValue(elementIndices));
-                const auto yVal = scaleValCompute != static_cast<ComputeDataType>(0.0)
-                                      ? xVal / scaleValCompute
-                                      : static_cast<ComputeDataType>(0.0);
+                auto yVal = scaleValCompute != static_cast<ComputeDataType>(0.0)
+                                ? xVal / scaleValCompute
+                                : static_cast<ComputeDataType>(0.0);
+                yVal = std::clamp(yVal, minOutValCompute, maxOutValCompute);
+
                 // Casting already does an RNE under the hood for the allowed IO types
                 y.setHostValue(static_cast<YDataType>(yVal), elementIndices);
             }
