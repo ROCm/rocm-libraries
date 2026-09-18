@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  *  limitations under the License.
  */
 
-#include <thrust/functional.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -28,7 +28,7 @@
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#if THRUST_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -666,7 +666,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinaryToDiscardIterator
 }
 DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 
-#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_INTEL)
+#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
 template <typename T>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnaryCountingIterator()
 {

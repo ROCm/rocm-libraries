@@ -1,6 +1,6 @@
 /*
  *  Copyright 2024 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/functional/address_stability.h>
+#include <thrust/detail/libcxx_wrapper/__functional/address_stability.h>
 
 #include <unittest/unittest.h>
 
@@ -33,8 +33,8 @@ struct addable
 
 void TestAddressStabilityLibcuxx()
 {
-  using ::thrust::detail::proclaim_copyable_arguments;
-  using ::thrust::detail::proclaims_copyable_arguments;
+  using ::internal::proclaim_copyable_arguments;
+  using ::internal::proclaims_copyable_arguments;
 
   // libcu++ function objects with known types
   static_assert(proclaims_copyable_arguments<_THRUST_STD::plus<int>>::value, "");
@@ -53,8 +53,8 @@ DECLARE_UNITTEST(TestAddressStabilityLibcuxx);
 
 void TestAddressStabilityThrust()
 {
-  using ::thrust::detail::proclaim_copyable_arguments;
-  using ::thrust::detail::proclaims_copyable_arguments;
+  using ::internal::proclaim_copyable_arguments;
+  using ::internal::proclaims_copyable_arguments;
 
   // thrust function objects with known types
   static_assert(proclaims_copyable_arguments<thrust::plus<int>>::value, "");
@@ -82,8 +82,8 @@ struct my_plus
 
 void TestAddressStabilityUserDefinedFunctionObject()
 {
-  using ::thrust::detail::proclaim_copyable_arguments;
-  using ::thrust::detail::proclaims_copyable_arguments;
+  using ::internal::proclaim_copyable_arguments;
+  using ::internal::proclaims_copyable_arguments;
 
   // by-value overload
   static_assert(!proclaims_copyable_arguments<my_plus<int>>::value, "");
@@ -107,8 +107,8 @@ DECLARE_UNITTEST(TestAddressStabilityUserDefinedFunctionObject);
 
 void TestAddressStabilityLambda()
 {
-  using ::thrust::detail::proclaim_copyable_arguments;
-  using ::thrust::detail::proclaims_copyable_arguments;
+  using ::internal::proclaim_copyable_arguments;
+  using ::internal::proclaims_copyable_arguments;
 
   {
     auto l = [](const int& i) {

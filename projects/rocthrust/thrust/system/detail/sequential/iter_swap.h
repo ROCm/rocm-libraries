@@ -43,7 +43,7 @@ namespace sequential
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
 THRUST_HOST_DEVICE void iter_swap(sequential::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
 {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || !_THRUST_USE_ROCPRIM
   using _THRUST_STD::swap;
 #else
   using thrust::swap;

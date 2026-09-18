@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 #  include <thrust/remove.h>
 #  include <thrust/unique.h>
@@ -59,7 +60,7 @@ inline I remove(execution::parallel_unsequenced_policy, I f, I l, const T& x)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::remove(::thrust::device, f, l, x);
+  return THRUST_NS_QUALIFIER::remove(THRUST_NS_QUALIFIER::device, f, l, x);
 }
 
 template <typename I, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -80,7 +81,7 @@ inline I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::remove_if(::thrust::device, f, l, ::std::move(p));
+  return THRUST_NS_QUALIFIER::remove_if(THRUST_NS_QUALIFIER::device, f, l, ::std::move(p));
 }
 
 template <typename I,
@@ -108,7 +109,7 @@ inline O remove_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, c
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::remove_copy(::thrust::device, fi, li, fo, x);
+  return THRUST_NS_QUALIFIER::remove_copy(THRUST_NS_QUALIFIER::device, fi, li, fo, x);
 }
 
 template <typename I, typename O, typename T, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -131,7 +132,7 @@ inline O remove_copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::remove_copy_if(::thrust::device, fi, li, fo, ::std::move(p));
+  return THRUST_NS_QUALIFIER::remove_copy_if(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(p));
 }
 
 template <typename I,
@@ -161,7 +162,7 @@ inline I unique(execution::parallel_unsequenced_policy, I f, I l)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::unique(::thrust::device, f, l);
+  return THRUST_NS_QUALIFIER::unique(THRUST_NS_QUALIFIER::device, f, l);
 }
 
 template <typename I, enable_if_t<!::hipstd::is_offloadable_iterator<I>()>* = nullptr>
@@ -180,7 +181,7 @@ inline I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::unique(::thrust::device, f, l, ::std::move(r));
+  return THRUST_NS_QUALIFIER::unique(THRUST_NS_QUALIFIER::device, f, l, ::std::move(r));
 }
 
 template <typename I,
@@ -208,7 +209,7 @@ inline O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::unique_copy(::thrust::device, fi, li, fo);
+  return THRUST_NS_QUALIFIER::unique_copy(THRUST_NS_QUALIFIER::device, fi, li, fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -229,7 +230,7 @@ inline O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, R
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::unique_copy(::thrust::device, fi, li, fo, ::std::move(r));
+  return THRUST_NS_QUALIFIER::unique_copy(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(r));
 }
 
 template <typename I,

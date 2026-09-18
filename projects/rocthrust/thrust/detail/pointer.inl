@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -52,11 +52,12 @@ THRUST_HOST_DEVICE pointer<Element, Tag, Reference, Derived>::pointer(OtherEleme
     : super_t(other)
 {} // end pointer::pointer
 
-// Fixes hipcc linkage error
+#if THRUST_HAS_HIP_COMPILER() // Fixes hipcc linkage error
 template <typename Element, typename Tag, typename Reference, typename Derived>
 THRUST_HOST_DEVICE pointer<Element, Tag, Reference, Derived>::pointer(Element* ptr)
     : super_t(ptr)
 {} // end pointer::pointer
+#endif
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
 template <typename OtherPointer>

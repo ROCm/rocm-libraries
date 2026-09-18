@@ -48,12 +48,12 @@ namespace stable_primitive_sort_detail
 
 template <typename Iterator>
 struct enable_if_bool_sort
-    : _THRUST_STD::enable_if<_THRUST_STD::is_same<bool, typename thrust::iterator_value<Iterator>::type>::value>
+    : _THRUST_STD::enable_if<_THRUST_STD::is_same<bool, thrust::detail::it_value_t<Iterator>>::value>
 {};
 
 template <typename Iterator>
 struct disable_if_bool_sort
-    : thrust::detail::disable_if<_THRUST_STD::is_same<bool, typename thrust::iterator_value<Iterator>::type>::value>
+    : thrust::detail::disable_if<_THRUST_STD::is_same<bool, thrust::detail::it_value_t<Iterator>>::value>
 {};
 
 template <typename DerivedPolicy, typename RandomAccessIterator>

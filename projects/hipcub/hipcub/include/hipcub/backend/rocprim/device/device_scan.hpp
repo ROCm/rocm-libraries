@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -40,6 +40,8 @@
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 #include <rocprim/types/future_value.hpp> // IWYU pragma: export
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceScan
@@ -58,7 +60,7 @@ public:
                              temp_storage_bytes,
                              d_in,
                              d_out,
-                             ::hipcub::Sum(),
+                             _HIPCUB_STD::plus<>{},
                              num_items,
                              stream);
     }
@@ -230,12 +232,12 @@ public:
                                    NumItemsT       num_items,
                                    hipStream_t     stream = 0)
     {
-        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using T = detail::it_value_t<InputIteratorT>;
         return ExclusiveScan(d_temp_storage,
                              temp_storage_bytes,
                              d_in,
                              d_out,
-                             ::hipcub::Sum(),
+                             _HIPCUB_STD::plus<>{},
                              T(0),
                              num_items,
                              stream);
@@ -492,8 +494,8 @@ public:
     template<typename KeysInputIteratorT,
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -504,14 +506,14 @@ public:
                                         EqualityOpT           equality_op = EqualityOpT(),
                                         hipStream_t           stream      = 0)
     {
-        using in_value_type = typename std::iterator_traits<ValuesInputIteratorT>::value_type;
+        using in_value_type = detail::it_value_t<ValuesInputIteratorT>;
 
         return ExclusiveScanByKey(d_temp_storage,
                                   temp_storage_bytes,
                                   d_keys_in,
                                   d_values_in,
                                   d_values_out,
-                                  ::hipcub::Sum(),
+                                  _HIPCUB_STD::plus<>{},
                                   static_cast<in_value_type>(0),
                                   num_items,
                                   equality_op,
@@ -521,8 +523,8 @@ public:
     template<typename KeysInputIteratorT,
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -550,8 +552,8 @@ public:
              typename ValuesOutputIteratorT,
              typename ScanOpT,
              typename InitValueT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,
@@ -591,8 +593,8 @@ public:
              typename ValuesOutputIteratorT,
              typename ScanOpT,
              typename InitValueT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,
@@ -622,8 +624,8 @@ public:
     template<typename KeysInputIteratorT,
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -639,7 +641,7 @@ public:
                                   d_keys_in,
                                   d_values_in,
                                   d_values_out,
-                                  ::hipcub::Sum(),
+                                  _HIPCUB_STD::plus<>{},
                                   num_items,
                                   equality_op,
                                   stream);
@@ -648,8 +650,8 @@ public:
     template<typename KeysInputIteratorT,
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -676,8 +678,8 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename ScanOpT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,
@@ -689,8 +691,7 @@ public:
                                          EqualityOpT           equality_op = EqualityOpT(),
                                          hipStream_t           stream      = 0)
     {
-        using acc_t = ::rocprim::
-            accumulator_t<ScanOpT, typename std::iterator_traits<ValuesInputIteratorT>::value_type>;
+        using acc_t = ::rocprim::accumulator_t<ScanOpT, detail::it_value_t<ValuesInputIteratorT>>;
 
         return ::rocprim::inclusive_scan_by_key<::rocprim::default_config,
                                                 KeysInputIteratorT,
@@ -714,8 +715,8 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename ScanOpT,
-             typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename EqualityOpT = _HIPCUB_STD::equal_to<>,
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,

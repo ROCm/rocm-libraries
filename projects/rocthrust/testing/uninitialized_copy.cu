@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/nv_target.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/uninitialized_copy.h>
@@ -128,9 +127,9 @@ struct CopyConstructTest
 
   THRUST_HOST_DEVICE CopyConstructTest(const CopyConstructTest&)
   {
-    NV_IF_TARGET(NV_IS_DEVICE,
-                 (copy_constructed_on_device = true; copy_constructed_on_host = false;),
-                 (copy_constructed_on_device = false; copy_constructed_on_host = true;));
+    _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
+                      (copy_constructed_on_device = true; copy_constructed_on_host = false;),
+                      (copy_constructed_on_device = false; copy_constructed_on_host = true;));
   }
 
   THRUST_HOST_DEVICE CopyConstructTest& operator=(const CopyConstructTest& x)

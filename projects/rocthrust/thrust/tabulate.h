@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -47,9 +54,8 @@ THRUST_NAMESPACE_BEGIN
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, and \p ForwardIterator is mutable, and if \c x and \c y are objects of \c ForwardIterator's \c
  * value_type, then <tt>x + y</tt> is defined, and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is
- * defined. \tparam UnaryOperation is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional/unary_function">Unary Function</a> and \c UnaryFunction's
- * \c result_type is convertible to \c OutputIterator's \c value_type.
+ * defined.
+ *  \tparam UnaryOperation The function's return type must be convertible to \c OutputIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p tabulate to generate the first \c n non-positive integers
  *  using the \p thrust::host execution policy for parallelization:
@@ -89,9 +95,8 @@ tabulate(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward
  * Iterator</a>, and \p ForwardIterator is mutable, and if \c x and \c y are objects of \c ForwardIterator's \c
  * value_type, then <tt>x + y</tt> is defined, and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is
- * defined. \tparam UnaryOperation is a model of <a
- * href="https://en.cppreference.com/w/cpp/utility/functional/unary_function">Unary Function</a> and \c UnaryFunction's
- * \c result_type is convertible to \c OutputIterator's \c value_type.
+ * defined.
+ *  \tparam UnaryOperation The function's return type must be convertible to \c OutputIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p tabulate to generate the first \c n non-positive integers:
  *

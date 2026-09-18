@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,6 @@
 
 // hipcub API
 #include <hipcub/device/device_adjacent_difference.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
-#include <hipcub/iterator/discard_output_iterator.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
@@ -157,7 +154,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
     static constexpr std::integral_constant<bool, TestFixture::params::copy> copy_constant{};
     using output_type
         = std::conditional_t<copy_constant, input_type, typename TestFixture::params::output_type>;
-    static constexpr ::hipcub::Difference op;
+    static constexpr test_utils::minus op;
 
     hipStream_t stream = 0;
     if(TestFixture::params::use_graphs)
@@ -460,7 +457,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
 
     static constexpr hipStream_t stream = 0; // default
 
-    for(std::size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -481,15 +478,15 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
             HIP_CHECK(hipMemset(d_counter, 0, sizeof(*d_counter)));
 
             OutputIterator output(d_incorrect_flag, d_counter);
-            const auto            input    = rocprim::counting_iterator<T>(T{0});
+            const auto            input    = test_utils::counting_iterator<T>(T{0});
             static constexpr auto left_tag = std::integral_constant<bool, left>{};
             static constexpr auto copy_tag = std::integral_constant<bool, copy>{};
 
             FocusIndex<left> op;
 
             // Allocate temporary storage
-            std::size_t temp_storage_size = 0;
-            void*       d_temp_storage    = nullptr;
+            size_t temp_storage_size = 0;
+            void*  d_temp_storage    = nullptr;
             HIP_CHECK(dispatch_adjacent_difference(left_tag,
                                                    copy_tag,
                                                    d_temp_storage,

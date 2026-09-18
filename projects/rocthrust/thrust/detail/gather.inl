@@ -18,78 +18,85 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/gather.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/detail/generic/select_system.h>
-#include <thrust/system/detail/generic/gather.h>
 #include <thrust/system/detail/adl/gather.h>
+#include <thrust/system/detail/generic/gather.h>
+#include <thrust/system/detail/generic/select_system.h>
 
 THRUST_NAMESPACE_BEGIN
 
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator,
-         typename RandomAccessIterator,
-         typename OutputIterator>
-THRUST_HOST_DEVICE
-  OutputIterator gather(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                        InputIterator                                               map_first,
-                        InputIterator                                               map_last,
-                        RandomAccessIterator                                        input_first,
-                        OutputIterator                                              result)
+template <typename DerivedPolicy, typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator gather(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator map_first,
+  InputIterator map_last,
+  RandomAccessIterator input_first,
+  OutputIterator result)
 {
   using thrust::system::detail::generic::gather;
-  return gather(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), map_first, map_last, input_first, result);
+  return gather(
+    thrust::detail::derived_cast(thrust::detail::strip_const(exec)), map_first, map_last, input_first, result);
 } // end gather()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator,
-         typename OutputIterator>
-THRUST_HOST_DEVICE
-  OutputIterator gather_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                           InputIterator1                                              map_first,
-                           InputIterator1                                              map_last,
-                           InputIterator2                                              stencil,
-                           RandomAccessIterator                                        input_first,
-                           OutputIterator                                              result)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename RandomAccessIterator,
+          typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator gather_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 map_first,
+  InputIterator1 map_last,
+  InputIterator2 stencil,
+  RandomAccessIterator input_first,
+  OutputIterator result)
 {
   using thrust::system::detail::generic::gather_if;
-  return gather_if(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), map_first, map_last, stencil, input_first, result);
+  return gather_if(
+    thrust::detail::derived_cast(thrust::detail::strip_const(exec)), map_first, map_last, stencil, input_first, result);
 } // end gather_if()
-
 
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator,
-         typename OutputIterator,
-         typename Predicate>
-THRUST_HOST_DEVICE
-  OutputIterator gather_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                           InputIterator1                                              map_first,
-                           InputIterator1                                              map_last,
-                           InputIterator2                                              stencil,
-                           RandomAccessIterator                                        input_first,
-                           OutputIterator                                              result,
-                           Predicate                                                   pred)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename RandomAccessIterator,
+          typename OutputIterator,
+          typename Predicate>
+THRUST_HOST_DEVICE OutputIterator gather_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 map_first,
+  InputIterator1 map_last,
+  InputIterator2 stencil,
+  RandomAccessIterator input_first,
+  OutputIterator result,
+  Predicate pred)
 {
   using thrust::system::detail::generic::gather_if;
-  return gather_if(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), map_first, map_last, stencil, input_first, result, pred);
+  return gather_if(
+    thrust::detail::derived_cast(thrust::detail::strip_const(exec)),
+    map_first,
+    map_last,
+    stencil,
+    input_first,
+    result,
+    pred);
 } // end gather_if()
 
-
-template<typename InputIterator,
-         typename RandomAccessIterator,
-         typename OutputIterator>
-  OutputIterator gather(InputIterator        map_first,
-                        InputIterator        map_last,
-                        RandomAccessIterator input_first,
-                        OutputIterator       result)
+template <typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
+OutputIterator
+gather(InputIterator map_first, InputIterator map_last, RandomAccessIterator input_first, OutputIterator result)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -101,19 +108,16 @@ template<typename InputIterator,
   System2 system2;
   System3 system3;
 
-  return thrust::gather(select_system(system1,system2,system3), map_first, map_last, input_first, result);
+  return thrust::gather(select_system(system1, system2, system3), map_first, map_last, input_first, result);
 } // end gather()
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator,
-         typename OutputIterator>
-  OutputIterator gather_if(InputIterator1       map_first,
-                           InputIterator1       map_last,
-                           InputIterator2       stencil,
-                           RandomAccessIterator input_first,
-                           OutputIterator       result)
+template <typename InputIterator1, typename InputIterator2, typename RandomAccessIterator, typename OutputIterator>
+OutputIterator gather_if(
+  InputIterator1 map_first,
+  InputIterator1 map_last,
+  InputIterator2 stencil,
+  RandomAccessIterator input_first,
+  OutputIterator result)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -127,21 +131,22 @@ template<typename InputIterator1,
   System3 system3;
   System4 system4;
 
-  return thrust::gather_if(select_system(system1,system2,system3,system4), map_first, map_last, stencil, input_first, result);
+  return thrust::gather_if(
+    select_system(system1, system2, system3, system4), map_first, map_last, stencil, input_first, result);
 } // end gather_if()
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator,
-         typename OutputIterator,
-         typename Predicate>
-  OutputIterator gather_if(InputIterator1       map_first,
-                           InputIterator1       map_last,
-                           InputIterator2       stencil,
-                           RandomAccessIterator input_first,
-                           OutputIterator       result,
-                           Predicate            pred)
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename RandomAccessIterator,
+          typename OutputIterator,
+          typename Predicate>
+OutputIterator gather_if(
+  InputIterator1 map_first,
+  InputIterator1 map_last,
+  InputIterator2 stencil,
+  RandomAccessIterator input_first,
+  OutputIterator result,
+  Predicate pred)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -155,7 +160,8 @@ template<typename InputIterator1,
   System3 system3;
   System4 system4;
 
-  return thrust::gather_if(select_system(system1,system2,system3,system4), map_first, map_last, stencil, input_first, result, pred);
+  return thrust::gather_if(
+    select_system(system1, system2, system3, system4), map_first, map_last, stencil, input_first, result, pred);
 } // end gather_if()
 
 THRUST_NAMESPACE_END

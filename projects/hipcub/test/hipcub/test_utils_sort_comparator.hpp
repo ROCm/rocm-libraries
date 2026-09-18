@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_half.hpp"
 
+#include <hipcub/libcxx.hpp>
 #include <hipcub/tuple.hpp>
 
 #include <cstring>
@@ -42,40 +43,62 @@ namespace test_utils
 namespace detail
 {
 
+template<class Key>
+constexpr bool is_extended_int
+    = std::is_same_v<Key, __int128> || std::is_same_v<Key, unsigned __int128>;
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH std::enable_if_t<
-             hipcub::NumericTraits<Key>::CATEGORY == hipcub::SIGNED_INTEGER
-                 || hipcub::NumericTraits<Key>::CATEGORY == hipcub::UNSIGNED_INTEGER,
-             int> HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+         std::enable_if_t<
+             // Catch integral types and extended integral types.
+             // The std::is_same_v<...> clauses can be removed once
+             // libhipcxx is a hard depedency and test types half_t
+             // and bfloat_t are removed.
+             _HIPCUB_STD::is_integral_v<Key> || is_extended_int<Key>,
+             int>
          = 0>
 Key to_bits(const Key key)
 {
-    static constexpr Key radix_mask_upper
-        = EndBit == 8 * sizeof(Key) ? ~Key(0) : static_cast<Key>((Key(1) << EndBit) - 1);
+    using Bits                             = typename hipcub::Traits<Key>::UnsignedBits;
+    static constexpr Key radix_mask_upper  = EndBit == 8 * sizeof(Key)
+                                                 ? static_cast<Key>(~Bits(0))
+                                                 : static_cast<Key>((Bits(1) << EndBit) - 1);
     static constexpr Key radix_mask_bottom = static_cast<Key>((Key(1) << StartBit) - 1);
     static constexpr Key radix_mask        = radix_mask_upper ^ radix_mask_bottom;
 
     return key & radix_mask;
 }
 
+template<class Key>
+constexpr bool is_extended_fp
+    = std::is_same_v<Key, __half> || std::is_same_v<Key, hip_bfloat16>
+      || std::is_same_v<Key, native_half> || std::is_same_v<Key, native_bfloat16>
+      || std::is_same_v<Key, test_utils::bfloat16>;
+
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-             std::enable_if_t<hipcub::NumericTraits<Key>::CATEGORY == hipcub::FLOATING_POINT, int>
+         std::enable_if_t<
+             // Catch floating types and extended floating types.
+             // The std::is_same_v<...> clauses can be removed once
+             // libhipcxx is a hard depedency and test types half_t
+             // and bfloat_t are removed.
+             _HIPCUB_STD::is_floating_point_v<Key> || is_extended_fp<Key>,
+             int>
          = 0>
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP auto to_bits(const Key key)
+auto to_bits(const Key key)
 {
     using unsigned_bits_type = typename hipcub::NumericTraits<Key>::UnsignedBits;
+    static_assert(sizeof(unsigned_bits_type) == sizeof(Key));
 
     unsigned_bits_type bit_key;
-    memcpy(&bit_key, &key, sizeof(Key));
+    std::memcpy(&bit_key, &key, sizeof(unsigned_bits_type));
 
     // Remove signed zero, this case is supposed to be treated the same as
     // unsigned zero in hipcub sorting algorithms.
-    constexpr unsigned_bits_type minus_zero = unsigned_bits_type{1} << (8 * sizeof(Key) - 1);
+    constexpr unsigned_bits_type minus_zero = unsigned_bits_type{1}
+                                              << (8 * sizeof(unsigned_bits_type) - 1);
+
     // Positive and negative zero should compare the same.
     if(bit_key == minus_zero)
     {
@@ -96,7 +119,7 @@ HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP auto to_bits(const Key key)
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<is_custom_test_type<Key>::value, int> = 0>
+         std::enable_if_t<is_custom_test_type<std::decay_t<Key>>::value, int> = 0>
 auto to_bits(const Key& key)
 {
     using inner_t            = typename inner_type<Key>::type;
@@ -108,19 +131,16 @@ auto to_bits(const Key& key)
                            uint32_t,
                            std::conditional_t<sizeof(inner_t) == 4, uint64_t, void>>>;
 
-    auto bit_key_upper = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.x) * 8>(key.x));
-    auto bit_key_lower = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.y) * 8>(key.y));
+    auto bit_key_upper = static_cast<unsigned_bits_type>(to_bits<0, sizeof(inner_t) * 8>(key.x));
+    auto bit_key_lower = static_cast<unsigned_bits_type>(to_bits<0, sizeof(inner_t) * 8>(key.y));
 
     // Flip sign bit to properly order signed types
-    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-    if(::hipcub::NumericTraits<inner_t>::CATEGORY == hipcub::SIGNED_INTEGER)
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-        {
-            constexpr auto sign_bit = static_cast<unsigned_bits_type>(1)
-                                      << (sizeof(inner_t) * 8 - 1);
-            bit_key_upper ^= sign_bit;
-            bit_key_lower ^= sign_bit;
-        }
+    if(std::is_signed<inner_t>::value)
+    {
+        constexpr auto sign_bit = static_cast<unsigned_bits_type>(1) << (sizeof(inner_t) * 8 - 1);
+        bit_key_upper ^= sign_bit;
+        bit_key_lower ^= sign_bit;
+    }
 
     // Create the result containing both parts
     const auto bit_key

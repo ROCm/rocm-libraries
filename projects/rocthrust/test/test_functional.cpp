@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/transform.h>
 #include <thrust/universal_vector.h>
@@ -28,7 +29,6 @@
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
-#  include <utility>
 #endif
 
 THRUST_DIAG_PUSH
@@ -86,7 +86,7 @@ TESTS_DEFINE(IntegralVectorTests, IntegralVectorTestsParams);
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
+#if THRUST_COMPILER(GCC, >=, 11)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
 #else
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -212,45 +212,6 @@ typename _THRUST_STD::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
   return __t;
 }
 
-// Ad-hoc testing for other functionals
-TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
-{
-  THRUST_SUPPRESS_DEPRECATED_PUSH
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  int i    = 42;
-  double d = 3.14;
-
-  // pass through
-  ASSERT_EQ(thrust::identity<int>{}(i), 42);
-  ASSERT_EQ(thrust::identity<int>{}(d), 3);
-
-  // modification through
-  thrust::identity<int>{}(i) = 1337;
-  ASSERT_EQ(i, 1337);
-
-  // value categories and const
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(42)), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(i)), int&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(i))), const int&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(i))), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const int&&>(i))), const int&>::value,
-                "");
-
-  // value categories when casting to different type
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
-  // unfortunately, old versions of MSVC pick the `const int&` overload instead of `int&&`
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_MSVC_VERSION >= 1929
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
-#endif
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(d))), int&&>::value, "");
-  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value,
-                "");
-  THRUST_SUPPRESS_DEPRECATED_POP
-}
-
 TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -348,15 +309,6 @@ TYPED_TEST(IntegralVectorTests, TestNot1) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   ASSERT_EQ(output, ref);
 }
 
-// GCC 11 fails to build this test case with a spurious error in a
-// very specific scenario:
-// - GCC 11
-// - CPP system for both host and device
-// - C++11 dialect
-#if !(defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 110000 && THRUST_GCC_VERSION < 120000          \
-      && THRUST_HOST_SYSTEM == THRUST_HOST_SYSTEM_CPP && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CPP \
-      && THRUST_CPP_DIALECT == 2011)
-
 TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -374,7 +326,5 @@ TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   Vector ref{0, 1, 1, 0, 1};
   ASSERT_EQ(output, ref);
 }
-
-#endif // Weird GCC11 failure case
 
 THRUST_DIAG_POP

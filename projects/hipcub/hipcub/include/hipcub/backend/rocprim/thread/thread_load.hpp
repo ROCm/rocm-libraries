@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -77,10 +77,10 @@ HIPCUB_FORCEINLINE T ThreadLoadVolatilePointer(T* ptr, Fundamental /* is_fundame
 
 template<int MODIFIER, typename InputIteratorT>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE typename std::iterator_traits<InputIteratorT>::value_type
-    ThreadLoad(InputIteratorT itr,
-               detail::int_constant_t<MODIFIER> /*modifier*/,
-               ::std::false_type /*is_pointer*/)
+HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT>
+                   ThreadLoad(InputIteratorT itr,
+                              detail::int_constant_t<MODIFIER> /*modifier*/,
+                              ::std::false_type /*is_pointer*/)
 {
     return rocprim::thread_load<rocprim::cache_load_modifier(MODIFIER)>(itr);
 }
@@ -96,12 +96,11 @@ HIPCUB_FORCEINLINE T ThreadLoad(T* ptr,
 
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename InputIteratorT>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
-    typename std::iterator_traits<InputIteratorT>::value_type ThreadLoad(InputIteratorT itr)
+HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT> ThreadLoad(InputIteratorT itr)
 {
     return ThreadLoad(itr,
                       detail::int_constant_t<MODIFIER>(),
-                      ::std::bool_constant<::std::is_pointer<InputIteratorT>::value>());
+                      ::std::bool_constant<_HIPCUB_STD::is_pointer<InputIteratorT>::value>());
 }
 
 END_HIPCUB_NAMESPACE

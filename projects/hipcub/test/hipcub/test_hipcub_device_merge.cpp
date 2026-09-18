@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 
 // hipcub API
 #include <hipcub/device/device_merge.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
 
 #include "identity_iterator.hpp"
 #include "test_utils_data_generation.hpp"
@@ -469,11 +468,16 @@ std::vector<std::tuple<size_t, size_t>> get_large_sizes()
 
 TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
 {
+
+#if defined(_WIN32)
+    GTEST_SKIP() << "Windows AMD HIP cannot allocate >= 4 GiB buffers.";
+#endif
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type         = int;
+    using key_type         = _HIPCUB_STD::int64_t;
     using compare_function = test_utils::less;
 
     hipStream_t stream = 0; // default
@@ -496,9 +500,9 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         compare_function compare_op;
 
         // Generate data
-        const auto input1 = rocprim::counting_iterator<key_type>(key_type{0});
+        const auto input1 = test_utils::counting_iterator<key_type>(key_type{0});
         const auto input2
-            = rocprim::counting_iterator<key_type>(key_type{static_cast<key_type>(size1)});
+            = test_utils::counting_iterator<key_type>(key_type{static_cast<key_type>(size1)});
         std::vector<key_type> vec_input1(size1);
         std::vector<key_type> vec_input2(size2);
         std::iota(vec_input1.begin(), vec_input1.end(), 0);
