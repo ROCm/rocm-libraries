@@ -1697,11 +1697,27 @@ namespace TensileLite
                 // Computed here rather than delegated because a predicate is handed
                 // MacroTile0/MacroTile1 as its value and never sees the solution's
                 // sizeMapping, so it cannot consult packBatchDims. That is the one
-                // remaining divergence: when packBatchDims is set getNumTiles folds
-                // batch into the M or N extent before the macro-tile divide, while
-                // this multiplies it in afterwards. That direction can only
-                // over-count, so it can only reject more, which is the safe way to
-                // be wrong.
+                // remaining divergence from getNumTiles, and it is not uniformly
+                // safe:
+                //
+                //   packBatchDims 0 : batch lands in numWG.z; identical to this.
+                //   packBatchDims 1 : batch folds into M before the divide, 2 into
+                //                     N. Folding before the divide can only lose to
+                //                     multiplying after, so this over-counts and
+                //                     only rejects more.
+                //   packBatchDims 3 : batch folds into M *and* N, so getNumTiles
+                //                     scales by batch squared while this scales by
+                //                     batch. This under-counts. One batch of 2 at a
+                //                     16x16 tile gives getNumTiles 1024 against 512
+                //                     here.
+                //
+                // Only mode 3 is unsafe, and it does not occur: packBatchDims is 0
+                // in all 77,421 solutions of the shipped gfx950 library. If a tuned
+                // library ever ships mode 3, this predicate needs the packing mode
+                // carried in its serialized value to stay correct. Until then the
+                // launch guard in SolutionAdapter::launchKernel is the backstop; it
+                // bounds the grid it is actually handed, so an under-count here
+                // surfaces as hipErrorInvalidValue rather than silent truncation.
                 static size_t tiles(ContractionProblemGemm const& problem,
                                     std::array<int, 2> const&     value)
                 {
