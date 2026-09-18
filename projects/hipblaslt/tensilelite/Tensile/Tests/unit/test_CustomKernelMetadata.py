@@ -323,6 +323,20 @@ def test_problem_predicate_ands_multi_dim_assert_size_equal():
     assert all(p.tag == "SizeEqual" for p in pred.value)
 
 
+def test_problem_predicate_rejects_non_dict_assert_size_equal():
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", 1))
+
+
+def test_valid_parameters_reject_assert_size_equal_bad_map():
+    with pytest.raises(Exception, match="Index must be int"):
+        checkParametersAreValid(("AssertSizeEqual", [{"0": 1}]), validParameters)
+    with pytest.raises(Exception, match="Index must be >= 0"):
+        checkParametersAreValid(("AssertSizeEqual", [{-1: 1}]), validParameters)
+    with pytest.raises(Exception, match="Size must be int"):
+        checkParametersAreValid(("AssertSizeEqual", [{0: 1.5}]), validParameters)
+
+
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
     yaml_path.write_text(dedent(f"""\
         BenchmarkProblems:
