@@ -209,8 +209,7 @@ public:
             // skipping the second guard; EXPECT reports and continues.
             alignas(alignof(T)) unsigned char after_bytes[MEM_MAX_GUARD_PAD * sizeof(T)];
 
-            hipError_t status
-                = hipMemcpy(after_bytes, d + m_size, m_guard_len, hipMemcpyDefault);
+            hipError_t status = hipMemcpy(after_bytes, d + m_size, m_guard_len, hipMemcpyDefault);
             EXPECT_EQ(status, hipSuccess)
                 << "cannot read the guard after the allocation: " << hipGetErrorName(status);
 
