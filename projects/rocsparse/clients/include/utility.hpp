@@ -444,7 +444,6 @@ struct test_hyb
     rocsparse_int           m;
     rocsparse_int           n;
     rocsparse_hyb_partition partition;
-    // Must mirror the layout of _rocsparse_hyb_mat.
     int64_t        ell_nnz;
     rocsparse_int  ell_width;
     rocsparse_int* ell_col_ind;

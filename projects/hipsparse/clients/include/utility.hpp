@@ -7634,7 +7634,6 @@ double get_time_us_sync(hipStream_t stream);
 }
 #endif
 
-// Must mirror the layout of rocSPARSE's _rocsparse_hyb_mat.
 struct testhyb
 {
     int                     m;
