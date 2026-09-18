@@ -30,6 +30,39 @@
 #include "int64_helpers.hpp"
 #include "tensile_host.hpp"
 
+// ALMIOPEN-1609 / ROCM-30996: Tensile 32-bit column*ld overflow workaround.
+// K is the column index (multiplies ld) only for A when transA=N (lda) and
+// B when transB!=N (ldb). Skip when hipBLASLt is the expected backend.
+template <typename Ti>
+inline int64_t rocblas_tensile_k_chunk(rocblas_handle    handle,
+                                       rocblas_operation trans_a,
+                                       rocblas_operation trans_b,
+                                       rocblas_int       ld_a,
+                                       rocblas_int       ld_b,
+                                       rocblas_int       k,
+                                       rocblas_gemm_algo algo,
+                                       int32_t           solution_index,
+                                       bool              batched)
+{
+    int64_t    safe_k = int64_t(k);
+    const bool tensile_only
+        = algo == rocblas_gemm_algo_solution_index && rocblas_tensile_index(solution_index);
+    if(tensile_only || !useHipBLASLt<Ti>(handle, batched))
+    {
+        constexpr int64_t overflow_limit_2_to_31 = 2147483647; // 2^31 - 1
+        int64_t           k_col_stride           = 0;
+        if(trans_a == rocblas_operation_none)
+            k_col_stride = std::max(k_col_stride, int64_t(ld_a));
+        if(trans_b != rocblas_operation_none)
+            k_col_stride = std::max(k_col_stride, int64_t(ld_b));
+        int64_t bytes_per_element = sizeof(Ti);
+        if(k_col_stride > 0 && k_col_stride * bytes_per_element > 0)
+            safe_k
+                = std::max(int64_t(1), overflow_limit_2_to_31 / (k_col_stride * bytes_per_element));
+    }
+    return (safe_k >= k) ? std::max(int64_t(k), int64_t(1)) : safe_k;
+}
+
 /*******************************************************************************
  * Tensile / HipBLASLt GEMM dispatch (problem construction shared)
  ******************************************************************************/
@@ -95,13 +128,54 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
     }
 #endif
 
-        RocblasContractionProblem<Ti, To, Tc> problem{
-            handle,   trans_a, trans_b,  m,        n,       k,        alpha,    nullptr,
-            A_ptr,    ld_a,    stride_a, offset_a, nullptr, B_ptr,    ld_b,     stride_b,
-            offset_b, beta,    nullptr,  C_ptr,    ld_c,    stride_c, offset_c, nullptr,
-            D_ptr,    ld_d,    stride_d, offset_d, batches, false,    flags};
+        int64_t k_chunk = rocblas_tensile_k_chunk<Ti>(
+            handle, trans_a, trans_b, ld_a, ld_b, k, algo, solution_index, true);
 
-        RETURN_IF_ROCBLAS_ERROR(runContractionProblem(problem, algo, solution_index));
+        Tc one_val = static_cast<Tc>(1);
+
+        for(int64_t k_base = 0; k_base < std::max(int64_t(k), int64_t(1)); k_base += k_chunk)
+        {
+            int32_t kblock = int32_t(std::min(int64_t(k) - k_base, k_chunk));
+
+            auto a_k_offset = (trans_a == rocblas_operation_none) ? int64_t(k_base) * ld_a : k_base;
+            auto b_k_offset = (trans_b == rocblas_operation_none) ? k_base : int64_t(k_base) * ld_b;
+
+            const Tc* chunk_beta = (k_base == 0) ? beta : &one_val;
+
+            RocblasContractionProblem<Ti, To, Tc> problem{handle,
+                                                          trans_a,
+                                                          trans_b,
+                                                          m,
+                                                          n,
+                                                          kblock,
+                                                          alpha,
+                                                          nullptr,
+                                                          A_ptr,
+                                                          ld_a,
+                                                          stride_a,
+                                                          offset_a + a_k_offset,
+                                                          nullptr,
+                                                          B_ptr,
+                                                          ld_b,
+                                                          stride_b,
+                                                          offset_b + b_k_offset,
+                                                          chunk_beta,
+                                                          nullptr,
+                                                          C_ptr,
+                                                          ld_c,
+                                                          stride_c,
+                                                          offset_c,
+                                                          nullptr,
+                                                          D_ptr,
+                                                          ld_d,
+                                                          stride_d,
+                                                          offset_d,
+                                                          batches,
+                                                          false,
+                                                          flags};
+
+            RETURN_IF_ROCBLAS_ERROR(runContractionProblem(problem, algo, solution_index));
+        }
     }
     return rocblas_status_success;
 }
@@ -168,27 +242,13 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
     }
 #endif
 
-        // ALMIOPEN-1609 FIX: chunk k dimension when stride*k could overflow 32-bit
-        // Note: k==0 is a valid BLAS operation (D = beta*C), must not skip it.
-        // Tensile kernels use 32-bit offset = column * stride, which overflows
-        // when stride (=lda or ldb) is large and k is large.
-        // Safe k_chunk: k_chunk * max(lda,ldb) * sizeof(element) < 2^31
         const auto A_base = A_ptr + offset_a;
         const auto B_base = B_ptr + offset_b;
         const auto C_base = C_ptr + offset_c;
         auto       D_base = D_ptr + offset_d;
 
-        // Calculate safe k_chunk_size to keep offsets within signed 32-bit
-        constexpr int64_t overflow_limit_2_to_31 = 2147483647; // 2^31 - 1
-        int64_t           max_stride             = std::max(int64_t(ld_a), int64_t(ld_b));
-        int64_t           bytes_per_element      = sizeof(Ti);
-        int64_t           safe_k
-            = (max_stride > 0 && max_stride * bytes_per_element > 0)
-                  ? std::max(int64_t(1), overflow_limit_2_to_31 / (max_stride * bytes_per_element))
-                  : int64_t(k);
-        // Only chunk if needed (when k would overflow)
-        // Ensure k_chunk >= 1 to avoid infinite loop when k=0
-        int64_t k_chunk = (safe_k >= k) ? std::max(int64_t(k), int64_t(1)) : safe_k;
+        int64_t k_chunk = rocblas_tensile_k_chunk<Ti>(
+            handle, trans_a, trans_b, ld_a, ld_b, k, algo, solution_index, false);
 
         Tc beta_val = *beta;
         Tc one_val  = static_cast<Tc>(1);
