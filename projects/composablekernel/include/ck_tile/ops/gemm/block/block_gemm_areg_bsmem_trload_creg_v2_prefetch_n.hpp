@@ -11,7 +11,9 @@ namespace ck_tile {
 // A is block distributed tensor
 // B is block window on shared memory
 // C is block distributed tensor
-template <typename Problem_, typename Policy_ = BlockGemmARegBSmemCRegV2DefaultPolicy>
+template <typename Problem_,
+          typename Policy_          = BlockGemmARegBSmemCRegV2DefaultPolicy,
+          bool RematerializeBOrigin = false>
 struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
 {
     using Problem        = remove_cvref_t<Problem_>;
@@ -23,12 +25,28 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
+    static constexpr auto config = Policy::template GetWarpGemmMWarpNWarp<Problem>();
+    using WarpGemm               = remove_cvref_t<decltype(config.template at<0>())>;
+    static constexpr index_t MIterPerWarp =
+        BlockGemmShape::kM / (config.template at<1>() * WarpGemm::kM);
+
+    struct no_scale
+    {
+    };
+
     // C += A * B
-    template <typename CBlockTensor, typename ABlockTensorTmp, typename BBlockWindowTmp>
+    template <typename CBlockTensor,
+              typename ABlockTensorTmp,
+              typename BBlockWindowTmp,
+              typename AScaleFn = no_scale,
+              typename BScaleFn = no_scale>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ABlockTensorTmp& a_block_tensor_tmp,
-                                   const BBlockWindowTmp& b_block_window_tmp) const
+                                   const BBlockWindowTmp& b_block_window_tmp,
+                                   const AScaleFn& a_scale = {},
+                                   const BScaleFn& b_scale = {}) const
     {
+        constexpr bool kScaled = !std::is_same_v<remove_cvref_t<AScaleFn>, no_scale>;
         static_assert(
             std::is_same_v<ADataType, remove_cv_t<typename ABlockTensorTmp::DataType>> &&
                 std::is_same_v<BDataType, remove_cv_t<typename BBlockWindowTmp::DataType>> &&
@@ -43,14 +61,12 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
                           KPerBlock == BlockGemmShape::kK,
                       "wrong!");
 
-        constexpr auto config = Policy::template GetWarpGemmMWarpNWarp<Problem>();
-
-        using WG = remove_cvref_t<decltype(config.template at<0>())>;
+        using WG = WarpGemm;
 
         constexpr index_t MWarp = config.template at<1>();
         constexpr index_t NWarp = config.template at<2>();
 
-        constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WG::kM);
+        constexpr index_t MIterations  = MPerBlock / (MWarp * WG::kM);
         constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WG::kN);
         constexpr index_t KIterPerWarp = KPerBlock / WG::kK;
 
@@ -61,7 +77,7 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
 
         constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<>,
-            tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
+            tuple<sequence<MIterations, MWarp>, sequence<NIterPerWarp, NWarp>>,
             tuple<sequence<1, 2>>,
             tuple<sequence<1, 1>>,
             sequence<1, 2>,
@@ -82,12 +98,20 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
             typename InputTileDistributionTraits<typename WG::BWarpDstrEncoding,
                                                  BDataType>::TransposedDstrEncode{};
 
+        auto b_origin = b_block_window_tmp.get_window_origin();
+        if constexpr(RematerializeBOrigin)
+        {
+            // Keep full B addresses out of the preceding QK/softmax live range.
+            index_t row_origin = b_origin[number<0>{}];
+            asm volatile("v_mov_b32 %0, %0" : "+v"(row_origin));
+            b_origin(number<0>{}) = row_origin;
+        }
         // construct B-warp-window
-        auto b_warp_window_tmp = make_tile_window(
-            b_block_window_tmp.get_bottom_tensor_view(),
-            make_tuple(number<WG::kK>{}, number<WG::kN>{}),
-            b_block_window_tmp.get_window_origin() + multi_index<2>{0, iNWarp * WG::kN},
-            make_static_tile_distribution(b_warp_dstr_encode));
+        auto b_warp_window_tmp =
+            make_tile_window(b_block_window_tmp.get_bottom_tensor_view(),
+                             make_tuple(number<WG::kK>{}, number<WG::kN>{}),
+                             b_origin + multi_index<2>{0, iNWarp * WG::kN},
+                             make_static_tile_distribution(b_warp_dstr_encode));
 
         statically_indexed_array<
             statically_indexed_array<decltype(b_warp_window_tmp), KIterPerWarp>,
@@ -143,7 +167,7 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
 
                 __builtin_amdgcn_sched_barrier(0);
 
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
+                static_for<0, MIterations, 1>{}([&](auto mIter) {
                     // read A warp tensor from A block tensor
                     AWarpTensor a_warp_tensor;
 
@@ -159,7 +183,18 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                     // warp GEMM
-                    WG{}(c_warp_tensor, a_warp_tensor, b_warp_tensors[nIter]);
+                    if constexpr(kScaled)
+                    {
+                        WG{}(c_warp_tensor,
+                             a_warp_tensor,
+                             b_warp_tensors[nIter],
+                             a_scale(mIter, kIter),
+                             b_scale(nIter, kIter));
+                    }
+                    else
+                    {
+                        WG{}(c_warp_tensor, a_warp_tensor, b_warp_tensors[nIter]);
+                    }
 
                     // write C warp tensor into C block tensor
                     c_block_tensor.set_y_sliced_thread_data(
@@ -174,19 +209,17 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
     template <index_t MPerBlock = BlockGemmShape::kM, index_t KPerBlock = BlockGemmShape::kK>
     CK_TILE_DEVICE static constexpr auto MakeABlockTileDistribution()
     {
-        constexpr auto config = Policy::template GetWarpGemmMWarpNWarp<Problem>();
-
-        using WG = remove_cvref_t<decltype(config.template at<0>())>;
+        using WG = WarpGemm;
 
         constexpr index_t MWarp = config.template at<1>();
         constexpr index_t NWarp = config.template at<2>();
 
-        constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WG::kM);
+        constexpr index_t MIterations  = MPerBlock / (MWarp * WG::kM);
         constexpr index_t KIterPerWarp = KPerBlock / WG::kK;
 
         constexpr auto a_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<NWarp>,
-                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<MIterations, MWarp>, sequence<KIterPerWarp>>,
                                        tuple<sequence<1, 0>>,
                                        tuple<sequence<1, 0>>,
                                        sequence<1, 2>,
@@ -203,20 +236,18 @@ struct BlockGemmARegBSmemTrLoadCRegV2PrefetchN
         constexpr index_t MPerBlock = BlockGemmShape::kM;
         constexpr index_t NPerBlock = BlockGemmShape::kN;
 
-        constexpr auto config = Policy::template GetWarpGemmMWarpNWarp<Problem>();
-
-        using WG = remove_cvref_t<decltype(config.template at<0>())>;
+        using WG = WarpGemm;
 
         constexpr index_t MWarp = config.template at<1>();
         constexpr index_t NWarp = config.template at<2>();
 
-        constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WG::kM);
+        constexpr index_t MIterations  = MPerBlock / (MWarp * WG::kM);
         constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WG::kN);
         // constexpr index_t KIterPerWarp = KPerBlock / WG::kK;
 
         constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<>,
-            tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
+            tuple<sequence<MIterations, MWarp>, sequence<NIterPerWarp, NWarp>>,
             tuple<sequence<1, 2>>,
             tuple<sequence<1, 1>>,
             sequence<1, 2>,
