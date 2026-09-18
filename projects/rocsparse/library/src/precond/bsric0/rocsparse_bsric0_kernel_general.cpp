@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsric0_kernel_general.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid_x.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -39,12 +40,28 @@ namespace rocsparse
                                                     int32_t* __restrict__ block_done,
                                                     const J* __restrict__ block_map,
                                                     J*                   zero_pivot,
-                                                    rocsparse_index_base idx_base)
+                                                    rocsparse_index_base idx_base,
+                                                    int64_t              block_row_idx)
     {
         auto lid = hipThreadIdx_x & (WFSIZE - 1);
         auto wid = hipThreadIdx_x / WFSIZE;
 
-        auto idx = hipBlockIdx_x + wid;
+        //
+        // The block row is supplied by the caller rather than read from
+        // hipBlockIdx_x, so that the kernel wrapper can walk a chunk of block
+        // rows when the row count is past what grid.x can express.
+        //
+        const int64_t idx = block_row_idx + wid;
+
+        //
+        // Do not run out of bounds. The row map has mb entries and nothing else
+        // checked this; bsrilu0_kernel_general and every CSR kernel in the
+        // family do.
+        //
+        if(idx >= mb)
+        {
+            return;
+        }
 
         // Current block row this wavefront is working on
         J block_row = block_map[idx];
@@ -350,18 +367,38 @@ namespace rocsparse
                                rocsparse_index_base idx_base)
     {
         const auto batch_index = hipBlockIdx_y;
-        rocsparse::bsric0_device_general<SLEEP, BLOCKSIZE, WFSIZE>(
-            dir,
-            mb,
-            bsr_dim,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val + batch_index * bsr_val_stride,
-            bsr_diag_ind,
-            done_array + batch_index * done_array_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            idx_base);
+
+        //
+        // grid.x is clamped to what the hardware accepts, so this walks a
+        // contiguous chunk of block rows. For every row count that fits on a
+        // device the chunk is exactly one block row and the loop runs once.
+        //
+        // No barrier between iterations, and none is needed: this kernel holds
+        // no shared state, so there is nothing for the next block row to race
+        // against. All the scratch it touches (the done array, the zero-pivot
+        // position) is addressed by the logical block row taken from the map,
+        // never by hipBlockIdx_x, so reusing a block across iterations is safe.
+        //
+        int64_t first_block_row, last_block_row;
+        rocsparse::grid_x_chunk(mb, hipGridDim_x, hipBlockIdx_x, first_block_row, last_block_row);
+
+        for(int64_t block_row_idx = first_block_row; block_row_idx < last_block_row;
+            ++block_row_idx)
+        {
+            rocsparse::bsric0_device_general<SLEEP, BLOCKSIZE, WFSIZE>(
+                dir,
+                mb,
+                bsr_dim,
+                bsr_row_ptr,
+                bsr_col_ind,
+                bsr_val + batch_index * bsr_val_stride,
+                bsr_diag_ind,
+                done_array + batch_index * done_array_stride,
+                map,
+                zero_pivot + batch_index * zero_pivot_stride,
+                idx_base,
+                block_row_idx);
+        }
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename I, typename J>
@@ -379,7 +416,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_general<SLEEP, BLOCKSIZE, WFSIZE>),
-            dim3(A->rows, A->batch_count),
+            dim3(rocsparse::get_grid_size_x(A->rows), A->batch_count),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
