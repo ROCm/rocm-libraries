@@ -3,12 +3,12 @@
 
 import pytest
 
-from Tensile.SolutionStructs.Solution import (
+from Tensile.SolutionStructs.Validators.Subtile import (
     _SUBTILE_STACK_FULL_LINE,
     _SUBTILE_STACK_SIZES,
     _subtileStackForTile,
-    _subtileStackForTLU1,
-    _subtileTLU1StackReason,
+    subtileStackForTLU1,
+    subtileTLU1StackReason,
 )
 
 
@@ -66,7 +66,7 @@ def test_stack_never_shrinks_below_an_exact_divisor():
 
 # --- geometry-aware fallback -------------------------------------------------
 #
-# _subtileStackForTile picks on cache-line utilization alone. _subtileStackForTLU1
+# _subtileStackForTile picks on cache-line utilization alone. subtileStackForTLU1
 # additionally backs off to a shorter stack when the preferred one cannot be laid
 # out for the wave group, instead of leaving the solution to be rejected.
 
@@ -96,8 +96,8 @@ def test_mt192x192_wg2x2_falls_back_to_a_layout_that_works():
     state = _state(12, 12, (2, 2))
     for tc in ("A", "B"):
         assert _subtileStackForTile(12) == 16
-        assert _subtileStackForTLU1(state, tc, 12) == 2
-        assert _subtileTLU1StackReason(state, tc, 12, 2) is None
+        assert subtileStackForTLU1(state, tc, 12) == 2
+        assert subtileTLU1StackReason(state, tc, 12, 2) is None
 
 
 @pytest.mark.parametrize("waveGroup", [(1, 4), (4, 1)])
@@ -107,9 +107,9 @@ def test_mt192x192_keeps_rejecting_the_three_tile_wave_groups(waveGroup):
     # the preferred stack is returned and the caller still rejects.
     state = _state(12, 12, waveGroup)
     tc = "A" if waveGroup[0] == 4 else "B"
-    stack = _subtileStackForTLU1(state, tc, 12)
+    stack = subtileStackForTLU1(state, tc, 12)
     assert stack == _subtileStackForTile(12)
-    assert _subtileTLU1StackReason(state, tc, 12, stack) is not None
+    assert subtileTLU1StackReason(state, tc, 12, stack) is not None
 
 
 def test_fallback_never_moves_a_stack_that_already_works():
@@ -123,8 +123,8 @@ def test_fallback_never_moves_a_stack_that_already_works():
             state = _state(mtTiles, mtTiles, waveGroup)
             preferred = _subtileStackForTile(mtTiles)
             for tc in ("A", "B"):
-                if _subtileTLU1StackReason(state, tc, mtTiles, preferred) is None:
-                    assert _subtileStackForTLU1(state, tc, mtTiles) == preferred
+                if subtileTLU1StackReason(state, tc, mtTiles, preferred) is None:
+                    assert subtileStackForTLU1(state, tc, mtTiles) == preferred
 
 
 def test_strip_sharing_rules_stay_gfx950_only():
@@ -135,9 +135,9 @@ def test_strip_sharing_rules_stay_gfx950_only():
     gfx950 = _state(tiles, tiles, waveGroup)
     other = _state(tiles, tiles, waveGroup, isa=(12, 5, 0))
     preferred = _subtileStackForTile(tiles)
-    assert _subtileTLU1StackReason(gfx950, "A", tiles, preferred) is not None
-    assert _subtileTLU1StackReason(other, "A", tiles, preferred) is None
-    assert _subtileStackForTLU1(other, "A", tiles) == preferred
+    assert subtileTLU1StackReason(gfx950, "A", tiles, preferred) is not None
+    assert subtileTLU1StackReason(other, "A", tiles, preferred) is None
+    assert subtileStackForTLU1(other, "A", tiles) == preferred
 
 
 def test_fallback_only_ever_returns_a_known_stack_height():
@@ -149,4 +149,4 @@ def test_fallback_only_ever_returns_a_known_stack_height():
                 continue
             state = _state(mtTiles, mtTiles, waveGroup)
             for tc in ("A", "B"):
-                assert _subtileStackForTLU1(state, tc, mtTiles) in _SUBTILE_STACK_SIZES
+                assert subtileStackForTLU1(state, tc, mtTiles) in _SUBTILE_STACK_SIZES
