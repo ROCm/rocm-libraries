@@ -168,6 +168,7 @@ from rocke.dispatch.core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 # ---------------------------------------------------------------------------
@@ -373,18 +374,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
             "(filter larger than padded input depth)"
         )
     return errors
-
-
-def _selector_matches(
-    req: ConvGroupedRequest, candidate: KernelCandidate
-) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
 
 
 def _vec_size_c(req: ConvGroupedRequest) -> int:
@@ -766,7 +755,7 @@ def _make_gfx950_fwd_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -876,7 +865,7 @@ def _make_gfx1250_fwd_candidate() -> KernelCandidate:
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
         if int(req.G) != 1:
             return False, "WMMA conv on gfx1250 supports only groups=1"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -979,7 +968,7 @@ def _make_gfx942_fwd_candidate() -> KernelCandidate:
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "fwd":
             return False, f"candidate handles 'fwd', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _fwd_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1087,7 +1076,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx942 candidate requires arch=gfx942 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1236,7 +1225,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1375,7 +1364,7 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
             return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
         if req.direction != "dgrad":
             return False, f"candidate handles 'dgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _dgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
@@ -1483,7 +1472,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             return False, f"gfx1250 candidate requires arch=gfx1250 (got {req.arch!r})"
         if req.direction != "wgrad":
             return False, f"candidate handles 'wgrad', got direction={req.direction!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         ok, why = _wgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
