@@ -566,7 +566,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 // read A
                 a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                   make_tuple(I0, I0, I0, Number<k * KPack>{}),
+                                   make_tuple(m0, I0, I0, Number<k * KPack>{}),
                                    a_block_buf,
                                    a_thread_desc_,
                                    make_tuple(I0, I0, k, I0),
