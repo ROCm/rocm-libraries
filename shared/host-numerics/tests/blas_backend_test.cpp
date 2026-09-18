@@ -187,20 +187,46 @@ void testModeratelyLargeExactGemm() {
 void testPlainLowPrecisionMaterialization() {
     using namespace roc::host_numerics;
 
-    const std::array<float, 6> aValues{1, 2, 3, 2, 1, 0};
-    const std::array<float, 6> bValues{1, 2, 3, 1, 2, 3};
-    const std::array<float, 4> expected{13, 13, 5, 5};
-    for (const ScalarType inputType : {ScalarType::Float16, ScalarType::BFloat16,
-                                       ScalarType::Float8E4M3, ScalarType::Float8E5M2}) {
-        Tensor output(ScalarType::Float32, Shape{2, 2});
-        GemmTestCase problem(Tensor::copyValuesWithConversion(inputType, Shape{2, 3},
-                                                              std::span<const float>(aValues)),
-                             Tensor::copyValuesWithConversion(inputType, Shape{3, 2},
-                                                              std::span<const float>(bValues)),
-                             output, ScalarType::Float32);
-        referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
-        require(compare(output, Tensor::copyNativeValues<float>(Shape{2, 2}, expected)).passed(),
-                "Plain low-precision BLAS materialization produced an incorrect result.");
+    constexpr std::array<float, 6> aValues{1, 4, 2, 5, 3, 6};
+    constexpr std::array<float, 6> bValues{7, 9, 11, 8, 10, 12};
+
+    for (const bool rowMajor : {false, true}) {
+        const Layout aLayout =
+            rowMajor ? Layout(Shape{2, 3}, {4, 1}, 1) : Layout(Shape{2, 3}, {1, 3}, 1);
+        const Layout bLayout =
+            rowMajor ? Layout(Shape{3, 2}, {3, 1}, 1) : Layout(Shape{3, 2}, {1, -4}, 4);
+        for (const ScalarType inputType :
+             {ScalarType::Float16, ScalarType::BFloat16, ScalarType::Float8E4M3,
+              ScalarType::Float8E5M2, ScalarType::Float8E4M3Fnuz, ScalarType::Float8E5M2Fnuz}) {
+            Tensor a(inputType, aLayout);
+            Tensor b(inputType, bLayout);
+            for (size_t column = 0; column < a.shape()[1]; ++column)
+                for (size_t row = 0; row < a.shape()[0]; ++row)
+                    a.storeFrom({row, column}, aValues[column * a.shape()[0] + row]);
+            for (size_t column = 0; column < b.shape()[1]; ++column)
+                for (size_t row = 0; row < b.shape()[0]; ++row)
+                    b.storeFrom({row, column}, bValues[column * b.shape()[0] + row]);
+
+            const auto checkOutput = [&](ScalarType outputType, const Layout& outputLayout) {
+                Tensor output(outputType, outputLayout);
+                GemmTestCase problem(a, b, output, ScalarType::Float32);
+                referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
+                for (size_t row = 0; row < output.shape()[0]; ++row) {
+                    for (size_t column = 0; column < output.shape()[1]; ++column) {
+                        float expected = 0.0f;
+                        for (size_t reduction = 0; reduction < a.shape()[1]; ++reduction)
+                            expected += a.loadAs<float>({row, reduction}) *
+                                        b.loadAs<float>({reduction, column});
+                        require(output.loadAs<float>({row, column}) == expected,
+                                "Plain low-precision BLAS materialization mismatch.");
+                    }
+                }
+            };
+            checkOutput(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}, 1));
+            checkOutput(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}, 1));
+            if (inputType == ScalarType::Float16 || inputType == ScalarType::BFloat16)
+                checkOutput(inputType, Layout(Shape{2, 2}, {-1, 3}, 1));
+        }
     }
 }
 }  // namespace
