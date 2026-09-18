@@ -364,8 +364,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
     #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
-    #   (on for all configs except short-sequence bf16 head_dim=128, which reverts
-    #   to plain exp2 -- see _use_exp2_fast for the seqlen gate).
+    #   (on for all configs except bf16 head_dim=128 on the default grid, which
+    #   reverts to plain exp2 -- see _use_exp2_fast for the grid gate).
     #   Numerically safe in both directions here -- both softmax arguments are
     #   always <= 0 -- so correctness never depends on it; the gate is pure perf.
     use_exp2_fast: bool | None = None
@@ -436,7 +436,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def resolved_use_exp2_fast(self) -> bool:
         """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
         if self.use_exp2_fast is None:
-            return _use_exp2_fast(self.head_size, self.dtype, self.seqlen_q)
+            return _use_exp2_fast(self.head_size, self.dtype, self.persistent)
         return bool(self.use_exp2_fast)
 
     def resolved_waves_per_eu(self) -> int:
@@ -611,7 +611,7 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if swz != (spec.resolved_use_cfvst() and _use_cfvst(spec.head_size, spec.dtype)):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
-    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.seqlen_q):
+    if e2f != _use_exp2_fast(spec.head_size, spec.dtype, spec.persistent):
         parts.append("e2f1" if e2f else "e2f0")
     if spec.iglp != _DEFAULT_IGLP:
         parts.append("iglp1" if spec.iglp else "iglp0")
@@ -655,65 +655,62 @@ def _rows_per_instr(head_size: int) -> int:
     return _DMA_ELEMS_PER_INSTR // head_size
 
 
-def _use_exp2_fast(head_size: int, dtype: str, seqlen: int) -> bool:
+def _use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
-    Enabled for all configs EXCEPT short-sequence bf16 head_dim=128 (see the guard
-    below). exp2_fast is a strict VALU reduction and the dominant P2 lever on the
-    (post-P1) VALU-bound path, and is always numerically safe here -- both softmax
+    Enabled for all configs EXCEPT bf16 head_dim=128 on the DEFAULT grid (see the
+    guard below). exp2_fast is a strict VALU reduction and the dominant P2 lever on
+    the (post-P1) VALU-bound path, and is always numerically safe here -- both softmax
     args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
     precondition, independent of head_size and dtype. So this is a pure perf gate,
     never a correctness one.
 
-    Short-sequence bf16 D128 guard. exp2_fast is a net win only where the kernel is
-    VALU-bound. For bf16 head_dim=128 prefill that clearly holds at seqlen >= 4096; at
-    seqlen <= 1024 the kernel is occupancy/latency-bound and exp2_fast's register/
-    schedule shift clearly regresses it. seqlen == 2048 sits in the same-node run-to-run
-    noise band (the exp2_fast-vs-plain delta there is smaller than same-node measurement
-    variance), so its sign is not reliably resolvable. fp16 D128 -- byte-identical across the
-    exp2_fast boundary -- is flat at every seqlen, which pins the regression to this
-    kernel. The guard uses the conservative cut seqlen < 4096: it reverts every clear
-    regressor (and the noisy 2048 case) to plain exp2 -- its original perf -- so no shape
-    regresses, at the cost of forgoing at most a noise-level 2048 win. head_dim != 128
-    and fp16 are unaffected.
+    Default-grid bf16 D128 guard. exp2_fast is a net win only where the kernel is
+    VALU-bound, and on this config the grid is what decides that. The P4 persistent
+    grid keeps one CTA resident over many work items, so the softmax VALU stays the
+    critical path and exp2_fast wins there uniformly. On the default grid (one CTA per
+    work item) bf16 D128 is occupancy/latency-bound instead, and exp2_fast's register/
+    schedule shift pays for itself nowhere on that path -- so it reverts to plain
+    exp2, its original perf. fp16 D128 -- byte-identical across the exp2_fast boundary
+    -- is unaffected on either grid, which pins the regression to this kernel.
+    head_dim != 128 and fp16 are unaffected.
+
+    This predicate reads only compile-time config, never the problem shape: an earlier
+    revision cut on ``seqlen < 4096`` instead, which made the emitted body a function
+    of ``seqlen_q`` and so collided with the runtime-shape cache identity. Re-measuring
+    across both grids showed the seqlen term was a proxy for which grid the dispatch
+    layer picked at that shape, not an effect of the sequence length: there is no
+    seqlen at which exp2_fast wins on the default grid, nor one at which it loses on
+    the persistent grid. Keep any future term compile-time for the same reason.
 
     Scope: measured on gfx942 against the current develop dense builder (causal, square
-    Sq==Skv). Full-mask square short-seq shapes take the same cut on the same mechanism
-    (identical kernel/softmax), not separately measured. The gfx950 dense kernel makes an
-    independent exp2_fast decision (its own builder) and is not covered here. 4096 is a
-    gfx942 / ROCm-7.2.2 sweep snapshot -- re-measure via the dense sweep harness on a
-    toolchain or kernel change rather than treating it as a fixed constant.
+    Sq==Skv), both grids forced, with fp16-D128 / bf16-D64 / fp16-D64 controls. Full-mask
+    square shapes take the same cut on the same mechanism (identical kernel/softmax), not
+    separately measured. The gfx950 dense kernel makes an independent exp2_fast decision
+    (its own builder) and is not covered here. This is a gfx942 / ROCm-7.2.2 sweep
+    snapshot -- re-measure via the dense sweep harness on a toolchain or kernel change
+    rather than treating it as fixed.
     """
-    if dtype == "bf16" and head_size == 128 and seqlen < 4096:
+    if dtype == "bf16" and head_size == 128 and not persistent:
         return False
     return True
 
 
 def _exp2_fast_is_shape_dependent(spec: "Gfx942AttentionDenseSpec") -> bool:
-    """Whether ``spec``'s resolved exp2_fast decision is a function of ``seqlen_q``.
+    """Whether ``spec``'s resolved exp2_fast decision is a function of the shape.
 
-    This is the one shape leak the arch-shared ``runtime_shape`` predicate does not
-    cover, and it is specific to gfx942: :func:`_use_exp2_fast` carries a
-    short-sequence cut (bf16 D128, ``seqlen < 4096``) that forks the emitted softmax.
-    So at the tri-state default, on that config only, the BODY differs per shape.
-
-    That is a cache collision and not merely a naming one.
-    :func:`_tuning_name_tags` deliberately emits no token when the resolved value
-    equals the policy's -- which is what keeps the shipped names golden-stable -- so
-    two shapes straddling the cut would share a cache key AND a kernel name while
-    lowering to different IR, and ``_DENSE_LAUNCHER_CACHE`` would serve one shape's
-    binary to the other. Exactly the stale-binary bug the tagging scheme exists to
-    prevent, and one the name assert in ``run_attention_dense_torch`` cannot catch,
+    VESTIGIAL, and retired in the follow-up commit. It guarded the window in which
+    :func:`_use_exp2_fast` cut on ``seqlen``: at the tri-state default, on bf16 D128,
+    the emitted softmax then forked per shape, so the spec had to be held off the
+    runtime-shape path or two shapes would share a cache key AND a kernel name while
+    lowering to different IR -- a stale-binary bug ``_DENSE_LAUNCHER_CACHE`` would
+    serve and the name assert in ``run_attention_dense_torch`` could not catch,
     because the names agree.
 
-    Excluding these specs from the runtime path is preferred over widening the cache
-    key or adding an unconditional name token: the premise of the runtime-shape path
-    is that ONE binary serves every shape, and here the body genuinely is not one
-    binary. The cost is bounded -- bf16 D128 at the tri-state default keeps exactly
-    today's per-shape identity; fp16, D64, and any spec that pins ``use_exp2_fast``
-    explicitly (which severs the dependency) all stay on the runtime path.
-
-    If the cut is ever removed from :func:`_use_exp2_fast`, delete this along with it.
+    With the cut now on ``persistent`` (compile-time), no shape reaches the policy
+    and this over-approximates: it still excludes every bf16 D128 default-grid spec
+    from the runtime-shape path, purely conservatively. Kept here only to keep this
+    commit to the policy change; the next one deletes it and re-blesses the goldens.
     """
     if spec.use_exp2_fast is not None:
         return False
@@ -1730,8 +1727,8 @@ def _build_attention_dense_single_buffer(
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled by
-            # _use_exp2_fast for every config except short-sequence bf16 D128, which
-            # reverts to plain exp2; rationale + seqlen gate in that docstring.
+            # _use_exp2_fast for every config except bf16 D128 on the default grid,
+            # which reverts to plain exp2; rationale + grid gate in that docstring.
             exp2 = b.exp2_fast if spec.resolved_use_exp2_fast() else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 

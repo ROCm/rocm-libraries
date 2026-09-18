@@ -2925,38 +2925,29 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         )
 
     def test_bf16_d128_default_stays_off_the_runtime_path(self):
-        """The shape-dependent exp2_fast policy must keep bf16 D128 baked.
+        """``_exp2_fast_is_shape_dependent`` still excludes bf16 D128 -- now for nothing.
 
-        ``_use_exp2_fast`` cuts at ``seqlen_q < 4096`` for bf16 D128, so at the
-        tri-state default the emitted softmax is a function of the shape. Since
-        ``_tuning_name_tags`` emits no token when the resolved value matches the
-        policy, two shapes straddling that cut would share a cache key AND a
-        kernel name while lowering to different IR -- a stale binary that the
-        name assert in ``run_attention_dense_torch`` cannot catch.
+        It was load-bearing while ``_use_exp2_fast`` cut on ``seqlen_q``: two shapes
+        straddling that cut shared a cache key AND a kernel name (``_tuning_name_tags``
+        emits no token when the resolved value matches the policy) while lowering to
+        different IR. With the cut moved to ``persistent``, the policy reads no shape
+        at all, so the body no longer forks and the exclusion is pure conservatism.
 
-        Two directions: the default is excluded, and pinning ``use_exp2_fast``
-        (which severs the seqlen dependency) puts it back on the runtime path.
+        Pinned here as the fact the follow-up commit acts on: the exclusion survives,
+        its justification does not.
         """
         from dataclasses import replace
 
         bf16 = self._spec(**{**self._BASE_KWARGS, "dtype": "bf16"})
-        self.assertFalse(
-            bf16.runtime_shape,
-            "bf16 D128 at the exp2_fast tri-state default is shape-dependent; "
-            "putting it on the runtime path collides two bodies in one cache slot",
-        )
+        self.assertFalse(bf16.runtime_shape)
         self.assertEqual(bf16.runtime_param_fields, ())
 
-        # The two sides of the cut really do differ, which is what makes the
-        # exclusion load-bearing rather than defensive.
+        # The two sides of the retired cut now resolve the same way. The IR still
+        # differs, but only because the exclusion keeps the shape baked -- that is
+        # the circularity the follow-up commit breaks.
         lo = replace(bf16, seqlen_q=2048, seqlen_kv=2048)
         hi = replace(bf16, seqlen_q=4096, seqlen_kv=4096)
-        self.assertNotEqual(
-            lo.resolved_use_exp2_fast(),
-            hi.resolved_use_exp2_fast(),
-            "the exp2_fast seqlen cut is gone; if _use_exp2_fast no longer reads "
-            "seqlen_q, delete _exp2_fast_is_shape_dependent and this test",
-        )
+        self.assertEqual(lo.resolved_use_exp2_fast(), hi.resolved_use_exp2_fast())
         self.assertNotEqual(self._ir_sha(lo), self._ir_sha(hi))
 
         pinned = self._spec(
@@ -2964,7 +2955,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         )
         self.assertTrue(
             pinned.runtime_shape,
-            "pinning use_exp2_fast severs the seqlen dependency, so the spec "
+            "pinning use_exp2_fast short-circuits the guard, so the spec "
             "belongs back on the runtime path",
         )
 
