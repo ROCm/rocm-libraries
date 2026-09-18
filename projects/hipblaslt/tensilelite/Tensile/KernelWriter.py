@@ -2952,12 +2952,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Wave-separated TDM increment: subtile uses per-wave descriptors and
       # does not need parity-based increment selection.
       if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel["UseSubtileImpl"]:
-        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+        hoisted = self.papTdmHoistInvariantEnabled(kernel)
+        cachedBase = self.papTdmCachedAddrBaseEnabled(kernel)
+        pairs = [(tensorParametersA, tensorParametersB)]
         if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
-        module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+          pairs.append((tensorParametersA["MX"], tensorParametersB["MX"]))
+        for tPa, tPb in pairs:
+          addrBase = self.papTdmAddrBaseName(tPa["tensorChar"].startswith("MX")) if cachedBase else None
+          module.add(self.initTDMDescriptorWaveSeparated(
+            kernel, tPa, tPb, emitInvariant=not hoisted, addrBaseSgpr=addrBase))
+        if not cachedBase:
+          for tPa, tPb in pairs:
+            module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPa, tPb))
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
@@ -6488,6 +6494,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
 
+    module.add(self.papTdmSetupAddrBases(kernel, tensorParametersA, tensorParametersB))
+    module.add(self.papTdmSetupInvariantDescriptor(kernel, tensorParametersA, tensorParametersB))
     module.add(loopComponent.openPersistentLoop(self, kernel))
     if kernel["ReuseAcrossPersistent"]:
       # Peel the compute section in two: the first tile runs a copy that fills the
@@ -10422,6 +10430,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("AddressABase", numSgprAddressA, 2)
       self.defineSgpr("AddressBBase", numSgprAddressB, 2)
 
+    # Cached wave-local bases must survive epilogue scratch allocation.
+    if self.papTdmCachedAddrBaseEnabled(kernel):
+      self.defineSgpr(self.papTdmAddrBaseName(False), 2, 2)
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        self.defineSgpr(self.papTdmAddrBaseName(True), 2, 2)
+
     # Actual allocation: prioritise 4-aligned SGPRs whenever the pool is
     # already on a 4-aligned boundary, otherwise consume unaligned ones.
     while len(requiredUnalignedSgprVar) or len(requiredAligned4SgprVar):
@@ -11507,6 +11521,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(afterLabel)
     return module
 
+  def papTdmHoistInvariantEnabled(self, kernel) -> bool:
+    """Keep launch-constant descriptor fields for ordinary no-tail DP PAP."""
+    problem = kernel["ProblemType"]
+    return (kernel["StreamK"] == 3 and kernel["StreamKForceDPOnly"]
+            and self.isPrefetchAcrossPersistentEnabled(kernel)
+            and kernel["PrefetchGlobalRead"] == 2 and kernel["NoTailLoop"]
+            and kernel["enableTDMA"] and kernel["enableTDMB"]
+            and kernel["NumWaves"] > 1 and kernel["GlobalSplitU"] == 0
+            and not kernel["UseSubtileImpl"] and not kernel["HalfPLR"]
+            and not kernel["ReuseAcrossPersistent"]
+            and not clusterEnabled(kernel["ClusterDim"])
+            and not problem["Sparse"]
+            and bool(problem["MXBlockA"]) == bool(problem["MXBlockB"])
+            and not kernel.get("_TDMIterateModeA", False)
+            and not kernel.get("_TDMIterateModeB", False))
+
+  def papTdmCachedAddrBaseEnabled(self, kernel) -> bool:
+    """Cache direct matrix bases; pointer-array batches resolve a base per tile."""
+    problem = kernel["ProblemType"]
+    mayResolveBatchPointer = (problem["SupportUserArgs"] and problem["Batched"]
+                             and not problem["GroupedGemm"])
+    return self.papTdmHoistInvariantEnabled(kernel) and not mayResolveBatchPointer
+
+  @staticmethod
+  def papTdmAddrBaseName(isMX: bool) -> str:
+    return "tdmMXSAMXSBAddrNoWG" if isMX else "tdmABAddrNoWG"
+
+  def papTdmPinnedDescriptorSgprs(self, kernel) -> list[str]:
+    """Owning tags for A/B-aliased descriptors carried through the epilogue."""
+    if not self.papTdmHoistInvariantEnabled(kernel):
+      return []
+    tags = ["tdmAGroup0", "tdmAGroup1"]
+    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+      tags += ["tdmMXSAGroup0", "tdmMXSAGroup1"]
+    return tags
+
   def isPrefetchAcrossPersistentEnabled(self, kernel):
     """Return True when PAP is enabled for this kernel."""
     # Suppressing the NLL normally takes PAP's out-of-line path with it, because
@@ -12574,7 +12624,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def initTDMDescriptor(self, kernel, tP) -> Module:
     assert False, "Should be overrided"
 
-  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
+  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB,
+                                     waveIdxSgpr="WaveIdx",
+                                     emitInvariant=True,
+                                     emitVariant=True,
+                                     addrBaseSgpr=None,
+                                     labelPrefix="TDMInit") -> Module:
     assert False, "Should be overrided"
 
   def tdmGlobalOffset(self, kernel, tP, useDescriptor=False) -> Module:
@@ -12587,6 +12642,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def papTdmSetupAddrBases(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def papTdmSetupInvariantDescriptor(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papTdmUpdateDescriptor(self, kernel, tPA, tPB, preservePapBank=True) -> Module:

@@ -163,6 +163,9 @@ _ClassicPapWriter._dcpThickThinIssueOrder = KernelWriter._dcpThickThinIssueOrder
 
 
 class _SetupNewTilePapTdmWriter:
+    papTdmHoistInvariantEnabled = staticmethod(lambda kernel: False)
+    papTdmCachedAddrBaseEnabled = staticmethod(lambda kernel: False)
+
     def __init__(self):
         self.states = SimpleNamespace(
             actualSummationLoops=1,
@@ -210,7 +213,7 @@ class _SetupNewTilePapTdmWriter:
     def removeGRSrdVariableSgprsFromPool(self, kernel):
         return self._module("removeGRSrdVariableSgprsFromPool")
 
-    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb):
+    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, **kwargs):
         return self._module("initTDMDescriptorWaveSeparated_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
 
     def tdmGlobalOffsetWaveSeparated(self, kernel, tpa, tpb):
@@ -316,6 +319,9 @@ class _StubTdmComp:
 
 
 class _PapTdmDescriptorRefreshWriter:
+    papTdmHoistInvariantEnabled = staticmethod(lambda kernel: False)
+    papTdmCachedAddrBaseEnabled = staticmethod(lambda kernel: False)
+
     def __init__(self):
         self._next_tmp_sgpr = 300
         self.recomputed_waveidx = []
@@ -332,7 +338,7 @@ class _PapTdmDescriptorRefreshWriter:
         self.recomputed_waveidx.append(wave_idx_sgpr)
         return _module_with_comment("papTdmRecomputeWaveIdx", "unit: recompute WaveIdx")
 
-    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx"):
+    def initTDMDescriptorWaveSeparated(self, kernel, tpa, tpb, wave_idx_sgpr="WaveIdx", **kwargs):
         self.init_waveidx.append(wave_idx_sgpr)
         return _module_with_comment("initTDMDescriptorWaveSeparated", "unit: init TDM descriptor")
 
