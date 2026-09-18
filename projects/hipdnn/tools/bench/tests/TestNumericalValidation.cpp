@@ -90,7 +90,7 @@ std::vector<hipdnn_bench::ValidationOutcome>
 
 } // namespace
 
-TEST(NumericalValidation, WrongKernelIsMarkedInvalidAndNamedInTheReason)
+TEST(TestNumericalValidation, WrongKernelIsMarkedInvalidAndNamedInTheReason)
 {
     // The case the whole gate exists for: two candidates compute the problem and a third
     // returns something else. Without this the third keeps whatever time it measured and,
@@ -107,7 +107,7 @@ TEST(NumericalValidation, WrongKernelIsMarkedInvalidAndNamedInTheReason)
     EXPECT_NE(verdicts[2].reason.find("tensor 'Y' element 2"), std::string::npos);
 }
 
-TEST(NumericalValidation, MajorityDecidesWhenTheCatalogsFirstCandidateIsTheBrokenOne)
+TEST(TestNumericalValidation, MajorityDecidesWhenTheCatalogsFirstCandidateIsTheBrokenOne)
 {
     // Taking candidate 0 as the reference is the obvious implementation and it inverts the
     // verdicts exactly when the gate matters most: the broken kernel would be declared the
@@ -120,7 +120,7 @@ TEST(NumericalValidation, MajorityDecidesWhenTheCatalogsFirstCandidateIsTheBroke
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::AGREED);
 }
 
-TEST(NumericalValidation, RoundingDifferencesBetweenCorrectKernelsDoNotFailTheGate)
+TEST(TestNumericalValidation, RoundingDifferencesBetweenCorrectKernelsDoNotFailTheGate)
 {
     // Two kernels that tile a reduction differently accumulate in a different order, so
     // their last bits differ by construction. A bitwise gate marks both invalid, which
@@ -132,7 +132,7 @@ TEST(NumericalValidation, RoundingDifferencesBetweenCorrectKernelsDoNotFailTheGa
     EXPECT_EQ(verdicts[1].verdict, NumericalVerdict::AGREED);
 }
 
-TEST(NumericalValidation, AnUncorroboratedCandidateIsUnknownRatherThanValid)
+TEST(TestNumericalValidation, AnUncorroboratedCandidateIsUnknownRatherThanValid)
 {
     // One candidate agreeing with itself is not evidence. Reporting it valid is the silent
     // "we did not check" that reads as "we checked", which §13.2 forbids by name.
@@ -142,7 +142,7 @@ TEST(NumericalValidation, AnUncorroboratedCandidateIsUnknownRatherThanValid)
     EXPECT_NE(verdicts[0].reason.find("no_reference"), std::string::npos);
 }
 
-TEST(NumericalValidation, UnanimousUntouchedOutputIsNotEvidenceOfCorrectness)
+TEST(TestNumericalValidation, UnanimousUntouchedOutputIsNotEvidenceOfCorrectness)
 {
     // The tool fills inputs now, but the output buffers still arrive zero-filled, so for
     // many operations a correct kernel whose result is zero and a kernel that writes
@@ -158,7 +158,7 @@ TEST(NumericalValidation, UnanimousUntouchedOutputIsNotEvidenceOfCorrectness)
     }
 }
 
-TEST(NumericalValidation, AnEvenSplitLeavesNoCandidateTrusted)
+TEST(TestNumericalValidation, AnEvenSplitLeavesNoCandidateTrusted)
 {
     // Two candidates, two answers: one of them is wrong and nothing here can say which. The
     // timing of a candidate that is not known correct is not a label (§13.2), so both are
@@ -170,7 +170,7 @@ TEST(NumericalValidation, AnEvenSplitLeavesNoCandidateTrusted)
     EXPECT_NE(verdicts[0].reason.find("disputed_output"), std::string::npos);
 }
 
-TEST(NumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
+TEST(TestNumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
 {
     // A NaN fails every magnitude comparison it takes part in, so a candidate that produced
     // one would slip through a gate written as `abs(a - b) > tolerance` alone.
@@ -180,7 +180,7 @@ TEST(NumericalValidation, NonFiniteOutputDisagreesWithAFiniteReference)
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::DISAGREED);
 }
 
-TEST(NumericalValidation, HalfPrecisionIsDecodedRatherThanComparedAsBytes)
+TEST(TestNumericalValidation, HalfPrecisionIsDecodedRatherThanComparedAsBytes)
 {
     // The binary16 decode is written out by hand here, and a wrong one is silent: it would
     // either wave a broken kernel through or condemn a good one. 0x3C00 is 1.0, 0x4000 is
@@ -198,7 +198,7 @@ TEST(NumericalValidation, HalfPrecisionIsDecodedRatherThanComparedAsBytes)
     EXPECT_EQ(split[2].verdict, NumericalVerdict::DISAGREED);
 }
 
-TEST(NumericalValidation, AnUndecodableDtypeIsUnknownRatherThanAssumedEqual)
+TEST(TestNumericalValidation, AnUndecodableDtypeIsUnknownRatherThanAssumedEqual)
 {
     // FP8 and the packed types are deliberately outside the decoder (Open Question 19 leaves
     // the per-op reference open). Skipping such a tensor silently would make every candidate
@@ -211,7 +211,7 @@ TEST(NumericalValidation, AnUndecodableDtypeIsUnknownRatherThanAssumedEqual)
     EXPECT_NE(verdicts[0].reason.find("no_comparable_output"), std::string::npos);
 }
 
-TEST(NumericalValidation, ACandidateThatNeverRanNeitherJoinsNorSplitsACohort)
+TEST(TestNumericalValidation, ACandidateThatNeverRanNeitherJoinsNorSplitsACohort)
 {
     // A candidate that could not be built is a coverage gap, not a corruption (§13.2): it is
     // recorded with its reason, and it must not count as a dissenting answer -- one build
@@ -228,7 +228,7 @@ TEST(NumericalValidation, ACandidateThatNeverRanNeitherJoinsNorSplitsACohort)
     EXPECT_EQ(verdicts[2].verdict, NumericalVerdict::AGREED);
 }
 
-TEST(NumericalValidation, TheVerdictColumnCannotBeReadBackAsABoolean)
+TEST(TestNumericalValidation, TheVerdictColumnCannotBeReadBackAsABoolean)
 {
     // Three states in a CSV column that a reader will try to coerce. "Unknown" is spelled as
     // a word precisely so `astype(bool)` fails loudly instead of folding it into True.
@@ -237,7 +237,7 @@ TEST(NumericalValidation, TheVerdictColumnCannotBeReadBackAsABoolean)
     EXPECT_STREQ(hipdnn_bench::verdictText(NumericalVerdict::UNKNOWN), "Unknown");
 }
 
-TEST(NumericalValidation, GarbageInASmallElementIsNotHiddenByTheTensorsLargest)
+TEST(TestNumericalValidation, GarbageInASmallElementIsNotHiddenByTheTensorsLargest)
 {
     // The bar used to be one absolute threshold for the whole tensor: tolerance times the
     // largest element, here 1e-5 * 40 = 4e-4. The third candidate's element 1 is wrong by
@@ -260,7 +260,7 @@ TEST(NumericalValidation, GarbageInASmallElementIsNotHiddenByTheTensorsLargest)
     EXPECT_NE(verdicts[2].reason.find("outside a tolerance of"), std::string::npos);
 }
 
-TEST(NumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
+TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
 {
     // Agreement on a graph whose inputs were all zero is agreement on a bias term: a wrong
     // reduction order, a wrong mask and a wrong tile boundary are all bit-identical on zero
@@ -320,7 +320,7 @@ TEST(NumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
             .empty());
 }
 
-TEST(NumericalValidation, ACandidateThatJoinsACohortDoesNotKeepItsImage)
+TEST(TestNumericalValidation, ACandidateThatJoinsACohortDoesNotKeepItsImage)
 {
     // Holding one host image per candidate is tens of GB for a 60-candidate sweep, and
     // --sweep is the only mode `uhd_gen generate` drives. Only an answer nobody has seen
