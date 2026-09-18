@@ -3,6 +3,8 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.2 for ROCm 10.2.0
+
 ## MIOpen 3.6.1 for ROCm 10.1.0
 
 ### Resolved Issues
