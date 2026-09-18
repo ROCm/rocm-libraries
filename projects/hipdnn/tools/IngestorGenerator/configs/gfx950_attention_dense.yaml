@@ -25,7 +25,7 @@ dialect: packaged
 authored_subpath: rocKE/gfx950_attention_dense
 
 engine:
-  name: hkp_example:gfx950_attention_dense
+  name: hipkernel:Gfx950AttentionDense
   sdk_version: "1.0.0"
   knobs: [block_n]
   heuristic: native
