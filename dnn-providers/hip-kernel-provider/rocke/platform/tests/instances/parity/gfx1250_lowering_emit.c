@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -119,8 +120,14 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
 
 /* K=128 FP8 SCALE/SCALE16 WMMA. Matrix fragments are <16 x i32>; packed
  * E8M0 scale operands are i32 for SCALE and i64 for SCALE16. */
-static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* op_id)
+static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* dtype)
 {
+    const int block = scale16 ? 16 : 32;
+    const rocke_mma_scale_operand_t query[2] = {{"e8m0", block}, {"e8m0", block}};
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
+        &target->mma, "wmma_scaled", dtype, dtype, "fp32", 16, 16, 128, query);
+    const char* op_id = atom->op_id;
     const rocke_type_t* scale_ty = scale16 ? rocke_i64() : rocke_i32();
     rocke_value_t* a_ptr = frag_param(b, "A", rocke_i32(), true);
     rocke_value_t* b_ptr = frag_param(b, "B", rocke_i32(), true);
@@ -145,34 +152,22 @@ static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* op_id)
 
 static void build_wmma_scale(rocke_ir_builder_t* b)
 {
-    wmma_scaled(
-        b,
-        false,
-        "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32");
+    wmma_scaled(b, false, "fp8e4m3");
 }
 
 static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(
-        b,
-        false,
-        "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b32.src1_bf8e5m2_e8m0_b32.src2_fp32.dst_fp32");
+    wmma_scaled(b, false, "bf8e5m2");
 }
 
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
-    wmma_scaled(
-        b,
-        true,
-        "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32");
+    wmma_scaled(b, true, "fp8e4m3");
 }
 
 static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
 {
-    wmma_scaled(
-        b,
-        true,
-        "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b16.src1_bf8e5m2_e8m0_b16.src2_fp32.dst_fp32");
+    wmma_scaled(b, true, "bf8e5m2");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning

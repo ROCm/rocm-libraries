@@ -5,8 +5,11 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
+from unittest import mock
 
 from rocke.core.arch import ArchTarget, MmaScaleOperand
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -23,9 +26,10 @@ def _scaled_atom(dtype="fp8", scale16=False):
     scale = MmaScaleOperand("e8m0", 16 if scale16 else 32)
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
-        src_dtypes=(dtype, dtype, "fp32"),
-        dst_dtype="fp32",
-        src_scales=(scale, scale, None),
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        scales=(scale, scale),
         m=16,
         n=16,
         k=128,
@@ -52,6 +56,17 @@ def _build_scaled_atom(*, scale16: bool):
 
 
 class TestGfx1250ScaledWmma(unittest.TestCase):
+    def test_backend_derives_each_matrix_carrier_and_selector(self):
+        # Synthetic metadata exercises the lowering contract without adding atoms.
+        atom = replace(_scaled_atom(), b_dtype="bf8e5m2", b_frag_len=8)
+        catalog = ArchTarget.from_gfx("gfx1250").mma
+        with mock.patch.object(catalog, "by_op_id", return_value=atom):
+            spec = gfx1250_scaled_wmma(atom.op_id)
+        self.assertEqual(spec.matrix_formats, (0, 1))
+        self.assertEqual(spec.matrix_llvm_types, ("<16 x i32>", "<8 x i32>"))
+        self.assertTrue(spec.intrinsic.endswith("v16i32.v8i32"))
+        self.assertIn("wmma.scale.block32", spec.declaration_key)
+
     def test_matrix_formats_share_intrinsic_declarations(self):
         b = IRBuilder("shared_scaled_wmma_declarations")
         matrix = b.param("matrix", PtrType(I32, "global"), readonly=True)

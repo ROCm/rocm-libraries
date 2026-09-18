@@ -567,7 +567,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     }
 
     /* ---- step 1: publish accs to LDS. ----
-     * WMMA path: use rocke_mma_op_dst_layout(op).coord() for the scatter.
+     * WMMA path: use op->c_layout().coord() for the scatter.
      * MFMA path: use atom->lane_to_output(). */
     for(mi = 0; mi < mfmas_m; ++mi)
     {
@@ -589,7 +589,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->dst.frag_len;
+                c_per_lane = epi->mma_op->c_frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }
@@ -858,7 +858,7 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
 
             if(epi->mma_op != NULL)
             {
-                c_per_lane = epi->mma_op->dst.frag_len;
+                c_per_lane = epi->mma_op->c_frag_len;
                 atom_m = epi->mma_op->m;
                 atom_n = epi->mma_op->n;
             }

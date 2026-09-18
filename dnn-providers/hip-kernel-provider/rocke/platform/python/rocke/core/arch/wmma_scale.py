@@ -52,14 +52,16 @@ class ScaledWmmaOp:
 
     @property
     def matrix_llvm_types(self) -> tuple[str, str]:
-        return tuple(f"<{src.frag_len} x i32>" for src in self.atom.srcs[:2])
+        return tuple(
+            f"<{n} x i32>" for n in (self.atom.a_frag_len, self.atom.b_frag_len)
+        )
 
     @property
     def intrinsic_suffix(self) -> str:
         atom = self.atom
         return (
-            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.dst.frag_len}f32."
-            f"v{atom.srcs[0].frag_len}i32.v{atom.srcs[1].frag_len}i32"
+            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.c_frag_len}f32."
+            f"v{atom.a_frag_len}i32.v{atom.b_frag_len}i32"
         )
 
     @property
@@ -78,26 +80,23 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     if atom is None or atom.family != "wmma_scaled":
         return None
     formats = {"fp8e4m3": 0, "bf8e5m2": 1}
-    src0, src1, src2 = atom.srcs
     # The current backend signatures require matching E8M0 scale packing.
     # Keep these restrictions here, independently of the catalog query model.
     if (
-        src0.dtype not in formats
-        or src1.dtype not in formats
-        or src0.scale is None
-        or src0.scale != src1.scale
-        or src0.scale.dtype != "e8m0"
-        or src2.scale is not None
-        or src2.dtype != "fp32"
-        or atom.dst.dtype != "fp32"
+        atom.a_dtype not in formats
+        or atom.b_dtype not in formats
+        or atom.a_scale is None
+        or atom.a_scale != atom.b_scale
+        or atom.a_scale.dtype != "e8m0"
+        or atom.c_dtype != "fp32"
         or atom.shape != (16, 16, 128)
     ):
         raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")
     return ScaledWmmaOp(
         atom=atom,
-        matrix_formats=(formats[src0.dtype], formats[src1.dtype]),
+        matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
         scale_formats=(0, 0),  # E8M0 for each source.
         scales=E8M0ScalePacking(
-            count=atom.k // src0.scale.block_size, block_k=src0.scale.block_size
+            count=atom.k // atom.a_scale.block_size, block_k=atom.a_scale.block_size
         ),
     )

@@ -81,9 +81,10 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
     scale = MmaScaleOperand("e8m0", 16 if scale_mode == "scale16" else 32)
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
-        src_dtypes=(a_kind, b_kind, "fp32"),
-        dst_dtype="fp32",
-        src_scales=(scale, scale, None),
+        a_dtype=a_kind,
+        b_dtype=b_kind,
+        c_dtype="fp32",
+        scales=(scale, scale),
         m=16,
         n=16,
         k=128,

@@ -128,9 +128,10 @@ def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
     )
     return target.mma.op_for_shape(
         family="wmma_scaled",
-        src_dtypes=(spec.dtype_a, spec.dtype_b, spec.dtype_acc),
-        dst_dtype=spec.dtype_acc,
-        src_scales=(scale, scale, None),
+        a_dtype=spec.dtype_a,
+        b_dtype=spec.dtype_b,
+        c_dtype=spec.dtype_acc,
+        scales=(scale, scale),
         m=_BLOCK_M,
         n=_BLOCK_N,
         k=_WMMA_SCALE_K,
@@ -313,7 +314,7 @@ def build_block_scaled_gemm(
     op_id = atom.op_id if atom is not None else _wmma_op_id(spec.dtype_a, spec.dtype_b)
     scale_op = gfx1250_scaled_wmma(op_id)
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
-    frag_words = atom.srcs[0].frag_len if atom is not None else _ACC
+    frag_words = atom.a_frag_len if atom is not None else _ACC
     a_frag_ty = VectorType(I32, frag_words)
 
     groups = spec.K // spec.block_k

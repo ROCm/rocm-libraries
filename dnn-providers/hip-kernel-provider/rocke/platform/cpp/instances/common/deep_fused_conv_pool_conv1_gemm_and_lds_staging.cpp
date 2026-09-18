@@ -132,7 +132,7 @@ static rocke_value_t* dfcp_load_smem_frag_contiguous_f16(rocke_ir_builder_t* b,
  * _stage_accumulators_to_cshuffle_lds (py 388-456)
  *
  * Publish MMA accumulators to a row-major [tile_m, tile_n] LDS tile, fully
- * op-driven via op->dst.frag_len + rocke_mma_op_dst_layout(op)->coord + the per-warp tile
+ * op-driven via op->c_frag_len + op->c_layout()->coord + the per-warp tile
  * geometry. sync=false defers the trailing barrier so the caller can merge it
  * with the disjoint W1 producer barrier.
  * ================================================================== */
@@ -160,7 +160,7 @@ rocke_value_t* rocke_dfcp_stage_accumulators_to_cshuffle_lds(rocke_ir_builder_t*
         return NULL;
     }
 
-    c_frag_len = op->dst.frag_len;
+    c_frag_len = op->c_frag_len;
     mfmas_m = rocke_warp_grid_mfmas_per_warp_m(b, grid);
     mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
     if(!rocke_ir_builder_ok(b))
@@ -360,7 +360,7 @@ rocke_value_t* rocke_dfcp_load_conv1_weights_to_lds(rocke_ir_builder_t* b,
  * _emit_conv1_1x1 (py 816-910)
  *
  * Compute conv1 as a 1x1 GEMM over the staged conv0 activations, op-driven:
- * operand lane->(mn,k) decomposition from rocke_mma_op_src_layout(op, 0/1)->coord,
+ * operand lane->(mn,k) decomposition from op->a_layout()/b_layout()->coord,
  * fragment widths op->{a,b}_frag_len, matmul via the target-neutral mma. The
  * K-tail mask is handled by load_smem_frag_contiguous_f16. defer_epilogue=true
  * returns the raw fp32 accumulators; else applies spec.conv1_epilogue.
@@ -428,8 +428,8 @@ rocke_status_t rocke_dfcp_emit_conv1_1x1(rocke_ir_builder_t* b,
         return rocke_ir_builder_status(b);
     }
 
-    a_frag = op->srcs[0].frag_len;
-    b_frag = op->srcs[1].frag_len;
+    a_frag = op->a_frag_len;
+    b_frag = op->b_frag_len;
     mfmas_m = rocke_warp_grid_mfmas_per_warp_m(b, grid);
     mfmas_n = rocke_warp_grid_mfmas_per_warp_n(b, grid);
     if(!rocke_ir_builder_ok(b))
@@ -476,7 +476,7 @@ rocke_status_t rocke_dfcp_emit_conv1_1x1(rocke_ir_builder_t* b,
         int idx;
         for(idx = 0; idx < num_accs; ++idx)
         {
-            accs[idx] = rocke_b_zero_vec_f32(b, op->srcs[2].frag_len);
+            accs[idx] = rocke_b_zero_vec_f32(b, op->c_frag_len);
         }
     }
 

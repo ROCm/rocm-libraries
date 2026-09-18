@@ -48,26 +48,27 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
 {
     rocke_scaled_wmma_op_t spec = {};
     spec.op_id = atom->op_id;
+    const char* dtypes[2] = {atom->a_dtype, atom->b_dtype};
+    const int words[2] = {atom->a_frag_len, atom->b_frag_len};
+    const rocke_mma_scale_operand_t scales[2] = {atom->a_scale, atom->b_scale};
     for(int i = 0; i < 2; ++i)
     {
-        const rocke_mma_src_t* src = &atom->srcs[i];
-        if(strcmp(src->dtype, "fp8e4m3") == 0)
+        if(strcmp(dtypes[i], "fp8e4m3") == 0)
             spec.matrix_formats[i] = 0;
-        else if(strcmp(src->dtype, "bf8e5m2") == 0)
+        else if(strcmp(dtypes[i], "bf8e5m2") == 0)
             spec.matrix_formats[i] = 1;
         else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA matrix format");
-        if(!src->scale_dtype || strcmp(src->scale_dtype, "e8m0") != 0
-           || (src->scale_block_size != 16 && src->scale_block_size != 32))
+        if(!scales[i].dtype || strcmp(scales[i].dtype, "e8m0") != 0
+           || (scales[i].block_size != 16 && scales[i].block_size != 32))
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA scale format");
         spec.scale_formats[i] = 0; // E8M0.
-        spec.matrix_words[i] = src->frag_len;
+        spec.matrix_words[i] = words[i];
     }
-    if(atom->srcs[0].scale_block_size != atom->srcs[1].scale_block_size || atom->srcs[2].scale_dtype
-       || strcmp(atom->srcs[2].dtype, "fp32") != 0 || strcmp(atom->dst.dtype, "fp32") != 0
+    if(atom->a_scale.block_size != atom->b_scale.block_size || strcmp(atom->c_dtype, "fp32") != 0
        || atom->m != 16 || atom->n != 16 || atom->k != 128)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");
-    spec.scales.block_k = atom->srcs[0].scale_block_size;
+    spec.scales.block_k = atom->a_scale.block_size;
     spec.scales.count = atom->k / spec.scales.block_k;
     char suffix[96];
     snprintf(suffix,
@@ -76,7 +77,7 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
              atom->m,
              atom->n,
              atom->k,
-             atom->dst.frag_len,
+             atom->c_frag_len,
              spec.matrix_words[0],
              spec.matrix_words[1]);
     snprintf(spec.intrinsic,
