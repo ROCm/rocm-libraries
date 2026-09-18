@@ -4,11 +4,13 @@
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -26,6 +28,15 @@ uint32_t endOf(const StinkyRegister& reg, RegType regClass) {
     return reg.reg.idx + width;
 }
 
+/// Where the dispatch stopped writing scalars, as the signature published it on
+/// the function. Nothing when the descriptor left it unsettled, which must not
+/// read as zero: that would hand out the registers the dispatch did fill.
+std::optional<uint32_t> publishedDispatchFilledSgprs(const Function& function) {
+    const uint64_t filled = function.getMetaData(kSigDispatchFilledSgprsMetaKey).value_or(0);
+    if (filled == 0 || filled > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+    return static_cast<uint32_t>(filled);
+}
+
 }  // namespace
 
 uint32_t highestRegisterCount(const Function& function, RegType regClass) {
@@ -41,6 +52,26 @@ uint32_t highestRegisterCount(const Function& function, RegType regClass) {
         }
     }
     return count;
+}
+
+uint32_t nextEvenRegisterBase(const Function& function, RegType regClass) {
+    const uint32_t base = highestRegisterCount(function, regClass);
+    return base + (base & 1u);
+}
+
+std::optional<uint32_t> reusableEvenSgprBase(const Function& function, uint32_t width,
+                                             uint32_t limit) {
+    const std::optional<uint32_t> dispatchFilled = publishedDispatchFilledSgprs(function);
+    if (!dispatchFilled) return std::nullopt;
+
+    const uint32_t top = std::min(limit, highestRegisterCount(function, RegType::S));
+    if (width == 0 || top < width) return std::nullopt;
+
+    // Highest even base whose whole block ends at or below `top`, so the block
+    // stays inside what the kernel already declares.
+    const uint32_t base = (top - width) & ~1u;
+    if (base < *dispatchFilled) return std::nullopt;
+    return base;
 }
 
 uint32_t dispatchFilledSgprCount(int numSgprPreload, const std::array<int, 3>& workgroupIds) {

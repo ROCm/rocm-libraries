@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include "stinkytofu/Export.hpp"
@@ -28,6 +29,25 @@ class Function;
 /// when the class is unused. Counts every operand rather than only allocated
 /// values, so a register the allocator never saw still counts.
 STINKYTOFU_EXPORT uint32_t highestRegisterCount(const Function& function, RegType regClass);
+
+/// First even index after every register of \p regClass already named in
+/// \p function. A 64-bit SGPR pair has to start even, so this is where a
+/// later pass can sit a new pair without overlapping compact's colouring.
+STINKYTOFU_EXPORT uint32_t nextEvenRegisterBase(const Function& function, RegType regClass);
+
+/// Even base of a \p width-wide SGPR block a pass inserting at KERNEL ENTRY may
+/// write, from inside the range the kernel already uses so the declared count
+/// does not grow: with s57 the highest and \p width 3, s[54:56]. \p limit caps it
+/// from above, so two passes writing at entry can stack rather than overlap.
+///
+/// Sound only at entry, where nothing has run yet, so no SGPR above the
+/// dispatch-filled line holds a value -- a pass emitting mid-kernel must not use
+/// this. Nothing when no block fits, or when the function does not publish that
+/// line, understating which is wrong code rather than a slower kernel; callers
+/// fall back to nextEvenRegisterBase above.
+STINKYTOFU_EXPORT std::optional<uint32_t> reusableEvenSgprBase(
+    const Function& function, uint32_t width,
+    uint32_t limit = std::numeric_limits<uint32_t>::max());
 
 /// At least how many SGPRs the hardware writes before the first instruction:
 /// \p numSgprPreload preloaded kernargs plus the two for the kernarg segment

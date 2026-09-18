@@ -50,6 +50,7 @@
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace stinkytofu {
 
@@ -122,6 +123,10 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
 
     void setBaseSgpr(int baseSgpr) {
         m_baseSgpr = baseSgpr;
+    }
+
+    void setAfterSgprCompact(bool on) {
+        m_afterSgprCompact = on;
     }
 
     int getBaseSgpr() const {
@@ -590,9 +595,20 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         constexpr int kGsuMask = 0x3fff;
 
         AsmIRBuilder b(*siteBB, archId);
-        const uint32_t lo = static_cast<uint32_t>(m_baseSgpr);
-        const uint32_t hi = static_cast<uint32_t>(m_baseSgpr + 1);
-        const uint32_t tmp = static_cast<uint32_t>(m_baseSgpr + 2);
+
+        // Which SGPRs each site may write. Without compact both use the Tensile
+        // triple, reserved across this window as well as the prolog. After compact
+        // that reservation means nothing: the cover sits at kernel entry, where
+        // nothing has run, so it reuses a block inside the kernel's range for free,
+        // while the ladder is mid-kernel, where an allocated register may still hold
+        // a value, so it has to stay above everything named. Both resolve before
+        // either emits, so neither sees the other's registers in the high-water mark.
+        const int coverBase =
+            m_afterSgprCompact ? static_cast<int>(absPrefetchEntrySgprBase(func)) : m_baseSgpr;
+        const int ladderBase = m_afterSgprCompact
+                                   ? static_cast<int>(nextEvenRegisterBase(func, RegType::S))
+                                   : m_baseSgpr;
+        const uint32_t tmp = static_cast<uint32_t>(ladderBase + 2);
         static const HwInstDesc labelMCID{
             GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
@@ -616,8 +632,11 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // begin()==end(), so the cover is never silently skipped (an earlier create-before-anchor
         // form needed a non-null anchor and skipped empty stubs). Inserting successive nodes before
         // a fixed `at` preserves order (each lands just ahead of `at`).
-        auto emitBurst = [&](BasicBlock& bb, IRList::iterator at, const std::string& target,
-                             int n = kFixedPrefetchN) {
+        auto emitBurst = [&](BasicBlock& bb, IRList::iterator at, const std::string& target, int n,
+                             int base) {
+            const uint32_t lo = static_cast<uint32_t>(base);
+            const uint32_t hi = static_cast<uint32_t>(base + 1);
+            const uint32_t scratch = static_cast<uint32_t>(base + 2);
             auto ins = [&](const HwInstDesc* d) {
                 StinkyInstruction* x = IRBase::createIR<StinkyInstruction>(d);
                 bb.insertIR(at, x);
@@ -626,13 +645,13 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             StinkyInstruction* g = ins(dGetpc);
             g->addDestReg(StinkyRegister("s", lo, 2));
             StinkyInstruction* a0 = ins(dAddI);
-            a0->addDestReg(StinkyRegister("s", tmp, 1));
+            a0->addDestReg(StinkyRegister("s", scratch, 1));
             a0->addSrcReg(StinkyRegister(target));
             a0->addSrcReg(StinkyRegister(4));
             StinkyInstruction* a1 = ins(dAddU);
             a1->addDestReg(StinkyRegister("s", lo, 1));
             a1->addSrcReg(StinkyRegister("s", lo, 1));
-            a1->addSrcReg(StinkyRegister("s", tmp, 1));
+            a1->addSrcReg(StinkyRegister("s", scratch, 1));
             StinkyInstruction* a2 = ins(dAddC);
             a2->addDestReg(StinkyRegister("s", hi, 1));
             a2->addSrcReg(StinkyRegister("s", hi, 1));
@@ -677,7 +696,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             // preserved) when no prologue is present.
             auto [coverBB, coverAt] = entryBurstInsertPoint(func);
             if (coverBB != nullptr) {
-                emitBurst(*coverBB, coverAt, std::string(kCpBoundaryLabel), coverN);
+                emitBurst(*coverBB, coverAt, std::string(kCpBoundaryLabel), coverN, coverBase);
                 coverEmitted = true;
             } else if (m_debug) {
                 *m_debugStream << "[" << getName() << "] CP cover skip: no entry BB\n";
@@ -710,20 +729,20 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
             cBeta->addSrcReg(StinkyRegister("s", tmp, 1));
             cBeta->addModifier<CommentData>(CommentData{"Beta == 0 ?"});
             emitBranch(dBr0, kCaseC);  // Beta != 0 (scc0) -> Case C (B1_GSU1)
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), kB,
-                      armN);  // fall-through: Beta == 0 -> Case B (B0_GSU1)
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), kB, armN,
+                      ladderBase);  // fall-through: Beta == 0 -> Case B (B0_GSU1)
             emitBranch(dBr, kEnd);
             emitLabel(kCaseA);
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), kA, armN);
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), kA, armN, ladderBase);
             emitBranch(dBr, kEnd);
             emitLabel(kCaseC);
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), kC, armN);
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), kC, armN, ladderBase);
             emitLabel(kEnd);
             ladderEmitted = true;
         } else if (emitLadder) {
             // Non-3-arm shape (rare): unconditionally prefetch the default hot target.
             emitLabel(kSel);
-            emitBurst(*siteBB, IRList::iterator(siteAnchor), hasC ? kC : kB, armN);
+            emitBurst(*siteBB, IRList::iterator(siteAnchor), hasC ? kC : kB, armN, ladderBase);
             ladderEmitted = true;
         }
 
@@ -771,7 +790,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
 
         if (m_debug)
             *m_debugStream << "[" << getName() << "] D1 emitted after label_MultiGemmEnd"
-                           << " baseSgpr=" << m_baseSgpr << " armN=" << armN
+                           << " coverBaseSgpr=" << coverBase << " ladderBaseSgpr=" << ladderBase
+                           << " armN=" << armN
                            << (ladderEmitted ? (hasA && hasC ? " ladder(3-arm)" : " ladder(uncond)")
                                              : " ladder(none)")
                            << (coverEmitted ? " +CPcover(coverN=" + std::to_string(coverN) +
@@ -782,6 +802,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     }
 
     int m_baseSgpr = -1;
+    bool m_afterSgprCompact = false;
     bool m_cpBoundaryCover = false;  // CP-range-extend cover (default off; staged rollout)
     std::unordered_map<std::string, int64_t> m_asmSetSymbols;
     bool m_debug = false;
@@ -794,9 +815,11 @@ char SwInstructionPrefetchAbsDynamicPass::ID = 0;
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(int baseSgpr,
                                                                 const std::string& debugOutputPath,
-                                                                bool cpBoundaryCover) {
+                                                                bool cpBoundaryCover,
+                                                                bool afterSgprCompact) {
     auto p = std::make_unique<SwInstructionPrefetchAbsDynamicPass>();
     p->setBaseSgpr(baseSgpr);
+    p->setAfterSgprCompact(afterSgprCompact);
     p->setCpBoundaryCoverEnabled(cpBoundaryCover);
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
@@ -805,11 +828,11 @@ std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(int baseSgpr,
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsDynamicPass(StinkyAsmModule& module) {
     auto p = std::make_unique<SwInstructionPrefetchAbsDynamicPass>();
-    // Reserved even-aligned SGPR pair + scratch (base, base+1, base+2), auto-allocated in
-    // Tensile KernelWriter._initKernel and passed via the module option (same source the abs
-    // static pass reads). -1 ⇒ emission no-ops (analysis-only); the static pass owns the
-    // burst in that case.
+    // Tensile reserves a 3-SGPR triple and passes the base here (-1 = off).
+    // After SGPR compact that triple may already hold other values, so Apply
+    // mode picks its own blocks per emit site.
     p->setBaseSgpr(module.getModuleOptions().SwInstructionPrefetchAbsBaseSgpr);
+    p->setAfterSgprCompact(module.getModuleOptions().RegisterAllocation >= 2);
     // CP-range-extend cover: ENABLED in production for the dynamic regime (unconditional
     // near-boundary burst of DYNAMIC width coverN, sized to the fast-path boundary and clamped to
     // coverN <= 4 via armFloor=4). Covers [P(0), P(0)+coverN*4096) — the once-through fast path the
