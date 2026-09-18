@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from ....core.arch.target import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec
 from ._scaled_gemm_example import argument_parser, verify
 
@@ -26,10 +27,13 @@ def make_spec(args) -> BlockScaledGemmSpec:
 def main(argv: list[str] | None = None) -> int:
     parser = argument_parser(__doc__)
     parser.add_argument(
-        "--dtype", choices=("fp6", "bf6", "both", "fp6e2m3", "fp6e3m2"), default="both"
+        "--dtype",
+        type=normalize_dtype,
+        choices=("fp6e2m3", "fp6e3m2", "both"),
+        default="both",
     )
     args = parser.parse_args(argv)
-    dtypes = ("fp6", "bf6") if args.dtype == "both" else (args.dtype,)
+    dtypes = ("fp6e2m3", "fp6e3m2") if args.dtype == "both" else (args.dtype,)
     for dtype in dtypes:
         args.dtype = dtype
         verify(make_spec(args), args)
