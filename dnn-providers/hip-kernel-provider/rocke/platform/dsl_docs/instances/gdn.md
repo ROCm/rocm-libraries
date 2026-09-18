@@ -1,54 +1,28 @@
 # Gated DeltaNet
 
-Gated DeltaNet (GDN) is a **linear-attention** layer. Where softmax attention
-re-reads every past token, linear attention carries a fixed-size **recurrent
-state** per value head -- a `head_v_dim x head_k_dim` matrix that compresses
-everything seen so far. Each new token reads the state to produce an output and
-then updates it, so cost per token does not grow with sequence length.
+The gfx950 Gated DeltaNet (GDN) instance implements single-token decode over a
+paged recurrent state. It supports `bf16` and `f16` activation and state
+dtypes. Prefill is a separate part of the GDN family and is not implemented by
+this instance.
 
-One page per family, as with [`kda.md`](kda.md) and
-[`attention.md`](attention.md): each kernel in the family gets a section here.
-Today that is **decode**. Prefill -- many tokens at once, a different shape of
-problem -- is not implemented yet and will be added as a second section by the
-change that ships it.
-
-For the equation and GPU-mapping walkthrough, see
+This page is the public instance reference, following the same structure as
+[`kda.md`](kda.md). For the equations and GPU thread mapping, see
 [`library/builders/gfx950/gdn/ALGORITHM.md`](../../../library/builders/gfx950/gdn/ALGORITHM.md).
-For commands and output interpretation, see
+For build, correctness, benchmark, and tuning commands, see
 [`library/builders/gfx950/gdn/README.md`](../../../library/builders/gfx950/gdn/README.md).
 
-## Decode
+## Source
 
-One token per sequence, for a batch of sequences generated concurrently.
-Kernel and drivers live under `library/` (`library -> platform` one-way):
-
-- `library/kernels/gfx950/gdn_decode.py` -- spec, validator and emitter
-- `library/builders/gfx950/gdn/gdn_decode.py` -- host driver and fp32 reference
-- `library/builders/gfx950/gdn/tune.py` -- tile sweep behind the tuned table
-- `library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py` -- benchmark scenario
-- `library/dispatch/gdn/` -- request, candidates and `dispatch_gdn_decode`
-
-Sections below cover decode:
-
-- [Tensor contract](#tensor-contract)
-- [Spec and validation](#spec-and-validation)
-- [Thread mapping](#thread-mapping)
-- [Tuned tile selection](#tuned-tile-selection)
-- [Dispatch](#dispatch)
-- [Coverage](#coverage)
-- [Failure modes](#failure-modes)
-
-The gated delta rule itself -- the four-line recurrence, why the `v_new` term
-makes it a *delta* rule, the precision and cross-lane reduction choices, and
-the validator's rules with their reasons -- is owned by
-[`ALGORITHM.md`](../../../library/builders/gfx950/gdn/ALGORITHM.md) §4 and is
-deliberately not restated here. Two copies of one algorithm drift, silently,
-because neither is executable; this page covers only what a caller of the
-instance needs.
+| Area | Path |
+|---|---|
+| Kernel spec, validator, and emitter | `library/kernels/gfx950/gdn_decode.py` |
+| Host driver and fp32 reference | `library/builders/gfx950/gdn/gdn_decode.py` |
+| Tile sweep | `library/builders/gfx950/gdn/tune.py` |
+| Dispatch | `library/dispatch/gdn/` |
 
 ## Tensor contract
 
-All tensors are contiguous (row-major).
+All tensors are contiguous and row-major.
 
 | Tensor | Shape | Dtype |
 |---|---|---|
@@ -60,91 +34,44 @@ All tensors are contiguous (row-major).
 | `read_indices`, `write_indices` | `[B]` | `i32` |
 | `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]` | `state_dtype` |
 
-The `1` is the sequence length: decode is one token per sequence.
-
-Two properties matter for a serving loop. State lives in a **pool** addressed
-through `read_indices` / `write_indices`, so a sequence's memory may sit
-anywhere; and a **`-1` index skips the block**, so idle padding lanes in a
-continuously-batched request cost nothing and need no separate kernel.
-
-The kernel has **two** outputs: `out`, and `state`, which it updates in place.
+The sequence length is one. `read_indices` and `write_indices` address the
+state pool; `-1` marks an idle batch entry. The kernel writes `out` and updates
+`state` in place.
 
 ## Spec and validation
 
 `GdnDecodeSpec` carries the head geometry, dtypes, `use_qk_l2norm`, and three
-tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
-`simple=True` selects a one-thread-per-state-row reference body instead of the
-warp-tiled default. `use_qk_l2norm=False` drops the `q`/`k` normalisation --
-it changes the emitted code, is reachable through the request, and has its own
-golden case and numeric test.
+tile knobs: `num_warps`, `warp_threads_k`, and `blocks_per_v_dim`.
+`simple=True` selects the one-thread-per-state-row reference implementation.
 
-`is_valid_spec(spec, arch)` rejects unbuildable configurations before any IR is
-built, and is also the final authority for dispatch: a candidate's support
-predicate ends in this call, so what the kernel can emit and what the
-dispatcher will offer cannot drift apart. The rules and the reason for each are
-listed once, in
-[`ALGORITHM.md` §4.8](../../../library/builders/gfx950/gdn/ALGORITHM.md) --
-read them there rather than from a copy that can fall behind the validator.
-
-`kernel_name()` encodes every field that changes emitted code. The name is the
-compile and launcher cache key, so two specs sharing one name would mean one
-silently executes the other's code object.
-
-## Thread mapping
-
-One workgroup per `(sequence, value head, v-sub-block)`; the grid is
-`batch * num_v_heads * blocks_per_v_dim`.
-
-Within a workgroup, each warp's lanes are split `warp_threads_k` ways across the
-key dimension and `wave_size / warp_threads_k` ways across value rows. A lane
-holds a contiguous run of K elements, so the dot products against `k_hat` and
-`q_hat` become lane-local products followed by a cross-lane sum.
-
-That sum is an xor butterfly. Offsets inside a four-lane quad use `quad_perm` on
-the VALU, avoiding the LDS crossbar and its wait; wider offsets fall back to
-`ds_swizzle`. Every lane ends holding the total, so no broadcast is needed, and
-only the first lane of each group stores the output scalar.
-
-## Tuned tile selection
-
-`blocks_per_v_dim` splits one head's value dimension across several workgroups
-purely to **manufacture parallelism**, duplicating some work per split. At small
-batch there are too few sequences to fill the machine and that trade pays for
-itself. At large batch the launch already has ample workgroups and the split is
-pure overhead, so the tuned tile collapses to one workgroup per head and widens
-the workgroup instead.
-
-No single tile is therefore right across the decode batch range. The dispatcher
-holds a table of coarse batch bands, measured by sweeping every legal tile at a
-set of batch anchors with each configuration correctness-gated before it is
-timed. Bands are coarse deliberately: neighbouring configurations sit close
-enough that a finer table would encode run-to-run variation. Re-measure with
-`library/builders/gfx950/gdn/tune.py`.
+`is_valid_spec(spec, arch)` is the shared authority for direct builds and
+dispatch. It checks the target wave size, data types, head grouping and
+alignment, workgroup size, and divisibility of the K and V tiles.
+`kernel_name()` includes every field that changes generated code.
 
 ## Dispatch
 
-`dispatch_gdn_decode(GdnDecodeRequest(...))` returns a result carrying the
-selected spec, the built kernel, its signature, and the launch grid and block.
-Selection is: capability prefilter (arch, dtype) -> support predicate (ending in
-`is_valid_spec`) -> tuned tile for the request's batch.
+```python
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
 
-An explicit `spec_id` on the request bypasses the table and forces a registered
-tile, which is what lets the tuning be re-measured or challenged.
+result = dispatch_gdn_decode(GdnDecodeRequest(batch=16, arch="gfx950"))
+```
 
-## Coverage
+The result contains the selected `GdnDecodeSpec`, kernel identity, signature,
+and launch grid and block. An explicit `spec_id` selects a registered tile for
+benchmarking or replay. Candidate admission ends in `is_valid_spec()`, so
+dispatch cannot offer a tile that the kernel rejects.
 
-gfx950 only. `bf16` and `f16` for both the activation and state dtypes; the two
-need not match. Head geometry is constrained by the validator rules above rather
-than by a fixed list.
+## Validation
 
-## Failure modes
+Run from `dnn-providers/hip-kernel-provider/rocke`:
 
-- **Spec rejected at dispatch.** The message names the failing rule; most often
-  a head dim or `blocks_per_v_dim` that does not divide.
-- **Wrong arch.** Candidates declare gfx950; another arch is rejected by the
-  capability prefilter before a spec is built.
-- **State appears corrupted on the following step.** The kernel writes `out` and
-  mutates `state`; a driver that checks only `out` will not see a bad state
-  write until the next decode step reads it. The numeric test compares both.
-- **Padding lane touched.** A `-1` `read_indices` / `write_indices` entry
-  must leave its state slot bit-identical.
+```bash
+PYTHONPATH=library:platform/python python3 -m pytest \
+  library/tests/test_gdn_decode_spec.py \
+  library/tests/test_gdn_decode_golden.py \
+  library/tests/dispatch/gdn/test_gfx950_wiring.py
+```
+
+The on-device output and recurrent-state checks are in
+`library/tests/test_gdn_decode_gfx950_numeric.py`.
