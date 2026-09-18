@@ -378,16 +378,40 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenNothingDiscovered)
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
-TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenDiscoveredButNoQueries)
+TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenSelectedButNoQueries)
 {
-    // (N, 0) → true: claim-bearing graphs exist but not one was ever queried.
+    // (N, 0) → true: claim-bearing graphs ran and not one was ever queried.
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
+    EXPECT_TRUE(verifiedNothing(supportClaimCoverage()));
+}
+
+// The shape every category suite has: a filter narrows the run onto bundles that
+// carry no sidecar, so nothing was queried and nothing should have been. Against
+// the registration-time denominator this is indistinguishable from the case
+// above, which is why the guard counts what ran instead of what was found.
+TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenFilterSelectedNoClaimedGraphs)
+{
+    supportClaimCoverage().graphsWithClaims = 18;
+    supportClaimCoverage().graphsSelectedWithClaims = 0;
+    EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
+}
+
+// The case the guard exists for, and the one that separates it from the test
+// above: the sidecars were selected and sat on disk untouched because no engine
+// was ever there to ask.
+TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenSelectedClaimsWentUnasked)
+{
+    supportClaimCoverage().graphsWithClaims = 18;
+    supportClaimCoverage().graphsSelectedWithClaims = 4;
+    supportClaimCoverage().graphsQueried = 0;
     EXPECT_TRUE(verifiedNothing(supportClaimCoverage()));
 }
 
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 {
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
@@ -399,6 +423,7 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenEveryQueryErrored)
 {
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
@@ -422,7 +447,8 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 TEST(TestSupportClaimCoverageRules, NoSidecarCountsNothing)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                    /*observationExpected=*/false);
+                                    /*observationExpected=*/false,
+                                    /*carriesSidecar=*/false);
 
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.noApplicableClaim);
@@ -433,7 +459,8 @@ TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
 {
     const auto update = coverageFor(
         SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::CLAIM_ACCEPTED)}},
-        /*observationExpected=*/true);
+        /*observationExpected=*/true,
+        /*carriesSidecar=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_FALSE(update.noApplicableClaim);
@@ -445,7 +472,8 @@ TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
 TEST(TestSupportClaimCoverageRules, ReadSidecarWithNoVerdictsIsQueriedButUnclaimed)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::CHECKED, {}},
-                                    /*observationExpected=*/true);
+                                    /*observationExpected=*/true,
+                                    /*carriesSidecar=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_TRUE(update.noApplicableClaim);
@@ -458,7 +486,8 @@ TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
 {
     const auto update = coverageFor(
         SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::UNCLAIMED_SUPPORT)}},
-        /*observationExpected=*/true);
+        /*observationExpected=*/true,
+        /*carriesSidecar=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_TRUE(update.noApplicableClaim);
@@ -468,7 +497,8 @@ TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
 TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                    /*observationExpected=*/true);
+                                    /*observationExpected=*/true,
+                                    /*carriesSidecar=*/true);
 
     EXPECT_FALSE(update.queried);
     EXPECT_TRUE(update.missedQuery);
@@ -480,13 +510,35 @@ TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NOT_QUERIED, {}},
-                                    /*observationExpected=*/true);
+                                    /*observationExpected=*/true,
+                                    /*carriesSidecar=*/true);
 
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.missedQuery);
     EXPECT_FALSE(update.noApplicableClaim);
     EXPECT_TRUE(update.notOpened) << "the shortfall must be attributable to the graph, "
                                      "not left for the summary to blame on --gtest_filter";
+}
+
+// selectedWithClaims tracks the file on disk and nothing else. Every other flag
+// here is conditioned on observationExpected, and this one deliberately is not:
+// the runs it has to count are precisely the ones where observation was off.
+TEST(TestSupportClaimCoverageRules, SelectedWithClaimsFollowsTheSidecarNotTheObservation)
+{
+    // Engine plugin never loaded: no observation, sidecar still sitting there. The
+    // guard's numerator must see this, or enforcement passes having asked nothing.
+    const auto unobserved = coverageFor(SupportObservation{SidecarState::NONE, {}},
+                                        /*observationExpected=*/false,
+                                        /*carriesSidecar=*/true);
+    EXPECT_FALSE(unobserved.queried);
+    EXPECT_TRUE(unobserved.selectedWithClaims);
+
+    // A selected bundle that carries no sidecar promises nothing, so it must not
+    // inflate the denominator a filtered suite is judged against.
+    const auto unclaimed = coverageFor(SupportObservation{SidecarState::NONE, {}},
+                                       /*observationExpected=*/false,
+                                       /*carriesSidecar=*/false);
+    EXPECT_FALSE(unclaimed.selectedWithClaims);
 }
 
 // Its own counter, so the summary can subtract it before attributing the rest of

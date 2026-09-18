@@ -49,6 +49,10 @@ public:
         {
             supportClaimCoverage().graphsQueried++;
         }
+        if(update.selectedWithClaims)
+        {
+            supportClaimCoverage().graphsSelectedWithClaims++;
+        }
         if(update.noApplicableClaim)
         {
             supportClaimCoverage().graphsWithNoApplicableClaim++;

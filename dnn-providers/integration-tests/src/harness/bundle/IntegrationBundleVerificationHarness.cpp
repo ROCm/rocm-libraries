@@ -94,7 +94,7 @@ void IntegrationBundleVerificationHarness::recordClaimCoverage(
     // Observation, so that the counters are the same numbers under both modes --
     // the point of report mode is to predict what enforcement would see, which it
     // cannot do from a different denominator.
-    const CoverageUpdate update = coverageFor(observation, shouldObserveClaims());
+    const CoverageUpdate update = coverageFor(observation, shouldObserveClaims(), carriesSidecar());
 
     _deps.reporter->recordCoverage(update);
 

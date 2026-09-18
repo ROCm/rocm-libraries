@@ -20,6 +20,16 @@ struct SupportClaimCoverage
 {
     size_t graphsFound = 0; // seeded by registration
     size_t graphsWithClaims = 0; // seeded by registration
+    // Of the claim-bearing graphs, how many a test body actually reached. Seeded at
+    // run time, unlike graphsWithClaims above, and that distinction is the whole
+    // reason it exists: registration is blind to --gtest_filter (GTest only applies
+    // the filter inside RUN_ALL_TESTS()), so graphsWithClaims counts every bundle on
+    // disk whether or not this run was ever going to touch it. Anything that divides
+    // a run-time numerator by that registration-time denominator reads a legitimately
+    // narrowed suite as a run that verified nothing. Bumped from the sidecar's
+    // presence on disk and *not* from shouldObserveClaims(), which would go false in
+    // exactly the case the guard exists to catch (engine plugin failed to load).
+    size_t graphsSelectedWithClaims = 0;
     // Bumped once per graph whose sidecar was read, from SupportObservation::sidecar
     // — never from the verdict count. A sidecar naming only engines this build does
     // not load leaves no verdicts and must still count.
@@ -46,6 +56,7 @@ SupportClaimCoverage& supportClaimCoverage();
 struct CoverageUpdate
 {
     bool queried = false; ///< bump graphsQueried
+    bool selectedWithClaims = false; ///< bump graphsSelectedWithClaims
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
     bool notOpened = false; ///< bump graphsNotOpened
     /// A sidecar exists and claim checking is on, but the query never happened. The
@@ -59,7 +70,14 @@ struct CoverageUpdate
 // claim checking is on in either mode, and an engine was named to decide against.
 // Deliberately the observe predicate and not the enforce one -- report mode has to
 // arrive at the same counters enforcement would, or it cannot predict it.
-CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected);
+//
+// `carriesSidecar` is the weaker fact that a sidecar file is sitting next to this
+// bundle, independent of whether anything was in a position to read it. It implies
+// nothing about the engine or the mode, which is why it and not observationExpected
+// is what verifiedNothing() counts against.
+CoverageUpdate coverageFor(const SupportObservation& observation,
+                           bool observationExpected,
+                           bool carriesSidecar);
 
 class SupportClaimVerdicts
 {
@@ -117,6 +135,9 @@ private:
 };
 
 // Enforcement that passed having queried nothing is a lie, not a pass (RFC 0015 §7.2).
+// Scoped to the claim-bearing graphs this run actually selected: a suite filtered
+// onto bundles that carry no claims enforced nothing because there was nothing to
+// enforce, which is not the same thing as enforcement failing to look.
 bool verifiedNothing(const SupportClaimCoverage& coverage);
 
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,

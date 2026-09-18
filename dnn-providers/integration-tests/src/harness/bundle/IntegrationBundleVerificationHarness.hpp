@@ -260,9 +260,20 @@ private:
     // impossible: the query never ran, so the summary had nothing to print.
     bool shouldObserveClaims() const
     {
-        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
-               && std::filesystem::exists(_claimLocator.sidecarPath)
+        return carriesSidecar() && _engineUnderTest.has_value()
                && (_deps.policy.reportSupportClaims || _deps.policy.enforceSupportClaims);
+    }
+
+    // "There is a sidecar here", and nothing more -- no engine, no mode. The run's
+    // verified-nothing guard counts against this rather than shouldObserveClaims()
+    // because the two disagree in precisely the case worth catching: a build whose
+    // engine plugin never loaded observes nothing while the sidecars sit untouched.
+    // Factored out rather than repeated so the guard's denominator cannot drift
+    // away from the predicate that decides whether the query happens.
+    bool carriesSidecar() const
+    {
+        return !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath);
     }
 
     // ...and the definition of "a broken claim must fail this test". Strictly

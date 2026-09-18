@@ -16,12 +16,19 @@ SupportClaimCoverage& supportClaimCoverage()
     return s_coverage;
 }
 
-CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected)
+CoverageUpdate coverageFor(const SupportObservation& observation,
+                           bool observationExpected,
+                           bool carriesSidecar)
 {
     const bool read = observation.sidecar == SidecarState::CHECKED;
 
     CoverageUpdate update;
     update.queried = read;
+    // Reaching here at all means a test body ran, so this is the run-time half of
+    // the pair verifiedNothing() compares. Not conditioned on observationExpected:
+    // a failed engine load makes that false while leaving the sidecar exactly where
+    // it was, and that run is the one that most needs to be caught.
+    update.selectedWithClaims = carriesSidecar;
     // Read in full, but silent about this arch/platform/case. Counted so "we checked
     // and it holds" reads differently from "we checked and nobody had said anything"
     // — the verdict tallies look the same for both, and only one of them means the
@@ -38,7 +45,11 @@ CoverageUpdate coverageFor(const SupportObservation& observation, bool observati
 
 bool verifiedNothing(const SupportClaimCoverage& coverage)
 {
-    return coverage.graphsWithClaims > 0 && coverage.graphsQueried == 0;
+    // graphsSelectedWithClaims, not graphsWithClaims: the latter is seeded at
+    // registration and cannot see --gtest_filter, so against it every suite that
+    // selects only unclaimed bundles -- hipblaslt's ffm-quick tier, ASM SDPA's
+    // gpu-reference target -- looks identical to a run whose engine never loaded.
+    return coverage.graphsSelectedWithClaims > 0 && coverage.graphsQueried == 0;
 }
 
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,
