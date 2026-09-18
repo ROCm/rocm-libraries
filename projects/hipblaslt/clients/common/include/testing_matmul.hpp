@@ -2922,16 +2922,18 @@ void testing_matmul_with_bias(const Arguments&                                  
                           ? hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha)
                           : Tensor::scalar(accumulatorType, 1);
 
-                Tensor referenceAccumulator(
-                    accumulatorType, Shape{referenceA.shape()[0], referenceB.shape()[1]});
+                const Shape referenceShape{referenceA.shape()[0], referenceB.shape()[1]};
+                const bool  hasProduct
+                    = alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
+                      && referenceA.shape()[1] != 0;
+                Tensor referenceAccumulator
+                    = hasProduct
+                          ? matmulWithBlasBackend(
+                                referenceA, referenceB, accumulatorType, matmulOptions)
+                          : Tensor(accumulatorType, referenceShape);
                 EpilogueOptions conversion(accumulatorType);
-                if(alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
-                   && referenceA.shape()[1] != 0)
-                {
-                    referenceAccumulator = matmulWithBlasBackend(
-                        referenceA, referenceB, accumulatorType, matmulOptions);
+                if(hasProduct)
                     conversion.inputScale = alpha;
-                }
                 if(beta.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
                 {
                     conversion.addend = referenceC;

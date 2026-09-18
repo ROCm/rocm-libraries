@@ -68,7 +68,8 @@ Tensor materializeOperand(const Tensor& operand, const std::optional<ScalarType>
                           const std::vector<Tensor>& preQuantizationScales, bool conjugate,
                           MathMode mathMode) {
     using namespace detail;
-    Tensor output(nativeScalarType<Accumulator>, columnMajorLayout(operand.shape()));
+    Tensor output = Tensor::allocateUninitialized(nativeScalarType<Accumulator>,
+                                                  columnMajorLayout(operand.shape()));
     const RuntimeMatrixReader<Accumulator> input(operand);
     const RuntimeMatrixWriter<Accumulator> writer(output);
     const RuntimeQuantizer<Accumulator> quantize(computeType);
@@ -159,8 +160,13 @@ GemmExecutionInfo runTransforming(const GemmInvocation& problem) {
         };
     if (problem.a.shape()[1] != 0 && blas.querySupport(problem)) return blas.run(problem);
 
-    Tensor stagedOutput(nativeScalarType<Accumulator>, columnMajorLayout(problem.d.shape()));
-    if (problem.a.shape()[1] != 0) {
+    const bool hasReductionElements = problem.a.shape()[1] != 0;
+    Tensor stagedOutput =
+        hasReductionElements
+            ? Tensor::allocateUninitialized(nativeScalarType<Accumulator>,
+                                            columnMajorLayout(problem.d.shape()))
+            : Tensor(nativeScalarType<Accumulator>, columnMajorLayout(problem.d.shape()));
+    if (hasReductionElements) {
         auto [stagedA, conjugateA] = prepareBlasOperand<Accumulator>(
             problem.a, problem.computeTypeA, problem.preQuantizationScalesA, problem.conjugateA,
             problem.mathMode, "A");

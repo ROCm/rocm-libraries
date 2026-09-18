@@ -74,6 +74,13 @@ void testRuntimeReferenceGemm() {
         rejectedBeforeAllocation = true;
     }
     require(rejectedBeforeAllocation, "Owning reference GEMM accepted an invalid output layout.");
+
+    const Tensor zeroReduction =
+        matmul(Tensor(ScalarType::Float32, Shape{2, 0}), Tensor(ScalarType::Float32, Shape{0, 3}),
+               ScalarType::Float32);
+    require(zeroReduction.shape() == Shape({2, 3}) &&
+                compare(zeroReduction, Tensor(ScalarType::Float32, Shape{2, 3})).passed(),
+            "Owning reference GEMM did not initialize an empty reduction to zero.");
 }
 
 void testRuntimeMixedAndBlockScaledGemm() {

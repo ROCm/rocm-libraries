@@ -25,11 +25,14 @@ Tensor matmul(const Tensor& a, const Tensor& b, ScalarType outputType, const Mat
     if (a.shape()[1] != b.shape()[0])
         throw std::invalid_argument("matmul reduction dimension mismatch.");
     const Shape outputShape{a.shape()[0], b.shape()[1]};
+    const bool useDefaultLayout = !outputLayout.has_value();
     const Layout layout =
         outputLayout.value_or(Layout::contiguousLastDimensionFastest(outputShape));
     if (layout.shape() != outputShape)
         throw std::invalid_argument("matmul output layout shape mismatch.");
-    Tensor output(outputType, layout);
+    Tensor output = useDefaultLayout && !scalarTypeInfo(outputType).isPacked()
+                        ? Tensor::allocateUninitialized(outputType, layout)
+                        : Tensor(outputType, layout);
     matmulInto(a, b, output, options, OutputSelection::all(), backend);
     return output;
 }
