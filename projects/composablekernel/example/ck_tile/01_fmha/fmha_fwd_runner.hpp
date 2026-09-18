@@ -421,16 +421,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
         page_block_size = 0;
     }
 #endif
-    // batch_prefill supports flexible page sizes (not just multiples of 128)
-    const bool need_128_aligned_page =
-        (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
-         CK_TILE_FMHA_FWD_PAGEDKV_API);
-    if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
-    {
-        std::cerr << "only paged-kvcache block size divisible by 128 are currently supported"
-                  << std::endl;
-        return fwd_result::invalid_args;
-    }
 
 #if !(CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API)
     if(use_cache_batch_idx)
@@ -689,6 +679,24 @@ fwd_result fmha_fwd_run(mode_enum mode,
     if(128 < num_splits)
     {
         std::cerr << "num_splits greater than 128 is not supported" << std::endl;
+        return fwd_result::invalid_args;
+    }
+
+    // Runs after num_splits is resolved: the heuristic turns 0 into a real
+    // count, and whether split-KV is used decides the page size accepted here.
+    // batch_prefill takes any page size; the other paged pipelines need a page
+    // that holds a whole K/V tile. gfx1100 is the exception -- it has a bn0=32
+    // split-KV tile and the pipeline merges a tile straddling one page, so it
+    // serves the 16-row pages vLLM allocates.
+    const bool need_aligned_page = (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
+                                    CK_TILE_FMHA_FWD_PAGEDKV_API);
+    const bool paged_splitkv_only = (1 < num_splits) && !(0 < seqlen_knew) && !(0 < rotary_dim) &&
+                                    ck_tile::get_device_name().compare(0, 7, "gfx1100") == 0;
+    const ck_tile::index_t page_alignment = paged_splitkv_only ? 16 : 128;
+    if(need_aligned_page && 0 < page_block_size && !(page_block_size % page_alignment == 0))
+    {
+        std::cerr << "only paged-kvcache block size divisible by " << page_alignment
+                  << " are currently supported" << std::endl;
         return fwd_result::invalid_args;
     }
 #if CK_TILE_FMHA_FWD_SPLITKV_API || CK_TILE_FMHA_FWD_PAGEDKV_API

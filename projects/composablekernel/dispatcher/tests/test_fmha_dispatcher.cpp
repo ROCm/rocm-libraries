@@ -489,3 +489,141 @@ TEST(FmhaDispatcherTest, SelectKernelReturnsNullptrOnNoMatch)
     auto selected = dispatcher.select_kernel(problem);
     EXPECT_EQ(selected, nullptr);
 }
+
+TEST(FmhaDispatcherTest, SplitKvAsymmetricHdimSelectsCombineAtHdimV)
+{
+    // DeepSeek-MLA: hdim_q=192, hdim_v=128. The combine kernel is generated at
+    // hdim_v x hdim_v (128x128), so with_family must align the combine problem's
+    // hdim_q to hdim_v or the combine (192 <= 128) fails to select -> "no plan".
+    FmhaRegistry registry;
+    auto split_key                    = make_key(FmhaKernelFamily::FwdSplitKv, "split");
+    split_key.signature.hdim_q        = 192;
+    split_key.signature.hdim_v        = 128;
+    split_key.algorithm.tile_shape.n0 = 32; // page16-safe
+    registry.register_kernel(std::make_shared<MockFmhaKernel>(split_key, "split"));
+    auto combine_key             = make_key(FmhaKernelFamily::FwdSplitKvCombine, "combine");
+    combine_key.signature.hdim_q = 128;
+    combine_key.signature.hdim_v = 128;
+    registry.register_kernel(std::make_shared<MockFmhaKernel>(combine_key, "combine"));
+
+    FmhaProblem problem;
+    problem.api_family       = FmhaApiFamily::FwdSplitKv;
+    problem.requested_family = FmhaKernelFamily::FwdSplitKv;
+    problem.data_type        = "fp16";
+    problem.batch            = 1;
+    problem.nhead_q          = 1;
+    problem.nhead_k          = 1;
+    problem.seqlen_q         = 2048;
+    problem.seqlen_k         = 2048;
+    problem.hdim_q           = 192;
+    problem.hdim_v           = 128;
+    problem.use_paged_kv     = true;
+    problem.page_size        = 16;
+
+    FmhaDispatcher dispatcher(&registry);
+    auto plan = dispatcher.plan(problem);
+    ASSERT_TRUE(plan.is_valid());
+    ASSERT_EQ(plan.stages.size(), 2u);
+    EXPECT_EQ(plan.stages[0].family, FmhaKernelFamily::FwdSplitKv);
+    EXPECT_EQ(plan.stages[1].family, FmhaKernelFamily::FwdSplitKvCombine);
+}
+
+TEST(FmhaDispatcherTest, SeqtunePrefersSingleBlockFitThenM64Fallback)
+{
+    FmhaRegistry registry;
+
+    auto key_big                      = make_key(FmhaKernelFamily::Fwd, "big", /*rank=*/0);
+    key_big.algorithm.tile_shape.m0   = 128;
+    key_big.algorithm.pad_s           = false;
+    auto key_small                    = make_key(FmhaKernelFamily::Fwd, "small", /*rank=*/0);
+    key_small.algorithm.tile_shape.m0 = 64;
+    key_small.algorithm.pad_s         = false;
+
+    registry.register_kernel(std::make_shared<MockFmhaKernel>(key_big, "big"));
+    registry.register_kernel(std::make_shared<MockFmhaKernel>(key_small, "small"));
+
+    FmhaDispatcher dispatcher(&registry);
+
+    fmha_fwd_traits traits{};
+    traits.hdim_q        = 128;
+    traits.hdim_v        = 128;
+    traits.data_type     = "fp16";
+    traits.is_v_rowmajor = true;
+    traits.mask_type     = mask_enum::no_mask;
+    traits.bias_type     = bias_enum::no_bias;
+
+    fmha_fwd_args args{};
+    args.batch        = 1;
+    args.seqlen_q     = 128;
+    args.seqlen_k     = 128;
+    args.max_seqlen_q = 128;
+    args.hdim_q       = 128;
+    args.hdim_v       = 128;
+    args.nhead_q      = 16;
+    args.nhead_k      = 16;
+
+    auto problem  = FmhaProblem::from_invocation(FmhaInvocation::make(traits, args), "gfx942");
+    auto selected = dispatcher.select_kernel(problem);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->get_name(), "big");
+
+    problem.seqlen_q     = 256;
+    problem.max_seqlen_q = 256;
+    selected             = dispatcher.select_kernel(problem);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected->get_name(), "small");
+}
+
+// ck_tile::dispatcher::backends::fmha_signature_matches() is the real backend's selection
+// predicate; the mock kernels above do not go through it, so these exercise it directly.
+namespace {
+
+FmhaProblem make_splitkv_combine_problem(int problem_mask)
+{
+    FmhaProblem p;
+    p.requested_family = FmhaKernelFamily::FwdSplitKvCombine;
+    p.data_type        = "fp16";
+    p.hdim_q           = 128;
+    p.hdim_v           = 128;
+    p.mask_type        = problem_mask;
+    return p;
+}
+
+FmhaKernelKey make_combine_key(int kernel_mask)
+{
+    auto key                = make_key(FmhaKernelFamily::FwdSplitKvCombine, "combine");
+    key.signature.data_type = "fp16";
+    key.signature.hdim_q    = 128;
+    key.signature.hdim_v    = 128;
+    key.signature.mask_type = kernel_mask;
+    return key;
+}
+
+} // namespace
+
+TEST(FmhaSignatureMatchTest, CombineIsMaskAgnostic)
+{
+    // Whatever mask context codegen stamped the combine with, it must still
+    // serve a split-K plan: the combine only merges o_acc/lse_acc.
+    for(int kernel_mask : {0, 1, 2})
+    {
+        EXPECT_TRUE(ck_tile::dispatcher::backends::fmha_signature_matches(
+            make_combine_key(kernel_mask), make_splitkv_combine_problem(0)))
+            << "combine generated with mask_type=" << kernel_mask;
+    }
+}
+
+TEST(FmhaSignatureMatchTest, NonCombineFamiliesStillCheckMask)
+{
+    // The exemption must not leak into other families.
+    auto key                = make_key(FmhaKernelFamily::FwdSplitKv, "split");
+    key.signature.data_type = "fp16";
+    key.signature.hdim_q    = 128;
+    key.signature.hdim_v    = 128;
+    key.signature.mask_type = 1;
+
+    FmhaProblem p      = make_splitkv_combine_problem(0);
+    p.requested_family = FmhaKernelFamily::FwdSplitKv;
+
+    EXPECT_FALSE(ck_tile::dispatcher::backends::fmha_signature_matches(key, p));
+}
