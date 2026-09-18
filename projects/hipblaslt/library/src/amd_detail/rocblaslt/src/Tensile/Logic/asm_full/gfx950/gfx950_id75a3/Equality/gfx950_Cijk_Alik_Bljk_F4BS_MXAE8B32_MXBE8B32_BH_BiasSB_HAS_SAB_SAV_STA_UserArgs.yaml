@@ -493,7 +493,7 @@ Solutions:
   VectorWidthB: 1
   VectorWidthMXSA: 1
   VectorWidthMXSB: 1
-  WGMBitSwizzle: true
+  WGMBitSwizzle: false
   WaveSeparateGlobalReadMXSA: 0
   WaveSeparateGlobalReadMXSB: 0
   WavefrontSize: 64
