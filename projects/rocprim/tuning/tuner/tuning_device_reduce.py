@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,14 @@ import sys
 
 sys.path.append("../")
 
-from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
 
 
-class TunerPartition(BaseTuner):
+class Tuner(BaseTuner):
+    @classmethod
+    def _get_default_args(cls) -> TunerArgs:
+        return TunerArgs(algo_full_name="device_reduce")
+
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
@@ -37,16 +40,13 @@ class TunerPartition(BaseTuner):
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        element_size = TYPE_CONFIGS[types["data_type"]].size
-        max_items = min(64 // element_size, 32)
-        params["block_size_x"] = list(range(128, 513, 64))
-        params["ipt"] = list(range(4, max_items + 1, 1))
+        params["block_size_x"] = [64, 128, 256]
+        params["ipt"] = [1, 2, 4, 8, 16]
         return params
 
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
 
-        # No constraints needed all handled in the parameters.
         def validate(params):
             return True
 
@@ -54,5 +54,9 @@ class TunerPartition(BaseTuner):
 
     def tune_all(self) -> None:
         """Tune for all data types"""
-        for data_type in COMMON_KEY_TYPES:
-            self.tune_type({"data_type": data_type})
+        for key_type in COMMON_KEY_TYPES:
+            self.tune_type({"key_type": key_type})
+
+
+if __name__ == "__main__":
+    Tuner.cli()

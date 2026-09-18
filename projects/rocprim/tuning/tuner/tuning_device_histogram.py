@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,34 +25,42 @@ import sys
 
 sys.path.append("../")
 
-from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
 
 
-class TunerPartition(BaseTuner):
+class Tuner(BaseTuner):
+    @classmethod
+    def _get_default_args(cls) -> TunerArgs:
+        return TunerArgs(algo_full_name="device_histogram")
+
     def __init__(self, args: TunerArgs):
         super().__init__(args)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
+        max_ipt = 16 // types["channels"]
         params = OrderedDict()
-        element_size = TYPE_CONFIGS[types["data_type"]].size
-        max_items = min(64 // element_size, 32)
-        params["block_size_x"] = list(range(128, 513, 64))
-        params["ipt"] = list(range(4, max_items + 1, 1))
+        params["block_size_x"] = [64, 128, 256]
+        params["ipt"] = list(range(1, max_ipt + 1, 1))
+        params["max_grid_size"] = [2048]
+        params["shared_impl_max_bins"] = [2048]
+        params["shared_impl_histograms"] = [2, 3, 4]
         return params
 
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
-
-        # No constraints needed all handled in the parameters.
         def validate(params):
             return True
 
         return validate
 
     def tune_all(self) -> None:
-        """Tune for all data types"""
-        for data_type in COMMON_KEY_TYPES:
-            self.tune_type({"data_type": data_type})
+        """Tune for all configurations"""
+        for value_type in COMMON_KEY_TYPES:
+            for (channels, active_channels) in [(1, 1), (2, 2), (3, 3), (4, 4), (4, 3)]:
+                self.tune_type({"value_type": value_type, "channels": channels, "active_channels": active_channels})
+
+
+if __name__ == "__main__":
+    Tuner.cli()
