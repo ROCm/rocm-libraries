@@ -445,9 +445,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         }
     }
 
-    // w4a16: int4 A and a 16-bit block A-scale only make sense together. Catching
-    // the mismatch here gives a real diagnostic instead of "no solution found"
-    // out of the heuristic much later.
+    // w4a16: int4 A and a block A-scale only make sense together.
     {
         const bool int4A = (matA->type == HIP_R_4I);
         bool       blockScaleA;
@@ -481,10 +479,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
             log_error(__func__, "w4a16 requires a non-null A scale pointer");
             return rocblaslt_status_invalid_pointer;
         }
-        // The group-scale tensor is [M][ceil(K/G)] with no batch dimension, and
-        // neither the kernel's scale SRD nor the reference adds a batch offset,
-        // so a batched problem would silently reuse batch 0's scales for every
-        // batch. Reject rather than compute the wrong answer.
+        // The scale tensor has no batch dimension.
         if(int4A && num_batches_a > 1)
         {
             log_error(__func__, "w4a16 does not support batch_count > 1 yet (got ",

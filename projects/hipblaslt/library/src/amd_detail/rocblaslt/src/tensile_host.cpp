@@ -639,16 +639,11 @@ namespace
         }
     }
 
-    /// Alignment of the zero-point region within the scaleA allocation. Part of
-    /// the public layout contract documented on
-    /// HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT, so it cannot be changed here
-    /// alone: the client-side generator in w4a16_datagen.hpp lays the region out
-    /// to match, and the two have to agree byte for byte.
+    /// Public layout contract; w4a16_datagen.hpp must match.
     constexpr size_t c_blockScaleAZeroPointAlignment = 256;
 
-    /// Byte offset of the packed int4 zero-point region inside the single
-    /// allocation the user passes as scaleA: the scales come first, then the
-    /// zero-points at the next c_blockScaleAZeroPointAlignment boundary.
+    /// Byte offset of the zero-point region within the scaleA allocation:
+    /// scales first, then zero-points at the next alignment boundary.
     inline size_t blockScaleAZeroPointOffset(int64_t m, int64_t k, int groupSize)
     {
         const size_t scaleBytes
@@ -657,8 +652,7 @@ namespace
                                                       c_blockScaleAZeroPointAlignment);
     }
 
-    /// True for the asymmetric w4a16 modes, i.e. those whose scale allocation
-    /// carries a packed int4 zero-point region after the scales.
+    /// True for the asymmetric w4a16 modes (scales followed by zero-points).
     inline bool isBlockScaleAZeroPoint(RocblasltContractionProblem::ScalingFormat fmt)
     {
         switch(fmt)
@@ -672,7 +666,7 @@ namespace
         }
     }
 
-    /// True for every w4a16 group-scale mode, symmetric or asymmetric.
+    /// True for every w4a16 group-scale mode.
     inline bool isBlockScaleA(RocblasltContractionProblem::ScalingFormat fmt)
     {
         return blockScaleAGroupSize(fmt) != 0;
