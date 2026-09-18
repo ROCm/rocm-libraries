@@ -30,6 +30,9 @@
 
 namespace rocsparse
 {
+    // innz_offset is the first nonzero of the coefficient block this thread block
+    // handles. The kernel wrapper supplies it from a grid-stride loop, so a grid.x
+    // clamped against the device limit still covers every nonzero.
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
               typename T,
@@ -38,7 +41,8 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void sddmm_ell_device(rocsparse_operation transA,
+    ROCSPARSE_DEVICE_ILF void sddmm_ell_device(I                   innz_offset,
+                                               rocsparse_operation transA,
                                                rocsparse_operation transB,
                                                rocsparse_order     orderA,
                                                rocsparse_order     orderB,
@@ -59,18 +63,17 @@ namespace rocsparse
         //
         // Each group treats one row.
         //
-        static constexpr rocsparse_int NUM_COEFF         = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
-        const I                        local_coeff_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
-        const I       local_thread_index                 = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
-        const int64_t incx                               = (orderA == rocsparse_order_column)
-                                                               ? ((transA == rocsparse_operation_none) ? lda : 1)
-                                                               : ((transA == rocsparse_operation_none) ? 1 : lda);
+        const I       local_coeff_index  = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
+        const I       local_thread_index = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
+        const int64_t incx               = (orderA == rocsparse_order_column)
+                                               ? ((transA == rocsparse_operation_none) ? lda : 1)
+                                               : ((transA == rocsparse_operation_none) ? 1 : lda);
 
         const int64_t incy = (orderB == rocsparse_order_column)
                                  ? ((transB == rocsparse_operation_none) ? 1 : ldb)
                                  : ((transB == rocsparse_operation_none) ? ldb : 1);
 
-        const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
+        const I innz = innz_offset + local_coeff_index;
         if(innz >= nnz)
         {
             return;
@@ -152,26 +155,48 @@ namespace rocsparse
         // therefore required to lay out the two buffers with that same
         // stride, and to broadcast A or B across batches the caller passes
         // batch_stride_A == 0 or batch_stride_B == 0.
+        //
+        // grid.x is clamped against the device limit (rocsparse::sddmm_grid_size_x),
+        // so one sweep of the grid covers hipGridDim_x * NUM_COEFF nonzeros. Advance
+        // the block's coefficient base by that stride until the whole nnz range is
+        // covered. Both the base and the stride involve only hipBlockIdx_x,
+        // hipGridDim_x, the nnz argument and a compile time constant, so the trip
+        // count is block uniform.
+        //
+        // The offsets are walked in 64 bits so that neither the stride nor the base
+        // can overflow the index type at the top of its range.
+        static constexpr int64_t NUM_COEFF
+            = static_cast<int64_t>(BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
+
+        const int64_t innz_bound   = static_cast<int64_t>(nnz);
+        const int64_t innz_stride  = static_cast<int64_t>(hipGridDim_x) * NUM_COEFF;
+        const int64_t innz_initial = static_cast<int64_t>(hipBlockIdx_x) * NUM_COEFF;
+
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::sddmm_ell_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT>(
-                transA,
-                transB,
-                orderA,
-                orderB,
-                M,
-                N,
-                K,
-                nnz,
-                alpha,
-                load_pointer(dense_A, batch, batch_stride_A),
-                lda,
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                beta,
-                load_pointer(val, batch, values_batch_stride_C),
-                load_pointer(ind, batch, indices_batch_stride_C),
-                base);
+            for(int64_t innz_offset = innz_initial; innz_offset < innz_bound;
+                innz_offset += innz_stride)
+            {
+                rocsparse::sddmm_ell_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT>(
+                    static_cast<I>(innz_offset),
+                    transA,
+                    transB,
+                    orderA,
+                    orderB,
+                    M,
+                    N,
+                    K,
+                    nnz,
+                    alpha,
+                    load_pointer(dense_A, batch, batch_stride_A),
+                    lda,
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    beta,
+                    load_pointer(val, batch, values_batch_stride_C),
+                    load_pointer(ind, batch, indices_batch_stride_C),
+                    base);
+            }
         }
     }
 
