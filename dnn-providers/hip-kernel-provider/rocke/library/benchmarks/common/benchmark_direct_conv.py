@@ -25,8 +25,8 @@ from typing import List
 
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
-from rocke.benchmark.conv_reference import conv_reference as _conv_reference
-from rocke.benchmark.conv_reference import dgrad_reference as _dgrad_reference_shared
+from builders.common.conv_reference import conv_reference as _conv_reference
+from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids
@@ -873,7 +873,7 @@ def _run_dgrad_sweep(
     import torch
 
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_direct_grouped import (
+    from kernels.common.conv_direct_grouped import (
         DirectConvDgradSpec,
         DirectDepthwiseDgradSpec,
         build_direct_conv_dgrad,
@@ -902,7 +902,7 @@ def _run_dgrad_sweep(
 
     if is_depthwise:
         # Depthwise dgrad: use ho-streaming kernel (better DRAM efficiency).
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             DirectDepthwiseDgradStreamSpec,
             build_direct_depthwise_dgrad_streaming,
             is_valid_depthwise_dgrad_stream_spec,
@@ -937,7 +937,7 @@ def _run_dgrad_sweep(
         # Grouped dgrad: use the 2-kernel MFMA pipeline (transpose + fprop) for
         # stride=1, fall back to scalar FMA for stride > 1.
         # H-tiling (block_h) ensures enough blocks/CU even for groups=1.
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             make_dgrad_fprop_spec,
             build_direct_transpose_weights_dgrad,
             build_direct_reorganize_weights,
@@ -1095,7 +1095,7 @@ def _run_dgrad_sweep(
     wt_dev = None
     wt_coa = None
     if not is_depthwise and use_mfma:
-        from rocke.instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             direct_dgrad_workspace_bytes,
             direct_dgrad_coalesced_workspace_bytes,
         )
