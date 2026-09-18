@@ -364,27 +364,14 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(ioStrides));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 1, "x", xDataType, &ioStrides, &ioDims));
+        builder, X_UID, "x", xDataType, &ioStrides, &ioDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", yDataType, &ioStrides, &ioDims));
+        builder, Y_UID, "y", yDataType, &ioStrides, &ioDims));
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, 3, "scale", scaleDataType, &derivedStrides, &derivedDims));
+        builder, SCALE_UID, "scale", scaleDataType, &derivedStrides, &derivedDims));
 
-    // Epsilon (pass-by-value)
-    const std::vector<int64_t> passByValueDims = {1};
-    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        4,
-        "epsilon",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &passByValueDims,
-        &passByValueDims,
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
-        builder.CreateStruct(epsilonVal).Union()));
     tensorAttributes.push_back(
         createEpsilonTensorAttributes(builder, EPSILON_UID, 1e-5f, epsilonDataType));
 
@@ -640,8 +627,8 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
             << "Mismatch in dx at index " << i;
     }
 
-    const auto* cpuDScaleData = static_cast<const GradInputType*>(dCpuScaleTensor.rawHostData());
-    const auto* gpuDScaleData = static_cast<const GradInputType*>(dGpuScaleTensor.rawHostData());
+    const auto* cpuDScaleData = static_cast<const ScaleType*>(dCpuScaleTensor.rawHostData());
+    const auto* gpuDScaleData = static_cast<const ScaleType*>(dGpuScaleTensor.rawHostData());
     for(size_t i = 0; i < dCpuScaleTensor.elementCount(); ++i)
     {
         EXPECT_NEAR(
@@ -649,8 +636,8 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
             << "Mismatch in dscale at index " << i;
     }
 
-    const auto* cpuDBiasData = static_cast<const GradInputType*>(dCpuBiasTensor.rawHostData());
-    const auto* gpuDBiasData = static_cast<const GradInputType*>(dGpuBiasTensor.rawHostData());
+    const auto* cpuDBiasData = static_cast<const ScaleType*>(dCpuBiasTensor.rawHostData());
+    const auto* gpuDBiasData = static_cast<const ScaleType*>(dGpuBiasTensor.rawHostData());
     for(size_t i = 0; i < dCpuBiasTensor.elementCount(); ++i)
     {
         EXPECT_NEAR(

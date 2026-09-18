@@ -69,7 +69,6 @@ inline flatbuffers::FlatBufferBuilder
         builder, dbiasUid, "dbias", scaleBiasDataType, &dbiasStrides, &dbiasDims));
     if(epsilonUid.has_value() && epsilon.has_value())
     {
-        const std::vector<int64_t> epsilonDimsStrides = {1};
         tensors.push_back(createEpsilonTensorAttributes(
             builder, epsilonUid.value(), epsilon.value(), epsilonDataType));
     }

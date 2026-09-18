@@ -57,7 +57,6 @@ inline flatbuffers::FlatBufferBuilder
         builder, scaleUid, "scale", scaleBiasDataType, &scaleStrides, &scaleDims));
     tensors.push_back(CreateTensorAttributesDirect(
         builder, biasUid, "bias", scaleBiasDataType, &biasStrides, &biasDims));
-    const std::vector<int64_t> epsilonDimsStrides = {1};
     tensors.push_back(createEpsilonTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType));
 
     if(meanUid.has_value() && meanDims.has_value() && meanStrides.has_value()
