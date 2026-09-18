@@ -65,12 +65,12 @@ __global__ void dilate_3x3_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -145,12 +145,12 @@ __global__ void dilate_5x5_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -237,12 +237,12 @@ __global__ void dilate_7x7_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -341,12 +341,12 @@ __global__ void dilate_9x9_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -459,8 +459,8 @@ __global__ void dilate_3x3_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     int srcIdx =
         (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f8.f4[0] = FLOAT4_ZERO;
-    sum_f8.f4[1] = FLOAT4_ZERO;
+    sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                          &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -486,8 +486,8 @@ __global__ void dilate_3x3_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -513,8 +513,8 @@ __global__ void dilate_3x3_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -564,8 +564,8 @@ __global__ void dilate_5x5_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     int srcIdx =
         (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f8.f4[0] = FLOAT4_ZERO;
-    sum_f8.f4[1] = FLOAT4_ZERO;
+    sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                          &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -593,8 +593,8 @@ __global__ void dilate_5x5_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -622,8 +622,8 @@ __global__ void dilate_5x5_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -675,8 +675,8 @@ __global__ void dilate_7x7_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     int srcIdx =
         (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f8.f4[0] = FLOAT4_ZERO;
-    sum_f8.f4[1] = FLOAT4_ZERO;
+    sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                          &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -706,8 +706,8 @@ __global__ void dilate_7x7_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -737,8 +737,8 @@ __global__ void dilate_7x7_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -792,8 +792,8 @@ __global__ void dilate_9x9_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     int srcIdx =
         (id_z * srcStridesNCH.x) + ((id_y_i + roiBeginY) * srcStridesNCH.z) + (id_x_i + roiBeginX);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f8.f4[0] = FLOAT4_ZERO;
-    sum_f8.f4[1] = FLOAT4_ZERO;
+    sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
     if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
         FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                          &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -825,8 +825,8 @@ __global__ void dilate_9x9_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -858,8 +858,8 @@ __global__ void dilate_9x9_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
         __syncthreads();
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
-        sum_f8.f4[0] = FLOAT4_ZERO;
-        sum_f8.f4[1] = FLOAT4_ZERO;
+        sum_f8.f4[0] = FLOAT4_I8_MIN_VALUE;
+        sum_f8.f4[1] = FLOAT4_I8_MIN_VALUE;
         if ((id_x_i >= 0) && ((id_x_i + 7) < roiWidth) && (id_y_i >= 0) && (id_y_i < roiHeight))
             FilterDispatch<T>::rpp_hip_load8(srcPtr + srcIdx,
                                              &src_smem[hipThreadIdx_y][hipThreadIdx_x8]);
@@ -917,12 +917,12 @@ __global__ void dilate_3x3_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -997,12 +997,12 @@ __global__ void dilate_5x5_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -1089,12 +1089,12 @@ __global__ void dilate_7x7_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -1193,12 +1193,12 @@ __global__ void dilate_9x9_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     int srcIdx = (id_z * srcStridesNH.x) + ((id_y_i + roiBeginY) * srcStridesNH.y) +
                  ((id_x_i + roiBeginX) * 3);
     int dstIdx = (id_z * dstStridesNCH.x) + (id_y_o * dstStridesNCH.z) + id_x_o;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -1314,12 +1314,12 @@ __global__ void dilate_3x3_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, 
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -1399,12 +1399,12 @@ __global__ void dilate_5x5_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, 
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -1497,12 +1497,12 @@ __global__ void dilate_7x7_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, 
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
@@ -1606,12 +1606,12 @@ __global__ void dilate_9x9_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, 
     srcIdx.y = srcIdx.x + srcStridesNCH.y;
     srcIdx.z = srcIdx.y + srcStridesNCH.y;
     int dstIdx = (id_z * dstStridesNH.x) + (id_y_o * dstStridesNH.y) + id_x_o * 3;
-    sum_f24.f4[0] = FLOAT4_ZERO;
-    sum_f24.f4[1] = FLOAT4_ZERO;
-    sum_f24.f4[2] = FLOAT4_ZERO;
-    sum_f24.f4[3] = FLOAT4_ZERO;
-    sum_f24.f4[4] = FLOAT4_ZERO;
-    sum_f24.f4[5] = FLOAT4_ZERO;
+    sum_f24.f4[0] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[1] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[2] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[3] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[4] = FLOAT4_I8_MIN_VALUE;
+    sum_f24.f4[5] = FLOAT4_I8_MIN_VALUE;
 
     int3 hipThreadIdx_y_channel;
     hipThreadIdx_y_channel.x = hipThreadIdx_y;
