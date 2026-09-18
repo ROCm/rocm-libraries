@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2119,11 +2119,8 @@ namespace rocalution
     // Flag coarse and fine points, so that a following exclusive sum turns these into the
     // fine to coarse and fine to fine index maps
     template <unsigned int BLOCKSIZE, typename I>
-    __launch_bounds__(BLOCKSIZE) __global__
-        void kernel_csr_rs_mmextpi_cf_flags(I nrow,
-                                            const int* __restrict__ cf,
-                                            I* __restrict__ f2c,
-                                            I* __restrict__ f2f)
+    __launch_bounds__(BLOCKSIZE) __global__ void kernel_csr_rs_mmextpi_cf_flags(
+        I nrow, const int* __restrict__ cf, I* __restrict__ f2c, I* __restrict__ f2f)
     {
         I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
 
@@ -2168,8 +2165,9 @@ namespace rocalution
             return;
         }
 
-        J nnz_ff = 0;
-        J nnz_fc = 0;
+        J    nnz_ff   = 0;
+        J    nnz_fc   = 0;
+        bool has_diag = false;
 
         for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
         {
@@ -2177,6 +2175,7 @@ namespace rocalution
 
             if(col == row)
             {
+                has_diag = true;
                 ++nnz_ff;
                 continue;
             }
@@ -2194,6 +2193,14 @@ namespace rocalution
             {
                 ++nnz_ff;
             }
+        }
+
+        // The F-F block always needs a diagonal slot, because the interpolation formula
+        // turns it into the placeholder that reproduces the direct term. Reserve one even
+        // when A does not store a diagonal on this row.
+        if(has_diag == false)
+        {
+            ++nnz_ff;
         }
 
         ff_row_ptr[f2f[row]] = nnz_ff;
@@ -2231,10 +2238,25 @@ namespace rocalution
             return;
         }
 
+        constexpr T zero = static_cast<T>(0);
+
         I frow = f2f[row];
 
         J idx_ff = ff_row_ptr[frow];
         J idx_fc = fc_row_ptr[frow];
+
+        // Determine whether A stores a diagonal exactly as the counting pass did, so that
+        // both passes agree on the number of diagonal slots for any column order.
+        bool diag_written = false;
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            if(csr_col_ind[k] == row)
+            {
+                diag_written = true;
+                break;
+            }
+        }
 
         for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
         {
@@ -2261,10 +2283,27 @@ namespace rocalution
             }
             else
             {
+                // f2f is monotonic, so the diagonal slot belongs ahead of the first fine
+                // neighbour past row. Placing it here keeps the columns ascending, which
+                // the subsequent SpGEMM relies on.
+                if(diag_written == false && col > row)
+                {
+                    ff_col_ind[idx_ff] = frow;
+                    ff_val[idx_ff]     = zero;
+                    ++idx_ff;
+                    diag_written = true;
+                }
+
                 ff_col_ind[idx_ff] = f2f[col];
                 ff_val[idx_ff]     = csr_val[k];
                 ++idx_ff;
             }
+        }
+
+        if(diag_written == false)
+        {
+            ff_col_ind[idx_ff] = frow;
+            ff_val[idx_ff]     = zero;
         }
     }
 
@@ -2360,27 +2399,26 @@ namespace rocalution
                 continue;
             }
 
-            T value = D_q[jj];
+            // Locate the entry of row jj that points back at r. It stays zero when row jj
+            // has no such entry, which drops the correction term for this neighbour.
+            T value1 = zero;
 
-            // Locate the entry of row jj that points back at r
             for(J k = ff_row_ptr[jj]; k < ff_row_ptr[jj + 1]; ++k)
             {
-                if(ff_col_ind[k] == jj)
-                {
-                    continue;
-                }
-
                 if(ff_col_ind[k] == r)
                 {
-                    T value1 = ff_val_orig[k];
-                    value    = value + value1;
-                    theta    = theta + ff_val[j] * value1 / value;
+                    value1 = ff_val_orig[k];
                     break;
                 }
             }
 
+            T value = D_q[jj] + value1;
+
+            // A vanishing denominator leaves the coupling out of both the correction and
+            // the scaling, rather than turning the whole row into a NaN
             if(value != zero)
             {
+                theta     = theta + ff_val[j] * value1 / value;
                 ff_val[j] = ff_val[j] / value;
             }
         }
@@ -2416,14 +2454,14 @@ namespace rocalution
 
         T theta = D_theta[r] + D_w[r];
 
-        if(theta != zero)
-        {
-            theta = static_cast<T>(-1) / theta;
+        // A degenerate denominator leaves the weights undefined. Zeroing row r of the F-F
+        // block makes row r of the product vanish, so the fine point gets no coarse-grid
+        // correction rather than an arbitrary unnormalised one.
+        theta = (theta != zero) ? static_cast<T>(-1) / theta : zero;
 
-            for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
-            {
-                ff_val[j] = ff_val[j] * theta;
-            }
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            ff_val[j] = ff_val[j] * theta;
         }
     }
 
