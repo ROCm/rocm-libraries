@@ -2,10 +2,8 @@
 # SPDX-License-Identifier: MIT
 #
 # By-layer C++ test registration for the rocKE engine. Included via
-# add_subdirectory(tests) from the top-level rocke/platform/CMakeLists.txt. All
-# targets
-# link the engine archive rocke_core (built by the parent). Paths are relative
-# to
+# add_subdirectory(tests) from the top-level rocke/platform/CMakeLists.txt. All targets
+# link the engine archive rocke_core (built by the parent). Paths are relative to
 # this file (tests/), keeping the tree copy-able.
 
 # --- core layer ---------------------------------------------------------------
@@ -65,8 +63,7 @@ if(BUILD_TESTING)
              COMMAND rocke_ir_serialize_roundtrip)
     set_tests_properties(rocke_ir_serialize_roundtrip
                          PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name
-      rocke_ir_serialize_roundtrip)
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_serialize_roundtrip)
     set_target_properties(rocke_ir_serialize_roundtrip
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_ir_serialize_roundtrip
@@ -77,15 +74,13 @@ if(BUILD_TESTING)
 
   # C++ parity for Python TestNewTargetIntrinsics.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/future_intrinsic_lowering.cpp")
-    add_executable(rocke_future_intrinsic_lowering
-      core/future_intrinsic_lowering.cpp)
+    add_executable(rocke_future_intrinsic_lowering core/future_intrinsic_lowering.cpp)
     target_link_libraries(rocke_future_intrinsic_lowering PRIVATE rocke_core)
     add_test(NAME rocke_future_intrinsic_lowering
              COMMAND rocke_future_intrinsic_lowering)
     set_tests_properties(rocke_future_intrinsic_lowering
                          PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name
-      rocke_future_intrinsic_lowering)
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_future_intrinsic_lowering)
     set_target_properties(rocke_future_intrinsic_lowering
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_future_intrinsic_lowering
@@ -102,8 +97,7 @@ if(BUILD_TESTING)
              COMMAND rocke_flavor_datalayout_ssot)
     set_tests_properties(rocke_flavor_datalayout_ssot
                          PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name
-      rocke_flavor_datalayout_ssot)
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_flavor_datalayout_ssot)
     set_target_properties(rocke_flavor_datalayout_ssot
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_flavor_datalayout_ssot
@@ -140,10 +134,10 @@ if(BUILD_TESTING)
   # archs, byte-compared against the Python lowerer) lives in the Python driver
   # python/rocke/portable_ir/drivers/parity_matrix.py, which needs a Python
   # front end and so cannot be a ctest.
-  foreach(pir_test dom_decoders recipe_vm_replay)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/portable_ir/${pir_test}.cpp")
-      set(_pir_target "rocke_portable_ir_${pir_test}")
-      add_executable(${_pir_target} portable_ir/${pir_test}.cpp)
+  foreach(_pir_test dom_decoders recipe_vm_replay)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/portable_ir/${_pir_test}.cpp")
+      set(_pir_target "rocke_portable_ir_${_pir_test}")
+      add_executable(${_pir_target} portable_ir/${_pir_test}.cpp)
       target_link_libraries(${_pir_target} PRIVATE rocke_core)
       if(UNIX)
         target_link_libraries(${_pir_target} PRIVATE m)
@@ -155,8 +149,7 @@ if(BUILD_TESTING)
                             PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
       install(TARGETS ${_pir_target}
               RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
-      set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
-        ${_pir_target})
+      set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS ${_pir_target})
     endif()
   endforeach()
 
@@ -172,12 +165,10 @@ if(BUILD_TESTING)
   endif()
 
   # --- instances layer --------------------------------------------------------
-  if(EXISTS
-     "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_reentrancy.cpp")
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/tiled_attention_2d_reentrancy.cpp")
     add_executable(rocke_tiled_attention_2d_reentrancy
                    instances/tiled_attention_2d_reentrancy.cpp)
-    target_link_libraries(rocke_tiled_attention_2d_reentrancy PRIVATE
-      rocke_core)
+    target_link_libraries(rocke_tiled_attention_2d_reentrancy PRIVATE rocke_core)
     if(UNIX)
       target_link_libraries(rocke_tiled_attention_2d_reentrancy PRIVATE m)
     endif()
@@ -185,8 +176,7 @@ if(BUILD_TESTING)
              COMMAND rocke_tiled_attention_2d_reentrancy)
     set_tests_properties(rocke_tiled_attention_2d_reentrancy
                          PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name
-      rocke_tiled_attention_2d_reentrancy)
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_tiled_attention_2d_reentrancy)
     set_target_properties(rocke_tiled_attention_2d_reentrancy
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_tiled_attention_2d_reentrancy
@@ -199,8 +189,7 @@ if(BUILD_TESTING)
   # whole-kernel LDS budget, the scaled-f8f6f4 arch gate and the fp8 wave-size
   # gate. The byte-identity gate only compares specs both engines accept, so an
   # acceptance divergence from the Python validators is invisible to it.
-  if(EXISTS
-     "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp")
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/moe_fused_mega_spec_guards.cpp")
     add_executable(rocke_moe_fused_mega_spec_guards
                    instances/moe_fused_mega_spec_guards.cpp)
     target_link_libraries(rocke_moe_fused_mega_spec_guards PRIVATE rocke_core)
@@ -211,8 +200,7 @@ if(BUILD_TESTING)
              COMMAND rocke_moe_fused_mega_spec_guards)
     set_tests_properties(rocke_moe_fused_mega_spec_guards
                          PROPERTIES LABELS "ckc;unit;host")
-    rocke_cxx_test_installed_name(_rocke_installed_name
-      rocke_moe_fused_mega_spec_guards)
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_moe_fused_mega_spec_guards)
     set_target_properties(rocke_moe_fused_mega_spec_guards
                           PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_moe_fused_mega_spec_guards
@@ -230,9 +218,7 @@ if(BUILD_TESTING)
   # nothing for them. Guarded because rocke/platform also builds
   # standalone (outside hip-kernel-provider), where neither the shared
   # parser (apply_ctest_category_labels) nor
-  #
-  # ROCKE_ENGINE_CTEST_CATEGORIES_YAML/HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENA
-  # BLED
+  # ROCKE_ENGINE_CTEST_CATEGORIES_YAML/HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
   # exist. Without this, these tests carry only the hardcoded
   # "ckc;unit;host" label and silently drop out of `ctest -L <tier>`
   # selection -- the mechanism TheRock CI's per-tier
