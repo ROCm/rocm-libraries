@@ -49,6 +49,7 @@ import pytest
 
 from rocisa.enum import DataTypeEnum
 from Tensile.Common.DataType import DataType
+from Tensile.SolutionStructs.Solution import _validateMXLocalReadWidth
 from Tensile.SolutionStructs.Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -76,6 +77,64 @@ E4M3      = DataTypeEnum.Float8
 # tests to confirm we don't over-reject on other architectures.
 _GFX1250_CAPS     = {"HasWMMA_V3": True}
 _NON_GFX1250_CAPS = {"HasWMMA_V3": False}
+
+
+def _local_read_state(
+    *,
+    mxBlockA=32,
+    mxBlockB=0,
+    vectorWidthA=1,
+    vectorWidthB=1,
+    unrollMajorLDSA=False,
+    unrollMajorLDSB=False,
+    matrixInstK=128,
+    scaleFormat="InMemorySwizzle",
+):
+    return {
+        "ProblemType": {"MXBlockA": mxBlockA, "MXBlockB": mxBlockB},
+        "MXScaleFormat": scaleFormat,
+        "MatrixInstK": matrixInstK,
+        "VectorWidthA": vectorWidthA,
+        "VectorWidthB": vectorWidthB,
+        "UnrollMajorLDSA": unrollMajorLDSA,
+        "UnrollMajorLDSB": unrollMajorLDSB,
+    }
+
+
+class TestMXLocalReadWidth:
+    def test_rejects_zero_width_a_read(self, capsys):
+        state = _local_read_state()
+
+        assert _validateMXLocalReadWidth(state, _GFX1250_CAPS, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: M-major MX-scale local read for A requires "
+            "VectorWidthA >= MatrixInstK // MXBlockA (4), got 1"
+        )
+
+    def test_rejects_zero_mx_unit(self, capsys):
+        state = _local_read_state(mxBlockA=256)
+
+        assert _validateMXLocalReadWidth(state, _GFX1250_CAPS, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: M-major MX-scale local read for A requires "
+            "MatrixInstK >= MXBlockA (128 < 256)"
+        )
+
+    @pytest.mark.parametrize(
+        "state,caps",
+        [
+            (_local_read_state(vectorWidthA=4), _GFX1250_CAPS),
+            (_local_read_state(unrollMajorLDSA=True), _GFX1250_CAPS),
+            (_local_read_state(scaleFormat="HostPreSwizzle"), _GFX1250_CAPS),
+            (_local_read_state(), _NON_GFX1250_CAPS),
+        ],
+        ids=["wide-enough", "k-major", "host-preswizzle", "non-wmma-v3"],
+    )
+    def test_accepts_supported_or_unrelated_paths(self, state, caps):
+        assert _validateMXLocalReadWidth(state, caps, False) is True
+        assert "Valid" not in state
 
 
 def _state(*, dtA, dtB, dtSA=E8, dtSB=E8, mxBlockA=32, mxBlockB=32):
