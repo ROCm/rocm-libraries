@@ -358,6 +358,7 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     Accumulator maximum = Accumulator(0);
     if (problem.amax && problem.accumulateAmax) maximum = problem.amax->loadAs<Accumulator>({0});
 
+    const size_t rows = problem.output.shape()[0];
     const size_t columns = problem.output.shape()[1];
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator value = quantize(input(row, column));
@@ -404,6 +405,14 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
         return magnitude;
     };
 
+    const bool firstDimensionFastest = strideMagnitude(problem.output.layout().stride(0)) <=
+                                       strideMagnitude(problem.output.layout().stride(1));
+    const auto computeLinearOutput = [&](size_t logicalIndex) {
+        return firstDimensionFastest
+                   ? computeOutput(logicalIndex % rows, logicalIndex / rows)
+                   : computeOutput(logicalIndex / columns, logicalIndex % columns);
+    };
+
     const size_t logicalElements = problem.output.shape().elementCount();
     const bool independentOutputs =
         hasProvablyIndependentElements(problem.output) &&
@@ -415,24 +424,17 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
             if (problem.amax) {
                 maximum = transformReduceParallelIndices(
                     logicalElements, logicalElements, independentOutputs, minimumElementsPerThread,
-                    maximum,
-                    [&](size_t logicalIndex) {
-                        return computeOutput(logicalIndex / columns, logicalIndex % columns);
-                    },
+                    maximum, computeLinearOutput,
                     [](Accumulator left, Accumulator right) { return std::max(left, right); });
             } else {
-                forEachParallelIndex(logicalElements, logicalElements, independentOutputs,
-                                     minimumElementsPerThread, [&](size_t logicalIndex) {
-                                         (void)computeOutput(logicalIndex / columns,
-                                                             logicalIndex % columns);
-                                     });
+                forEachParallelIndex(
+                    logicalElements, logicalElements, independentOutputs, minimumElementsPerThread,
+                    [&](size_t logicalIndex) { (void)computeLinearOutput(logicalIndex); });
             }
         } else {
-            forEachParallelIndex(logicalElements, logicalElements, independentOutputs,
-                                 minimumElementsPerThread, [&](size_t logicalIndex) {
-                                     (void)computeOutput(logicalIndex / columns,
-                                                         logicalIndex % columns);
-                                 });
+            forEachParallelIndex(
+                logicalElements, logicalElements, independentOutputs, minimumElementsPerThread,
+                [&](size_t logicalIndex) { (void)computeLinearOutput(logicalIndex); });
         }
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
