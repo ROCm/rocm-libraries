@@ -14,10 +14,11 @@
 # stack * waveGroup, and the 16x1 blocks are rectangular because acc VGPRs scale
 # as MIWT[0]*MIWT[1]*4.
 #
-# Two cases cannot be shared and sit in the extras at the end: an odd free-dim
-# extent is legal only on a non-TLU=1 operand (NN takes odd N, TT odd M), and
-# DepthU 768 needs LdsBlockSizePerPad (1024) to divide depthU * bpe, which fails
-# at fp4, so it runs only on NT where neither operand pads.
+# One case cannot be shared and sits in the extras at the end: an odd free-dim
+# extent is legal only on a non-TLU=1 operand (NN takes odd N, TT odd M).
+#
+# DepthU is a power of two throughout: the MX scale thread split is a shift and
+# a mask, so Solution.py rejects anything else for a subtile MX solution.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
@@ -1332,7 +1333,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
         - ActivationFuncCall: [false]
-        - DepthU: [256, 512, 768]
+        - DepthU: [256, 512]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - TransposeLDS: [1]
@@ -2272,42 +2273,6 @@ BenchmarkProblems:
         - ProblemSizes:
           - Range: [[256], [256], [1], [64, 64, 512]]
         - BiasTypeArgs: ['s']
-  -
-    - # DepthU 768: three scale K-subtiles, where the scale thread split stops
-      # being a shift.  MT64x64 only -- 128x128 runs past the LDS at this depth.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64 wg2x2
-        - PrefetchGlobalRead: [0, 2]
-        - PrefetchLocalRead: [0]
-        - DepthU: [768]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0, 3]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 768]    # one unroll iteration
-          - Exact: [256, 256, 1, 2304]   # three
-          - Exact: [224, 224, 1, 768]   # M and N edge
-          - Exact: [256, 256, 2, 1536]   # batch, two iterations
   ########################################
   # StreamK partial tiles, all four layouts
   ########################################

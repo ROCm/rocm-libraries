@@ -1298,6 +1298,13 @@ class Solution(collections.abc.Mapping):
       if state["DepthU"] % duUnit != 0:
         reject(state, printRejectionReason, f"UseSubtileImpl=1 support only DepthU multiple of {numSubIterK} * MatrixInstK * LocalSplitU")
 
+      # The scale GR thread split (_graTileAssignmentScaleSwizzledCommon) divides
+      # Serial by the scale K-subtile count with a shift and a mask.  Every other
+      # factor of that count is a power of two, so the requirement lands on DepthU.
+      if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) \
+          and state["DepthU"] & (state["DepthU"] - 1) != 0:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 MX requires a power-of-two DepthU")
+
       for tc in ('A', 'B'):
         dtype = state["ProblemType"][f"DataType{tc}"]
         tlu = state["ProblemType"][f"TLU{tc}"]
