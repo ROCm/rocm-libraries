@@ -209,10 +209,10 @@
     #else
         #define ROCPRIM_IS_CDNA5() 0
     #endif
-    #if defined(ROCPRIM_TARGET_CDNA3)
-        #define ROCPRIM_IS_CDNA3() 1
+    #if defined(ROCPRIM_TARGET_CDNA4)
+        #define ROCPRIM_IS_CDNA4() 1
     #else
-        #define ROCPRIM_IS_CDNA3() 0
+        #define ROCPRIM_IS_CDNA4() 0
     #endif
     #if defined(ROCPRIM_TARGET_CDNA3)
         #define ROCPRIM_IS_CDNA3() 1
