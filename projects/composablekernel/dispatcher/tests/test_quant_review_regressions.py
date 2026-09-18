@@ -22,6 +22,46 @@ CXX = shutil.which("c++")
 
 
 @pytest.mark.parametrize("op", OPS)
+def test_custom_quant_tiles_require_explicit_arch(op, tmp_path):
+    codegen = importlib.import_module(f"unified_grouped_gemm_{op}_codegen")
+    config = codegen._default_config("gfx1250")
+    output = tmp_path / "headers"
+    with pytest.raises(ValueError, match="explicit.*gfx.arch"):
+        codegen.generate_kernels(output, config=config, parallel=False)
+    assert not output.exists()
+
+    # The same custom tile is valid when its target is explicitly recorded.
+    header = codegen.generate_kernels(output, config=config, gfx_arch="gfx1250:xnack-",
+                                      parallel=False)[0].read_text()
+    assert 'GfxArch = "gfx1250"' in header
+    # Preserve legacy no-config generation without a target.
+    legacy = codegen.generate_kernels(tmp_path / "legacy", parallel=False)[0].read_text()
+    assert 'GfxArch = ""' in legacy
+    assert "WarpTileM      = 32" in legacy
+
+
+@pytest.mark.parametrize("op", OPS)
+@pytest.mark.parametrize("config_mode", ["--config", "--config-json"])
+@pytest.mark.parametrize("list_names", [False, True])
+def test_custom_quant_cli_requires_explicit_arch(op, config_mode, list_names, tmp_path):
+    codegen = importlib.import_module(f"unified_grouped_gemm_{op}_codegen")
+    config_json = json.dumps(codegen._default_config("gfx1250"))
+    config_file = tmp_path / "config.json"
+    config_file.write_text(config_json)
+    output = tmp_path / "headers"
+    args = [sys.executable, str(ROOT / f"codegen/unified_grouped_gemm_{op}_codegen.py"),
+            "--output-dir", str(output), config_mode,
+            str(config_file) if config_mode == "--config" else config_json]
+    if list_names:
+        args.append("--list-names")
+    result = subprocess.run(args, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "explicit --gfx-arch" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("op", OPS)
 @pytest.mark.parametrize("config_arch,build_arch", [("gfx1250", "gfx942"), ("gfx942", "gfx1250")])
 @pytest.mark.parametrize("explicit", [False, True])
 def test_config_build_mismatch_fails_before_codegen(op, config_arch, build_arch, explicit, monkeypatch, tmp_path):

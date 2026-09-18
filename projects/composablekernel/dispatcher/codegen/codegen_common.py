@@ -1045,13 +1045,14 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
 ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 
-def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str) -> str:
+def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str, *, require_explicit: bool = False) -> str:
     """Normalize and check a caller-supplied gfx target; return the bare target.
 
     Raises ``ValueError`` for anything outside
     ``ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES``. Empty is allowed and means "not
     specified", which selects the gfx9 MFMA tile -- the behaviour every invocation
-    without the flag had before the flag existed.
+    without the flag had before the flag existed. Custom tile configurations must
+    set ``require_explicit=True`` so their target check cannot be bypassed.
 
     This exists because ``--gfx-arch`` on the two codegen scripts is the one place a
     typo is completely silent. Everywhere else a bad target eventually reaches
@@ -1061,6 +1062,11 @@ def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str) -> str:
     this whole branch exists to close, arriving through the front door.
     """
     if not gfx_arch:
+        if require_explicit:
+            raise ValueError(
+                "Custom tile_configs require an explicit --gfx-arch (gfx_arch in Python) "
+                "so the generated header can reject a mismatched build target."
+            )
         return ""
     base = normalize_gfx_arch(gfx_arch)
     if base not in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:

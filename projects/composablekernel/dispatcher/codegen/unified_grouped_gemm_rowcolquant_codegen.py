@@ -550,9 +550,12 @@ def generate_kernels(
     """Generate all RowColQuant kernel headers into output_dir. Returns list of generated .hpp paths.
 
     `gfx_arch` selects the default tile and is embedded in every header so the
-    bridge can reject a mismatched build target. Explicit tiles remain unchanged.
+    bridge can reject a mismatched build target. Custom tile_configs require an
+    explicit target; their tile values remain unchanged.
     """
-    gfx_arch = validate_rowcol_tensor_quant_gfx_arch(gfx_arch)
+    gfx_arch = validate_rowcol_tensor_quant_gfx_arch(
+        gfx_arch, require_explicit=config is not None and "tile_configs" in config
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     cfg = config or _default_config(gfx_arch)
     specs = _build_specs(cfg)
@@ -618,7 +621,7 @@ def main() -> int:
                         help="GPU target the generated kernels will be compiled for, "
                              "e.g. gfx1250. Embedded in generated headers; selects the default tile "
                              "unless --config/--config-json supplies tile_configs. "
-                             "Defaults to the gfx9 MFMA tile.")
+                             "Required with custom tile_configs; otherwise defaults to the gfx9 MFMA tile.")
     args = parser.parse_args()
 
     # Validate before anything uses it. This value never reaches a compiler -- it
@@ -641,6 +644,14 @@ def main() -> int:
     elif args.config:
         with open(args.config) as f:
             cfg = json.load(f)
+
+    try:
+        gfx_arch = validate_rowcol_tensor_quant_gfx_arch(
+            gfx_arch, require_explicit=cfg is not None and "tile_configs" in cfg
+        )
+    except ValueError as e:
+        log.error("%s", e)
+        return 1
 
     if args.list_names:
         specs = _build_specs(cfg or _default_config(gfx_arch))
