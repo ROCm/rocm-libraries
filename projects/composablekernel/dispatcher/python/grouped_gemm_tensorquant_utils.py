@@ -52,6 +52,7 @@ from codegen_common import (  # noqa: E402
     ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
     rowcol_tensor_quant_default_tile,
     normalize_gfx_arch,
+    validate_rowcol_tensor_quant_gfx_arch,
     make_tensorquant_kernel_name,
 )
 
@@ -73,7 +74,8 @@ _DEFAULT_GFX_ARCH = "gfx950"
 # than papered over with a runtime fallback.
 #   1 -> original export set
 #   2 -> added dispatcher_get_tile_n() / dispatcher_get_pad_n()
-_SO_ABI = 2
+#   3 -> require regenerated headers with build-target validation
+_SO_ABI = 3
 
 
 # =============================================================================
@@ -204,7 +206,7 @@ class TensorQuantDispatcherLib:
 
     def __init__(self, so_path: Path):
         self.so_path = Path(so_path)
-        self._cleaned_up = False
+        self._cleaned_up = True
         if not self.so_path.exists():
             raise FileNotFoundError(f"TensorQuant .so not found: {self.so_path}")
         self._lib = ctypes.CDLL(str(self.so_path))
@@ -212,6 +214,7 @@ class TensorQuantDispatcherLib:
         rc = self._lib.dispatcher_initialize()
         if rc != 0:
             raise RuntimeError(f"dispatcher_initialize() returned {rc}")
+        self._cleaned_up = False
 
     def _setup(self):
         lib = self._lib
@@ -246,16 +249,17 @@ class TensorQuantDispatcherLib:
         lib.dispatcher_get_kernel_count.restype  = ctypes.c_int
         lib.dispatcher_get_kernel_count.argtypes = []
 
-        # TileN / pad_n are compile-time properties of the single force-included
-        # kernel. They are read back rather than hardcoded so the N-divisibility
-        # diagnostics below stay correct if the default tile changes. No missing-
-        # symbol fallback: this .so is always compiled from the ctypes source that
-        # ships these exports, by this module.
-        lib.dispatcher_get_tile_n.restype  = ctypes.c_int
-        lib.dispatcher_get_tile_n.argtypes = []
-
-        lib.dispatcher_get_pad_n.restype  = ctypes.c_int
-        lib.dispatcher_get_pad_n.argtypes = []
+        # Direct callers can supply libraries outside the versioned cache.
+        try:
+            lib.dispatcher_get_tile_n.restype = ctypes.c_int
+            lib.dispatcher_get_tile_n.argtypes = []
+            lib.dispatcher_get_pad_n.restype = ctypes.c_int
+            lib.dispatcher_get_pad_n.argtypes = []
+        except AttributeError as exc:
+            raise RuntimeError(
+                f"Incompatible quant bridge ABI in {self.so_path}: missing TileN/PadN "
+                "exports (ABI 2 or newer required). Rebuild the library."
+            ) from exc
 
         lib.dispatcher_cleanup.restype  = None
         lib.dispatcher_cleanup.argtypes = []
@@ -530,6 +534,7 @@ def _generate_tensorquant_kernel(
         str(_CODEGEN_SCRIPT),
         "--output-dir", str(output_dir),
         "--config-json", config_json,
+        "--gfx-arch", validate_rowcol_tensor_quant_gfx_arch(config.gfx_arch),
     ]
 
     try:
@@ -568,7 +573,7 @@ def _compile_tensorquant_kernel(
     # defines below and the --offload-arch/-DGFX_ARCH we hand to hipcc -- sees the
     # bare target. A caller-supplied "gfx1250:xnack-" must not reach the compiler
     # flags.
-    gfx_arch = normalize_gfx_arch(gfx_arch)
+    gfx_arch = validate_rowcol_tensor_quant_gfx_arch(gfx_arch)
 
     ck_include = _get_ck_include_dir()
     static_lib = _get_dispatcher_static_lib()
@@ -576,6 +581,10 @@ def _compile_tensorquant_kernel(
     obj_path = so_path.with_suffix(".o")
 
     arch_defines = []
+    # Match the top-level CK CMake policy in both host and device compilation.
+    # The unified WarpGemm implementation does not yet support gfx1250.
+    if gfx_arch == "gfx1250":
+        arch_defines.append("-DUSE_NEW_UNIFIED_FRAMEWORK=0")
     # Family test on purpose: every gfx12xx part (gfx1200/gfx1201/gfx1250) uses OCP
     # FP8 encoding, so an exact-gfx1250 test here would be WRONG. This is the
     # opposite of the tile selector in codegen_common.rowcol_tensor_quant_default_tile(),
@@ -588,6 +597,7 @@ def _compile_tensorquant_kernel(
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
                    "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
                    f"--offload-arch={gfx_arch}",
+                   f"-DCK_CMAKE_GPU_TARGET_IDS=0x{gfx_arch[3:]}",
                    f"-DGFX_ARCH=\"{gfx_arch}\"",
                    *arch_defines,
                    "-include", str(hpp_path),
@@ -665,7 +675,14 @@ def setup_multiple_tensorquant_dispatchers(
     # Normalize the explicit branch too, not just detection: an explicitly passed
     # "gfx1250:xnack-" would otherwise flow into --offload-arch, -DGFX_ARCH and the
     # .so cache name. _detect_gpu_arch() already normalizes.
-    arch = normalize_gfx_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
+    arch = validate_rowcol_tensor_quant_gfx_arch(gfx_arch or _detect_gpu_arch())
+    for cfg in configs:
+        config_arch = validate_rowcol_tensor_quant_gfx_arch(cfg.gfx_arch)
+        if config_arch != arch:
+            raise ValueError(
+                f"Config architecture {cfg.gfx_arch!r} does not match build target {arch!r}. "
+                "Create configs for the selected build target."
+            )
     base_dir = output_dir or Path(tempfile.mkdtemp(prefix="tensorquant_dispatcher_"))
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -756,7 +773,7 @@ def _default_config(dtype: str, gfx_arch: str) -> TensorQuantKernelConfig:
     # Normalize at this boundary too: default_fp8_config()/default_bf8_config() are
     # public entry points, so a caller-supplied "gfx1250:xnack-" must not be stored
     # on the config and observed by later consumers.
-    gfx_arch = normalize_gfx_arch(gfx_arch)
+    gfx_arch = validate_rowcol_tensor_quant_gfx_arch(gfx_arch)
     traits = ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS
     return TensorQuantKernelConfig(
         dtype=dtype,

@@ -89,26 +89,22 @@ static bool is_supported_arch(const std::string& arch)
 }
 
 // ---------------------------------------------------------------------------
-// Compile-time gfx1250 tile guard.
-//
-// The runtime helper in grouped_gemm_*_utils.py picks an arch-correct tile, but the
-// CMake/codegen path does not: unified_grouped_gemm_*_codegen.py::_default_config()
-// takes no arch and hard-codes the gfx9 tile. Listing gfx1250 in kSupportedArchs above
-// therefore means a CMake-built gfx1250 library would initialize cleanly and then run a
-// tile that does not exist on the device -- which compiles and returns garbage rather
-// than failing.
-//
-// Rather than trust the build to pick correctly, refuse to produce such a library at
-// all. gfx1250 is wave32 with RDNA-style WMMA: the only 8-bit fragments are 16x16x64
-// and 16x16x128 (there is no 32x32 WMMA), and a block of more than four warps has no
-// launchable kernel entry. These are the same rules the Python validator enforces.
-//
-// The test is exact-gfx1250, not gfx12-family: gfx1200/gfx1201 have a different 8-bit
-// fragment (16x16x16) and are not in kSupportedArchs anyway.
+// Generated-target and tile guards. Codegen records an explicit target in the
+// header; a build for another processor must fail before it can run that tile.
+// Headers generated without an explicit target retain the gfx9 default behavior.
 static constexpr bool ct_starts_with(const char* s, const char* prefix)
 {
     return *prefix == '\0' ? true : (*s == *prefix && ct_starts_with(s + 1, prefix + 1));
 }
+
+static constexpr bool ct_equal(const char* a, const char* b)
+{
+    return *a == *b && (*a == '\0' || ct_equal(a + 1, b + 1));
+}
+
+static_assert(SelectedKernel::GfxArch[0] == '\0' || ct_equal(SelectedKernel::GfxArch, GFX_ARCH),
+              "Generated kernel architecture does not match GFX_ARCH. Regenerate the "
+              "header with --gfx-arch matching the build target.");
 
 static constexpr bool kCompiledForGfx1250 = ct_starts_with(GFX_ARCH, "gfx1250");
 

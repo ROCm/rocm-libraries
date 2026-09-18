@@ -390,14 +390,17 @@ class TestArchDefines:
         assert ok, "compile helper should report success when hipcc succeeds"
         return captured[0]
 
-    @pytest.mark.parametrize("arch", ["gfx1200", "gfx1201", "gfx1250", "gfx1250:xnack-"])
-    def test_all_gfx12_parts_get_ocp_fp8(self, monkeypatch, tmp_path, arch):
+    @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250:xnack-"])
+    def test_supported_gfx12_targets_get_ocp_fp8(self, monkeypatch, tmp_path, arch):
         argv = self._compile_argv(monkeypatch, tmp_path, arch)
+        assert "-DUSE_NEW_UNIFIED_FRAMEWORK=0" in argv
+        assert "-DCK_CMAKE_GPU_TARGET_IDS=0x1250" in argv
         assert "-DCK_USE_OCP_FP8" in argv
         assert "-DCK_TILE_USE_OCP_FP8" in argv
 
     def test_gfx950_gets_ocp_fp8_and_mx(self, monkeypatch, tmp_path):
         argv = self._compile_argv(monkeypatch, tmp_path, "gfx950")
+        assert "-DCK_CMAKE_GPU_TARGET_IDS=0x950" in argv
         assert "-DCK_USE_OCP_FP8" in argv
         assert "-DCK_USE_NATIVE_MX_SUPPORT" in argv
 
@@ -474,13 +477,14 @@ class TestSoCacheAbiKey:
     def test_abi_is_versioned(self):
         assert isinstance(UTILS._SO_ABI, int) and UTILS._SO_ABI >= 2
 
-    def test_pre_abi_artifact_is_not_reused(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("old_suffix", ["", "_abi2"])
+    def test_pre_abi_artifact_is_not_reused(self, monkeypatch, tmp_path, old_suffix):
         cfg = default_fp8_config(gfx_arch="gfx950")
 
         so_dir = tmp_path / "libs"
         so_dir.mkdir(parents=True)
         # Exactly the name the old code would have produced and reused.
-        stale = so_dir / f"lib{cfg.name}_gfx950.so"
+        stale = so_dir / f"lib{cfg.name}_gfx950{old_suffix}.so"
         stale.write_bytes(b"stale pre-ABI artifact")
 
         compiled = []

@@ -797,16 +797,13 @@ class TestValidateRowColTensorQuantGfxArch(unittest.TestCase):
             self.assertIn(arch, message)
 
     def test_the_set_matches_the_bridge_runtime(self):
-        # One advertised support set per bridge. gemm_utils is the runtime entry
-        # point; if the two drift, --gfx-arch accepts a target the runner refuses,
-        # or refuses one it accepts.
-        sys.path.insert(0, str(DISPATCHER_DIR / "python"))
-        import gemm_utils
-
         self.assertEqual(
-            sorted(ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES),
-            sorted(gemm_utils._SUPPORTED_ARCHES),
+            ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES, ("gfx942", "gfx950", "gfx1250")
         )
+        for arch in ("gfx90a", "gfx90a:xnack-"):
+            with self.assertRaises(ValueError):
+                validate_rowcol_tensor_quant_gfx_arch(arch)
+
 
 
 if __name__ == "__main__":

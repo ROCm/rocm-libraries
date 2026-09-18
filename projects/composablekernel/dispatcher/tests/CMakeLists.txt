@@ -221,12 +221,13 @@ endforeach()
 # silently collect zero tests and report success.
 #
 # The *_utils suites are pure Python (naming, config, codegen text) and run
-# anywhere. The *_gpu_correctness suites arch-gate to gfx942/gfx950 and skip
+# anywhere. The *_gpu_correctness suites arch-gate to gfx942/gfx950/gfx1250 and skip
 # cleanly without a GPU or hipcc, so they cost nothing on a CPU-only runner.
 # =============================================================================
 foreach(_quant_test
         test_grouped_gemm_rowcolquant_utils
-        test_grouped_gemm_tensorquant_utils)
+        test_grouped_gemm_tensorquant_utils
+        test_quant_review_regressions)
     add_test(
         NAME dispatcher_${_quant_test}
         COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/${_quant_test}.py -v

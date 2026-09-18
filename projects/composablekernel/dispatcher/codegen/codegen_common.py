@@ -1040,16 +1040,9 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
     return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)
 
 
-# Architectures the RowColQuant/TensorQuant codegen will accept on its command line.
-# Deliberately the same four as dispatcher/python/gemm_utils.py::_SUPPORTED_ARCHES,
-# so the bridge does not advertise one supported set on one entry point and a
-# different one on another.
-#
-# Not taken from codegen/arch_specs.json: that file does not list gfx1250 at all, and
-# it does list gfx908/gfx1100/gfx1200/gfx1201, none of which these two operators have
-# a defensible default tile for -- gfx1200/gfx1201 in particular are WMMA parts whose
-# 8-bit fragment is 16x16x16, so both tiles above are wrong for them.
-ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
+# Operator-specific support: both bridges require native FP8/BF8. gfx90a
+# belongs to generic GEMM support, but cannot initialize these quant bridges.
+ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 
 def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str) -> str:

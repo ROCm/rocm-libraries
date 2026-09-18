@@ -351,15 +351,21 @@ if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
         else()
             set(_rowcolquant_gfx_arch "gfx942")
         endif()
-        # Strip feature suffixes ("gfx942:sramecc+:xnack-"). CMAKE_HIP_ARCHITECTURES
-        # carries them for ASAN configures, and GFX_ARCH is compared against
-        # kSupportedArchs and the compile-time tile guards in the .cpp, which want the
-        # bare target. Mirrors normalize_gfx_arch() on the Python side.
-        string(REGEX REPLACE ":.*$" "" _rowcolquant_gfx_arch "${_rowcolquant_gfx_arch}")
         set(CK_TILE_ROWCOLQUANT_GFX_ARCH "${_rowcolquant_gfx_arch}" CACHE STRING
             "GFX arch for the CMake-built RowColQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
     endif()
+    # Normalize both inferred and explicitly supplied cache values.
+    string(REGEX REPLACE ":.*$" "" CK_TILE_ROWCOLQUANT_GFX_ARCH "${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
     message(STATUS "RowColQuant ctypes lib GFX_ARCH: ${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
+
+    # Standalone dispatcher builds do not inherit the top-level CK definitions.
+    # Override the directory-wide ID for this single-target library.
+    string(REGEX REPLACE "^gfx" "0x" _rowcolquant_target_id "${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
+    target_compile_options(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
+        -UCK_CMAKE_GPU_TARGET_IDS "-DCK_CMAKE_GPU_TARGET_IDS=${_rowcolquant_target_id}")
+    if(CK_TILE_ROWCOLQUANT_GFX_ARCH STREQUAL "gfx1250")
+        target_compile_definitions(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
+    endif()
 
     target_compile_definitions(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
@@ -405,15 +411,21 @@ if(TENSORQUANT_GEMM_KERNEL_HEADERS)
         else()
             set(_tensorquant_gfx_arch "gfx942")
         endif()
-        # Strip feature suffixes ("gfx942:sramecc+:xnack-"). CMAKE_HIP_ARCHITECTURES
-        # carries them for ASAN configures, and GFX_ARCH is compared against
-        # kSupportedArchs and the compile-time tile guards in the .cpp, which want the
-        # bare target. Mirrors normalize_gfx_arch() on the Python side.
-        string(REGEX REPLACE ":.*$" "" _tensorquant_gfx_arch "${_tensorquant_gfx_arch}")
         set(CK_TILE_TENSORQUANT_GFX_ARCH "${_tensorquant_gfx_arch}" CACHE STRING
             "GFX arch for the CMake-built TensorQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
     endif()
+    # Normalize both inferred and explicitly supplied cache values.
+    string(REGEX REPLACE ":.*$" "" CK_TILE_TENSORQUANT_GFX_ARCH "${CK_TILE_TENSORQUANT_GFX_ARCH}")
     message(STATUS "TensorQuant ctypes lib GFX_ARCH: ${CK_TILE_TENSORQUANT_GFX_ARCH}")
+
+    # Standalone dispatcher builds do not inherit the top-level CK definitions.
+    # Override the directory-wide ID for this single-target library.
+    string(REGEX REPLACE "^gfx" "0x" _tensorquant_target_id "${CK_TILE_TENSORQUANT_GFX_ARCH}")
+    target_compile_options(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
+        -UCK_CMAKE_GPU_TARGET_IDS "-DCK_CMAKE_GPU_TARGET_IDS=${_tensorquant_target_id}")
+    if(CK_TILE_TENSORQUANT_GFX_ARCH STREQUAL "gfx1250")
+        target_compile_definitions(dispatcher_grouped_gemm_tensorquant_lib PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
+    endif()
 
     target_compile_definitions(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE

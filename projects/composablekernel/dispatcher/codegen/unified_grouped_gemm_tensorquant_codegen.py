@@ -145,6 +145,7 @@ class TensorQuantKernelSpec:
     tile: TensorQuantTileConfig
     block_size: int = 256
     k_block_per_cu: int = 1
+    gfx_arch: str = ""
 
     @property
     def name(self) -> str:
@@ -253,6 +254,8 @@ struct {struct} {{
     using AQDataType  = {ns}::AQDataType;
     using BQDataType  = {ns}::BQDataType;
     using AccDataType = {ns}::AccDataType;
+
+    static constexpr const char* GfxArch = "{validate_rowcol_tensor_quant_gfx_arch(spec.gfx_arch)}";
 
     static constexpr ck_tile::index_t TileM          = {t.tile_m};
     static constexpr ck_tile::index_t TileN          = {t.tile_n};
@@ -546,12 +549,15 @@ def generate_kernels(
 ) -> List[Path]:
     """Generate all TensorQuant kernel headers into output_dir. Returns list of generated .hpp paths.
 
-    `gfx_arch` only selects the built-in default tile and is ignored when `config`
-    is supplied -- an explicit config already carries its own tile_configs.
+    `gfx_arch` selects the default tile and is embedded in every header so the
+    bridge can reject a mismatched build target. Explicit tiles remain unchanged.
     """
+    gfx_arch = validate_rowcol_tensor_quant_gfx_arch(gfx_arch)
     output_dir.mkdir(parents=True, exist_ok=True)
     cfg = config or _default_config(gfx_arch)
     specs = _build_specs(cfg)
+    for spec in specs:
+        spec.gfx_arch = gfx_arch
 
     if not specs:
         log.warning("No kernel specs produced from config — check dtypes and tile_configs")
@@ -610,8 +616,8 @@ def main() -> int:
                         help="Print kernel names that would be generated and exit")
     parser.add_argument("--gfx-arch", type=str, default="",
                         help="GPU target the generated kernels will be compiled for, "
-                             "e.g. gfx1250. Selects the built-in default tile; ignored "
-                             "when --config/--config-json supplies tile_configs. "
+                             "e.g. gfx1250. Embedded in generated headers; selects the default tile "
+                             "unless --config/--config-json supplies tile_configs. "
                              "Defaults to the gfx9 MFMA tile.")
     args = parser.parse_args()
 

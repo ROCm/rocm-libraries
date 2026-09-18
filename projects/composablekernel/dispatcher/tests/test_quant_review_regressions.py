@@ -1,0 +1,178 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Host regressions for quant build targets, direct loading, and C++ guards."""
+
+import ctypes
+import importlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / "python"), str(ROOT / "codegen")]
+OPS = ("rowcolquant", "tensorquant")
+CXX = shutil.which("c++")
+
+
+@pytest.mark.parametrize("op", OPS)
+@pytest.mark.parametrize("config_arch,build_arch", [("gfx1250", "gfx942"), ("gfx942", "gfx1250")])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_config_build_mismatch_fails_before_codegen(op, config_arch, build_arch, explicit, monkeypatch, tmp_path):
+    module = importlib.import_module(f"grouped_gemm_{op}_utils")
+    monkeypatch.setattr(module, "_detect_gpu_arch", lambda: build_arch)
+    monkeypatch.setattr(module, f"_generate_{op}_kernel", lambda *a: pytest.fail("codegen must not run"))
+    setup = getattr(module, f"setup_multiple_{op}_dispatchers")
+    with pytest.raises(ValueError, match="does not match build target"):
+        setup([module.default_fp8_config(config_arch)], output_dir=tmp_path / "output",
+              gfx_arch=build_arch if explicit else None)
+    assert not (tmp_path / "output").exists()
+
+
+@pytest.mark.parametrize("op", OPS)
+def test_matching_suffix_config_generates_target_metadata(op, tmp_path):
+    module = importlib.import_module(f"grouped_gemm_{op}_utils")
+    config = module.default_fp8_config("gfx942:sramecc+:xnack-")
+    config.gfx_arch = "gfx942:xnack-"
+    header = getattr(module, f"_generate_{op}_kernel")(config, tmp_path)
+    assert header is not None
+    assert 'GfxArch = "gfx942"' in header.read_text()
+
+
+@pytest.mark.parametrize("op", OPS)
+@pytest.mark.parametrize("arch", ["gfx90a", "gfx90a:xnack-", "gfx1200", "gfx1201"])
+def test_unsupported_quant_targets_rejected_at_entry(op, arch, tmp_path):
+    module = importlib.import_module(f"grouped_gemm_{op}_utils")
+    with pytest.raises(ValueError, match="Unsupported GPU architecture"):
+        module.default_fp8_config(arch)
+    result = subprocess.run([sys.executable, str(ROOT / f"codegen/unified_grouped_gemm_{op}_codegen.py"),
+                             "--gfx-arch", arch, "--output-dir", str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Unsupported GPU architecture" in result.stderr
+    assert not list(tmp_path.glob("*.hpp"))
+
+
+@pytest.mark.parametrize("op,cls", [("rowcolquant", "RowColQuant"), ("tensorquant", "TensorQuant")])
+@pytest.mark.parametrize("missing", ["dispatcher_get_tile_n", "dispatcher_get_pad_n"])
+def test_direct_runner_reports_old_abi(op, cls, missing, monkeypatch, tmp_path):
+    module = importlib.import_module(f"grouped_gemm_{op}_utils")
+    lib = SimpleNamespace()
+    lifecycle_calls = []
+    for name in ("dispatcher_initialize", "dispatcher_run_gemm", "dispatcher_get_kernel_name",
+                 "dispatcher_get_kernel_count", "dispatcher_get_tile_n", "dispatcher_get_pad_n",
+                 "dispatcher_cleanup"):
+        if name != missing:
+            setattr(lib, name, lambda *args: 0)
+    lib.dispatcher_initialize = lambda: lifecycle_calls.append("initialize")
+    lib.dispatcher_cleanup = lambda: lifecycle_calls.append("cleanup")
+    path = tmp_path / "old.so"
+    path.touch()
+    monkeypatch.setattr(module.ctypes, "CDLL", lambda *a: lib)
+    with pytest.raises(RuntimeError, match="Incompatible quant bridge ABI.*Rebuild"):
+        getattr(module, cls + "GpuGemmRunner")(path)
+    assert lifecycle_calls == []
+
+
+def compile_cpp(tmp_path, source, shared=False):
+    if not CXX:
+        pytest.skip("requires C++ compiler")
+    cpp = tmp_path / "probe.cpp"
+    cpp.write_text(source)
+    output = tmp_path / ("probe.so" if shared else "probe.o")
+    args = [CXX, "-std=c++17", str(cpp), "-o", str(output)]
+    args += ["-shared", "-fPIC"] if shared else ["-c"]
+    return subprocess.run(args, capture_output=True, text=True), output
+
+
+@pytest.mark.parametrize("op", OPS)
+@pytest.mark.parametrize("generated,compiled,passes", [
+    ("gfx1250", "gfx942", False), ("gfx942", "gfx1250", False),
+    ("gfx1250", "gfx1250", True), ("gfx942", "gfx942", True), ("gfx950", "gfx950", True),
+])
+def test_production_cpp_rejects_header_target_mismatch(op, generated, compiled, passes, tmp_path):
+    codegen = importlib.import_module(f"unified_grouped_gemm_{op}_codegen")
+    header = codegen.generate_kernels(tmp_path / "headers", gfx_arch=generated, parallel=False)[0].read_text()
+    # Compile the actual emitted constants and actual bridge guard block without
+    # requiring HIP. Kernel implementation and GPU execution are tested separately.
+    constants = header[header.index("    static constexpr const char* GfxArch"):header.index("    // Informational only:")]
+    constants = constants.replace("ck_tile::index_t", "int")
+    bridge = (ROOT / f"bindings/ctypes/grouped_gemm_{op}_ctypes_lib.cpp").read_text()
+    guards = bridge[bridge.index("static constexpr bool ct_starts_with"):bridge.index('extern "C" {')]
+    source = f'#define GFX_ARCH "{compiled}"\nstruct SelectedKernel {{\n{constants}\n}};\n{guards}'
+    result, _ = compile_cpp(tmp_path, source)
+    assert (result.returncode == 0) == passes, result.stderr
+    if not passes:
+        assert "Generated kernel architecture does not match" in result.stderr
+
+
+@pytest.mark.parametrize("arch,pad_n,M,N,expected", [
+    ("gfx1250", False, 128, 128, 0),
+    ("gfx1250", False, 126, 128, -1),
+    ("gfx1250", False, 128, 100, -1),
+    ("gfx942", False, 126, 128, 0),
+    ("gfx1250", True, 128, 100, 0),
+])
+def test_rowcolquant_actual_shape_guards(arch, pad_n, M, N, expected, tmp_path):
+    bridge = (ROOT / "bindings/ctypes/grouped_gemm_rowcolquant_ctypes_lib.cpp").read_text()
+    # Execute the production host-side prefix of dispatcher_run_gemm. Stop before
+    # allocation/launch; valid inputs return a sentinel success in this harness.
+    prefix = bridge[bridge.index("int dispatcher_run_gemm("):bridge.index("    // Only packed (contiguous) layouts")]
+    source = f'''#include <atomic>
+#include <cstdint>
+#include <iostream>
+#define GFX_ARCH "{arch}"
+std::atomic<int> g_ref_count{{1}};
+constexpr bool kCompiledForGfx12 = {str(arch == "gfx1250").lower()};
+struct SelectedKernel {{ static constexpr bool kPadN = {str(pad_n).lower()}; static constexpr int TileN = 64; }};
+extern "C" {{
+{prefix}
+return 0;
+}}
+}}
+'''
+    result, output = compile_cpp(tmp_path, source, shared=True)
+    assert result.returncode == 0, result.stderr
+    lib = ctypes.CDLL(str(output))
+    run = lib.dispatcher_run_gemm
+    run.argtypes = [ctypes.c_void_p] * 5 + [ctypes.c_int64] * 10 + [ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
+    run.restype = ctypes.c_int
+    elapsed = ctypes.c_float()
+    assert run(*([1] * 5), M, N, 192, 192, 192, 1, 1, N, M, N, 1, ctypes.byref(elapsed)) == expected
+
+
+@pytest.mark.parametrize("explicit", [True, False])
+@pytest.mark.parametrize("arch", ["gfx942:sramecc+:xnack-", "gfx1250"])
+def test_cmake_normalizes_explicit_and_inferred_arches(tmp_path, explicit, arch):
+    if not shutil.which("cmake"):
+        pytest.skip("requires CMake")
+    source = tmp_path / "source"
+    source.mkdir()
+    build = tmp_path / "build"
+    headers = build / "generated_kernels"
+    headers.mkdir(parents=True)
+    for op in OPS:
+        (headers / f"grouped_gemm_{op}_test.hpp").touch()
+    overrides = '\n'.join(f'set(CK_TILE_{op.upper()}_GFX_ARCH "{arch}")' for op in OPS) if explicit else ''
+    (source / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.16)
+project(quant_cmake_probe LANGUAGES CXX)
+add_library(hip::device INTERFACE IMPORTED)
+set(CMAKE_HIP_ARCHITECTURES "{arch}")
+{overrides}
+add_subdirectory("{ROOT / 'bindings/ctypes'}" ctypes)
+''')
+    result = subprocess.run(["cmake", "-S", str(source), "-B", str(build), "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    commands = json.loads((build / "compile_commands.json").read_text())
+    for op in OPS:
+        command = next(c["command"] for c in commands if c["file"].endswith(f"grouped_gemm_{op}_ctypes_lib.cpp"))
+        base = arch.split(":")[0]
+        assert f'GFX_ARCH=\\"{base}\\"' in command
+        assert f'GFX_ARCH=\\"{base}:' not in command
+        assert f'-DCK_CMAKE_GPU_TARGET_IDS=0x{base[3:]}' in command
+        if base == "gfx1250":
+            assert "-DUSE_NEW_UNIFIED_FRAMEWORK=0" in command
