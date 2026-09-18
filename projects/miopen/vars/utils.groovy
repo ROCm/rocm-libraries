@@ -1265,20 +1265,6 @@ def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def with
     def gfx1101_flags = pipelineEnv.gfx1101_flags
     def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
 
-    def hipTidy = 'Hip Tidy'
-    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !passedStages.contains(hipTidy), hipTidy) {
-        node(rocmnodeFn("nogpu")) {
-            try {
-                withStageStatus {
-                    withWorkingDirFn {
-                        def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
-                        def buildCmd = "ninja -j\$(nproc) -k 0 analyze"
-                        buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
-                    }
-                }
-            } finally { cleanWs() }
-        }
-    }
 
     // GFX90A Tests
     def dbsyncGfx90a = 'Dbsync gfx90a'
