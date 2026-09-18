@@ -24,9 +24,11 @@ foreach(arch IN LISTS archs)
         set(WAVEFRONT "-mno-wavefrontsize64")
     endif()
     # Enable true16 on all gfx11*/gfx12* (NoSDWA). "SHELL:" keeps the flag group
-    # intact so CMake de-duplication does not drop the paired +real-true16.
+    # intact so CMake de-duplication does not drop the paired +real-true16. The
+    # stepping suffix is matched like it is for the wavefront size above: true16
+    # belongs to the ISA, which a stepping shares with the architecture it steps.
     set(TRUE16_FEATURE "")
-    if(arch MATCHES "^gfx1[12][0-9][0-9]$")
+    if(arch MATCHES "^gfx1[12][0-9][0-9](-[a-z0-9]+)*$")
         set(TRUE16_FEATURE "SHELL:-Xclangas -target-feature -Xclangas +real-true16")
     endif()
     add_library(extop-obj-${arch} OBJECT)
