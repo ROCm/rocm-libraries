@@ -1,0 +1,321 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# hipBLASLt + TensileLite tests on a gfx1250 runner, run against a prebuilt ROCm
+# artifact inside a container
+#
+# Triggers:
+#   - workflow_run: after a TheRock Multi-Arch CI build on a hipBLASLt/TensileLite
+#     PR, fetch that build's gfx1250 artifact and test it (scoped by the scope job).
+#   - workflow_dispatch: manually test a specific build by run-id.
+#
+
+name: gfx1250 HW hipBLASLt + TensileLite Tests
+run-name: ${{ github.event.workflow_run.head_branch || github.ref_name }} @ ${{ github.event.workflow_run.head_sha || github.sha }}
+
+on:
+  workflow_run:
+    workflows: ["TheRock Multi-Arch CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "CI run-id of the gfx1250 build to fetch (manual runs only)"
+        type: string
+        required: false
+      build_repo:
+        description: "Repo that produced the artifact (e.g. ROCm/TheRock for validation)"
+        type: string
+        default: "ROCm/rocm-libraries"
+      run_hipblaslt:
+        description: "Run the hipBLASLt gtest suite"
+        type: boolean
+        default: true
+      run_tensilelite:
+        description: "Run the TensileLite common tests"
+        type: boolean
+        default: true
+      tensilelite_pytest_k:
+        description: "pytest -k expression for TensileLite common tests"
+        type: string
+        default: ""
+      hipblaslt_gtest_filter:
+        description: "hipBLASLt --gtest_filter (e.g. -*MX* to exclude MXFP). Empty = run all."
+        type: string
+        default: ""
+      pytest_workers:
+        description: "pytest-xdist workers for TensileLite common tests (one per visible GPU on this runner)"
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap gate: resolve the PR and check org-member label + hipBLASLt/TensileLite
+  # paths BEFORE claiming the scarce gfx1250 runner. workflow_dispatch always runs.
+  scope:
+    name: Scope check
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      run_hipblaslt: ${{ steps.check.outputs.run_hipblaslt }}
+      run_tensilelite: ${{ steps.check.outputs.run_tensilelite }}
+    steps:
+      - name: Resolve PR + check org-member label and paths
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          IN_RUN_HIPBLASLT: ${{ inputs.run_hipblaslt }}
+          IN_RUN_TENSILELITE: ${{ inputs.run_tensilelite }}
+          WR_EVENT: ${{ github.event.workflow_run.event }}
+          PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "Manual dispatch (hipblaslt=$IN_RUN_HIPBLASLT tensilelite=$IN_RUN_TENSILELITE)."
+            echo "run_hipblaslt=$IN_RUN_HIPBLASLT" >> "$GITHUB_OUTPUT"
+            echo "run_tensilelite=$IN_RUN_TENSILELITE" >> "$GITHUB_OUTPUT"
+            if [ "$IN_RUN_HIPBLASLT" = "true" ] || [ "$IN_RUN_TENSILELITE" = "true" ]; then
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "No suite selected; skipping."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          # workflow_run: proceed for any COMPLETED pull_request build. We do NOT
+          # require the whole multi-arch run to succeed — only that the gfx1250 build
+          # produced an artifact, which the fetch step checks. This keeps an unrelated
+          # arch's failure from blocking gfx1250 testing.
+          if [ "$WR_EVENT" != "pull_request" ]; then
+            echo "Not a pull_request build ($WR_EVENT); skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Resolve the PR: same-repo PRs are in the event; fork PRs are not, so
+          # look them up by head commit.
+          PR_NUMBER="$PR_FROM_EVENT"
+          if [ -z "$PR_NUMBER" ] && [ -n "$HEAD_SHA" ]; then
+            PR_NUMBER="$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" --jq '.[0].number' 2>/dev/null || true)"
+          fi
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR found for this build; skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Trust gate (allows fork PRs): require an org-member label.
+          LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          if ! echo "$LABELS" | grep -qxE 'organization: (ROCm|streamhpc)'; then
+            echo "PR #$PR_NUMBER lacks an org-member label; skipping (a maintainer can add 'organization: ROCm')."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename')"
+          # hipBLASLt gtest: any hipBLASLt change (incl. its tensilelite subtree) + shared deps.
+          RUN_HIP=false
+          if echo "$FILES" | grep -qE '^(projects/hipblaslt/|shared/origami/|shared/stinkytofu/|shared/mxdatagenerator/)'; then
+            RUN_HIP=true
+          fi
+          # TensileLite common: only the tensilelite subtree + shared deps — a pure
+          # hipBLASLt-library change does not affect the kernel generator's own tests.
+          RUN_TL=false
+          if echo "$FILES" | grep -qE '^(projects/hipblaslt/tensilelite/|shared/origami/|shared/stinkytofu/|shared/mxdatagenerator/)'; then
+            RUN_TL=true
+          fi
+          echo "run_hipblaslt=$RUN_HIP" >> "$GITHUB_OUTPUT"
+          echo "run_tensilelite=$RUN_TL" >> "$GITHUB_OUTPUT"
+          if [ "$RUN_HIP" = "true" ] || [ "$RUN_TL" = "true" ]; then
+            echo "PR #$PR_NUMBER: run hipblaslt=$RUN_HIP tensilelite=$RUN_TL"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PR #$PR_NUMBER does not touch hipBLASLt/TensileLite; skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  gfx1250-tests:
+    name: gfx1250 hipBLASLt + TensileLite
+    needs: scope
+    if: needs.scope.outputs.should_run == 'true'
+    runs-on: blas-rocm-mi455-sandbox
+    timeout-minutes: 360
+    # Test container: no ROCm baked in, so the fetched artifact's libraries load
+    # cleanly with no host /opt/rocm to shadow them. Same image + options TheRock's
+    # component-test (pytest_runner) path uses.
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      # GPU access: --group-add 993/992/110 are the render/video/kfd device group
+      # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
+      options: >-
+        --ipc host
+        --ulimit memlock=-1:-1
+        --ulimit nofile=1048576:1048576
+        --security-opt seccomp=unconfined
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --user 0:0
+    defaults:
+      run:
+        shell: bash
+    env:
+      ROCM: ${{ github.workspace }}/rocm
+      LD_LIBRARY_PATH: ${{ github.workspace }}/rocm/lib:${{ github.workspace }}/rocm/lib/llvm/lib:${{ github.workspace }}/rocm/lib/rocm_sysdeps/lib
+      # Activates the env-gated xfail for known-failing configs in configMarks
+      # (companion tensilelite PR). Inert against artifacts that predate it.
+      GFX1250_HW_XFAIL: "1"
+      GTEST_PRINT_TIME: "0"
+      PIP_BREAK_SYSTEM_PACKAGES: "1"
+
+    steps:
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Load CI environment (resolves the pinned TheRock ref)
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Checkout TheRock (artifact install tooling)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          path: TheRock
+          sparse-checkout: |
+            build_tools
+            cmake
+          sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r TheRock/requirements-test.txt
+
+      - name: Fetch prebuilt gfx1250 ROCm artifact
+        id: fetch
+        env:
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id }}
+          BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$BUILD_RUN_ID" ]; then
+            echo "::error::No build run-id (provide build_run_id for manual runs)"; exit 1
+          fi
+          set +e
+          python TheRock/build_tools/install_rocm_from_artifacts.py \
+            --run-id "$BUILD_RUN_ID" \
+            --artifact-group gfx125X-dcgpu \
+            --blas --tests \
+            --run-github-repo "$BUILD_REPO" \
+            --output-dir "$ROCM" 2>&1 | tee fetch.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            # Fail closed: any fetch error is red, never a silent green. A narrow
+            # skip for the reuse-baseline "missing artifact" case can be added once a
+            # validation run reveals its exact signal.
+            echo "::error::gfx1250 artifact fetch failed (RC=$RC). See fetch.log."
+            {
+              echo "### :x: gfx1250 artifact fetch FAILED — NOT tested"
+              echo ""
+              echo "Fetch for build run \`${BUILD_RUN_ID}\` failed (RC=$RC). If this was a"
+              echo "reused-baseline build with no artifact under this run-id, that case gets an"
+              echo "explicit narrow skip once its exact signal is confirmed — until then it is a"
+              echo "red failure, never a silent green."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$RC"
+          fi
+          echo "$ROCM/bin" >> "$GITHUB_PATH"
+          echo "$ROCM/lib/llvm/bin" >> "$GITHUB_PATH"
+          printf '%s\n' "$ROCM/lib" "$ROCM/lib/llvm/lib" "$ROCM/lib/rocm_sysdeps/lib" > /etc/ld.so.conf.d/rocm-artifact.conf
+          ldconfig
+          echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
+          echo "::group::Artifact layout"
+          echo "Key binaries:"
+          find "$ROCM" -type f \( -name hipblaslt-test -o -name tensilelite-client \) 2>/dev/null || true
+          echo "::endgroup::"
+
+      - name: Run hipBLASLt tests
+        timeout-minutes: 120
+        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_hipblaslt == 'true' }}
+        env:
+          GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
+        run: |
+          set -o pipefail  # a failing test must propagate through `| tee`, not be masked
+          mkdir -p test_results
+          HIPBLASLT_TEST="$(find "$ROCM" -type f -name hipblaslt-test | head -1)"
+          if [ -z "$HIPBLASLT_TEST" ]; then
+            echo "::error::hipblaslt-test not found in the fetched artifact"; exit 1
+          fi
+          echo "Using: $HIPBLASLT_TEST"
+          FILTER=()
+          [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
+          HIPBLASLT_TEST_TIMEOUT=3600 \
+          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
+          "$HIPBLASLT_TEST" "${FILTER[@]}" \
+            --gtest_output=xml:test_results/hipblaslt_test.xml 2>&1 \
+            | tee test_results/hipblaslt_test.log
+
+      - name: Run TensileLite common tests
+        timeout-minutes: 240
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
+        env:
+          TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
+          TL_WORKERS: ${{ inputs.pytest_workers || '1' }}
+        run: |
+          set -o pipefail  # a failing test must propagate through `| tee`, not be masked
+          mkdir -p tensilelite_test_results
+          export PYTHONPATH="$ROCM/share/hipblaslt/tensilelite:${PYTHONPATH:-}"
+          cd "$ROCM/share/hipblaslt/tensilelite"
+          echo "::group::rocisa import"
+          python3 -c "import rocisa; print('rocisa import OK')" 2>&1 \
+            || echo "::warning::rocisa import failed from the artifact PYTHONPATH"
+          echo "::endgroup::"
+          K_ARG=()
+          [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
+          # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
+          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
+          # HIP device compiles through ccache.
+          # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
+          if ! command -v ccache >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq ccache || echo "::warning::ccache unavailable; no kernel-assembly caching"
+          fi
+          if command -v ccache >/dev/null 2>&1; then
+            export CCACHE_DIR=/tmp/tl-ccache CCACHE_MAXSIZE=5G
+            export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
+            ccache -z >/dev/null 2>&1 || true
+          fi
+          pytest -p no:cacheprovider Tensile/Tests/common \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
+            --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
+            --global-parameters="LibraryFormat='msgpack'" \
+            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
+            --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
+            | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gfx1250-test-results
+          path: |
+            test_results/
+            tensilelite_test_results/
+          if-no-files-found: warn
