@@ -61,8 +61,8 @@ using namespace rocsparse_ut;
 
 namespace
 {
-    // The launch clamps grid.y at this value (rocsparse::bellmm_max_grid_y, kept
-    // translation-unit local in the library, hence duplicated here).
+    // The launch clamps grid.y at this value through rocsparse::get_batch_grid_size,
+    // which is internal to the library, hence the value is duplicated here.
     constexpr int64_t bellmm_max_grid_y = 65535;
 
     // Widest square tile rocsparse::bellmm_general_tile_size can return, so
