@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from .arch.wmma_scale import gfx1250_scaled_wmma
-from .scaled_wmma import scale_formats
+from .arch.wmma_scale import scale_formats
 from .ir import (
     KernelDef,
     Op,

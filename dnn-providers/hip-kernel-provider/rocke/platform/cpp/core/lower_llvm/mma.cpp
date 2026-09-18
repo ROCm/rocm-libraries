@@ -25,7 +25,6 @@
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
-#include "rocke/scaled_wmma_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc

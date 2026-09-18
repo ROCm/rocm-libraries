@@ -29,7 +29,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .scaled_wmma import SCALED_WMMA_OPS, scale_formats
+from .arch.wmma_scale import SCALED_WMMA_OPS, scale_formats
 
 # ----------------------------- Types --------------------------------------
 

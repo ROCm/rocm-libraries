@@ -27,7 +27,7 @@ from ...core.ir import (
     Type,
     VectorType,
 )
-from ...core.scaled_wmma import MATRIX_FORMATS, scale_formats
+from ...core.arch.wmma_scale import MATRIX_FORMATS, scale_formats
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
