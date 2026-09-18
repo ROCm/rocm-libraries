@@ -32,8 +32,11 @@
 #include "Reference.hpp"
 
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <sstream>
 
@@ -131,6 +134,22 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
+            m_bf16AtomicSplits  = 0;
+
+            if(m_enabled && solution != nullptr && solution->sizeMapping.gsuAtomicDestBF16)
+            {
+                // How many BF16 atomic adds land on one output element. Read it
+                // the way solve() does rather than from sizeMapping.globalSplitU,
+                // which is the -1 "auto" sentinel until the hardware resolves it.
+                if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                {
+                    auto hardware = hip::GetCurrentDevice();
+                    m_bf16AtomicSplits
+                        = gemm->getParams().gsu() > 0
+                              ? gemm->getParams().gsu()
+                              : (int)solution->calculateAutoGSU(*gemm, hardware.get());
+                }
+            }
 
             // Re-run CPU reference after DataInitialization refreshes MX inputs.
             if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
@@ -393,6 +412,57 @@ namespace TensileLite
             return false;
         }
 
+        namespace
+        {
+            // Spacing between neighbouring BFloat16 values at |x|. BFloat16 keeps
+            // 8 significand bits (1 implicit + 7 stored), so within [2^e, 2^(e+1))
+            // the representable values are 2^(e-7) apart.
+            double bf16Ulp(double x)
+            {
+                x = std::fabs(x);
+                if(!(x > 0.0) || !std::isfinite(x))
+                    return 0.0;
+                int exp2 = 0;
+                std::frexp(x, &exp2); // x == m * 2^exp2 with m in [0.5, 1)
+                return std::ldexp(1.0, exp2 - 1 - 7);
+            }
+        }
+
+        double ReferenceValidator::bf16AtomicAbsTolerance(ContractionProblemGemm const& problem,
+                                                          ContractionInputs const& reference) const
+        {
+            // buffer_atomic_pk_add_bf16 reduces the GSU slices in BF16: every
+            // slice rounds its fp32 partial down to BF16 and every atomic add
+            // rounds the running sum again, so about 2*splits roundings land on
+            // one output element. Each costs at most half a BF16 ULP of the
+            // intermediate sums -- which are set by the magnitude of the tensor,
+            // not by the magnitude of the element. Where slices cancel, the
+            // result approaches zero while that error does not, so this has to
+            // be an absolute allowance; the usual relative bound still applies
+            // on top of it and keeps large values honest.
+            auto const* d = static_cast<BFloat16 const*>(reference.d);
+            if(d == nullptr || problem.d().dataType() != rocisa::DataType::BFloat16)
+                return 0.0;
+
+            constexpr size_t maxSamples = 1u << 16;
+
+            size_t elements = problem.d().totalLogicalElements();
+            size_t stride   = std::max<size_t>(1, elements / maxSamples);
+            double sumSq    = 0.0;
+            size_t samples  = 0;
+            for(size_t i = 0; i < elements; i += stride)
+            {
+                double v = static_cast<float>(d[i]);
+                sumSq += v * v;
+                samples++;
+            }
+            if(samples == 0)
+                return 0.0;
+
+            double rms = std::sqrt(sumSq / samples);
+            return m_bf16AtomicSplits * bf16Ulp(rms);
+        }
+
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      reference,
                                           ContractionInputs const&      result)
@@ -418,6 +488,12 @@ namespace TensileLite
             } else if (isTF32x1) {
                 threshold = 0.3 * sqrt(double(k));
             }
+            // Unlike the TF32 thresholds above this one is an absolute allowance
+            // and only BFloat16 comparisons read it that way, so it is applied to
+            // D alone rather than to every output tensor.
+            double thresholdD = m_bf16AtomicSplits > 1 && threshold < 0.0
+                                    ? bf16AtomicAbsTolerance(problem, reference)
+                                    : threshold;
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -547,8 +623,16 @@ namespace TensileLite
                     throw std::runtime_error(ss.str());
                 }
 
-                rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
+                rv &= checkResults(tensor,
+                                   refPtr,
+                                   resPtr,
+                                   result.maxElements[i],
+                                   result.gpu,
+                                   validationStride,
+                                   static_cast<ContractionProblemGemm::TENSOR>(i)
+                                           == ContractionProblemGemm::TENSOR::D
+                                       ? thresholdD
+                                       : threshold);
             }
             return rv;
         }
