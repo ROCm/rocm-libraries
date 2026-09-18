@@ -558,6 +558,36 @@ namespace rocblaslt
                                                                   std::memory_order_release);
     }
 
+    // The write lock is what makes "at most once" true rather than merely
+    // likely: two threads resolving the same problem would otherwise both see
+    // an empty record and both fill it. The load inside the lock is the
+    // authoritative one; a caller is free to check pinned() first to stay off
+    // the lock entirely, which is what the steady state does.
+    void OnlineTuner::pinWinner(const Resolution& resolved,
+                                const std::shared_ptr<TensileLite::ContractionSolution>& solution,
+                                size_t                                                   problem,
+                                size_t requiredWorkspace)
+    {
+        if(!solution)
+            return;
+
+        std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+
+        if(resolved.m_pinned.load(std::memory_order_relaxed)
+           || m_winnerPool.size() >= c_resolutionSlots)
+            return;
+
+        auto entry                 = std::make_unique<PinnedWinner>();
+        entry->m_solution          = solution;
+        entry->m_problem           = problem;
+        entry->m_requiredWorkspace = requiredWorkspace;
+
+        const PinnedWinner* published = entry.get();
+        m_winnerPool.push_back(std::move(entry));
+
+        resolved.m_pinned.store(published, std::memory_order_release);
+    }
+
     bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop)
     {
         if(!m_pairs.empty())

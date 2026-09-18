@@ -12,6 +12,15 @@
 #include <unordered_map>
 #include <vector>
 
+// Carried through a shared_ptr and never dereferenced here, so the declaration
+// is all this needs. Keeping the Tensile headers out is what lets the tuner be
+// compiled and tested on its own, as orderEqualitySlotCandidates' plain-struct
+// interface does for the same reason.
+namespace TensileLite
+{
+    class ContractionSolution;
+}
+
 namespace rocblaslt
 {
     /**
@@ -99,12 +108,43 @@ namespace rocblaslt
         };
 
         /**
+     * @brief The winner itself, for a caller that would otherwise have to ask
+     * the library for a ranked list only to pick one entry out of it.
+     *
+     * m_problem identifies the problem the winner was offered for, at the
+     * granularity the solution library caches its rankings at rather than the
+     * granularity resolution() is keyed on. A caller whose problem matches it
+     * would be handed the very ranking the winner was recorded in, so it can
+     * use the winner without fetching that ranking to look for it; one whose
+     * problem does not match has to go and ask, because a key deliberately
+     * covers problems that rank differently.
+     *
+     * m_requiredWorkspace is that same ranking's workspace answer for the
+     * winner, which depends only on the solution and the problem and so is
+     * fixed alongside them. Only the caller's own allocation still varies, and
+     * comparing against it is all that remains of the filter.
+     */
+        struct PinnedWinner
+        {
+            std::shared_ptr<TensileLite::ContractionSolution> m_solution;
+            size_t                                            m_problem           = 0;
+            size_t                                            m_requiredWorkspace = 0;
+        };
+
+        /**
      * @brief Everything a problem still needs once its winner is pinned.
      *
      * Published once, while the write lock is held, and read from then on
      * without taking anything: the key and the winner never change afterwards,
      * so the release store that publishes the pointer and the acquire load that
      * finds it are the whole synchronisation.
+     *
+     * pinned() is filled in later, by the first caller to offer the winner
+     * object, and is published the same way for the same reason -- a release
+     * store under the write lock against an acquire load taking none. It is
+     * written at most once, so a reader either sees nothing or sees a record
+     * that is complete and will never change, and copying the shared_ptr out of
+     * it is a read of an object nothing mutates.
      *
      * position() is the exception and is only a hint -- where the caller found
      * the winner in the list it was offered last time. Callers check it against
@@ -123,6 +163,12 @@ namespace rocblaslt
                 return m_winner;
             }
 
+            /// The winner object, or nullptr until a caller has offered one.
+            const PinnedWinner* pinned() const
+            {
+                return m_pinned.load(std::memory_order_acquire);
+            }
+
             int position() const
             {
                 return m_position.load(std::memory_order_relaxed);
@@ -134,9 +180,10 @@ namespace rocblaslt
             }
 
         private:
-            size_t                   m_key    = 0;
-            int                      m_winner = -1;
-            mutable std::atomic<int> m_position{-1};
+            size_t                                   m_key    = 0;
+            int                                      m_winner = -1;
+            mutable std::atomic<int>                 m_position{-1};
+            mutable std::atomic<const PinnedWinner*> m_pinned{nullptr};
         };
 
         static OnlineTuner& getInstance()
@@ -217,6 +264,25 @@ namespace rocblaslt
 
             return entry && entry->m_key == problemKey ? entry : nullptr;
         }
+
+        /**
+     * @brief Offer a resolved problem the winner object itself, so later calls
+     * need not ask the library for a ranking to find it in.
+     *
+     * Taken from the first caller to offer one and ignored afterwards. A key can
+     * cover problems that rank differently, and the one recorded here is the one
+     * the winner was measured on; letting a later problem overwrite it would
+     * only make the two take turns invalidating each other's record.
+     *
+     * problem is the caller's own identifier for the problem the winner was
+     * offered for, and is handed back unexamined through pinned(). Calling this
+     * cannot change which kernel is chosen for any problem: a caller that does
+     * not recognise what comes back has lost nothing but the shortcut.
+     */
+        void pinWinner(const Resolution&                                        resolved,
+                       const std::shared_ptr<TensileLite::ContractionSolution>& solution,
+                       size_t                                                   problem,
+                       size_t                                                   requiredWorkspace);
 
         /**
      * @brief Pick which of the ranked candidates should run next.
@@ -388,5 +454,12 @@ namespace rocblaslt
 
         std::vector<std::unique_ptr<Resolution>> m_resolutionPool;
         std::atomic<const Resolution*>           m_resolutions[c_resolutionSlots] = {};
+
+        // Kept alive for the same reason and bounded by the same slot count:
+        // at most one per resolved problem, taken from the first caller to
+        // offer one. The solutions themselves are owned by the library, which
+        // outlives the tuner, so what this holds is a reference count and not
+        // the kernel.
+        std::vector<std::unique_ptr<PinnedWinner>> m_winnerPool;
     };
 } // namespace rocblaslt

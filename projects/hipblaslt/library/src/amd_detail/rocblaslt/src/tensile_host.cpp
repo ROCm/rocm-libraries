@@ -47,6 +47,7 @@
 
 #include <Tensile/AMDGPU_Detail.hpp>
 #include <Tensile/Comparison.hpp>
+#include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -4945,12 +4946,71 @@ inline void promoteOnlineTuningCandidate(
     const size_t position = rankedPositions[promote];
 
     // The call that resolves a problem is the last one to hold its ranking, so
-    // it is also the one that can tell the fast path where the winner sits.
+    // it is also the one that can tell the fast path where the winner sits --
+    // and the only one that can hand it the winner itself, which is what lets a
+    // later call skip the ranking altogether. selectCandidate() names the winner
+    // once the problem is resolved, which is also the only time resolution()
+    // answers, so the index compare holds wherever this runs; it is here so that
+    // what gets pinned is checkably the winner and not whatever was promoted.
     if(const auto* resolved = tuner.resolution(problemKey))
+    {
         resolved->setPosition(static_cast<int>(position));
+
+        if(!resolved->pinned() && solutions[position]->index == resolved->winner())
+            tuner.pinWinner(*resolved,
+                            solutions[position],
+                            std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob),
+                            solutions[position]->requiredWorkspaceSize(tensile_prob, hardware));
+    }
 
     const auto picked = solutions.begin() + position;
     std::rotate(solutions.begin(), picked, picked + 1);
+}
+
+// Answer a resolved problem from the pinned winner alone, without asking the
+// library for a ranking to pick it out of.
+//
+// This is the only thing on the path that does not grow with topK(). Lowering
+// the fetch depth would not have done it: CachingLibrary caches one ranking per
+// problem with no depth in the key and returns it whole and by value, so once
+// exploration has grown that entry to topK() every later lookup copies topK()
+// shared_ptrs however few the caller asks for, and the resize back down
+// destroys them again. Not fetching is the only way to stop paying for it.
+//
+// What the fetch was still buying was the check that the winner is in the list
+// this problem ranked, and m_problem replaces it with a stronger one. It is the
+// key the solution library caches rankings at, so a problem matching it would
+// be handed the very ranking the winner was recorded in, and returning the
+// winner is exactly what fronting it in that ranking would have returned. A
+// problem that does not match is one the coarser resolution key covers but that
+// may rank differently, and it goes and asks, as it did before.
+//
+// Empty on anything less than that, which leaves the caller to fetch and to
+// answer the way it always has.
+inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
+    resolvedOnlineTuningAnswer(const TensileLite::ContractionProblemGemm& tensile_prob,
+                               const rocblaslt::OnlineTuner::Resolution&  resolved,
+                               int                                        requestedAlgoCount)
+{
+    // More than one wanted means the ranking is wanted, and the winner is only
+    // the head of it. Nothing to save, so nothing is attempted.
+    if(requestedAlgoCount != 1)
+        return {};
+
+    const rocblaslt::OnlineTuner::PinnedWinner* pinned = resolved.pinned();
+
+    if(!pinned
+       || pinned->m_problem != std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob))
+        return {};
+
+    // All that is left of the per-candidate workspace filter: the requirement is
+    // fixed once the problem and the solution are, and only the caller's own
+    // allocation still varies. A caller that cannot cover the winner is one the
+    // winner is withheld from, which is its ranking untouched.
+    if(pinned->m_requiredWorkspace > tensile_prob.workspaceSize())
+        return {};
+
+    return {pinned->m_solution};
 }
 
 // Front the pinned winner of an already-resolved problem, doing nothing that
@@ -5024,6 +5084,14 @@ inline auto getSolutions(
 
     const rocblaslt::OnlineTuner::Resolution* resolved
         = onlineTuning && tuner.equalitySlots() == 0 ? tuner.resolution(problemKey) : nullptr;
+
+    if(resolved)
+    {
+        auto answered = resolvedOnlineTuningAnswer(tensile_prob, *resolved, requestedAlgoCount);
+
+        if(!answered.empty())
+            return answered;
+    }
 
     // Exploration rotates through the top K, and the caller may well have asked
     // for one. CachingLibrary grows its entry in place on the deeper request, so
