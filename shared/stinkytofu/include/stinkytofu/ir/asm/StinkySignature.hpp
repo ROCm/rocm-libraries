@@ -269,6 +269,12 @@ struct SignatureArgument {
 /// onto Function; occupancy-aware passes read it. Absent or 0 means "unknown".
 inline constexpr const char* kSigTotalVgprsMetaKey = "SignatureKernelDescriptor.totalVgprs";
 
+/// Function-metadata key (uint64) carrying the SGPRs the dispatch writes before
+/// the first instruction, per settledDispatchFilledSgprCount. The allocator pins
+/// live-ins against it; absent or 0 means "unknown", which must read as "filled".
+inline constexpr const char* kSigDispatchFilledSgprsMetaKey =
+    "SignatureKernelDescriptor.dispatchFilledSgprs";
+
 struct SignatureKernelDescriptor {
     std::string kernelName;
     int totalVgprs;

@@ -1,32 +1,16 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <optional>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -42,6 +26,15 @@ uint32_t endOf(const StinkyRegister& reg, RegType regClass) {
     if (reg.reg.type != regClass) return 0;
     const uint32_t width = std::max<uint16_t>(1, reg.reg.num);
     return reg.reg.idx + width;
+}
+
+/// Where the dispatch stopped writing scalars, as the signature published it on
+/// the function. Nothing when the descriptor left it unsettled, which must not
+/// read as zero: that would hand out the registers the dispatch did fill.
+std::optional<uint32_t> publishedDispatchFilledSgprs(const Function& function) {
+    const uint64_t filled = function.getMetaData(kSigDispatchFilledSgprsMetaKey).value_or(0);
+    if (filled == 0 || filled > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+    return static_cast<uint32_t>(filled);
 }
 
 }  // namespace
@@ -61,17 +54,46 @@ uint32_t highestRegisterCount(const Function& function, RegType regClass) {
     return count;
 }
 
-uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
-                           const std::array<int, 3>& workgroupIds) {
-    const uint32_t used = highestRegisterCount(function, RegType::S);
+uint32_t nextEvenRegisterBase(const Function& function, RegType regClass) {
+    const uint32_t base = highestRegisterCount(function, regClass);
+    return base + (base & 1u);
+}
 
+std::optional<uint32_t> reusableEvenSgprBase(const Function& function, uint32_t width,
+                                             uint32_t limit) {
+    const std::optional<uint32_t> dispatchFilled = publishedDispatchFilledSgprs(function);
+    if (!dispatchFilled) return std::nullopt;
+
+    const uint32_t top = std::min(limit, highestRegisterCount(function, RegType::S));
+    if (width == 0 || top < width) return std::nullopt;
+
+    // Highest even base whose whole block ends at or below `top`, so the block
+    // stays inside what the kernel already declares.
+    const uint32_t base = (top - width) & ~1u;
+    if (base < *dispatchFilled) return std::nullopt;
+    return base;
+}
+
+uint32_t dispatchFilledSgprCount(int numSgprPreload, const std::array<int, 3>& workgroupIds) {
     // The kernarg segment pointer occupies two, matching the `numSgprPreload + 2`
     // the descriptor emits as .amdhsa_user_sgpr_count.
-    uint32_t abi = numSgprPreload > 0 ? static_cast<uint32_t>(numSgprPreload) + 2u : 0u;
+    uint32_t filled = numSgprPreload > 0 ? static_cast<uint32_t>(numSgprPreload) + 2u : 0u;
     for (int enabled : workgroupIds) {
-        if (enabled > 0) ++abi;
+        if (enabled > 0) ++filled;
     }
-    return std::max(used, abi);
+    return filled;
+}
+
+std::optional<uint32_t> settledDispatchFilledSgprCount(int numSgprPreload,
+                                                       const std::array<int, 3>& workgroupIds) {
+    if (numSgprPreload <= 0) return std::nullopt;
+    return dispatchFilledSgprCount(numSgprPreload, workgroupIds);
+}
+
+uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
+                           const std::array<int, 3>& workgroupIds) {
+    return std::max(highestRegisterCount(function, RegType::S),
+                    dispatchFilledSgprCount(numSgprPreload, workgroupIds));
 }
 
 }  // namespace stinkytofu
