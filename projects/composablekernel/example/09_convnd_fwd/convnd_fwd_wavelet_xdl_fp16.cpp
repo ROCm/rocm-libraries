@@ -45,10 +45,10 @@ using DeviceGroupedConvNDFwdInstance =
         64,          // NPerBlock
         64,          // KPerBlock
         8,           // K1
-        32,          // MPerXdl
-        32,          // NPerXdl
-        1,           // MXdlPerWave
-        2,           // NXdlPerWave
+        16,          // MPerXdl
+        16,          // NPerXdl
+        2,           // MXdlPerWave
+        4,           // NXdlPerWave
         S<8, 32, 1>, // ABlockTransferThreadClusterLengths_AK0_M_AK1
         S<1, 0, 2>,  // ABlockTransferThreadClusterArrangeOrder
         S<1, 0, 2>,  // ABlockTransferSrcAccessOrder
@@ -66,7 +66,11 @@ using DeviceGroupedConvNDFwdInstance =
         1,
         1,
         S<1, 32, 1, 8>,
-        4>;
+        4,
+        InDataType,
+        WeiDataType,
+        1,
+        true>;
 
 #include "run_convnd_fwd_example.inc"
 

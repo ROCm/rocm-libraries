@@ -16,7 +16,11 @@
 #endif
 namespace ck {
 
-template <index_t MNXdlPerWave, index_t MNWaves, index_t MNPerXdl, typename TileDesc_K0_MN_K1>
+template <index_t MNXdlPerWave,
+          index_t MNWaves,
+          index_t MNPerXdl,
+          typename TileDesc_K0_MN_K1,
+          bool DirectLoad>
 __host__ __device__ static constexpr auto
 MakeGemmMmaTileDescriptor_MN0_MN1_MN2_K(const TileDesc_K0_MN_K1&)
 {
@@ -44,7 +48,8 @@ template <index_t BlockSize,
           index_t NRepeat,
           index_t KPack,
           typename ComputeTypeA = FloatA,
-          typename ComputeTypeB = FloatB>
+          typename ComputeTypeB = FloatB,
+          bool DirectLoad       = false>
 struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
 {
     static constexpr auto I0 = Number<0>{};
@@ -282,26 +287,72 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
 
     __host__ __device__ static constexpr auto MakeABlockDescriptor_M0_M1_M2_K()
     {
-        return transform_tensor_descriptor(
-            AK0MK1BlockDesc{},
-            make_tuple(
-                make_merge_transform_v3_division_mod(make_tuple(Number<A_K0>{}, Number<A_K1>{})),
-                make_unmerge_transform(
-                    make_tuple(Number<MRepeat>{}, Number<MWaves>{}, Number<MPerXDL>{}))),
-            make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-            make_tuple(Sequence<3>{}, Sequence<0, 1, 2>{}));
+        if constexpr(!DirectLoad)
+        {
+            return transform_tensor_descriptor(
+                AK0MK1BlockDesc{},
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<A_K0>{}, Number<A_K1>{})),
+                           make_unmerge_transform(
+                               make_tuple(Number<MRepeat>{}, Number<MWaves>{}, Number<MPerXDL>{}))),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                make_tuple(Sequence<3>{}, Sequence<0, 1, 2>{}));
+        }
+        else
+        {
+            constexpr index_t M = AK0MK1BlockDesc{}.GetLength(Number<1>{});
+
+            constexpr auto desc = transform_tensor_descriptor(
+                AK0MK1BlockDesc{},
+                make_tuple(make_xor_with_modulo_transform(make_tuple(Number<M>{}, Number<A_K0>{})),
+                           make_pass_through_transform(Number<A_K1>{})),
+                make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
+                make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
+
+            return transform_tensor_descriptor(
+                desc,
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<A_K0>{}, Number<A_K1>{})),
+                           make_unmerge_transform(
+                               make_tuple(Number<MRepeat>{}, Number<MWaves>{}, Number<MPerXDL>{}))),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                make_tuple(Sequence<3>{}, Sequence<0, 1, 2>{}));
+        }
     }
 
     __host__ __device__ static constexpr auto MakeBBlockDescriptor_N0_N1_N2_K()
     {
-        return transform_tensor_descriptor(
-            BK0NK1BlockDesc{},
-            make_tuple(
-                make_merge_transform_v3_division_mod(make_tuple(Number<B_K0>{}, Number<B_K1>{})),
-                make_unmerge_transform(
-                    make_tuple(Number<NRepeat>{}, Number<NWaves>{}, Number<NPerXDL>{}))),
-            make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-            make_tuple(Sequence<3>{}, Sequence<0, 1, 2>{}));
+        if constexpr(!DirectLoad)
+        {
+            return transform_tensor_descriptor(
+                BK0NK1BlockDesc{},
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<B_K0>{}, Number<B_K1>{})),
+                           make_unmerge_transform(
+                               make_tuple(Number<NRepeat>{}, Number<NWaves>{}, Number<NPerXDL>{}))),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                make_tuple(Sequence<3>{}, Sequence<0, 1, 2>{}));
+        }
+        else
+        {
+            constexpr index_t N = BK0NK1BlockDesc{}.GetLength(Number<1>{});
+
+            constexpr auto desc = transform_tensor_descriptor(
+                BK0NK1BlockDesc{},
+                make_tuple(make_xor_with_modulo_transform(make_tuple(Number<N>{}, Number<B_K0>{})),
+                           make_pass_through_transform(Number<B_K1>{})),
+                make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
+                make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
+
+            return transform_tensor_descriptor(
+                desc,
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(Number<B_K0>{}, Number<B_K1>{})),
+                           make_unmerge_transform(
+                               make_tuple(Number<NRepeat>{}, Number<NWaves>{}, Number<NPerXDL>{}))),
+                make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                make_tuple(Sequence<3>{}, Sequence<0, 1, 2>{}));
+        }
     }
 
     static constexpr auto a_block_desc_m0_m1_m2_k = MakeABlockDescriptor_M0_M1_M2_K();
