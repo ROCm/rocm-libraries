@@ -22,6 +22,8 @@ target_sources(hipblaslt-rocroller
 target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipblaslt-rocroller PRIVATE roc::origami-headers)
+# solution_selection.cpp includes the tilewright hipBLASLt backend adapter.
+target_link_libraries(hipblaslt-rocroller PRIVATE roc::tilewright-hipblaslt)
 if(TARGET roc::rocroller-interface)
     target_link_libraries(hipblaslt-rocroller PRIVATE roc::rocroller-interface)
 else()
@@ -37,6 +39,10 @@ target_include_directories(hipblaslt-rocroller
         "${PROJECT_BINARY_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/tensilelite/include"
+        # solution_selection.cpp includes <Tensile/Debug.hpp> directly, and
+        # Debug.hpp includes the GENERATED <tensilelitehost/export.h>, which
+        # lands in the binary tree -- the source include dir alone is not enough.
+        "${PROJECT_BINARY_DIR}/tensilelite/include"
 )
 target_link_libraries(hipblaslt PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,hipblaslt-rocroller>)
 
