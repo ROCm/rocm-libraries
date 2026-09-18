@@ -1015,10 +1015,11 @@ Which function follows from what the hardware fact is *about*:
 | `forbidsBase` | which indexes are legal for a value | hard |
 | `clobbersEarly` | an instruction writes before it finishes reading | hard |
 | `addRelations` | two values must sit a fixed distance apart | hard |
+| `pinToProducer` | a value must keep the register the producer assigned | hard |
 | `baseCost` | an index is legal but worse | soft |
 | `addPreferences` | two values would rather share a register | soft |
 
-Reads like a register rule but is really about *when* an instruction reads versus writes? `clobbersEarly`. A fixed displacement two values *must* keep? `addRelations`. A sharing the chip would merely *like*? `addPreferences`. Otherwise it is about which indexes are acceptable, and the only question left is whether a bad one is illegal (`forbidsBase`) or merely slow (`baseCost`).
+Reads like a register rule but is really about *when* an instruction reads versus writes? `clobbersEarly`. A fixed displacement two values *must* keep? `addRelations`. An operand that must sit on the producer's own register? `pinToProducer`. A sharing the chip would merely *like*? `addPreferences`. Otherwise it is about which indexes are acceptable, and the only question left is whether a bad one is illegal (`forbidsBase`) or merely slow (`baseCost`).
 
 `addPreferences` is the one row that needs a second function. It collects the pairs, and `satisfiedBy` judges them:
 
@@ -1033,9 +1034,20 @@ reuse.addPreferences = pairMatrixAccumulator;   // walks one instruction's opera
 
 One without the other is a table mistake, and the table says so. `addPreferences` sees one instruction at a time, with its register operands already resolved to SSA values by printed operand position — resolved for the rule rather than left to it, because pairing an operand with its values is the step that is easy to get wrong and silently relate the wrong registers. A rule that needs to pair *across* instructions has no hook yet.
 
+`pinToProducer` uses the same resolved operands, and is the hook for an absolute producer index:
+
+```cpp
+AllocationRule pin;
+pin.name = "ProducerPinMatrix";
+pin.description =
+    "VGPR operands of a matrix instruction keep the registers the producer assigned";
+pin.status = RuleStatus::Off;
+pin.pinToProducer = pinMatrixProducerRegisters;
+```
+
 Each preference carries a `benefit`, and that number must never be negative: `pickBase` stops scanning as soon as a base costs nothing, which is only sound while penalties cannot go below zero.
 
-Then hand the table to the registry from a per-arch TU. Nothing else changes: no policy is edited, no allocator learns the rule exists, no header is touched.
+Then hand the table to the registry from a per-arch TU. Nothing else changes for a new *row*: no policy is edited, no allocator learns the rule exists. A new *kind* is the exception — `pinToProducer` is one, and it is the hook that lets a row name an absolute producer index.
 
 ```cpp
 // src/transforms/asm/ra/target/<Arch>AllocationRules.cpp
@@ -1100,6 +1112,7 @@ Each already had exactly one honouring site and one checking site:
 | `forbidsBase` | `Greedy::reachableAt()` | the per-value loop in `verifyAllocation` |
 | `addRelations` | `OffsetUnion` in `Greedy::buildBlocks()` | the `tupleRuns()` / `affinitySets()` loops in `verifyAllocation` |
 | `clobbersEarly` | `PhysRegMatrix::available()`, via widened ranges | the overlap check inside the per-value loop |
+| `pinToProducer` | `AllocationConstraints::build()` → `isPinned()` | the pin check in `verifyAllocation`, and `Greedy::pinReasonOf()` |
 | `baseCost` | `Greedy::pickBase()` | **nothing** — paying a price is legal |
 | `addPreferences` | `Greedy::foldPairs()` and `Greedy::pickBase()` | **nothing** — an unmet wish is legal |
 
@@ -1114,6 +1127,7 @@ flowchart TD
     table -->|"baseCost"| pick["Greedy::pickBase"]
     table -->|"addPreferences"| pref["Greedy::foldPairs"] --> pick
     table -->|"addRelations"| cons["AllocationConstraints::build"] --> offs["OffsetUnion"]
+    table -->|"pinToProducer"| cons
     table -->|"clobbersEarly"| adj["applyEarlyClobber"] --> mat["PhysRegMatrix::available"]
 
     place --> ver{"verifyAllocation"}
@@ -1135,6 +1149,8 @@ The dotted edge into the verifier is the whole difference between hard and soft:
 `reachableAt()` is the single funnel every candidate base passes through — placement, eviction, and hint-following all reach it — so one call subjects all three to the rule. `checkFeasible()` also consults it, so a block that can never be placed names the rule instead of exhausting every base.
 
 **`addRelations` goes through `build()`.** The architecture contributes through `AllocationConstraints::build()`, which calls every Active rule with its own private vectors just before returning. `tupleRuns()` and `affinitySets()` stay the only vocabulary, and the object stays immutable once built. `addRelations` holds only equalities. A disequality — "these two must differ" — is what `clobbersEarly` is for. `OffsetUnion::relate()` already reports a contradiction, so a rule that conflicts with an operand's own requirement produces a named error.
+
+**`pinToProducer` also goes through `build()`.** It sets `isPinned()` on the values it names, so `hintFor()` is a requirement. Live-ins already used that bit; a rule pin is the same obligation for a defined value. `Greedy::pinReasonOf()` reads the reason (`"a function live-in"` or the rule name) and places those blocks first at their hint, even under `greedy-compact`. The verifier checks the assignment against the hint and names the reason. A value with no recorded register is skipped rather than pinned into a hole.
 
 **`clobbersEarly` widens ranges.** A source dying at instruction `I` ends at `I`'s `d` point and a normal destination starts at the same `d` point, so half-open ranges make them touch without overlapping — which is what lets `v40 = wmma(..., v40)` reuse a register. Starting an early-clobber destination at `I`'s `u` point instead makes them genuinely overlap:
 
@@ -1194,6 +1210,18 @@ Ungated, for the same reason as its scalar sibling: it is a property of the inst
 
 The row was added after enabling VGPR lifting, and its absence is worth remembering as a category of bug rather than a one-off. `Gfx1250Backend` lifted SGPRs alone for as long as this table had only scalar rows, so every allocated multi-DWORD range was covered by the one rule that existed. Widening the lift scope to `RegType::V` moved allocation into a class the table said nothing about, and because the verifier reads the same table as the allocator, both agreed there was nothing to check and a `v[3:10]` WMMA destination reached the assembler. See `st_register_allocation.md`, "Multi-DWORD VGPR ranges were placed at odd bases". `tests/filecheck/allocation_rule_vector_alignment.stir` pins the fixed colouring.
 
+#### `ProducerPinMatrix` — pin, `Active`
+
+VGPR operands of a matrix instruction keep the registers the producer assigned. Compaction otherwise packs dest and sources, which changes the packed `s_set_vgpr_msb` word those instructions need.
+
+**Why `pinToProducer` and not a preference.** "This value sits *here*" is an absolute producer index. `forbidsBase` can only veto some bases, `addRelations` can only relate two values, and a preference can only rank legal ones. The pin goes through `AllocationConstraints::isPinned()`, so a compacting run places the block at its hint first — the same path a function live-in already takes — rather than scoring a wish it may leave unmet.
+
+The family is `isMatrixInstruction`: dest and every VGPR source, including slotless scale fields. A vector add in the same function is free to pack. Pinning dest and C at different indexes fights `WmmaAccumulatorReuse`; the pin is hard, so reuse goes unmet.
+
+It ships `Active`. A hard rule the input already violates would turn those kernels silently uncoloured; the producer's own colouring is tautological for a pin, because that colouring *is* the producer registers. `tests/filecheck/allocation_rule_producer_pin_matrix_test.stir` is the end-to-end check.
+
+This is not `AllocationScope::pinRegisters`. HeldRange withholds a physical register for the whole function; this pins a *value* to its hint, and the register is free again when the value dies.
+
 ### 14.6. Diagnostics
 
 | Surface | What it gains |
@@ -1205,11 +1233,11 @@ The row was added after enabling VGPR lifting, and its absence is worth remember
 
 The `pref[...]` breakdown splits the unmet pairings into two kinds, because the bare ratio does not say whether the remaining ones were ever available. **Blocked** means a third value held the register in both directions, so the wish was impossible. **Missed** means a register was free and placement simply did not take it, which is an ordering problem and therefore the part worth working on.
 
-### 14.7. What the five functions cannot say
+### 14.7. What the six functions cannot say
 
 - **Pairwise facts as a hard rule.** A rule relating two *different* instructions' operands — which is what a hazard pass's group rules are — is not one instruction's timing, so `clobbersEarly` cannot express it. `addPreferences` relates two values but only as a wish, and only within one instruction. Real pairwise *exclusion* needs two-phase placement, because a partner may be unplaced when the pair needs checking.
 - **Pairings across instructions.** `addPreferences` is handed one instruction with its operands resolved, so a wish spanning two of them has no hook.
 - **Reuse cost.** Giving a dead value's register to an unrelated value creates a false dependency that a wait or delay must cover. The cost depends on who held the register before and when they died, not on the index, so `baseCost` cannot carry it.
-- **The cost of moving up.** Neither `baseCost` nor a preference's `benefit` has a term for distance, so a satisfied wish beats a lower base by any margin. On a chip where occupancy moves in granule steps that trade can be a bad one, and nothing currently prices it.
-- **Whole-colouring preferences.** VGPR-MSB churn is the example: `s_set_vgpr_msb` is emitted only when the required word *changes* between instructions, so the cost is a function of the whole stream rather than of where one block sits.
+- **The cost of moving up.** Neither `baseCost` nor a preference's `benefit` has a term for distance, so a satisfied wish beats a lower base by any margin. On a chip where occupancy moves in granule steps that trade can be a bad one, and nothing currently prices it. `pinToProducer` freezes the producer index instead of pricing the move.
+- **Whole-colouring preferences.** Stream-level VGPR-MSB churn is the example: `s_set_vgpr_msb` is emitted only when the required word *changes* between instructions, so the true cost is a function of the whole stream rather than of where one block sits. `ProducerPinMatrix` freezes the producer's layout on matrix instructions, which can preserve a word the producer already had. The inter-instruction half still has no hook.
 - **Placement below a block.** A rule constrains a block's base, and a block is a union of tied values, so two overlapping tuple runs can form a block wider than either operand — an operand at an odd offset inside an aligned block is still misaligned. The verifier and the audit approximate blocks for the same reason: they reconstruct runs from `tupleRuns()` rather than running `OffsetUnion`. Exact for tuples and singletons, conservative otherwise.

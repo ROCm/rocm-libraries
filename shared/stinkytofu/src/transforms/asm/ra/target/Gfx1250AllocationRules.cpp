@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-// What gfx1250 requires of a register allocation. Three rules; see
+// What gfx1250 requires of a register allocation. See
 // docs/developer/register-allocation.md §14.
 
 #include <array>
@@ -29,6 +29,7 @@
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
 
@@ -111,6 +112,30 @@ void pairMatrixAccumulator(const StinkyInstruction& inst, const OperandValues& v
     }
 }
 
+/// Pin every VGPR operand of a matrix instruction to the register the producer
+/// assigned it.
+///
+/// Dest and sources both: compacting otherwise packs the whole tuple, which is
+/// what changes the packed MSB word. Slotless scale fields stay in too — they
+/// already live under a bank-0 ceiling, and pinning them still keeps the
+/// producer index rather than a compacted one.
+void pinMatrixProducerRegisters(const StinkyInstruction& inst, const OperandValues& values,
+                                std::vector<SSAValueID>& pinned) {
+    if (!isMatrixInstruction(inst)) return;
+    forEachVgprOperandField(inst,
+                            [&](const StinkyRegister& reg, size_t operand, bool isDest, int slot) {
+                                if (!reg.isRegister() || reg.reg.type != RegType::V) return;
+                                // A field with no MSB slot never costs an s_set_vgpr_msb, and where
+                                // it may sit is the unbankableOperands policy's call: Allocate
+                                // moves it under the bank ceiling, which a pin to the producer's
+                                // register would forbid.
+                                if (slot < 0) return;
+                                for (const SSAValueID id : values(operand, isDest)) {
+                                    if (id != kInvalidSSAValueID) pinned.push_back(id);
+                                }
+                            });
+}
+
 // A literal triple, not getArchTriple(GfxArchID::Gfx1250): this TU is compiled
 // into a Gfx1250v0-only build where that enumerator does not exist, and keying
 // on {12,5,0} is what gives v0 the same rules as v1.
@@ -174,11 +199,22 @@ AllocationRules buildGfx1250Rules(const AsmCapsConfig& caps) {
     AllocationRule wmmaAccumulator;
     wmmaAccumulator.name = "WmmaAccumulatorReuse";
     wmmaAccumulator.description = "a matrix destination should reuse its accumulator's registers";
-    wmmaAccumulator.status = RuleStatus::Active;
+    wmmaAccumulator.status = RuleStatus::Off;
     wmmaAccumulator.satisfiedBy = [](RegKey d, RegKey c) { return d == c; };
     wmmaAccumulator.addPreferences = pairMatrixAccumulator;
 
-    return AllocationRules({smemSelfOverlap, scalarAlignment, vectorAlignment, wmmaAccumulator});
+    /// Leave matrix VGPR operands where the producer put them. Packing them
+    /// can add extra s_set_vgpr_msb. Hard, so this wins over WmmaAccumulatorReuse
+    /// when dest and C were assigned different registers.
+    AllocationRule producerPin;
+    producerPin.name = "ProducerPinMatrix";
+    producerPin.description =
+        "VGPR operands of a matrix instruction keep the registers the producer assigned";
+    producerPin.status = RuleStatus::Active;
+    producerPin.pinToProducer = pinMatrixProducerRegisters;
+
+    return AllocationRules(
+        {smemSelfOverlap, scalarAlignment, vectorAlignment, wmmaAccumulator, producerPin});
 }
 
 struct Gfx1250RulesRegistrar {

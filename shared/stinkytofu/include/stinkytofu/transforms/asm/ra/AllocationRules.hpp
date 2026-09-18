@@ -31,6 +31,7 @@
 //   forbidsBase    a value may not sit at some index         (hard)
 //   clobbersEarly  an instruction writes before it reads     (hard)
 //   addRelations   two values sit at a fixed offset          (hard)
+//   pinToProducer  a value keeps the producer's register     (hard)
 //   baseCost       an index is legal but worse               (soft)
 //   addPreferences two values would rather share a register  (soft)
 //
@@ -88,13 +89,14 @@ enum class RuleKind : uint8_t {
     Placement,     ///< forbidsBase
     Interference,  ///< clobbersEarly
     Offset,        ///< addRelations
+    Pin,           ///< pinToProducer
     Preference,    ///< baseCost
     Pairing,       ///< addPreferences, with satisfiedBy
 };
 
 /// One architecture rule.
 ///
-/// Fill in exactly one of the four functions. A rule that is both a veto and a
+/// Fill in exactly one of the six functions. A rule that is both a veto and a
 /// price would be invisible to diagnostics and to the lifecycle, so the table
 /// rejects it.
 struct AllocationRule {
@@ -155,6 +157,15 @@ struct AllocationRule {
     /// Asked once per candidate base per preference, so it must be cheap. A
     /// plain pointer rather than std::function to keep that obvious.
     bool (*satisfiedBy)(RegKey a, RegKey b) = nullptr;
+
+    /// Append the values of \p inst that must keep the producer's register.
+    /// \p values is the same helper pairing uses.
+    ///
+    /// Hard, so compact cannot trade that register for a lower index. The
+    /// other hooks cannot name an exact producer register.
+    std::function<void(const StinkyInstruction& inst, const OperandValues& values,
+                       std::vector<SSAValueID>& pinned)>
+        pinToProducer;
 
     RuleKind kind() const;
 };
@@ -240,6 +251,12 @@ class AllocationRules {
         return pairs_;
     }
 
+    /// True when any Active rule pins values to the producer's registers, so
+    /// AllocationConstraints::build() can skip the walk on a chip with none.
+    bool pins() const {
+        return pins_;
+    }
+
     /// Names \p overrides asks to activate and to disable at once. Refused for
     /// the same reason a misspelling is: whichever wins, one half of what was
     /// asked for happens silently, and a run that does nothing still passes.
@@ -268,12 +285,13 @@ class AllocationRules {
     std::vector<std::string> problems_;
     bool prices_ = false;
     bool pairs_ = false;
+    bool pins_ = false;
 };
 
 /// "off", "audit" or "active".
 STINKYTOFU_EXPORT const char* ruleStatusName(RuleStatus status);
 
-/// "placement", "interference", "offset", "preference", "pairing" or "empty".
+/// "placement", "interference", "offset", "pin", "preference", "pairing" or "empty".
 STINKYTOFU_EXPORT const char* ruleKindName(RuleKind kind);
 
 /// \p base with every early-clobber destination made live from its

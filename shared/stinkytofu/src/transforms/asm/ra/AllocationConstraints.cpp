@@ -127,26 +127,14 @@ std::vector<std::vector<SSAValueID>> valueGroups(const StinkyInstruction& instru
     return groups;
 }
 
-/// SSA values behind every register operand of one instruction, both sides.
-///
-/// Computed once and shared: three collectors below want the same walk, and the
-/// walk is the part that is easy to get subtly wrong. Doing it per collector
-/// also meant paying for it three times on every instruction.
-struct OperandGroups {
-    std::vector<std::vector<SSAValueID>> dest;
-    std::vector<std::vector<SSAValueID>> src;
-
-    std::span<const SSAValueID> at(size_t operand, bool isDest) const {
-        const std::vector<std::vector<SSAValueID>>& groups = isDest ? dest : src;
-        if (operand >= groups.size()) return {};
-        return groups[operand];
-    }
-};
+}  // namespace
 
 OperandGroups operandGroupsOf(const StinkyInstruction& instruction, const RegClassSet& classes) {
     return {valueGroups(instruction, classes, /*destinations=*/true),
             valueGroups(instruction, classes, /*destinations=*/false)};
 }
+
+namespace {
 
 /// Tie a read-write destination to the source naming the same register.
 ///
@@ -358,6 +346,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
     constraints.classByValue_.assign(valueCount + 1, RegType::UNKNOWN);
     constraints.hintByValue_.assign(valueCount + 1, std::nullopt);
     constraints.pinnedByValue_.assign(valueCount + 1, false);
+    constraints.pinReasonByValue_.assign(valueCount + 1, nullptr);
     constraints.maxIndexByValue_.assign(valueCount + 1, std::numeric_limits<uint32_t>::max());
 
     for (StinkySSAValue* value : function.ssaArena().values()) {
@@ -385,14 +374,34 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
                                  constraints.affinitySets_);
             collectBankReachableCeilings(*instruction, groups, constraints.maxIndexByValue_);
 
-            // Soft pairings, per instruction because that is where an operand
-            // pair means anything. Skipped entirely on a chip with no pairing
-            // rule, so nothing here costs a std::function on the common path.
-            if (rules.pairs()) {
+            // Soft pairings and producer pins, per instruction because that is
+            // where an operand means anything. Skipped entirely on a chip with
+            // neither, so nothing here costs a std::function on the common path.
+            if (rules.pairs() || rules.pins()) {
                 const OperandValues values = [&groups](size_t operand, bool isDest) {
                     return groups.at(operand, isDest);
                 };
-                rules.addPreferences(*instruction, values, constraints.preferences_);
+                if (rules.pairs())
+                    rules.addPreferences(*instruction, values, constraints.preferences_);
+                if (rules.pins()) {
+                    // Tagged here rather than by the rule, so a rule cannot name
+                    // the wrong row and have its pins reported as somebody else's.
+                    for (const AllocationRule& rule : rules.all()) {
+                        if (rule.status != RuleStatus::Active || !rule.pinToProducer) continue;
+                        std::vector<SSAValueID> pinned;
+                        rule.pinToProducer(*instruction, values, pinned);
+                        for (const SSAValueID id : pinned) {
+                            if (id == kInvalidSSAValueID || id >= constraints.pinnedByValue_.size())
+                                continue;
+                            // First pin wins. A live-in collected below overwrites
+                            // the reason, which is the more specific one.
+                            if (constraints.pinnedByValue_[id]) continue;
+                            if (!constraints.hintByValue_[id].has_value()) continue;
+                            constraints.pinnedByValue_[id] = true;
+                            constraints.pinReasonByValue_[id] = rule.name.data();
+                        }
+                    }
+                }
             }
         }
 
@@ -408,6 +417,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
                     constraints.undefinedLiveIns_.push_back(id);
                 } else {
                     constraints.pinnedByValue_[id] = true;
+                    constraints.pinReasonByValue_[id] = "a function live-in";
                 }
                 continue;
             }
@@ -459,6 +469,11 @@ bool AllocationConstraints::isPinned(SSAValueID id) const {
     return pinnedByValue_[id];
 }
 
+const char* AllocationConstraints::pinReason(SSAValueID id) const {
+    if (id == kInvalidSSAValueID || id >= pinReasonByValue_.size()) return nullptr;
+    return pinReasonByValue_[id];
+}
+
 uint32_t AllocationConstraints::maxIndexFor(SSAValueID id) const {
     constexpr uint32_t kNoLimit = std::numeric_limits<uint32_t>::max();
     if (id == kInvalidSSAValueID || id >= maxIndexByValue_.size()) return kNoLimit;
@@ -473,7 +488,11 @@ std::string AllocationConstraints::toString() const {
     for (size_t id = 1; id < hintByValue_.size(); ++id) {
         out << '%' << id << ':' << regTypeToString(classOf(static_cast<SSAValueID>(id)));
         if (hintByValue_[id].has_value()) out << " hint " << regKeyToString(*hintByValue_[id]);
-        if (isPinned(static_cast<SSAValueID>(id))) out << " pinned";
+        if (isPinned(static_cast<SSAValueID>(id))) {
+            out << " pinned";
+            if (const char* reason = pinReason(static_cast<SSAValueID>(id)))
+                out << " (" << reason << ")";
+        }
         const uint32_t ceiling = maxIndexFor(static_cast<SSAValueID>(id));
         if (ceiling != std::numeric_limits<uint32_t>::max()) out << " max " << ceiling;
         out << '\n';

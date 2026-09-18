@@ -21,10 +21,6 @@
 #
 # CHECK-LABEL: @exec_masked_write_tie
 # CHECK: ^entry:
-#
-# The temporary is pushed to v0 so the preserved value can keep v1. The sources
-# are live-ins above the dispatch line, so they are undefined and compact down
-# from v20-v23; only the destinations carry the tie this test is about.
 # CHECK-NEXT: v0 = "st.v_add_f32"(v0, v1)
 # CHECK-NEXT: v1 = "st.v_add_f32"(v2, v3)
 # CHECK-NEXT: v0 = "st.v_add_f32"(v0, v0)
@@ -38,8 +34,10 @@
 #
 # CHECK-NEXT: v0 = "st.v_add_f32"(v1, v0)
 #
-# The untied colouring, spelled out so it cannot come back unnoticed.
-# CHECK-NOT: v0 = "st.v_mov_b32"(0)
+# The untied colouring, spelled out so it cannot come back unnoticed. Match the
+# instruction that names no source, not a particular destination: a tied write
+# prints `(0, vN)` and must not trip this.
+# CHECK-NOT: "st.v_mov_b32"(0) {
 # CHECK-NOT: %
 
 st.func @exec_masked_write_tie() {
