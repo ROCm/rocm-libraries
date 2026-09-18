@@ -552,8 +552,8 @@ void SdpaFwdPlanBuilder::buildPlan(
                 "SdpaFwdPlanBuilder::buildPlan: generate_stats is set but stats_tensor_uid "
                 "is missing");
         }
-        lseUid = sdpaAttrs.stats_tensor_uid().value();
-        const auto lseIt = tensorMap.find(lseUid);
+        lseUid = sdpaAttrs.stats_tensor_uid();
+        const auto lseIt = tensorMap.find(lseUid.value());
         if(lseIt == tensorMap.end())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(

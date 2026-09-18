@@ -217,12 +217,13 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     {
         stats->set_output(true);
         stats->set_data_type(DataType::FLOAT);
-        if(config.mode == BatchMode::GROUP)
-        {
-            o->set_ragged_offset(q->get_ragged_offset());
-        }
-
-        return graph;
     }
+    if(config.mode == BatchMode::GROUP)
+    {
+        o->set_ragged_offset(q->get_ragged_offset());
+    }
+
+    return graph;
+}
 
 } // namespace asm_sdpa_engine
