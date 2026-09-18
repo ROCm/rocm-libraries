@@ -36,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
 # normalize_gfx_arch lives in codegen_common: single source of truth shared by
 # the codegen tile selector, the runtime helpers and these tests.
 from codegen_common import normalize_gfx_arch  # noqa: E402
+from dispatcher_common import fp8_uses_ocp as _fp8_uses_ocp
+
 from grouped_gemm_tensorquant_utils import (
     TensorQuantGemmProblem,
     TensorQuantGpuGemmRunner,
@@ -47,6 +49,7 @@ from grouped_gemm_tensorquant_utils import (
 log = logging.getLogger(__name__)
 
 TOLERANCE = 0.05  # 5% max relative error — fp8/bf8 precision floor
+SKIP_EXIT = 77    # ctest SKIP_RETURN_CODE; see main()
 
 
 # ---------------------------------------------------------------------------
@@ -116,17 +119,6 @@ def _require_ml_dtypes():
             "ml_dtypes is required for valid fp8/bf8 encoding; "
             "install with: pip install ml-dtypes"
         )
-
-
-def _fp8_uses_ocp(arch: str) -> bool:
-    """Mirror the -DCK_USE_OCP_FP8 compile logic in grouped_gemm_tensorquant_utils.py.
-
-    gfx950 / gfx12 build the kernel with OCP fp8 (e4m3fn / e5m2); every other
-    supported arch (notably gfx942) uses the native FNUZ format
-    (e4m3fnuz / e5m2fnuz). The host-side encoding MUST match the format the kernel
-    was compiled for, otherwise the reinterpreted bytes decode to NaN/Inf on device.
-    """
-    return "gfx950" in arch or "gfx12" in arch
 
 
 def _fp8_ml_dtype(dtype: str, arch: str):
@@ -315,6 +307,12 @@ def test_tensorquant_timing_positive(tmp_path):
 # Standalone runner
 # ---------------------------------------------------------------------------
 
+# Mirrors the pytest cases above one-for-one. ctest runs this file as a script
+# (not via `-m pytest`) so that a missing GPU exits 77 = Skipped, so anything
+# absent from this list is not covered by ctest at all.
+#
+# test_*_timing_positive has no entry of its own because _run_one already fails
+# the case when time_ms <= 0.
 TESTS = [
     # arch=gfx, not the detected arch: with --gfx the host encoding must follow the
     # arch the kernel is compiled for (see _fp8_ml_dtype).
@@ -324,16 +322,22 @@ TESTS = [
     ("C4/bf8", lambda od, gfx: _run_one(
         "C4/bf8", default_bf8_config(gfx_arch=gfx), 128, 128, 192,
         *_make_inputs(128, 128, 192, "bf8", arch=gfx), Path(od), gfx_arch=gfx)),
+    # Non-square M/N/K to stress stride math.
+    ("rect/fp8", lambda od, gfx: _run_one(
+        "rect/fp8", default_fp8_config(gfx_arch=gfx), 64, 256, 128,
+        *_make_inputs(64, 256, 128, "fp8", arch=gfx), Path(od), gfx_arch=gfx)),
 ]
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="TensorQuant GPU correctness tests")
-    # Default to the arch of the GPU we are actually on. A hardcoded default builds a
-    # gfx950 image on any other device, which then aborts with "device kernel image is
-    # invalid" (or is rejected by the .so's compile-vs-runtime arch guard).
-    parser.add_argument("--gfx", default=None)
+    # No hardcoded default: an explicit --gfx is an override the caller is
+    # trusted on, but falling back to a fixed arch would make a CPU-only or
+    # gfx90a box compile for gfx950 and crash instead of skipping.
+    parser.add_argument("--gfx", default=None,
+                        help=f"GPU arch override (default: auto-detect; "
+                             f"{'/'.join(_SUPPORTED_ARCHES)} only)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -343,11 +347,26 @@ def main():
         format="%(levelname)s: %(message)s",
     )
 
-    gfx = args.gfx or _GFX_ARCH
+    # The pytest path gates on the requires_gpu marker; this standalone path is
+    # what CI drives, so it needs the same gates spelled out. SKIP_EXIT keeps a
+    # clean skip distinguishable from a failure -- ctest maps it via
+    # SKIP_RETURN_CODE and the Jenkins lane via its run_ok helper.
+    gfx = normalize_gfx_arch(args.gfx or _GFX_ARCH)
     if not gfx:
-        log.error("no GPU detected and --gfx not given")
-        return 1
-    log.info("Target arch: %s", gfx)
+        print("SKIP: no supported GPU detected (rocm_agent_enumerator)")
+        return SKIP_EXIT
+    if gfx not in _SUPPORTED_ARCHES:
+        print(f"SKIP: TensorQuant needs native fp8 "
+              f"({'/'.join(_SUPPORTED_ARCHES)}); detected {gfx}")
+        return SKIP_EXIT
+    if not _has_hipcc():
+        print("SKIP: hipcc not found in PATH; cannot JIT-compile kernels")
+        return SKIP_EXIT
+    if _ml_dtypes is None:
+        # _require_ml_dtypes raises pytest.skip's Skipped, which derives from
+        # BaseException and so slips past the per-test except Exception below.
+        print("SKIP: ml_dtypes not installed; fp8/bf8 encoding unavailable")
+        return SKIP_EXIT
 
     out_dir = args.output_dir or Path(tempfile.mkdtemp(prefix="tensorquant_gpu_test_"))
     log.info("Kernel output dir: %s", out_dir)

@@ -56,6 +56,11 @@ from codegen_common import (  # noqa: E402
     make_rowcolquant_kernel_name,
 )
 
+_python_dir = str(Path(__file__).parent)
+if _python_dir not in sys.path:
+    sys.path.insert(0, _python_dir)
+from dispatcher_common import arch_feature_defines  # noqa: E402
+
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -595,19 +600,10 @@ def _compile_rowcolquant_kernel(
 
     obj_path = so_path.with_suffix(".o")
 
-    arch_defines = []
-    # Match the top-level CK CMake policy in both host and device compilation.
-    # The unified WarpGemm implementation does not yet support gfx1250.
+    arch_defines = arch_feature_defines(gfx_arch)
+    # Match top-level CK policy in both host and device compilation.
     if gfx_arch == "gfx1250":
         arch_defines.append("-DUSE_NEW_UNIFIED_FRAMEWORK=0")
-    # Family test on purpose: every gfx12xx part (gfx1200/gfx1201/gfx1250) uses OCP
-    # FP8 encoding, so an exact-gfx1250 test here would be WRONG. This is the
-    # opposite of the tile selector in codegen_common.rowcol_tensor_quant_default_tile(),
-    # which must be exact because gfx1200/gfx1201 have a different 8-bit warp fragment.
-    if gfx_arch.startswith("gfx12") or gfx_arch == "gfx950":
-        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
-    if gfx_arch == "gfx950":
-        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
 
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
                    "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
