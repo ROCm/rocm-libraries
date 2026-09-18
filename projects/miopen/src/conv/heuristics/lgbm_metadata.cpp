@@ -42,18 +42,6 @@ LgbmMetadata::LgbmMetadata()
         for(int i = 0; i < static_cast<int>(solvers.size()); ++i)
             solver_index[solvers[i]] = i;
 
-        // Always-applicable naive fallbacks; demoted to the tail of the ranked
-        // pick list (for low-group convs only). Optional key (older bundles
-        // omit it).
-        if(rank.contains("naive_fallback_solvers"))
-        {
-            for(const auto& name : rank.at("naive_fallback_solvers"))
-                naive_fallback.insert(name.get<std::string>());
-        }
-        // Group-count threshold for the naive demotion; defaults to 64.
-        if(rank.contains("naive_guard_max_groups"))
-            naive_guard_max_groups = rank.at("naive_guard_max_groups").get<int>();
-
         // Unseen-architecture support: a model trained with gfx_id feature
         // dropout ships rank.gfx_id_unseen_code (the code to feed for an arch
         // outside the vocab; -1 = the missing branch). Its presence is the
@@ -93,11 +81,6 @@ int LgbmMetadata::SolverCode(const std::string& solver_name) const
 {
     const auto it = solver_index.find(solver_name);
     return it != solver_index.end() ? it->second : -1;
-}
-
-bool LgbmMetadata::IsNaiveFallback(const std::string& solver_name) const
-{
-    return naive_fallback.count(solver_name) != 0;
 }
 
 } // namespace lgbm

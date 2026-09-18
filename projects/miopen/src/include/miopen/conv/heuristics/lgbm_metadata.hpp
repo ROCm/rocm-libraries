@@ -11,7 +11,6 @@
 
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace miopen {
@@ -50,17 +49,6 @@ public:
     // Helper: look up the solver_name categorical code; -1 on miss.
     int SolverCode(const std::string& solver_name) const;
 
-    // True if `solver_name` is one of the always-applicable naive fallback
-    // solvers (rank.naive_fallback_solvers). These are demoted to the tail of
-    // the ranked pick list so they are chosen only when nothing else applies.
-    bool IsNaiveFallback(const std::string& solver_name) const;
-
-    // Group-count threshold (rank.naive_guard_max_groups) below which the naive
-    // demotion applies. At or above it, naive fallbacks keep their raw score
-    // rank because naive is genuinely fastest on high-group convs. Defaults to
-    // 64 when the key is absent.
-    int NaiveGuardMaxGroups() const { return naive_guard_max_groups; }
-
     // True if the model was trained to handle architectures outside its gfx_id
     // vocab (rank.gfx_id_unseen_code present). Such a model was trained with
     // gfx_id feature-dropout, so routing an unknown arch through the missing
@@ -80,10 +68,8 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> categorical_vocab;
     std::vector<std::string> solvers;
     std::unordered_map<std::string, int> solver_index;
-    std::unordered_set<std::string> naive_fallback;
-    int naive_guard_max_groups = 64;
-    bool allow_unseen_arch     = false;
-    int unseen_arch_code       = -1;
+    bool allow_unseen_arch = false;
+    int unseen_arch_code   = -1;
 };
 
 } // namespace lgbm

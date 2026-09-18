@@ -366,12 +366,6 @@
       "al_c_rem64",
       "al_oc_rem64"
     ],
-    "naive_fallback_solvers": [
-      "ConvDirectNaiveConvBwd",
-      "ConvDirectNaiveConvFwd",
-      "ConvDirectNaiveConvWrw"
-    ],
-    "naive_guard_max_groups": 64,
     "gfx_id_unseen_code": -1,
     "gfxid_mask_p": 0.2
   },
@@ -2498,9 +2492,5 @@
       "TransposedConvBinWinoRxS<3-2>",
       "TransposedConvBinWinogradRxSf2x3g1"
     ]
-  },
-  "_note_unseen_arch": "UNSEEN-ARCHITECTURE PATH (DESIGN Change 2, layer 1). When the live GPU's gfx_id is not in rank.categorical_vocab.gfx_id (a new/untrained arch), the C++ picker (lgbm_pick.cpp) MUST encode the gfx_id cell as rank.gfx_id_unseen_code (-1 == missing -> LightGBM default branch) and score normally, instead of the legacy hard-gate 'if(gfx_code < 0) return {}'. The model is trained with gfx_id masked on rank.gfxid_mask_p of train rows, so the default branch predicts from the physical GPU-numeric features (cu_count, wave_size, lds_size_per_workgroup_kb, l2_cache_total_kb, boost_clock_mhz, vram_bytes). All other categoricals already follow the same unknown->-1->missing rule (see the .so parity encoding). Mirrors the layer-2 pcfg gfx_code .fillna(-1) behavior.",
-  "_note_naive_guard": "DEPLOYMENT GUARD (GetSolutionsFallback/PredictSolver lazy walk): the ranked walk MUST skip rank.naive_fallback_solvers (ConvDirectNaiveConv*) and select one ONLY when no non-naive applicable solver exists. These are always-applicable universal fallbacks; without the guard the model ranks one #1 on OOD shapes and the first-applicable walk executes it (~4-20x slowdown; log7-confirmed gfx950/gfx942). Matches develop ND TunaNet (ranks naive last). Offline gold-val: naive pick 51.6%->0.09%, coverage 0.51->1.00, geomean on non-naive-best shapes unchanged (1.0136 oracle vs 1.0132 guarded). ConvDepthwiseFwd2D is a real optimized kernel, NOT a fallback -- do NOT demote it.",
-  "_note_v18": "v18 gold-only (255lv/800t, 41 feat). Trained on exhaustively-tuned (mode1/enforce4) labels only. oracle gold-val geo 1.0147 top1 94.35%. See results/2026-06-24_v18_tier_AB.md.",
-  "_note_candidate": "Refresh 2026-09-16 (delta pull, watermark cr.id=1,280,885,409): 1,146,020 gold pairs / 4.24M candidates / 77 solvers / 14 specs. gfx1250-mi455 grew 2,164 -> 37,220 pairs (now 3.25% of corpus, 20-solver vocab). 59 runtime-derivable features -- gflops/bandwidth_gbps now DROPPED as measured-throughput leakage. Masked-gfx_id p=0.2. A/B on identical v5 ground truth: geomean 1.1004 -> 1.0144, top1 89.44% -> 93.92% vs the prior deployed model. CAVEAT: gfx1250 still trained with lds_size_per_workgroup_kb and vram_bytes NULL (2 of 6 GPU numerics) -- skew exposure grew 15x with the data; reprobe and retrain. device_runs 347 (MI250X) and 350 (Radeon AI PRO R9700) left unmapped: 52,439 gold rows excluded pending a correct GPUInfo spec / llvm_target."
+  }
 }

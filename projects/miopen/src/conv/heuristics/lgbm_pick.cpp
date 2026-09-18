@@ -286,20 +286,11 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // Score every solver in the vocabulary (lambdarank: higher = predicted
     // faster) and return the solver IDs sorted by score. The downstream walk
     // applies IsApplicable, so no masking is done here.
-    //
-    // The always-applicable ConvDirectNaiveConv* fallbacks are demoted below all
-    // non-naive solvers for low-group convs, so a naive solver is reachable only
-    // when nothing else applies. The demotion is gated by group count: at
-    // groups >= naive_guard_max_groups naive is often genuinely fastest, so the
-    // raw score order is kept there.
-    const bool guard_naive =
-        problem.GetGroupCount() < static_cast<unsigned>(meta.NaiveGuardMaxGroups());
     const auto& solvers = meta.Solvers();
     struct Scored
     {
         double score;
         std::size_t idx;
-        bool demote; // naive fallback that should sink below non-naive solvers
     };
     const auto& forest = LgbmForest::GetRank();
     if(!forest.IsReady())
@@ -313,11 +304,9 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     {
         SetCategorical(row[kIdxSolverName], meta.SolverCode(solvers[i]));
         const double s = forest.Score(row.data(), row.size());
-        scored.push_back({s, i, guard_naive && meta.IsNaiveFallback(solvers[i])});
+        scored.push_back({s, i});
     }
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) {
-        if(a.demote != b.demote)
-            return !a.demote; // non-demoted solvers rank ahead of demoted naive
         return a.score > b.score;
     });
 
@@ -338,7 +327,7 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // counts so the two can be told apart.
     MIOPEN_LOG_I2("lgbm: scored " << scored.size() << " solvers, " << ranked.size()
                                   << " valid in this build, " << dropped
-                                  << " dropped (unknown name), guard_naive=" << guard_naive);
+                                  << " dropped (unknown name)");
     if(ranked.empty())
         MIOPEN_LOG_I2("lgbm: abstain (no scored solver is known to this MIOpen build)");
     return ranked;
