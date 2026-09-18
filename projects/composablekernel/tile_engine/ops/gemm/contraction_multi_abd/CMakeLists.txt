@@ -42,62 +42,39 @@ set(_CMA_CTYPES_SRC
     "${CMAKE_CURRENT_LIST_DIR}/../../../../dispatcher/bindings/ctypes/batched_contraction_multi_abd_ctypes_lib.cpp")
 
 # ---------------------------------------------------------------------------
-# GPU target filter.
-#
-# gfx9 (CDNA, wave64/MFMA) and gfx1250 (MI400, wave32/WMMA) need different warp
-# tiles -- 32x32x16 and 16x16x32 respectively -- and a single config file can
-# only carry one of them. The tile is therefore chosen from the target set
-# below, not left to the caller: a gfx9 tile on gfx1250 builds and launches
-# cleanly and returns zeros, so an unnoticed default is a wrong-answer default.
+# GPU target families. Each family gets its own codegen pass and compiler
+# targets: a gfx9 MFMA header must never be compiled for gfx1250 WMMA.
 # ---------------------------------------------------------------------------
-set(CONTRACTION_MULTI_ABD_GPU_TARGETS "")
 set(_CMA_GFX9_TARGETS "gfx90a;gfx942;gfx950")
-set(_CMA_GFX12_TARGETS "gfx1250")
-set(_CMA_DESIRED_TARGETS "${_CMA_GFX9_TARGETS};${_CMA_GFX12_TARGETS}")
+set(_CMA_GFX1250_TARGETS "gfx1250")
+set(_CMA_DESIRED_TARGETS "${_CMA_GFX9_TARGETS};${_CMA_GFX1250_TARGETS}")
+set(_CMA_TARGETS_gfx9 "")
+set(_CMA_TARGETS_gfx1250 "")
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
-    if(target IN_LIST _CMA_DESIRED_TARGETS)
-        list(APPEND CONTRACTION_MULTI_ABD_GPU_TARGETS ${target})
+    # Match the processor, while preserving the full target ID (including
+    # xnack/sramecc features) for the compiler and linker.
+    string(REGEX REPLACE ":.*$" "" _cma_arch "${target}")
+    if(_cma_arch IN_LIST _CMA_GFX9_TARGETS)
+        list(APPEND _CMA_TARGETS_gfx9 "${target}")
+    elseif(_cma_arch IN_LIST _CMA_GFX1250_TARGETS)
+        list(APPEND _CMA_TARGETS_gfx1250 "${target}")
     endif()
 endforeach()
 
-if(NOT CONTRACTION_MULTI_ABD_GPU_TARGETS)
+set(_CMA_FAMILIES "")
+foreach(family gfx9 gfx1250)
+    if(_CMA_TARGETS_${family})
+        list(REMOVE_DUPLICATES _CMA_TARGETS_${family})
+        list(APPEND _CMA_FAMILIES "${family}")
+    endif()
+endforeach()
+if(NOT _CMA_FAMILIES)
     message(WARNING
         "Skipping contraction_multi_abd build: no supported GPU targets "
         "(${_CMA_DESIRED_TARGETS}) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
     return()
 endif()
-
-# Which tile family do the selected targets need?
-set(_CMA_HAS_GFX9 FALSE)
-set(_CMA_HAS_GFX12 FALSE)
-foreach(target IN LISTS CONTRACTION_MULTI_ABD_GPU_TARGETS)
-    if(target IN_LIST _CMA_GFX9_TARGETS)
-        set(_CMA_HAS_GFX9 TRUE)
-    elseif(target IN_LIST _CMA_GFX12_TARGETS)
-        set(_CMA_HAS_GFX12 TRUE)
-    endif()
-endforeach()
-
-# Pick the default config from the target family. An explicit
-# CONTRACTION_MULTI_ABD_CONFIG_FILE always wins -- see the config selection below.
-if(_CMA_HAS_GFX9 AND _CMA_HAS_GFX12)
-    message(FATAL_ERROR
-        "contraction_multi_abd: cannot build gfx9 and gfx1250 in one pass. "
-        "They require different warp tiles (32x32x16 vs 16x16x32) and one config "
-        "file carries only one. Requested: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}. "
-        "Configure separate builds, or pass "
-        "-DCONTRACTION_MULTI_ABD_CONFIG_FILE=<file> to choose deliberately.")
-endif()
-
-# One config file serves every target: default_config.json carries an
-# arch_tile_config block the codegen selects on --gfx-arch. The arch is derived
-# from the first configured target, matching how the ctypes bindings derive
-# GFX_ARCH, and is passed to BOTH codegen invocations so the listed and the
-# generated kernel sets cannot diverge.
-list(GET CONTRACTION_MULTI_ABD_GPU_TARGETS 0 CONTRACTION_MULTI_ABD_CODEGEN_ARCH)
-
-message(STATUS "contraction_multi_abd: building for GPU targets: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}")
-message(STATUS "contraction_multi_abd: codegen arch: ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}")
+list(LENGTH _CMA_FAMILIES _CMA_FAMILY_COUNT)
 
 # ---------------------------------------------------------------------------
 # Compiler cache
@@ -121,7 +98,8 @@ function(create_contraction_multi_abd_target datatype layout kernel_name instanc
         return()
     endif()
 
-    set(target "benchmark_contraction_multi_abd_${kernel_name}")
+    # Preserve existing target names for single-family builds.
+    set(target "benchmark_contraction_multi_abd_${_CMA_TARGET_PREFIX}${kernel_name}")
 
     add_executable(${target}
         EXCLUDE_FROM_ALL
@@ -130,6 +108,23 @@ function(create_contraction_multi_abd_target datatype layout kernel_name instanc
     )
 
     set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES ${CONTRACTION_MULTI_ABD_GPU_TARGETS})
+
+    # This project builds .cpp files as CXX through hipcc. HIP_ARCHITECTURES
+    # does not control that path, and the inherited hip::device supplies the
+    # entire project's offload target list. Replace it for this executable
+    # only; otherwise a family-specific header is compiled for both families.
+    get_target_property(_cma_link_libraries ${target} LINK_LIBRARIES)
+    if(_cma_link_libraries)
+        list(REMOVE_ITEM _cma_link_libraries hip::device)
+        set_property(TARGET ${target} PROPERTY LINK_LIBRARIES "${_cma_link_libraries}")
+    endif()
+    target_link_libraries(${target} PRIVATE hip::host)
+    target_compile_options(${target} PRIVATE -x hip)
+    target_link_options(${target} PRIVATE --hip-link)
+    foreach(gpu_target IN LISTS CONTRACTION_MULTI_ABD_GPU_TARGETS)
+        target_compile_options(${target} PRIVATE "--offload-arch=${gpu_target}")
+        target_link_options(${target} PRIVATE "--offload-arch=${gpu_target}")
+    endforeach()
 
     target_include_directories(${target} PRIVATE
         ${CONTRACTION_MULTI_ABD_SOURCE_DIR}
@@ -142,6 +137,7 @@ function(create_contraction_multi_abd_target datatype layout kernel_name instanc
         -include ${instance_header}
     )
 
+    add_dependencies(benchmark_contraction_multi_abd_${_CMA_FAMILY} ${target})
     add_dependencies(benchmark_contraction_multi_abd_all ${target})
     add_dependencies(benchmark_contraction_multi_abd_${datatype} ${target})
     add_dependencies(benchmark_contraction_multi_abd_${layout} ${target})
@@ -170,39 +166,55 @@ endforeach()
 # ---------------------------------------------------------------------------
 # For each (datatype, layout): run codegen to list kernels, then create targets
 # ---------------------------------------------------------------------------
-foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
-    foreach(layout IN LISTS CONTRACTION_MULTI_ABD_LAYOUT)
-        set(working_path "${CMAKE_CURRENT_BINARY_DIR}/${datatype}/${layout}")
-        file(MAKE_DIRECTORY ${working_path})
+foreach(_CMA_FAMILY IN LISTS _CMA_FAMILIES)
+    set(CONTRACTION_MULTI_ABD_GPU_TARGETS "${_CMA_TARGETS_${_CMA_FAMILY}}")
+    # gfx9 targets share the existing unconstrained codegen policy. gfx1250
+    # selects the WMMA arch_tile_config block in the same config file.
+    list(GET CONTRACTION_MULTI_ABD_GPU_TARGETS 0 CONTRACTION_MULTI_ABD_CODEGEN_ARCH)
+    string(REGEX REPLACE ":.*$" "" CONTRACTION_MULTI_ABD_CODEGEN_ARCH
+        "${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}")
+    set(_CMA_TARGET_PREFIX "")
+    set(_CMA_WORKING_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
+    if(_CMA_FAMILY_COUNT GREATER 1)
+        set(_CMA_TARGET_PREFIX "${_CMA_FAMILY}_")
+        set(_CMA_WORKING_ROOT "${CMAKE_CURRENT_BINARY_DIR}/${_CMA_FAMILY}")
+    endif()
+    add_custom_target(benchmark_contraction_multi_abd_${_CMA_FAMILY})
+    message(STATUS "contraction_multi_abd: ${_CMA_FAMILY} targets: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}; codegen arch: ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}")
 
-        # Select config file
-        if(DEFINED ENV{CONTRACTION_MULTI_ABD_CONFIG_FILE}
-           AND NOT "$ENV{CONTRACTION_MULTI_ABD_CONFIG_FILE}" STREQUAL "")
-            set(config_file "$ENV{CONTRACTION_MULTI_ABD_CONFIG_FILE}")
-            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${config_file}")
-        elseif(NOT "${CONTRACTION_MULTI_ABD_CONFIG_FILE}" STREQUAL "")
-            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${CONTRACTION_MULTI_ABD_CONFIG_FILE}")
-        else()
-            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
-        endif()
+    foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
+        foreach(layout IN LISTS CONTRACTION_MULTI_ABD_LAYOUT)
+            set(working_path "${_CMA_WORKING_ROOT}/${datatype}/${layout}")
+            file(MAKE_DIRECTORY ${working_path})
 
-        if(NOT EXISTS ${json_blob})
-            message(FATAL_ERROR "Config file not found: ${json_blob}")
-        endif()
+            # Select config file
+            if(DEFINED ENV{CONTRACTION_MULTI_ABD_CONFIG_FILE}
+               AND NOT "$ENV{CONTRACTION_MULTI_ABD_CONFIG_FILE}" STREQUAL "")
+                set(config_file "$ENV{CONTRACTION_MULTI_ABD_CONFIG_FILE}")
+                set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${config_file}")
+            elseif(NOT "${CONTRACTION_MULTI_ABD_CONFIG_FILE}" STREQUAL "")
+                set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${CONTRACTION_MULTI_ABD_CONFIG_FILE}")
+            else()
+                set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
+            endif()
 
-        # Build the per-operation overrides (dtype, layout, tensor counts, dim counts,
-        # elementwise ops) as a JSON fragment that will be MERGED on top of the tile/trait
-        # ranges read from json_blob. Tile/trait ranges come from the selected config file;
-        # per-operation scalars override only the fields listed here.
-        # Include max_instances only when non-empty so codegen can cap kernel count.
-        if(CONTRACTION_MULTI_ABD_MAX_INSTANCES STREQUAL "")
-            set(_cma_max_inst_json "")
-        else()
-            set(_cma_max_inst_json ",\"max_instances\":${CONTRACTION_MULTI_ABD_MAX_INSTANCES}")
-        endif()
+            if(NOT EXISTS ${json_blob})
+                message(FATAL_ERROR "Config file not found: ${json_blob}")
+            endif()
 
-        set(_cma_overrides_json
-            "{\"dtypes\":[\"${datatype}\"],\"layouts\":[\"${layout}\"],\
+            # Build the per-operation overrides (dtype, layout, tensor counts, dim counts,
+            # elementwise ops) as a JSON fragment that will be MERGED on top of the tile/trait
+            # ranges read from json_blob. Tile/trait ranges come from the selected config file;
+            # per-operation scalars override only the fields listed here.
+            # Include max_instances only when non-empty so codegen can cap kernel count.
+            if(CONTRACTION_MULTI_ABD_MAX_INSTANCES STREQUAL "")
+                set(_cma_max_inst_json "")
+            else()
+                set(_cma_max_inst_json ",\"max_instances\":${CONTRACTION_MULTI_ABD_MAX_INSTANCES}")
+            endif()
+
+            set(_cma_overrides_json
+                "{\"dtypes\":[\"${datatype}\"],\"layouts\":[\"${layout}\"],\
 \"num_a_tensors\":[${CONTRACTION_MULTI_ABD_NUM_A_TENSORS}],\
 \"num_b_tensors\":[${CONTRACTION_MULTI_ABD_NUM_B_TENSORS}],\
 \"num_d_tensors\":[${CONTRACTION_MULTI_ABD_NUM_D_TENSORS}],\
@@ -213,75 +225,76 @@ foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
 \"a_elementwise\":\"${CONTRACTION_MULTI_ABD_A_ELEMENTWISE}\",\
 \"b_elementwise\":\"${CONTRACTION_MULTI_ABD_B_ELEMENTWISE}\",\
 \"cde_elementwise\":\"${CONTRACTION_MULTI_ABD_CDE_ELEMENTWISE}\"${_cma_max_inst_json}}"
-        )
+            )
 
-        # Merge: start from json_blob (tile/trait ranges), then layer overrides on top.
-        # Use a Python one-liner so we do not need to parse JSON in CMake.
-        set(_cma_config_file "${working_path}/codegen_config.json")
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c
-                "import json,sys; \
+            # Merge: start from json_blob (tile/trait ranges), then layer overrides on top.
+            # Use a Python one-liner so we do not need to parse JSON in CMake.
+            set(_cma_config_file "${working_path}/codegen_config.json")
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} -c
+                    "import json,sys; \
 base=json.load(open('${json_blob}')); \
 ovr=json.loads(sys.argv[1]); \
 base.update(ovr); \
 open('${_cma_config_file}','w').write(json.dumps(base))"
-                "${_cma_overrides_json}"
-            RESULT_VARIABLE _cma_merge_ret
-            ERROR_VARIABLE  _cma_merge_err
-        )
-        if(NOT _cma_merge_ret EQUAL 0)
-            message(FATAL_ERROR
-                "Failed to merge contraction_multi_abd config JSON: ${_cma_merge_err}")
-        endif()
-
-        # Run codegen to list kernel names (--list-name)
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} ${_CMA_CODEGEN_SCRIPT}
-                    --output-dir ${working_path}
-                    --config ${_cma_config_file}
-                    --gfx-arch ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}
-                    --list-name
-            WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-            RESULT_VARIABLE _cma_ret
-            OUTPUT_VARIABLE _cma_names
-            ERROR_VARIABLE  _cma_err
-        )
-        if(NOT _cma_ret EQUAL 0)
-            message(FATAL_ERROR
-                "contraction_multi_abd codegen (--list-name) failed for "
-                "${datatype} ${layout}:\n${_cma_err}")
-        endif()
-
-        # Generate all headers
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} ${_CMA_CODEGEN_SCRIPT}
-                    --output-dir ${working_path}
-                    --config ${_cma_config_file}
-                    --gfx-arch ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}
-            WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-            RESULT_VARIABLE _cma_ret2
-            OUTPUT_VARIABLE _cma_out2
-            ERROR_VARIABLE  _cma_err2
-        )
-        if(NOT _cma_ret2 EQUAL 0)
-            message(FATAL_ERROR
-                "contraction_multi_abd codegen failed for ${datatype} ${layout}:\n${_cma_err2}")
-        endif()
-
-        # Parse kernel names and create per-kernel targets
-        string(REPLACE "\n" ";" _cma_name_list "${_cma_names}")
-        foreach(kernel_name IN LISTS _cma_name_list)
-            string(STRIP "${kernel_name}" kernel_name)
-            if(NOT kernel_name STREQUAL "")
-                set(_hpp "${working_path}/${kernel_name}.hpp")
-                if(EXISTS ${_hpp})
-                    create_contraction_multi_abd_target(
-                        "${datatype}" "${layout}" "${kernel_name}" "${_hpp}")
-                else()
-                    message(WARNING
-                        "contraction_multi_abd: expected header not found: ${_hpp}")
-                endif()
+                    "${_cma_overrides_json}"
+                RESULT_VARIABLE _cma_merge_ret
+                ERROR_VARIABLE  _cma_merge_err
+            )
+            if(NOT _cma_merge_ret EQUAL 0)
+                message(FATAL_ERROR
+                    "Failed to merge contraction_multi_abd config JSON: ${_cma_merge_err}")
             endif()
+
+            # Run codegen to list kernel names (--list-name)
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} ${_CMA_CODEGEN_SCRIPT}
+                        --output-dir ${working_path}
+                        --config ${_cma_config_file}
+                        --gfx-arch ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}
+                        --list-name
+                WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+                RESULT_VARIABLE _cma_ret
+                OUTPUT_VARIABLE _cma_names
+                ERROR_VARIABLE  _cma_err
+            )
+            if(NOT _cma_ret EQUAL 0)
+                message(FATAL_ERROR
+                    "contraction_multi_abd codegen (--list-name) failed for "
+                    "${datatype} ${layout}:\n${_cma_err}")
+            endif()
+
+            # Generate all headers
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} ${_CMA_CODEGEN_SCRIPT}
+                        --output-dir ${working_path}
+                        --config ${_cma_config_file}
+                        --gfx-arch ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+                RESULT_VARIABLE _cma_ret2
+                OUTPUT_VARIABLE _cma_out2
+                ERROR_VARIABLE  _cma_err2
+            )
+            if(NOT _cma_ret2 EQUAL 0)
+                message(FATAL_ERROR
+                    "contraction_multi_abd codegen failed for ${datatype} ${layout}:\n${_cma_err2}")
+            endif()
+
+            # Parse kernel names and create per-kernel targets
+            string(REPLACE "\n" ";" _cma_name_list "${_cma_names}")
+            foreach(kernel_name IN LISTS _cma_name_list)
+                string(STRIP "${kernel_name}" kernel_name)
+                if(NOT kernel_name STREQUAL "")
+                    set(_hpp "${working_path}/${kernel_name}.hpp")
+                    if(EXISTS ${_hpp})
+                        create_contraction_multi_abd_target(
+                            "${datatype}" "${layout}" "${kernel_name}" "${_hpp}")
+                    else()
+                        message(WARNING
+                            "contraction_multi_abd: expected header not found: ${_hpp}")
+                    endif()
+                endif()
+            endforeach()
         endforeach()
     endforeach()
 endforeach()

@@ -70,6 +70,8 @@ from unified_contraction_multi_abd_codegen import (  # noqa: E402
     normalize_gfx_arch,
     default_warp_tile_for_arch,
     valid_warp_tiles_for_arch,
+    validate_dtype_for_arch,
+    validate_layout,
 )
 
 _DEFAULT_HIPCC = "hipcc"
@@ -147,11 +149,13 @@ class ContractionMultiABDKernelConfig:
         # much later as codegen subprocess stderr, by which point the caller has
         # lost the connection to the field that was wrong.
         validate_contraction_multi_abd_params(
+            layout=self.layout,
             epilogue=self.epilogue,
             persistent=self.persistent,
             num_a_tensor=self.num_a_tensor,
             num_b_tensor=self.num_b_tensor,
         )
+        validate_dtype_for_arch(self.dtype, self.gfx_arch)
 
     @property
     def name(self) -> str:
@@ -680,6 +684,10 @@ def _validate_warp_tiles_for_arch(
     one requested is its own bug. On gfx1250 the failure this guards against is
     an all-zero result, which no downstream check would catch.
     """
+    for cfg in configs:
+        validate_layout(cfg.layout)
+        validate_dtype_for_arch(cfg.dtype, arch)
+
     bad = [
         cfg for cfg in configs
         if not warp_tile_supported_on_arch(

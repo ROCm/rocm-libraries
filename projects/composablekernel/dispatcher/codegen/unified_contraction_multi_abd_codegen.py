@@ -110,14 +110,43 @@ _ARCH_VALID_WARP_TILES: Dict[str, Dict[int, frozenset]] = {
 }
 
 
+# Dtype support is separate from warp-tile legality. gfx90a retains its
+# FP8/BF8 conversion fallback; this operator rejects FP8/BF8 only on gfx1250.
+_UNSUPPORTED_DTYPES_BY_ARCH = {
+    "gfx1250": frozenset({"fp8", "bf8"}),
+}
+
+
+def validate_dtype_for_arch(dtype: str, arch: str) -> None:
+    """Reject unsupported dtypes once the target architecture is known."""
+    arch = normalize_gfx_arch(arch)
+    if dtype in _UNSUPPORTED_DTYPES_BY_ARCH.get(arch, ()):
+        raise ValueError(
+            f"contraction_multi_abd: dtype {dtype!r} is currently not supported on {arch}. "
+            "Use fp16 or bf16 on this architecture."
+        )
+
+
+def validate_layout(layout: str) -> None:
+    """Only rcr is supported, independently of the target architecture."""
+    if layout != "rcr":
+        raise ValueError(
+            f"contraction_multi_abd: layout {layout!r} is not supported. "
+            "Only 'rcr' is supported on all architectures."
+        )
+
+
 def valid_warp_tiles_for_arch(arch: str, dtype: str) -> Optional[frozenset]:
     """Warp tiles `arch` can execute for `dtype`, or None if unconstrained.
 
-    None means "no opinion, emit whatever the config says" -- the gfx9 path.
+    None means the dtype has no architecture-specific warp-tile constraint.
     An empty frozenset means "this arch has no valid tile for this dtype",
     which is a refusal, not an absence of information.
     """
-    by_width = _ARCH_VALID_WARP_TILES.get(normalize_gfx_arch(arch))
+    arch = normalize_gfx_arch(arch)
+    if dtype in _UNSUPPORTED_DTYPES_BY_ARCH.get(arch, ()):
+        return frozenset()
+    by_width = _ARCH_VALID_WARP_TILES.get(arch)
     if by_width is None:
         return None
     return by_width.get(_DTYPE_ELEM_BITS.get(dtype, 0), frozenset())
@@ -155,6 +184,7 @@ SUPPORTED_EPILOGUES = ("cshuffle", "default2d")
 
 def validate_contraction_multi_abd_params(
     *,
+    layout: str,
     epilogue: str,
     persistent: bool,
     num_a_tensor: int,
@@ -169,6 +199,7 @@ def validate_contraction_multi_abd_params(
 
     Raises ValueError on an unsupported combination.
     """
+    validate_layout(layout)
     if epilogue not in SUPPORTED_EPILOGUES:
         raise ValueError(
             f"Unsupported epilogue: {epilogue!r}. "
@@ -308,6 +339,7 @@ class ContractionMultiABDKernelSpec:
 
     def __post_init__(self):
         validate_contraction_multi_abd_params(
+            layout=self.layout,
             epilogue=self.epilogue,
             persistent=self.persistent,
             num_a_tensor=self.num_a_tensor,
@@ -733,21 +765,19 @@ def build_specs(config: dict, gfx_arch: str = "",
     """Enumerate all specs from a config dict.
 
     `gfx_arch` selects any arch-scoped tile block and enables the arch warp-tile
-    filter. Omitting it reproduces the pre-arch-aware behaviour exactly.
+    filter. Layout validation also applies when no architecture is supplied.
     """
     config = _expand_nested_config(config, gfx_arch)
 
-    # dtypes/layouts accept anything _DTYPE_TO_CK and the layout decoder know,
-    # but not every value reaches a compiling kernel today. Measured on gfx942
-    # at 256x256x64 / compv3 / cshuffle: fp16, bf16, fp8 and bf8 build; fp32
-    # does not. Of the layouts only rcr builds -- rrr/ccr/crr trip the
-    # row-major-B static_assert in gemm_pipeline_ag_bg_cr_comp_v3.hpp, and that
-    # still fires with pad_k on, at 128x128x32, and on the mem pipeline, so it
-    # is not a tile-shape accident. These are left as values you may pass
-    # rather than hard errors because the constraint lives in the pipeline and
-    # may lift there; the support matrices record what is actually usable.
+    # Layout support is operator-wide; dtype support additionally depends on
+    # the target. Validate the requested surface before filtering tile shapes
+    # so an unsupported request cannot silently disappear from a mixed config.
     dtypes     = config.get("dtypes",     ["fp16"])
     layouts    = config.get("layouts",    ["rcr"])
+    for layout in layouts:
+        validate_layout(layout)
+    for dtype in dtypes:
+        validate_dtype_for_arch(dtype, gfx_arch)
     pipelines  = config.get("pipelines",  ["compv3"])
     epilogues  = config.get("epilogues",  ["cshuffle"])
     schedulers = config.get("schedulers", ["intrawave"])
@@ -918,6 +948,8 @@ def generate_kernels(output_dir: Path, config: dict, *, gfx_arch: str = "",
 # =============================================================================
 
 
+# Tile defaults are selected by build_specs() using gfx_arch. Keep them out
+# of the CLI defaults so an implicit gfx9 tile cannot override that selection.
 _DEFAULT_CONFIG: dict = {
     "dtypes":     ["fp16"],
     "layouts":    ["rcr"],
@@ -925,11 +957,6 @@ _DEFAULT_CONFIG: dict = {
     "epilogues":  ["cshuffle"],
     "schedulers": ["intrawave"],
     "pad_options": [{"pad_m": False, "pad_n": False, "pad_k": False}],
-    "tile_configs": [
-        {"tile_m": 256, "tile_n": 256, "tile_k": 64,
-         "warp_m": 2,   "warp_n": 2,   "warp_k": 1,
-         "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16},
-    ],
     "num_a_tensors": [1],
     "num_b_tensors": [1],
     "num_d_tensors": [1],

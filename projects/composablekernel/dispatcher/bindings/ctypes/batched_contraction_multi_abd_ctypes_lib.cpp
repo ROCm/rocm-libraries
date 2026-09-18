@@ -49,6 +49,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "ck_tile/core.hpp"
@@ -90,6 +91,12 @@ constexpr bool ct_starts_with(const char* s, const char* prefix)
 
 constexpr bool kIsGfx1250 = ct_starts_with(GFX_ARCH, "gfx1250");
 
+static_assert(std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor> &&
+                  std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor> &&
+                  std::is_same_v<ELayout, ck_tile::tensor_layout::gemm::RowMajor>,
+              "batched_contraction_multi_abd: non-rcr layouts are not supported "
+              "on any architecture. Only rcr is supported.");
+
 /// Element width of the kernel's data type, in bits.
 constexpr int kElemBits = static_cast<int>(sizeof(EDataType)) * 8;
 
@@ -98,10 +105,8 @@ constexpr bool kGfx1250WarpTileOk = (SelectedKernel::WarpTileM == 16) &&
                                     (SelectedKernel::WarpTileK == 32);
 
 static_assert(!kIsGfx1250 || kElemBits == 16,
-              "gfx1250 (MI400) has no validated warp tile for this element width "
-              "in batched_contraction_multi_abd. Only 16-bit (fp16/bf16) is "
-              "established; an 8- or 32-bit kernel here would be an untested "
-              "claim rather than a measured one.");
+              "batched_contraction_multi_abd: this dtype is currently not supported on "
+              "gfx1250. Only fp16/bf16 are supported; fp8/bf8 are currently not supported.");
 
 static_assert(!kIsGfx1250 || kGfx1250WarpTileOk,
               "gfx1250 (MI400) is wave32 with RDNA-style WMMA and its only 16-bit "
