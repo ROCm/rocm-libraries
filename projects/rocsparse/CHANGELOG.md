@@ -3,6 +3,12 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.2.0
+
+### Resolved issues
+* Fixed an integer overflow in `rocsparse_csr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion. ELL element counts are now stored in 64-bit arithmetic, and ELL element indices are computed using 64-bit types in the CSR-to-ELL, CSR-to-HYB, ELL-to-CSR, and HYB-to-CSR conversion kernels.
+* Fixed a second integer overflow in `rocsparse_csr2hyb`, in the maximum ELL row width check. `2 * (csr_nnz - 1)` was evaluated in 32-bit arithmetic, so for matrices with more than 2^30 (~1.07 billion) nonzeros the allowed width became negative and the conversion rejected every ELL width with `rocsparse_status_invalid_value`. The check is now evaluated in 64-bit arithmetic.
+
 ## (Unreleased) rocSPARSE 5.1.0
 
 ### Added
@@ -15,8 +21,6 @@ Documentation for rocSPARSE is available at
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
 
 ### Resolved issues
-* Fixed a second integer overflow in `rocsparse_csr2hyb`, in the maximum ELL row width check. `2 * (csr_nnz - 1)` was evaluated in 32-bit arithmetic, so for matrices with more than 2^30 (~1.07 billion) nonzeros the allowed width became negative and the conversion rejected every ELL width with `rocsparse_status_invalid_value`. The check is now evaluated in 64-bit arithmetic.
-* Fixed an integer overflow in `rocsparse_csr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion. ELL element counts are now stored in 64-bit arithmetic, and ELL element indices are computed using 64-bit types in the CSR-to-ELL, CSR-to-HYB, ELL-to-CSR, and HYB-to-CSR conversion kernels.
 * Fixed an integer overflow in `rocsparse_prune_dense2csr_by_percentage` and `rocsparse_prune_csr2csr_by_percentage`, which computed the matrix element count in 32-bit arithmetic. For matrices with more than `INT32_MAX` (~2.1 billion) elements the count overflowed to a negative value, resulting in out-of-bounds pointer construction and an invalid kernel launch grid. The element count is now computed in 64-bit arithmetic.
 * Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
 * Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
