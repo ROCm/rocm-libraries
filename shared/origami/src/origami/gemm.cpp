@@ -409,6 +409,50 @@ bool check_lds_capacity(const hardware_t& hardware,
   return LDS_usage <= hardware.lds_capacity;
 }
 
+bool is_config_feasible(const problem_t& problem, const config_t& config) {
+  const size_t M     = problem.size.m;
+  const size_t N     = problem.size.n;
+  const size_t K     = problem.size.k;
+  const size_t batch = problem.batch;
+
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+  const size_t MT_K = config.mt.k;
+  const size_t MI_M = config.mi.m;
+  const size_t MI_N = config.mi.n;
+  const size_t MI_K = config.mi.k;
+
+  const int cha = config.cache_hints_a;
+  const int chb = config.cache_hints_b;
+
+  const bool a_trans = problem.a_transpose == transpose_t::T;
+  const bool b_trans = problem.b_transpose == transpose_t::T;
+
+  const int a_bits = datatype_to_bits(problem.a_dtype);
+  const int b_bits = datatype_to_bits(problem.b_dtype);
+  if (a_bits < 0 || b_bits < 0) return false;
+
+  if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N)) return false;
+  if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return false;
+
+  const size_t K_mod_128bytes    = K * static_cast<size_t>(a_bits) % 1024;
+  const size_t MT_K_mod_128bytes = MT_K * static_cast<size_t>(a_bits) % 1024;
+  if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+    const size_t ma_bits = std::max(M * static_cast<size_t>(a_bits), size_t{1});
+    const size_t nb_bits = std::max(N * static_cast<size_t>(b_bits), size_t{1});
+    if (M <= MT_M * 2 && !b_trans && (nb_bits / ma_bits > 5)) {
+      if (chb != 4) return false;
+    } else if (N <= MT_N * 2 && a_trans && (ma_bits / nb_bits > 5)) {
+      if (cha != 4) return false;
+    } else if (cha || chb) {
+      return false;
+    }
+  } else if (cha || chb) {
+    return false;
+  }
+  return true;
+}
+
 // Compute limited achievable memory bandwidth based on active CUs
 double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus) {
   const double CUs = static_cast<double>(num_active_cus);
@@ -1900,39 +1944,9 @@ double compute_total_latency(const problem_t& problem,
   const int a_bits = datatype_to_bits(problem.a_dtype);
   const int b_bits = datatype_to_bits(problem.b_dtype);
 
-  // 0) Short-circuit
-  // We don't need to compute latency for all MTs. With this, we can shortcut.
-  bool shortCircuit = true;
-  if (shortCircuit) {
-    // When problem dimensions are small enough that we can fit them in one tile, we should do
-    // so. This short circuit condition also decreases selection latency when problems are very
-    // small :)
-    // TODO 256 and 256 here should be largest M and N tile dimensions in library
-    if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
-      return std::numeric_limits<double>::max();
-
-    // Use Dot2 only for M < 3
-    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
-
-    size_t K_mod_128bytes    = K * a_bits % 1024;
-    size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
-    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
-      // avoid division by 0 if K == 0
-      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-        // Use nontemporal B
-        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
-      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-        // Use Non Temporal A
-        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
-      } else {
-        // Never use Non Temporal
-        if (config.cache_hints_a || config.cache_hints_b) {
-          return std::numeric_limits<double>::max();
-        }
-      }
-    } else if (config.cache_hints_a || config.cache_hints_b) {
-      return std::numeric_limits<double>::max();
-    }
+  // 0) Short-circuit — drop infeasible configs before latency work.
+  if (!is_config_feasible(problem, config)) {
+    return std::numeric_limits<double>::max();
   }
 
   // 1) Setup context (computes grid dims, launch params, WGM, etc.)
