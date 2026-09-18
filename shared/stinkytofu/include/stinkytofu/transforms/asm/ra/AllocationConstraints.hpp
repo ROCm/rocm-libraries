@@ -24,6 +24,8 @@ namespace stinkytofu {
 class AllocationRules;
 class AsmTargetRegisters;
 class Function;
+class RegClassSet;
+struct StinkyInstruction;
 
 /// Value IDs that must occupy consecutive physical units, in operand order.
 struct TupleRun {
@@ -70,6 +72,25 @@ struct Preference {
     bool operator==(const Preference& other) const = default;
 };
 
+/// SSA values behind every register operand of one instruction, both sides.
+///
+/// Shared by AllocationConstraints::build() and auditRules() so a pin rule
+/// sees the same operand-to-value map the colourer honoured.
+struct OperandGroups {
+    std::vector<std::vector<SSAValueID>> dest;
+    std::vector<std::vector<SSAValueID>> src;
+
+    std::span<const SSAValueID> at(size_t operand, bool isDest) const {
+        const std::vector<std::vector<SSAValueID>>& groups = isDest ? dest : src;
+        if (operand >= groups.size()) return {};
+        return groups[operand];
+    }
+};
+
+/// SSA values behind each register operand of \p instruction, using the same
+/// lifted-DWORD walk as tuple collection.
+OperandGroups operandGroupsOf(const StinkyInstruction& instruction, const RegClassSet& classes);
+
 /// Stamp every entry live-in the dispatch does not fill as undefined.
 ///
 /// Recorded on the value because three consumers need it: pinning and affinity
@@ -109,9 +130,17 @@ class AllocationConstraints {
     /// function defines them and moving one changes what the kernel reads. Lifting
     /// models them as block arguments with no incoming edges.
     ///
+    /// An Active pinToProducer rule pins the values it names the same way: the
+    /// colourer must keep the producer's register rather than pick another legal
+    /// one. Compacting still honours that; it is not a hint it may ignore.
+    ///
     /// This is legality, not policy. A colourer that ignores it produces wrong
     /// code rather than a slower kernel.
     bool isPinned(SSAValueID id) const;
+
+    /// Why isPinned() is true, or nullptr. `"a function live-in"`, or the name
+    /// of the pinToProducer rule that asked.
+    const char* pinReason(SSAValueID id) const;
 
     /// Highest index \p id may occupy, or no limit when nothing constrains it.
     ///
@@ -158,6 +187,7 @@ class AllocationConstraints {
     std::vector<RegType> classByValue_;
     std::vector<std::optional<RegKey>> hintByValue_;
     std::vector<bool> pinnedByValue_;
+    std::vector<const char*> pinReasonByValue_;
     std::vector<uint32_t> maxIndexByValue_;
     std::vector<SSAValueID> undefinedLiveIns_;
     std::vector<TupleRun> tupleRuns_;

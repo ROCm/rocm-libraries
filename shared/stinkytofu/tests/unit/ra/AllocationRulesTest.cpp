@@ -873,3 +873,97 @@ TEST_F(AllocationRulesTest, SatisfiedByAnswersOnlyForActiveRules) {
     // than reading past the table.
     EXPECT_FALSE(active.satisfiedBy(Preference{1, 2, 99, 1.0}, v4, v4));
 }
+
+// ---------------------------------------------------------------------------
+// Pin rules: keep the producer's register
+// ---------------------------------------------------------------------------
+
+namespace {
+
+AllocationRules pinDestOf(const StinkyInstruction* target, RuleStatus status = RuleStatus::Active) {
+    AllocationRule rule;
+    rule.name = "PinDest";
+    rule.description = "the destination keeps the producer's register";
+    rule.status = status;
+    rule.pinToProducer = [target](const StinkyInstruction& inst, const OperandValues& values,
+                                  std::vector<SSAValueID>& pinned) {
+        if (&inst != target) return;
+        for (const SSAValueID id : values(0, /*isDest=*/true)) {
+            if (id != kInvalidSSAValueID) pinned.push_back(id);
+        }
+    };
+    return AllocationRules({rule});
+}
+
+}  // namespace
+
+TEST_F(AllocationRulesTest, APinRuleIsItsOwnKind) {
+    const AllocationRules rules = pinDestOf(nullptr);
+    ASSERT_EQ(rules.all().size(), 1u);
+    EXPECT_EQ(rules.all()[0].kind(), RuleKind::Pin);
+    EXPECT_STREQ(ruleKindName(RuleKind::Pin), "pin");
+    EXPECT_TRUE(rules.pins());
+    EXPECT_FALSE(rules.pairs());
+    EXPECT_FALSE(rules.prices());
+}
+
+TEST_F(AllocationRulesTest, APinRuleHasAnAuditState) {
+    const AllocationRules rules = pinDestOf(nullptr, RuleStatus::Audit);
+    ASSERT_EQ(rules.all().size(), 1u);
+    EXPECT_EQ(rules.all()[0].status, RuleStatus::Audit);
+    EXPECT_TRUE(rules.problems().empty()) << rules.toString();
+    EXPECT_FALSE(rules.pins());
+}
+
+TEST_F(AllocationRulesTest, AuditAllPromotesAPinRule) {
+    AllocationRules rules = pinDestOf(nullptr, RuleStatus::Off);
+    RuleOverrides audit;
+    audit.auditAll = true;
+    rules.force(audit);
+    EXPECT_EQ(rules.all()[0].status, RuleStatus::Audit);
+}
+
+TEST_F(AllocationRulesTest, APinRuleKeepsTheDestinationOnItsProducerRegister) {
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* add =
+        createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/4, /*src1=*/5);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*add, 0);
+    ASSERT_NE(dest, nullptr);
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {}, AllocationRules{});
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    EXPECT_EQ(without->assignmentOf(dest->valueId()).idx, 0u) << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {}, pinDestOf(add));
+    EXPECT_TRUE(on.constraints().isPinned(dest->valueId())) << on.constraints().toString();
+    EXPECT_STREQ(on.constraints().pinReason(dest->valueId()), "PinDest");
+    Expected<AllocationResult> with = allocator.allocate(on.context());
+    ASSERT_TRUE(with.hasValue()) << with.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());
+    EXPECT_EQ(with->assignmentOf(dest->valueId()).idx, 40u) << with->toString();
+}
+
+TEST_F(AllocationRulesTest, AuditFindsACompactedPinnedDestination) {
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* add =
+        createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/4, /*src1=*/5);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    CompactingGreedyAllocator allocator;
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {}, AllocationRules{});
+    Expected<AllocationResult> compact = allocator.allocate(off.context());
+    ASSERT_TRUE(compact.hasValue()) << compact.getError();
+
+    const std::vector<std::string> findings =
+        auditRules(*func, *compact, pinDestOf(add, RuleStatus::Off));
+    ASSERT_FALSE(findings.empty());
+    EXPECT_TRUE(contains(findings.front(), "PinDest")) << findings.front();
+    EXPECT_TRUE(contains(findings.front(), "producer")) << findings.front();
+
+    EXPECT_TRUE(
+        auditRules(*func, createLegacyColoring(*func), pinDestOf(add, RuleStatus::Off)).empty());
+}

@@ -25,11 +25,13 @@
 #include <algorithm>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -76,12 +78,14 @@ RuleKind AllocationRule::kind() const {
                        static_cast<int>(static_cast<bool>(clobbersEarly)) +
                        static_cast<int>(static_cast<bool>(addRelations)) +
                        static_cast<int>(static_cast<bool>(baseCost)) +
-                       static_cast<int>(static_cast<bool>(addPreferences));
+                       static_cast<int>(static_cast<bool>(addPreferences)) +
+                       static_cast<int>(static_cast<bool>(pinToProducer));
     if (filled != 1) return RuleKind::Empty;
     if (forbidsBase) return RuleKind::Placement;
     if (clobbersEarly) return RuleKind::Interference;
     if (addRelations) return RuleKind::Offset;
     if (addPreferences) return RuleKind::Pairing;
+    if (pinToProducer) return RuleKind::Pin;
     return RuleKind::Preference;
 }
 
@@ -107,6 +111,8 @@ const char* ruleKindName(RuleKind kind) {
             return "interference";
         case RuleKind::Offset:
             return "offset";
+        case RuleKind::Pin:
+            return "pin";
         case RuleKind::Preference:
             return "preference";
         case RuleKind::Pairing:
@@ -130,7 +136,7 @@ AllocationRules::AllocationRules(std::vector<AllocationRule> rules) : rules_(std
             problems_.push_back(
                 "rule " + std::string(rule.name) +
                 " fills in none or several of forbidsBase, clobbersEarly, addRelations, "
-                "baseCost, addPreferences; exactly one is required" +
+                "baseCost, addPreferences, pinToProducer; exactly one is required" +
                 // satisfiedBy is the easiest one to fill in alone, and it is
                 // not on the list above, so the message would otherwise name
                 // nothing the author actually wrote.
@@ -169,6 +175,9 @@ void AllocationRules::refresh() {
     });
     pairs_ = std::any_of(rules_.begin(), rules_.end(), [](const AllocationRule& rule) {
         return rule.status == RuleStatus::Active && static_cast<bool>(rule.addPreferences);
+    });
+    pins_ = std::any_of(rules_.begin(), rules_.end(), [](const AllocationRule& rule) {
+        return rule.status == RuleStatus::Active && static_cast<bool>(rule.pinToProducer);
     });
 }
 
@@ -400,6 +409,35 @@ std::vector<std::string> auditRules(const Function& function, const AllocationRe
                                                  mnemonicOf(*instruction));
                             });
                         });
+                    }
+                }
+                break;
+            }
+            case RuleKind::Pin: {
+                if (!rule.pinToProducer) break;
+                const RegClassSet& classes = function.ssaArena().liftedClasses();
+                for (const BasicBlock& block : function) {
+                    for (const IRBase& ir : block) {
+                        const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
+                        if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
+                        const OperandGroups groups = operandGroupsOf(*instruction, classes);
+                        const OperandValues values = [&groups](size_t operand, bool isDest) {
+                            return groups.at(operand, isDest);
+                        };
+                        std::vector<SSAValueID> pinned;
+                        rule.pinToProducer(*instruction, values, pinned);
+                        for (const SSAValueID id : pinned) {
+                            if (id == kInvalidSSAValueID || !coloring.isAssigned(id)) continue;
+                            const StinkySSAValue* value = function.ssaArena().get(id);
+                            if (value == nullptr || !value->hasPhysicalBinding()) continue;
+                            const StinkySSAValue::PhysicalBinding& binding = value->physical();
+                            const RegKey producer{binding.type, binding.idx, RegHalf::NONE};
+                            const RegKey physical = coloring.assignmentOf(id);
+                            if (physical == producer) continue;
+                            report(rule, valueName(id) + " is " + regKeyToString(physical) +
+                                             " but the producer placed it at " +
+                                             regKeyToString(producer));
+                        }
                     }
                 }
                 break;
