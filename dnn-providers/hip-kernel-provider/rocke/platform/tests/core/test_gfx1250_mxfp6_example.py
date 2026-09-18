@@ -9,10 +9,14 @@ from rocke.examples.gfx1250.gemm import _scaled_gemm_example, mxfp6_gemm
 @pytest.mark.parametrize(
     "argv,dtypes",
     [
-        ([], ("fp6", "bf6")),
-        (["--dtype", "both"], ("fp6", "bf6")),
-        (["--dtype", "fp6"], ("fp6",)),
-        (["--dtype", "bf6"], ("bf6",)),
+        (["--dtype", "fp6e2m3"], ("fp6e2m3",)),
+        (["--dtype", " FP6 "], ("fp6e2m3",)),
+        (["--dtype", "fp6e3m2"], ("fp6e3m2",)),
+        (["--dtype", " BF6 "], ("fp6e3m2",)),
+        ([], ("fp6e2m3", "fp6e3m2")),
+        (["--dtype", "both"], ("fp6e2m3", "fp6e3m2")),
+        (["--dtype", "fp6"], ("fp6e2m3",)),
+        (["--dtype", "bf6"], ("fp6e3m2",)),
     ],
 )
 def test_mxfp6_cli_selects_formats(monkeypatch, argv, dtypes):

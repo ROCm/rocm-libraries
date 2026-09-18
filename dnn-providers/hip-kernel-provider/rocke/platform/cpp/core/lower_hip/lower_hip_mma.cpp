@@ -33,7 +33,6 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
-#include "rocke/scaled_wmma_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc

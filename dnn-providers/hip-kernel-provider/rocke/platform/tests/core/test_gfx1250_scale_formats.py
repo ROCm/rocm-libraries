@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma, scale_formats
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
@@ -136,3 +137,12 @@ def test_reject_invalid_fp6_scale_formats(changes):
     assert not is_valid_spec(spec)[0]
     with pytest.raises(ValueError):
         build_block_scaled_gemm(spec)
+
+
+def test_scale_contract_uses_matrix_operation():
+    op = gfx1250_scaled_wmma("wmma_scale16_f32_16x16x128_fp4_bf6")
+    assert op is not None
+    assert op.scales.block_k == 16
+    assert scale_formats(op.matrix_format, op.matrix_format_b, "e4m3", "e8m0") == (2, 0)
+    with pytest.raises(ValueError, match="require an FP4 operand"):
+        scale_formats(op.matrix_format, op.matrix_format_b, "e8m0", "e4m3")

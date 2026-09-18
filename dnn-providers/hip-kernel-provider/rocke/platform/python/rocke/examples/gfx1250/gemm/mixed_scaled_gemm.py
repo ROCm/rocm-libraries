@@ -4,14 +4,15 @@
 
 from __future__ import annotations
 
-from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec, _canon_lowbit
+from ....core.arch.target import normalize_dtype
+from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec, _LOWBIT_DTYPES
 from ._scaled_gemm_example import argument_parser, verify
 
-FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4", "fp8e4m3", "bf8e5m2")
+FORMATS = tuple(sorted(_LOWBIT_DTYPES))
 
 
 def make_spec(args) -> BlockScaledGemmSpec:
-    if _canon_lowbit(args.dtype_a) == _canon_lowbit(args.dtype_b):
+    if normalize_dtype(args.dtype_a) == normalize_dtype(args.dtype_b):
         raise ValueError(
             "choose different A/B formats or use a homogeneous mxfp example"
         )
@@ -31,8 +32,12 @@ def make_spec(args) -> BlockScaledGemmSpec:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argument_parser(__doc__)
-    parser.add_argument("--dtype-a", choices=FORMATS, default="fp8")
-    parser.add_argument("--dtype-b", choices=FORMATS, default="fp4")
+    parser.add_argument(
+        "--dtype-a", type=normalize_dtype, choices=FORMATS, default="fp8e4m3"
+    )
+    parser.add_argument(
+        "--dtype-b", type=normalize_dtype, choices=FORMATS, default="fp4e2m1"
+    )
     args = parser.parse_args(argv)
     try:
         spec = make_spec(args)

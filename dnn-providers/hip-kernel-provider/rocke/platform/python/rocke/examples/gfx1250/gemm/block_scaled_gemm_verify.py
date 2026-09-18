@@ -29,7 +29,9 @@ import numpy as np
 
 from ....helpers import compile_kernel
 from ....helpers.compile import compile_kernel_via_hipcc
+from ....core.arch.target import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import (
+    _LOWBIT_DTYPES,
     BlockScaledGemmSpec,
     _canon_lowbit,
     block_scaled_gemm_grid,
@@ -413,20 +415,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--dtype",
         default="fp8e4m3",
-        choices=(
-            "fp8",
-            "bf8",
-            "fp8e4m3",
-            "bf8e5m2",
-            "fp4",
-            "fp4e2m1",
-            "fp6",
-            "bf6",
-            "fp6e2m3",
-            "fp6e3m2",
-        ),
+        type=normalize_dtype,
+        choices=sorted(_LOWBIT_DTYPES),
     )
-    p.add_argument("--dtype-b", default=None)
+    p.add_argument(
+        "--dtype-b", type=normalize_dtype, choices=sorted(_LOWBIT_DTYPES), default=None
+    )
     p.add_argument("--scale-dtype-a", default=None)
     p.add_argument("--scale-dtype-b", default=None)
     p.add_argument("--tol", type=float, default=2e-2, help="legacy WMMA tolerance only")

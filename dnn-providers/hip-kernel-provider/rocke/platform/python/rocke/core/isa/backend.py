@@ -32,7 +32,7 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
-from ..scaled_wmma import scale_formats
+from ..arch.wmma_scale import scale_formats
 
 
 class ISABackend:

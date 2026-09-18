@@ -7,6 +7,7 @@ import importlib
 
 import pytest
 
+from rocke.core.arch.target import normalize_dtype
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm import _scaled_gemm_example
 from rocke.instances.gfx1250.block_scaled_gemm import build_block_scaled_gemm
@@ -77,9 +78,23 @@ def test_mixed_example_rejects_equal_canonical_formats(a, b):
         make_spec(argparse.Namespace(dtype_a=a, dtype_b=b))
 
 
-@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp8e4m3", "bf8e5m2"])
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        "fp8",
+        "bf8",
+        "fp8e4m3",
+        "bf8e5m2",
+        "fp6",
+        "bf6",
+        "fp6e2m3",
+        "fp6e3m2",
+        "fp4",
+        "fp4e2m1",
+    ],
+)
 @pytest.mark.parametrize("operand", ["a", "b"])
-def test_mixed_scaled_gemm_cli_accepts_eight_bit_names(monkeypatch, dtype, operand):
+def test_mixed_scaled_gemm_cli_normalizes_matrix_names(monkeypatch, dtype, operand):
     from rocke.examples.gfx1250.gemm import mixed_scaled_gemm as example
 
     calls = []
@@ -93,11 +108,12 @@ def test_mixed_scaled_gemm_cli_accepts_eight_bit_names(monkeypatch, dtype, opera
         return 0
 
     monkeypatch.setattr(example, "verify", verify)
-    argv = ["--dtype-a", "fp4", "--dtype-b", "fp4"]
+    other = "fp8" if normalize_dtype(dtype) == "fp4e2m1" else "fp4"
+    argv = ["--dtype-a", other, "--dtype-b", other]
     argv += [f"--dtype-{operand}", dtype]
     assert example.main(argv) == 0
     assert len(calls) == 1
-    assert getattr(calls[0], f"dtype_{operand}") == dtype
+    assert getattr(calls[0], f"dtype_{operand}") == normalize_dtype(dtype)
 
 
 @pytest.mark.parametrize("dtype,alias", [("fp8", "fp8e4m3"), ("bf8", "bf8e5m2")])

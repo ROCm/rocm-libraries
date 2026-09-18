@@ -18,7 +18,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
-#include "rocke/scaled_wmma_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 /* ===================================================================== */
 /*  target-neutral MMA metadata                                          */

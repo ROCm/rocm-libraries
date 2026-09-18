@@ -13,7 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ...core.arch.wmma_scale import gfx1250_scaled_wmma
+from ...core.arch.target import normalize_dtype
+from ...core.arch.wmma_scale import MATRIX_FORMATS, gfx1250_scaled_wmma, scale_formats
 from ...core.ir import (
     BF16,
     F16,
@@ -27,22 +28,17 @@ from ...core.ir import (
     Type,
     VectorType,
 )
-from ...core.scaled_wmma import MATRIX_FORMATS, scale_formats
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
-_LOWBIT_DTYPES = {
-    "fp8",
-    "fp8e4m3",
-    "bf8",
-    "bf8e5m2",
-    "fp6",
-    "fp6e2m3",
-    "bf6",
-    "fp6e3m2",
-    "fp4",
-    "fp4e2m1",
+_LOWBIT_FORMATS = {
+    "fp8e4m3": "fp8",
+    "bf8e5m2": "bf8",
+    "fp6e2m3": "fp6",
+    "fp6e3m2": "bf6",
+    "fp4e2m1": "fp4",
 }
+_LOWBIT_DTYPES = frozenset(_LOWBIT_FORMATS)
 _OUTPUT_DTYPES = {"fp16", "f16", "bf16"}
 _SCALE_DTYPES = {"fp16", "f16", "fp32", "f32"}
 _SUPPORTED_MATRIX_PATHS = {
@@ -69,17 +65,11 @@ def _wmma_op_id(dtype_a: str, dtype_b: str) -> str:
 
 
 def _canon_lowbit(dtype: str) -> str:
-    if dtype in ("fp8", "fp8e4m3"):
-        return "fp8"
-    if dtype in ("bf8", "bf8e5m2"):
-        return "bf8"
-    if dtype in ("fp6", "fp6e2m3"):
-        return "fp6"
-    if dtype in ("bf6", "fp6e3m2"):
-        return "bf6"
-    if dtype in ("fp4", "fp4e2m1"):
-        return "fp4"
-    raise ValueError(f"expected fp8/bf8/fp6/bf6/fp4 low-bit dtype, got {dtype!r}")
+    """Map a normalized catalog dtype to its stable instruction-format token."""
+    try:
+        return _LOWBIT_FORMATS[normalize_dtype(dtype)]
+    except KeyError:
+        raise ValueError(f"unsupported low-bit matrix dtype: {dtype!r}") from None
 
 
 def _wire_scale_dtype(dtype: str) -> str:
@@ -179,7 +169,10 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
 
     if spec.M <= 0 or spec.N <= 0 or spec.K <= 0:
         return False, f"M/N/K must be positive (got M={spec.M}, N={spec.N}, K={spec.K})"
-    if spec.dtype_a not in _LOWBIT_DTYPES or spec.dtype_b not in _LOWBIT_DTYPES:
+    if (
+        normalize_dtype(spec.dtype_a) not in _LOWBIT_DTYPES
+        or normalize_dtype(spec.dtype_b) not in _LOWBIT_DTYPES
+    ):
         return False, (
             f"A/B must be fp8, bf8, fp6, bf6, or fp4 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
         )
@@ -295,6 +288,7 @@ def block_scaled_gemm_grid(spec: BlockScaledGemmSpec) -> Tuple[int, int, int]:
 
 
 def _storage_type(dtype: str) -> Type:
+    dtype = normalize_dtype(dtype)
     if dtype in ("fp4", "fp4e2m1", "fp6", "bf6", "fp6e2m3", "fp6e3m2"):
         return I8
     if dtype in ("fp16", "f16"):
