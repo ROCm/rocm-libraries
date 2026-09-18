@@ -169,6 +169,36 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
         cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
         cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {64, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
     }
+
+    // Large spatial shapes to exercise FWD spatial tiling with large tensors
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 3, 600, 600}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {1, 3, 600, 600}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {8, 3, 200, 200}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+
+    // 3D coverage (NCDHW/NDHWC)
+    const auto type_y_3d = (datatype == miopenInt8) ? miopenInt32 : datatype;
+    // Plain 3x3x3
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, type_y_3d, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, type_y_3d, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    // Padding on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    // Stride 2 on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}}});
+    // Dilation 2 on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, type_y_3d, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, type_y_3d, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}});
+    // Grouped, g=4
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 8, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {8, 2, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 4}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 8, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {8, 2, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 4}});
+    // Batch-dominant
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {8, 4, 4, 8, 8}}, {datatype, miopenTensorNCDHW, {8, 4, 3, 3, 3}}, type_y_3d, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {8, 4, 4, 8, 8}}, {datatype, miopenTensorNDHWC, {8, 4, 3, 3, 3}}, type_y_3d, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    // Large spatial extent
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 1, 34, 66, 66}}, {datatype, miopenTensorNCDHW, {1, 1, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 1, 34, 66, 66}}, {datatype, miopenTensorNDHWC, {1, 1, 3, 3, 3}}, type_y_3d, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
     // clang-format on
 
     return cases;
