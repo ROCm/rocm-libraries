@@ -12,6 +12,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <numeric>
 #include <roc/host_numerics/generation.hpp>
 #include <span>
 #include <stdexcept>
@@ -804,9 +805,11 @@ struct GenerationRecipeAccess {
 
     struct PreparedAlternatingSign {
         std::vector<AlternatingDimension> dimensions;
+        std::vector<uint8_t> repeatingNegation;
+        size_t repeatMask = 0;
         bool negativeWhenOdd;
 
-        bool negates(size_t logicalIndex) const {
+        bool negatesFromDimensions(size_t logicalIndex) const {
             size_t parity = 0;
             for (const auto [stride, oddExtent] : dimensions) {
                 size_t coordinate = stride == 1 ? logicalIndex : logicalIndex / stride;
@@ -814,6 +817,13 @@ struct GenerationRecipeAccess {
                 parity ^= coordinate;
             }
             return ((parity & 1U) != 0) == negativeWhenOdd;
+        }
+
+        bool negates(size_t logicalIndex) const {
+            if (repeatingNegation.empty()) return negatesFromDimensions(logicalIndex);
+            const size_t index = repeatMask == 0 ? logicalIndex % repeatingNegation.size()
+                                                 : logicalIndex & repeatMask;
+            return repeatingNegation[index] != 0;
         }
     };
 
@@ -831,9 +841,13 @@ struct GenerationRecipeAccess {
 
         PreparedAlternatingSign result{
             .dimensions = {},
+            .repeatingNegation = {},
+            .repeatMask = 0,
             .negativeWhenOdd = parameters.negativeWhenOdd,
         };
         result.dimensions.reserve(parameters.dimensions.size());
+        constexpr size_t maximumRepeatSize = 65536;
+        size_t repeatSize = shape.elementCount() == 0 ? 0 : 1;
         for (const size_t dimension : parameters.dimensions) {
             if (dimension >= shape.rank())
                 throw std::out_of_range(
@@ -841,6 +855,24 @@ struct GenerationRecipeAccess {
             const size_t extent = shape[dimension];
             result.dimensions.push_back(
                 {.stride = strides[dimension], .oddExtent = extent % 2 == 0 ? 0 : extent});
+            if (extent <= 1 || repeatSize == 0) continue;
+            const size_t coordinatePeriodFactor = extent % 2 == 0 ? 2 : extent;
+            if (strides[dimension] > maximumRepeatSize / coordinatePeriodFactor) {
+                repeatSize = 0;
+                continue;
+            }
+            const size_t dimensionPeriod = strides[dimension] * coordinatePeriodFactor;
+            const size_t commonDivisor = std::gcd(repeatSize, dimensionPeriod);
+            if (repeatSize / commonDivisor > maximumRepeatSize / dimensionPeriod)
+                repeatSize = 0;
+            else
+                repeatSize = repeatSize / commonDivisor * dimensionPeriod;
+        }
+        if (repeatSize != 0) {
+            result.repeatingNegation.resize(repeatSize);
+            for (size_t index = 0; index < repeatSize; ++index)
+                result.repeatingNegation[index] = result.negatesFromDimensions(index);
+            if (std::has_single_bit(repeatSize)) result.repeatMask = repeatSize - 1;
         }
         return result;
     }
