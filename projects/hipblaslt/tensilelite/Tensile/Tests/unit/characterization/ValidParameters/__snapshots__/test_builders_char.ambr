@@ -1450,6 +1450,7 @@
     'NonVolatileC',
     'NonVolatileD',
     'NonVolatileE',
+    'NonVolatileGate',
     'NonVolatileMXSA',
     'NonVolatileMXSB',
     'NonVolatileMetadata',
@@ -1463,6 +1464,7 @@
     'PrefetchGlobalRead',
     'PrefetchLocalRead',
     'PreloadKernArgs',
+    'ReuseAcrossPersistent',
     'SFCWGM',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
@@ -1499,6 +1501,7 @@
     'TemporalHintC',
     'TemporalHintD',
     'TemporalHintE',
+    'TemporalHintGate',
     'TemporalHintMXSA',
     'TemporalHintMXSB',
     'TemporalHintMetadata',
@@ -2334,6 +2337,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'NonVolatileGate': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'NonVolatileMXSA': dict({
       'head': list([
         0,
@@ -2441,6 +2452,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ReuseAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
@@ -2738,6 +2757,15 @@
       'type': 'list',
     }),
     'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintGate': dict({
       'head': list([
         0,
         1,

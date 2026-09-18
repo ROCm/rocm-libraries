@@ -35,3 +35,10 @@ Known bugs:
   - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 192, N: 128, known_bug_platforms: gfx950 }
   # gfx1250: matmul_batch_offset bf16 TN, batch_mode=1 only.
   - { function: matmul_batch_offset, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, transA: T, transB: N, batch_mode: 1, known_bug_platforms: gfx1250 }
+  # gfx950: complex (f32_c) transpose-NT size-1 / degenerate shapes in
+  # matmul_batch_complex_general_batch_edge hit kernel selection returning
+  # "NO solution found". Suspected cause: the gfx950 NT complex library has only
+  # a width-2 read solution (GRVWA=GRVWB=2, no width-1), so it can't serve a
+  # size-1 M or N free dim.
+  # REMOVE once gfx950 gets a width-1 NT complex kernel.
+  - { name: matmul_batch_complex_general_batch_edge, function: matmul, transA: N, transB: T, known_bug_platforms: gfx950 }
