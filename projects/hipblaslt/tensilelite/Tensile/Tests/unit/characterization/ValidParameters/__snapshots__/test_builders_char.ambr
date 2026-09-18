@@ -1376,7 +1376,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernelName',
+    'CustomKernel',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1604,7 +1604,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1613,7 +1613,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertSummationElementMultiple': dict({
@@ -1683,7 +1683,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernelName': dict({
+    'CustomKernel': dict({
       'type': 'int',
       'value': -1,
     }),
