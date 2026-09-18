@@ -48,7 +48,7 @@ def test_scaled_wmma_llvm23_golden(case, expected_sha):
     assert hashlib.sha256(llvm.encode()).hexdigest() == expected_sha
 
 
-@pytest.mark.parametrize("alias,canonical", [("fp6e2m3", "fp6"), ("fp6e3m2", "bf6")])
+@pytest.mark.parametrize("alias,canonical", [("fp6", "fp6e2m3"), ("bf6", "fp6e3m2")])
 def test_fp6_catalog_aliases(alias, canonical):
     from rocke.core.arch.target import normalize_dtype
 
