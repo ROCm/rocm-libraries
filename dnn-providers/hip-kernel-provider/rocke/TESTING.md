@@ -222,6 +222,62 @@ Key semantics:
   ([`fuzz_diff.py`](platform/tests/instances/differential/fuzz_diff.py)) feeds the
   differential oracle with generated `(spec, arch)` inputs rather than a fixed list.
 
+### 4.4 Is the emitted IR legal? (the toolchain gate)
+
+§4.2 and §4.3 both compare rocKE's output against *another copy of rocKE's
+output* — a golden sha, or the other engine. Neither asks the AMDGPU toolchain
+whether the IR is valid at all, so an illegal construct that is emitted stably
+and by both engines is green in both. The **emitted-IR validity gate**,
+[`check_ir_validity.py`](platform/tools/check_ir_validity.py), asks the external
+question: it lowers every case in the representative corpus
+([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py),
+the same corpus §4.2 hashes) and pushes each module through `clang` to a linked
+hsaco.
+
+Three design points, each of them load-bearing:
+
+- **The oracle is a LINK, not a verify and not a codegen.** A `declare` for an
+  intrinsic that does not exist passes `opt -passes=verify`, *and* passes
+  `clang -S` — the backend silently treats the unknown `llvm.*` name as an
+  ordinary external function and emits a GOT-relative call. The undefined symbol
+  appears only when the relocatable is linked. Stopping anywhere earlier makes
+  the gate blind to the whole *fictional-intrinsic* bug class.
+- **Every compile is a subprocess.** A backend failure is a
+  `report_fatal_error`, not an exception: it takes the process down. Compiling
+  in-process (via comgr, which is otherwise faster) means one bad module kills
+  the run and emits no report. The isolation is a correctness requirement, and
+  it makes the per-module diagnostic free.
+- **Only the host's own LLVM flavor can be validated.** Modules lower at any
+  flavor, but there is no local compiler for the others; those report
+  `UNVALIDATED`, never green. On a host with no LLVM tools at all the gate
+  self-skips loudly — pass `--strict` to make that a failure instead.
+
+Failures that are known and owned live in a `KNOWN_BAD` allowlist, same
+convention and same rule as `KNOWN_VIOLATIONS` in
+[`test_library_layering.py`](library/tests/test_library_layering.py): **it only
+shrinks.** An entry that starts compiling is itself reported as a failure, so a
+fix cannot leave dead weight behind.
+
+### 4.5 Do the two engines carry the same declares? (the table check)
+
+§4.3 sees a divergence only where a kernel in the corpus exercises it, and §4.4
+needs an LLVM toolchain. The intrinsic-declaration tables sit upstream of both
+and are maintained by hand in two files, in two languages:
+`lower_llvm._INTRINSIC_DECLS` (plus the per-flavor override dicts) and the
+`rocke_ll_decl_t` arrays in `cpp/core/lower_llvm/data.cpp`.
+[`test_intrinsic_decl_table_parity.py`](platform/tests/core/test_intrinsic_decl_table_parity.py)
+compares them on the three axes they must agree on — **key set**, **declaration
+text**, and **insertion order**. The third is the subtle one: `finalize` emits
+declares in table order, so swapping two entries changes the emitted bytes while
+every declare stays character-identical, and byte-identity catches it only if
+some corpus kernel happens to need both keys.
+
+It is the cheapest check in the stack and the only one guarding byte-identity
+*upstream* of emission: no LLVM, no comgr, no GPU, no built C++ engine — it
+reads `data.cpp` as text, so it runs on the same hosts where §4.4 can only
+report `UNVALIDATED`. It says nothing about whether either table is *correct*;
+two engines can agree on a declare LLVM rejects. That is §4.4's job.
+
 ---
 
 ## 5. Execution tiers & gating
@@ -230,13 +286,13 @@ Four distinct things run here; **do not conflate them**:
 
 | Tier | What | Gated? |
 |---|---|---|
-| **1. Gate** | relative-path guard → byte-identity gate → pytest (`platform/tests`) → ctest | ✅ blocking |
+| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → pytest (`platform/tests`) → ctest | ✅ blocking |
 | **2. Diagnostics** | IR-canonical diff, fuzz diff, per-config golden check | ❌ opt-in |
 | **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
 | **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
 
 **Two entrypoints, one gated scope.** [`run_all.py`](platform/tests/run_all.py) is
-the **developer** runner (guard → gate → pytest → ctest). **CI does not run
+the **developer** runner (guard → gate → IR validity → pytest → ctest). **CI does not run
 `run_all.py`** — it runs
 **ctest** (wired from TheRock; project selection via `get_changed_projects.py`),
 whose registered pytest targets the **`platform/tests`** tree only. The exact
