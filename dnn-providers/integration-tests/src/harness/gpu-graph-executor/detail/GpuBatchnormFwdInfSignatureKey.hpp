@@ -3,34 +3,39 @@
 
 #pragma once
 
-#include <functional>
-#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 #include <ostream>
 
-namespace hipdnn_test_sdk::detail
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+
+#include "GpuBatchnormFwdInfPlan.hpp"
+
+namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
 
-struct BatchnormFwdInferenceSignatureKey
+struct GpuBatchnormFwdInfSignatureKey
 {
-    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
-        = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
-    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
-    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
+    const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType{
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes};
+    hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET};
 
-    BatchnormFwdInferenceSignatureKey() = default;
-    constexpr BatchnormFwdInferenceSignatureKey(
-        hipdnn_flatbuffers_sdk::data_objects::DataType x,
+    GpuBatchnormFwdInfSignatureKey() = default;
+    constexpr GpuBatchnormFwdInfSignatureKey(
+        hipdnn_flatbuffers_sdk::data_objects::DataType input,
         hipdnn_flatbuffers_sdk::data_objects::DataType scaleBias,
         hipdnn_flatbuffers_sdk::data_objects::DataType meanVariance,
         hipdnn_flatbuffers_sdk::data_objects::DataType output,
         hipdnn_flatbuffers_sdk::data_objects::DataType compute)
-        : xDataType(x)
+        : inputDataType(input)
         , scaleBiasDataType(scaleBias)
         , meanVarianceDataType(meanVariance)
         , outputDataType(output)
@@ -38,11 +43,12 @@ struct BatchnormFwdInferenceSignatureKey
     {
     }
 
-    BatchnormFwdInferenceSignatureKey(
+    GpuBatchnormFwdInfSignatureKey(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-            tensorMap)
+            tensorMap,
+        const hipdnn_flatbuffers_sdk::data_objects::DataType computeType)
     {
         const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
         if(nodeAttributes == nullptr)
@@ -51,26 +57,26 @@ struct BatchnormFwdInferenceSignatureKey
                 "Node attributes could not be cast to BatchnormInferenceAttributes");
         }
 
-        auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
+        auto inputTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid());
-        auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
-
-        if(xTensorAttr == nullptr || scaleTensorAttr == nullptr || meanTensorAttr == nullptr
-           || yTensorAttr == nullptr)
+        auto outputTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
+        if(inputTensorAttr == nullptr || scaleTensorAttr == nullptr || meanTensorAttr == nullptr
+           || outputTensorAttr == nullptr)
         {
-            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
-                                     "failed to construct key");
+            throw std::runtime_error(
+                "One or more required tensor attributes could not be found in the map, "
+                "failed to construct key");
         }
 
-        xDataType = xTensorAttr->data_type();
+        inputDataType = inputTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
         meanVarianceDataType = meanTensorAttr->data_type();
-        computeDataType = node.compute_data_type();
-        outputDataType = yTensorAttr->data_type();
+        outputDataType = outputTensorAttr->data_type();
+        computeDataType = computeType;
     }
 
-    std::size_t operator()(const BatchnormFwdInferenceSignatureKey& k) const noexcept
+    std::size_t operator()(const GpuBatchnormFwdInfSignatureKey& k) const noexcept
     {
         return k.hashSelf();
     }
@@ -78,30 +84,30 @@ struct BatchnormFwdInferenceSignatureKey
     constexpr std::size_t hashSelf() const
     {
         return static_cast<std::size_t>(static_cast<int>(nodeType))
-               ^ (static_cast<std::size_t>(static_cast<int>(xDataType)) << 4)
+               ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 4)
                ^ (static_cast<std::size_t>(static_cast<int>(scaleBiasDataType)) << 8)
                ^ (static_cast<std::size_t>(static_cast<int>(meanVarianceDataType)) << 12)
                ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16)
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 20);
     }
 
-    bool operator==(const BatchnormFwdInferenceSignatureKey& other) const noexcept
+    bool operator==(const GpuBatchnormFwdInfSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType && xDataType == other.xDataType
+        return nodeType == other.nodeType && inputDataType == other.inputDataType
                && scaleBiasDataType == other.scaleBiasDataType
                && meanVarianceDataType == other.meanVarianceDataType
                && outputDataType == other.outputDataType
                && computeDataType == other.computeDataType;
     }
 
-    static std::unordered_map<BatchnormFwdInferenceSignatureKey,
-                              std::unique_ptr<IGraphNodePlanBuilder>,
-                              BatchnormFwdInferenceSignatureKey>
+    static std::unordered_map<GpuBatchnormFwdInfSignatureKey,
+                              std::unique_ptr<IGpuGraphNodePlanBuilder>,
+                              GpuBatchnormFwdInfSignatureKey>
         getPlanBuilders()
     {
-        std::unordered_map<BatchnormFwdInferenceSignatureKey,
-                           std::unique_ptr<IGraphNodePlanBuilder>,
-                           BatchnormFwdInferenceSignatureKey>
+        std::unordered_map<GpuBatchnormFwdInfSignatureKey,
+                           std::unique_ptr<IGpuGraphNodePlanBuilder>,
+                           GpuBatchnormFwdInfSignatureKey>
             map;
 
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -120,6 +126,11 @@ struct BatchnormFwdInferenceSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -129,21 +140,6 @@ struct BatchnormFwdInferenceSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
-        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
-        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
@@ -156,31 +152,33 @@ struct BatchnormFwdInferenceSignatureKey
     template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-              hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType YDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void addPlanBuilder(std::unordered_map<BatchnormFwdInferenceSignatureKey,
-                                                  std::unique_ptr<IGraphNodePlanBuilder>,
-                                                  BatchnormFwdInferenceSignatureKey>& map)
+    static void addPlanBuilder(std::unordered_map<GpuBatchnormFwdInfSignatureKey,
+                                                  std::unique_ptr<IGpuGraphNodePlanBuilder>,
+                                                  GpuBatchnormFwdInfSignatureKey>& map)
     {
-        map[BatchnormFwdInferenceSignatureKey(XDataTypeEnum,
-                                              ScaleBiasDataTypeEnum,
-                                              MeanVarianceDataTypeEnum,
-                                              OutputDataTypeEnum,
-                                              ComputeDataTypeEnum)]
-            = std::make_unique<BatchnormFwdInferencePlanBuilder<XDataTypeEnum,
-                                                                ScaleBiasDataTypeEnum,
-                                                                MeanVarianceDataTypeEnum,
-                                                                OutputDataTypeEnum,
-                                                                ComputeDataTypeEnum>>();
+        map[GpuBatchnormFwdInfSignatureKey(XDataTypeEnum,
+                                           ScaleBiasDataTypeEnum,
+                                           MeanVarianceDataTypeEnum,
+                                           YDataTypeEnum,
+                                           ComputeDataTypeEnum)]
+            = std::make_unique<GpuBatchnormFwdInfPlanBuilder<XDataTypeEnum,
+                                                             ScaleBiasDataTypeEnum,
+                                                             MeanVarianceDataTypeEnum,
+                                                             YDataTypeEnum,
+                                                             ComputeDataTypeEnum>>();
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const BatchnormFwdInferenceSignatureKey& key)
+inline std::ostream& operator<<(std::ostream& os, const GpuBatchnormFwdInfSignatureKey& key)
 {
-    os << "BatchnormFwdInference(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
-       << ", mean=" << key.meanVarianceDataType << ", y=" << key.outputDataType
-       << ", compute=" << key.computeDataType << ")";
+    os << "GpuBatchnormFwdInfSignatureKey(inputDataType=" << key.inputDataType
+       << ", scaleBiasDataType=" << key.scaleBiasDataType
+       << ", meanVarianceDataType=" << key.meanVarianceDataType
+       << ", outputDataType=" << key.outputDataType << ", computeDataType=" << key.computeDataType
+       << ")";
     return os;
 }
 
-} // namespace hipdnn_test_sdk::detail
+} // namespace hipdnn_integration_tests::gpu_graph_executor::detail
