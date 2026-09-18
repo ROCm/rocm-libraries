@@ -36,6 +36,7 @@ from ..Common import (
     ParallelMap,
     ensurePath,
     globalParameters,
+    isStubGfxTarget,
     splitArchs,
     tPrint,
 )
@@ -203,6 +204,10 @@ def _buildSourceCodeObjectFile(
         os.environ["CMAKE_CXX_COMPILER"] = globalParameters["CmakeCxxCompiler"]
 
     _, cmdlineArchs = splitArchs()
+    cmdlineArchs = [arch for arch in cmdlineArchs if not isStubGfxTarget(arch)]
+    if not cmdlineArchs:
+        tPrint(1, "Skipping source object compile; only stub gfx targets requested")
+        return []
 
     # Add build-id for builds with rocm 5.3+
     compilerVer = globalParameters["HipClangVersion"].split(".")[:2]
