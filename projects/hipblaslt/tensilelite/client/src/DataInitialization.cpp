@@ -2865,22 +2865,32 @@ namespace TensileLite
                                                p.cpuInput.valid.get(),
                                                p.maxElements,
                                                hipMemcpyHostToDevice);
+                        // Records the canonical layout so a later swizzled
+                        // solution does not reuse this buffer.
+                        m_mxUploadedScale[i] = {true, desc};
                     }
                     else if(preswizzledAlready)
                     {
                         ptr = p.gpuInput.valid.get();
                     }
-                    else if(auto mxIt = m_mxSwizzledDescriptor.find(i);
+                    else if(auto mxIt = m_mxUploadedScale.find(i);
                             m_mxScaleLayout == MXScaleLayout::GFX1250
-                            && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
+                            && mxIt != m_mxUploadedScale.end()
+                            && mxIt->second.first == false
+                            && mxIt->second.second == desc)
                     {
-                        // Already swizzled, and initOneMXSide kept the source bytes
-                        // unchanged, so skip the host-side permute.
+                        // Same layout and same descriptor already in gpuInput.valid,
+                        // and initOneMXSide kept the source bytes unchanged, so skip
+                        // the host-side permute.
                         ptr = p.gpuInput.valid.get();
                     }
                     else
                     {
-                        m_mxSwizzledDescriptor[i] = desc;
+                        // Every non-NoSwizzle format takes this same fallback
+                        // swizzle, so the bytes do not depend on which one asked
+                        // for it -- including the sentinel -1 of the first,
+                        // pre-solution call.
+                        m_mxUploadedScale[i] = {false, desc};
 
                         // Fallback K-dimension swizzle for the case where
                         // initializeMXData did NOT pre-produce a swizzled
