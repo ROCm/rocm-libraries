@@ -7,6 +7,7 @@ import ctypes
 import importlib
 import json
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -146,7 +147,11 @@ return 0;
 
 
 @pytest.mark.parametrize("explicit", [True, False])
-@pytest.mark.parametrize("arch", ["gfx942:sramecc+:xnack-", "gfx1250"])
+@pytest.mark.parametrize("arch", [
+    "gfx942", "gfx942:sramecc+:xnack-",
+    "gfx950", "gfx950:sramecc+:xnack-",
+    "gfx1250", "gfx1250:xnack-",
+])
 def test_cmake_normalizes_explicit_and_inferred_arches(tmp_path, explicit, arch):
     if not shutil.which("cmake"):
         pytest.skip("requires CMake")
@@ -168,11 +173,20 @@ add_subdirectory("{ROOT / 'bindings/ctypes'}" ctypes)
     result = subprocess.run(["cmake", "-S", str(source), "-B", str(build), "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     commands = json.loads((build / "compile_commands.json").read_text())
+    from dispatcher_common import arch_feature_defines
+
+    # Compare the standalone CMake command with the working Python compiler
+    # path, including absent flags so gfx1250/OCP settings cannot leak to gfx942.
+    feature_flags = set().union(*(set(arch_feature_defines(a)) for a in ("gfx942", "gfx950", "gfx1250")))
+    feature_flags.add("-DUSE_NEW_UNIFIED_FRAMEWORK=0")
     for op in OPS:
         command = next(c["command"] for c in commands if c["file"].endswith(f"grouped_gemm_{op}_ctypes_lib.cpp"))
         base = arch.split(":")[0]
         assert f'GFX_ARCH=\\"{base}\\"' in command
         assert f'GFX_ARCH=\\"{base}:' not in command
         assert f'-DCK_CMAKE_GPU_TARGET_IDS=0x{base[3:]}' in command
+        expected = set(arch_feature_defines(base))
         if base == "gfx1250":
-            assert "-DUSE_NEW_UNIFIED_FRAMEWORK=0" in command
+            expected.add("-DUSE_NEW_UNIFIED_FRAMEWORK=0")
+        actual = set(shlex.split(command)) & feature_flags
+        assert actual == expected, f"{op} {arch}: CMake/JIT feature mismatch: {actual ^ expected}"

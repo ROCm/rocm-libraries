@@ -48,6 +48,24 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
     )
 endfunction()
 
+# Feature definitions for the two single-target grouped quant bridges below.
+# Keep these aligned with dispatcher_common.arch_feature_defines(): standalone
+# CMake builds do not inherit the top-level CK definitions, and host/device FP8
+# encoding must agree. test_quant_review_regressions checks CMake/JIT parity.
+function(set_grouped_quant_arch_features TARGET_NAME GFX_ARCH)
+    if(GFX_ARCH STREQUAL "gfx950" OR GFX_ARCH STREQUAL "gfx1250")
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            CK_USE_OCP_FP8 CK_TILE_USE_OCP_FP8 CK_USE_NATIVE_MX_SUPPORT)
+    endif()
+    if(GFX_ARCH STREQUAL "gfx950")
+        target_compile_definitions(${TARGET_NAME} PRIVATE CK_GFX950_SUPPORT)
+    elseif(GFX_ARCH STREQUAL "gfx1250")
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            CK_TILE_USE_WMMA=1 CK_GFX12_SUPPORT CK_USE_GFX1250 CK_GFX1250_SUPPORT
+            USE_NEW_UNIFIED_FRAMEWORK=0)
+    endif()
+endfunction()
+
 # Helper function for block-scale quant ctypes targets.
 #
 # Usage:
@@ -363,9 +381,8 @@ if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
     string(REGEX REPLACE "^gfx" "0x" _rowcolquant_target_id "${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
     target_compile_options(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
         -UCK_CMAKE_GPU_TARGET_IDS "-DCK_CMAKE_GPU_TARGET_IDS=${_rowcolquant_target_id}")
-    if(CK_TILE_ROWCOLQUANT_GFX_ARCH STREQUAL "gfx1250")
-        target_compile_definitions(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
-    endif()
+    set_grouped_quant_arch_features(dispatcher_grouped_gemm_rowcolquant_lib
+        "${CK_TILE_ROWCOLQUANT_GFX_ARCH}")
 
     target_compile_definitions(dispatcher_grouped_gemm_rowcolquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
@@ -423,9 +440,8 @@ if(TENSORQUANT_GEMM_KERNEL_HEADERS)
     string(REGEX REPLACE "^gfx" "0x" _tensorquant_target_id "${CK_TILE_TENSORQUANT_GFX_ARCH}")
     target_compile_options(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
         -UCK_CMAKE_GPU_TARGET_IDS "-DCK_CMAKE_GPU_TARGET_IDS=${_tensorquant_target_id}")
-    if(CK_TILE_TENSORQUANT_GFX_ARCH STREQUAL "gfx1250")
-        target_compile_definitions(dispatcher_grouped_gemm_tensorquant_lib PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
-    endif()
+    set_grouped_quant_arch_features(dispatcher_grouped_gemm_tensorquant_lib
+        "${CK_TILE_TENSORQUANT_GFX_ARCH}")
 
     target_compile_definitions(dispatcher_grouped_gemm_tensorquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
