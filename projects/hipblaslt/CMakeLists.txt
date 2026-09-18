@@ -904,11 +904,22 @@ if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
 endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
-    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
+    # Keep each host selector paired with its flag so CMake does not de-duplicate it.
+    target_compile_options(hipblaslt PRIVATE
+        -g
+        -O0
+        "SHELL:-Xarch_host -fprofile-instr-generate"
+        "SHELL:-Xarch_host -fcoverage-mapping"
+    )
+    target_link_options(hipblaslt PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
 
-    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_options(hipblaslt-clients-common PRIVATE
+        -g
+        -O0
+        "SHELL:-Xarch_host -fprofile-instr-generate"
+        "SHELL:-Xarch_host -fcoverage-mapping"
+    )
+    target_link_options(hipblaslt-clients-common PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
