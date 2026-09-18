@@ -368,13 +368,8 @@ Function name                                     single double single complex d
 :cpp:func:`rocsparse_Xgthrz() <rocsparse_sgthrz>` x      x      x              x
 :cpp:func:`rocsparse_Xroti() <rocsparse_sroti>`   x      x
 :cpp:func:`rocsparse_Xsctr() <rocsparse_ssctr>`   x      x      x              x
+:cpp:func:`rocsparse_isctr`
 ================================================= ====== ====== ============== ==============
-
-+-----------------------------------------------------+
-|Function name                                        |
-+-----------------------------------------------------+
-|:cpp:func:`rocsparse_isctr`                          |
-+-----------------------------------------------------+
 
 Sparse level 2 functions
 ------------------------
