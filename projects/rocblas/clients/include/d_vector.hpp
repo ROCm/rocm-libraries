@@ -149,7 +149,7 @@ public:
                 // A guard that was not written is a guard that reports corruption later, so
                 // the failure has to be raised here where it says what actually went wrong.
                 // EXPECT is the only option in a function that returns a pointer.
-                hipError_t status = hipMemcpy(d, m_guard, m_guard_len, hipMemcpyHostToDevice);
+                hipError_t status = hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault);
                 EXPECT_EQ(status, hipSuccess)
                     << "cannot write the guard before the allocation: " << hipGetErrorName(status);
 
@@ -168,7 +168,7 @@ public:
                 }
                 else
                 {
-                    status = hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyHostToDevice);
+                    status = hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault);
                     EXPECT_EQ(status, hipSuccess) << "cannot write the guard after the allocation: "
                                                   << hipGetErrorName(status);
                     if(status != hipSuccess)
@@ -210,7 +210,7 @@ public:
             alignas(alignof(T)) unsigned char after_bytes[MEM_MAX_GUARD_PAD * sizeof(T)];
 
             hipError_t status
-                = hipMemcpy(after_bytes, d + m_size, m_guard_len, hipMemcpyDeviceToHost);
+                = hipMemcpy(after_bytes, d + m_size, m_guard_len, hipMemcpyDefault);
             EXPECT_EQ(status, hipSuccess)
                 << "cannot read the guard after the allocation: " << hipGetErrorName(status);
 
@@ -222,7 +222,7 @@ public:
 
             alignas(alignof(T)) unsigned char before_bytes[MEM_MAX_GUARD_PAD * sizeof(T)];
 
-            status = hipMemcpy(before_bytes, d, m_guard_len, hipMemcpyDeviceToHost);
+            status = hipMemcpy(before_bytes, d, m_guard_len, hipMemcpyDefault);
             EXPECT_EQ(status, hipSuccess)
                 << "cannot read the guard before the allocation: " << hipGetErrorName(status);
 
