@@ -55,7 +55,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 4, 1, 4, 4]
         - StaggerU: [0]
         - AssertSummationElementMultiple: [8]
-        - AssertFree0SizeEqual: [1]
+        - AssertSizeEqual: [{0: 1}]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

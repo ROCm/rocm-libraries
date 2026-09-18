@@ -220,6 +220,7 @@ def test_valid_parameters_accept_size_multiple_256():
     checkParametersAreValid(("AssertFree0ElementMultiple", [256]), validParameters)
     checkParametersAreValid(("AssertFree1ElementMultiple", [256]), validParameters)
     checkParametersAreValid(("AssertSummationElementMultiple", [256]), validParameters)
+    checkParametersAreValid(("AssertSizeEqual", [{}, {0: 1}, {0: 1, 1: 4}]), validParameters)
 
 
 def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
@@ -253,6 +254,33 @@ def test_get_custom_kernel_config_rejects_bad_predicate_value(tmp_path):
         getCustomKernelConfig("bad_predicate", {}, str(tmp_path))
 
 
+def test_get_custom_kernel_config_preserves_assert_size_equal(tmp_path):
+    write_kernel(tmp_path / "size_equal.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertSizeEqual: {0: 1}
+        """)
+
+    config = getCustomKernelConfig("size_equal", {}, str(tmp_path))
+
+    assert config["AssertSizeEqual"] == {0: 1}
+
+
+def test_get_custom_kernel_config_rejects_bad_assert_size_equal(tmp_path):
+    write_kernel(tmp_path / "bad_size_equal.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          AssertSizeEqual: 1
+        """)
+
+    with pytest.raises(Exception, match="AssertSizeEqual"):
+        getCustomKernelConfig("bad_size_equal", {}, str(tmp_path))
+
+
 def test_problem_predicate_emits_size_multiple_for_assert_free0():
     pred = ProblemPredicate.FromOriginalKeyPair(("AssertFree0ElementMultiple", 256))
 
@@ -274,14 +302,25 @@ def test_problem_predicate_drops_value_one():
     assert ProblemPredicate.FromOriginalKeyPair(("AssertFree0ElementMultiple", 1)) is None
 
 
-def test_problem_predicate_emits_size_equal_for_assert_free0_size():
-    pred = ProblemPredicate.FromOriginalKeyPair(("AssertFree0SizeEqual", 1))
+def test_problem_predicate_emits_size_equal_for_assert_size_equal():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {0: 1}))
 
     assert pred is not None
     assert pred.tag == "SizeEqual"
     assert pred.index == 0
     assert pred.value == 1
-    assert ProblemPredicate.FromOriginalKeyPair(("AssertFree0SizeEqual", 0)) is None
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {})) is None
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {0: -1})) is None
+
+
+def test_problem_predicate_ands_multi_dim_assert_size_equal():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", {0: 1, 1: 4}))
+
+    assert pred is not None
+    assert pred.tag == "And"
+    dims = {(p.index, p.value) for p in pred.value}
+    assert dims == {(0, 1), (1, 4)}
+    assert all(p.tag == "SizeEqual" for p in pred.value)
 
 
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
@@ -307,6 +346,27 @@ def test_parse_tensile_yaml_copies_single_valued_predicate(tmp_path):
     config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
 
     assert config["AssertFree0ElementMultiple"] == 256
+
+
+def test_parse_tensile_yaml_copies_assert_size_equal(tmp_path):
+    yaml_path = tmp_path / "size_equal.yaml"
+    yaml_path.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: predicated_kernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  threads: [256, 1, 1]
+                  grid: [TilesX, TilesY, One]
+              - AssertSizeEqual: [{0: 1}]
+        """))
+
+    config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
+
+    assert config["AssertSizeEqual"] == {0: 1}
 
 
 def test_parse_tensile_yaml_rejects_multi_valued_predicate(tmp_path):
@@ -345,7 +405,7 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
         },
         "AssertFree0ElementMultiple": 256,
         "AssertFree1ElementMultiple": 256,
-        "AssertFree0SizeEqual": 1,
+        "AssertSizeEqual": {0: 1},
         "StaggerU": 0,
         "WavefrontSize": 64,
     }
@@ -355,7 +415,7 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
     mi_idx = rendered.index("MatrixInstruction:")
     f0_idx = rendered.index("AssertFree0ElementMultiple:")
     f1_idx = rendered.index("AssertFree1ElementMultiple:")
-    size_idx = rendered.index("AssertFree0SizeEqual:")
+    size_idx = rendered.index("AssertSizeEqual:")
     stagger_idx = rendered.index("StaggerU:")
     wf_idx = rendered.index("WavefrontSize:")
 
@@ -365,7 +425,7 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
     assert mi_idx < stagger_idx < wf_idx
     assert "AssertFree0ElementMultiple: 256" in rendered
     assert "AssertFree1ElementMultiple: 256" in rendered
-    assert "AssertFree0SizeEqual: 1" in rendered
+    assert "AssertSizeEqual: { 0: 1 }" in rendered
     assert "StaggerU: 0" in rendered
 
 
@@ -998,7 +1058,7 @@ def test_wvspltk_hf_m1_shipped_config():
     ck = config["CustomKernel"]
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
-    assert config["AssertFree0SizeEqual"] == 1
+    assert config["AssertSizeEqual"] == {0: 1}
     assert config["AssertSummationElementMultiple"] == 8
     assert config["StaggerU"] == 0
     assert [a["semantic"] for a in ck["args"]] == [

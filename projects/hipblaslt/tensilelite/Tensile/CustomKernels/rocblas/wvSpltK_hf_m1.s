@@ -595,7 +595,7 @@ custom.config:
   EnableMatrixInstruction: True
   MIWaveTile: [1, 1]
   AssertSummationElementMultiple: 8
-  AssertFree0SizeEqual: 1
+  AssertSizeEqual: { 0: 1 }
   StaggerU: 0
   WavefrontSize: 64
 amdhsa.kernels:

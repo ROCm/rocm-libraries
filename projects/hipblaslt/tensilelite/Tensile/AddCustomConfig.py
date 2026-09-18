@@ -72,7 +72,7 @@ PREDICATE_FORK_PARAMETER_KEYS = (
     "AssertFree0ElementMultiple",
     "AssertFree1ElementMultiple",
     "AssertSummationElementMultiple",
-    "AssertFree0SizeEqual",
+    "AssertSizeEqual",
 )
 
 # Single-valued ForkParameters frozen into custom.config. Predicates select

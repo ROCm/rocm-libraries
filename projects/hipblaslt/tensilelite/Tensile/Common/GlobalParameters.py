@@ -521,7 +521,7 @@ defaultBenchmarkCommonParameters = [
     {"AssertSummationElementMultiple": [1]},
     {"AssertFree0ElementMultiple": [1]},
     {"AssertFree1ElementMultiple": [1]},
-    {"AssertFree0SizeEqual": [0]},
+    {"AssertSizeEqual": [{}]},
     {"AssertAIGreaterThanEqual": [-1]},
     {"AssertAILessThanEqual": [-1]},
     {"StaggerU": [32]},  # recommend [0,32]
