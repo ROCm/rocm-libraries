@@ -36,7 +36,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    streamKMulticast, streamK2DMulticast, \
+                    streamKCluster, streamKMulticast, streamK2DCluster, \
                     swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
@@ -271,7 +271,7 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   than an explicit opt-in. They deliberately do not reach the FDPO=0 SK3
   cluster (cluster reduction), which develop never constrained.
   """
-  if not streamKMulticast(state):
+  if not streamKCluster(state):
     return True
 
   # SK3 (StreamKTwoTileDPFirst) only: the DP schedule + skIndexToWG addressing
@@ -341,8 +341,8 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
 # module (Tensile/Tests/unit/test_validateParameterTypes.py) that imports
 # them from Solution.
 
-_cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
-_cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
+_cacheHintTensors = ("A", "B", "C", "D", "E", "Gate", "MXSA", "MXSB", "WS", "Metadata")
+_cacheHintLoadTensors = ("A", "B", "C", "E", "Gate", "MXSA", "MXSB", "WS", "Metadata")
 
 # Module-level collector that accumulates type mismatches across all Solution
 # instances during a build.  Key is (param_name, actual_type_name,
@@ -1183,7 +1183,7 @@ class Solution(collections.abc.Mapping):
     # -- except on the DP-only SK3 cluster, where every WG owns one whole tile, so the
     # peers stay the spatial tile neighbours the ClusterLoad component broadcasts between.
     clusterPeersShareTiles = bool(state["ClusterDim"] != [1, 1]
-                                  and (state["StreamK"] == 0 or streamKMulticast(state)))
+                                  and (state["StreamK"] == 0 or streamKCluster(state)))
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
     # clustering and ClusterBarrier are separate features kept even where it is absent.
     state["Multicast"] = bool(clusterPeersShareTiles
@@ -1856,15 +1856,22 @@ class Solution(collections.abc.Mapping):
       if state["InternalSupportParams"]["KernArgsVersion"] < 3:
         state["InternalSupportParams"]["KernArgsVersion"] = 3
 
+    # SupportStreamKPerTileExtraIters is a pure CAPABILITY flag (see
+    # defaultInternalSupportParams): "this kernel's asm carries BOTH Stream-K
+    # K-split mappings and honors bit 29 of MagicShiftItersPerTile as the
+    # runtime selector". It is fully derived here, overriding whatever the
+    # solution YAML said, because only the generator knows what it just emitted.
+    # Newly generated SK3 / SK5 kernels emit both mappings plus the bit-29 gate.
+    # SK4 (dynamic) and SK0 do not, and custom kernels are hand-written asm that
+    # this generator did not produce, so none of them may claim the capability.
+    isCustomKernel = bool(state["CustomKernelName"])
+    state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
+        (state["StreamK"] in (3, 5)) and not isCustomKernel
+
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
-      # Newly generated SK3 / SK5 kernels emit the per-tile extra-iters asm
-      # path. SK4 (dynamic) does not. Older/custom kernels keep the default
-      # False via YAML omission / defaultInternalSupportParams.
-      if state["StreamK"] in (3, 5):
-        state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = True
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:
@@ -1883,7 +1890,7 @@ class Solution(collections.abc.Mapping):
         # ForceDPOnly cluster multicast; anywhere else a Y-extent > 1 would collide
         # WorkGroup0 across work-groups that differ only in Y. A [1, Ck] cluster has
         # no B-sharing X peers at all and is not a multicast shape.
-        if state["ClusterDim"][1] != 1 and not (streamK2DMulticast(state)
+        if state["ClusterDim"][1] != 1 and not (streamK2DCluster(state)
                                                 and state["StreamKForceDPOnly"]):
           reject(state, printRejectionReason,
                  "Stream-K + ClusterDim Y-extent > 1 requires StreamKForceDPOnly=1 "
@@ -2834,12 +2841,20 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["enableTDMMetadata"] and state["ProblemType"]["MetadataLayout"]:
-      # reject if NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)
+      # reject if NumWaves // 2 > metadata k-major dimension (DepthU * 0.25 // 2).
+      # Reaching this branch (enableTDMMetadata + NumWaves > 1) implies TDMInst==3
+      # (enableTDMA and enableTDMB both set; TDMInst is validated to be 0 or 3
+      # above), i.e. isTdmWaveSeparated() is true. In wave-separated mode, only
+      # even "component" waves transfer metadata (see the wCompId = WaveIdx // 2
+      # partitioning in KernelWriterAssembly.initTDMDescriptor and
+      # TensorDataMover.calculateStartAddr), so the metadata region only needs
+      # to be sized for NumWaves // 2 components, not the full NumWaves.
       metadataKMajorDimension = (state["DepthU"] * 0.25) // 2
-      if state["NumWaves"] > 1 and metadataKMajorDimension < state["NumWaves"]:
+      numComp = state["NumWaves"] // 2
+      if state["NumWaves"] > 1 and metadataKMajorDimension < numComp:
         reject(state, printRejectionReason,
-               "Metadata Layout 1 can not support NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)"
-               "(DepthU=%d * 0.25 // 2)=%d < NumWaves=%d)" % (state["DepthU"], metadataKMajorDimension, state["NumWaves"]))
+               "Metadata Layout 1 can not support NumWaves // 2 > metadata k-major dimension (DepthU * 0.25 // 2)"
+               "(DepthU=%d * 0.25 // 2)=%d < NumWaves//2=%d)" % (state["DepthU"], metadataKMajorDimension, numComp))
         return
 
     if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):

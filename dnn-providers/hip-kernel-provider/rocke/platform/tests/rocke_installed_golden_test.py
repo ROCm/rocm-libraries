@@ -94,7 +94,6 @@ def main() -> int:
 
     from rocke_ir_parity_harness import (
         GOLDEN_FLAVORS,
-        QUARANTINED_CASES,
         check_golden,
     )
 
@@ -104,11 +103,7 @@ def main() -> int:
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         return 1
-    quarantined = f", {len(QUARANTINED_CASES)} quarantined" if QUARANTINED_CASES else ""
-    print(
-        f"rocKE installed golden gate: PASS "
-        f"({flavors}, golden={golden.name}{quarantined})"
-    )
+    print(f"rocKE installed golden gate: PASS " f"({flavors}, golden={golden.name})")
     return 0
 
 

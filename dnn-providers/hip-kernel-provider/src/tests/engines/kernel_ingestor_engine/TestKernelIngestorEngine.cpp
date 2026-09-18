@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -23,6 +24,7 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "core/Container.hpp"
 #include "core/Context.hpp"
@@ -44,7 +46,11 @@ using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hip_kernel_provider::core::Container;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+constexpr const char* SCRATCH_LABEL = "ingestorengine";
 
 GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 {
@@ -295,8 +301,7 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphNoPackOfItsClaims)
 /// directory there has to beat both the module-relative path and the configure-time one.
 TEST(TestKernelIngestorEngine, PrefersHipdnnDescriptorDirOverEverything)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory existing(
-        std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_env");
+    const ScopedDirectory existing = claimScratchDirectory(SCRATCH_LABEL);
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
         "HIPDNN_DESCRIPTOR_DIR", existing.path().string());
 
@@ -315,7 +320,8 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorDirThatDoesNotExist)
     const auto resolved = descriptorSearchDirectory();
 
     EXPECT_NE(resolved, std::filesystem::path("/nowhere/in/particular"));
-    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
+    EXPECT_TRUE(resolved.generic_string().find(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR)
+                != std::string::npos)
         << "resolved to " << resolved;
 }
 
@@ -330,8 +336,10 @@ TEST(TestKernelIngestorEngine, FallsBackToAModuleRelativeOrInstalledPath)
     const auto resolved = descriptorSearchDirectory();
 
     ASSERT_FALSE(resolved.empty());
-    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
-        << "resolved to " << resolved << ", which does not end in " << HIPDNN_DESCRIPTOR_SUBDIR;
+    EXPECT_TRUE(resolved.generic_string().find(HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR)
+                != std::string::npos)
+        << "resolved to " << resolved << ", which does not end in "
+        << HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR;
 }
 
 /// Asserts the mechanism step 2 rests on: an address resolves to the module containing
@@ -371,8 +379,7 @@ TEST(TestKernelIngestorEngine, ReturnsOnlyTheProviderTreeWhenRuntimeDirIsUnset)
 /// duplicate rule, so it's asserted position by position rather than as a set.
 TEST(TestKernelIngestorEngine, AppendsHipdnnDescriptorRuntimeDirAfterTheProviderTree)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory runtimeDir(
-        std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_runtime");
+    const ScopedDirectory runtimeDir = claimScratchDirectory(SCRATCH_LABEL);
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", runtimeDir.path().string());
 
