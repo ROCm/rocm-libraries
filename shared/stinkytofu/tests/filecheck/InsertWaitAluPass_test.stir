@@ -402,19 +402,19 @@ st.func @vm_many_ds() {
   v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- g_enableESM2SuppressValuToGlobalVaVdst gate on global_prefetch_b8: a VALU
-#--- writes a vaddr VGPR (v0), then global_prefetch_b8 reads it. The gate drops the
-#--- src-RAW va_vdst wait (the DAG already spaces the producer >=32 cycles). Two
-#--- unrelated VALUs sit between, so WITHOUT the suppression a non-zero va_vdst wait
-#--- would be emitted before the prefetch.
+#--- A VALU writes a vaddr VGPR (v0), then global_prefetch_b8 reads it. The wait is
+#--- emitted: correctness comes from the wait itself, and the cost is managed by
+#--- pacing the producer away from the consumer so the count satisfies it. Here the
+#--- two intervening VALUs are not matrix ops, so nothing satisfies the count and the
+#--- wait stands at the follower distance.
 #---
 #--- Regression for the classifier fix: global_prefetch_b8 does NOT carry
-#--- IF_GLOBALLoad, so the original isGLOBALOrAtomic-only gate silently skipped it,
-#--- leaving the wait in place. The gate must also classify it via isGlobalPrefetch().
-#--- No s_wait_alu va_vdst may appear between the producer and the prefetch.
+#--- IF_GLOBALLoad, so a classifier keyed only on isGLOBALOrAtomic silently skips it.
+#--- It must be recognised via isGlobalPrefetch().
 # CHECK-LABEL: @valu_to_global_prefetch_suppressed
 # CHECK: v_add_f32
-# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 2
 # CHECK: "st.global_prefetch_b8"
 
 st.func @valu_to_global_prefetch_suppressed() {

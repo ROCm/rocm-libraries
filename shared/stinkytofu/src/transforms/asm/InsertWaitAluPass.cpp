@@ -67,7 +67,7 @@ bool g_xdlCountFromNextWmma = false;
 // >=32 cycles ahead (CDNA5 isVmemAddrHazardConsumer covers buffer loads and prefetch).
 // Stores and atomics are not covered by that spacing guarantee, so their data
 // operand still needs the real wait.
-constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = true;
+constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = false;
 
 const HWModel::WaitHide* g_waitHide = nullptr;
 
