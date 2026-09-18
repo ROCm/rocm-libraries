@@ -183,6 +183,26 @@ void testModeratelyLargeExactGemm() {
             require(output.loadAs<float>({row, column}) == static_cast<float>(dimension),
                     "Moderately large BLAS GEMM result mismatch.");
 }
+
+void testPlainLowPrecisionMaterialization() {
+    using namespace roc::host_numerics;
+
+    const std::array<float, 6> aValues{1, 2, 3, 2, 1, 0};
+    const std::array<float, 6> bValues{1, 2, 3, 1, 2, 3};
+    const std::array<float, 4> expected{13, 13, 5, 5};
+    for (const ScalarType inputType : {ScalarType::Float16, ScalarType::BFloat16,
+                                       ScalarType::Float8E4M3, ScalarType::Float8E5M2}) {
+        Tensor output(ScalarType::Float32, Shape{2, 2});
+        GemmTestCase problem(Tensor::copyValuesWithConversion(inputType, Shape{2, 3},
+                                                              std::span<const float>(aValues)),
+                             Tensor::copyValuesWithConversion(inputType, Shape{3, 2},
+                                                              std::span<const float>(bValues)),
+                             output, ScalarType::Float32);
+        referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
+        require(compare(output, Tensor::copyNativeValues<float>(Shape{2, 2}, expected)).passed(),
+                "Plain low-precision BLAS materialization produced an incorrect result.");
+    }
+}
 }  // namespace
 
 int main() {
@@ -217,6 +237,7 @@ int main() {
     testTransformingAutomaticCostPolicy();
     testZeroExtentsDoNotInvokeBlas();
     testModeratelyLargeExactGemm();
+    testPlainLowPrecisionMaterialization();
 
     const std::array<std::complex<float>, 1> complexA{std::complex<float>(1, 2)};
     const std::array<std::complex<float>, 1> complexB{std::complex<float>(3, 4)};

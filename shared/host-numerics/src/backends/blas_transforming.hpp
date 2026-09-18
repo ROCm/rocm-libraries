@@ -70,6 +70,28 @@ Tensor materializeOperand(const Tensor& operand, const std::optional<ScalarType>
     using namespace detail;
     Tensor output = Tensor::allocateUninitialized(nativeScalarType<Accumulator>,
                                                   columnMajorLayout(operand.shape()));
+    if (!computeType && preQuantizationScales.empty() && !conjugate &&
+        mathMode == MathMode::Default) {
+        const auto storage = output.rawEncodedBackingStorage();
+        if (reinterpret_cast<uintptr_t>(storage.data()) % alignof(Accumulator) == 0) {
+            auto* values = reinterpret_cast<Accumulator*>(storage.data());
+            const RuntimeMatrixBlockReader<Accumulator> input(operand);
+            const size_t rows = operand.shape()[0];
+            const size_t columns = operand.shape()[1];
+            constexpr size_t rowsPerBlock = 64 * 1024;
+            const size_t rowBlocks = rows / rowsPerBlock + (rows % rowsPerBlock != 0);
+            const size_t blockCount = saturatedProduct(rowBlocks, columns);
+            forEachParallelIndex(
+                blockCount, operand.elementCount(), true, 500'000, [&](size_t block) {
+                    const size_t column = block / rowBlocks;
+                    const size_t rowBase = (block % rowBlocks) * rowsPerBlock;
+                    const size_t blockRows = std::min(rowsPerBlock, rows - rowBase);
+                    input.load(rowBase, column, blockRows, 1,
+                               std::span(values + column * rows + rowBase, blockRows));
+                });
+            return output;
+        }
+    }
     const RuntimeMatrixReader<Accumulator> input(operand);
     const RuntimeMatrixWriter<Accumulator> writer(output);
     const RuntimeQuantizer<Accumulator> quantize(computeType);
