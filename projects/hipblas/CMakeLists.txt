@@ -19,8 +19,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-# ROCm software requires Ubuntu 16.04 or Fedora 24, which has cmake 3.5
-cmake_minimum_required( VERSION 3.5 )
+# FindCUDAToolkit, used by the CUDA backend, was added in CMake 3.17.
+cmake_minimum_required( VERSION 3.17 )
 
 # We use C++14 features, this will add compile option: -std=c++14
 set( CMAKE_CXX_STANDARD 17 )
@@ -86,10 +86,7 @@ option( BUILD_SHARED_LIBS "Build hipBLAS as a shared library" ON )
 option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
 if(USE_CUDA)
-  # Use the legacy FindCUDA module (available since CMake 2.8) so that the
-  # minimum required CMake version does not need to be raised. FindCUDAToolkit
-  # (the modern alternative with imported targets) requires CMake 3.17.
-  find_package(CUDA REQUIRED)
+  find_package(CUDAToolkit REQUIRED)
   set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
 else()
   # AMD backend: hip::host / hip::device imported targets drive compilation.
