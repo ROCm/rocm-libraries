@@ -42,7 +42,7 @@ test_categories:
     exclude:
     extra_args:
       - "--test_prob"
-      - "0.02"
+      - "1.0"
     labels:
       - "multigpu_comprehensive"
       - "multigpu_full"
@@ -65,5 +65,5 @@ execution_settings:
     standard: 3600       # 1 hour
     comprehensive: 14400 # 4 hours
     full: 43200          # 12 hours
-    multigpu_tests: 3600 # 1 hour
+    multigpu_tests: 43200 # 12 hours (test_prob=1.0 diagnostic run)
     ffm-quick: 7200      # 2 hours
