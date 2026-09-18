@@ -146,6 +146,12 @@ TEST(host_alloc, guard_no_false_positive_on_clean_alloc)
         ::testing::ScopedFakeTestPartResultReporter reporter(
             ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
         device_vector<float> dv(1024);
+        // If this allocation fails after the one-element probe succeeded, the
+        // destructor is a no-op and an empty `failures` array would greenwash
+        // the test. Record memcheck with EXPECT so a failed alloc shows up in
+        // `failures` and the final size check does not treat it as a clean pass.
+        EXPECT_EQ(dv.memcheck(), hipSuccess)
+            << "device allocation failed; guard check was never exercised";
         // Guards are not modified. dv is declared after reporter, so its
         // destructor runs first (reverse declaration order) while reporter
         // is still intercepting — any EXPECT from device_vector_check is captured.
