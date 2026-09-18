@@ -3414,10 +3414,9 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
       return True
 
-    # Track VALU source operands on VA_VDST (src-operand WAR hazard). On only for
-    # sparse; non-sparse kernels skip the stamp. Pre-armed for when sparse enables ESM2.
+    # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:
-      return bool(state["ProblemType"]["Sparse"])
+      return True
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
     state["EnableStinkyTofuESM2"] = evaluateStinkyTofuESM2()
