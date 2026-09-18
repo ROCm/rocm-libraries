@@ -5,6 +5,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
+### Removed
+* [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
+* [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
+* [Conv] Removed the gfx803 find-database files.
+
 ## MIOpen 3.6.1 for ROCm 10.1.0
 
 ### Resolved Issues
@@ -49,9 +54,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Removed disabled convolution solver `ConvCkIgemmFwdV6r1DlopsNchw`.
 * Removed disabled convolution solver `ConvHipImplicitGemmBwdDataV1R1Xdlops`.
 * Removed disabled convolution solver `ConvHipImplicitGemmBwdDataV4R1`.
-* Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
-* Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
-* Removed the gfx803 find-database files.
 
 ## MIOpen 3.6.0 for ROCm 10.0.0
 ### Added
