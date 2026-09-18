@@ -16,6 +16,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "detail/generation_primitives.hpp"
@@ -76,6 +77,12 @@ struct GenerationRecipeAccess {
             component.pattern_);
     }
 
+    static double uniformRealValue(const Component::UniformRealPattern& pattern,
+                                   uint64_t randomMantissa) {
+        return pattern.parameters.lower + uniformUnitFromMantissa(randomMantissa) *
+                                              (pattern.parameters.upper - pattern.parameters.lower);
+    }
+
     template <typename Pattern>
     static double baseGenerationValueKnown(const Pattern& pattern, uint64_t seed, uint64_t domain,
                                            std::span<const size_t> indices, const Shape& shape,
@@ -98,9 +105,7 @@ struct GenerationRecipeAccess {
         } else if constexpr (std::is_same_v<Pattern, Component::UniformRealPattern>) {
             if (pattern.parameters.lower > pattern.parameters.upper)
                 throw std::invalid_argument("Uniform-real lower bound exceeds upper bound.");
-            const double unit = indexedUniformUnit(seed, domain, logicalIndex);
-            return pattern.parameters.lower +
-                   unit * (pattern.parameters.upper - pattern.parameters.lower);
+            return uniformRealValue(pattern, counterRandom(seed, domain, logicalIndex) >> 11);
         } else if constexpr (std::is_same_v<Pattern, Component::NormalPattern>) {
             constexpr double twoPi = 6.28318530717958647692528676655900576;
             const double first = indexedUniformUnit(seed, domain, 2 * logicalIndex);
@@ -707,6 +712,23 @@ struct GenerationRecipeAccess {
         }
     }
 
+    template <typename Tag>
+    static auto rawStorageValue(uint64_t value) {
+        using Storage = typename Tag::Storage;
+        if constexpr (std::is_void_v<Storage>) {
+            return static_cast<uint32_t>(value);
+        } else if constexpr (sizeof(Storage) == 1) {
+            return std::bit_cast<Storage>(static_cast<uint8_t>(value));
+        } else if constexpr (sizeof(Storage) == 2) {
+            return std::bit_cast<Storage>(static_cast<uint16_t>(value));
+        } else if constexpr (sizeof(Storage) == 4) {
+            return std::bit_cast<Storage>(static_cast<uint32_t>(value));
+        } else {
+            static_assert(sizeof(Storage) == 8);
+            return std::bit_cast<Storage>(value);
+        }
+    }
+
     template <typename EncodedValue>
     static bool generateContiguousPacked(Tensor destination, IndexOrder order,
                                          bool valueUsesCoordinates, EncodedValue&& encodedValue) {
@@ -740,21 +762,13 @@ struct GenerationRecipeAccess {
         return true;
     }
 
-    template <typename Tag, typename Pattern>
-    static bool generateContiguousNumericalType(Tensor destination, const GenerationRecipe& recipe,
-                                                const GenerationRecipe::BoundComponent& bound,
-                                                const Pattern& pattern) {
+    template <typename Tag, typename EncodedValue>
+    static bool generateContiguousEncodedValues(Tensor destination, IndexOrder order,
+                                                EncodedValue&& encodedValue) {
         using Storage = typename Tag::Storage;
-        if (!isUnmodifiedComponent<Pattern>(bound.component) ||
-            !isContiguous(destination.layout(), recipe.settings_.indexOrder))
-            return false;
-
         if constexpr (std::is_void_v<Storage>) {
-            return generateContiguousPacked(
-                destination, recipe.settings_.indexOrder, false, [&](size_t logicalIndex) {
-                    return generatedEncodedValue<Tag>(pattern, recipe, bound, destination.shape(),
-                                                      logicalIndex, destination.type());
-                });
+            return generateContiguousPacked(destination, order, false,
+                                            std::forward<EncodedValue>(encodedValue));
         } else {
             const auto storage = destination.rawEncodedBackingStorage();
             const size_t byteOffset =
@@ -762,14 +776,200 @@ struct GenerationRecipeAccess {
             if (reinterpret_cast<uintptr_t>(storage.data() + byteOffset) % alignof(Storage) != 0)
                 return false;
             auto* output = reinterpret_cast<Storage*>(storage.data() + byteOffset);
-            forEachParallelIndex(destination.elementCount(), destination.elementCount(), true, 4096,
-                                 [&](size_t logicalIndex) {
-                                     output[logicalIndex] = generatedEncodedValue<Tag>(
-                                         pattern, recipe, bound, destination.shape(), logicalIndex,
-                                         destination.type());
-                                 });
+            forEachParallelIndex(
+                destination.elementCount(), destination.elementCount(), true, 4096,
+                [&](size_t logicalIndex) { output[logicalIndex] = encodedValue(logicalIndex); });
             return true;
         }
+    }
+
+    static constexpr size_t maximumDiscreteLookupSize = 256;
+    static constexpr size_t uniformRealLookupBits = 12;
+    static constexpr size_t uniformRealLookupSize = size_t{1} << uniformRealLookupBits;
+    static constexpr size_t uniformRandomMantissaBits = 53;
+    static constexpr size_t uniformRealLookupShift =
+        uniformRandomMantissaBits - uniformRealLookupBits;
+    static constexpr uint16_t ambiguousUniformRealLookupValue = 0x100U;
+
+    template <typename Encoded>
+    struct EncodedDiscreteLookup {
+        std::array<Encoded, maximumDiscreteLookupSize> values{};
+        size_t size = 0;
+    };
+
+    struct AlternatingDimension {
+        size_t stride;
+        size_t oddExtent;
+    };
+
+    struct PreparedAlternatingSign {
+        std::vector<AlternatingDimension> dimensions;
+        bool negativeWhenOdd;
+
+        bool negates(size_t logicalIndex) const {
+            size_t parity = 0;
+            for (const auto [stride, oddExtent] : dimensions) {
+                size_t coordinate = stride == 1 ? logicalIndex : logicalIndex / stride;
+                if (oddExtent != 0) coordinate %= oddExtent;
+                parity ^= coordinate;
+            }
+            return ((parity & 1U) != 0) == negativeWhenOdd;
+        }
+    };
+
+    static PreparedAlternatingSign prepareAlternatingSign(const Component& component,
+                                                          const Shape& shape, IndexOrder order) {
+        const auto& parameters = *component.alternatingSign_;
+        std::vector<size_t> strides(shape.rank(), 1);
+        if (order == IndexOrder::FirstDimensionFastest) {
+            for (size_t dimension = 1; dimension < shape.rank(); ++dimension)
+                strides[dimension] = strides[dimension - 1] * shape[dimension - 1];
+        } else {
+            for (size_t dimension = shape.rank(); dimension > 1; --dimension)
+                strides[dimension - 2] = strides[dimension - 1] * shape[dimension - 1];
+        }
+
+        PreparedAlternatingSign result{
+            .dimensions = {},
+            .negativeWhenOdd = parameters.negativeWhenOdd,
+        };
+        result.dimensions.reserve(parameters.dimensions.size());
+        for (const size_t dimension : parameters.dimensions) {
+            if (dimension >= shape.rank())
+                throw std::out_of_range(
+                    "Alternating-sign generation dimension exceeds tensor rank.");
+            const size_t extent = shape[dimension];
+            result.dimensions.push_back(
+                {.stride = strides[dimension], .oddExtent = extent % 2 == 0 ? 0 : extent});
+        }
+        return result;
+    }
+
+    template <typename Tag, typename Pattern>
+    static auto prepareEncodedDiscreteValues(const Pattern& pattern, bool negate = false) {
+        // The random counter still selects one source candidate per logical element. Caching only
+        // removes repeated conversion of that finite candidate set, so both the distribution and
+        // the seed-to-output mapping remain unchanged.
+        using Encoded = decltype(encodeScalarValueKnown<Tag>(0.0));
+        EncodedDiscreteLookup<Encoded> lookup;
+        if constexpr (std::is_same_v<Pattern, Component::ChoicePattern>) {
+            if (pattern.parameters.values.size() > maximumDiscreteLookupSize) return lookup;
+            for (const double value : pattern.parameters.values)
+                lookup.values[lookup.size++] = encodeScalarValueKnown<Tag>(negate ? -value : value);
+        } else {
+            const int64_t lower = pattern.parameters.lower;
+            const int64_t upper = pattern.parameters.upper;
+            const uint64_t count = static_cast<uint64_t>(upper - lower + 1);
+            if (count > maximumDiscreteLookupSize) return lookup;
+            for (int64_t value = lower; value <= upper; ++value) {
+                const double generated =
+                    std::is_same_v<Pattern, Component::AbsoluteUniformIntegerPattern>
+                        ? std::abs(static_cast<double>(value))
+                        : static_cast<double>(value);
+                lookup.values[lookup.size++] =
+                    encodeScalarValueKnown<Tag>(negate ? -generated : generated);
+            }
+        }
+        return lookup;
+    }
+
+    template <typename Tag>
+    static auto prepareEncodedUniformRealLookup(const Component::UniformRealPattern& pattern) {
+        // Uniform generation is monotonic in the 53 random mantissa bits. If both ends of a
+        // bucket encode identically, every value in that bucket does too. Only buckets crossing
+        // an encoding boundary need the full floating-point calculation at generation time.
+        std::array<uint16_t, uniformRealLookupSize> values{};
+        for (size_t bucket = 0; bucket < uniformRealLookupSize; ++bucket) {
+            const uint64_t firstMantissa = static_cast<uint64_t>(bucket) << uniformRealLookupShift;
+            const uint64_t lastMantissa =
+                (static_cast<uint64_t>(bucket + 1) << uniformRealLookupShift) - 1U;
+            const uint32_t first = static_cast<uint32_t>(
+                encodeScalarValueKnown<Tag>(uniformRealValue(pattern, firstMantissa)));
+            const uint32_t last = static_cast<uint32_t>(
+                encodeScalarValueKnown<Tag>(uniformRealValue(pattern, lastMantissa)));
+            values[bucket] =
+                first == last ? static_cast<uint16_t>(first) : ambiguousUniformRealLookupValue;
+        }
+        return values;
+    }
+
+    template <typename Tag, typename Pattern>
+    static bool generateContiguousNumericalType(Tensor destination, const GenerationRecipe& recipe,
+                                                const GenerationRecipe::BoundComponent& bound,
+                                                const Pattern& pattern) {
+        if (!isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
+
+        constexpr ScalarCategory category = scalarTypeInfo(Tag::type).category;
+        constexpr bool lowPrecisionFloatingPoint = category == ScalarCategory::FloatingPoint &&
+                                                   scalarTypeInfo(Tag::type).storageBits <= 16;
+        constexpr bool discretePattern =
+            std::is_same_v<Pattern, Component::ChoicePattern> ||
+            std::is_same_v<Pattern, Component::UniformIntegerPattern> ||
+            std::is_same_v<Pattern, Component::AbsoluteUniformIntegerPattern>;
+        const bool onlyAlternatingSign =
+            bound.component.alternatingSign_.has_value() &&
+            !bound.component.zeroOutsideMainDiagonal_ &&
+            bound.component.unaryTransform_ == Component::UnaryTransform::None &&
+            bound.component.affineValue_.scale == 1.0 && bound.component.affineValue_.offset == 0.0;
+        if (!isUnmodifiedComponent<Pattern>(bound.component) &&
+            !(lowPrecisionFloatingPoint && discretePattern && onlyAlternatingSign))
+            return false;
+
+        if constexpr (lowPrecisionFloatingPoint && discretePattern) {
+            const auto encodedValues = prepareEncodedDiscreteValues<Tag>(pattern);
+            if (encodedValues.size != 0) {
+                const uint64_t seed = recipe.settings_.seed;
+                const uint64_t domain = randomDomain(bound);
+                if (onlyAlternatingSign) {
+                    const auto negativeEncodedValues =
+                        prepareEncodedDiscreteValues<Tag>(pattern, true);
+                    const PreparedAlternatingSign alternating = prepareAlternatingSign(
+                        bound.component, destination.shape(), recipe.settings_.indexOrder);
+                    return generateContiguousEncodedValues<Tag>(
+                        destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                            const size_t selected =
+                                counterRandom(seed, domain, logicalIndex) % encodedValues.size;
+                            return alternating.negates(logicalIndex)
+                                       ? negativeEncodedValues.values[selected]
+                                       : encodedValues.values[selected];
+                        });
+                }
+                return generateContiguousEncodedValues<Tag>(
+                    destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                        return encodedValues
+                            .values[counterRandom(seed, domain, logicalIndex) % encodedValues.size];
+                    });
+            }
+        }
+
+        constexpr bool subByteOrByteFloatingPoint =
+            category == ScalarCategory::FloatingPoint && scalarTypeInfo(Tag::type).storageBits <= 8;
+        if constexpr (subByteOrByteFloatingPoint &&
+                      std::is_same_v<Pattern, Component::UniformRealPattern>) {
+            constexpr size_t minimumLookupElementCount = 16384;
+            if (destination.elementCount() >= minimumLookupElementCount &&
+                std::isfinite(pattern.parameters.lower) &&
+                std::isfinite(pattern.parameters.upper - pattern.parameters.lower)) {
+                const auto encodedValues = prepareEncodedUniformRealLookup<Tag>(pattern);
+                const uint64_t seed = recipe.settings_.seed;
+                const uint64_t domain = randomDomain(bound);
+                return generateContiguousEncodedValues<Tag>(
+                    destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                        const uint64_t mantissa = counterRandom(seed, domain, logicalIndex) >> 11;
+                        const uint16_t encoded = encodedValues[mantissa >> uniformRealLookupShift];
+                        return encoded == ambiguousUniformRealLookupValue
+                                   ? encodeScalarValueKnown<Tag>(
+                                         uniformRealValue(pattern, mantissa))
+                                   : encoded;
+                    });
+            }
+        }
+
+        return generateContiguousEncodedValues<Tag>(
+            destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                return generatedEncodedValue<Tag>(pattern, recipe, bound, destination.shape(),
+                                                  logicalIndex, destination.type());
+            });
     }
 
     template <typename Pattern>
@@ -781,6 +981,42 @@ struct GenerationRecipeAccess {
                 return false;
             else
                 return generateContiguousNumericalType<Tag>(destination, recipe, bound, pattern);
+        });
+    }
+
+    template <typename Pattern>
+    static bool generateCommonRawType(Tensor destination, const GenerationRecipe& recipe,
+                                      const GenerationRecipe::BoundComponent& bound,
+                                      const Pattern& pattern) {
+        if (usesCoordinates<Pattern>(bound.component) ||
+            !isContiguous(destination.layout(), recipe.settings_.indexOrder))
+            return false;
+
+        return visitScalarType(destination.type(), [&]<typename Tag>() {
+            constexpr ScalarType type = Tag::type;
+            if constexpr (scalarTypeInfo(type).category == ScalarCategory::Complex ||
+                          scalarTypeInfo(type).storageBits > 64) {
+                return false;
+            } else {
+                const uint64_t seed = recipe.settings_.seed;
+                const uint64_t domain = randomDomain(bound);
+                if constexpr (std::is_same_v<Pattern,
+                                             Component::UniformFiniteEncodedValuePattern>) {
+                    const std::span<const uint8_t> candidates =
+                        finiteEncodedValues(destination.type());
+                    return generateContiguousEncodedValues<Tag>(
+                        destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                            return rawStorageValue<Tag>(
+                                candidates[counterRandom(seed, domain, logicalIndex) %
+                                           candidates.size()]);
+                        });
+                }
+                return generateContiguousEncodedValues<Tag>(
+                    destination, recipe.settings_.indexOrder, [&](size_t logicalIndex) {
+                        return rawStorageValue<Tag>(rawGenerationValueKnown(
+                            pattern, seed, domain, {}, destination.shape(), logicalIndex, type));
+                    });
+            }
         });
     }
 
@@ -800,14 +1036,7 @@ struct GenerationRecipeAccess {
                                 }))
                             return;
                     }
-                    if (generateContiguousPacked(
-                            destination, recipe.settings_.indexOrder,
-                            usesCoordinates<Pattern>(bound.component), [&](size_t logicalIndex) {
-                                return rawGenerationValueKnown(
-                                    pattern, recipe.settings_.seed, randomDomain(bound), {},
-                                    destination.shape(), logicalIndex, destination.type());
-                            }))
-                        return;
+                    if (generateCommonRawType(destination, recipe, bound, pattern)) return;
                     forEachGenerationElement(
                         destination, recipe.settings_.indexOrder,
                         usesCoordinates<Pattern>(bound.component),
