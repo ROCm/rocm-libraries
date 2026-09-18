@@ -1207,6 +1207,7 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
     - CK_USE_XDL: enables MFMA (matrix fused multiply-add) instructions
     - CK_TILE_USE_WMMA: 0 for CDNA (uses MFMA instead)
     - CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3: BWD bf16 conversion mode
+    - USE_NEW_UNIFIED_FRAMEWORK=0: preserves the gfx1250 CMake gate for every TU
     """
     if not hipcc:
         hipcc = _find_hipcc()
@@ -1218,6 +1219,7 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
         "-O3",
         "-DNDEBUG",
         f"--offload-arch={arch}",
+        *unified_framework_flags(arch),
         "-std=c++17",
         f"-I{root.parent / 'include'}",
         f"-I{root / 'include'}",
@@ -1448,7 +1450,6 @@ def setup_fmha_dispatcher(
         f"-I{output_dir / 'dispatcher_wrappers'}",
         f"-include{dispatch_header}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
-        *unified_framework_flags(config.gfx_arch),
         str(ctypes_src),
         "-o",
         str(ctypes_obj),
@@ -1656,7 +1657,6 @@ def setup_multiple_fmha_dispatchers(
                         f"-I{out / 'dispatcher_wrappers'}",
                         f"-include{dispatch}",
                         f'-DGFX_ARCH="{arch}"',
-                        *unified_framework_flags(arch),
                         str(ctypes_src),
                         "-o",
                         str(ctypes_obj),

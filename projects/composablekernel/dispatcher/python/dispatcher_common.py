@@ -111,7 +111,7 @@ def unified_framework_flags(arch: Optional[str]) -> List[str]:
     project. The bridges build their own hipcc command lines outside it and
     would otherwise pick up the header default of 1, which does not compile.
     """
-    if arch and "gfx1250" in arch:
+    if normalize_arch(arch) == "gfx1250":
         return ["-DUSE_NEW_UNIFIED_FRAMEWORK=0"]
     return []
 
