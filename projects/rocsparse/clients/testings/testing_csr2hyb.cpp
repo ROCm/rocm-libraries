@@ -181,7 +181,7 @@ void testing_csr2hyb(const Arguments& arg)
         rocsparse_hyb_mat ptr  = hyb;
         test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
 
-        rocsparse_int ell_nnz = dhyb->ell_nnz;
+        int64_t       ell_nnz = dhyb->ell_nnz;
         rocsparse_int coo_nnz = dhyb->coo_nnz;
 
         host_vector<rocsparse_int> hhyb_ell_col_ind(ell_nnz);
@@ -210,7 +210,7 @@ void testing_csr2hyb(const Arguments& arg)
 
         // CPU csr2hyb
         rocsparse_int ell_width_gold = user_ell_width;
-        rocsparse_int ell_nnz_gold;
+        int64_t       ell_nnz_gold;
         rocsparse_int coo_nnz_gold;
 
         host_csr_to_hyb<T>(M,
@@ -233,7 +233,7 @@ void testing_csr2hyb(const Arguments& arg)
         unit_check_scalar<rocsparse_int>(M, dhyb->m);
         unit_check_scalar<rocsparse_int>(N, dhyb->n);
         unit_check_scalar<rocsparse_int>(ell_width_gold, dhyb->ell_width);
-        unit_check_scalar<rocsparse_int>(ell_nnz_gold, dhyb->ell_nnz);
+        unit_check_scalar<int64_t>(ell_nnz_gold, dhyb->ell_nnz);
         unit_check_scalar<rocsparse_int>(coo_nnz_gold, dhyb->coo_nnz);
         hhyb_ell_col_ind_gold.unit_check(hhyb_ell_col_ind);
         hhyb_ell_val_gold.unit_check(hhyb_ell_val);
