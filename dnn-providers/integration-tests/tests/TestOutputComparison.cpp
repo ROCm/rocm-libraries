@@ -70,7 +70,7 @@ flatbuffers::DetachedBuffer makeGraphBuffer()
     return buffer;
 }
 
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     floatTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, float value)
 {
     auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
