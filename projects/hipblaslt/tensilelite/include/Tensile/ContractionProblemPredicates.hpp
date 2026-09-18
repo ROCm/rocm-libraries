@@ -1685,21 +1685,30 @@ namespace TensileLite
                 // ContractionProblemGemm::getNumTiles(sizeMapping, 1). This is
                 // computed separately because a predicate is handed
                 // MacroTile0/MacroTile1 as its value rather than the solution's
-                // sizeMapping, and it agrees with getNumTiles only for the
-                // single-free-index, unpacked-batch case. getNumTiles multiplies
-                // over every free and batch index and, when packBatchDims is set,
-                // folds batch into the M or N extent before dividing by the macro
-                // tile; this uses index 0 of each and multiplies batch in
-                // afterwards. WorkgroupNumberCheck makes the same simplification,
-                // so the two predicates agree with each other on every shape;
-                // revisit both together if a multi-free-index or packed-batch
-                // contraction ever has to be bounded here.
+                // sizeMapping, so it cannot consult sizeMapping.packBatchDims.
+                //
+                // Every batch index is accumulated, matching getNumTiles, rather
+                // than taking batchSize(0) the way WorkgroupNumberCheck and the
+                // LeadingFree*SizesGreaterOrEqual predicates do. Those carry an
+                // assert(batchIndices().size() <= 1) that compiles out of a release
+                // build, and undercounting here would admit a grid that then wraps,
+                // which is the failure this predicate exists to prevent.
+                //
+                // Two divergences from getNumTiles remain, both of which can only
+                // make this over-count and therefore only reject more: it uses
+                // freeSizeA/B index 0 rather than the product over every free
+                // index, and when packBatchDims is set getNumTiles folds batch into
+                // the M or N extent before dividing by the macro tile while this
+                // multiplies it in afterwards.
                 static size_t tiles(ContractionProblemGemm const& problem,
                                     std::array<int, 2> const&     value)
                 {
+                    size_t batch = 1;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        batch *= problem.batchSize(i);
+
                     return ceilDiv(problem.freeSizeA(0), value[0])
-                           * ceilDiv(problem.freeSizeB(0), value[1])
-                           * problem.batchSize(0);
+                           * ceilDiv(problem.freeSizeB(0), value[1]) * batch;
                 }
 
                 // The launch narrows the 64-bit work-item count

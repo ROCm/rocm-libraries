@@ -525,11 +525,20 @@ namespace TensileLite
             // of D holding whatever was there before, with no error raised.
             //
             // StreamKWorkgroupNumberCheck keeps dispatch away from the tuned
-            // Stream-K solutions that reach this, but it cannot see every path:
-            // skFixedGrid and skGridMultiplier rewrite the grid after selection, the
-            // predicate's bound assumes 256 threads, and the hand-written custom
-            // kernels carry no such predicate. Refusing the launch is what makes
-            // those remaining paths loud instead of silent.
+            // Stream-K solutions that reach this, but it cannot see every path
+            // through here: skFixedGrid and skGridMultiplier rewrite the grid after
+            // selection, and the predicate's bound assumes 256 threads. Refusing
+            // the launch is what makes those remaining paths loud instead of
+            // silent.
+            //
+            // This covers launches that go through SolutionAdapter, which is not
+            // every launch in the library. rocblaslt's rocRoller custom kernels
+            // call hipExtModuleLaunchKernel directly (see
+            // library/src/amd_detail/rocblaslt/src/rocroller/custom_kernels.cpp)
+            // and never reach this function. That path builds its grid from
+            // uint32_t tile counts rather than narrowing a 64-bit dim3, so it has
+            // a different failure mode than the one guarded here, but it is not
+            // protected by this check.
             bool fitsLaunchDim(TensileLite::dim3 const& dim)
             {
                 constexpr size_t limit = std::numeric_limits<unsigned int>::max();
@@ -548,39 +557,20 @@ namespace TensileLite
                                                  hipEvent_t              stopEvent,
                                                  bool                    isKernelLoaded)
         {
-            if(!isKernelLoaded && !kernel.codeObjectFile.empty())
-            {
-                FindCodeObject(kernel.codeObjectFile);
-            }
-
-            if(m_debug)
-            {
-                std::cout << "Kernel " << kernel.kernelName << std::endl;
-                std::cout << " l" << kernel.workGroupSize << " x g" << kernel.numWorkGroups << " = "
-                          << kernel.numWorkItems << std::endl;
-                std::cout << kernel.args;
-            }
-            if(m_debugSkipLaunch)
-            {
-                std::cout << "DEBUG: Skip kernel execution" << std::endl;
-                if(startEvent != nullptr)
-                    HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
-                if(stopEvent != nullptr)
-                    HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
-                return hipSuccess;
-            }
-
 #ifdef HIP_HAS_CLUSTER_LAUNCH
             const bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
 #else
             const bool enableCluster = false;
 #endif
 
-            // Checked before the code object is looked up: a grid that cannot be
-            // expressed is impossible whether or not the kernel loads, and this is
-            // the last point where the 64-bit values are still intact. The two
-            // launch APIs below narrow different quantities, so each is bounded
-            // against the one it actually passes.
+            // First thing in the function, ahead of loading the code object: a grid
+            // that cannot be expressed is impossible whether or not the kernel
+            // loads, so there is no reason to pay for the module load, and this is
+            // the last point where the 64-bit values are still intact. It also
+            // precedes the m_debugSkipLaunch early return, so that debug knob
+            // reports the invalid grid rather than hiding it behind success.
+            // The two launch APIs below narrow different quantities, so each is
+            // bounded against the one it actually passes.
             if(enableCluster)
             {
                 // hipDrvLaunchKernelEx enumerates the grid in workgroups.
@@ -605,6 +595,28 @@ namespace TensileLite
                               << ") for kernel: " << kernel.kernelName << std::endl;
                     return hipErrorInvalidValue;
                 }
+            }
+
+            if(!isKernelLoaded && !kernel.codeObjectFile.empty())
+            {
+                FindCodeObject(kernel.codeObjectFile);
+            }
+
+            if(m_debug)
+            {
+                std::cout << "Kernel " << kernel.kernelName << std::endl;
+                std::cout << " l" << kernel.workGroupSize << " x g" << kernel.numWorkGroups << " = "
+                          << kernel.numWorkItems << std::endl;
+                std::cout << kernel.args;
+            }
+            if(m_debugSkipLaunch)
+            {
+                std::cout << "DEBUG: Skip kernel execution" << std::endl;
+                if(startEvent != nullptr)
+                    HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
+                if(stopEvent != nullptr)
+                    HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
+                return hipSuccess;
             }
 
             hipFunction_t function;

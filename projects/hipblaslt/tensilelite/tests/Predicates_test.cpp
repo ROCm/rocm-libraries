@@ -292,6 +292,50 @@ TEST(Predicates, StreamKWorkgroupNumberCheck_BatchMultiplierCounted)
     EXPECT_FALSE((*pred)(problem));
 }
 
+TEST(Predicates, StreamKWorkgroupNumberCheck_EveryBatchIndexCounted)
+{
+    using namespace TensileLite;
+    // getNumTiles() multiplies every batch index (ContractionProblem.cpp,
+    // m_batchIndices loop), so the predicate has to as well. Taking only
+    // batchSize(0), the way WorkgroupNumberCheck and the
+    // LeadingFree*SizesGreaterOrEqual predicates do, undercounts a
+    // multi-batch contraction and admits a grid that then wraps.
+    //
+    // Sized so the two answers land on opposite sides of the bound:
+    // 16x16 tiles of a 256x256 output is 256 tiles per batch, so all batch
+    // indices give 256 * 4096 * 64 == 2^26 (rejected), while batchSize(0)
+    // alone gives 256 * 4096 == 2^20 (accepted).
+    constexpr int macroTile0 = 16;
+    constexpr int macroTile1 = 16;
+
+    // bound = l; A = i,l,k,m; B = l,j,k,m; C = D = i,j,k,m. i and j are free,
+    // k and m are both batch. GEMM() above can only build one batch index.
+    const std::string   id    = "Contraction_l_Ailkm_Bljkm_Cijkm_Dijkm";
+    std::vector<size_t> sizes = {/*i=*/256, /*j=*/256, /*k=*/4096, /*m=*/64, /*l=*/48};
+
+    auto problem = ContractionProblemGemm::FromIndexSizes(id,
+                                                          sizes,
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          rocisa::DataType::Float,
+                                                          {},
+                                                          0.0);
+
+    ASSERT_EQ(problem.batchIndices().size(), 2u)
+        << "the fixture must actually carry two batch indices";
+    ASSERT_EQ(problem.batchSize(0) * problem.batchSize(1), 4096u * 64u);
+
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "tiles across both batch indices is 2^26, past the bound; counting only "
+           "batchSize(0) would give 2^20 and wrongly admit this shape";
+}
+
 TEST(Predicates, StreamKWorkgroupNumberCheck_NonRepresentableDimension_Rejected)
 {
     using namespace TensileLite;
