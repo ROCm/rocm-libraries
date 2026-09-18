@@ -45,7 +45,6 @@
 #include "rocroller_host.hpp"
 #endif
 
-#include <Tensile/AMDGPU_Detail.hpp>
 #include <Tensile/Comparison.hpp>
 #include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -73,7 +72,6 @@
 #include <mutex>
 #include <optional>
 #include <regex>
-#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -4627,285 +4625,15 @@ inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& ten
     std::cerr << msg.str();
 }
 
-// One Equality-pool kernel, with everything slot ordering needs lifted out so
-// it runs over a compact array instead of dereferencing a shared_ptr per
-// compare.
-struct OnlineTuningEqualityEntry
-{
-    std::shared_ptr<TensileLite::ContractionSolution> m_solution;
-    rocblaslt::EqualitySlotCandidate                  m_descriptor;
-};
-
-// Where the reserved candidates ended up: a contiguous run of the list handed
-// to the tuner, so it can record which of its candidates Origami did not rank.
-struct OnlineTuningEqualityBlock
-{
-    size_t m_begin = 0;
-    size_t m_count = 0;
-};
-
-inline rocblaslt::EqualitySlotCandidate
-    onlineTuningSlotCandidate(const TensileLite::ContractionSolution& solution)
-{
-    return {solution.index,
-            std::max<size_t>(1, solution.sizeMapping.macroTile.x),
-            std::max<size_t>(1, solution.sizeMapping.macroTile.y),
-            solution.sizeMapping.depthU};
-}
-
-inline bool onlineTuningSameTile(const rocblaslt::EqualitySlotCandidate& a,
-                                 const rocblaslt::EqualitySlotCandidate& b)
-{
-    return a.m_tileM == b.m_tileM && a.m_tileN == b.m_tileN && a.m_depthU == b.m_depthU;
-}
-
-// The predicate pair every Origami candidate already passed inside
-// findTopSolutions, and that isSolutionSupported applies before a dispatch.
-// GEMM_TYPE_ONLY enumeration checks the hardware predicate and the GEMM type
-// but not the problem or task predicate, so a reserved candidate has to be put
-// through them here; M=1 is where skipping it shows up, as a launch failure
-// rather than as a rejection.
-inline bool onlineTuningSolutionSupported(const TensileLite::ContractionSolution&    solution,
-                                          const TensileLite::ContractionProblemGemm& problem,
-                                          const TensileLite::Hardware&               hardware)
-{
-    TensileLite::Task task(hardware, problem, solution);
-
-    return (*solution.hardwarePredicate)(hardware)
-           && TensileLite::softwarePredicate(
-               TensileLite::SolutionLibrarySearchType::DEFAULT, task, hardware, solution, problem);
-}
-
-// Everything isGemmTypeSame() discriminates on, plus the GPU identity
-// std::hash<AMDGPU> defines. That is the granularity CachingLibrary already
-// memoises findTopSolutions at, so both caches agree on what one problem type
-// on one device means.
-inline size_t onlineTuningEqualityPoolKey(const TensileLite::ContractionProblemGemm& problem,
-                                          const TensileLite::AMDGPU&                 amdgpu)
-{
-    return TensileLite::hash_combine(problem.transA(),
-                                     problem.transB(),
-                                     problem.a().dataType(),
-                                     problem.b().dataType(),
-                                     problem.c().dataType(),
-                                     problem.d().dataType(),
-                                     problem.computeType(),
-                                     problem.groupedGemm(),
-                                     problem.mxBlockA(),
-                                     problem.mxBlockB(),
-                                     std::hash<TensileLite::AMDGPU>{}(amdgpu));
-}
-
-// Enumerate the Equality pool for one problem type.
-//
-// Not through the Equality lookup, which matches on an exact [M, N, batch, K]
-// key, returns at most one solution, and hits none of the shapes this feature
-// exists for. GEMM_TYPE_ONLY is what getAllSolutions uses, and it takes the
-// whole matching table for the type instead of the key match. Equality-row
-// solutions are the ones ExactLogicLibrary tags Equal.
-//
-// Going through the master library rather than walking to the Equality row
-// directly is deliberate: a lazily loaded problem type reaches its solutions
-// through PlaceholderLibrary, which is also what stamps codeObjectFilename onto
-// them, and a kernel without that cannot be loaded.
-inline std::vector<OnlineTuningEqualityEntry> onlineTuningEqualityPool(
-    const std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>&
-                                               library,
-    const TensileLite::ContractionProblemGemm& problem,
-    const TensileLite::Hardware&               hardware)
-{
-    std::vector<OnlineTuningEqualityEntry> pool;
-
-    for(const auto& solution : library->findAllSolutions(
-            problem, hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY))
-    {
-        if(!solution || solution->tag != TensileLite::ContractionSolution::MatchingTag::Equal)
-            continue;
-
-        pool.push_back({solution, onlineTuningSlotCandidate(*solution)});
-    }
-
-    // findAllSolutions returns a set of shared_ptr, which orders by raw
-    // pointer. Ordering by solution index instead is what makes the selection
-    // below reproducible from run to run of one binary.
-    std::sort(pool.begin(),
-              pool.end(),
-              [](const OnlineTuningEqualityEntry& a, const OnlineTuningEqualityEntry& b) {
-                  return a.m_solution->index < b.m_solution->index;
-              });
-
-    return pool;
-}
-
-// Choose up to slots Equality-pool kernels for this problem.
-//
-// orderEqualitySlotCandidates decides which tiles are worth a slot and in what
-// order; this walks that order and takes the first slots candidates the problem
-// can actually dispatch, one per macro tile. The predicates are applied here
-// and not during ordering so that a pool of thousands costs a handful of
-// evaluations rather than one per entry.
-inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
-    onlineTuningSelectEqualitySlots(
-        const std::vector<OnlineTuningEqualityEntry>&                         pool,
-        const TensileLite::ContractionProblemGemm&                            problem,
-        const TensileLite::Hardware&                                          hardware,
-        const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& ranked,
-        int                                                                   slots)
-{
-    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> selected;
-
-    if(pool.empty() || slots <= 0)
-        return selected;
-
-    size_t m = 1;
-    size_t n = 1;
-    for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
-        m *= problem.freeSizeA(i);
-    for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
-        n *= problem.freeSizeB(i);
-
-    std::vector<rocblaslt::EqualitySlotCandidate> offered;
-    std::vector<rocblaslt::EqualitySlotCandidate> descriptors;
-    offered.reserve(ranked.size());
-    descriptors.reserve(pool.size());
-
-    for(const auto& solution : ranked)
-        offered.push_back(onlineTuningSlotCandidate(*solution));
-
-    for(const auto& entry : pool)
-        descriptors.push_back(entry.m_descriptor);
-
-    std::vector<rocblaslt::EqualitySlotCandidate> claimed;
-    claimed.reserve(static_cast<size_t>(slots));
-
-    for(size_t position : rocblaslt::orderEqualitySlotCandidates(descriptors, offered, m, n))
-    {
-        if(selected.size() >= static_cast<size_t>(slots))
-            break;
-
-        const OnlineTuningEqualityEntry& entry = pool[position];
-
-        if(std::any_of(claimed.begin(),
-                       claimed.end(),
-                       [&entry](const rocblaslt::EqualitySlotCandidate& tile) {
-                           return onlineTuningSameTile(tile, entry.m_descriptor);
-                       }))
-            continue;
-
-        if(!onlineTuningSolutionSupported(*entry.m_solution, problem, hardware))
-            continue;
-
-        if(entry.m_solution->requiredWorkspaceSize(problem, hardware) > problem.workspaceSize())
-            continue;
-
-        claimed.push_back(entry.m_descriptor);
-        selected.push_back(entry.m_solution);
-    }
-
-    return selected;
-}
-
-// The Equality candidates reserved for one problem, chosen on its first
-// selection and held from then on.
-//
-// Held rather than recomputed because every later call has to offer the tuner
-// the same candidates -- a pinned winner missing from the list stops being
-// promotable -- and because a selection pass sorts the whole pool. The pool
-// itself is size-independent, so one enumeration serves every problem of a type.
-inline std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
-    onlineTuningEqualityCandidates(
-        const std::shared_ptr<
-            TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>& library,
-        const TensileLite::ContractionProblemGemm&                                    problem,
-        const TensileLite::AMDGPU&                                                    amdgpu,
-        const std::vector<std::shared_ptr<TensileLite::ContractionSolution>>&         ranked,
-        int                                                                           slots,
-        size_t                                                                        problemKey)
-{
-    using Selection = std::vector<std::shared_ptr<TensileLite::ContractionSolution>>;
-
-    // Shared while reading and exclusive to insert, the discipline OnlineTuner
-    // uses. Tensile never calls back into this file, so holding it across
-    // findAllSolutions cannot invert a lock order.
-    static std::shared_timed_mutex                                            cacheMutex;
-    static std::unordered_map<size_t, std::vector<OnlineTuningEqualityEntry>> pools;
-    static std::unordered_map<size_t, Selection>                              selections;
-
-    {
-        std::shared_lock<std::shared_timed_mutex> lock(cacheMutex);
-
-        auto iter = selections.find(problemKey);
-        if(iter != selections.end())
-            return iter->second;
-    }
-
-    std::lock_guard<std::shared_timed_mutex> lock(cacheMutex);
-
-    auto cached = selections.find(problemKey);
-    if(cached != selections.end())
-        return cached->second;
-
-    const size_t poolKey = onlineTuningEqualityPoolKey(problem, amdgpu);
-
-    auto pool = pools.find(poolKey);
-    if(pool == pools.end())
-        pool = pools.emplace(poolKey, onlineTuningEqualityPool(library, problem, amdgpu)).first;
-
-    return selections
-        .emplace(problemKey,
-                 onlineTuningSelectEqualitySlots(pool->second, problem, amdgpu, ranked, slots))
-        .first->second;
-}
-
-// Reserve up to equalitySlots() positions in the exploration window for
-// Equality-pool kernels and report where they landed.
-//
-// Inside the window, not below it: the tuner samples only its first topK()
-// candidates, so a candidate appended under the ranking is never measured and
-// the experiment returns a confident null. The block ends exactly at topK,
-// which leaves Origami's rank-1 at the head of the list and lets a slot the
-// pool could not fill fall through to the next ranked candidate rather than be
-// wasted.
-inline OnlineTuningEqualityBlock reserveOnlineTuningEqualitySlots(
-    std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
-    const std::shared_ptr<
-        TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>& library,
-    const TensileLite::ContractionProblemGemm&                                    tensile_prob,
-    const TensileLite::Hardware&                                                  hardware,
-    const rocblaslt::OnlineTuner&                                                 tuner,
-    size_t                                                                        problemKey)
-{
-    const auto* amdgpu = dynamic_cast<const TensileLite::AMDGPU*>(&hardware);
-    if(!amdgpu)
-        return {};
-
-    const std::vector<std::shared_ptr<TensileLite::ContractionSolution>> equality
-        = onlineTuningEqualityCandidates(
-            library, tensile_prob, *amdgpu, solutions, tuner.equalitySlots(), problemKey);
-
-    if(equality.empty())
-        return {};
-
-    const size_t begin
-        = std::min(static_cast<size_t>(tuner.topK()) - equality.size(), solutions.size());
-
-    solutions.insert(solutions.begin() + begin, equality.begin(), equality.end());
-
-    return {begin, equality.size()};
-}
-
 // Move the candidate online tuning wants to sample next to the front of the
 // ranking, leaving the order of the rest alone.
 //
 // Candidates the caller's workspace cannot cover are withheld from the tuner:
-// they rank, but runContractionProblem refuses to dispatch them. Filtering
-// preserves order, so the reserved block stays contiguous and is reported to
-// the tuner in the coordinates of the list it actually sees.
+// they rank, but runContractionProblem refuses to dispatch them.
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
     const TensileLite::Hardware&                                    hardware,
-    const OnlineTuningEqualityBlock&                                equality,
     size_t                                                          problemKey)
 {
     std::vector<int>    rankedSolutionIndices;
@@ -4913,31 +4641,18 @@ inline void promoteOnlineTuningCandidate(
     rankedSolutionIndices.reserve(solutions.size());
     rankedPositions.reserve(solutions.size());
 
-    size_t equalityBegin = 0;
-    size_t equalityCount = 0;
-
     for(size_t i = 0; i < solutions.size(); ++i)
     {
         if(solutions[i]->requiredWorkspaceSize(tensile_prob, hardware)
            > tensile_prob.workspaceSize())
             continue;
 
-        if(i >= equality.m_begin && i < equality.m_begin + equality.m_count)
-        {
-            if(equalityCount == 0)
-                equalityBegin = rankedSolutionIndices.size();
-            ++equalityCount;
-        }
-
         rankedSolutionIndices.push_back(solutions[i]->index);
         rankedPositions.push_back(i);
     }
 
     auto&     tuner   = rocblaslt::OnlineTuner::getInstance();
-    const int promote = tuner.selectCandidate(problemKey,
-                                              rankedSolutionIndices,
-                                              static_cast<int>(equalityBegin),
-                                              static_cast<int>(equalityCount));
+    const int promote = tuner.selectCandidate(problemKey, rankedSolutionIndices);
     if(promote < 0)
         return;
 
@@ -5075,13 +4790,10 @@ inline auto getSolutions(
     // Both hooks key on this, so computing it once here is what lets a resolved
     // problem be recognised -- a masked index and a compare, no lock -- before
     // any of the work that scales with topK() has been started.
-    //
-    // Reserved slots are spliced into the ranking on every call, so a run using
-    // them stays on the full path and the list its callers see is unchanged.
     const size_t problemKey = onlineTuning ? onlineTuningProblemKey(tensile_prob) : 0;
 
     const rocblaslt::OnlineTuner::Resolution* resolved
-        = onlineTuning && tuner.equalitySlots() == 0 ? tuner.resolution(problemKey) : nullptr;
+        = onlineTuning ? tuner.resolution(problemKey) : nullptr;
 
     if(resolved)
     {
@@ -5106,15 +4818,7 @@ inline auto getSolutions(
     {
         if(!resolved
            || !promoteResolvedOnlineTuningWinner(solutions, tensile_prob, *hardware, *resolved))
-        {
-            OnlineTuningEqualityBlock equality;
-
-            if(tuner.equalitySlots() > 0)
-                equality = reserveOnlineTuningEqualitySlots(
-                    solutions, library, tensile_prob, *hardware, tuner, problemKey);
-
-            promoteOnlineTuningCandidate(solutions, tensile_prob, *hardware, equality, problemKey);
-        }
+            promoteOnlineTuningCandidate(solutions, tensile_prob, *hardware, problemKey);
 
         // The extra candidates were for the tuner, not for the caller.
         if(solutions.size() > static_cast<size_t>(requestedAlgoCount))
