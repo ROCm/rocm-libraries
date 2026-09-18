@@ -1,0 +1,18 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# Two independent MX WMMAs, each with its own v_perm parent. Phase B must unlock
+# one WMMA at a time: perm0, wmma0, then perm1, wmma1 — not dump both perms
+# before the first WMMA.
+
+# CHECK-LABEL: @parent_per_wmma
+# CHECK: v0 = {{.*}}v_perm_b32
+# CHECK: v[80:87] = {{.*}}v_wmma_scale_f32_16x16x128_f8f6f4{{.*}}v0
+# CHECK: v20 = {{.*}}v_perm_b32
+# CHECK: v[180:187] = {{.*}}v_wmma_scale_f32_16x16x128_f8f6f4{{.*}}v20
+st.func @parent_per_wmma() {
+^entry:
+  v0 = "st.v_perm_b32"(v1, v1, 0) { issueCycles = 1, latencyCycles = 5 }
+  v[80:87] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[60:63], v[8:11], v[80:87], v4, v0) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+  v20 = "st.v_perm_b32"(v21, v21, 0) { issueCycles = 1, latencyCycles = 5 }
+  v[180:187] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[160:163], v[108:111], v[180:187], v24, v20) { issueCycles = 1, latencyCycles = 8, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8" }, mod.mfma = { reuseA = false, reuseB = false } }
+}
