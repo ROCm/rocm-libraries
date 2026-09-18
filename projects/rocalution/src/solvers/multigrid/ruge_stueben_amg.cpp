@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -210,17 +210,28 @@ namespace rocalution
     {
         log_debug(this, "RugeStuebenAMG::SetInterpolationTruncationFactor()", factor);
 
+        assert(this->build_ == false);
         assert(factor >= 0.0f);
+        assert(factor < 1.0f);
+
+        if(factor < 0.0f || factor >= 1.0f)
+        {
+            // LCOV_EXCL_START
+            LOG_INFO("RugeStuebenAMG::SetInterpolationTruncationFactor() factor must be in [0, 1)");
+            FATAL_ERROR(__FILE__, __LINE__);
+            // LCOV_EXCL_STOP
+        }
 
         this->trunc_factor_ = factor;
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
-    void RugeStuebenAMG<OperatorType, VectorType, ValueType>::SetInterpolationMaxElmts(
-        int max_elmts)
+    void
+        RugeStuebenAMG<OperatorType, VectorType, ValueType>::SetInterpolationMaxElmts(int max_elmts)
     {
         log_debug(this, "RugeStuebenAMG::SetInterpolationMaxElmts()", max_elmts);
 
+        assert(this->build_ == false);
         assert(max_elmts >= 0);
 
         this->p_max_elmts_ = max_elmts;
