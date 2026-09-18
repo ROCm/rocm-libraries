@@ -1,0 +1,30 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Positive-only CPU admission for the quick BatchNorm golden bundles. The
+# CMake registration supplies --reference cpu and the exact installed data
+# root. The TheRock runner protects this selector with the exact 12-case name
+# inventory and rejects missing data before execution.
+test_categories:
+  host-asan:
+    description: "Quick BatchNorm golden bundles evaluated by the CPU reference"
+    test_patterns:
+      - "Inference_CpuRef.small_fp32_nchw"
+      - "Inference_CpuRef.large_fp32_nchw"
+      - "Inference_CpuRef.tiny_fp32_nchw"
+      - "Inference_CpuRef.small_fp16_nchw"
+      - "Inference_CpuRef.small_bfp16_nchw"
+      - "Inference_CpuRef.small_fp32_ncdhw"
+      - "ncdhw_fp32_Small_CpuRef.Small"
+      - "nchw_bfp16_Small_CpuRef.Small"
+      - "nchw_fp16_Small_CpuRef.Small"
+      - "nchw_fp32_Large_CpuRef.Large"
+      - "nchw_fp32_MIOpen_CpuRef.MIOpen"
+      - "nchw_fp32_Small_CpuRef.Small"
+    labels:
+      - "host-asan"
+
+execution_settings:
+  default_timeout: 600
+  category_timeouts:
+    host-asan: 600
