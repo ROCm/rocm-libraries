@@ -226,6 +226,10 @@ namespace rocsparse
                 }
             }
         }
+
+        // The shared PCR tiles are still live above; synchronise before a caller
+        // looping over blocks of right-hand sides overwrites them.
+        __syncthreads();
     }
 
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
@@ -278,14 +282,6 @@ namespace rocsparse
                                                                                   d_spike,
                                                                                   du_spike,
                                                                                   B_spike);
-
-            // The shared PCR tiles are still being read when the device function
-            // returns; synchronise before the next block of right-hand sides
-            // overwrites them. The tridiagonal coefficients written to dl_modified,
-            // d_modified, du_modified and the spike diagonals do not depend on the
-            // right-hand side, so re-writing them on every iteration is redundant but
-            // harmless, exactly as it already was across the blocks of grid.y.
-            __syncthreads();
         }
     }
 

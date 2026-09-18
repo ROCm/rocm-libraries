@@ -198,6 +198,10 @@ namespace rocsparse
 
             B_spike[num_spikes * bidy + row] = x_shared[tidx];
         }
+
+        // The shared PCR tiles are still live above; synchronise before a caller
+        // looping over the batch overwrites them.
+        __syncthreads();
     }
 
     template <uint32_t BLOCKSIZE, typename T>
@@ -246,10 +250,6 @@ namespace rocsparse
                                                                                       d_spike,
                                                                                       du_spike,
                                                                                       B_spike);
-
-            // The shared PCR tiles are still being read when the device function
-            // returns; synchronise before the next system of the batch overwrites them.
-            __syncthreads();
         }
     }
 

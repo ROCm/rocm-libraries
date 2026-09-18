@@ -180,6 +180,10 @@ namespace rocsparse
         {
             output[k + bidy * m_pad] = stile[BLOCKDIM * lid + wid];
         }
+
+        // The shared tile is still live above; synchronise before a caller looping
+        // over right-hand sides overwrites it.
+        __syncthreads();
     }
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
@@ -200,10 +204,6 @@ namespace rocsparse
         {
             rocsparse::gtsv_transpose_and_pad_array_shared_device<BLOCKSIZE, BLOCKDIM>(
                 bidy, m, m_pad, stride, input, output, pad_value);
-
-            // The shared tile is still being read when the device function returns;
-            // synchronise before the next right-hand side overwrites it.
-            __syncthreads();
         }
     }
 
@@ -1101,6 +1101,10 @@ namespace rocsparse
             rhs_scratch[bidx + 2 * hipGridDim_x * bidy]                = srhs[0];
             rhs_scratch[hipGridDim_x + bidx + 2 * hipGridDim_x * bidy] = srhs[2 * BLOCKSIZE - 1];
         }
+
+        // The shared spike tiles are still live above; synchronise before a caller
+        // looping over right-hand sides reloads them.
+        __syncthreads();
     }
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
@@ -1126,10 +1130,6 @@ namespace rocsparse
         {
             rocsparse::gtsv_spike_block_level_device<BLOCKSIZE, BLOCKDIM>(
                 bidy, m_pad, n, ldb, rhs, w, v, w2, v2, rhs_scratch, w_scratch, v_scratch);
-
-            // The shared spike tiles are still being read when the device function
-            // returns; synchronise before the next right-hand side reloads them.
-            __syncthreads();
         }
     }
 
@@ -1228,6 +1228,10 @@ namespace rocsparse
 
         rhs_scratch[tidx + 2 * BLOCKSIZE * bidy]             = srhs[tidx];
         rhs_scratch[tidx + BLOCKSIZE + 2 * BLOCKSIZE * bidy] = srhs[tidx + BLOCKSIZE];
+
+        // The shared spike tiles are still live above; synchronise before a caller
+        // looping over right-hand sides reloads them.
+        __syncthreads();
     }
 
     template <uint32_t BLOCKSIZE, typename T>
@@ -1250,10 +1254,6 @@ namespace rocsparse
         {
             rocsparse::gtsv_solve_spike_grid_level_device<BLOCKSIZE>(
                 bidy, m_pad, n, ldb, rhs_scratch, w_scratch, v_scratch);
-
-            // The shared spike tiles are still being read when the device function
-            // returns; synchronise before the next right-hand side reloads them.
-            __syncthreads();
         }
     }
 
@@ -1338,6 +1338,10 @@ namespace rocsparse
             rhs[gid + m_pad * bidy]                            = srhs[tidx + 1 + BLOCKSIZE];
             rhs[gid + (BLOCKDIM - 1) * nblocks + m_pad * bidy] = srhs[tidx + 1];
         }
+
+        // The shared spike tiles are still live above; synchronise before a caller
+        // looping over right-hand sides reloads them.
+        __syncthreads();
     }
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
@@ -1359,10 +1363,6 @@ namespace rocsparse
         {
             rocsparse::gtsv_solve_spike_propagate_device<BLOCKSIZE, BLOCKDIM>(
                 bidy, m_pad, n, ldb, rhs, w, v, rhs_scratch);
-
-            // The shared spike tiles are still being read when the device function
-            // returns; synchronise before the next right-hand side reloads them.
-            __syncthreads();
         }
     }
 
