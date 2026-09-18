@@ -899,10 +899,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 ABlockTransferSrcAccessOrder,
                 ABlockTransferSrcVectorDim,
                 2,
-                ABlockTransferSrcScalarPerVector>(a_grid_desc_ak0_m_ak1,
-                                                  make_multi_index(0, m_block_data_idx_on_grid, 0),
-                                                  a_block_desc_ak0_m_ak1,
-                                                  make_multi_index(0, 0, 0));
+                ABlockTransferSrcScalarPerVector,
+                true>(a_grid_desc_ak0_m_ak1,
+                      make_multi_index(0, m_block_data_idx_on_grid, 0),
+                      a_block_desc_ak0_m_ak1,
+                      make_multi_index(0, 0, 0));
 
             auto b_blockwise_copy = ThreadGroupTensorSliceTransfer_DirectLoad<
                 TileLoadThreadGroup,
@@ -916,10 +917,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
                 BBlockTransferSrcAccessOrder,
                 BBlockTransferSrcVectorDim,
                 2,
-                BBlockTransferSrcScalarPerVector>(b_grid_desc_bk0_n_bk1,
-                                                  make_multi_index(0, n_block_data_idx_on_grid, 0),
-                                                  b_block_desc_bk0_n_bk1,
-                                                  make_multi_index(0, 0, 0));
+                BBlockTransferSrcScalarPerVector,
+                true>(b_grid_desc_bk0_n_bk1,
+                      make_multi_index(0, n_block_data_idx_on_grid, 0),
+                      b_block_desc_bk0_n_bk1,
+                      make_multi_index(0, 0, 0));
 
             GridwiseGemmLoad::template RunLoadWavePipeline<HasMainKBlockLoop, TailNum>(
                 a_grid_desc_ak0_m_ak1,

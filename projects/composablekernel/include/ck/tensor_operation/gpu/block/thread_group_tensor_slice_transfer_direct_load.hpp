@@ -50,7 +50,8 @@ template <typename ThreadGroup,
           typename SrcDimAccessOrder,
           index_t SrcVectorDim,
           index_t DstVectorDim,
-          index_t ScalarPerVector>
+          index_t ScalarPerVector,
+          bool UseFullAssembly = false>
 struct ThreadGroupTensorSliceTransfer_DirectLoad
 {
     static constexpr index_t nDim = remove_reference_t<SrcDesc>::GetNumOfDimension();
@@ -250,7 +251,8 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
 
             src_buf.template AsyncCopyToLds<remove_cvref_t<decltype(dst_buf)>,
                                             ScalarPerVector,
-                                            lds_access_offset>(
+                                            lds_access_offset,
+                                            UseFullAssembly>(
                 dst_buf, src_offset, dst_coord_.GetOffset(), is_src_valid);
 
             // move coordinate
