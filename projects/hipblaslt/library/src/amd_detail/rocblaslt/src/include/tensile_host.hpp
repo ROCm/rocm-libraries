@@ -180,6 +180,19 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      rocblaslt_matmul_algo*       algo,
                                      size_t*                      workspaceSizeInBytes);
 
+/**
+ * Evaluate support without leaving gemmData's Tensile problem modified.
+ *
+ * Cache-validity probes may test a different math mode or algorithm from the
+ * one the caller will actually launch, so they must not reuse the mutating
+ * execution helper directly.
+ */
+rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
+                                               const RocblasltContractionProblem& prob,
+                                               std::shared_ptr<void>              gemmData,
+                                               rocblaslt_matmul_algo*             algo,
+                                               size_t* workspaceSizeInBytes);
+
 template <typename Tuning>
 rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
                                      const rocblaslt::RocGemmType& gemmType,
@@ -296,6 +309,29 @@ TensileLite::ProblemOverride
     RocblasltContractionProblem2ProblemOverride(const RocblasltContractionProblem&);
 
 TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<void>);
+
+/**
+ * Whether this key still has an entry that resolves to its recorded kernel.
+ *
+ * The execution-path tuning hook needs "is there a usable entry", not "is there
+ * any entry": a shape whose rows all failed validation after a rebuild must be
+ * eligible for re-tuning.
+ *
+ * countLookup false suppresses the hit/miss and summary accounting, for the two
+ * cases where a probe is not a cache lookup on the caller's behalf: the re-check
+ * the hook performs after taking the tuning lock, which asks the same question
+ * about the same key within one call and would otherwise report two or three
+ * misses for a single matmul, and a hipblasLtMatmul given no algorithm, which is
+ * launched with default selection whatever the cache holds.
+ */
+#ifdef HIPBLASLT_ENABLE_TUNING_CACHE
+bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes,
+                                  bool                                countLookup = true);
+#endif
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 

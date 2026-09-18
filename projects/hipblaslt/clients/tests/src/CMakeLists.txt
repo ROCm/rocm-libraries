@@ -21,6 +21,15 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
 )
 
+# The tuning cache tests link test-only exports that only exist when the
+# feature is compiled in, so the source is added rather than guarded inside.
+if(HIPBLASLT_ENABLE_TUNING_CACHE)
+    target_sources(hipblaslt-test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
+    )
+endif()
+
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
