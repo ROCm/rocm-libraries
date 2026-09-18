@@ -1,0 +1,371 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+//
+//===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef _LIBCUDACXX___CUDA_COMPLEX_NVFP16_H
+#define _LIBCUDACXX___CUDA_COMPLEX_NVFP16_H
+
+#include <cuda/std/detail/__config>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _LIBCUDACXX_HAS_NVFP16()
+
+#  include <cuda/std/__cmath/nvfp16.h>
+#  include <cuda/std/__complex/vector_support.h>
+#  include <cuda/std/__floating_point/nvfp_types.h>
+#  include <cuda/std/__fwd/get.h>
+#  include <cuda/std/__type_traits/enable_if.h>
+#  include <cuda/std/__type_traits/integral_constant.h>
+#  include <cuda/std/__type_traits/is_constructible.h>
+#  include <cuda/std/__type_traits/is_extended_floating_point.h>
+#  include <cuda/std/cmath>
+#  include <cuda/std/complex>
+
+#  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
+#    include <sstream> // for std::basic_ostringstream
+#  endif // !_CCCL_COMPILER(NVRTC)
+
+// This is a workaround against the user defining macros __CUDA_NO_HALF_CONVERSIONS__ __CUDA_NO_HALF_OPERATORS__
+namespace __cccl_internal
+{
+template <>
+struct __is_non_narrowing_convertible<__half, float>
+{
+  static constexpr bool value = true;
+};
+
+template <>
+struct __is_non_narrowing_convertible<__half, double>
+{
+  static constexpr bool value = true;
+};
+
+template <>
+struct __is_non_narrowing_convertible<float, __half>
+{
+  static constexpr bool value = true;
+};
+
+template <>
+struct __is_non_narrowing_convertible<double, __half>
+{
+  static constexpr bool value = true;
+};
+} // namespace __cccl_internal
+
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+
+template <>
+struct __complex_alignment<__half> : integral_constant<size_t, alignof(__half2)>
+{};
+
+template <>
+struct __type_to_vector<__half>
+{
+  using __type = __half2;
+};
+
+template <>
+struct __cccl_complex_overload_traits<__half, false, false>
+{
+  using _ValueType   = __half;
+  using _ComplexType = complex<__half>;
+};
+
+template <class _Tp>
+_LIBCUDACXX_HIDE_FROM_ABI __half __convert_to_half(const _Tp& __value) noexcept
+{
+  return __value;
+}
+
+_LIBCUDACXX_HIDE_FROM_ABI __half __convert_to_half(const float& __value) noexcept
+{
+  return __float2half(__value);
+}
+
+_LIBCUDACXX_HIDE_FROM_ABI __half __convert_to_half(const double& __value) noexcept
+{
+  // NOTE(HIP/AMD): fp16 currently does not provide a __double2half conversion
+  // (see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+  // corresponding ticket SWDEV-529927
+  return __float2half(static_cast<float>(__value));
+}
+
+template <>
+class _CCCL_TYPE_VISIBILITY_DEFAULT _CCCL_ALIGNAS(alignof(__half2)) complex<__half>
+{
+  __half2 __repr_;
+
+  template <class _Up>
+  friend class complex;
+
+  template <class _Up>
+  friend struct __get_complex_impl;
+
+public:
+  using value_type = __half;
+
+  _LIBCUDACXX_HIDE_FROM_ABI complex(const value_type& __re = value_type(), const value_type& __im = value_type())
+      : __repr_(__re, __im)
+  {}
+
+  template <class _Up, enable_if_t<__cccl_internal::__is_non_narrowing_convertible<value_type, _Up>::value, int> = 0>
+  _LIBCUDACXX_HIDE_FROM_ABI complex(const complex<_Up>& __c)
+      : __repr_(__convert_to_half(__c.real()), __convert_to_half(__c.imag()))
+  {}
+
+  template <class _Up,
+            enable_if_t<!__cccl_internal::__is_non_narrowing_convertible<value_type, _Up>::value, int> = 0,
+            enable_if_t<_CCCL_TRAIT(is_constructible, value_type, _Up), int>                           = 0>
+  _LIBCUDACXX_HIDE_FROM_ABI explicit complex(const complex<_Up>& __c)
+      : __repr_(__convert_to_half(__c.real()), __convert_to_half(__c.imag()))
+  {}
+
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator=(const value_type& __re)
+  {
+    __repr_.x = __re;
+    __repr_.y = value_type();
+    return *this;
+  }
+
+  template <class _Up>
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator=(const complex<_Up>& __c)
+  {
+    __repr_.x = __convert_to_half(__c.real());
+    __repr_.y = __convert_to_half(__c.imag());
+    return *this;
+  }
+
+#  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
+  template <class _Up>
+  _LIBCUDACXX_HIDE_FROM_ABI complex(const ::std::complex<_Up>& __other)
+      : __repr_(_LIBCUDACXX_ACCESS_STD_COMPLEX_REAL(__other), _LIBCUDACXX_ACCESS_STD_COMPLEX_IMAG(__other))
+  {}
+
+  template <class _Up>
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator=(const ::std::complex<_Up>& __other)
+  {
+    __repr_.x = _LIBCUDACXX_ACCESS_STD_COMPLEX_REAL(__other);
+    __repr_.y = _LIBCUDACXX_ACCESS_STD_COMPLEX_IMAG(__other);
+    return *this;
+  }
+
+  _CCCL_HOST operator ::std::complex<value_type>() const
+  {
+    return {__repr_.x, __repr_.y};
+  }
+#  endif // !_CCCL_COMPILER(NVRTC)
+
+  _LIBCUDACXX_HIDE_FROM_ABI value_type real() const
+  {
+    return __repr_.x;
+  }
+  _LIBCUDACXX_HIDE_FROM_ABI value_type imag() const
+  {
+    return __repr_.y;
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI void real(value_type __re)
+  {
+    __repr_.x = __re;
+  }
+  _LIBCUDACXX_HIDE_FROM_ABI void imag(value_type __im)
+  {
+    __repr_.y = __im;
+  }
+
+  // Those additional volatile overloads are meant to help with reductions in thrust
+  _LIBCUDACXX_HIDE_FROM_ABI value_type real() const volatile
+  {
+    return __repr_.x;
+  }
+  _LIBCUDACXX_HIDE_FROM_ABI value_type imag() const volatile
+  {
+    return __repr_.y;
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator+=(const value_type& __re)
+  {
+    __repr_.x = __hadd(__repr_.x, __re);
+    return *this;
+  }
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator-=(const value_type& __re)
+  {
+    __repr_.x = __hsub(__repr_.x, __re);
+    return *this;
+  }
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator*=(const value_type& __re)
+  {
+    __repr_.x = __hmul(__repr_.x, __re);
+    __repr_.y = __hmul(__repr_.y, __re);
+    return *this;
+  }
+  _LIBCUDACXX_HIDE_FROM_ABI complex& operator/=(const value_type& __re)
+  {
+    __repr_.x = __hdiv(__repr_.x, __re);
+    __repr_.y = __hdiv(__repr_.y, __re);
+    return *this;
+  }
+
+  // We can utilize vectorized operations for those operators
+  _LIBCUDACXX_HIDE_FROM_ABI friend complex& operator+=(complex& __lhs, const complex& __rhs) noexcept
+  {
+    __lhs.__repr_ = __hadd2(__lhs.__repr_, __rhs.__repr_);
+    return __lhs;
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI friend complex& operator-=(complex& __lhs, const complex& __rhs) noexcept
+  {
+    __lhs.__repr_ = __hsub2(__lhs.__repr_, __rhs.__repr_);
+    return __lhs;
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI friend bool operator==(const complex& __lhs, const complex& __rhs) noexcept
+  {
+    return __hbeq2(__lhs.__repr_, __rhs.__repr_);
+  }
+};
+
+template <> // complex<float>
+template <> // complex<__half>
+_LIBCUDACXX_HIDE_FROM_ABI complex<float>::complex(const complex<__half>& __c)
+    : __re_(__half2float(__c.real()))
+    , __im_(__half2float(__c.imag()))
+{}
+
+template <> // complex<double>
+template <> // complex<__half>
+_LIBCUDACXX_HIDE_FROM_ABI complex<double>::complex(const complex<__half>& __c)
+    : __re_(__half2float(__c.real()))
+    , __im_(__half2float(__c.imag()))
+{}
+
+template <> // complex<float>
+template <> // complex<__half>
+_LIBCUDACXX_HIDE_FROM_ABI complex<float>& complex<float>::operator=(const complex<__half>& __c)
+{
+  __re_ = __half2float(__c.real());
+  __im_ = __half2float(__c.imag());
+  return *this;
+}
+
+template <> // complex<double>
+template <> // complex<__half>
+_LIBCUDACXX_HIDE_FROM_ABI complex<double>& complex<double>::operator=(const complex<__half>& __c)
+{
+  __re_ = __half2float(__c.real());
+  __im_ = __half2float(__c.imag());
+  return *this;
+}
+
+_LIBCUDACXX_HIDE_FROM_ABI __half arg(__half __re)
+{
+  // NOTE(HIP/AMD): fp16 currently does not provide __int2half_rn for host code; this is implementated for floating point alternatives
+  // (device only see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+  // corresponding ticket SWDEV-529927
+  return _CUDA_VSTD::atan2(__float2half_rn(0.0f), __re);
+}
+
+// We have performance issues with some trigonometric functions with __half
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI complex<__half> asinh(const complex<__half>& __x)
+{
+  return complex<__half>{_CUDA_VSTD::asinh(complex<float>{__x})};
+}
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI complex<__half> acosh(const complex<__half>& __x)
+{
+  return complex<__half>{_CUDA_VSTD::acosh(complex<float>{__x})};
+}
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI complex<__half> atanh(const complex<__half>& __x)
+{
+  return complex<__half>{_CUDA_VSTD::atanh(complex<float>{__x})};
+}
+template <>
+_LIBCUDACXX_HIDE_FROM_ABI complex<__half> acos(const complex<__half>& __x)
+{
+  return complex<__half>{_CUDA_VSTD::acos(complex<float>{__x})};
+}
+
+template <>
+struct __get_complex_impl<__half>
+{
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half& get(complex<__half>& __z) noexcept
+  {
+    return (_Index == 0) ? __z.__repr_.x : __z.__repr_.y;
+  }
+
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __half&& get(complex<__half>&& __z) noexcept
+  {
+    return _CUDA_VSTD::move((_Index == 0) ? __z.__repr_.x : __z.__repr_.y);
+  }
+
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __half& get(const complex<__half>& __z) noexcept
+  {
+    return (_Index == 0) ? __z.__repr_.x : __z.__repr_.y;
+  }
+
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __half&& get(const complex<__half>&& __z) noexcept
+  {
+    return _CUDA_VSTD::move((_Index == 0) ? __z.__repr_.x : __z.__repr_.y);
+  }
+};
+
+#  if !defined(_LIBCUDACXX_HAS_NO_LOCALIZATION) && !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
+template <class _CharT, class _Traits>
+::std::basic_istream<_CharT, _Traits>& operator>>(::std::basic_istream<_CharT, _Traits>& __is, complex<__half>& __x)
+{
+  ::std::complex<float> __temp;
+  __is >> __temp;
+  __x = __temp;
+  return __is;
+}
+
+template <class _CharT, class _Traits>
+::std::basic_ostream<_CharT, _Traits>&
+operator<<(::std::basic_ostream<_CharT, _Traits>& __os, const complex<__half>& __x)
+{
+  return __os << complex<float>{__x};
+}
+#  endif // !_LIBCUDACXX_HAS_NO_LOCALIZATION && !_CCCL_COMPILER(NVRTC)
+
+_LIBCUDACXX_END_NAMESPACE_STD
+
+#endif // _LIBCUDACXX_HAS_NVFP16()
+
+#endif // _LIBCUDACXX___CUDA_COMPLEX_NVFP16_H
