@@ -79,43 +79,102 @@ def test_get_version_no_match_raises(monkeypatch):
         C._getVersion("amdclang++", "--version", r"version\s+([\d.]+)")
 
 
-def test_get_rocm_version_uses_hipconfig(monkeypatch):
-    seen = {}
-
-    def _fake(exe, flag, regex):
-        seen["exe"], seen["flag"] = exe, flag
-        return SemanticVersion(6, 4, 0)
-
-    monkeypatch.setattr(C, "_getVersion", _fake)
+def test_get_rocm_version_uses_rocm_version_env(monkeypatch, tmp_path):
+    """ROCM_VERSION env var takes priority over all other sources."""
+    monkeypatch.setenv("ROCM_VERSION", "6.4.0")
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
-    assert seen["flag"] == "--version"
-    assert seen["exe"] == C.ToolchainDefaults.HIP_CONFIG
 
 
 @pytest.mark.parametrize(
-    "hipconfig_output, expected_version",
+    "version_str, expected_version",
     [
         pytest.param(
-            b"7.1.25424-4179531dcd",
-            SemanticVersion(7, 1, 25424),
-            id="rocm_7_1_build_suffix",
+            "7.1.0",
+            SemanticVersion(7, 1, 0),
+            id="simple_version",
         ),
         pytest.param(
-            b"7.2.26015-fc0010cf6a",
-            SemanticVersion(7, 2, 26015),
-            id="rocm_7_2_build_suffix",
+            "7.1.25424-4179531dcd",
+            SemanticVersion(7, 1, 25424),
+            id="build_suffix",
         ),
     ],
 )
-def test_get_rocm_version_parses_hipconfig_build_suffix(
-    monkeypatch, hipconfig_output, expected_version
+def test_get_rocm_version_reads_info_version_file(
+    monkeypatch, tmp_path, version_str, expected_version
 ):
-    monkeypatch.setattr(C, "validateToolchain", lambda x: x)
+    """get_rocm_version reads .info/version when ROCM_VERSION is not set."""
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text(version_str)
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    assert C.get_rocm_version() == expected_version
 
-    class _R:
-        stdout = hipconfig_output
 
-    monkeypatch.setattr(C, "run", lambda *a, **k: _R())
+@pytest.mark.parametrize(
+    "exe_depth, version_str, expected_version",
+    [
+        pytest.param(
+            1,
+            "#define HIP_VERSION_MAJOR 10\n#define HIP_VERSION_MINOR 1\n#define HIP_VERSION_PATCH 0\n",
+            SemanticVersion(10, 1, 0),
+            id="dist_bin_layout",
+        ),
+        pytest.param(
+            3,
+            "#define HIP_VERSION_MAJOR 7\n#define HIP_VERSION_MINOR 2\n#define HIP_VERSION_PATCH 53211\n",
+            SemanticVersion(7, 2, 53211),
+            id="dist_lib_llvm_bin_layout",
+        ),
+    ],
+)
+def test_get_rocm_version_path_fallback_hip_version_h(
+    monkeypatch, tmp_path, exe_depth, version_str, expected_version
+):
+    """PATH fallback parses hip_version.h when ROCM_PATH/HIP_PATH are absent.
+
+    In TheRock CI builds ROCm tools such as amdclang++ are on PATH but
+    ROCM_PATH is not set and /opt/rocm does not exist. The fallback walks up
+    from the found executable's directory (up to 5 levels) looking for either
+    .info/version or include/hip/hip_version.h. Two typical layouts are
+    exercised: dist/bin/ (1 level up to dist/) and dist/lib/llvm/bin/ (3
+    levels up to dist/).
+    """
+    # Build a fake executable nested exe_depth directories under tmp_path.
+    parts = ["sub"] * exe_depth + ["bin"]
+    bin_dir = tmp_path
+    for p in parts:
+        bin_dir = bin_dir / p
+    bin_dir.mkdir(parents=True)
+    exe = bin_dir / "amdclang++"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+
+    # Place hip_version.h at the root of tmp_path (the "dist" level).
+    hip_dir = tmp_path / "include" / "hip"
+    hip_dir.mkdir(parents=True)
+    (hip_dir / "hip_version.h").write_text(version_str)
+
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "which", lambda name: str(exe) if name == "amdclang++" else None)
+
+    # Block all .info/version reads (including the hardcoded /opt/rocm fallback)
+    # so the code falls through to the PATH-based hip_version.h branch.
+    from pathlib import Path as _Path
+    _orig_read_text = _Path.read_text
+
+    def _selective_read_text(self, **kwargs):
+        if self.name == "version" and self.parent.name == ".info":
+            raise OSError(f"mocked absence: {self}")
+        return _orig_read_text(self, **kwargs)
+
+    monkeypatch.setattr(_Path, "read_text", _selective_read_text)
 
     assert C.get_rocm_version() == expected_version
 

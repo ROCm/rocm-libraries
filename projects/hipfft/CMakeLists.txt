@@ -110,17 +110,19 @@ if(BUILD_ADDRESS_SANITIZER)
   add_compile_definitions(ADDRESS_SANITIZER)
 endif()
 
+# USE_CUDA: build hipFFT for the CUDA backend using nvcc directly.
+# Replaces the old ENV{HIP_PLATFORM} check (hipcc/hipconfig removed).
+option(USE_CUDA "Build hipFFT for the CUDA backend using nvcc directly (no hipcc)" OFF)
+
 # Set internal BUILD_WITH_COMPILER.
 if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
   set( BUILD_WITH_COMPILER "HOST-default" )
+elseif( USE_CUDA )
+  set( BUILD_WITH_COMPILER "HIP-nvcc" )
 else()
-  if( $ENV{HIP_PLATFORM} MATCHES "nvidia" )
-    set( BUILD_WITH_COMPILER "HIP-nvcc" )
-  else()
-    set( BUILD_WITH_COMPILER "HIP-clang" )
-    if( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
-      message( FATAL_ERROR "Detected HIP_COMPILER=clang, but BUILD_WITH_LIB is not ROCM!" )
-    endif()
+  set( BUILD_WITH_COMPILER "HIP-clang" )
+  if( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
+    message( FATAL_ERROR "Detected HIP_COMPILER=clang, but BUILD_WITH_LIB is not ROCM!" )
   endif()
 endif()
 
@@ -140,7 +142,6 @@ include(cmake/dependencies.cmake)
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set (BUILD_WITH_LIB "CUDA")
-  set( HIP_PLATFORM "nvidia" )
 
   set( CMAKE_CXX_EXTENSIONS OFF )
 
@@ -172,7 +173,6 @@ else()
   # Check support for the GPU target(s)
   rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   if( BUILD_WITH_COMPILER STREQUAL "HIP-CLANG" )
-    set( HIP_PLATFORM "amd" )
     set( HIP_COMPILER "clang" )
   endif()
 endif()

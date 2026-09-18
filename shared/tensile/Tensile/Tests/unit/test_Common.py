@@ -24,6 +24,12 @@
 
 from __future__ import print_function
 
+import shutil
+import tempfile
+from pathlib import Path
+
+import pytest
+
 import Tensile.Common as Common
 
 import os
@@ -67,3 +73,81 @@ def test_paths():
     assert Common.globalParameters["WorkingPath"] == expectedSet1WorkingPath
     Common.popWorkingPath()
     assert Common.globalParameters["WorkingPath"] == expectedWorkingPath
+
+
+@pytest.mark.parametrize(
+    "exe_depth, version_str, expected_hip_clang",
+    [
+        pytest.param(
+            1,
+            "#define HIP_VERSION_MAJOR 10\n#define HIP_VERSION_MINOR 1\n#define HIP_VERSION_PATCH 0\n",
+            "10.1.0",
+            id="dist_bin_layout",
+        ),
+        pytest.param(
+            3,
+            "#define HIP_VERSION_MAJOR 7\n#define HIP_VERSION_MINOR 2\n#define HIP_VERSION_PATCH 53211\n",
+            "7.2.53211",
+            id="dist_lib_llvm_bin_layout",
+        ),
+    ],
+)
+def test_common_path_fallback_hip_version_h(
+    monkeypatch, tmp_path, exe_depth, version_str, expected_hip_clang
+):
+    """Common.py PATH fallback parses hip_version.h when env vars are absent.
+
+    The version detection in assignGlobalParameters mirrors the logic in
+    Tensile.Toolchain.Component.get_rocm_version: when ROCM_VERSION,
+    ROCM_PATH, and HIP_PATH are all unset it walks up from any amdclang++
+    found on PATH, trying .info/version then include/hip/hip_version.h at
+    each ancestor level. Two representative TheRock layouts are exercised:
+    dist/bin/ (1 level up) and dist/lib/llvm/bin/ (3 levels up).
+
+    Rather than calling the full assignGlobalParameters (which requires a
+    complete config), we exercise the version detection section directly by
+    patching Path.read_text to reject all .info/version lookups and redirect
+    the hip_version.h lookup to our controlled tmpdir file, then verify that
+    globalParameters["HipClangVersion"] is set correctly before the function
+    proceeds to unrelated config validation.
+    """
+    # Build a fake executable nested exe_depth directories under tmp_path.
+    parts = ["sub"] * exe_depth + ["bin"]
+    bin_dir = tmp_path
+    for p in parts:
+        bin_dir = bin_dir / p
+    bin_dir.mkdir(parents=True)
+    exe = bin_dir / "amdclang++"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+
+    # Place hip_version.h at the root of tmp_path (the "dist" level).
+    hip_dir = tmp_path / "include" / "hip"
+    hip_dir.mkdir(parents=True)
+    hip_version_h_path = hip_dir / "hip_version.h"
+    hip_version_h_path.write_text(version_str)
+
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    monkeypatch.delenv("HIP_PATH", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: str(exe) if name == "amdclang++" else None)
+
+    # Patch Path.read_text: reject all .info/version reads so the code falls
+    # through to the PATH-based fallback, but allow the real hip_version.h read.
+    original_read_text = Path.read_text
+
+    def selective_read_text(self, **kwargs):
+        if self.name == "version" and self.parent.name == ".info":
+            raise OSError(f"mocked absence: {self}")
+        return original_read_text(self, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", selective_read_text)
+
+    # assignGlobalParameters does more than version detection; capture the
+    # HipClangVersion set by the version section before the rest fails.
+    try:
+        Common.assignGlobalParameters({})
+    except (ValueError, KeyError):
+        pass  # Expected — subsequent config steps need more parameters.
+
+    assert Common.globalParameters["HipClangVersion"] == expected_hip_clang

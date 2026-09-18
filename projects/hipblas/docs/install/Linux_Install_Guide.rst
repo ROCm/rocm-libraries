@@ -92,8 +92,10 @@ A few commands in the script require ``sudo`` access, which might prompt you for
 
    You can run the ``rmake.py`` script from the ``projects/hipblas`` directory.
 
-The install script determines the build platform by querying ``hipconfig --platform``. This value can be explicitly defined
-by setting the environment variable ``HIP_PLATFORM`` to ``HIP_PLATFORM=amd`` or ``HIP_PLATFORM=nvidia``.
+To build for the CUDA backend, pass ``--cuda`` to ``rmake.py`` or ``install.sh``.
+This sets ``-DUSE_CUDA=ON`` in CMake and invokes ``nvcc`` directly without
+relying on ``hipcc``. ``nvcc`` must be on ``PATH`` or the CUDA install location
+specified via ``--cudapath``.
 
 Common examples showing how to use ``rmake.py`` to build the library dependencies and library are listed
 in this table.

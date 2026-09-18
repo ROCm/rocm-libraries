@@ -35,9 +35,6 @@ V = importlib.import_module("Tensile.Toolchain.Validators")
         ("supportedCCompiler", "amdclang++", False),
         ("supportedOffloadBundler", "clang-offload-bundler", True),
         ("supportedOffloadBundler", "clang", False),
-        ("supportedHip", "hipcc", True),
-        ("supportedHip", "hipconfig", True),
-        ("supportedHip", "hipcc.exe", False),
     ],
 )
 def test_supported_predicates(fn, name, expected):
@@ -180,7 +177,6 @@ def test_toolchain_defaults_posix():
     assert d.C_COMPILER == "amdclang"
     assert d.OFFLOAD_BUNDLER == "clang-offload-bundler"
     assert d.ASSEMBLER == "amdclang++"
-    assert d.HIP_CONFIG == "hipconfig"
     assert d.DEVICE_ENUMERATOR in ("rocm_agent_enumerator", "amdgpu-arch")
 
 
