@@ -10,6 +10,24 @@
 
 using namespace ck_tile::dispatcher;
 
+namespace {
+void set_signature(GroupedConvProblem& problem,
+                   const std::string& layout = "nhwgc_gkyxc_nhwgk")
+{
+    problem.dtype_in = problem.dtype_wei = problem.dtype_out = "fp16";
+    problem.layout = layout;
+    problem.arch = "gfx1100";
+}
+
+GroupedConvProblemBuilder valid_builder()
+{
+    return GroupedConvProblemBuilder()
+        .data_types("fp16", "fp16", "fp16")
+        .layout("nhwgc_gkyxc_nhwgk")
+        .arch("gfx1100");
+}
+} // namespace
+
 void test_grouped_conv_problem_defaults()
 {
     std::cout << "  test_grouped_conv_problem_defaults... ";
@@ -24,7 +42,7 @@ void test_grouped_conv_problem_defaults()
     assert(p.X() == 3);
     assert(p.op == GroupedConvOp::Forward);
     assert(p.stride[0] == 1 && p.stride[1] == 1 && p.stride[2] == 1);
-    assert(p.padding[0] == 0 && p.padding[1] == 0 && p.padding[2] == 0);
+    assert(p.padding_left[0] == 0 && p.padding_left[1] == 0 && p.padding_left[2] == 0);
     assert(p.dilation[0] == 1 && p.dilation[1] == 1 && p.dilation[2] == 1);
     std::cout << "PASSED\n";
 }
@@ -57,7 +75,8 @@ void test_grouped_conv_problem_strided()
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 2, 2};
-    p.padding        = {0, 1, 1};
+    p.padding_left   = {0, 1, 1};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.compute_output_size();
     assert(p.Ho() == 7);
@@ -76,9 +95,11 @@ void test_grouped_conv_problem_grouped()
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 1, 1};
-    p.padding        = {0, 0, 0};
+    p.padding_left   = {0, 0, 0};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
-    p.compute_output_size();
+    set_signature(p);
+    assert(p.compute_output_size());
     assert(p.G == 4);
     assert(p.C % p.G == 0);
     assert(p.K % p.G == 0);
@@ -97,7 +118,8 @@ void test_grouped_conv_problem_depthwise()
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 1, 1};
-    p.padding        = {0, 0, 0};
+    p.padding_left   = {0, 0, 0};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.compute_output_size();
     assert(p.is_depthwise());
@@ -116,7 +138,8 @@ void test_grouped_conv_problem_pointwise()
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 1, 1};
     p.stride         = {1, 1, 1};
-    p.padding        = {0, 0, 0};
+    p.padding_left   = {0, 0, 0};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.compute_output_size();
     assert(p.is_pointwise());
@@ -135,7 +158,8 @@ void test_grouped_conv_problem_flops()
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 1, 1};
-    p.padding        = {0, 0, 0};
+    p.padding_left   = {0, 0, 0};
+    p.padding_right  = p.padding_left;
     p.dilation       = {1, 1, 1};
     p.compute_output_size();
     double flops = p.get_flops();
@@ -154,7 +178,9 @@ void test_grouped_conv_problem_is_valid()
     p.G              = 1;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
-    p.compute_output_size();
+    p.padding_right  = p.padding_left;
+    set_signature(p);
+    assert(p.compute_output_size());
     assert(p.is_valid());
 
     p.N = 0;
@@ -179,13 +205,17 @@ void test_grouped_conv_problem_is_valid()
     assert(!p.is_valid());
     p.G = 4;
     assert(p.is_valid());
+    p.ndim_spatial = 1;
+    assert(!p.is_valid());
+    p.ndim_spatial = 2;
+    assert(p.is_valid());
     std::cout << "PASSED\n";
 }
 
 void test_grouped_conv_problem_builder()
 {
     std::cout << "  test_grouped_conv_problem_builder... ";
-    auto p = GroupedConvProblemBuilder()
+    auto p = valid_builder()
                  .batch(8)
                  .channels(128, 256)
                  .groups(4)
@@ -205,14 +235,14 @@ void test_grouped_conv_problem_builder()
     assert(p.Y() == 3);
     assert(p.X() == 3);
     assert(p.stride[1] == 2 && p.stride[2] == 2);
-    assert(p.padding[1] == 1 && p.padding[2] == 1);
+    assert(p.padding_left[1] == 1 && p.padding_left[2] == 1);
     assert(p.op == GroupedConvOp::Forward);
     assert(p.is_valid());
 
     bool threw = false;
     try
     {
-        (void)GroupedConvProblemBuilder()
+        (void)valid_builder()
             .batch(0)
             .channels(64, 64)
             .groups(1)
@@ -228,10 +258,119 @@ void test_grouped_conv_problem_builder()
     std::cout << "PASSED\n";
 }
 
+
+void test_runtime_signature_and_full_validation()
+{
+    GroupedConvProblem p;
+    assert(p.dtype_in.empty() && p.dtype_wei.empty() && p.dtype_out.empty());
+    assert(p.layout.empty() && p.ndim_spatial == 2);
+    assert(p.arch.empty() && p.op == GroupedConvOp::Forward);
+    assert(!p.is_valid());
+    assert((p.padding_left == std::array<std::int64_t, 3>{0, 0, 0}));
+    assert((p.padding_right == std::array<std::int64_t, 3>{0, 0, 0}));
+
+    p.dtype_in = "bf16"; p.dtype_wei = "fp32"; p.dtype_out = "fp64";
+    p.layout = "custom"; p.ndim_spatial = 3; p.arch = "gfx942";
+    p.op = GroupedConvOp::BackwardData;
+    assert(p.dtype_in == "bf16" && p.dtype_wei == "fp32" && p.dtype_out == "fp64");
+    assert(p.layout == "custom" && p.ndim_spatial == 3 && p.arch == "gfx942");
+
+    auto valid = valid_builder().channels(64, 128).groups(4).build();
+    valid.G = -1; assert(!valid.is_valid());
+    valid = valid_builder().build(); valid.C = 65; valid.G = 4;
+    assert(!valid.is_valid());
+    valid = valid_builder().build(); valid.K = 65; valid.G = 4;
+    assert(!valid.is_valid());
+}
+
+void test_invalid_spatial_contract()
+{
+    auto p = valid_builder().build();
+    p.input_spatial[1] = 0; assert(!p.is_valid());
+    p = valid_builder().build(); p.filter_spatial[1] = 0; assert(!p.is_valid());
+    p = valid_builder().build(); p.stride[1] = 0; assert(!p.is_valid());
+    p = valid_builder().build(); p.dilation[1] = 0; assert(!p.is_valid());
+    p = valid_builder().build(); p.padding_left[1] = -1; assert(!p.is_valid());
+    p = valid_builder().build(); p.padding_right[1] = -1; assert(!p.is_valid());
+    p = valid_builder().build(); ++p.output_spatial[1]; assert(!p.is_valid());
+    p = valid_builder().build(); p.filter_spatial[1] = 100;
+    p.output_spatial[1] = 1; assert(!p.is_valid());
+}
+
+void test_2d_depth_contract_and_asymmetric_padding()
+{
+    auto p = valid_builder().build();
+    p.input_spatial[0] = 2; assert(!p.is_valid());
+    p = valid_builder().build(); p.filter_spatial[0] = 2; assert(!p.is_valid());
+    p = valid_builder().build(); p.output_spatial[0] = 2; assert(!p.is_valid());
+    p = valid_builder().build(); p.stride[0] = 2; assert(!p.is_valid());
+    p = valid_builder().build(); p.dilation[0] = 2; assert(!p.is_valid());
+    p = valid_builder().build(); p.padding_left[0] = 1; assert(!p.is_valid());
+    p = valid_builder().build(); p.padding_right[0] = 1; assert(!p.is_valid());
+
+    auto asymmetric = valid_builder().input_size(7, 8).filter_size(3, 3)
+                          .stride(2, 2).padding(0, 1, 2, 3).build();
+    assert((asymmetric.padding_left == std::array<std::int64_t, 3>{0, 0, 1}));
+    assert((asymmetric.padding_right == std::array<std::int64_t, 3>{0, 2, 3}));
+    assert((asymmetric.output_spatial == std::array<std::int64_t, 3>{1, 4, 5}));
+}
+
+void test_3d_builder_and_grouped_flops()
+{
+    auto p = valid_builder().ndim(3).layout("ndhwgc_gkzyxc_ndhwgk")
+                 .input_size(8, 9, 10).filter_size(3, 3, 3).stride(1, 2, 2)
+                 .padding(1, 1, 2).dilation(1, 1, 1).build();
+    assert(p.ndim_spatial == 3 && p.layout == "ndhwgc_gkzyxc_ndhwgk");
+    assert((p.padding_left == std::array<std::int64_t, 3>{1, 1, 2}));
+    assert(p.padding_left == p.padding_right);
+    assert((p.output_spatial == std::array<std::int64_t, 3>{8, 5, 6}));
+
+    auto grouped = valid_builder().batch(2).channels(64, 128).groups(4)
+                       .input_size(14, 14).filter_size(3, 3).build();
+    assert(grouped.get_flops() == 2.0 * 2 * 128 * 12 * 12 * 16 * 3 * 3);
+}
+
+void test_builder_setters_are_order_independent()
+{
+    const auto first = valid_builder().ndim(3).layout("custom_3d")
+                           .input_size(8, 9, 10).filter_size(3, 3, 3).build();
+    const auto second = valid_builder().input_size(8, 9, 10).filter_size(3, 3, 3)
+                            .layout("custom_3d").ndim(3).build();
+    assert(first.ndim_spatial == second.ndim_spatial);
+    assert(first.layout == second.layout);
+    assert(first.input_spatial == second.input_spatial);
+    assert(first.filter_spatial == second.filter_spatial);
+    assert(first.output_spatial == second.output_spatial);
+}
+
+void test_compute_output_size_contract()
+{
+    GroupedConvProblem p;
+    const auto original = p.output_spatial;
+    p.stride[1] = 0;
+    assert(!p.compute_output_size());
+    assert(p.output_spatial == original);
+
+    p.stride[1] = 1;
+    p.filter_spatial[1] = 100;
+    assert(!p.compute_output_size());
+    assert(p.output_spatial == original);
+
+    p.filter_spatial[1] = 3;
+    assert(p.compute_output_size());
+    assert((p.output_spatial == std::array<std::int64_t, 3>{1, 26, 26}));
+}
+
 int main()
 {
     std::cout << "\n=== Test Grouped Conv Problem ===\n\n";
     test_grouped_conv_problem_defaults();
+    test_builder_setters_are_order_independent();
+    test_compute_output_size_contract();
+    test_runtime_signature_and_full_validation();
+    test_invalid_spatial_contract();
+    test_2d_depth_contract_and_asymmetric_padding();
+    test_3d_builder_and_grouped_flops();
     test_grouped_conv_problem_2d();
     test_grouped_conv_problem_strided();
     test_grouped_conv_problem_grouped();

@@ -116,7 +116,7 @@ def parse_kernel_metadata(kname):
         warp_m, warp_n, warp_k = int(triplets[2][0]), int(triplets[2][1]), int(triplets[2][2])
 
     pipeline = "compv3"
-    for p in ["compv1", "compv2", "compv3", "compv4", "compv5", "compv6", "mem"]:
+    for p in ["compv1", "compv2", "compv3", "compv4", "compv5", "compv6", "mem", "wavelet"]:
         if f"_{p}_" in kname:
             pipeline = p
             break
@@ -163,7 +163,11 @@ def parse_kernel_metadata(kname):
     return {
         "ndim": ndim,
         "dtype": dtype,
-        "layout": "ndhwgc" if "_ndhwgc_" in kname else "nhwgc",
+        "layout": (
+            "ndhwgc_gkzyxc_ndhwgk"
+            if ndim == 3
+            else "nhwgc_gkyxc_nhwgk"
+        ),
         "tile_m": tile_m, "tile_n": tile_n, "tile_k": tile_k,
         "wave_m": wave_m, "wave_n": wave_n, "wave_k": wave_k,
         "warp_m": warp_m, "warp_n": warp_n, "warp_k": warp_k,
@@ -220,7 +224,7 @@ def _make_implicit_gemm_conv_key(meta):
         f'        key.dtype_in     = "{meta["dtype"]}";',
         f'        key.dtype_wei    = "{meta["dtype"]}";',
         f'        key.dtype_out    = "{meta["dtype"]}";',
-        f'        key.layout       = "{meta.get("layout", "nhwgc")}";',
+        f'        key.layout       = "{meta["layout"]}";',
         f"        key.ndim_spatial = {meta['ndim']};",
         f"        key.tile_m       = {meta['tile_m']};",
         f"        key.tile_n       = {meta['tile_n']};",
@@ -268,26 +272,33 @@ def make_registration_block(kname, global_idx, op_enum, run_fn_maker, is_support
         lines.extend(_make_implicit_gemm_conv_key(meta))
 
     lines.append(f"        key.arch         = arch;")
+    lines.append(f'        key.name         = "{kname}";')
     lines.append(f"        auto run_fn = {run_fn_maker}<{launcher}, {ndim}>();")
     lines.append(f"        auto is_supported_fn = {is_supported_fn_maker}<{launcher}, {ndim}>();")
     lines.append(f"#ifdef CK_EXPERIMENTAL_BUILDER")
     lines.append(f"        auto instance_str = backends::get_instance_string<{launcher}>();")
     lines.append(
-        f'        auto inst = std::make_shared<GroupedConvKernelInstance>(key, "{kname}", std::move(run_fn), std::move(is_supported_fn), instance_str);'
+        f'        auto inst = std::make_shared<GroupedConvKernelInstance>(key, std::move(run_fn), std::move(is_supported_fn), instance_str);'
     )
     lines.append(f"#else")
     lines.append(
-        f'        auto inst = std::make_shared<GroupedConvKernelInstance>(key, "{kname}", std::move(run_fn), std::move(is_supported_fn));'
+        f'        auto inst = std::make_shared<GroupedConvKernelInstance>(key, std::move(run_fn), std::move(is_supported_fn));'
     )
     lines.append(f"#endif")
-    lines.append(f"        registry.register_kernel(key, inst);")
+    lines.append(
+        f'        if(!registry.register_kernel(key, inst))'
+    )
+    lines.append(
+        f'            throw std::runtime_error("failed to register grouped convolution kernel: {kname}");'
+    )
     lines.append("    }")
     return lines
 
 
 def generate_chunked_registration(headers, output_dir, variant, op_enum,
                                    run_fn_maker, is_supported_fn_maker,
-                                   register_fn_name, chunk_size=CHUNK_SIZE):
+                                   register_fn_name, chunk_size=CHUNK_SIZE,
+                                   arch: str = ""):
     """Generate chunked registration .cpp files for parallel compilation.
 
     Args:
@@ -299,18 +310,24 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
         is_supported_fn_maker: C++ template function like "backends::make_conv_bwd_weight_is_supported_fn"
         register_fn_name: C++ function name like "register_all_grouped_conv_bwd_weight_kernels"
         chunk_size: number of kernels per chunk file
+        arch: optional architecture suffix for per-arch OBJECT libraries.
+            When non-empty, chunk symbols are register_{variant}_{arch}_chunk_{i}
+            and register_fn_name is emitted as-is (caller passes the mangled name).
+            Unmangled public register_all_grouped_conv_<variant>_kernels names are
+            owned by the CMake dispatcher TU, not this generator.
 
     Returns:
         list of generated .cpp file paths
     """
     output_dir = Path(output_dir)
     generated_files = []
+    arch_suffix = f"_{arch}" if arch else ""
 
     # Split headers into chunks
     chunks = [headers[i:i + chunk_size] for i in range(0, len(headers), chunk_size)]
 
     for chunk_idx, chunk_headers in enumerate(chunks):
-        chunk_fn = f"register_{variant}_chunk_{chunk_idx}"
+        chunk_fn = f"register_{variant}{arch_suffix}_chunk_{chunk_idx}"
         chunk_cpp = output_dir / f"register_{variant}_chunk_{chunk_idx}.cpp"
 
         lines = [
@@ -366,7 +383,7 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
     ]
     # Forward-declare chunk functions
     for chunk_idx in range(len(chunks)):
-        chunk_fn = f"register_{variant}_chunk_{chunk_idx}"
+        chunk_fn = f"register_{variant}{arch_suffix}_chunk_{chunk_idx}"
         lines.append(f"void {chunk_fn}(GroupedConvRegistry& registry, const std::string& arch);")
     lines.append("")
 
@@ -375,7 +392,7 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
     lines.append(f"    GroupedConvRegistry& registry, const std::string& arch)")
     lines.append("{")
     for chunk_idx in range(len(chunks)):
-        chunk_fn = f"register_{variant}_chunk_{chunk_idx}"
+        chunk_fn = f"register_{variant}{arch_suffix}_chunk_{chunk_idx}"
         lines.append(f"    {chunk_fn}(registry, arch);")
     lines.append("}")
     lines.append("")
