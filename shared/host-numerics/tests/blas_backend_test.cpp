@@ -156,6 +156,13 @@ void testZeroExtentsDoNotInvokeBlas() {
             "BLAS strategy did not accept an empty reduction.");
     require(output.loadAs<float>({0, 0}) == 0.0f,
             "BLAS strategy did not write zero for an empty reduction.");
+
+    const Tensor owned =
+        matmulWithBlasBackend(Tensor(ScalarType::Float32, Shape{2, 0}),
+                              Tensor(ScalarType::Float32, Shape{0, 3}), ScalarType::Float32);
+    require(owned.shape() == Shape({2, 3}) &&
+                compare(owned, Tensor(ScalarType::Float32, Shape{2, 3})).passed(),
+            "Owning BLAS GEMM did not initialize an empty reduction to zero.");
 }
 
 void testModeratelyLargeExactGemm() {
