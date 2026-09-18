@@ -98,7 +98,7 @@ def _buildColScatter(stackM: int, instM: int, instK: int, bpe: float,
     if cpc & (cpc - 1) or cBits > 3:
         raise ValueError("col_scatter needs a power-of-two cpc with at most 3 "
                          "m_chunk bits (contiguous in bytes), got cpc=%d" % cpc)
-    if elemsPerRead % N or elemsPerRead // N < 1:
+    if elemsPerRead % N:
         raise ValueError("col_scatter needs the transpose read to step whole "
                          "col-groups: elemsPerRead=%d, N=%d" % (elemsPerRead, N))
     # Thread bits [5:0]: bit 3 is reserved for col_group[gdBit] (bank-pair
@@ -207,7 +207,10 @@ def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
 # bytes -- so wider strips stay unswizzled.  On a shared strip the XOR is
 # unusable (see _sharedStrip), so the narrow widths route here too.
 _COL_SCATTER_CPC = frozenset({4, 8})
-_COL_SCATTER_CPC_SHARED = frozenset({1, 2, 4, 8})
+# The narrow widths the XOR normally owns, added rather than restated so the
+# shared-strip set cannot fall behind _COL_SCATTER_CPC.  A miss here is a
+# bank-conflicting kernel, not an error.
+_COL_SCATTER_CPC_SHARED = _COL_SCATTER_CPC | frozenset({1, 2})
 
 
 def selectTLUColScatter(tileInfo) -> Optional[TLUColScatter]:
