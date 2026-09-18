@@ -101,7 +101,8 @@ namespace
             handle->properties.maxGridSize[0] = saved;
         }
 
-        scoped_max_grid_x(const scoped_max_grid_x&)            = delete;
+        scoped_max_grid_x(const scoped_max_grid_x&) = delete;
+
         scoped_max_grid_x& operator=(const scoped_max_grid_x&) = delete;
     };
 
