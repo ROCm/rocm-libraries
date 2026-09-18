@@ -451,7 +451,8 @@ namespace rocalution
         /** \brief Apply and add the matrix to vector, out = out + scalar*this*in; */
         virtual void ApplyAdd(const BaseVector<ValueType>& in,
                               ValueType                    scalar,
-                              BaseVector<ValueType>*       out) const = 0;
+                              BaseVector<ValueType>*       out) const
+            = 0;
 
         /** \brief Delete all entries abs(a_ij) <= drop_off;
         * the diagonal elements are never deleted */

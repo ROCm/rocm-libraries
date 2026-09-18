@@ -1863,17 +1863,13 @@ namespace rocalution
             format += sstr.str();
         }
 
-        LOG_INFO("LocalMatrix"
-                 << " name=" << this->object_name_ << ";"
-                 << " rows=" << this->GetM() << ";"
-                 << " cols=" << this->GetN() << ";"
-                 << " nnz=" << this->GetNnz() << ";"
-                 << " prec=" << 8 * sizeof(ValueType) << "bit;"
-                 << " format=" << format << ";"
-                 << " host backend={" << _rocalution_host_name[0] << "};"
-                 << " accelerator backend={"
-                 << _rocalution_backend_name[this->local_backend_.backend] << "};"
-                 << " current=" << current_backend_name);
+        LOG_INFO("LocalMatrix" << " name=" << this->object_name_ << ";" << " rows=" << this->GetM()
+                               << ";" << " cols=" << this->GetN() << ";" << " nnz="
+                               << this->GetNnz() << ";" << " prec=" << 8 * sizeof(ValueType)
+                               << "bit;" << " format=" << format << ";" << " host backend={"
+                               << _rocalution_host_name[0] << "};" << " accelerator backend={"
+                               << _rocalution_backend_name[this->local_backend_.backend] << "};"
+                               << " current=" << current_backend_name);
 
         // this->matrix_->Info();
     }

@@ -807,18 +807,15 @@ namespace rocalution
             format += sstr.str() + "/" + _matrix_format_names[this->matrix_ghost_.GetFormat()];
         }
 
-        LOG_INFO("GlobalMatrix"
-                 << " name=" << this->object_name_ << ";"
-                 << " rows=" << this->GetM() << ";"
-                 << " cols=" << this->GetN() << ";"
-                 << " nnz=" << this->GetNnz() << ";"
-                 << " prec=" << 8 * sizeof(ValueType) << "bit;"
-                 << " format=" << format << ";"
-                 << " subdomains=" << ((this->pm_ != NULL) ? this->pm_->num_procs_ : 1) << ";"
-                 << " host backend={" << _rocalution_host_name[0] << "};"
-                 << " accelerator backend={"
-                 << _rocalution_backend_name[this->local_backend_.backend] << "};"
-                 << " current=" << current_backend_name);
+        LOG_INFO("GlobalMatrix" << " name=" << this->object_name_ << ";" << " rows=" << this->GetM()
+                                << ";" << " cols=" << this->GetN() << ";" << " nnz="
+                                << this->GetNnz() << ";" << " prec=" << 8 * sizeof(ValueType)
+                                << "bit;" << " format=" << format << ";" << " subdomains="
+                                << ((this->pm_ != NULL) ? this->pm_->num_procs_ : 1) << ";"
+                                << " host backend={" << _rocalution_host_name[0] << "};"
+                                << " accelerator backend={"
+                                << _rocalution_backend_name[this->local_backend_.backend] << "};"
+                                << " current=" << current_backend_name);
     }
 
     template <typename ValueType>
