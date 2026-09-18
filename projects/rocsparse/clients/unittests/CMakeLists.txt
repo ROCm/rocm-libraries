@@ -192,6 +192,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- Dense element-count grids of the shared common helpers [AISPARSE-699] -
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Needs rocsparse_common.cpp compiled in
+  # (appended to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
+  unit_test_internal_common_dense_grids.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -270,6 +275,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
+  # Added at this leaf for unit_test_internal_common_dense_grids.cpp
+  # [AISPARSE-699]: the valset_2d / scale_array / scale_2d_array /
+  # axpby_array_batched template instantiations are hidden in librocsparse
+  # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled in.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_common.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
