@@ -123,13 +123,11 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(pytest.mark.syntax_error)
         return marks
 
-    # A Tensile config is a mapping carrying BenchmarkProblems. Library logic
-    # YAMLs (e.g. characterization data files) are not standalone Tensile.py
-    # configs; signal the caller to skip them rather than crashing on
-    # doc["BenchmarkProblems"]. They come in both shapes -- a top-level sequence
-    # in the legacy form, a mapping without BenchmarkProblems in the form the
-    # LibraryLogic step emits today -- so testing for the key covers both.
-    if not isinstance(doc, dict) or "BenchmarkProblems" not in doc:
+    # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
+    # Top-level sequences are library logic YAMLs (e.g. characterization data
+    # files), which are not standalone Tensile.py configs. Signal the caller to
+    # skip them rather than crashing on doc["BenchmarkProblems"].
+    if not isinstance(doc, dict):
         return None
 
     if "TestParameters" in doc:
