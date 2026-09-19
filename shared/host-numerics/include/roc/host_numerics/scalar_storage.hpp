@@ -106,6 +106,28 @@ inline int64_t signExtend(uint32_t value, uint32_t bits) {
 }
 
 template <typename Tag, typename Target>
+    requires(!std::is_void_v<typename Tag::Storage>)
+Target decodeScalarValueKnown(typename Tag::Storage encoded,
+                              const ScalarConversionOptions& options) {
+    constexpr ScalarType Type = Tag::type;
+    static_assert(isConcreteScalarType(Type));
+    if constexpr (Type == ScalarType::Boolean)
+        return convertScalarValue<Target>(encoded != 0, options);
+    else if constexpr (Type == ScalarType::Float16)
+        return convertScalarValue<Target>(decodeFloat16(encoded), options);
+    else if constexpr (Type == ScalarType::BFloat16)
+        return convertScalarValue<Target>(decodeBFloat16(encoded), options);
+    else if constexpr (IsBinaryFloatTypeV<Type>)
+        return convertScalarValue<Target>(decodeBinaryFloatKnown<Type>(encoded), options);
+    else if constexpr (Type == ScalarType::E8M0)
+        return convertScalarValue<Target>(decodeE8M0(encoded), options);
+    else if constexpr (Type == ScalarType::E8M0Zero)
+        return convertScalarValue<Target>(decodeE8M0Zero(encoded), options);
+    else
+        return convertScalarValue<Target>(encoded, options);
+}
+
+template <typename Tag, typename Target>
 Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset,
                          const ScalarConversionOptions& options) {
     constexpr ScalarType Type = Tag::type;
@@ -113,36 +135,18 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
     const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
 
-    if constexpr (Type == ScalarType::Boolean)
-        return convertScalarValue<Target>(readNative<uint8_t>(storage, offsetBytes) != 0, options);
-    else if constexpr (Type == ScalarType::Float16)
-        return convertScalarValue<Target>(decodeFloat16(readNative<uint16_t>(storage, offsetBytes)),
-                                          options);
-    else if constexpr (Type == ScalarType::BFloat16)
-        return convertScalarValue<Target>(
-            decodeBFloat16(readNative<uint16_t>(storage, offsetBytes)), options);
+    if constexpr (!std::is_void_v<typename Tag::Storage>)
+        return decodeScalarValueKnown<Tag, Target>(
+            readNative<typename Tag::Storage>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Int4)
         return convertScalarValue<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4),
                                           options);
     else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
-                       Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
-                       Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
-                       Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
-                       Type == ScalarType::E4M3) {
+                       Type == ScalarType::Float6E3M2) {
         constexpr uint16_t storageBits = scalarTypeInfo(Type).storageBits;
-        const uint32_t raw = storageBits == 8 ? readNative<uint8_t>(storage, offsetBytes)
-                                              : readPackedBits(storage, offsetBits, storageBits);
+        const uint32_t raw = readPackedBits(storage, offsetBits, storageBits);
         return convertScalarValue<Target>(decodeBinaryFloatKnown<Type>(raw), options);
-    } else if constexpr (Type == ScalarType::E8M0)
-        return convertScalarValue<Target>(decodeE8M0(readNative<uint8_t>(storage, offsetBytes)),
-                                          options);
-    else if constexpr (Type == ScalarType::E8M0Zero)
-        return convertScalarValue<Target>(decodeE8M0Zero(readNative<uint8_t>(storage, offsetBytes)),
-                                          options);
-    else if constexpr (!std::is_void_v<typename Tag::Storage>)
-        return convertScalarValue<Target>(readNative<typename Tag::Storage>(storage, offsetBytes),
-                                          options);
-    else
+    } else
         static_assert(AlwaysFalseV<Tag>, "Unhandled ScalarType decoding.");
 }
 

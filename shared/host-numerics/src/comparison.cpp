@@ -55,15 +55,11 @@ ComparisonReport accumulateComparison(const Tensor& observed, const Tensor& expe
     for (int thread = 0; thread < threadCount; ++thread)
         partials.emplace_back(options, observed.shape());
 
-    const size_t elementsPerPartition = selectedCount / partitionCount;
-    const size_t remainder = selectedCount % partitionCount;
     detail::forEachParallelIndex(
         partitionCount, selectedCount, true, minimumElementsPerThread, [&](size_t partition) {
-            const size_t firstSelected =
-                partition * elementsPerPartition + std::min(partition, remainder);
-            const size_t pastLastSelected =
-                firstSelected + elementsPerPartition + static_cast<size_t>(partition < remainder);
-            detail::forEachAllOffsetPairRange(
+            const auto [firstSelected, pastLastSelected] =
+                detail::evenlyPartitionedRange(selectedCount, partitionCount, partition);
+            detail::forEachLayoutOffsetPairRange(
                 observed.layout(), expected.layout(), options.selection.indexOrder(), firstSelected,
                 pastLastSelected,
                 [&](size_t logicalIndex, ptrdiff_t observedOffset, ptrdiff_t expectedOffset) {

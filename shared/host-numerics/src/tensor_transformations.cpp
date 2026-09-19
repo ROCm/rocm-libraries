@@ -2,9 +2,70 @@
 // SPDX-License-Identifier: MIT
 
 #include <complex>
+#include <cstring>
 #include <roc/host_numerics/tensor.hpp>
+#include <type_traits>
+
+#include "detail/layout_iteration.hpp"
 
 namespace roc::host_numerics {
+namespace {
+template <typename SourceTag, typename DestinationTag>
+void copyConvertedElement(std::span<const std::byte> sourceStorage, ptrdiff_t sourceOffset,
+                          std::span<std::byte> destinationStorage, ptrdiff_t destinationOffset,
+                          const ScalarConversionOptions& options) {
+    const auto convert = [&]<typename Intermediate>() {
+        if constexpr (!std::is_void_v<typename SourceTag::Storage> &&
+                      !std::is_void_v<typename DestinationTag::Storage>) {
+            typename SourceTag::Storage encodedSource;
+            std::memcpy(&encodedSource,
+                        sourceStorage.data() +
+                            static_cast<size_t>(sourceOffset) * sizeof(typename SourceTag::Storage),
+                        sizeof(encodedSource));
+            const Intermediate value =
+                detail::decodeScalarValueKnown<SourceTag, Intermediate>(encodedSource, options);
+            const auto encodedDestination =
+                detail::encodeScalarValueKnown<DestinationTag>(value, options);
+            std::memcpy(destinationStorage.data() + static_cast<size_t>(destinationOffset) *
+                                                        sizeof(typename DestinationTag::Storage),
+                        &encodedDestination, sizeof(encodedDestination));
+        } else {
+            const Intermediate value =
+                detail::decodeScalarKnown<SourceTag, Intermediate>(sourceStorage, sourceOffset);
+            detail::encodeScalarKnown<DestinationTag>(destinationStorage, destinationOffset, value,
+                                                      options);
+        }
+    };
+
+    constexpr ScalarCategory sourceCategory = scalarTypeInfo(SourceTag::type).category;
+    if constexpr (sourceCategory == ScalarCategory::Boolean ||
+                  sourceCategory == ScalarCategory::UnsignedInteger) {
+        convert.template operator()<uint64_t>();
+    } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
+        convert.template operator()<int64_t>();
+    } else if constexpr (sourceCategory == ScalarCategory::Complex) {
+        convert.template operator()<std::complex<double>>();
+    } else {
+        convert.template operator()<double>();
+    }
+}
+
+using CopyConvertedElementFunction = void (*)(std::span<const std::byte>, ptrdiff_t,
+                                              std::span<std::byte>, ptrdiff_t,
+                                              const ScalarConversionOptions&);
+
+CopyConvertedElementFunction copyConvertedElementFunction(ScalarType sourceType,
+                                                          ScalarType destinationType) {
+    return visitScalarType(
+        sourceType, [destinationType]<typename SourceTag>() -> CopyConvertedElementFunction {
+            return visitScalarType(destinationType,
+                                   []<typename DestinationTag>() -> CopyConvertedElementFunction {
+                                       return &copyConvertedElement<SourceTag, DestinationTag>;
+                                   });
+        });
+}
+}  // namespace
+
 Tensor Tensor::reshapeSharingStorage(Shape shape) const {
     if (shape.elementCount() != elementCount())
         throw std::invalid_argument("Tensor reshape requires the same logical element count.");
@@ -130,45 +191,91 @@ Tensor Tensor::copyConvertedTo(ScalarType destinationType, Layout destinationLay
         throw std::invalid_argument(
             "Tensor conversion requires non-overlapping destination elements when relayouting.");
 
-    Tensor result(destinationType, std::move(destinationLayout));
+    const bool fullyWritesBackingStorage =
+        !scalarTypeInfo(destinationType).isPacked() && destinationLayout.offset() == 0 &&
+        (detail::isContiguous(destinationLayout, IndexOrder::FirstDimensionFastest) ||
+         detail::isContiguous(destinationLayout, IndexOrder::LastDimensionFastest));
+    Tensor result =
+        fullyWritesBackingStorage
+            ? Tensor::allocateUninitialized(destinationType, std::move(destinationLayout))
+            : Tensor(destinationType, std::move(destinationLayout));
     if (destinationType == sourceType) {
         result.copyLogicalElementsFrom(*this);
         return result;
     }
     const Tensor destination = result;
-    visitScalarType(sourceType, [&]<typename SourceTag>() {
-        visitScalarType(destinationType, [&]<typename DestinationTag>() {
-            detail::forEachIndex(sourceLayout.shape(), [&](std::span<const size_t> indices,
-                                                           size_t) {
-                const ptrdiff_t sourceOffset = sourceLayout.elementOffset(indices);
-                const ptrdiff_t destinationOffset = destination.layout().elementOffset(indices);
-                constexpr ScalarCategory sourceCategory = scalarTypeInfo(SourceTag::type).category;
-                if constexpr (sourceCategory == ScalarCategory::Boolean ||
-                              sourceCategory == ScalarCategory::UnsignedInteger) {
-                    const uint64_t value =
-                        detail::decodeScalarKnown<SourceTag, uint64_t>(sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag>(
-                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
-                } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
-                    const int64_t value =
-                        detail::decodeScalarKnown<SourceTag, int64_t>(sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag>(
-                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
-                } else if constexpr (sourceCategory == ScalarCategory::Complex) {
-                    const std::complex<double> value =
-                        detail::decodeScalarKnown<SourceTag, std::complex<double>>(sourceStorage,
-                                                                                   sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag>(
-                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
+    const auto copyElement = copyConvertedElementFunction(sourceType, destinationType);
+    const auto destinationStorage = destination.rawEncodedBackingStorage();
+    const bool firstDimensionFastest =
+        detail::isContiguous(sourceLayout, IndexOrder::FirstDimensionFastest) &&
+        detail::isContiguous(destination.layout(), IndexOrder::FirstDimensionFastest);
+    const bool lastDimensionFastest =
+        detail::isContiguous(sourceLayout, IndexOrder::LastDimensionFastest) &&
+        detail::isContiguous(destination.layout(), IndexOrder::LastDimensionFastest);
+    if (firstDimensionFastest || lastDimensionFastest) {
+        const ptrdiff_t sourceBase = sourceLayout.offset();
+        const ptrdiff_t destinationBase = destination.layout().offset();
+        for (size_t index = 0; index < sourceLayout.shape().elementCount(); ++index)
+            copyElement(sourceStorage, sourceBase + static_cast<ptrdiff_t>(index),
+                        destinationStorage, destinationBase + static_cast<ptrdiff_t>(index),
+                        options);
+        return result;
+    }
+
+    const bool sourceFirstDimensionFastest =
+        detail::isContiguous(sourceLayout, IndexOrder::FirstDimensionFastest);
+    const bool sourceLastDimensionFastest =
+        detail::isContiguous(sourceLayout, IndexOrder::LastDimensionFastest);
+    const bool destinationFirstDimensionFastest =
+        detail::isContiguous(destination.layout(), IndexOrder::FirstDimensionFastest);
+    const bool destinationLastDimensionFastest =
+        detail::isContiguous(destination.layout(), IndexOrder::LastDimensionFastest);
+    if (sourceLayout.shape().rank() == 2 &&
+        ((sourceFirstDimensionFastest && destinationLastDimensionFastest) ||
+         (sourceLastDimensionFastest && destinationFirstDimensionFastest))) {
+        constexpr size_t tileRows = 64;
+        constexpr size_t tileColumns = 64;
+        const size_t rows = sourceLayout.shape()[0];
+        const size_t columns = sourceLayout.shape()[1];
+        const auto copyAt = [&](size_t row, size_t column) {
+            copyElement(sourceStorage,
+                        sourceLayout.offset() +
+                            static_cast<ptrdiff_t>(row) * sourceLayout.stride(0) +
+                            static_cast<ptrdiff_t>(column) * sourceLayout.stride(1),
+                        destinationStorage,
+                        destination.layout().offset() +
+                            static_cast<ptrdiff_t>(row) * destination.layout().stride(0) +
+                            static_cast<ptrdiff_t>(column) * destination.layout().stride(1),
+                        options);
+        };
+        for (size_t rowBase = 0; rowBase < rows; rowBase += tileRows) {
+            const size_t rowEnd = std::min(rows, rowBase + tileRows);
+            for (size_t columnBase = 0; columnBase < columns; columnBase += tileColumns) {
+                const size_t columnEnd = std::min(columns, columnBase + tileColumns);
+                if (sourceFirstDimensionFastest) {
+                    for (size_t column = columnBase; column < columnEnd; ++column)
+                        for (size_t row = rowBase; row < rowEnd; ++row) copyAt(row, column);
                 } else {
-                    const double value =
-                        detail::decodeScalarKnown<SourceTag, double>(sourceStorage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag>(
-                        destination.rawEncodedBackingStorage(), destinationOffset, value, options);
+                    for (size_t row = rowBase; row < rowEnd; ++row)
+                        for (size_t column = columnBase; column < columnEnd; ++column)
+                            copyAt(row, column);
                 }
-            });
+            }
+        }
+        return result;
+    }
+
+    const IndexOrder traversalOrder =
+        sourceFirstDimensionFastest        ? IndexOrder::FirstDimensionFastest
+        : sourceLastDimensionFastest       ? IndexOrder::LastDimensionFastest
+        : destinationFirstDimensionFastest ? IndexOrder::FirstDimensionFastest
+                                           : IndexOrder::LastDimensionFastest;
+    detail::forEachLayoutOffsetPairRange(
+        sourceLayout, destination.layout(), traversalOrder, 0, sourceLayout.shape().elementCount(),
+        [&](size_t, ptrdiff_t sourceOffset, ptrdiff_t destinationOffset) {
+            copyElement(sourceStorage, sourceOffset, destinationStorage, destinationOffset,
+                        options);
         });
-    });
     return result;
 }
 }  // namespace roc::host_numerics

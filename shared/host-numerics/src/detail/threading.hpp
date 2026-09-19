@@ -10,6 +10,7 @@
 #include <exception>
 #include <limits>
 #include <roc/host_numerics/tensor.hpp>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,23 @@
 #endif
 
 namespace roc::host_numerics::detail {
+struct IndexRange {
+    size_t first;
+    size_t pastLast;
+};
+
+inline IndexRange evenlyPartitionedRange(size_t count, size_t partitionCount, size_t partition) {
+    if (partitionCount == 0 || partition >= partitionCount)
+        throw std::invalid_argument("Parallel partition index is out of range.");
+    const size_t elementsPerPartition = count / partitionCount;
+    const size_t remainder = count % partitionCount;
+    const size_t first = partition * elementsPerPartition + std::min(partition, remainder);
+    return {
+        first,
+        first + elementsPerPartition + static_cast<size_t>(partition < remainder),
+    };
+}
+
 inline bool hasProvablyIndependentElements(const Tensor& destination) {
     if (scalarTypeInfo(destination.type()).storageBits % 8 != 0) return false;
     return detail::hasProvablyDistinctElementOffsets(destination.layout());

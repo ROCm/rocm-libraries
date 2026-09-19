@@ -64,20 +64,47 @@ void validateTransforming(const GemmInvocation& problem) {
 }
 
 template <typename Accumulator>
+bool requiresComputeQuantization(const Tensor& operand,
+                                 const std::optional<ScalarType>& computeType) {
+    return computeType && *computeType != operand.type() &&
+           !detail::RuntimeQuantizer<Accumulator>(computeType).isIdentity();
+}
+
+template <typename Accumulator>
 Tensor materializeOperand(const Tensor& operand, const std::optional<ScalarType>& computeType,
                           const std::vector<Tensor>& preQuantizationScales, bool conjugate,
                           MathMode mathMode) {
     using namespace detail;
     Tensor output = Tensor::allocateUninitialized(nativeScalarType<Accumulator>,
                                                   columnMajorLayout(operand.shape()));
-    if (!computeType && preQuantizationScales.empty() && !conjugate &&
-        mathMode == MathMode::Default) {
+    if (!requiresComputeQuantization<Accumulator>(operand, computeType) &&
+        preQuantizationScales.empty() && !conjugate && mathMode == MathMode::Default) {
         const auto storage = output.rawEncodedBackingStorage();
         if (reinterpret_cast<uintptr_t>(storage.data()) % alignof(Accumulator) == 0) {
             auto* values = reinterpret_cast<Accumulator*>(storage.data());
             const RuntimeMatrixBlockReader<Accumulator> input(operand);
             const size_t rows = operand.shape()[0];
             const size_t columns = operand.shape()[1];
+            if (strideMagnitude(operand.layout().strides()[1]) <
+                strideMagnitude(operand.layout().strides()[0])) {
+                constexpr size_t tileRows = 64;
+                constexpr size_t tileColumns = 64;
+                const size_t rowTiles = rows / tileRows + (rows % tileRows != 0);
+                const size_t columnTiles = columns / tileColumns + (columns % tileColumns != 0);
+                const size_t tileCount = saturatedProduct(rowTiles, columnTiles);
+                forEachParallelIndex(
+                    tileCount, operand.elementCount(), true, 500'000, [&](size_t tile) {
+                        const size_t rowBase = tile % rowTiles * tileRows;
+                        const size_t columnBase = tile / rowTiles * tileColumns;
+                        const size_t blockRows = std::min(tileRows, rows - rowBase);
+                        const size_t blockColumns = std::min(tileColumns, columns - columnBase);
+                        input.loadStrided(rowBase, columnBase, blockRows, blockColumns,
+                                          std::span(values + columnBase * rows + rowBase,
+                                                    (columns - columnBase) * rows - rowBase),
+                                          1, static_cast<ptrdiff_t>(rows));
+                    });
+                return output;
+            }
             constexpr size_t rowsPerBlock = 64 * 1024;
             const size_t rowBlocks = rows / rowsPerBlock + (rows % rowsPerBlock != 0);
             const size_t blockCount = saturatedProduct(rowBlocks, columns);
@@ -120,9 +147,10 @@ bool canUseBlasOperandWithoutMaterialization(const Tensor& operand,
                                              const std::optional<ScalarType>& computeType,
                                              const std::vector<Tensor>& preQuantizationScales,
                                              bool conjugate, MathMode mathMode, const char* name) {
-    const bool requiresValueTransform = operand.type() != nativeScalarType<Accumulator> ||
-                                        computeType || !preQuantizationScales.empty() ||
-                                        mathMode != MathMode::Default;
+    const bool requiresValueTransform =
+        operand.type() != nativeScalarType<Accumulator> ||
+        requiresComputeQuantization<Accumulator>(operand, computeType) ||
+        !preQuantizationScales.empty() || mathMode != MathMode::Default;
     if (requiresValueTransform) return false;
     try {
         (void)toBlasLayout(operand, conjugate, name);

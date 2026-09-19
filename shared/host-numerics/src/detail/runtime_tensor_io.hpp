@@ -10,6 +10,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
@@ -37,7 +38,7 @@ using RuntimeLoadFunction = Accumulator (*)(std::span<const std::byte>, ptrdiff_
 template <typename Accumulator>
 using RuntimeLoadMatrixBlockFunction = void (*)(std::span<const std::byte>, ptrdiff_t, ptrdiff_t,
                                                 ptrdiff_t, size_t, size_t, size_t, size_t,
-                                                std::span<Accumulator>);
+                                                std::span<Accumulator>, ptrdiff_t, ptrdiff_t);
 
 template <typename Accumulator>
 using RuntimeStoreFunction = void (*)(std::span<std::byte>, ptrdiff_t, Accumulator);
@@ -51,7 +52,20 @@ template <typename Accumulator, typename Tag>
 void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset,
                             ptrdiff_t rowStride, ptrdiff_t columnStride, size_t rowBase,
                             size_t columnBase, size_t rows, size_t columns,
-                            std::span<Accumulator> destination) {
+                            std::span<Accumulator> destination, ptrdiff_t destinationRowStride,
+                            ptrdiff_t destinationColumnStride) {
+    const auto decode = [&](ptrdiff_t logicalOffset) {
+        if constexpr (!std::is_void_v<typename Tag::Storage>) {
+            typename Tag::Storage encoded;
+            std::memcpy(&encoded,
+                        storage.data() + static_cast<size_t>(logicalOffset) * sizeof(encoded),
+                        sizeof(encoded));
+            return decodeScalarValueKnown<Tag, Accumulator>(encoded,
+                                                            implicitNativeConversionOptions());
+        } else {
+            return decodeScalarKnown<Tag, Accumulator>(storage, logicalOffset);
+        }
+    };
     const auto strideMagnitude = [](ptrdiff_t stride) {
         using Unsigned = std::make_unsigned_t<ptrdiff_t>;
         const Unsigned value = static_cast<Unsigned>(stride);
@@ -64,8 +78,9 @@ void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset
             for (size_t row = 0; row < rows; ++row) {
                 const ptrdiff_t sourceOffset =
                     sourceColumn + static_cast<ptrdiff_t>(rowBase + row) * rowStride;
-                destination[row * columns + column] =
-                    decodeScalarKnown<Tag, Accumulator>(storage, sourceOffset);
+                destination[static_cast<ptrdiff_t>(row) * destinationRowStride +
+                            static_cast<ptrdiff_t>(column) * destinationColumnStride] =
+                    decode(sourceOffset);
             }
         }
         return;
@@ -75,8 +90,9 @@ void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset
         for (size_t column = 0; column < columns; ++column) {
             const ptrdiff_t sourceOffset =
                 sourceRow + static_cast<ptrdiff_t>(columnBase + column) * columnStride;
-            destination[row * columns + column] =
-                decodeScalarKnown<Tag, Accumulator>(storage, sourceOffset);
+            destination[static_cast<ptrdiff_t>(row) * destinationRowStride +
+                        static_cast<ptrdiff_t>(column) * destinationColumnStride] =
+                decode(sourceOffset);
         }
     }
 }
@@ -137,14 +153,42 @@ class RuntimeMatrixBlockReader {
           m_offset(view.layout().offset()),
           m_rowStride(view.layout().strides()[0]),
           m_columnStride(view.layout().strides()[1]),
+          m_rows(view.shape()[0]),
+          m_columns(view.shape()[1]),
           m_load(runtimeLoadMatrixBlockFunction<Accumulator>(view.type())) {}
 
     void load(size_t rowBase, size_t columnBase, size_t rows, size_t columns,
               std::span<Accumulator> destination) const {
-        if (rows != 0 && columns > destination.size() / rows)
-            throw std::invalid_argument("Runtime matrix block destination is too small.");
+        loadStrided(rowBase, columnBase, rows, columns, destination,
+                    static_cast<ptrdiff_t>(columns), 1);
+    }
+
+    void loadStrided(size_t rowBase, size_t columnBase, size_t rows, size_t columns,
+                     std::span<Accumulator> destination, ptrdiff_t destinationRowStride,
+                     ptrdiff_t destinationColumnStride) const {
+        if (rowBase > m_rows || rows > m_rows - rowBase || columnBase > m_columns ||
+            columns > m_columns - columnBase)
+            throw std::out_of_range("Runtime matrix block exceeds the source tensor.");
+        if (destinationRowStride < 0 || destinationColumnStride < 0)
+            throw std::invalid_argument("Runtime matrix block destination strides are negative.");
+        if (rows != 0 && columns != 0) {
+            if (destination.empty())
+                throw std::invalid_argument("Runtime matrix block destination is too small.");
+            size_t maximumOffset = 0;
+            const auto includeDimension = [&](size_t lastIndex, ptrdiff_t stride) {
+                const size_t unsignedStride = static_cast<size_t>(stride);
+                if (unsignedStride != 0 &&
+                    lastIndex > (destination.size() - 1 - maximumOffset) / unsignedStride)
+                    throw std::invalid_argument("Runtime matrix block destination is too small.");
+                maximumOffset += lastIndex * unsignedStride;
+            };
+            includeDimension(rows - 1, destinationRowStride);
+            includeDimension(columns - 1, destinationColumnStride);
+            if (maximumOffset >= destination.size())
+                throw std::invalid_argument("Runtime matrix block destination is too small.");
+        }
         m_load(m_storage, m_offset, m_rowStride, m_columnStride, rowBase, columnBase, rows, columns,
-               destination);
+               destination, destinationRowStride, destinationColumnStride);
     }
 
    private:
@@ -152,6 +196,8 @@ class RuntimeMatrixBlockReader {
     ptrdiff_t m_offset;
     ptrdiff_t m_rowStride;
     ptrdiff_t m_columnStride;
+    size_t m_rows;
+    size_t m_columns;
     RuntimeLoadMatrixBlockFunction<Accumulator> m_load;
 };
 
@@ -305,9 +351,13 @@ class RuntimeQuantizer {
     RuntimeQuantizer() = default;
 
     explicit RuntimeQuantizer(std::optional<ScalarType> type) {
-        if (!type) return;
+        if (!type || *type == nativeScalarType<Accumulator>) return;
         m_load = runtimeLoadFunction<Accumulator>(*type);
         m_store = runtimeStoreFunction<Accumulator>(*type);
+    }
+
+    bool isIdentity() const {
+        return m_load == nullptr;
     }
 
     Accumulator operator()(Accumulator value) const {

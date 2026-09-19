@@ -442,5 +442,18 @@ void testComparisonProgram() {
         require(parallelResult.reportedMismatches[index].index ==
                     serialResult.reportedMismatches[index].index,
                 "Parallel comparison reduction changed mismatch report order.");
+
+    ComparisonOptions allCloseOnly = allCloseComparisonOptions(1.0, 0.0, true);
+    allCloseOnly.maxReportedMismatches = 0;
+    const ComparisonReport tolerantParallelResult =
+        compare(largeObservedTensor, largeExpectedTensor, allCloseOnly);
+    require(tolerantParallelResult.passed() &&
+                tolerantParallelResult.compared == largeComparisonElements,
+            "Parallel all-close comparison rejected values within tolerance.");
+    allCloseOnly.absoluteTolerance = 0.0;
+    const ComparisonReport exactParallelResult =
+        compare(largeObservedTensor, largeExpectedTensor, allCloseOnly);
+    require(!exactParallelResult.passed() && exactParallelResult.mismatches == 3,
+            "Parallel all-close comparison lost mismatches.");
 }
 }  // namespace host_numerics_test

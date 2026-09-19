@@ -209,7 +209,10 @@ void testPlainLowPrecisionMaterialization() {
 
             const auto checkOutput = [&](ScalarType outputType, const Layout& outputLayout) {
                 Tensor output(outputType, outputLayout);
-                GemmTestCase problem(a, b, output, ScalarType::Float32);
+                GemmTestOptions options(ScalarType::Float32);
+                options.computeTypeA = ScalarType::Float32;
+                options.computeTypeB = ScalarType::Float32;
+                GemmTestCase problem(a, b, output, options);
                 referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
                 for (size_t row = 0; row < output.shape()[0]; ++row) {
                     for (size_t column = 0; column < output.shape()[1]; ++column) {

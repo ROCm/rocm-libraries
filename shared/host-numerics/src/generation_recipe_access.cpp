@@ -22,6 +22,7 @@
 
 #include "detail/generation_primitives.hpp"
 #include "detail/generation_values.hpp"
+#include "detail/layout_iteration.hpp"
 #include "detail/threading.hpp"
 
 namespace roc::host_numerics::detail {
@@ -520,29 +521,6 @@ struct GenerationRecipeAccess {
             bound.component.pattern_);
     }
 
-    static bool isContiguous(const Layout& layout, IndexOrder order) {
-        uint64_t expectedStride = 1;
-        const auto matchesDimension = [&](size_t dimension) {
-            const size_t extent = layout.shape()[dimension];
-            if (extent > 1 && (layout.stride(dimension) < 0 ||
-                               static_cast<uint64_t>(layout.stride(dimension)) != expectedStride))
-                return false;
-            if (extent != 0 && expectedStride > std::numeric_limits<uint64_t>::max() / extent)
-                return false;
-            expectedStride *= extent;
-            return true;
-        };
-
-        if (order == IndexOrder::FirstDimensionFastest) {
-            for (size_t dimension = 0; dimension < layout.shape().rank(); ++dimension)
-                if (!matchesDimension(dimension)) return false;
-        } else {
-            for (size_t dimension = layout.shape().rank(); dimension > 0; --dimension)
-                if (!matchesDimension(dimension - 1)) return false;
-        }
-        return true;
-    }
-
     static void incrementCoordinates(std::vector<size_t>& indices, const Shape& shape,
                                      IndexOrder order) {
         const auto incrementDimension = [&](size_t dimension) {
@@ -563,7 +541,7 @@ struct GenerationRecipeAccess {
     template <typename WriteFirst>
     static bool fillContiguous(Tensor destination, IndexOrder order, WriteFirst&& writeFirst) {
         const uint16_t storageBits = scalarTypeInfo(destination.type()).storageBits;
-        if (!isContiguous(destination.layout(), order)) return false;
+        if (!detail::isContiguous(destination.layout(), order)) return false;
 
         const size_t elementCount = destination.elementCount();
         if (elementCount == 0) return true;
@@ -617,7 +595,7 @@ struct GenerationRecipeAccess {
         const bool independent = hasProvablyIndependentElements(destination);
         const IndexOrder traversalOrder =
             independent ? logicalOrder : IndexOrder::LastDimensionFastest;
-        const bool contiguous = isContiguous(destination.layout(), traversalOrder);
+        const bool contiguous = detail::isContiguous(destination.layout(), traversalOrder);
         const bool trackCoordinates =
             valueUsesCoordinates || !contiguous || traversalOrder != logicalOrder;
         const int threadCount = independent ? operationThreadCount(elementCount) : 1;
@@ -735,7 +713,7 @@ struct GenerationRecipeAccess {
                                          bool valueUsesCoordinates, EncodedValue&& encodedValue) {
         const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
         if (bits >= 8 || valueUsesCoordinates || destination.layout().offset() != 0 ||
-            !isContiguous(destination.layout(), order))
+            !detail::isContiguous(destination.layout(), order))
             return false;
 
         const size_t elementsPerGroup = scalarElementGroupSize(destination.type());
@@ -929,7 +907,7 @@ struct GenerationRecipeAccess {
     static bool generateContiguousNumericalType(Tensor destination, const GenerationRecipe& recipe,
                                                 const GenerationRecipe::BoundComponent& bound,
                                                 const Pattern& pattern) {
-        if (!isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
+        if (!detail::isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
 
         constexpr ScalarCategory category = scalarTypeInfo(Tag::type).category;
         constexpr bool signedNumerical =
@@ -1026,7 +1004,7 @@ struct GenerationRecipeAccess {
                                       const GenerationRecipe::BoundComponent& bound,
                                       const Pattern& pattern) {
         if (usesCoordinates<Pattern>(bound.component) ||
-            !isContiguous(destination.layout(), recipe.settings_.indexOrder))
+            !detail::isContiguous(destination.layout(), recipe.settings_.indexOrder))
             return false;
 
         return visitScalarType(destination.type(), [&]<typename Tag>() {
@@ -1123,7 +1101,7 @@ struct GenerationRecipeAccess {
                                                 const PreparedNumericalGenerator& real,
                                                 const PreparedNumericalGenerator* imaginary,
                                                 ComplexGenerationKind kind) {
-        if (!isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
+        if (!detail::isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
         const auto storage = destination.rawEncodedBackingStorage();
         const size_t byteOffset =
             static_cast<size_t>(destination.layout().offset()) * sizeof(Storage);
