@@ -33,15 +33,18 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic1DIndexCalculati
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{10});
 
-    auto indices0 = functor.getNdIndices(0);
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0);
     EXPECT_EQ(indices0.size(), 1);
     EXPECT_EQ(indices0[0], 0);
 
-    auto indices5 = functor.getNdIndices(5);
+    std::vector<int64_t> indices5;
+    functor.fillNdIndices(5, indices5);
     EXPECT_EQ(indices5.size(), 1);
     EXPECT_EQ(indices5[0], 5);
 
-    auto indices9 = functor.getNdIndices(9);
+    std::vector<int64_t> indices9;
+    functor.fillNdIndices(9, indices9);
     EXPECT_EQ(indices9.size(), 1);
     EXPECT_EQ(indices9[0], 9);
 }
@@ -51,24 +54,29 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic2DIndexCalculati
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{3, 4});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0)
     EXPECT_EQ(indices0.size(), 2);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
 
-    auto indices3 = functor.getNdIndices(3); // Should be (0, 3)
+    std::vector<int64_t> indices3;
+    functor.fillNdIndices(3, indices3); // Should be (0, 3)
     EXPECT_EQ(indices3[0], 0);
     EXPECT_EQ(indices3[1], 3);
 
-    auto indices4 = functor.getNdIndices(4); // Should be (1, 0)
+    std::vector<int64_t> indices4;
+    functor.fillNdIndices(4, indices4); // Should be (1, 0)
     EXPECT_EQ(indices4[0], 1);
     EXPECT_EQ(indices4[1], 0);
 
-    auto indices7 = functor.getNdIndices(7); // Should be (1, 3)
+    std::vector<int64_t> indices7;
+    functor.fillNdIndices(7, indices7); // Should be (1, 3)
     EXPECT_EQ(indices7[0], 1);
     EXPECT_EQ(indices7[1], 3);
 
-    auto indices11 = functor.getNdIndices(11); // Should be (2, 3)
+    std::vector<int64_t> indices11;
+    functor.fillNdIndices(11, indices11); // Should be (2, 3)
     EXPECT_EQ(indices11[0], 2);
     EXPECT_EQ(indices11[1], 3);
 }
@@ -78,18 +86,21 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic3DIndexCalculati
     auto functor = makeParallelTensorFunctor(
         [](const std::vector<int64_t>& indices) { (void)indices; }, std::vector<int64_t>{2, 3, 4});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0)
     EXPECT_EQ(indices0.size(), 3);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
     EXPECT_EQ(indices0[2], 0);
 
-    auto indices12 = functor.getNdIndices(12); // Should be (1, 0, 0)
+    std::vector<int64_t> indices12;
+    functor.fillNdIndices(12, indices12); // Should be (1, 0, 0)
     EXPECT_EQ(indices12[0], 1);
     EXPECT_EQ(indices12[1], 0);
     EXPECT_EQ(indices12[2], 0);
 
-    auto indices23 = functor.getNdIndices(23); // Should be (1, 2, 3)
+    std::vector<int64_t> indices23;
+    functor.fillNdIndices(23, indices23); // Should be (1, 2, 3)
     EXPECT_EQ(indices23[0], 1);
     EXPECT_EQ(indices23[1], 2);
     EXPECT_EQ(indices23[2], 3);
@@ -101,20 +112,23 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculati
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 2, 2});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0, 0)
     EXPECT_EQ(indices0.size(), 4);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
     EXPECT_EQ(indices0[2], 0);
     EXPECT_EQ(indices0[3], 0);
 
-    auto indices8 = functor.getNdIndices(8); // Should be (1, 0, 0, 0)
+    std::vector<int64_t> indices8;
+    functor.fillNdIndices(8, indices8); // Should be (1, 0, 0, 0)
     EXPECT_EQ(indices8[0], 1);
     EXPECT_EQ(indices8[1], 0);
     EXPECT_EQ(indices8[2], 0);
     EXPECT_EQ(indices8[3], 0);
 
-    auto indices15 = functor.getNdIndices(15); // Should be (1, 1, 1, 1)
+    std::vector<int64_t> indices15;
+    functor.fillNdIndices(15, indices15); // Should be (1, 1, 1, 1)
     EXPECT_EQ(indices15[0], 1);
     EXPECT_EQ(indices15[1], 1);
     EXPECT_EQ(indices15[2], 1);
@@ -326,7 +340,8 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculati
         = makeParallelTensorFunctor([](const std::vector<int64_t>& indices) { (void)indices; },
                                     std::vector<int64_t>{2, 2, 2, 2, 2});
 
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0, 0, 0)
     EXPECT_EQ(indices0.size(), 5);
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
@@ -334,14 +349,16 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic5DIndexCalculati
     EXPECT_EQ(indices0[3], 0);
     EXPECT_EQ(indices0[4], 0);
 
-    auto indices16 = functor.getNdIndices(16); // Should be (1, 0, 0, 0, 0)
+    std::vector<int64_t> indices16;
+    functor.fillNdIndices(16, indices16); // Should be (1, 0, 0, 0, 0)
     EXPECT_EQ(indices16[0], 1);
     EXPECT_EQ(indices16[1], 0);
     EXPECT_EQ(indices16[2], 0);
     EXPECT_EQ(indices16[3], 0);
     EXPECT_EQ(indices16[4], 0);
 
-    auto indices31 = functor.getNdIndices(31); // Should be (1, 1, 1, 1, 1)
+    std::vector<int64_t> indices31;
+    functor.fillNdIndices(31, indices31); // Should be (1, 1, 1, 1, 1)
     EXPECT_EQ(indices31[0], 1);
     EXPECT_EQ(indices31[1], 1);
     EXPECT_EQ(indices31[2], 1);
@@ -418,13 +435,15 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleElementDim
     EXPECT_EQ(count.load(), 15); // 1 * 5 * 1 * 3 = 15
 
     // Verify index calculation for this shape
-    auto indices0 = functor.getNdIndices(0); // Should be (0, 0, 0, 0)
+    std::vector<int64_t> indices0;
+    functor.fillNdIndices(0, indices0); // Should be (0, 0, 0, 0)
     EXPECT_EQ(indices0[0], 0);
     EXPECT_EQ(indices0[1], 0);
     EXPECT_EQ(indices0[2], 0);
     EXPECT_EQ(indices0[3], 0);
 
-    auto indices7 = functor.getNdIndices(7); // Should be (0, 2, 0, 1)
+    std::vector<int64_t> indices7;
+    functor.fillNdIndices(7, indices7); // Should be (0, 2, 0, 1)
     EXPECT_EQ(indices7[0], 0);
     EXPECT_EQ(indices7[1], 2);
     EXPECT_EQ(indices7[2], 0);
@@ -456,4 +475,373 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicThreadSafety)
         EXPECT_EQ(elementCounts[i].load(), 1) << "Element " << i << " was processed "
                                               << elementCounts[i].load() << " times instead of 1";
     }
+}
+
+// ============================================================================
+// buildDenseOffsets / flatOffset
+// ============================================================================
+
+TEST_F(TestCpuFpReferenceUtilities, BuildDenseOffsetsIsRowMajor)
+{
+    // The normalization references replaced an iterateAlongDimensions walk with this
+    // table, so the order has to match: last dimension varies fastest.
+    const std::vector<int64_t> strides{10, 1};
+    const auto offsets = buildDenseOffsets({2, 3}, strides.data());
+
+    EXPECT_EQ(offsets, (std::vector<int64_t>{0, 1, 2, 10, 11, 12}));
+}
+
+TEST_F(TestCpuFpReferenceUtilities, BuildDenseOffsetsHonoursNonPackedStrides)
+{
+    // A permuted (channels-last) stride set must yield the addresses the strides
+    // describe, not the packed ones the extents imply.
+    const std::vector<int64_t> strides{1, 4};
+    const auto offsets = buildDenseOffsets({2, 3}, strides.data());
+
+    EXPECT_EQ(offsets, (std::vector<int64_t>{0, 4, 8, 1, 5, 9}));
+}
+
+TEST_F(TestCpuFpReferenceUtilities, BuildDenseOffsetsTreatsZeroStrideAsBroadcast)
+{
+    // A zero stride is how an axis the walk does not address contributes nothing: the
+    // walk still visits every position, but they alias onto the same offsets.
+    const std::vector<int64_t> strides{0, 1};
+    const auto offsets = buildDenseOffsets({3, 2}, strides.data());
+
+    EXPECT_EQ(offsets, (std::vector<int64_t>{0, 1, 0, 1, 0, 1}));
+}
+
+TEST_F(TestCpuFpReferenceUtilities, BuildDenseOffsetsOfNoExtentsIsOnePosition)
+{
+    // The scalar walk is one position at offset 0, not an empty table - a reference
+    // looping over an empty table would silently skip its only element.
+    const std::vector<int64_t> strides{};
+    const auto offsets = buildDenseOffsets({}, strides.data());
+
+    EXPECT_EQ(offsets, (std::vector<int64_t>{0}));
+}
+
+TEST_F(TestCpuFpReferenceUtilities, FlatOffsetReducesOnlyTheLeadingIndices)
+{
+    // Each normalization pass holds one index space fixed and walks the other, so it
+    // reduces a prefix of the index vector, never all of it.
+    const std::vector<int64_t> indices{2, 3, 4};
+    const std::vector<int64_t> strides{100, 10, 1};
+
+    EXPECT_EQ(flatOffset(indices.data(), strides.data(), 0), 0);
+    EXPECT_EQ(flatOffset(indices.data(), strides.data(), 1), 200);
+    EXPECT_EQ(flatOffset(indices.data(), strides.data(), 2), 230);
+    EXPECT_EQ(flatOffset(indices.data(), strides.data(), 3), 234);
+}
+
+// ============================================================================
+// ConvolutionWindow
+// ============================================================================
+
+TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowEmitsTapsInRowMajorWindowOrder)
+{
+    // Convolution accumulates in tap order, so this ordering is what keeps results
+    // bit-identical to the iterateAlongDimensions formulation it replaced.
+    const std::vector<int64_t> extents{2, 3};
+    const std::vector<int64_t> windowStrides{3, 1};
+    const std::vector<int64_t> sourceStrides{100, 10};
+
+    ConvolutionWindow window;
+    window.build(extents.size(),
+                 extents.data(),
+                 windowStrides.data(),
+                 sourceStrides.data(),
+                 [](size_t, int64_t index) { return index; });
+
+    const std::vector<int64_t> expectedWindow{0, 1, 2, 3, 4, 5};
+    const std::vector<int64_t> expectedSource{0, 10, 20, 100, 110, 120};
+
+    ASSERT_EQ(window.taps().size(), expectedWindow.size());
+    for(size_t i = 0; i < expectedWindow.size(); ++i)
+    {
+        EXPECT_EQ(window.taps()[i].windowOffset, expectedWindow[i]) << "tap " << i;
+        EXPECT_EQ(window.taps()[i].sourceOffset, expectedSource[i]) << "tap " << i;
+    }
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowDropsTapsWithNoSourceElement)
+{
+    // A tap in the padding region has no source element. It must disappear while the
+    // surviving taps keep the window offsets they would have had.
+    const std::vector<int64_t> extents{3};
+    const std::vector<int64_t> strides{1};
+
+    ConvolutionWindow window;
+    window.build(
+        extents.size(), extents.data(), strides.data(), strides.data(), [](size_t, int64_t index) {
+            return index == 0 ? -1 : index - 1;
+        });
+
+    ASSERT_EQ(window.taps().size(), 2u);
+    EXPECT_EQ(window.taps()[0].windowOffset, 1);
+    EXPECT_EQ(window.taps()[0].sourceOffset, 0);
+    EXPECT_EQ(window.taps()[1].windowOffset, 2);
+    EXPECT_EQ(window.taps()[1].sourceOffset, 1);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowFactorsValidityPerDimension)
+{
+    // The whole optimization rests on validity factoring per dimension: dropping one
+    // index of the outer dimension must remove that entire slice of the product, not a
+    // single tap.
+    const std::vector<int64_t> extents{2, 2};
+    const std::vector<int64_t> windowStrides{2, 1};
+    const std::vector<int64_t> sourceStrides{10, 1};
+
+    ConvolutionWindow window;
+    window.build(extents.size(),
+                 extents.data(),
+                 windowStrides.data(),
+                 sourceStrides.data(),
+                 [](size_t dim, int64_t index) { return (dim == 0 && index == 1) ? -1 : index; });
+
+    ASSERT_EQ(window.taps().size(), 2u);
+    EXPECT_EQ(window.taps()[0].windowOffset, 0);
+    EXPECT_EQ(window.taps()[1].windowOffset, 1);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowIsEmptyWhenNoTapHasASource)
+{
+    // A fully padded window must accumulate nothing rather than address anything.
+    const std::vector<int64_t> extents{2, 2};
+    const std::vector<int64_t> strides{2, 1};
+
+    ConvolutionWindow window;
+    window.build(
+        extents.size(), extents.data(), strides.data(), strides.data(), [](size_t, int64_t) {
+            return -1;
+        });
+
+    EXPECT_TRUE(window.taps().empty());
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowRebuildReplacesPreviousTaps)
+{
+    // One window is reused for every output position, so a rebuild must replace the
+    // previous position's taps rather than append to or leak them.
+    const std::vector<int64_t> extents{4};
+    const std::vector<int64_t> strides{1};
+
+    ConvolutionWindow window;
+    window.build(
+        extents.size(), extents.data(), strides.data(), strides.data(), [](size_t, int64_t index) {
+            return index;
+        });
+    ASSERT_EQ(window.taps().size(), 4u);
+
+    window.build(
+        extents.size(), extents.data(), strides.data(), strides.data(), [](size_t, int64_t index) {
+            return index < 2 ? index : -1;
+        });
+
+    ASSERT_EQ(window.taps().size(), 2u);
+    EXPECT_EQ(window.taps()[0].windowOffset, 0);
+    EXPECT_EQ(window.taps()[1].windowOffset, 1);
+}
+
+// ============================================================================
+// ParallelTensorFunctorWithScratch
+// ============================================================================
+
+namespace
+{
+
+// Counts its own construction so a test can tell per-thread scratch from per-work-item
+// scratch, which is the entire difference between this functor and the plain one.
+struct CountingScratch
+{
+    static inline std::atomic<int> constructions{0};
+
+    CountingScratch()
+    {
+        constructions++;
+    }
+
+    int itemsSeen{0};
+};
+
+} // namespace
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchConstructsOnePerThread)
+{
+    // The point of the scratch functor: construction is paid once per worker thread, not
+    // once per work item. A per-item scratch would report 64 constructions here.
+    CountingScratch::constructions = 0;
+
+    constexpr int64_t ELEMENT_COUNT = 64;
+    constexpr std::size_t THREAD_COUNT = 4;
+
+    std::atomic<int> visits{0};
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&visits](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+            (void)indices;
+            scratch.itemsSeen++;
+            visits++;
+        },
+        std::vector<int64_t>{ELEMENT_COUNT});
+    functor(THREAD_COUNT);
+
+    EXPECT_EQ(visits.load(), static_cast<int>(ELEMENT_COUNT));
+    EXPECT_EQ(CountingScratch::constructions.load(), static_cast<int>(THREAD_COUNT));
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchReusesScratchAcrossWorkItems)
+{
+    // Single thread, so every work item must land on the same instance. A per-item
+    // scratch would leave itemsSeen at 1 and defeat the buffer reuse this exists for.
+    CountingScratch::constructions = 0;
+
+    constexpr int64_t ELEMENT_COUNT = 10;
+    std::atomic<int> maxItemsSeen{0};
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&maxItemsSeen](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+            (void)indices;
+            scratch.itemsSeen++;
+            maxItemsSeen = std::max(maxItemsSeen.load(), scratch.itemsSeen);
+        },
+        std::vector<int64_t>{ELEMENT_COUNT});
+    functor(1);
+
+    EXPECT_EQ(CountingScratch::constructions.load(), 1);
+    EXPECT_EQ(maxItemsSeen.load(), static_cast<int>(ELEMENT_COUNT));
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchIsolatesThreads)
+{
+    // Threads must not share one scratch; sharing would be a data race in every caller.
+    // All workers are alive concurrently, so their addresses are necessarily distinct.
+    constexpr int64_t ELEMENT_COUNT = 1000;
+    constexpr std::size_t THREAD_COUNT = 4;
+
+    std::mutex mutex;
+    std::set<const void*> addresses;
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&mutex, &addresses](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+            (void)indices;
+            const std::lock_guard<std::mutex> lock(mutex);
+            addresses.insert(&scratch);
+        },
+        std::vector<int64_t>{ELEMENT_COUNT});
+    functor(THREAD_COUNT);
+
+    EXPECT_EQ(addresses.size(), THREAD_COUNT);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchVisitsEveryIndexOnce)
+{
+    // Same coverage contract as the plain functor: the scratch parameter must not
+    // perturb how the index space is decomposed or divided.
+    constexpr int64_t HEIGHT = 5;
+    constexpr int64_t WIDTH = 7;
+
+    std::vector<std::atomic<int>> visitCounts(static_cast<size_t>(HEIGHT * WIDTH));
+    for(auto& count : visitCounts)
+    {
+        count = 0;
+    }
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&visitCounts](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+            (void)scratch;
+            visitCounts[static_cast<size_t>((indices[0] * WIDTH) + indices[1])]++;
+        },
+        std::vector<int64_t>{HEIGHT, WIDTH});
+    functor(3);
+
+    for(size_t i = 0; i < visitCounts.size(); ++i)
+    {
+        EXPECT_EQ(visitCounts[i].load(), 1)
+            << "index " << i << " was visited the wrong number of times";
+    }
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchStopsOnFalse)
+{
+    // The bool early-exit contract carries over from the plain functor.
+    std::atomic<int> visits{0};
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&visits](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+            (void)scratch;
+            visits++;
+            return indices[0] < 3;
+        },
+        std::vector<int64_t>{100});
+    functor(1);
+
+    // Indices 0, 1 and 2 continue; index 3 returns false and stops the thread.
+    EXPECT_EQ(visits.load(), 4);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchDoesNothingForAnEmptyRange)
+{
+    // A zero-sized dimension must spawn no threads and construct no scratch.
+    CountingScratch::constructions = 0;
+    std::atomic<int> visits{0};
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&visits](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+            (void)scratch;
+            (void)indices;
+            visits++;
+        },
+        std::vector<int64_t>{0});
+    functor(4);
+
+    EXPECT_EQ(visits.load(), 0);
+    EXPECT_EQ(CountingScratch::constructions.load(), 0);
+}
+
+// A bool-returning functor taking a non-const lvalue reference. It binds fine at the call
+// site either way, so an early-exit probe that models the argument as an rvalue or as a
+// `const&` silently drops the bool and runs the whole range.
+namespace
+{
+
+struct MutableIndexEarlyExit
+{
+    std::atomic<int>* visits;
+
+    bool operator()(std::vector<int64_t>& indices) const
+    {
+        (*visits)++;
+        return indices[0] < 3;
+    }
+};
+
+} // namespace
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicStopsOnFalseForMutableIndices)
+{
+    std::atomic<int> visits{0};
+
+    auto functor
+        = makeParallelTensorFunctor(MutableIndexEarlyExit{&visits}, std::vector<int64_t>{100});
+    functor(1);
+
+    // Indices 0, 1 and 2 continue; index 3 returns false and stops the thread.
+    EXPECT_EQ(visits.load(), 4);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchStopsOnFalseForMutableIndices)
+{
+    std::atomic<int> visits{0};
+
+    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
+        [&visits](CountingScratch& scratch, std::vector<int64_t>& indices) {
+            (void)scratch;
+            visits++;
+            return indices[0] < 3;
+        },
+        std::vector<int64_t>{100});
+    functor(1);
+
+    EXPECT_EQ(visits.load(), 4);
 }

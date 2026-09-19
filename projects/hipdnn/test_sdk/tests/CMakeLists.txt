@@ -30,6 +30,7 @@ add_executable(
     utilities/TestCpuFpReferenceMoeGroupedMatmul.cpp
     utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
     utilities/TestCpuFpReferenceReduction.cpp
+    utilities/TestCpuFpReferenceRaggedRejection.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
