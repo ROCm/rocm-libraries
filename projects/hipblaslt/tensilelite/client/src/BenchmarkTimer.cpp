@@ -257,7 +257,9 @@ namespace TensileLite
                 if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                 {
                     pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
-                    flopCount = problem->gemms[0].flopCount();
+                    flopCount = 0.0;
+                    for(auto& gemm : problem->gemms)
+                        flopCount += gemm.flopCount();
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
