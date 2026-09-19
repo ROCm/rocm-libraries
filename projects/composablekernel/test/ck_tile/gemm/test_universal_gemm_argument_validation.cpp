@@ -40,6 +40,12 @@ struct MockTilePartitioner
 
 struct MockGemmPipeline
 {
+    // UniversalGemmKernel also consumes these scalar aliases when it forms
+    // tensor descriptors, even though this test only reaches validation.
+    using ADataType      = float;
+    using BDataType      = float;
+    using ALayout        = Row;
+    using BLayout        = Col;
     using AsDataType     = ck_tile::tuple<float>;
     using BsDataType     = ck_tile::tuple<float>;
     using AsLayout       = ck_tile::tuple<Row>;
@@ -101,6 +107,8 @@ TEST(UniversalGemmArgumentValidation, ReportsMismatchedDTensorLayout)
 
     EXPECT_FALSE(supported);
     EXPECT_NE(diagnostic.find("D tensor layout must match the C layout: D0"), std::string::npos)
+        << diagnostic;
+    EXPECT_NE(diagnostic.find("D0 is ColumnMajor, but C is RowMajor"), std::string::npos)
         << diagnostic;
 }
 

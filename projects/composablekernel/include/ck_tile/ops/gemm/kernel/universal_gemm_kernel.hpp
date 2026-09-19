@@ -589,8 +589,12 @@ struct UniversalGemmKernel
                 {
                     CK_TILE_ERROR("D tensor layout must match the C layout: D",
                                   index.value,
-                                  " differs, so this kernel cannot run. Give D the C layout, "
-                                  "or use a kernel/epilogue that supports a transposed D.");
+                                  " is ",
+                                  DiLayout::name,
+                                  ", but C is ",
+                                  CLayout::name,
+                                  ". Give D the C layout, or use a kernel/epilogue that "
+                                  "supports a transposed D.");
                 }
                 DTensorIsValid = false;
             }
