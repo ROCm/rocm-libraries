@@ -157,17 +157,28 @@ endif()
 # gfx1250 uses 16x16x32/64 WMMA tiles, unlike the gfx11/gfx12 fixtures.
 # Keep a dedicated suite that forces cross-workgroup reduction with these tiles.
 if(GPU_TARGETS MATCHES "gfx1250")
-    add_gtest_executable(test_ck_tile_streamk_gfx1250_wmma
-        test_gemm_streamk_gfx1250_wmma.cpp test_gemm_streamk_util.cpp)
     set(GFX1250_STREAMK_TARGETS ${SUPPORTED_GPU_TARGETS})
     list(FILTER GFX1250_STREAMK_TARGETS INCLUDE REGEX "^gfx1250")
-    set_property(TARGET test_ck_tile_streamk_gfx1250_wmma
-                 PROPERTY HIP_ARCHITECTURES ${GFX1250_STREAMK_TARGETS})
-    target_compile_options(test_ck_tile_streamk_gfx1250_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
-    set_tests_properties(test_ck_tile_streamk_gfx1250_wmma PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
+    set(CK_TILE_GFX1250_STREAMK_TEST_TARGETS)
+    # Both implementations must finish partial stores before publishing the ready flag.
+    foreach(use_builtin IN ITEMS 1 0)
+        set(test_target test_ck_tile_streamk_gfx1250_wmma)
+        if(NOT use_builtin)
+            string(APPEND test_target "_legacy")
+        endif()
+        add_gtest_executable(${test_target}
+            test_gemm_streamk_gfx1250_wmma.cpp test_gemm_streamk_util.cpp)
+        set_property(TARGET ${test_target}
+                     PROPERTY HIP_ARCHITECTURES ${GFX1250_STREAMK_TARGETS})
+        target_compile_definitions(${test_target} PRIVATE
+            CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN=${use_builtin})
+        target_compile_options(${test_target} PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
+        list(APPEND CK_TILE_GFX1250_STREAMK_TEST_TARGETS ${test_target})
+    endforeach()
     add_custom_target(ck_tile_gemm_streamk_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_GEMM_STREAMK_TESTS"
-        DEPENDS test_ck_tile_streamk_gfx1250_wmma
+        DEPENDS ${CK_TILE_GFX1250_STREAMK_TEST_TARGETS}
         USES_TERMINAL
         COMMENT "Running gfx1250 ck_tile gemm_streamk tests..."
     )

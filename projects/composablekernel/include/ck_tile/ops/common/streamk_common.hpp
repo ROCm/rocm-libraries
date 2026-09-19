@@ -81,10 +81,14 @@ struct StreamKReductionOps
         core::arch::is_target_family_gfx11<CompilerTarget_>()>
     SignalStorePartialDone(const KernelArgs_& kargs, index_t cta_idx) const
     {
-        auto* sk_flags_ptr                = static_cast<index_t*>(kargs.workspace_ptr);
-        index_t offset                    = cta_idx * sizeof(index_t);
-        __amdgpu_buffer_rsrc_t buffer_rsc = make_builtin_buffer_resource(
-            sk_flags_ptr, sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas());
+        auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
+        index_t offset     = cta_idx * sizeof(index_t);
+        // The flag store uses raw builtins in both buffer-addressing modes.
+        __amdgpu_buffer_rsrc_t buffer_rsc = __builtin_amdgcn_make_buffer_rsrc(
+            sk_flags_ptr,
+            0,
+            sizeof(index_t) * kargs.tile_partitioner.get_sk_ctas(),
+            CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
 
         if(threadIdx.x == 0)
         {
@@ -371,7 +375,8 @@ struct StreamKReductionOps
         {
             // gfx1250 has separate load and store counters. s_waitcnt<0>() waits for loads
             // here, so it cannot order these partial stores before the completion flag.
-            buffer_store_fence();
+            // Emit the store wait directly: the legacy buffer_store_fence() uses vmcnt too.
+            asm volatile("s_wait_storecnt 0" ::: "memory");
         }
         else
         {
