@@ -494,3 +494,32 @@ def test_TensileLibLogicToYaml():
             configFileName = f.name
 
         assert filecmp.cmp(configYaml, configFileName, shallow=False)
+
+
+# formProblemTypeYamlData is arch-independent, so these run without a GPU.
+def test_formProblemTypeYamlData_preserves_nondefault_activation():
+    data = TensileLibLogicToYaml.formProblemTypeYamlData(
+        {
+            "OperationType": "GEMM",
+            "ComputeDataType": 0,
+            "Activation": True,
+            "ActivationType": "hipblaslt_all",
+            "ActivationComputeDataType": 7,
+        }
+    )
+    assert data["ActivationType"] == "hipblaslt_all"
+    assert data["ActivationComputeDataType"] == 7
+
+
+def test_formProblemTypeYamlData_drops_default_activation():
+    data = TensileLibLogicToYaml.formProblemTypeYamlData(
+        {
+            "OperationType": "GEMM",
+            "ComputeDataType": 0,
+            "Activation": True,
+            "ActivationType": "none",
+            "ActivationComputeDataType": 0,
+        }
+    )
+    assert "ActivationType" not in data
+    assert "ActivationComputeDataType" not in data
