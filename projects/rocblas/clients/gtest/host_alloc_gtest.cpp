@@ -55,6 +55,24 @@ namespace
     private:
         size_t m_was;
     };
+
+    // rocblas_init_nan / rocblas_nan_rng only force a NaN exponent; sign and
+    // mantissa are random. A fixed 0xFF fill can therefore match live guard
+    // bytes and under-count mismatches. Invert the actual m_guard bytes so
+    // every written byte is guaranteed to differ.
+    hipError_t
+        overwrite_post_guard_inverted(device_vector<float>& dv, size_t first_elem, size_t n_bytes)
+    {
+        const auto* src = reinterpret_cast<const unsigned char*>(d_vector<float>::m_guard)
+                          + first_elem * sizeof(float);
+        unsigned char flipped[12];
+        if(n_bytes > sizeof(flipped))
+            return hipErrorInvalidValue;
+        for(size_t i = 0; i < n_bytes; ++i)
+            flipped[i] = static_cast<unsigned char>(~src[i]);
+        return hipMemcpy(
+            static_cast<float*>(dv) + dv.nmemb() + first_elem, flipped, n_bytes, hipMemcpyDefault);
+    }
 }
 
 // Guard-detection tests: verify that device_vector_check catches writes into the
@@ -158,6 +176,102 @@ TEST(host_alloc, guard_no_false_positive_on_clean_alloc)
     }
     EXPECT_EQ(failures.size(), 0)
         << "device_vector_check reported a spurious failure on an unmodified guard";
+}
+
+// Byte-diagnostic tests: verify that device_vector_check reports the correct differing-byte
+// count and first-byte index via the report_guard_corruption lambda. Corruption is the
+// bitwise inverse of d_vector<float>::m_guard so every written byte differs, independent
+// of rocblas_nan_rng's random NaN payload.
+
+TEST(host_alloc, guard_reports_byte_count)
+{
+    scoped_pad_length pad(4096);
+    ASSERT_EQ(g_DVEC_PAD, size_t(4096))
+        << "guard pad was not set; the byte-count check is meaningless";
+
+    {
+        device_vector<float> probe(1);
+        if(probe.memcheck() != hipSuccess)
+            GTEST_SKIP() << "device allocation unavailable";
+    }
+
+    // 3 floats × 4 bytes = 12 guard bytes inverted, so the diagnostic must report
+    // "12 post-guard" regardless of the random NaN payload in m_guard.
+    EXPECT_NONFATAL_FAILURE(
+        {
+            device_vector<float> dv(1024);
+            ASSERT_EQ(overwrite_post_guard_inverted(dv, 0, 3 * sizeof(float)), hipSuccess)
+                << "post-guard invert failed; byte-count diagnostic was never exercised";
+        },
+        "12 post-guard");
+}
+
+TEST(host_alloc, guard_reports_first_byte_index)
+{
+    scoped_pad_length pad(4096);
+    ASSERT_EQ(g_DVEC_PAD, size_t(4096))
+        << "guard pad was not set; the first-byte-index check is meaningless";
+
+    {
+        device_vector<float> probe(1);
+        if(probe.memcheck() != hipSuccess)
+            GTEST_SKIP() << "device allocation unavailable";
+    }
+
+    // Element 5 starts at byte offset 5 × sizeof(float) = 20 into the post-guard.
+    // Bytes 0–19 remain intact; inverting those four live guard bytes makes the
+    // first mismatch byte 20 regardless of the random NaN payload.
+    EXPECT_NONFATAL_FAILURE(
+        {
+            device_vector<float> dv(1024);
+            ASSERT_EQ(overwrite_post_guard_inverted(dv, 5, sizeof(float)), hipSuccess)
+                << "post-guard invert failed; first-byte-index diagnostic was never exercised";
+        },
+        "first at byte 20");
+}
+
+// Verifies that device_vector_check reports both guard regions independently when both
+// are corrupted. device_vector_check uses EXPECT (not ASSERT), so it continues past the
+// first guard failure; both "post-guard" and "pre-guard" must appear in the output.
+TEST(host_alloc, guard_detects_both_guards_corrupted)
+{
+    scoped_pad_length pad(4096);
+    ASSERT_EQ(g_DVEC_PAD, size_t(4096))
+        << "guard pad was not set; both-guard corruption cannot be detected";
+
+    {
+        device_vector<float> probe(1);
+        if(probe.memcheck() != hipSuccess)
+            GTEST_SKIP() << "device allocation unavailable";
+    }
+
+    // Capture failures from alloc+corrupt+destroy. hipMemset results are recorded
+    // outside the reporter scope and checked after it closes so that an ASSERT inside
+    // the intercepted scope cannot mask a real hipMemset failure.
+    hipError_t                     post_err = hipSuccess, pre_err = hipSuccess;
+    ::testing::TestPartResultArray failures;
+    {
+        ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+        device_vector<float> dv(1024);
+        post_err = hipMemset(static_cast<float*>(dv) + dv.nmemb(), 0, sizeof(float));
+        pre_err  = hipMemset(static_cast<float*>(dv) - 1, 0, sizeof(float));
+        // dv destructs here; device_vector_check fires and both EXPECT failures are captured.
+    }
+    ASSERT_EQ(post_err, hipSuccess) << "hipMemset post-guard failed; test is inconclusive";
+    ASSERT_EQ(pre_err, hipSuccess) << "hipMemset pre-guard failed; test is inconclusive";
+
+    bool post_reported = false, pre_reported = false;
+    for(size_t i = 0; i < failures.size() && (!post_reported || !pre_reported); ++i)
+    {
+        std::string msg = failures.GetTestPartResult(i).message();
+        if(!post_reported && msg.find("post-guard") != std::string::npos)
+            post_reported = true;
+        if(!pre_reported && msg.find("pre-guard") != std::string::npos)
+            pre_reported = true;
+    }
+    EXPECT_TRUE(post_reported) << "post-guard corruption was not reported";
+    EXPECT_TRUE(pre_reported) << "pre-guard corruption was not reported";
 }
 
 TEST(host_alloc, hmm_count_returns_to_its_baseline)
