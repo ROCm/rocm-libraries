@@ -28,11 +28,15 @@ namespace asm_sdpa_engine
 //   D buffer    starts at: workspace + 0                     (aligned by hipMalloc)
 //   dq_acc      starts at: workspace + sizeof(D buffer)      (NOT automatically aligned)
 //
-// We round each sub-buffer size up to a 64-byte boundary (MI300X L2 cache line size) so the
+// We round each sub-buffer size up to a 64-byte boundary (L2 cache line size) so the
 // next sub-buffer starts cache-line-aligned. This prevents false sharing between buffers and
 // ensures vector memory instructions (e.g. global_load_b128) don't span cache line boundaries.
 //
-// TODO(Task I8.9): POC hardcodes 64 bytes; production should query hipGetDeviceProperties()
+// 64 bytes is the L2 cache line size for all CDNA architectures this engine targets
+// (gfx942, gfx950). hipDeviceProp_t does not expose cache line size, and the workspace
+// size helpers must remain constexpr, so a compile-time constant is the correct approach.
+// If a future architecture changes the L2 cache line size, update this constant and add
+// the architecture to the list above.
 // NOLINTNEXTLINE(readability-redundant-inline-specifier)
 inline constexpr size_t K_WORKSPACE_ALIGNMENT_BYTES = 64;
 
