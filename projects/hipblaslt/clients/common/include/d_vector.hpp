@@ -26,13 +26,22 @@
 
 #pragma once
 
+#include "cgroup_memory_probe.hpp"
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
+#include <algorithm>
 #include <cinttypes>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <hipblaslt/hipblaslt.h>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -73,6 +82,19 @@ public:
         return capacity() < s;
     }
 
+    // Smallest remaining allowance across this process's cgroup hierarchy, or SIZE_MAX
+    // when nothing limits it. Needed because sysinfo().freeram is host-wide: inside a
+    // MemoryMax scope the kernel will happily pin pages the scope cannot afford and then
+    // OOM-kill us, so an allocation certain to be killed looks like one that fits.
+    static size_t cgroup_available_memory()
+    {
+#ifdef __linux__
+        return hipblaslt_client::cgroup_available_memory_live();
+#else
+        return std::numeric_limits<size_t>::max();
+#endif
+    }
+
     size_t get_available_host_memory()
     {
 #ifdef __linux__
@@ -80,7 +102,11 @@ public:
         if(sysinfo(&info) == 0)
         {
             // In the linux system, the host memory(pinned memory)'s capacity is the same as the free memory
-            return info.freeram;
+            // ... except under a cgroup, where freeram describes the machine and not the
+            // budget this process is held to. Take the tighter of the two so an allocation
+            // that would be killed is reported as one that does not fit, which lets the
+            // pool-clearing retry in memory_pool::get() engage.
+            return std::min(static_cast<size_t>(info.freeram), cgroup_available_memory());
         }
         else
         {
@@ -217,6 +243,18 @@ private:
     std::unique_ptr<char, decltype(&hipHostFree)> m_d{nullptr, &hipHostFree};
 };
 
+class pinned_host_memory_exhausted : public std::runtime_error
+{
+public:
+    explicit pinned_host_memory_exhausted(size_t bytes_mib)
+        : std::runtime_error("Fatal: cannot allocate " + std::to_string(bytes_mib)
+                             + " MiB of pinned host memory even with an empty pool. This "
+                               "problem does not fit in the memory available to this "
+                               "process.")
+    {
+    }
+};
+
 /* ============================================================================================ */
 /*! \brief  memory pool class to keep track of memory in either M = d_memory, or M = h_memory objects */
 template <typename M>
@@ -301,7 +339,13 @@ private:
             if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation )
                 (void)hipGetLastError();
 
-            return M(bytes, bytes, use_HMM);
+            auto retry = M(bytes, bytes, use_HMM);
+            // Host allocations are unchecked by the callers -- memcheck() exists only on
+            // the device buffer class -- so returning an empty one here means a null
+            // pointer reaches as<T>() and gets written through. Fail attributably instead.
+            if(!retry.get() && std::is_same<M, h_memory>::value)
+                throw pinned_host_memory_exhausted(bytes >> 20);
+            return retry;
         }
     }
 
