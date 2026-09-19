@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 // An elementwise input may carry a strict subset of the output modes, in which case it is
-// broadcast along the modes it lacks. See ROCm#6560. What remains unsupported is an input
+// broadcast along the modes it lacks. What remains unsupported is an input
 // mode that the output does not carry, since that would have to be reduced away.
 
 #include <gtest/gtest.h>

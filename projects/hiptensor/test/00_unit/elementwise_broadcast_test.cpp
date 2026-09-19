@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 // End-to-end checks that an elementwise input carrying a subset of the output modes is
-// broadcast along the modes it lacks (ROCm#6560). The 02_elementwise suite also covers
+// broadcast along the modes it lacks. The 02_elementwise suite also covers
 // broadcast, but compares the kernel against hipTensor's own CPU reference, which reaches
 // the kernel arguments through the same stride-alignment code. The expected values here are
 // written out by hand instead, so a fault shared by both paths cannot pass unnoticed.
@@ -46,6 +46,19 @@ constexpr uint32_t alignment = 256;
 
 constexpr int64_t M = 8;
 constexpr int64_t N = 5;
+
+// Wraps the boilerplate between an operation descriptor and a runnable plan.
+hiptensorPlan_t makePlan(hiptensorHandle_t handle, hiptensorOperationDescriptor_t opDesc)
+{
+    hiptensorPlanPreference_t planPref{};
+    EXPECT_EQ(hiptensorCreatePlanPreference(
+                  handle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+              HIPTENSOR_STATUS_SUCCESS);
+    hiptensorPlan_t plan{};
+    EXPECT_EQ(hiptensorCreatePlan(handle, &plan, opDesc, planPref, 0), HIPTENSOR_STATUS_SUCCESS);
+    hiptensorDestroyPlanPreference(planPref);
+    return plan;
+}
 
 // A rank-2 {m,n} output of extents {M,N}, plus the rank-1 inputs that broadcast into it.
 class ElementwiseBroadcastTest : public ::testing::Test
@@ -68,6 +81,9 @@ protected:
         ASSERT_EQ(hiptensorCreateTensorDescriptor(
                       mHandle, &mDescAlongN, 1, nLengths, nullptr, HIPTENSOR_R_32F, alignment),
                   HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                      mHandle, &mDescFull, 2, outLengths, nullptr, HIPTENSOR_R_32F, alignment),
+                  HIPTENSOR_STATUS_SUCCESS);
 
         // The kernel derives the output strides from its lengths, so the offset of (i,j) in the
         // result follows whichever convention the library is built or configured for.
@@ -79,10 +95,14 @@ protected:
 
         ASSERT_EQ(hipMalloc(&mDeviceAlongM, M * sizeof(float)), hipSuccess);
         ASSERT_EQ(hipMalloc(&mDeviceAlongN, N * sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&mDeviceAlongNAlt, N * sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&mDeviceFull, M * N * sizeof(float)), hipSuccess);
         ASSERT_EQ(hipMalloc(&mDeviceOut, M * N * sizeof(float)), hipSuccess);
 
         mHostAlongM.resize(M);
         mHostAlongN.resize(N);
+        mHostAlongNAlt.resize(N);
+        mHostFull.assign(M * N, 0.0f);
         mHostOut.assign(M * N, 0.0f);
         for(int64_t i = 0; i < M; i++)
         {
@@ -90,7 +110,17 @@ protected:
         }
         for(int64_t j = 0; j < N; j++)
         {
-            mHostAlongN[j] = static_cast<float>(j + 1);
+            mHostAlongN[j]    = static_cast<float>(j + 1);
+            mHostAlongNAlt[j] = static_cast<float>(1000 * (j + 1));
+        }
+        // Distinct decades per operand keep a dropped or misplaced contribution visible in the sum.
+        for(int64_t i = 0; i < M; i++)
+        {
+            for(int64_t j = 0; j < N; j++)
+            {
+                mHostFull[i * mStrideM + j * mStrideN]
+                    = static_cast<float>(10000 * (i + 1) + 10 * (j + 1));
+            }
         }
         ASSERT_EQ(
             hipMemcpy(mDeviceAlongM, mHostAlongM.data(), M * sizeof(float), hipMemcpyHostToDevice),
@@ -98,13 +128,23 @@ protected:
         ASSERT_EQ(
             hipMemcpy(mDeviceAlongN, mHostAlongN.data(), N * sizeof(float), hipMemcpyHostToDevice),
             hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(
+                mDeviceAlongNAlt, mHostAlongNAlt.data(), N * sizeof(float), hipMemcpyHostToDevice),
+            hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(mDeviceFull, mHostFull.data(), M * N * sizeof(float), hipMemcpyHostToDevice),
+            hipSuccess);
     }
 
     void TearDown() override
     {
         EXPECT_EQ(hipFree(mDeviceOut), hipSuccess);
+        EXPECT_EQ(hipFree(mDeviceFull), hipSuccess);
+        EXPECT_EQ(hipFree(mDeviceAlongNAlt), hipSuccess);
         EXPECT_EQ(hipFree(mDeviceAlongN), hipSuccess);
         EXPECT_EQ(hipFree(mDeviceAlongM), hipSuccess);
+        hiptensorDestroyTensorDescriptor(mDescFull);
         hiptensorDestroyTensorDescriptor(mDescAlongN);
         hiptensorDestroyTensorDescriptor(mDescAlongM);
         hiptensorDestroyTensorDescriptor(mDescOut);
@@ -125,31 +165,27 @@ protected:
         return mHostOut[i * mStrideM + j * mStrideN];
     }
 
-    // Wraps the boilerplate between an operation descriptor and a runnable plan.
-    hiptensorPlan_t makePlan(hiptensorOperationDescriptor_t opDesc)
+    float fullAt(int64_t i, int64_t j) const
     {
-        hiptensorPlanPreference_t planPref{};
-        EXPECT_EQ(hiptensorCreatePlanPreference(
-                      mHandle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
-                  HIPTENSOR_STATUS_SUCCESS);
-        hiptensorPlan_t plan{};
-        EXPECT_EQ(hiptensorCreatePlan(mHandle, &plan, opDesc, planPref, 0),
-                  HIPTENSOR_STATUS_SUCCESS);
-        hiptensorDestroyPlanPreference(planPref);
-        return plan;
+        return mHostFull[i * mStrideM + j * mStrideN];
     }
 
     hiptensorHandle_t           mHandle{};
     hiptensorTensorDescriptor_t mDescOut{};
     hiptensorTensorDescriptor_t mDescAlongM{};
     hiptensorTensorDescriptor_t mDescAlongN{};
+    hiptensorTensorDescriptor_t mDescFull{};
 
     void* mDeviceAlongM{};
     void* mDeviceAlongN{};
+    void* mDeviceAlongNAlt{};
+    void* mDeviceFull{};
     void* mDeviceOut{};
 
     std::vector<float> mHostAlongM;
     std::vector<float> mHostAlongN;
+    std::vector<float> mHostAlongNAlt;
+    std::vector<float> mHostFull;
     std::vector<float> mHostOut;
 
     int64_t mStrideM{};
@@ -174,7 +210,7 @@ TEST_F(ElementwiseBroadcastTest, PermutationRepeatsTheInputAlongTheMissingMode)
                                          HIPTENSOR_COMPUTE_DESC_32F),
               HIPTENSOR_STATUS_SUCCESS);
 
-    auto  plan  = makePlan(opDesc);
+    auto  plan  = makePlan(mHandle, opDesc);
     float alpha = 2.0f;
     ASSERT_EQ(hiptensorPermute(mHandle, plan, &alpha, mDeviceAlongN, mDeviceOut, nullptr),
               HIPTENSOR_STATUS_SUCCESS);
@@ -185,6 +221,41 @@ TEST_F(ElementwiseBroadcastTest, PermutationRepeatsTheInputAlongTheMissingMode)
         for(int64_t j = 0; j < N; j++)
         {
             EXPECT_FLOAT_EQ(outputAt(i, j), alpha * mHostAlongN[j])
+                << "at (" << i << ", " << j << ")";
+        }
+    }
+
+    hiptensorDestroyPlan(plan);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// D{m,n} = alpha * A{m}: the mirror of the case above. A lacks mode n, so each element of A is
+// held constant across a row of D. Broadcasting has to follow the mode the input is missing, not
+// a fixed axis, and this is the case that a hardcoded innermost-axis assumption would get wrong.
+TEST_F(ElementwiseBroadcastTest, PermutationRepeatsTheInputAlongTheOppositeMissingMode)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         mDescAlongM,
+                                         mModesM,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         mDescOut,
+                                         mOutModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    auto  plan  = makePlan(mHandle, opDesc);
+    float alpha = 2.0f;
+    ASSERT_EQ(hiptensorPermute(mHandle, plan, &alpha, mDeviceAlongM, mDeviceOut, nullptr),
+              HIPTENSOR_STATUS_SUCCESS);
+    readOutput();
+
+    for(int64_t i = 0; i < M; i++)
+    {
+        for(int64_t j = 0; j < N; j++)
+        {
+            EXPECT_FLOAT_EQ(outputAt(i, j), alpha * mHostAlongM[i])
                 << "at (" << i << ", " << j << ")";
         }
     }
@@ -212,7 +283,7 @@ TEST_F(ElementwiseBroadcastTest, BinaryBroadcastsTwoInputsAlongOppositeModes)
                                                HIPTENSOR_COMPUTE_DESC_32F),
               HIPTENSOR_STATUS_SUCCESS);
 
-    auto  plan  = makePlan(opDesc);
+    auto  plan  = makePlan(mHandle, opDesc);
     float alpha = 2.0f;
     float gamma = 3.0f;
     ASSERT_EQ(hiptensorElementwiseBinaryExecute(
@@ -226,6 +297,225 @@ TEST_F(ElementwiseBroadcastTest, BinaryBroadcastsTwoInputsAlongOppositeModes)
         {
             EXPECT_FLOAT_EQ(outputAt(i, j), alpha * mHostAlongN[j] + gamma * mHostAlongM[i])
                 << "at (" << i << ", " << j << ")";
+        }
+    }
+
+    hiptensorDestroyPlan(plan);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// D{m,n} = alpha * A{n} + gamma * C{n}: both inputs are missing the same mode, so both are
+// broadcast along m and every row of D is identical. The two operands hold different values, so
+// the result still distinguishes them; reading either one in place of the other would show up.
+TEST_F(ElementwiseBroadcastTest, BinaryBroadcastsBothInputsAlongTheSameMode)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+                                               &opDesc,
+                                               mDescAlongN,
+                                               mModesN,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               mDescAlongN,
+                                               mModesN,
+                                               HIPTENSOR_OP_IDENTITY,
+                                               mDescOut,
+                                               mOutModes,
+                                               HIPTENSOR_OP_ADD,
+                                               HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    auto  plan  = makePlan(mHandle, opDesc);
+    float alpha = 2.0f;
+    float gamma = 3.0f;
+    ASSERT_EQ(
+        hiptensorElementwiseBinaryExecute(
+            mHandle, plan, &alpha, mDeviceAlongN, &gamma, mDeviceAlongNAlt, mDeviceOut, nullptr),
+        HIPTENSOR_STATUS_SUCCESS);
+    readOutput();
+
+    for(int64_t i = 0; i < M; i++)
+    {
+        for(int64_t j = 0; j < N; j++)
+        {
+            EXPECT_FLOAT_EQ(outputAt(i, j), alpha * mHostAlongN[j] + gamma * mHostAlongNAlt[j])
+                << "at (" << i << ", " << j << ")";
+        }
+    }
+
+    hiptensorDestroyPlan(plan);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+// D{m,n} = alpha * A{n} + beta * B{m} + gamma * C{m,n}: two broadcast inputs alongside one that
+// already carries every output mode. Mixing the two kinds in a single operation checks that the
+// full-rank operand keeps its own strides while the others are given stride 0.
+TEST_F(ElementwiseBroadcastTest, TrinaryMixesBroadcastAndFullRankInputs)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+                                                &opDesc,
+                                                mDescAlongN,
+                                                mModesN,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mDescAlongM,
+                                                mModesM,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mDescFull,
+                                                mOutModes,
+                                                HIPTENSOR_OP_IDENTITY,
+                                                mDescOut,
+                                                mOutModes,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_OP_ADD,
+                                                HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    auto  plan  = makePlan(mHandle, opDesc);
+    float alpha = 2.0f;
+    float beta  = 3.0f;
+    float gamma = 5.0f;
+    ASSERT_EQ(hiptensorElementwiseTrinaryExecute(mHandle,
+                                                 plan,
+                                                 &alpha,
+                                                 mDeviceAlongN,
+                                                 &beta,
+                                                 mDeviceAlongM,
+                                                 &gamma,
+                                                 mDeviceFull,
+                                                 mDeviceOut,
+                                                 nullptr),
+              HIPTENSOR_STATUS_SUCCESS);
+    readOutput();
+
+    for(int64_t i = 0; i < M; i++)
+    {
+        for(int64_t j = 0; j < N; j++)
+        {
+            EXPECT_FLOAT_EQ(outputAt(i, j),
+                            alpha * mHostAlongN[j] + beta * mHostAlongM[i] + gamma * fullAt(i, j))
+                << "at (" << i << ", " << j << ")";
+        }
+    }
+
+    hiptensorDestroyPlan(plan);
+    hiptensorDestroyOperationDescriptor(opDesc);
+}
+
+constexpr int32_t oMode = 'o';
+
+constexpr int64_t O = 3;
+
+// A rank-3 {m,n,o} output fed by a rank-1 input, so a single operand is broadcast along two modes
+// at once rather than one.
+class ElementwiseBroadcastRank3Test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        ASSERT_EQ(hiptensorCreate(&mHandle), HIPTENSOR_STATUS_SUCCESS);
+
+        int64_t outLengths[3] = {M, N, O};
+        int64_t nLengths[1]   = {N};
+
+        ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                      mHandle, &mDescOut, 3, outLengths, nullptr, HIPTENSOR_R_32F, alignment),
+                  HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                      mHandle, &mDescAlongN, 1, nLengths, nullptr, HIPTENSOR_R_32F, alignment),
+                  HIPTENSOR_STATUS_SUCCESS);
+
+        auto outStrides = hiptensor::stridesFromLengths(
+            std::vector<int64_t>{M, N, O},
+            hiptensor::HiptensorOptions::instance()->isColMajorStrides());
+        mStrideM = outStrides[0];
+        mStrideN = outStrides[1];
+        mStrideO = outStrides[2];
+
+        ASSERT_EQ(hipMalloc(&mDeviceAlongN, N * sizeof(float)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&mDeviceOut, M * N * O * sizeof(float)), hipSuccess);
+
+        mHostAlongN.resize(N);
+        mHostOut.assign(M * N * O, 0.0f);
+        for(int64_t j = 0; j < N; j++)
+        {
+            mHostAlongN[j] = static_cast<float>(j + 1);
+        }
+        ASSERT_EQ(
+            hipMemcpy(mDeviceAlongN, mHostAlongN.data(), N * sizeof(float), hipMemcpyHostToDevice),
+            hipSuccess);
+    }
+
+    void TearDown() override
+    {
+        EXPECT_EQ(hipFree(mDeviceOut), hipSuccess);
+        EXPECT_EQ(hipFree(mDeviceAlongN), hipSuccess);
+        hiptensorDestroyTensorDescriptor(mDescAlongN);
+        hiptensorDestroyTensorDescriptor(mDescOut);
+        hiptensorDestroy(mHandle);
+    }
+
+    void readOutput()
+    {
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(
+                mHostOut.data(), mDeviceOut, M * N * O * sizeof(float), hipMemcpyDeviceToHost),
+            hipSuccess);
+    }
+
+    float outputAt(int64_t i, int64_t j, int64_t k) const
+    {
+        return mHostOut[i * mStrideM + j * mStrideN + k * mStrideO];
+    }
+
+    hiptensorHandle_t           mHandle{};
+    hiptensorTensorDescriptor_t mDescOut{};
+    hiptensorTensorDescriptor_t mDescAlongN{};
+
+    void* mDeviceAlongN{};
+    void* mDeviceOut{};
+
+    std::vector<float> mHostAlongN;
+    std::vector<float> mHostOut;
+
+    int64_t mStrideM{};
+    int64_t mStrideN{};
+    int64_t mStrideO{};
+
+    int32_t mOutModes[3] = {mMode, nMode, oMode};
+    int32_t mModesN[1]   = {nMode};
+};
+
+// D{m,n,o} = alpha * A{n}: A carries the middle mode only, so it is broadcast along m and o
+// simultaneously and each of its elements lands in an M-by-O slab of D.
+TEST_F(ElementwiseBroadcastRank3Test, PermutationBroadcastsAlongTwoMissingModes)
+{
+    hiptensorOperationDescriptor_t opDesc{};
+    ASSERT_EQ(hiptensorCreatePermutation(mHandle,
+                                         &opDesc,
+                                         mDescAlongN,
+                                         mModesN,
+                                         HIPTENSOR_OP_IDENTITY,
+                                         mDescOut,
+                                         mOutModes,
+                                         HIPTENSOR_COMPUTE_DESC_32F),
+              HIPTENSOR_STATUS_SUCCESS);
+
+    auto  plan  = makePlan(mHandle, opDesc);
+    float alpha = 2.0f;
+    ASSERT_EQ(hiptensorPermute(mHandle, plan, &alpha, mDeviceAlongN, mDeviceOut, nullptr),
+              HIPTENSOR_STATUS_SUCCESS);
+    readOutput();
+
+    for(int64_t i = 0; i < M; i++)
+    {
+        for(int64_t j = 0; j < N; j++)
+        {
+            for(int64_t k = 0; k < O; k++)
+            {
+                EXPECT_FLOAT_EQ(outputAt(i, j, k), alpha * mHostAlongN[j])
+                    << "at (" << i << ", " << j << ", " << k << ")";
+            }
         }
     }
 

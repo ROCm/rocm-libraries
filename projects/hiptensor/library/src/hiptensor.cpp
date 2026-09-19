@@ -68,8 +68,9 @@ static hiptensorStatus_t checkElementwiseModes(char const*                     a
             {
                 snprintf(msg,
                          sizeof(msg),
-                         "Elementwise operation where mode '%c' is repeated within %s is not "
+                         "Elementwise operation where mode '%c' (%d) is repeated within %s is not "
                          "supported",
+                         mode,
                          mode,
                          name);
                 logger.logError(apiFuncName, msg);
@@ -85,9 +86,10 @@ static hiptensorStatus_t checkElementwiseModes(char const*                     a
         {
             snprintf(msg,
                      sizeof(msg),
-                     "Elementwise operation where %s carries mode '%c' that %s does not carry is "
-                     "not supported",
+                     "Elementwise operation where %s carries mode '%c' (%d) that %s does not carry "
+                     "is not supported",
                      inName,
+                     inModes[i],
                      inModes[i],
                      outName);
             logger.logError(apiFuncName, msg);
@@ -99,7 +101,8 @@ static hiptensorStatus_t checkElementwiseModes(char const*                     a
         {
             snprintf(msg,
                      sizeof(msg),
-                     "Mode '%c' has extent %zu in %s but extent %zu in %s",
+                     "Mode '%c' (%d) has extent %zu in %s but extent %zu in %s",
+                     inModes[i],
                      inModes[i],
                      inLengths[i],
                      inName,
