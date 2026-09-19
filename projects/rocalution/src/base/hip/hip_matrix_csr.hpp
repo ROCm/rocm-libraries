@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -422,6 +422,28 @@ namespace rocalution
                                         BaseMatrix<ValueType>*       prolong_int,
                                         BaseMatrix<ValueType>*       prolong_gst,
                                         BaseVector<int64_t>*         global_ghost_col) const;
+
+        virtual bool RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                    const BaseVector<bool>& S,
+                                    BaseVector<int>*        f2c,
+                                    BaseVector<int>*        f2f,
+                                    BaseMatrix<ValueType>*  A_FF,
+                                    BaseMatrix<ValueType>*  A_FC) const;
+        virtual bool RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                    const BaseVector<int>&       f2f,
+                                    const BaseMatrix<ValueType>& A_FC,
+                                    BaseMatrix<ValueType>*       A_FF) const;
+        virtual bool RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                    const BaseVector<int>& f2f,
+                                    BaseMatrix<ValueType>* A_FC,
+                                    BaseMatrix<ValueType>* A_FF) const;
+        virtual bool RSInterpolationTruncation(float trunc_factor, int max_elmts);
+
+        virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                        const BaseVector<int>&       f2c,
+                                        const BaseVector<int>&       f2f,
+                                        const BaseMatrix<ValueType>& W,
+                                        BaseMatrix<ValueType>*       prolong) const;
 
         virtual bool RenumberGlobalToLocal(const BaseVector<int64_t>& column_indices);
         virtual bool CombineAndRenumber(int                        ncol,

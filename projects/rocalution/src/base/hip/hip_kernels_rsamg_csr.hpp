@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2113,6 +2113,608 @@ namespace rocalution
                 // Transform local ghost index into global column index
                 ext_csr_col_ind[idx++] = l2g[col];
             }
+        }
+    }
+
+    // Flag coarse and fine points, so that a following exclusive sum turns these into the
+    // fine to coarse and fine to fine index maps
+    template <unsigned int BLOCKSIZE, typename I>
+    __launch_bounds__(BLOCKSIZE) __global__ void kernel_csr_rs_mmextpi_cf_flags(
+        I nrow, const int* __restrict__ cf, I* __restrict__ f2c, I* __restrict__ f2f)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        bool coarse = (cf[row] == COARSE);
+
+        f2c[row] = coarse ? 1 : 0;
+        f2f[row] = coarse ? 0 : 1;
+    }
+
+    // Number of entries per row of the strongly connected F-F and F-C blocks. The diagonal
+    // of A always belongs to the F-F block, every other entry contributes only if it is a
+    // strong connection.
+    template <unsigned int BLOCKSIZE, typename I, typename J>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_split_nnz(I nrow,
+                                             const J* __restrict__ csr_row_ptr,
+                                             const I* __restrict__ csr_col_ind,
+                                             const bool* __restrict__ S,
+                                             const int* __restrict__ cf,
+                                             const I* __restrict__ f2f,
+                                             J* __restrict__ ff_row_ptr,
+                                             J* __restrict__ fc_row_ptr)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        J    nnz_ff   = 0;
+        J    nnz_fc   = 0;
+        bool has_diag = false;
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            I col = csr_col_ind[k];
+
+            if(col == row)
+            {
+                has_diag = true;
+                ++nnz_ff;
+                continue;
+            }
+
+            if(S[k] == false)
+            {
+                continue;
+            }
+
+            if(cf[col] == COARSE)
+            {
+                ++nnz_fc;
+            }
+            else
+            {
+                ++nnz_ff;
+            }
+        }
+
+        // The F-F block always needs a diagonal slot, because the interpolation formula
+        // turns it into the placeholder that reproduces the direct term. Reserve one even
+        // when A does not store a diagonal on this row.
+        if(has_diag == false)
+        {
+            ++nnz_ff;
+        }
+
+        ff_row_ptr[f2f[row]] = nnz_ff;
+        fc_row_ptr[f2f[row]] = nnz_fc;
+    }
+
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_split_fill(I nrow,
+                                              const J* __restrict__ csr_row_ptr,
+                                              const I* __restrict__ csr_col_ind,
+                                              const T* __restrict__ csr_val,
+                                              const bool* __restrict__ S,
+                                              const int* __restrict__ cf,
+                                              const I* __restrict__ f2c,
+                                              const I* __restrict__ f2f,
+                                              const J* __restrict__ ff_row_ptr,
+                                              I* __restrict__ ff_col_ind,
+                                              T* __restrict__ ff_val,
+                                              const J* __restrict__ fc_row_ptr,
+                                              I* __restrict__ fc_col_ind,
+                                              T* __restrict__ fc_val)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        I frow = f2f[row];
+
+        J idx_ff = ff_row_ptr[frow];
+        J idx_fc = fc_row_ptr[frow];
+
+        // Determine whether A stores a diagonal exactly as the counting pass did, so that
+        // both passes agree on the number of diagonal slots for any column order.
+        bool diag_written = false;
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            if(csr_col_ind[k] == row)
+            {
+                diag_written = true;
+                break;
+            }
+        }
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            I col = csr_col_ind[k];
+
+            if(col == row)
+            {
+                ff_col_ind[idx_ff] = frow;
+                ff_val[idx_ff]     = csr_val[k];
+                ++idx_ff;
+                continue;
+            }
+
+            if(S[k] == false)
+            {
+                continue;
+            }
+
+            if(cf[col] == COARSE)
+            {
+                fc_col_ind[idx_fc] = f2c[col];
+                fc_val[idx_fc]     = csr_val[k];
+                ++idx_fc;
+            }
+            else
+            {
+                // f2f is monotonic, so the diagonal slot belongs ahead of the first fine
+                // neighbour past row. Placing it here keeps the columns ascending, which
+                // the subsequent SpGEMM relies on.
+                if(diag_written == false && col > row)
+                {
+                    ff_col_ind[idx_ff] = frow;
+                    ff_val[idx_ff]     = zero;
+                    ++idx_ff;
+                    diag_written = true;
+                }
+
+                ff_col_ind[idx_ff] = f2f[col];
+                ff_val[idx_ff]     = csr_val[k];
+                ++idx_ff;
+            }
+        }
+
+        if(diag_written == false)
+        {
+            ff_col_ind[idx_ff] = frow;
+            ff_val[idx_ff]     = zero;
+        }
+    }
+
+    // Row sums of the F-C block, and what remains of the row sum of A once all strong
+    // connections have been accounted for
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_diagonals(I nrow,
+                                             const J* __restrict__ csr_row_ptr,
+                                             const T* __restrict__ csr_val,
+                                             const int* __restrict__ cf,
+                                             const I* __restrict__ f2f,
+                                             const J* __restrict__ ff_row_ptr,
+                                             const I* __restrict__ ff_col_ind,
+                                             const T* __restrict__ ff_val,
+                                             const J* __restrict__ fc_row_ptr,
+                                             const T* __restrict__ fc_val,
+                                             T* __restrict__ D_q,
+                                             T* __restrict__ D_w)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        I r = f2f[row];
+
+        T q = static_cast<T>(0);
+
+        for(J j = fc_row_ptr[r]; j < fc_row_ptr[r + 1]; ++j)
+        {
+            q = q + fc_val[j];
+        }
+
+        T sum = static_cast<T>(0);
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            sum = sum + csr_val[k];
+        }
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            // The diagonal of row r of the F-F block sits at column r
+            if(ff_col_ind[j] != r)
+            {
+                sum = sum - ff_val[j];
+            }
+        }
+
+        D_q[r] = q;
+        D_w[r] = sum - q;
+    }
+
+    // Divide each off-diagonal of the F-F block by the denominator of its neighbour and
+    // accumulate the correction that distinguishes ext+i from plain extended interpolation
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_scale_ff(I nf,
+                                            const J* __restrict__ ff_row_ptr,
+                                            const I* __restrict__ ff_col_ind,
+                                            T* __restrict__ ff_val,
+                                            const T* __restrict__ ff_val_orig,
+                                            const T* __restrict__ D_q,
+                                            T* __restrict__ D_theta)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        T theta = zero;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            I jj = ff_col_ind[j];
+
+            if(jj == r)
+            {
+                continue;
+            }
+
+            // Locate the entry of row jj that points back at r. It stays zero when row jj
+            // has no such entry, which drops the correction term for this neighbour.
+            T value1 = zero;
+
+            for(J k = ff_row_ptr[jj]; k < ff_row_ptr[jj + 1]; ++k)
+            {
+                if(ff_col_ind[k] == r)
+                {
+                    value1 = ff_val_orig[k];
+                    break;
+                }
+            }
+
+            T value = D_q[jj] + value1;
+
+            // A vanishing denominator leaves the coupling out of both the correction and
+            // the scaling, rather than turning the whole row into a NaN
+            if(value != zero)
+            {
+                theta     = theta + ff_val[j] * value1 / value;
+                ff_val[j] = ff_val[j] / value;
+            }
+        }
+
+        D_theta[r] = theta;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            if(ff_col_ind[j] == r)
+            {
+                ff_val[j] = static_cast<T>(1);
+                break;
+            }
+        }
+    }
+
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_scale_rows(I nf,
+                                              const J* __restrict__ ff_row_ptr,
+                                              T* __restrict__ ff_val,
+                                              const T* __restrict__ D_theta,
+                                              const T* __restrict__ D_w)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        T theta = D_theta[r] + D_w[r];
+
+        // A degenerate denominator leaves the weights undefined. Zeroing row r of the F-F
+        // block makes row r of the product vanish, so the fine point gets no coarse-grid
+        // correction rather than an arbitrary unnormalised one.
+        theta = (theta != zero) ? static_cast<T>(-1) / theta : zero;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            ff_val[j] = ff_val[j] * theta;
+        }
+    }
+
+    // Average of the strong F-F couplings, row sums of the F-C block, the resulting
+    // redistribution factor, and what remains of the row sum of A
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpe_diagonals(I nrow,
+                                             const J* __restrict__ csr_row_ptr,
+                                             const T* __restrict__ csr_val,
+                                             const int* __restrict__ cf,
+                                             const I* __restrict__ f2f,
+                                             const J* __restrict__ ff_row_ptr,
+                                             const I* __restrict__ ff_col_ind,
+                                             const T* __restrict__ ff_val,
+                                             const J* __restrict__ fc_row_ptr,
+                                             const T* __restrict__ fc_val,
+                                             T* __restrict__ D_lambda,
+                                             T* __restrict__ D_beta,
+                                             T* __restrict__ D_tmp,
+                                             T* __restrict__ D_w)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+        constexpr T   zero   = static_cast<T>(0);
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        I r = f2f[row];
+
+        T lambda = zero;
+        I count  = 0;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            // The diagonal of row r of the F-F block sits at column r
+            if(ff_col_ind[j] != r)
+            {
+                lambda = lambda + ff_val[j];
+                ++count;
+            }
+        }
+
+        if(count != 0)
+        {
+            lambda = lambda / static_cast<T>(count);
+        }
+
+        T beta = zero;
+
+        for(J j = fc_row_ptr[r]; j < fc_row_ptr[r + 1]; ++j)
+        {
+            beta = beta + fc_val[j];
+        }
+
+        T sum = zero;
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            sum = sum + csr_val[k];
+        }
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            if(ff_col_ind[j] != r)
+            {
+                sum = sum - ff_val[j];
+            }
+        }
+
+        D_lambda[r] = lambda;
+        D_beta[r]   = beta;
+        D_w[r]      = sum - beta;
+
+        if(lambda + beta != zero)
+        {
+            D_tmp[r] = lambda / (beta + lambda);
+        }
+    }
+
+    // Couple each row to the redistribution factors of its F-neighbours. This reads the
+    // unscaled F-F block, so it has to complete before anything is scaled
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpe_tau(I nf,
+                                       const J* __restrict__ ff_row_ptr,
+                                       const I* __restrict__ ff_col_ind,
+                                       const T* __restrict__ ff_val,
+                                       const T* __restrict__ D_tmp,
+                                       T* __restrict__ D_tau)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        T tau = static_cast<T>(0);
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            I jj = ff_col_ind[j];
+
+            if(jj != r)
+            {
+                tau = tau + ff_val[j] * D_tmp[jj];
+            }
+        }
+
+        D_tau[r] = tau;
+    }
+
+    // Scale both blocks such that their product yields the ext+e weights
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpe_scale(I nf,
+                                         const J* __restrict__ ff_row_ptr,
+                                         const I* __restrict__ ff_col_ind,
+                                         T* __restrict__ ff_val,
+                                         const J* __restrict__ fc_row_ptr,
+                                         T* __restrict__ fc_val,
+                                         const T* __restrict__ D_lambda,
+                                         const T* __restrict__ D_beta,
+                                         const T* __restrict__ D_tau,
+                                         const T* __restrict__ D_w)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        T value = D_w[r] + D_tau[r];
+
+        if(value != zero)
+        {
+            value = static_cast<T>(-1) / value;
+        }
+
+        T theta = D_beta[r] + D_lambda[r];
+
+        J diag_idx = -1;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            if(ff_col_ind[j] == r)
+            {
+                diag_idx = j;
+            }
+            else
+            {
+                ff_val[j] = ff_val[j] * value;
+            }
+        }
+
+        if(diag_idx >= 0)
+        {
+            ff_val[diag_idx] = value * theta;
+        }
+
+        if(theta != zero)
+        {
+            theta = static_cast<T>(1) / theta;
+        }
+
+        for(J j = fc_row_ptr[r]; j < fc_row_ptr[r + 1]; ++j)
+        {
+            fc_val[j] = fc_val[j] * theta;
+        }
+    }
+
+    // Coarse points are injected, fine points take their row of interpolation weights
+    template <unsigned int BLOCKSIZE, typename I, typename J>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_prolong_nnz(I nrow,
+                                               const int* __restrict__ cf,
+                                               const I* __restrict__ f2f,
+                                               const J* __restrict__ w_row_ptr,
+                                               J* __restrict__ csr_row_ptr_P)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            csr_row_ptr_P[row] = 1;
+        }
+        else
+        {
+            I r = f2f[row];
+
+            csr_row_ptr_P[row] = w_row_ptr[r + 1] - w_row_ptr[r];
+        }
+    }
+
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_prolong_fill(I nrow,
+                                                const int* __restrict__ cf,
+                                                const I* __restrict__ f2c,
+                                                const I* __restrict__ f2f,
+                                                const J* __restrict__ w_row_ptr,
+                                                const I* __restrict__ w_col_ind,
+                                                const T* __restrict__ w_val,
+                                                const J* __restrict__ csr_row_ptr_P,
+                                                I* __restrict__ csr_col_ind_P,
+                                                T* __restrict__ csr_val_P)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        J idx = csr_row_ptr_P[row];
+
+        if(cf[row] == COARSE)
+        {
+            csr_col_ind_P[idx] = f2c[row];
+            csr_val_P[idx]     = static_cast<T>(1);
+
+            return;
+        }
+
+        I r = f2f[row];
+
+        for(J j = w_row_ptr[r]; j < w_row_ptr[r + 1]; ++j)
+        {
+            csr_col_ind_P[idx] = w_col_ind[j];
+            csr_val_P[idx]     = w_val[j];
+            ++idx;
         }
     }
 

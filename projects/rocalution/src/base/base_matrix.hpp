@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -451,7 +451,8 @@ namespace rocalution
         /** \brief Apply and add the matrix to vector, out = out + scalar*this*in; */
         virtual void ApplyAdd(const BaseVector<ValueType>& in,
                               ValueType                    scalar,
-                              BaseVector<ValueType>*       out) const = 0;
+                              BaseVector<ValueType>*       out) const
+            = 0;
 
         /** \brief Delete all entries abs(a_ij) <= drop_off;
         * the diagonal elements are never deleted */
@@ -723,6 +724,46 @@ namespace rocalution
                                         BaseMatrix<ValueType>*       prolong_int,
                                         BaseMatrix<ValueType>*       prolong_gst,
                                         BaseVector<int64_t>*         global_ghost_col) const;
+
+        /** \brief Split A into its strongly connected F-F and F-C blocks, as required by
+        * the matrix-matrix formulation of extended+i interpolation. Additionally computes
+        * the fine to coarse and fine to fine index maps. */
+        virtual bool RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                    const BaseVector<bool>& S,
+                                    BaseVector<int>*        f2c,
+                                    BaseVector<int>*        f2f,
+                                    BaseMatrix<ValueType>*  A_FF,
+                                    BaseMatrix<ValueType>*  A_FC) const;
+
+        /** \brief Scale the F-F block in-place such that the product with the F-C block
+        * yields the extended+i interpolation weights */
+        virtual bool RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                    const BaseVector<int>&       f2f,
+                                    const BaseMatrix<ValueType>& A_FC,
+                                    BaseMatrix<ValueType>*       A_FF) const;
+
+        /** \brief Truncate the rows of an interpolation operator, dropping entries below
+        * trunc_factor times the largest magnitude of their row and keeping at most
+        * max_elmts of them. The surviving entries are rescaled so that the row sum is
+        * preserved. */
+        virtual bool RSInterpolationTruncation(float trunc_factor, int max_elmts);
+
+        /** \brief Scale the F-F and F-C blocks in-place such that their product yields the
+        * extended+e interpolation weights. Unlike extended+i, this redistributes the
+        * F-neighbour influence using the average of the strong F-F couplings, which needs
+        * no lookup of the reverse coupling and hence no communication. */
+        virtual bool RSMMExtPEScale(const BaseVector<int>& CFmap,
+                                    const BaseVector<int>& f2f,
+                                    BaseMatrix<ValueType>* A_FC,
+                                    BaseMatrix<ValueType>* A_FF) const;
+
+        /** \brief Assemble the prolongation operator from the F-point interpolation
+        * weights, inserting the identity at the coarse points */
+        virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                        const BaseVector<int>&       f2c,
+                                        const BaseVector<int>&       f2f,
+                                        const BaseMatrix<ValueType>& W,
+                                        BaseMatrix<ValueType>*       prolong) const;
 
         /** \brief Factorized Sparse Approximate Inverse assembly for given system
         * matrix power pattern or external sparsity pattern */

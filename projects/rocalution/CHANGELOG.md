@@ -6,6 +6,8 @@ Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/proj
 
 ### Added
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of rocALUTION.
+* Added the matrix-matrix based interpolation operators `MMExtPI` and `MMExtPE` to the `InterpolationType` enumeration, selectable through `RugeStuebenAMG::SetInterpolationType()`.
+* Added `RugeStuebenAMG::SetInterpolationTruncationFactor()` and `RugeStuebenAMG::SetInterpolationMaxElmts()` to truncate the interpolation operator, dropping entries that are small relative to the largest entry of their row and capping the number of entries per row.
 
 ### Resolved issues
 * Fixed a GPU memory access fault in the Smoothed-Aggregation AMG preconditioner on wave32 (RDNA) hardware.
