@@ -19,12 +19,12 @@ constexpr auto tile_configs = std::array{
 };
 constexpr auto types        = std::array{hipconv::DataType::fp16, hipconv::DataType::bf16};
 constexpr auto directions   = std::array{hipconv::Direction::Fprop, hipconv::Direction::Dgrad};
-constexpr auto filter_sizes = std::array{1, 3, 4, 5, 6, 7};
+constexpr auto filter_sizes = std::array{3, 4, 5, 6, 7};
 constexpr auto make_configs()
 {
     constexpr std::size_t num_configs =
         tile_configs.size() * types.size() * directions.size() * filter_sizes.size() -
-        (filter_sizes.size() - 2) * types.size() * directions.size();
+        (filter_sizes.size() - 1) * types.size() * directions.size();
 
     std::array<Config, num_configs> configs;
     std::size_t cfg = 0;

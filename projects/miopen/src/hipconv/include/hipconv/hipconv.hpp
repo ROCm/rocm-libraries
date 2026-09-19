@@ -6,7 +6,7 @@
 // return value, while a violated precondition (an invalid argument such as a
 // null handle) throws std::invalid_argument.
 
-#include "conv2d_params.hpp"
+#include "conv_params.hpp"
 #include "export.hpp"
 #include "tolerance.hpp"
 
@@ -56,27 +56,34 @@ inline constexpr std::size_t MAX_RANKED_CONFIGS = 8;
 inline constexpr std::size_t ALL_RANKED_CONFIGS = std::numeric_limits<std::size_t>::max();
 
 // All valid kernels for the given params, best first. Empty if unsupported.
+//
+// `par` is matched as written; no folding happens here. A caller with a conv1d
+// or conv3d layer passes ConvParams::unfolded() instead, which is what gets a
+// degenerate conv3d served by a conv2d kernel; without it such a layer matches
+// nothing, because every kernel in the tree serves two-dimensional layers only.
+// The handle this returns is then bound to the unfolded params, so
+// ConvLaunch::make and launch() must be given the same ones.
 HIPCONV_API std::vector<ConvKernelHandle>
 get_valid_configs(ArchHandle arch,
-                  const Conv2dParams& par,
+                  const ConvParams& par,
                   std::size_t max_ranked = MAX_RANKED_CONFIGS);
 
 // All valid kernels for the given params and algorithm.
 HIPCONV_API std::vector<ConvKernelHandle>
 get_valid_configs(ArchHandle arch,
-                  const Conv2dParams& par,
+                  const ConvParams& par,
                   Algorithm algo,
                   std::size_t max_ranked = MAX_RANKED_CONFIGS);
 
 // Best kernel, or nullopt if unsupported.
-HIPCONV_API std::optional<ConvKernelHandle> find_config(ArchHandle arch, const Conv2dParams& par);
+HIPCONV_API std::optional<ConvKernelHandle> find_config(ArchHandle arch, const ConvParams& par);
 
 // Re-check whether a previously selected kernel still supports `par`.
 //
 // Lets a caller who mutates params slightly avoid recomputing the full
 // valid-configs list. Returns false if `par` falls outside the kernel's family
-// applicability or its tuning configuration.
-HIPCONV_API bool is_applicable(ConvKernelHandle kernel, const Conv2dParams& par);
+// applicability or its configuration.
+HIPCONV_API bool is_applicable(ConvKernelHandle kernel, const ConvParams& par);
 
 // Short kernel-family name of the handle (e.g. "direct_l1", "direct", "grouped").
 //
@@ -99,19 +106,19 @@ HIPCONV_API std::string describe_config(ConvKernelHandle kernel);
 // "waves_k=2,kh=3,direction=fprop"); the kernel matches iff every constraint it
 // understands is satisfied and it rejects any token it does not understand. This
 // is the ONLY general interface for specifying a config: how a constraint maps to
-// a kernel's tuning fields is encapsulated entirely inside the kernel. A family
+// a kernel's configuration fields is encapsulated entirely inside the kernel. A family
 // that has not opted in matches only the empty string. On a malformed/unknown
 // token, returns false and (if `error` is non-null) sets it to a message.
 HIPCONV_API bool
 matches_descriptor(ConvKernelHandle kernel, std::string_view spec, std::string* error = nullptr);
 
-HIPCONV_API size_t get_workspace_size(ConvKernelHandle kernel, const Conv2dParams& par);
+HIPCONV_API size_t get_workspace_size(ConvKernelHandle kernel, const ConvParams& par);
 
 // Weighted throughput index of `kernel` for `par`; larger is better.
 //
 // 1.0 means full hardware utilization. Pass a kernel from find_config/
 // get_valid_configs; the caller uses it to rank hipconv against other providers.
-HIPCONV_API float get_weighted_throughput_index(ConvKernelHandle kernel, const Conv2dParams& par);
+HIPCONV_API float get_weighted_throughput_index(ConvKernelHandle kernel, const ConvParams& par);
 
 // Enqueue the kernel on the stream, returning the launch-time HIP status.
 //
@@ -120,7 +127,7 @@ HIPCONV_API float get_weighted_throughput_index(ConvKernelHandle kernel, const C
 // an execution fault (e.g. an out-of-bounds access) surfaces at a later
 // synchronization, not here.
 HIPCONV_API hipconvError_t launch(ConvKernelHandle kernel,
-                                  const Conv2dParams& par,
+                                  const ConvParams& par,
                                   const void* in,
                                   const void* wei,
                                   void* out,
@@ -130,7 +137,7 @@ HIPCONV_API hipconvError_t launch(ConvKernelHandle kernel,
 // The error bound `kernel` admits on `par`: |kernel - exact| <= atol + rtol * conv(|A|,|B|).
 // rtol is TOLERANCE_UNAVAILABLE when no model applies; check has_tolerance(rtol) first.
 HIPCONV_API void
-get_tolerance(ConvKernelHandle kernel, const Conv2dParams& par, float& atol, float& rtol);
+get_tolerance(ConvKernelHandle kernel, const ConvParams& par, float& atol, float& rtol);
 
 // The tolerance for a kernel that accumulates by recursive summation over the whole contraction.
 //
@@ -140,8 +147,7 @@ get_tolerance(ConvKernelHandle kernel, const Conv2dParams& par, float& atol, flo
 // docs/algorithms/direct/direct-wgrad-tolerance.md.
 //
 // rtol is TOLERANCE_UNAVAILABLE past the depth where the model applies.
-HIPCONV_API void
-get_recursive_summation_tolerance(const Conv2dParams& par, float& atol, float& rtol);
+HIPCONV_API void get_recursive_summation_tolerance(const ConvParams& par, float& atol, float& rtol);
 
 // A bound (kernel, params) pair ready to launch.
 //
@@ -157,7 +163,7 @@ public:
     //
     // Returns nullopt if the kernel does not support `par` (same predicate as
     // is_applicable). Throws std::invalid_argument if `kernel` is null.
-    static std::optional<ConvLaunch> make(ConvKernelHandle kernel, Conv2dParams par);
+    static std::optional<ConvLaunch> make(ConvKernelHandle kernel, ConvParams par);
 
     ConvLaunch(ConvLaunch&&) noexcept;
     ConvLaunch& operator=(ConvLaunch&&) noexcept;
@@ -166,13 +172,13 @@ public:
     ConvLaunch(const ConvLaunch&)            = delete;
     ConvLaunch& operator=(const ConvLaunch&) = delete;
 
-    // Cached at construction; no Conv2dParams argument needed.
+    // Cached at construction; no ConvParams argument needed.
     size_t workspace_size() const noexcept;
     // rtol is TOLERANCE_UNAVAILABLE when no model applies; see the free get_tolerance above.
     void get_tolerance(float& atol, float& rtol) const;
 
     // The bound parameters and kernel handle, for inspection or printing.
-    const Conv2dParams& params() const noexcept;
+    const ConvParams& params() const noexcept;
     ConvKernelHandle kernel() const noexcept;
 
     // Launch the kernel on the bound parameters.

@@ -2,7 +2,7 @@
 #include "launch_params.h"
 #include "pointwise/hipblaslt_matmul.hpp"
 #include "pointwise_conv_kernel.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 #include <array>
 
@@ -10,7 +10,7 @@ namespace hipconv::pointwise_fp16bf16
 {
 
 void launch_impl(const LaunchParams&,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -31,9 +31,9 @@ class PointwiseConvKernelImpl : public PointwiseConvKernel
 public:
     constexpr PointwiseConvKernelImpl() : PointwiseConvKernel(&launch_impl) {}
 
-    bool is_valid_config(const Conv2dParams&) const override { return true; }
+    bool is_valid_config(const ConvParams&) const override { return true; }
 
-    LaunchParams get_launch_params(const Conv2dParams&) const override { return LaunchParams{}; }
+    LaunchParams get_launch_params(const ConvParams&) const override { return LaunchParams{}; }
 };
 
 PointwiseConvKernelImpl kernel;

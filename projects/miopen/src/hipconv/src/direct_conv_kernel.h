@@ -1,7 +1,7 @@
 #pragma once
 
 #include "conv_kernel.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include "types.h"
 
 #include <cmath>
@@ -20,7 +20,7 @@ public:
 
     hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Direct; }
 
-    bool is_applicable(const hipconv::Conv2dParams& par) const override
+    bool is_applicable(const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
 
@@ -46,7 +46,7 @@ public:
     // Direct is almost certainly the fastest kernel at 128+ channels per group;
     // below that it is a coverage fallback whose speed we can't vouch for, so a
     // different provider may beat it.
-    float get_weighted_throughput_index(const hipconv::Conv2dParams& par) const override
+    float get_weighted_throughput_index(const hipconv::ConvParams& par) const override
     {
         constexpr int confident_channels = 128;
         return par.channels_per_group() >= confident_channels ? 1.0f : 0.5f;

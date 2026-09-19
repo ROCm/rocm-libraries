@@ -59,6 +59,13 @@ struct Config
     int unfold_n      = 1; // images packed into one column block
     int prefetch_rows = 2; // rows the memory phase runs ahead of its compute phase
 
+    // Rows a loader addresses from one base, or 0 to address the whole image from one.
+    //
+    // Nonzero folds the tile's first row into the 64-bit base so the 32-bit offset spans a tile,
+    // which is the only way to reach an image past 2 GiB. Must be a multiple of unroll(). See
+    // the row-tile section of row_schedule.h.
+    int rows_per_tile = 0;
+
     constexpr int waves() const { return waves_c * waves_k * waves_q * waves_g; }
     constexpr int threads() const { return WAVE_SIZE * waves(); }
 

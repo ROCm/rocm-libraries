@@ -20,3 +20,9 @@ hipconv_autoshard(ARCH         cdna5
                   CONFIG_TABLE grouped/grouped_multi_g_wgrad/config_table.hpp
                   KERNEL       grouped/grouped_multi_g_wgrad/kernel.hpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
+hipconv_autoshard(ARCH         cdna5
+                  NAMESPACE    depthwise_1d_toeplitz
+                  KERNEL_CLASS Depthwise_1D_Toeplitz_ConvKernel
+                  CONFIG_TABLE depthwise/depthwise_1d_toeplitz/config_table.h
+                  KERNEL       depthwise/depthwise_1d_toeplitz/kernel.h
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
