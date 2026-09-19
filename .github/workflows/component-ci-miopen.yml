@@ -109,7 +109,7 @@ jobs:
               -DROCM_PATH=/opt/rocm
             build_target: ""
 
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     steps:
       - name: Runner health status
         run: |
