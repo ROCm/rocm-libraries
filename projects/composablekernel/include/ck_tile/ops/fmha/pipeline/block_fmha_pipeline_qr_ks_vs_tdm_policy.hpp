@@ -38,6 +38,28 @@ CK_TILE_HOST_DEVICE constexpr index_t integer_log2_exact()
     return result;
 }
 
+// Largest power-of-2 that divides x (lowest set bit). The TDM writer inserts
+// padding every IntervalBytes of the cumulative write stream, so the stride
+// must evenly tile the row for padding to land at the same intra-row position
+// each row. For power-of-2 row widths this equals the full width (row-boundary
+// padding, unchanged); for non-power-of-2 widths (e.g. hdim 160 -> 80 dwords)
+// it picks the coarsest stride that still divides the row (80 -> 16 dwords).
+CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_largest_pow2_divisor(index_t x)
+{
+    return x & (-x);
+}
+
+// Compute the TDM LDS padding interval (in bytes) for a row of Cols elements,
+// mirroring gemm_universal_pipeline_ag_bg_cr_policy.hpp:GetLdsPaddingConfig.
+// banks_per_row uses 4-byte dwords; the interval is the largest pow2 divisor
+// of banks_per_row expressed back in bytes.
+template <index_t ElementBytes, index_t Cols>
+CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_interval_bytes()
+{
+    constexpr index_t banks_per_row = Cols * ElementBytes / 4;
+    return qr_tdm_largest_pow2_divisor(banks_per_row) * 4;
+}
+
 template <bool Enabled, index_t IntervalBytes, index_t PadBytes>
 inline constexpr bool is_valid_lds_padding_config_v =
     (!Enabled && IntervalBytes == 0 && PadBytes == 0) ||
@@ -188,8 +210,19 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     Problem::BlockFmhaShape::NumWarps == 4 &&
     (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
     Problem::BlockFmhaShape::kN0 == 64 && Problem::BlockFmhaShape::kK0 == 32 &&
-    Problem::BlockFmhaShape::kN1 == 128 && Problem::BlockFmhaShape::kK1 == 32 &&
-    Problem::BlockFmhaShape::kQKHeaddim == 128 && Problem::BlockFmhaShape::kSubQKHeaddim == 128 &&
+    Problem::BlockFmhaShape::kK1 == 32 &&
+    // Head dim must be stored in LDS without tile-length rounding (excludes the
+    // 80->96 / 96->128 padded cases). The padding interval formula needs each
+    // row to be a whole number of kQrTdmLdsAccessBytes (16B) vector accesses, so
+    // require the row byte width to be a multiple of 16. This is dtype-aware:
+    // bf16/fp16 -> head dim % 8, fp8 -> head dim % 16 (holds for the current
+    // bf16/fp16 gate above; stays correct if the dtype gate is later widened).
+    Problem::BlockFmhaShape::kSubQKHeaddim == Problem::BlockFmhaShape::kQKHeaddim &&
+    (Problem::BlockFmhaShape::kQKHeaddim * sizeof(typename Problem::KDataType)) %
+            kQrTdmLdsAccessBytes ==
+        0 &&
+    (Problem::BlockFmhaShape::kN1 * sizeof(typename Problem::VDataType)) % kQrTdmLdsAccessBytes ==
+        0 &&
     Problem::BlockFmhaShape::IsVLayoutRowMajor &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
     std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
@@ -210,10 +243,20 @@ struct QrTdmPaddingSelection
 template <typename Problem>
 struct QrTdmPaddingSelection<Problem, true>
 {
-    // Measured production configuration for gfx1250 BF16/FP16 d=128 qr_tdm.
+    // Dynamic padding derived from the head dim, mirroring the GEMM universal
+    // pipeline formula. Reproduces the d=128 production values (K 256/16,
+    // V 256/32) and extends to non-power-of-2 hdim (160/192).
+    using Shape                          = typename Problem::BlockFmhaShape;
+    static constexpr index_t kKElemBytes = sizeof(typename Problem::KDataType);
+    static constexpr index_t kVElemBytes = sizeof(typename Problem::VDataType);
+    static constexpr index_t kKInterval  = qr_tdm_interval_bytes<kKElemBytes, Shape::kSubQKHeaddim>();
+    static constexpr index_t kVInterval  = qr_tdm_interval_bytes<kVElemBytes, Shape::kN1>();
+    static constexpr index_t kKPad       = 16;               // non-tr-load: dwords_per_128b * 4
+    static constexpr index_t kVPad       = 16 * kVElemBytes; // tr-load: bank_of_vecs * 4
+
     using Q = LdsPaddingConfig<false, 0, 0>;
-    using K = LdsPaddingConfig<true, 256, 16>;
-    using V = LdsPaddingConfig<true, 256, 32>;
+    using K = LdsPaddingConfig<true, kKInterval, kKPad>;
+    using V = LdsPaddingConfig<true, kVInterval, kVPad>;
 };
 
 } // namespace detail
