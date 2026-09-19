@@ -98,6 +98,7 @@ set(rocauxiliary_test_source
   auxiliary/orglx_unglx_gtest.cpp
   auxiliary/orgxl_ungxl_gtest.cpp
   auxiliary/orgbr_ungbr_gtest.cpp
+  auxiliary/orghr_unghr_gtest.cpp
   auxiliary/orgtr_ungtr_gtest.cpp
   auxiliary/ormxr_unmxr_gtest.cpp
   auxiliary/ormlx_unmlx_gtest.cpp
@@ -261,6 +262,9 @@ endif()
 # correct behavior (real run when ON, rocblas_status_not_implemented when OFF).
 if(ROCSOLVER_ENABLE_EIG_2STAGE)
   target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
+if(ROCSOLVER_ENABLE_XXGHR)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_XXGHR)
 endif()
 
 add_test(

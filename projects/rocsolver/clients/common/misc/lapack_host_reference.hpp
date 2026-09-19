@@ -505,6 +505,16 @@ void cpu_orgtr_ungtr(rocblas_fill uplo,
                      rocblas_int size_w);
 
 template <typename T>
+void cpu_orghr_unghr(rocblas_int n,
+                     rocblas_int ilo,
+                     rocblas_int ihi,
+                     T* A,
+                     rocblas_int lda,
+                     T* tau,
+                     T* work,
+                     rocblas_int size_w);
+
+template <typename T>
 void cpu_orm2r_unm2r(rocblas_side side,
                      rocblas_operation trans,
                      rocblas_int m,
