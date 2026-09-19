@@ -9,22 +9,25 @@
 #   ./setup_and_run_benchmark.sh /abs/path/to/out --gpu-targets=gfx1250
 #   ./setup_and_run_benchmark.sh bkc_26.9.5 --configs=maf   # run only MAF
 #   ./setup_and_run_benchmark.sh bkc_26.9.5 --configs=mab   # run only MAB
+#   ./setup_and_run_benchmark.sh bkc_26.9.5 --num-runs=5    # 5 iterations per config
 #
 # The first argument is the output directory (relative to this script, or
 # absolute). Each {maf,mab}/*.yaml is run into <out>/<yaml-stem>/ with log.txt.
 # Use --configs=<dir> to run only one subset (maf or mab).
+# Use --num-runs=N to repeat each config N times (default: 3).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HIPBLASLT_DIR="${HIPBLASLT_DIR:-$HOME/rocm-libraries/projects/hipblaslt}"
 TENSILELITE_DIR="${TENSILELITE_DIR:-$HIPBLASLT_DIR/tensilelite}"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-VENV_DIR="${VENV_DIR:-$HOME/env1}"
+VENV_DIR="${VENV_DIR:-}"
 CONFIGS_DIRS=()
 GPU_TARGETS="${GPU_TARGETS:-gfx1250}"
 SKIP_REBUILD=0
 KEEP_OUTPUTS=0
 SKIP_EXTRACT=0
+NUM_RUNS="${NUM_RUNS:-3}"
 OUT_ARG=""
 
 usage() {
@@ -46,6 +49,8 @@ while [[ $# -gt 0 ]]; do
         --rocm-path) shift; ROCM_PATH="$1" ;;
         --venv=*) VENV_DIR="${1#--venv=}" ;;
         --venv) shift; VENV_DIR="$1" ;;
+        --num-runs=*) NUM_RUNS="${1#--num-runs=}" ;;
+        --num-runs) shift; NUM_RUNS="$1" ;;
         --configs=*) CONFIGS_DIRS+=("${1#--configs=}") ;;
         --configs) shift; CONFIGS_DIRS+=("$1") ;;
         --) shift; break ;;
@@ -67,12 +72,17 @@ done
 log() { printf '\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
+[[ "$NUM_RUNS" =~ ^[1-9][0-9]*$ ]] || die "--num-runs must be a positive integer (got '$NUM_RUNS')"
 [[ -n "$OUT_ARG" ]] || die "output folder required (e.g. bkc_26.9.5). See --help."
 if [[ "$OUT_ARG" = /* ]]; then
     OUT_DIR="$OUT_ARG"
 else
     OUT_DIR="$ROOT/$OUT_ARG"
 fi
+mkdir -p "$OUT_DIR"
+
+# Default venv location: inside the output directory
+[[ -n "$VENV_DIR" ]] || VENV_DIR="$OUT_DIR/.venv"
 
 TENSILE_BIN="$TENSILELITE_DIR/Tensile/bin/Tensile"
 TENSILE_CLIENT="$TENSILELITE_DIR/build_tmp/tensilelite/client/tensilelite-client"
@@ -82,8 +92,22 @@ PYTHON_BIN="$VENV_DIR/bin/python3"
 [[ -d "$TENSILELITE_DIR" ]] || die "tensilelite not found at $TENSILELITE_DIR"
 [[ -x "$TENSILE_BIN" ]] || die "Tensile launcher not found at $TENSILE_BIN"
 [[ -x "$ROCM_PATH/bin/hipcc" ]] || die "hipcc not found under $ROCM_PATH (set ROCM_PATH or --rocm-path)"
-[[ -x "$INVOKE_BIN" ]] || die "invoke not found at $INVOKE_BIN (set VENV_DIR or --venv)"
-[[ -x "$PYTHON_BIN" ]] || die "python not found at $PYTHON_BIN (set VENV_DIR or --venv)"
+
+# ---------------------------------------------------------------------------
+# Create venv and install rocisa + dependencies
+# ---------------------------------------------------------------------------
+if [[ ! -x "$PYTHON_BIN" ]]; then
+    log "creating venv at $VENV_DIR"
+    python3 -m venv "$VENV_DIR"
+    log "installing requirements-dev.txt (includes rocisa)"
+    "$VENV_DIR/bin/pip" install --upgrade pip
+    (cd "$TENSILELITE_DIR" && "$VENV_DIR/bin/pip" install -r requirements-dev.txt)
+else
+    log "reusing existing venv at $VENV_DIR"
+fi
+
+[[ -x "$INVOKE_BIN" ]] || die "invoke not found at $INVOKE_BIN (venv may be incomplete)"
+[[ -x "$PYTHON_BIN" ]] || die "python not found at $PYTHON_BIN (venv creation failed)"
 
 # Default: scan both maf/ and mab/ under ROOT
 if (( ${#CONFIGS_DIRS[@]} == 0 )); then
@@ -147,34 +171,42 @@ mkdir -p "$OUT_DIR"
 log "wrote $OUT_DIR/hipblaslt.txt ($(tr '\n' ' ' < "$OUT_DIR/hipblaslt.txt"))"
 
 # ---------------------------------------------------------------------------
-# Run every config YAML
+# Run every config YAML (repeated $NUM_RUNS times)
 # ---------------------------------------------------------------------------
+log "each config will be run $NUM_RUNS time(s)"
 FAILED=()
-for yaml in "${CONFIGS[@]}"; do
-    name="$(basename "$yaml" .yaml)"
-    dest="$OUT_DIR/$name"
-    if (( KEEP_OUTPUTS )); then
-        mkdir -p "$dest"
-    else
-        log "wiping stale output $dest"
-        rm -rf "$dest"
-        mkdir -p "$dest"
-    fi
-    log "Tensile $name -> $dest"
-    set +e
-    "$PYTHON_BIN" "$TENSILE_BIN" \
-        "$yaml" \
-        --prebuilt-client "$TENSILE_CLIENT" \
-        "$dest" \
-        2>&1 | tee "$dest/log.txt"
-    rc="${PIPESTATUS[0]}"
-    set -e
-    if (( rc != 0 )); then
-        log "FAILED $name (exit $rc)"
-        FAILED+=("$name")
-    else
-        log "ok $name"
-    fi
+for (( run=1; run<=NUM_RUNS; run++ )); do
+    log "--- run $run / $NUM_RUNS ---"
+    for yaml in "${CONFIGS[@]}"; do
+        name="$(basename "$yaml" .yaml)"
+        if (( NUM_RUNS > 1 )); then
+            dest="$OUT_DIR/${name}/run_${run}"
+        else
+            dest="$OUT_DIR/${name}"
+        fi
+        if (( KEEP_OUTPUTS )); then
+            mkdir -p "$dest"
+        else
+            log "wiping stale output $dest"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+        fi
+        log "Tensile $name (run $run/$NUM_RUNS) -> $dest"
+        set +e
+        "$PYTHON_BIN" "$TENSILE_BIN" \
+            "$yaml" \
+            --prebuilt-client "$TENSILE_CLIENT" \
+            "$dest" \
+            2>&1 | tee "$dest/log.txt"
+        rc="${PIPESTATUS[0]}"
+        set -e
+        if (( rc != 0 )); then
+            log "FAILED $name run $run (exit $rc)"
+            FAILED+=("${name}:run${run}")
+        else
+            log "ok $name run $run"
+        fi
+    done
 done
 
 if (( ${#FAILED[@]} )); then
@@ -183,8 +215,10 @@ if (( ${#FAILED[@]} )); then
 fi
 
 if (( ! SKIP_EXTRACT )) && [[ -x "$ROOT/extract_perf.py" || -f "$ROOT/extract_perf.py" ]]; then
-    log "extract_perf.py $ROOT"
-    "$PYTHON_BIN" "$ROOT/extract_perf.py" "$ROOT" || true
+    log "extract_perf.py $ROOT -s $(basename "$OUT_DIR") -o $OUT_DIR/perf_summary.csv"
+    "$PYTHON_BIN" "$ROOT/extract_perf.py" "$ROOT" \
+        -s "$(basename "$OUT_DIR")" \
+        -o "$OUT_DIR/perf_summary.csv" || true
 fi
 
 log "all configs finished under $OUT_DIR"
