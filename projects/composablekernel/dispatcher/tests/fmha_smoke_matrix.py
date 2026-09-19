@@ -58,7 +58,7 @@ def generate_fwd_fp16_bf16_matrix() -> List[TestCase]:
     for prec in ["fp16", "bf16"]:
         for mode in [1, 0]:
             for perm in [0, 1]:
-                for hdim in [32, 64, 128, 256]:
+                for hdim in [32, 64, 128, 256, 512]:
                     for lse in [0, 1]:
                         for bias in ["n", "e", "a"]:
                             for p_drop in [0.0, 0.2]:
