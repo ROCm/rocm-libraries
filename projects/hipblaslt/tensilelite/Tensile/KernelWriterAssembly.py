@@ -6595,7 +6595,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # GSU.graIncrements negates GlobalReadIncs when the unroll dimension is
       # mirrored, so that operand is signed there and unsigned everywhere else.
-      unrollMirrored = tc in ('A', 'B', 'Metadata') \
+      unrollMirrored = tc in ('A', 'B', 'Metadata', 'MXSA', 'MXSB') \
           and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] \
               in kernel["ProblemType"]["MirrorDims%s"%tc]
       widenIncs = self.s_mul_i64_i32 if unrollMirrored else self.s_mul_u64_u32
