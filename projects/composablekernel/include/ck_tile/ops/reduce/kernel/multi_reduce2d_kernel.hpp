@@ -275,23 +275,23 @@ struct MultiReduce2d
             if(is_first_n_thread)
             {
                 tile_elementwise_inout(accumulator_ops.get(number<i>{}), y_compute, y_compute);
-                const index_t output_offset =
-                    (i * output_tensor_offset) +                     // operation offset
-                    partitioner.GetOutputTileOffset(block_group_id); // tile offset
+                const index_t output_tile_offset = partitioner.GetOutputTileOffset(block_group_id);
+                // Bound each view to its logical output. Padded rows in the final tile must not
+                // overwrite the next operation's results or write beyond the output allocation.
                 // Single-block vs multi-block output strategy
                 if constexpr(!ForceMultiBlock)
                 {
                     // Single-block case: direct store without atomics
                     auto y_tensor_view = make_naive_tensor_view<address_space_enum::global>(
-                        p_y_tuple + output_offset,
-                        make_tuple(S::Block_M),
+                        p_y_tuple + i * output_tensor_offset,
+                        make_tuple(output_tensor_offset),
                         make_tuple(1),
                         number<output_vector_size>{},
                         number<1>{});
 
                     auto y_window = make_tile_window(y_tensor_view,
                                                      make_tuple(number<S::ThreadTile_M>{}),
-                                                     {0},
+                                                     {output_tile_offset},
                                                      y_compute.get_tile_distribution());
 
                     auto y_output = cast_tile<YDataType>(y_compute);
@@ -304,15 +304,15 @@ struct MultiReduce2d
                     auto y_tensor_view =
                         make_naive_tensor_view<address_space_enum::global,
                                                interblock_reduce_ops.get(number<i>{}).GetAtomic()>(
-                            p_y_tuple + output_offset,
-                            make_tuple(S::Block_M),
+                            p_y_tuple + i * output_tensor_offset,
+                            make_tuple(output_tensor_offset),
                             make_tuple(1),
                             number<output_vector_size>{},
                             number<1>{});
 
                     auto y_window = make_tile_window(y_tensor_view,
                                                      make_tuple(number<S::ThreadTile_M>{}),
-                                                     {0},
+                                                     {output_tile_offset},
                                                      y_compute.get_tile_distribution());
 
                     auto y_output = cast_tile<YDataType>(y_compute);

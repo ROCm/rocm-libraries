@@ -30,6 +30,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Fixed
 
+* Fixed out-of-bounds stores in CK Tile multi-reduction kernels when the output row count is not a multiple of the block tile size.
 * Fixed a 32-bit integer overflow in the tensor descriptor element space size that caused undersized workspace allocation and out-of-bounds writes in grouped convolution backward weight for large tensors.
 * Fixed grouped convolution forward rejecting valid problem sizes because the implicit GEMM view was subject to the 2 GB logical GEMM size limit.
 * Fixed incorrect results in grouped convolution backward data and XDL GEMM kernels caused by an invalid `__restrict__` qualifier on LDS pointers.
