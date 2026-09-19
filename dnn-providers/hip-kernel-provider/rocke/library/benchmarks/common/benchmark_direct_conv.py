@@ -170,7 +170,7 @@ def parse_miopen_cmd_direct(cmd: str):
     # For fprop the grouped direct kernels require cpg == kpg.
     # For dgrad cpg and kpg may differ; the spec validators enforce the
     # kernel-specific constraints, so we skip the symmetric check here.
-    if cpg != 1 and cpg != kpg and (cpg % 4 != 0 or cpg < 4):
+    if miopen_args.forw != 2 and cpg != 1 and cpg != kpg and (cpg % 4 != 0 or cpg < 4):
         raise ValueError(
             f"cpg={cpg} (C/groups) must be 1 (depthwise) or a positive multiple of 4"
         )
@@ -1619,7 +1619,7 @@ def main() -> int:
             )
             return 2
 
-        if cpg != 1 and (cpg % 4 != 0 or cpg < 4):
+        if args.direction != "dgrad" and cpg != 1 and (cpg % 4 != 0 or cpg < 4):
             print(
                 f"error: cpg={cpg} (C/groups={args.C}/{args.groups}) must be 1 (depthwise) "
                 f"or a positive multiple of 4 (grouped)",

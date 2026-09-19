@@ -263,12 +263,13 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     rocke_value_t* c_st_hw = (c_stride > 1) ? rocke_b_const_i32(b, c_stride) : NULL;
 
     /* Runtime Hi-loop */
+    rocke_value_t* hi_bound = rocke_b_const_i32(b, p->H);
     rocke_iter_arg_t hi_iarg;
     hi_iarg.name = "dg_hi_dummy";
     hi_iarg.init = rocke_b_const_i32(b, 0);
     rocke_for_t hi_loop = rocke_b_scf_for_iter(b,
                                                c0,
-                                               rocke_b_const_i32(b, p->H),
+                                               hi_bound,
                                                c1,
                                                &hi_iarg,
                                                1,
@@ -547,6 +548,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
      * Python order: outer r loop, inner s loop. */
 #define ROCKE_DGRAD_DW_MAX_KH 8
 #define ROCKE_DGRAD_DW_MAX_KW 8
+    if(p->KH > ROCKE_DGRAD_DW_MAX_KH || p->KW > ROCKE_DGRAD_DW_MAX_KW)
+    {
+        if(b->status == ROCKE_OK)
+            b->status = ROCKE_ERR_VALUE;
+        return NULL;
+    }
     rocke_value_t* weights_f32[ROCKE_DGRAD_DW_MAX_KH * ROCKE_DGRAD_DW_MAX_KW];
     for(r_const = 0; r_const < p->KH; r_const++)
     {
@@ -577,12 +584,13 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
     rocke_value_t* c_st_hw = (c_stride > 1) ? rocke_b_const_i32(b, c_stride) : NULL;
 
     /* Runtime Hi-loop */
+    rocke_value_t* hi_bound = rocke_b_const_i32(b, p->H);
     rocke_iter_arg_t hi_iarg;
     hi_iarg.name = "dg_dw_dummy";
     hi_iarg.init = rocke_b_const_i32(b, 0);
     rocke_for_t hi_loop = rocke_b_scf_for_iter(b,
                                                c0,
-                                               rocke_b_const_i32(b, p->H),
+                                               hi_bound,
                                                c1,
                                                &hi_iarg,
                                                1,

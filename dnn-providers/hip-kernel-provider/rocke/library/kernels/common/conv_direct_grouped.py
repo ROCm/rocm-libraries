@@ -2085,6 +2085,10 @@ class DirectConvSpec:
             raise ValueError("DirectConvSpec block_q must be a multiple of 16")
         if self.block_h < 0:
             raise ValueError("DirectConvSpec block_h must be >= 0")
+        if self.fold_k32 and p.cpg % 32 != 0:
+            raise ValueError(
+                f"DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got {p.cpg})"
+            )
         N_K_ATOMS = (p.cpg + 15) // 16
         if N_K_ATOMS % self.waves_k != 0:
             raise ValueError(
@@ -2397,27 +2401,25 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         chunk_idx = b.add(tid, b.const_i32(pass_idx * THREADS))
         decoded = chunk_desc.unmerge_lower(b, chunk_idx=chunk_idx)
         in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_CHUNKS))
-        # For persistent grid, g_tile is decoded per-cell and updated via 'g' variable.
-        # For non-persistent, g_tile = by (static for this block).
-        _g_tile_for_lds = (
-            by if not PERSISTENT else b.const_i32(0)
-        )  # updated per-cell via 'g'
-        abs_group = b.add(b.mul(_g_tile_for_lds, c_BG), decoded["group_in_wg"])
         chunk_meta.append(
             {
                 "chunk_idx": chunk_idx,
                 "ch_block": decoded["ch_block"],
                 "W_lds": decoded["W_lds"],
                 "in_bounds": in_bounds,
-                "abs_group": abs_group,
+                "group_in_wg": decoded["group_in_wg"],
             }
         )
 
-    def issue_dram_load(y_iter_val: Value):
+    def issue_dram_load(y_iter_val: Value, g_tile_val=None):
+        # g_tile_val: for persistent grid, the per-cell decoded g_tile (pg_gt_v);
+        # for non-persistent, None (uses the static by value).
+        _g_tile = g_tile_val if g_tile_val is not None else by
         out = []
         for cm in chunk_meta:
+            abs_group = b.add(b.mul(_g_tile, c_BG), cm["group_in_wg"])
             c_val = b.add(
-                b.mul(cm["abs_group"], c_cpg),
+                b.mul(abs_group, c_cpg),
                 b.mul(
                     cm["ch_block"], b.const_i32(LOAD_VEC)
                 ),  # LOAD_VEC halves per chunk
@@ -2502,8 +2504,10 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         # pg_in_bounds is ANDed into every output store via the persistent flush guard below.
 
     # Prologue: zero-fill LDS for the first (padded) row of this cell/tile.
+    # For persistent grid, pass the per-cell g_tile so abs_group is correct.
+    _load_g_tile = pg_gt_v if PERSISTENT else None
     prologue_y = c0 if BLOCK_H == 0 else h_tile_start
-    store_to_lds(issue_dram_load(prologue_y), A_smem)
+    store_to_lds(issue_dram_load(prologue_y, g_tile_val=_load_g_tile), A_smem)
     b.sync()
 
     # acc_tiles[qt][m][slot]: <4 x f32> per (q_subtile, M-tile, pipeline slot).
@@ -2530,15 +2534,24 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         _pw_elems_per_block = WAVE * LOAD_VEC
         c_block_sz = b.const_i32(_pw_elems_per_block)
         _pw_n_dwords = LOAD_VEC // 2  # for buffer_load_vN_f16 n parameter
+        # W_coa layout: [groups, KH, KW, N_K_ATOMS, N_M_TILES, WAVE, LOAD_VEC]
+        # group-level block offset (g_tile for non-persistent; 0 for persistent
+        # since persistent with WAVES_K>1 and groups>1 is not a supported combo).
+        _pw_blocks_per_group = p.KH * p.KW * N_K_ATOMS * N_M_TILES
+        _pw_g_tile = by if not PERSISTENT else b.const_i32(0)
+        _pw_group_base = b.mul(_pw_g_tile, b.const_i32(_pw_blocks_per_group))
         for r_const in range(p.KH):
             for s_const in range(p.KW):
                 for local_atom in range(N_K_LOCAL):
                     atom_global_val = b.add(k_atom_base, b.const_i32(local_atom))
                     rs_base_pw = b.add(
-                        b.mul(atom_global_val, b.const_i32(N_M_TILES)),
-                        b.const_i32(
-                            (r_const * p.KW * N_K_ATOMS + s_const * N_K_ATOMS)
-                            * N_M_TILES
+                        _pw_group_base,
+                        b.add(
+                            b.mul(atom_global_val, b.const_i32(N_M_TILES)),
+                            b.const_i32(
+                                (r_const * p.KW * N_K_ATOMS + s_const * N_K_ATOMS)
+                                * N_M_TILES
+                            ),
                         ),
                     )
                     for m in range(N_M_TILES):
@@ -2578,7 +2591,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                 next_y = b.add(h_tile_start, b.const_i32(y_local + 1))
             else:
                 next_y = b.const_i32(y_local + 1)
-            loads_next = issue_dram_load(next_y)
+            loads_next = issue_dram_load(next_y, g_tile_val=_load_g_tile)
 
         for qt in range(q_subtiles):
             qt_w_base = qt * 16
@@ -2716,9 +2729,21 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 rs_const_base = (
                                     r_const * p.KW * N_K_ATOMS + s_const * N_K_ATOMS
                                 ) * N_M_TILES
+                                # W_coa layout: [groups, KH, KW, N_K_ATOMS, N_M_TILES, ...].
+                                # Include group-tile base offset so g>0 loads the correct group.
+                                _rk_blocks_per_group = (
+                                    p.KH * p.KW * N_K_ATOMS * N_M_TILES
+                                )
+                                _rk_g_tile = by if not PERSISTENT else b.const_i32(0)
+                                _rk_group_base = b.mul(
+                                    _rk_g_tile, b.const_i32(_rk_blocks_per_group)
+                                )
                                 block_idx_rk = b.add(
-                                    b.const_i32(rs_const_base + m),
-                                    b.mul(k_atom_global, b.const_i32(N_M_TILES)),
+                                    _rk_group_base,
+                                    b.add(
+                                        b.const_i32(rs_const_base + m),
+                                        b.mul(k_atom_global, b.const_i32(N_M_TILES)),
+                                    ),
                                 )
                                 elem_off_rk = b.add(
                                     b.mul(block_idx_rk, b.const_i32(WAVE * LOAD_VEC)),
@@ -3129,6 +3154,10 @@ def direct_dgrad_coalesced_workspace_bytes(
     p = problem
     K_ATOM_SZ = 32 if fold_k32 else 16
     ELEMS_PER_LANE = 8 if fold_k32 else 4
+    if fold_k32 and p.kpg % 32 != 0:
+        raise ValueError(
+            f"DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got {p.kpg})"
+        )
     N_K_ATOMS = p.kpg // K_ATOM_SZ  # kpg_orig = cpg of transposed fprop
     N_M_TILES = (p.cpg + 15) // 16  # cpg_orig = kpg of transposed fprop
     return (
@@ -3165,6 +3194,10 @@ def build_direct_reorganize_weights(
     fold_k32 = spec.fold_k32
     K_ATOM_SZ = 32 if fold_k32 else 16
     ELEMS_PER_LANE = 8 if fold_k32 else 4
+    if fold_k32 and p.kpg % 32 != 0:
+        raise ValueError(
+            f"DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got {p.kpg})"
+        )
     N_K_ATOMS = p.kpg // K_ATOM_SZ  # kpg = cpg of transposed fprop
     N_M_TILES = (p.cpg + 15) // 16  # cpg = kpg of transposed fprop
     WAVE = 64
@@ -3220,7 +3253,7 @@ def build_direct_reorganize_weights(
         b.cmp_lt(
             b.add(
                 b.mul(atom_idx, b.const_i32(K_ATOM_SZ)),
-                b.mul(c4, b.const_i32(ELEMS_PER_LANE // 2)),
+                b.mul(c4, b.const_i32(ELEMS_PER_LANE)),
             ),
             b.const_i32(p.kpg),
         ),
