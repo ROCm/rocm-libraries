@@ -1447,18 +1447,23 @@ MAINLOOP:
       [ 6] gr_inc     gr_inc(SA)
       [ 7] gr_inc     gr_inc(SB)
       [ 8] inline     inline(initC_overlap)
-      [ 9] wait_gr    wait_gr(0)
-      [10] sync       sync
-      [11] lr         LR A  (MT n, subIterK [0]) [0-7]
-      [12] lr         LR B  (MT n, subIterK [0]) [0-7]
-      [13] lr         LR SA (MT n, subIterK [0,1]) [0-7]
-      [14] lr         LR SB (MT n, subIterK [0,1]) [0-7]
-      [15] skip       skip(LE:1:NLL)
-      [16] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
-      [17] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
-      [18] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
-      [19] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
-      [20] skip       skip(LE:2:NGLL)
+      [ 9] skip       skip(LE:1:PreloopReorderPartial)
+      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
+      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
+      [12] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
+      [13] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
+      [14] wait_gr    wait_gr(num_gr_total)
+      [15] inline     inline(reorder_branch_PreloopReorderJoin)
+      [16] inline     inline(reorder_label_PreloopReorderPartial)
+      [17] wait_gr    wait_gr(0)
+      [18] inline     inline(reorder_label_PreloopReorderJoin)
+      [19] sync       sync
+      [20] lr         LR A  (MT n, subIterK [0]) [0-7]
+      [21] lr         LR B  (MT n, subIterK [0]) [0-7]
+      [22] lr         LR SA (MT n, subIterK [0,1]) [0-7]
+      [23] lr         LR SB (MT n, subIterK [0,1]) [0-7]
+      [24] skip       skip(LE:1:NLL)
+      [25] skip       skip(LE:2:NGLL)
 """
 
 
@@ -1519,14 +1524,19 @@ MAINLOOP:
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
       [ 4] inline     inline(initC_overlap)
-      [ 5] wait_gr    wait_gr(0)
-      [ 6] sync       sync
-      [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
-      [ 8] lr         LR B  (MT n, subIterK [0]) [0-1]
-      [ 9] skip       skip(LE:1:NLL)
-      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [12] skip       skip(LE:2:NGLL)
+      [ 5] skip       skip(LE:1:PreloopReorderPartial)
+      [ 6] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [ 7] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [ 8] wait_gr    wait_gr(mt1_gr_placements(A=1 B=1 SA=0 SB=0))
+      [ 9] inline     inline(reorder_branch_PreloopReorderJoin)
+      [10] inline     inline(reorder_label_PreloopReorderPartial)
+      [11] wait_gr    wait_gr(0)
+      [12] inline     inline(reorder_label_PreloopReorderJoin)
+      [13] sync       sync
+      [14] lr         LR A  (MT n, subIterK [0]) [0-9]
+      [15] lr         LR B  (MT n, subIterK [0]) [0-1]
+      [16] skip       skip(LE:1:NLL)
+      [17] skip       skip(LE:2:NGLL)
 """
 
 EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL = """\
@@ -1538,18 +1548,23 @@ MAINLOOP:
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
       [ 4] inline     inline(initC_overlap)
-      [ 5] wait_gr    wait_gr(0)
-      [ 6] sync       sync
-      [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
-      [ 8] lr         LR B  (MT n, subIterK [0]) [0-1]
-      [ 9] skip       skip(LE:1:NLL)
-      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
-      [13] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
-      [14] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
-      [15] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
-      [16] skip       skip(LE:2:NGLL)
+      [ 5] skip       skip(LE:1:PreloopReorderPartial)
+      [ 6] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [ 7] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [ 8] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
+      [ 9] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
+      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
+      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
+      [12] wait_gr    wait_gr(mt1_gr_placements(A=1 B=5 SA=0 SB=0))
+      [13] inline     inline(reorder_branch_PreloopReorderJoin)
+      [14] inline     inline(reorder_label_PreloopReorderPartial)
+      [15] wait_gr    wait_gr(0)
+      [16] inline     inline(reorder_label_PreloopReorderJoin)
+      [17] sync       sync
+      [18] lr         LR A  (MT n, subIterK [0]) [0-9]
+      [19] lr         LR B  (MT n, subIterK [0]) [0-1]
+      [20] skip       skip(LE:1:NLL)
+      [21] skip       skip(LE:2:NGLL)
 """
 
 
