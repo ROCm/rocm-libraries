@@ -3,10 +3,59 @@
 
 """Tests for origami configuration selection."""
 
+import os
 import pytest
 import origami
 import csv
 from helpers import create_config_list
+
+
+def _arithmetic_intensity(config):
+    """Flops-to-traffic ratio of a macro tile, matching rank_configs' tie-breaker."""
+    mt_m, mt_n, mt_k = config.mt.m, config.mt.n, config.mt.k
+    traffic = mt_m * mt_k + mt_n * mt_k + mt_m * mt_n
+    if traffic == 0:
+        return 0.0
+    return (2.0 * mt_m * mt_n * mt_k) / traffic
+
+
+def _heuristics_variance():
+    """Relative latency window that rank_configs treats as a tie."""
+    return float(os.environ.get("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.01"))
+
+
+def _assert_ranked_order(results):
+    """Assert the ordering rank_configs actually promises.
+
+    Candidates whose latency is within the heuristics variance of the best are
+    a near-tie group that rank_configs deliberately reorders by arithmetic
+    intensity, so latency is monotonic only past that group.
+    """
+    variance = _heuristics_variance()
+    best = min(r.latency for r in results)
+    epsilon = 1e-9
+
+    if variance <= epsilon:
+        def near_tie(latency):
+            return abs(latency - best) < epsilon
+    else:
+        denom = max(abs(best), epsilon)
+
+        def near_tie(latency):
+            return abs(latency - best) / denom < variance
+
+    tied = sum(1 for r in results if near_tie(r.latency))
+
+    for r in results[:tied]:
+        assert near_tie(r.latency)
+
+    intensities = [_arithmetic_intensity(r.config) for r in results[:tied]]
+    for higher, lower in zip(intensities, intensities[1:]):
+        assert lower <= higher + 1e-6
+
+    tail = results[tied:]
+    for i in range(len(tail) - 1):
+        assert tail[i].latency <= tail[i + 1].latency
 
 
 @pytest.mark.integration
@@ -57,9 +106,7 @@ def test_rank_configs(hardware):
     assert len(ranked_configs) > 0
     assert len(ranked_configs) <= len(configs)
 
-    # Check that results are sorted by latency (best first)
-    for i in range(len(ranked_configs) - 1):
-        assert ranked_configs[i].latency <= ranked_configs[i + 1].latency
+    _assert_ranked_order(ranked_configs)
 
 
 @pytest.mark.integration
@@ -95,9 +142,15 @@ def test_select_topk_configs(hardware):
     assert len(top_configs) <= topk
     assert len(top_configs) > 0
 
-    # Check that results are sorted by latency (best first)
-    for i in range(len(top_configs) - 1):
-        assert top_configs[i].latency <= top_configs[i + 1].latency
+    _assert_ranked_order(top_configs)
+
+    ranked_configs = origami.rank_configs(problem, hardware, configs, origami.model_t.gemm)
+    assert len(top_configs) == min(topk, len(ranked_configs))
+    for picked, ranked in zip(top_configs, ranked_configs):
+        assert picked.latency == ranked.latency
+        assert picked.config.mt.m == ranked.config.mt.m
+        assert picked.config.mt.n == ranked.config.mt.n
+        assert picked.config.mt.k == ranked.config.mt.k
 
 
 @pytest.mark.integration
