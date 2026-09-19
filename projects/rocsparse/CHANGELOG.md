@@ -3,7 +3,13 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 5.1.0
+## (Unreleased) rocSPARSE 5.2.0
+
+### Changed
+* rocSPARSE no longer depends on rocBLAS. The dependency was used only by the `rocsparse_sddmm_alg_dense` algorithm, which densified the sparse output and called a dense GEMM.
+* Deprecated `rocsparse_sddmm_alg_dense`. It remains a valid value of `rocsparse_sddmm_alg` and keeps its numerical value, so existing source and binaries continue to work, but it now selects `rocsparse_sddmm_alg_default`. As a result, `rocsparse_sddmm_buffer_size` reports a zero-sized buffer for this algorithm, and batched SDDMM on the CSR, CSC, COO, COO AoS, and ELL formats, which previously returned `rocsparse_status_not_implemented` with this algorithm, is now supported.
+
+## rocSPARSE 5.1.0 for ROCm 10.1
 
 ### Added
 * Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.

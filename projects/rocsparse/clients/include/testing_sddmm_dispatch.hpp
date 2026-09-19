@@ -450,28 +450,6 @@ public:
             trans_B = rocsparse_operation_none;
         }
 
-        // buffer size
-        {
-            device_dense_matrix<A> dA;
-            device_dense_matrix<B> dB;
-            rocsparse_local_dnmat  local_A(dA), local_B(dB);
-
-            device_sparse_matrix<C> dC(10, 10, 10, rocsparse_index_base_zero);
-            rocsparse_local_spmat   local_C(dC);
-
-            rocsparse_dnmat_descr mat_A = local_A;
-            rocsparse_dnmat_descr mat_B = local_B;
-            rocsparse_spmat_descr mat_C = local_C;
-
-            alg         = rocsparse_sddmm_alg_dense;
-            temp_buffer = nullptr;
-
-            EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm(PARAMS), rocsparse_status_invalid_pointer);
-
-            alg         = rocsparse_sddmm_alg_default;
-            temp_buffer = (void*)0x4;
-        }
-
 #undef PARAMS
 #undef PARAMS_BUFFER_SIZE
     }
@@ -490,16 +468,6 @@ public:
         rocsparse_order      order_B = arg.orderB;
         // Create rocsparse handle
         rocsparse_local_handle handle(arg);
-
-#ifndef ROCSPARSE_WITH_ROCBLAS
-        if(arg.sddmm_alg == rocsparse_sddmm_alg_dense)
-        {
-            std::cerr
-                << "No BLAS implementation is available, skipping rocsparse_sddmm_alg_dense test."
-                << std::endl;
-            return;
-        }
-#endif
 
         host_scalar<T> h_alpha(arg.get_alpha<T>());
         host_scalar<T> h_beta(arg.get_beta<T>());
