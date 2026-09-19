@@ -216,11 +216,30 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     const Flash2Selection sel = selectFlash2Config(
         params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.causal, cuCount);
 
-    // Split-K execution is not yet plumbed through execute() (it needs a second
-    // merge launch plus a workspace pointer). Record the decision, run single
-    // pass for now.
+    // Split-K needs its own object (the split and merge entry points live in
+    // hip_flash2_fwd_<arch>_splitk.co). Take the split only if that object is
+    // installed; otherwise fall back to single-pass, mirroring the variant
+    // probe so a partial install degrades instead of failing.
     params.splitK = 1;
     params.workspaceBytes = 0;
+    std::string splitCoPath;
+    if(sel.splitK > 1)
+    {
+        splitCoPath = flash2CoPath(archId, K_FLASH2_SPLITK_TAG);
+        const std::ifstream splitProbe(splitCoPath, std::ios::binary);
+        if(splitProbe.good())
+        {
+            params.splitK = sel.splitK;
+            params.workspaceBytes = flash2WorkspaceBytes(
+                params.batch, params.numHeadsQ, params.seqLenQ, params.headDim, params.splitK);
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder -- split-K object not installed at "
+                                   << splitCoPath << ", running single-pass");
+            splitCoPath.clear();
+        }
+    }
 
     std::string coPath = flash2CoPath(archId, sel.variant.tag);
     {
@@ -254,7 +273,16 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder::buildPlan -- loading " << coPath
                                                                             << " fn=" << funcName);
 
-    auto kernelOpt = loadKernelModule(coPath, funcName);
+    // Split-K supersedes the variant object: it carries its own split entry
+    // point plus the merge pass, both from one module.
+    auto kernelOpt = (params.splitK > 1) ? loadKernelModule(splitCoPath,
+                                                            flash2SplitKernelName(params.headDim),
+                                                            K_FLASH2_MERGE_FUNC)
+                                         : loadKernelModule(coPath, funcName);
+    if(params.splitK > 1)
+    {
+        coPath = splitCoPath; // error messages below should name what we loaded
+    }
     if(!kernelOpt)
     {
         const std::string msg
