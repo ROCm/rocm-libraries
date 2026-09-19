@@ -309,14 +309,21 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.IsTensorsCasted())
         return false;
-    if(!problem.IsFp16())
-        return false;
     if(problem.HasNonPackedTensors())
         return false;
 
     const auto devName = ctx.GetStream().GetDeviceName();
-    if(!(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx950") ||
-         StartsWith(devName, "gfx120")))
+    if(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx950"))
+    {
+        if(!(problem.IsFp16() || problem.IsBfp16()))
+            return false;
+    }
+    else if(StartsWith(devName, "gfx120"))
+    {
+        if(!problem.IsFp16())
+            return false;
+    }
+    else
     {
         return false;
     }
@@ -415,7 +422,13 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
         MIOPEN_THROW(miopenStatusInternalError);
     }(devName);
 
-    const std::string dTypeStr  = "_fp16_fp32acc";
+    const auto dTypeStr = [](const ProblemDescription& p) -> std::string {
+        if(p.IsFp16())
+            return "_fp16_fp32acc";
+        if(p.IsBfp16())
+            return "_bf16_fp32acc";
+        MIOPEN_THROW(miopenStatusInternalError);
+    }(problem);
     const std::string strideStr = "_stride1";
     const auto winoVariantStr   = []() -> std::string {
         if constexpr(Winodata == 2 && Winofilter == 3)
