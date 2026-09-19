@@ -370,6 +370,8 @@ inline constexpr auto rocblas_datatype_from_type<float> = rocblas_datatype_f32_r
 template <>
 inline constexpr auto rocblas_datatype_from_type<double> = rocblas_datatype_f64_r;
 template <>
+inline constexpr auto rocblas_datatype_from_type<rocblas_half_complex> = rocblas_datatype_f16_c;
+template <>
 inline constexpr auto rocblas_datatype_from_type<rocblas_float_complex> = rocblas_datatype_f32_c;
 template <>
 inline constexpr auto rocblas_datatype_from_type<rocblas_double_complex> = rocblas_datatype_f64_c;
@@ -383,6 +385,9 @@ template <>
 inline constexpr auto rocblas_datatype_from_type<uint32_t> = rocblas_datatype_u32_r;
 template <>
 inline constexpr auto rocblas_datatype_from_type<rocblas_bfloat16> = rocblas_datatype_bf16_r;
+template <>
+inline constexpr auto rocblas_datatype_from_type<rocblas_bfloat16_complex>
+    = rocblas_datatype_bf16_c;
 #if ROCSOLVER_ROCBLAS_HAS_F8_DATATYPES
 template <>
 inline constexpr auto rocblas_datatype_from_type<rocblas_f8> = rocblas_datatype_f8_r;
@@ -415,8 +420,11 @@ template <>
 inline constexpr char rocblas_precision_string<rocblas_float_complex>[] = "f32_c";
 template <>
 inline constexpr char rocblas_precision_string<rocblas_double_complex>[] = "f64_c";
+template <>
+inline constexpr char rocblas_precision_string<rocblas_half_complex>[] = "f16_c";
+template <>
+inline constexpr char rocblas_precision_string<rocblas_bfloat16_complex>[] = "bf16_c";
 #if 0 // Not implemented
-template <> inline constexpr char rocblas_precision_string<rocblas_half_complex  >[] = "f16_c";
 template <> inline constexpr char rocblas_precision_string<rocblas_i8_complex    >[] = "i8_c";
 template <> inline constexpr char rocblas_precision_string<rocblas_u8_complex    >[] = "u8_c";
 template <> inline constexpr char rocblas_precision_string<rocblas_i32_complex   >[] = "i32_c";
