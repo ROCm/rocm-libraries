@@ -5912,7 +5912,22 @@ class KernelWriterAssembly(KernelWriter):
         wReg = self.vgprPool.checkOut(1, "waveSwizTDM")
         module.add(vectorStaticDivide(wReg, "Serial", dividedForWaveId, tmpVgprRes, "wtid = Serial // (waveWidth*MIWaveGroup[0])"))
         module.add(vectorStaticRemainder(dummy, wReg, wReg, num1DWaves, tmpVgprRes, tmpSgprInfo, "wtid0 = wtid %% MIWaveGroup[N]"))
-        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(wReg), strideWaveN, vgpr(tReg), tmpSgprInfo, "lro += wtid0 * MIWaveTile[N]*nOStride"))
+        # LDSSegmentInterleave: when B spans its whole LDS component (segment_interleave gates this to the
+        # tight MIWaveGroup=[2,2] case), the wave's segment jump REPLACES the swizzle nO-band term -- mirror
+        # LraTileAssignment's [2,2] branch: stash wtid0*writeStrideBytes, added post-pad in lraFinalOffset,
+        # and drop the wtid0*strideWaveN add. The write already deposits at wId*writeStrideBytes + ldsBaseB.
+        segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+        segSpansComp = bool(segOffAB) and segOffAB.get("footprintPacked", False) \
+            and not segOffAB.get("bBaseline", False) \
+            and min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vw \
+                >= kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
+        if segSpansComp:
+          segOff = self.vgprPool.checkOut(1, "segWaveByteOffSwizTDM")   # checked in by lraFinalOffset
+          module.add(vectorStaticMultiply(vgpr(segOff), vgpr(wReg), segOffAB["writeStrideBytes"], tmpSgprInfo,
+                                           "seg interleave: byte offset = wtid0 * writeStrideBytes (post-pad)"))
+          tP["gpr"]["segWaveByteOff"] = segOff
+        else:
+          module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(wReg), strideWaveN, vgpr(tReg), tmpSgprInfo, "lro += wtid0 * MIWaveTile[N]*nOStride"))
         self.vgprPool.checkIn(wReg)
     tP["gpr"]["lro"] = tReg
     self.vgprPool.checkIn(dummy)
