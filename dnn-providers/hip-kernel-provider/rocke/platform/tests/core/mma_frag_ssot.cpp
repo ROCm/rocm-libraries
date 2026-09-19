@@ -4,8 +4,8 @@
  * tests/core/mma_frag_ssot.cpp -- host unit test for the IR-layer MMA
  * frag-length / accumulator-dtype tables consulted by rocke_b_mma.
  *
- * rocke_b_mma sizes its tile.mma result vector as <c_frag_len x acc_elem>,
- * where c_frag_len comes from the op_id frag-length table and acc_elem is i32
+ * rocke_b_mma sizes its tile.mma result vector as <dst_frag_len x acc_elem>,
+ * where dst_frag_len comes from the op_id frag-length table and acc_elem is i32
  * for integer WMMA atoms (else f32). This test pins that mapping for a
  * representative set of atoms and checks the unknown-op_id error path, so a
  * table edit that changes a result width/dtype is caught here.
@@ -60,7 +60,9 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
     }
 }
 
-static void check_catalog_fragments(const rocke_mma_catalog_t* catalog, const char* op_id)
+static void check_catalog_fragments(const rocke_mma_catalog_t* catalog,
+                                    const char* op_id,
+                                    int scale_block_size)
 {
     const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(catalog, op_id);
     CHECK(op != NULL, op_id);
@@ -68,13 +70,96 @@ static void check_catalog_fragments(const rocke_mma_catalog_t* catalog, const ch
     {
         return;
     }
-    CHECK(op->a_frag_len == 16, op_id);
-    CHECK(op->b_frag_len == 16, op_id);
-    CHECK(op->c_frag_len == 8, op_id);
+    CHECK(op->srcs[0].frag_len == 16, op_id);
+    CHECK(op->srcs[1].frag_len == 16, op_id);
+    CHECK(op->srcs[2].frag_len == 8, op_id);
+    CHECK(op->dst.frag_len == 8, op_id);
+    for(int i = 0; i < 2; ++i)
+    {
+        CHECK(strcmp(op->srcs[i].dtype, "fp8e4m3") == 0, op_id);
+        CHECK(op->srcs[i].scale_dtype != NULL, op_id);
+        if(op->srcs[i].scale_dtype)
+        {
+            CHECK(strcmp(op->srcs[i].scale_dtype, "e8m0") == 0, op_id);
+        }
+        CHECK(op->srcs[i].scale_block_size == scale_block_size, op_id);
+    }
+    CHECK(op->srcs[2].scale_dtype == NULL && op->srcs[2].scale_block_size == 0, op_id);
 }
 
 int main(void)
 {
+    const char* cpu_targets[] = {"gfx950", "gfx1250"};
+    for(const char* gfx : cpu_targets)
+    {
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(gfx);
+        CHECK(target != NULL, "CPU catalog target exists");
+        if(!target)
+        {
+            continue;
+        }
+        for(int i = 0; i < target->mma.num_ops; ++i)
+        {
+            const rocke_mma_op_t* op = &target->mma.ops[i];
+            const char* src_dtypes[3] = {op->srcs[0].dtype, op->srcs[1].dtype, op->srcs[2].dtype};
+            CHECK(rocke_mma_catalog_op_for_shape_indexed(
+                      &target->mma, op->family, src_dtypes, op->dst.dtype, op->m, op->n, op->k)
+                      != NULL,
+                  "indexed query resolves CPU catalog key");
+        }
+    }
+
+    {
+        rocke_mma_op_t distinct = {};
+        const rocke_layout_map_t src2_layout = {ROCKE_MMA_ROLE_SRC2, 3, 32, NULL};
+        const rocke_layout_map_t dst_layout = {ROCKE_MMA_ROLE_DST, 7, 32, NULL};
+        distinct.family = "mma";
+        distinct.srcs[0].dtype = "xf32";
+        distinct.srcs[1].dtype = "xf32";
+        distinct.srcs[0].scale_dtype = "e8m0";
+        distinct.srcs[0].scale_block_size = 32;
+        distinct.srcs[1].scale_dtype = "e4m3";
+        distinct.srcs[1].scale_block_size = 16;
+        distinct.srcs[2].dtype = "fp32";
+        distinct.srcs[2].frag_len = 3;
+        distinct.srcs[2].layout = &src2_layout;
+        distinct.dst.dtype = "i32";
+        distinct.dst.frag_len = 7;
+        distinct.dst.layout = &dst_layout;
+        distinct.m = 16;
+        distinct.n = 16;
+        distinct.k = 8;
+        distinct.op_id = "synthetic_distinct_dst";
+        const rocke_mma_catalog_t catalog = {&distinct, 1};
+        const char* src_dtypes[3] = {"xf32", "xf32", "fp32"};
+        CHECK(rocke_mma_catalog_op_for_shape_indexed(&catalog, "mma", src_dtypes, "i32", 16, 16, 8)
+                  == &distinct,
+              "indexed query distinguishes src2 and dst");
+        CHECK(rocke_mma_catalog_op_for_shape(&catalog, "mma", "xf32", "xf32", "fp32", 16, 16, 8)
+                  == NULL,
+              "legacy query defaults dst to src2");
+        CHECK(rocke_mma_op_src_layout(&distinct, 2, NULL) == &src2_layout,
+              "indexed src2 layout remains independent");
+        CHECK(rocke_mma_op_dst_layout(&distinct, NULL) == &dst_layout,
+              "dst layout remains independent");
+        CHECK(rocke_mma_op_c_layout(&distinct, NULL) == &dst_layout,
+              "historical C layout projects dst");
+        const rocke_mma_op_t* selected
+            = rocke_mma_catalog_by_op_id(&catalog, "synthetic_distinct_dst");
+        CHECK(selected != NULL, "catalog preserves scaled operand metadata");
+        if(selected)
+        {
+            CHECK(strcmp(selected->srcs[0].scale_dtype, "e8m0") == 0
+                      && selected->srcs[0].scale_block_size == 32,
+                  "src0 scale retains its value format and block size");
+            CHECK(strcmp(selected->srcs[1].scale_dtype, "e4m3") == 0
+                      && selected->srcs[1].scale_block_size == 16,
+                  "src1 scale is independent of src0");
+            CHECK(selected->srcs[2].scale_dtype == NULL && selected->srcs[2].scale_block_size == 0,
+                  "src2 remains unscaled");
+        }
+    }
+
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "rocke_mma_frag_ssot") != ROCKE_OK)
     {
@@ -99,8 +184,8 @@ int main(void)
     CHECK(gfx1250 != NULL, "gfx1250 target");
     if(gfx1250)
     {
-        check_catalog_fragments(&gfx1250->mma, "wmma_scale_f32_16x16x128_fp8_fp8");
-        check_catalog_fragments(&gfx1250->mma, "wmma_scale16_f32_16x16x128_fp8_fp8");
+        check_catalog_fragments(&gfx1250->mma, "wmma_scale_f32_16x16x128_fp8_fp8", 32);
+        check_catalog_fragments(&gfx1250->mma, "wmma_scale16_f32_16x16x128_fp8_fp8", 16);
     }
 
     /* Unknown op_id must be rejected. The engine's error path either returns
