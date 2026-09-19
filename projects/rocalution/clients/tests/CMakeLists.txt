@@ -55,6 +55,7 @@ set(ROCALUTION_TEST_SOURCES
   test_pairwise_amg.cpp
   test_ruge_stueben_amg.cpp
   test_saamg.cpp
+  test_saamg_host_fallback.cpp
   test_uaamg.cpp
 # Other tests
   test_preconditioner.cpp
