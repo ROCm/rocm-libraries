@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 
 #include "../../transforms/asm/dag/RegionDAG.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -40,7 +41,7 @@ namespace stinkytofu {
 // policy.
 RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                                        const std::vector<WmmaHideBudgetBarrierInfo>& barriers,
-                                       int wmmaHideBudgetBase) {
+                                       int wmmaHideBudgetBase, int dsReadPerWmmaCap) {
     RegionHideBudget budget;
     budget.barriers = barriers;
     budget.issueBudgetByWmmaIndex = !barriers.empty();
@@ -133,6 +134,32 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                              << " wmmaNeeded=" << info.dsLoadWmmaNeeded << " begin=0"
                              << " end=" << end << " dsLoadCount=" << dsLoads
                              << " perWindow=" << perWindow << " remainder=" << remainder << "\n");
+    }
+
+    // Step 3.5: dsLoadBudget is a flat fill of dsReadPerWmmaCap (every window
+    // plus the virtual tail slot for the region segment after the last WMMA)
+    // -- deliberately the SAME per-window value the standalone flat-fill
+    // (dsTargetPerWindow_) used before this migration, so this step is a
+    // relocation of where the ds cap lives, not a behavior change: the ds
+    // cap and the hold-back-next-WMMA decision (issueBudget /
+    // cumulativeWmmaHideBudget_) now live in one place instead of two
+    // independently-computed values that could disagree, but the actual cap
+    // number the scheduler sees is unchanged. issueBudget (Steps 2/3 above)
+    // is intentionally NOT folded into dsLoadBudget: it already serves its
+    // own, unrelated purpose (hold-back-next-WMMA) and mixing it in here
+    // would reintroduce a real behavior change (a tried, measured
+    // regression: diluting the per-window ds cap below dsReadPerWmmaCap
+    // starves the in-flight ds_load pipeline and forces a full-drain wait
+    // (wait_dscnt 0) instead of a smooth partial-overlap pipeline). Any
+    // future even-spread redesign should build on top of this unified
+    // location rather than forking away from it again.
+    {
+        const int flatCap =
+            dsReadPerWmmaCap > 0 ? dsReadPerWmmaCap : std::numeric_limits<int>::max();
+        for (WmmaWindowBudget& window : budget.windows) window.dsLoadBudget = flatCap;
+        budget.dsLoadTailBudget = flatCap;
+        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis ds cap] dsReadPerWmmaCap="
+                             << dsReadPerWmmaCap << " flatCap=" << flatCap << "\n");
     }
 
     // Step 4: place remaining non-DS-load instructions in the first 50% of WMMA

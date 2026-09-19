@@ -666,8 +666,8 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetDistributesBarrierWorkPerWindow) {
          /*threshold=*/3, /*dsLoadCount=*/3, /*dsLoadWmmaNeeded=*/2},
     };
 
-    const RegionHideBudget budget =
-        analyzeWmmaHideBudget(regionDag, barriers, /*wmmaHideBudgetBase=*/0);
+    const RegionHideBudget budget = analyzeWmmaHideBudget(
+        regionDag, barriers, /*wmmaHideBudgetBase=*/0, /*dsReadPerWmmaCap=*/100);
 
     ASSERT_EQ(budget.windows.size(), 4u);
     EXPECT_TRUE(budget.issueBudgetByWmmaIndex);
@@ -675,6 +675,77 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetDistributesBarrierWorkPerWindow) {
     EXPECT_EQ(budget.windows[1].issueBudget, 1);
     EXPECT_EQ(budget.windows[2].issueBudget, 3);
     EXPECT_EQ(budget.windows[3].issueBudget, 2);
+
+    // dsLoadBudget is a flat fill of dsReadPerWmmaCap for every window AND
+    // the tail slot -- deliberately IGNORING the barrier-driven issueBudget
+    // values asserted above. This migration is a relocation of the ds cap
+    // into analyzeWmmaHideBudget, not a behavior change: the actual cap
+    // value must stay identical to the pre-migration flat fill
+    // (dsTargetPerWindow_.assign(windows, dsReadPerWmma())), which never
+    // consulted barrier data either.
+    EXPECT_EQ(budget.windows[0].dsLoadBudget, 100);
+    EXPECT_EQ(budget.windows[1].dsLoadBudget, 100);
+    EXPECT_EQ(budget.windows[2].dsLoadBudget, 100);
+    EXPECT_EQ(budget.windows[3].dsLoadBudget, 100);
+    EXPECT_EQ(budget.dsLoadTailBudget, 100);
+}
+
+// ---------------------------------------------------------------------------
+// Property: dsLoadBudget is a flat fill of dsReadPerWmmaCap for every window
+// PLUS the tail slot (the region segment after the last WMMA, which has no
+// window entry since there's no WMMA left to hold back there) -- regardless
+// of the region's actual ds_load count. This is the ds cap migrated into
+// analyzeWmmaHideBudget: one source of truth for "how many ds_loads belong
+// in window w" shared with the hold-back-next-WMMA logic, but deliberately
+// NO behavior change from the pre-migration flat fill (an even-spread
+// redesign that diluted the per-window cap below dsReadPerWmmaCap was tried
+// and found to regress real hardware: it starves the in-flight ds_load
+// pipeline depth and forces a full-drain wait instead of smooth
+// partial-overlap pipelining -- see git history).
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaHideBudgetDsCapIsFlatFillNotEvenSpread) {
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
+    for (int i = 0; i < 5; ++i)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
+
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    const RegionHideBudget budget = analyzeWmmaHideBudget(
+        regionDag, /*barriers=*/{}, /*wmmaHideBudgetBase=*/0, /*dsReadPerWmmaCap=*/100);
+
+    ASSERT_EQ(budget.windows.size(), 2u);
+    EXPECT_EQ(budget.dsLoadInstructionCount, 5);
+    EXPECT_EQ(budget.windows[0].dsLoadBudget, 100)
+        << "dsLoadBudget must be the flat dsReadPerWmmaCap, not a fraction of "
+           "the region's actual ds_load count";
+    EXPECT_EQ(budget.windows[1].dsLoadBudget, 100);
+    EXPECT_EQ(budget.dsLoadTailBudget, 100)
+        << "the tail slot must also get the flat cap, matching the "
+           "pre-migration flat fill's behavior at the region's last (implicit) "
+           "window";
+}
+
+// ---------------------------------------------------------------------------
+// Property: dsReadPerWmmaCap (dagFeatures.dsReadPerWmma /
+// StinkyTofuDsReadPerWmma) is the actual per-window/tail value used, at any
+// configured magnitude -- confirms the parameter survived the migration into
+// analyzeWmmaHideBudget (it was silently dropped in an earlier version of
+// this migration, since the analysis had no way to hear about it).
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCapsFreeDsLoadsAtConfiguredPerWmma) {
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
+    for (int i = 0; i < 5; ++i)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
+
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    const RegionHideBudget budget = analyzeWmmaHideBudget(
+        regionDag, /*barriers=*/{}, /*wmmaHideBudgetBase=*/0, /*dsReadPerWmmaCap=*/1);
+
+    ASSERT_EQ(budget.windows.size(), 2u);
+    EXPECT_EQ(budget.windows[0].dsLoadBudget, 1);
+    EXPECT_EQ(budget.windows[1].dsLoadBudget, 1);
+    EXPECT_EQ(budget.dsLoadTailBudget, 1);
 }
 
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycles) {
@@ -686,8 +757,9 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycle
     createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
 
     const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
-    const RegionHideBudget budget = analyzeWmmaHideBudget(regionDag, /*barriers=*/{},
-                                                          /*wmmaHideBudgetBase=*/100);
+    const RegionHideBudget budget =
+        analyzeWmmaHideBudget(regionDag, /*barriers=*/{}, /*wmmaHideBudgetBase=*/100,
+                              /*dsReadPerWmmaCap=*/100);
 
     ASSERT_EQ(budget.windows.size(), 2u);
     EXPECT_EQ(budget.nonWmmaInstructionCount, 3);
@@ -1021,10 +1093,11 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
 // positions 6/7). Right after issue the position is 1, where isValuPickable()
 // is already false, so extra non-hazardous fillers are needed to advance the
 // co-issue timeline into a pickable position while WMMA #0 is still in flight.
-// That is exactly the moment the hazard gate must fire:
-//   - 3 non-hazardous ds_loads (v[300:], v[320:], v[340:]) fill the per-WMMA DS
-//   cap and
-//     advance positions 1 -> 4.
+// This test does not enable the hide-budget prescan
+// (dagFeatures.enableWmmaHideBudgetPrescan), so the ds cap uses the flat
+// per-arch fallback, not the even ds_load spread computed by
+// analyzeWmmaHideBudget -- the 3 non-hazardous ds_loads (v[300:], v[320:],
+// v[340:]) bunch together under that flat cap and advance positions 1 -> 4.
 //   - 3 independent scalar ops advance positions 4 -> 7; at position 6 the VALU
 //   becomes
 //     co-issue pickable while WMMA #0 (v[50:58)) is still the active window.

@@ -385,6 +385,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int crossBBGlobalReadResidual_ = 0;
 
     InFlightQueue dsReadInflight_;
+    int crossBBDsReadCount_ = 0;
+    int crossBBDsReadResidual_ = 0;
 
     int globalReadQueueDepth() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.globalReadQueueDepth;
@@ -487,8 +489,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
-    // Per-window override for maxDsPerWmmaWindow_; empty => use the flat value.
-    std::vector<int> dsTargetPerWindow_;
 
     // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
     // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
@@ -1128,15 +1128,19 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         }
     };
 
-    // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
-    // co-issue window; it is meaningless when no WMMA is available to issue, so
-    // it is applied only while a WMMA is pending. When the DS queue reaches
-    // depth, configured transition entries use the transition factor before full
-    // pacing.
+    // Per-WMMA-window DS cap (rule 4) spreads ds_loads across the region's WMMA
+    // windows. When the hide-budget pre-analysis (analyzeWmmaHideBudget) is
+    // enabled, the target comes from it -- the single authoritative source of
+    // "how many ds_loads belong in window w", shared with the
+    // hold-back-next-WMMA decision so the two can't disagree -- otherwise
+    // falls back to the flat per-arch value. It only spreads ds_loads across an
+    // active WMMA co-issue window; it is meaningless when no WMMA is available
+    // to issue, so it is applied only while a WMMA is pending. When the DS
+    // queue reaches depth, configured transition entries use the transition
+    // factor before full pacing.
     int windowCap = maxDsPerWmmaWindow_;
-    if (!dsTargetPerWindow_.empty()) {
-        const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
-        windowCap = dsTargetPerWindow_[w];
+    if (hideBudgetPrescanEnabled() && hasWMMAInRegion_) {
+        windowCap = hideBudget_.dsLoadBudgetFor((int)wmmaIssuedCountThisRegion_);
     }
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     const bool dsBaseOk = pickedDS && !dsCapReached && !destOverlapsActiveWmmaSrc(pickedDS);
@@ -2073,20 +2077,29 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // over-issues).
     if (globalReadQueueDepth() > 0 && crossBBGlobalReadCount_ > 0)
         globalReadInflight_.seed(crossBBGlobalReadCount_, crossBBGlobalReadResidual_);
+    // Same credit-pool seeding for the ds_load (LDS return queue) pacer, so a
+    // real loop re-entry doesn't model the queue as empty while hardware still
+    // has the prior iteration's tail draining (see crossBBDsReadCount_).
+    if (dsReadQueueDepth() > 0 && crossBBDsReadCount_ > 0)
+        dsReadInflight_.seed(crossBBDsReadCount_, crossBBDsReadResidual_);
 }
 
 void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
     crossBBDsResiduals_.clear();
     crossBBGlobalReadCount_ = 0;
     crossBBGlobalReadResidual_ = 0;
+    crossBBDsReadCount_ = 0;
+    crossBBDsReadResidual_ = 0;
     const Loop* loop = getLoop();
     if (!currentBB_ || !loop || !loop->contains(currentBB_) || !getAnalysisCache()) return;
 
     // Global-read credits: loop predecessors take priority over non-loop ones
     // (the loop body runs many iterations, so its carried state governs steady
     // state). Take the max within the chosen group on BOTH axes — occupancy and
-    // residual drain — so no predecessor path is left over-issuing.
+    // residual drain — so no predecessor path is left over-issuing. ds_load
+    // credits follow the identical rule.
     int loopCount = 0, loopRes = 0, nonLoopCount = 0, nonLoopRes = 0;
+    int dsLoopCount = 0, dsLoopRes = 0, dsNonLoopCount = 0, dsNonLoopRes = 0;
     bool sawLoopPred = false;
 
     for (BasicBlock* pred : currentBB_->getPredecessors()) {
@@ -2099,19 +2112,26 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
             sawLoopPred = true;
             loopCount = std::max(loopCount, state->globalReadInflightCount);
             loopRes = std::max(loopRes, state->globalReadResidual);
+            dsLoopCount = std::max(dsLoopCount, state->dsReadInflightCount);
+            dsLoopRes = std::max(dsLoopRes, state->dsReadResidual);
         } else {
             nonLoopCount = std::max(nonLoopCount, state->globalReadInflightCount);
             nonLoopRes = std::max(nonLoopRes, state->globalReadResidual);
+            dsNonLoopCount = std::max(dsNonLoopCount, state->dsReadInflightCount);
+            dsNonLoopRes = std::max(dsNonLoopRes, state->dsReadResidual);
         }
     }
     crossBBGlobalReadCount_ = sawLoopPred ? loopCount : nonLoopCount;
     crossBBGlobalReadResidual_ = sawLoopPred ? loopRes : nonLoopRes;
+    crossBBDsReadCount_ = sawLoopPred ? dsLoopCount : dsNonLoopCount;
+    crossBBDsReadResidual_ = sawLoopPred ? dsLoopRes : dsNonLoopRes;
 }
 
 void CDNA5ReadyQueue::onFinishBB() {
     if (!currentBB_ || !getAnalysisCache()) return;
     getAnalysisCache()->store(currentBB_, {0, regDataReadyCounters, globalReadInflight_.size(),
-                                           globalReadInflight_.maxResidual()});
+                                           globalReadInflight_.maxResidual(),
+                                           dsReadInflight_.size(), dsReadInflight_.maxResidual()});
 }
 
 // Per scheduling region. Rule (4): per-WMMA-window DS cap (computed in
@@ -2183,10 +2203,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
         }
     }
-
-    // Flat fill (one entry per window); a later commit computes per-window
-    // targets.
-    dsTargetPerWindow_.assign(wmmaIssueConfig.issuedCount + 1, dsReadPerWmma());
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
@@ -2544,7 +2560,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // Run after every barrier placement and normalization step so the analysis
     // sees the same final thresholds that the scheduler will enforce.
     if (hideBudgetPrescanEnabled()) {
-        hideBudget_ = analyzeWmmaHideBudget(deps.dag, hideBudgetBarriers, wmmaHideBudgetBase);
+        hideBudget_ = analyzeWmmaHideBudget(deps.dag, hideBudgetBarriers, wmmaHideBudgetBase,
+                                            dsReadPerWmma());
         PASS_DEBUG(std::cerr << "[CDNA5 hideBudget] windows=" << hideBudget_.numWindows()
                              << " wmmaInstructions=" << hideBudget_.wmmaInstructionCount
                              << " nonWmmaInstructions=" << hideBudget_.nonWmmaInstructionCount

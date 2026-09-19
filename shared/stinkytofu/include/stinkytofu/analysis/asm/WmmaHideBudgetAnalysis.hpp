@@ -63,6 +63,14 @@ struct WmmaWindowBudget {
     StinkyInstruction* wmma = nullptr;
     /// Non-WMMA instructions the scheduling policy assigns to this window.
     int issueBudget = 0;
+    /// ds_load-only count assigned to this window: barrier-attributed
+    /// ds_loads (from the Before/After barrier steps) plus this window's
+    /// share of any ds_load with no barrier relationship at all. Kept
+    /// separate from issueBudget (which stays a mixed ds+non-ds total driving
+    /// the existing hold-back-next-WMMA decision) so the scheduler's ds
+    /// per-window cap has one authoritative source instead of a second,
+    /// independently-computed number that can disagree with this analysis.
+    int dsLoadBudget = 0;
 };
 
 /// Summed hide budget of one scheduling region.
@@ -80,6 +88,11 @@ struct RegionHideBudget {
     int dsLoadInstructionCount = 0;
     int nonDsLoadInstructionCount = 0;
     int wmmaHideBudgetBase = 0;
+    /// ds_load count that belongs after the last WMMA in the region (this
+    /// window's share of the even ds_load spread). There is no WMMA left to
+    /// hold back there, so this is consulted only by the ds cap, never by the
+    /// hold-back-next-WMMA logic.
+    int dsLoadTailBudget = 0;
 
     int numWindows() const {
         return static_cast<int>(windows.size());
@@ -105,6 +118,14 @@ struct RegionHideBudget {
                    ? 0
                    : windows[static_cast<size_t>(wmmaIndex)].issueBudget;
     }
+    /// ds_load-only budget for \p wmmaIndex; returns dsLoadTailBudget once
+    /// \p wmmaIndex reaches or passes the last WMMA window (mirrors how
+    /// CDNA5ReadyQueue clamps wmmaIssuedCountThisRegion_ into a window index).
+    int dsLoadBudgetFor(int wmmaIndex) const {
+        if (wmmaIndex < 0) return 0;
+        return wmmaIndex >= numWindows() ? dsLoadTailBudget
+                                         : windows[static_cast<size_t>(wmmaIndex)].dsLoadBudget;
+    }
 };
 
 /// True when \p pos -- cycles elapsed since a matrix op issued -- lands on a
@@ -126,8 +147,15 @@ inline bool isBlockedWindowCycle(int pos, int latency, uint16_t blockedMask) {
 /// Analyse \p regionDag using the final barrier placement metadata computed by
 /// the scheduler. A barrier present in both estimators has separate Before and
 /// After records.
+/// \p dsReadPerWmmaCap ceilings each window's share of ds_loads that have no
+/// barrier relationship at all (dagFeatures.dsReadPerWmma /
+/// StinkyTofuDsReadPerWmma). It intentionally does NOT ceiling
+/// barrier-attributed ds_loads (Steps 2/3): those counts reflect a real
+/// dependency requirement, and capping them below what a barrier needs would
+/// reintroduce the exact cap-vs-hide-budget disagreement this analysis exists
+/// to prevent.
 STINKYTOFU_EXPORT RegionHideBudget analyzeWmmaHideBudget(
     const dag::RegionDAG& regionDag, const std::vector<WmmaHideBudgetBarrierInfo>& barriers,
-    int wmmaHideBudgetBase);
+    int wmmaHideBudgetBase, int dsReadPerWmmaCap);
 
 }  // namespace stinkytofu
