@@ -22,23 +22,22 @@
 #
 ################################################################################
 
-from . import __version__
-from . import Parallel
-from .Utilities.ConditionalImports import print, TENSILE_TERM_COLORS
-from collections import OrderedDict
-
-from copy import deepcopy
-from pathlib import Path
-from .AsmCaps import getCapabilitiesCache
-from typing import Any, NamedTuple, Optional, Tuple, Dict
-
 import math
 import os.path
+import re
+import shutil
 import subprocess
 import sys
 import time
 import warnings
-import re
+from collections import OrderedDict
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Dict, NamedTuple, Optional, Tuple
+
+from . import Parallel, __version__
+from .AsmCaps import getCapabilitiesCache
+from .Utilities.ConditionalImports import TENSILE_TERM_COLORS, print
 
 startTime = time.time()
 
@@ -56,6 +55,83 @@ class SemanticVersion(NamedTuple):
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}.{self.patch}"
+
+
+_DEFAULT_ROCM_ROOT = Path("/opt/rocm")
+_HIP_VERSION_PARTS = ("MAJOR", "MINOR", "PATCH")
+
+
+def _parseHipVersion(versionString: str) -> str:
+  versionMatch = re.match(r"^\s*(\d+)\.(\d+)\.(\d+)", versionString)
+  if not versionMatch:
+    raise ValueError(f"Invalid HIP version: {versionString!r}")
+  return ".".join(versionMatch.groups())
+
+
+def _readHipBuildVersion(path: Path) -> Optional[str]:
+  """Read HIP_VERSION_MAJOR/MINOR/PATCH from a HIP metadata file."""
+  try:
+    contents = path.read_text()
+  except OSError:
+    return None
+
+  values = []
+  for part in _HIP_VERSION_PARTS:
+    value = re.search(
+        rf"^\s*(?:#define\s+)?HIP_VERSION_{part}(?:\s*=\s*|\s+)(\d+)",
+        contents,
+        re.MULTILINE,
+    )
+    if not value:
+      raise ValueError(f"Invalid HIP version file: {path}")
+    values.append(value.group(1))
+  return ".".join(values)
+
+
+def _readHipVersionFromRoot(root: Path) -> Optional[str]:
+  """Read the HIP build version, with the ROCm release as a last fallback."""
+  for relativePath in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
+    versionString = _readHipBuildVersion(root / relativePath)
+    if versionString:
+      return versionString
+
+  try:
+    versionString = (root / ".info" / "version").read_text().strip()
+  except OSError:
+    return None
+  return versionString or None
+
+
+def _getHipVersion() -> str:
+  """Return the HIP build version used by the selected ROCm toolchain."""
+  versionString = os.environ.get("ROCM_VERSION")
+  if versionString:
+    return _parseHipVersion(versionString)
+
+  for root in (os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), _DEFAULT_ROCM_ROOT):
+    if root:
+      versionString = _readHipVersionFromRoot(Path(root))
+      if versionString:
+        return _parseHipVersion(versionString)
+
+  for executable in ("amdclang++", "rocm-smi", "amd-smi"):
+    executablePath = shutil.which(executable)
+    if not executablePath:
+      continue
+    candidate = Path(executablePath).resolve().parent
+    for _ in range(5):
+      versionString = _readHipVersionFromRoot(candidate)
+      if versionString:
+        return _parseHipVersion(versionString)
+      parent = candidate.parent
+      if parent == candidate:
+        break
+      candidate = parent
+
+  raise ValueError(
+      "Failed to get ROCm version from ROCM_VERSION, ROCM_PATH, HIP_PATH, "
+      "/opt/rocm, or a PATH-derived ROCm root"
+  )
 
 class DeveloperWarning(Warning):
     """Custom warning for Tensile developers.
@@ -2410,61 +2486,9 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
       printExit("Config file requires version=%s is not compatible with current Tensile version=%s" \
           % (config["MinimumRequiredVersion"], __version__) )
 
-  version_str = os.environ.get("ROCM_VERSION")
-  if not version_str:
-    # Note: Python ROCm SDK (pip) version detection is intentionally omitted
-    # here; it will be handled by PR #11023 with proper feature-gating.
-    for root in [os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), "/opt/rocm"]:
-      if root:
-        try:
-          version_str = (Path(root) / ".info" / "version").read_text().strip()
-          break
-        except OSError:
-          continue
-  if not version_str:
-    # Fallback: derive ROCm root from PATH (e.g. TheRock builds where
-    # amdclang++ is on PATH but ROCM_PATH is not set and /opt/rocm doesn't exist).
-    # Walk up from the executable's directory: handles both dist/bin/ and
-    # dist/lib/llvm/bin/ layouts by trying each ancestor.
-    import shutil
-    for exe in ["amdclang++", "rocm-smi", "amd-smi"]:
-      exe_path = shutil.which(exe)
-      if not exe_path:
-        continue
-      candidate = Path(exe_path).parent
-      for _ in range(5):
-        # Standard ROCm install layout: .info/version
-        try:
-          version_str = (candidate / ".info" / "version").read_text().strip()
-          break
-        except OSError:
-          pass
-        # TheRock component dist layout: include/hip/hip_version.h
-        try:
-          hip_ver_h = (candidate / "include" / "hip" / "hip_version.h").read_text()
-          maj = re.search(r'#define\s+HIP_VERSION_MAJOR\s+(\d+)', hip_ver_h)
-          min_ = re.search(r'#define\s+HIP_VERSION_MINOR\s+(\d+)', hip_ver_h)
-          pat = re.search(r'#define\s+HIP_VERSION_PATCH\s+(\d+)', hip_ver_h)
-          if maj and min_ and pat:
-            version_str = f"{maj.group(1)}.{min_.group(1)}.{pat.group(1)}"
-            break
-        except OSError:
-          pass
-        parent = candidate.parent
-        if parent == candidate:
-          break
-        candidate = parent
-      if version_str:
-        break
-  if version_str:
-    # Strip pre-release suffixes before storing (e.g. "0a20260813" -> "0")
-    # so that nightly version strings like "10.1.0a20260813" are handled correctly.
-    parts = version_str.split(".")[:3]
-    version_str = ".".join(re.match(r'\d+', p.split("-")[0]).group() for p in parts)
-    globalParameters["HipClangVersion"] = version_str
-    tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
-  else:
-    raise ValueError("ROCM_VERSION not set, could not set HipClangVersion")
+  # Python ROCm SDK discovery remains in PR #11023 with its feature-gating.
+  globalParameters["HipClangVersion"] = _getHipVersion()
+  tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
 
   # User-specified global parameters
   tPrint(3, "GlobalParameters:")
@@ -2698,6 +2722,8 @@ def listToInitializer(l):
 
 
 from copy import copy
+
+
 class Backup:
   """RAII class to restore backed up fields from object"""
   fields = {}
