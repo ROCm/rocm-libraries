@@ -3049,9 +3049,15 @@ Tests:
 # gates both faces of the defect, but the shape here is the one that fits on a 16 GiB
 # part -- the silent-corruption shape needs 17 GiB for A.
 #
-# Selection is left to the heuristic rather than pinned with solution_index, because
-# indices are not stable across library retunes. The trade is that a future retune
-# could move selection off the affected kernel and quietly weaken this gate.
+# Every supported solution is exercised, via algo_method 1 with
+# requested_solution_num -1 (the matmul_heuristic_all_solutions pattern), rather than
+# only the heuristic's pick. The defect is kernel-specific, so a gate that ran one
+# heuristically chosen solution would stop covering it the moment a retune changed
+# that choice, and it would do so silently. Pinning solution_index is the other way
+# to guarantee the affected kernel runs, but indices are not stable across retunes
+# either. The all-solutions cost is small here because the 8.6 GiB allocation is made
+# once and reused across launches: 17 solutions at this shape, about 7 s in total
+# against 4.3 s for a single one.
 #
 # nightly rather than pre_checkin: A is 8.6 GiB on both the host and the device and
 # cannot be made smaller, and a host-side shortfall currently crashes the harness
