@@ -122,7 +122,11 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
   if(WIN32)
     target_compile_definitions(${BENCHMARK_TARGET} PUBLIC PRIMBENCH_NO_MONITORING)
   else()
-    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+    if(TARGET amd_smi)
+      target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+    else()
+      target_compile_definitions(${BENCHMARK_TARGET} PUBLIC PRIMBENCH_NO_MONITORING)
+    endif()
   endif()
 
   target_compile_options(${BENCHMARK_TARGET}
