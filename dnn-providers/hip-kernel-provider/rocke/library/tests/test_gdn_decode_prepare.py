@@ -44,6 +44,15 @@ def test_out_of_range_index_is_rejected():
             prepare(spec, inp, batch)
 
 
+def test_duplicate_active_write_index_is_rejected():
+    """Two live sequences cannot race to update one recurrent-state page."""
+    spec = GdnDecodeSpec()
+    batch = 8
+    inp = make_inputs(spec, batch, device=DEVICE)
+    inp["write_indices"][1] = inp["write_indices"][0]
+    with pytest.raises(ValueError, match="unique across active sequences"):
+        prepare(spec, inp, batch)
+
 def test_the_skip_sentinel_is_accepted():
     """``-1`` marks an idle continuous-batching slot and must pass the guard."""
     spec = GdnDecodeSpec()
