@@ -1134,8 +1134,6 @@ int main(int argc, const char* argv[])
         numProblems = problems.size();
     int lastProblemIdx = firstProblemIdx + numProblems - 1;
 
-    int         firstSolutionIdx = args["solution-start-idx"].as<int>();
-    int         numSolutions     = args["num-solutions"].as<int>();
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -1148,15 +1146,6 @@ int main(int argc, const char* argv[])
         std::cout << "Invalid Skip Slow Solution Ratio: " << skip_slow_solution_ratio << std::endl;
         std::cout << "Please Set Valid Ratio : (0.0 ~ 1.0)." << std::endl;
         exit(1);
-    }
-
-    if(firstSolutionIdx < 0)
-        firstSolutionIdx = library->solutions.begin()->first;
-
-    if(numSolutions < 0)
-    {
-        auto iter = library->solutions.end();
-        iter--;
     }
 
     std::shared_ptr<DataInitialization> dataInit;
