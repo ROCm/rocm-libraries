@@ -154,6 +154,15 @@ int main(int argc, char** argv) noexcept
             .help("Enforce engine support claims from .support.json sidecars. "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
                   "a test FAIL instead of a silent SKIP.");
+        parser.add_argument("--report-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Query engine support claims from .support.json sidecars and print "
+                  "the support-claim summary, without failing any test. The "
+                  "observe-only half of --enforce-support-claims: same query, same "
+                  "verdicts, exit code unchanged. Use it to measure how many claims "
+                  "would break before turning enforcement on. Implied by "
+                  "--enforce-support-claims.");
         parser.add_argument("--write-support-claims")
             .default_value(false)
             .implicit_value(true)
@@ -316,6 +325,7 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.captureDir = std::move(captureDir);
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
+        opts.reportSupportClaims = parser.get<bool>("--report-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
         if(opts.writeSupportClaims && !opts.articlePath.has_value())
@@ -338,11 +348,48 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        if(opts.writeSupportClaims && opts.enforceSupportClaims)
+        // Writing authors the claims; enforcing and reporting both check them
+        // against the very file the same run would be rewriting. Whichever way that
+        // race landed the answer would be meaningless, so neither combination is
+        // allowed. --enforce and --report *are* compatible: enforcement is
+        // reporting plus a failure, so a run given both enforces.
+        if(opts.writeSupportClaims && (opts.enforceSupportClaims || opts.reportSupportClaims))
         {
-            std::cerr << "--write-support-claims and --enforce-support-claims are "
-                      << "mutually exclusive.\n";
+            std::cerr << "--write-support-claims is mutually exclusive with "
+                      << "--enforce-support-claims and --report-support-claims.\n";
             return 1;
+        }
+
+        // HSA_OVERRIDE_GFX_VERSION rewrites the gcnArchName that
+        // hipGetDeviceProperties reports, and that string is the only thing the
+        // harness knows about the device (DeviceQuery.hpp). An MI200 with 9.4.2
+        // set introduces itself as gfx942 to every layer below this point, so
+        // claims get filed under, or checked against, an arch the silicon is not.
+        //
+        // A read-only run only mislabels its own output, so it is warned and
+        // allowed. A write lands that wrong arch in a checked-in sidecar, where
+        // it becomes a claim no enforcement run on real hardware can ever match
+        // or clear -- the defect class SupportClaimWriter.cpp already rejects for
+        // an empty arch. That one is refused.
+        const std::string archOverride
+            = hipdnn_data_sdk::utilities::getEnv("HSA_OVERRIDE_GFX_VERSION");
+        if(!archOverride.empty())
+        {
+            if(opts.writeSupportClaims)
+            {
+                std::cerr << "--write-support-claims refuses to run with "
+                          << "HSA_OVERRIDE_GFX_VERSION=" << archOverride << " set.\n"
+                          << "The device reports an arch it is not, so the claims would be "
+                             "authored\nunder the wrong one. Unset it and re-run on the arch "
+                             "you mean to claim.\n";
+                return 1;
+            }
+            if(opts.enforceSupportClaims || opts.reportSupportClaims)
+            {
+                std::cerr << "Warning: HSA_OVERRIDE_GFX_VERSION=" << archOverride
+                          << " is set; support-claim verdicts will be\nlabelled with the "
+                             "overridden arch, not the physical one.\n";
+            }
         }
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
@@ -427,6 +474,19 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // Same missing prerequisite, deliberately not fatal. Report mode's contract
+        // is that it leaves the exit code alone, so it warns and prints an empty
+        // summary rather than turning a run red over its own diagnostic. Enforcement
+        // returned above, so reaching here means report mode only.
+        if(hipdnn_integration_tests::TestConfig::get().reportSupportClaims()
+           && !hipdnn_integration_tests::TestConfig::get().hasEngineName())
+        {
+            std::cerr << "Warning: --report-support-claims without --test-engine; there is no "
+                         "engine to\n"
+                         "         check sidecar claims against, so the support claim summary "
+                         "will be empty.\n";
+        }
+
         // Enumerated before any test records support data (see setEngineNames); the
         // vector keeps enumeration order for the table columns below.
         std::vector<std::string> loadedEngineNames;
@@ -493,16 +553,20 @@ int main(int argc, char** argv) noexcept
         {
             std::cerr
                 << "\nFATAL: --enforce-support-claims is active and "
-                << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsWithClaims
+                << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsSelectedWithClaims
                 << " graph(s) carrying support\n"
-                   "       claims were discovered, but not one of them was ever queried. "
+                   "       claims actually ran, but not one of them was ever queried. "
                    "Enforcement\n"
                    "       passed having verified nothing, so the run fails instead. Usual "
                    "causes:\n"
                    "         - no --test-engine was given, so there is no engine to check claims "
                    "against\n"
                    "         - the GPU or the engine plugin failed to load\n"
-                   "         - a --gtest_filter selected only graphs without claims\n";
+                   "\n"
+                   "       A --gtest_filter that selected only unclaimed graphs is *not* a "
+                   "cause:\n"
+                   "       the count above is seeded by the tests that ran, not by what was "
+                   "discovered.\n";
             exitCode = 1;
         }
 

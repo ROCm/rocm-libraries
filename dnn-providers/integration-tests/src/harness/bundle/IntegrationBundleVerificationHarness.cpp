@@ -4,6 +4,7 @@
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
+#include <iostream>
 #include <ostream>
 #include <set>
 #include <sstream>
@@ -63,7 +64,9 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 SupportObservation
     IntegrationBundleVerificationHarness::checkSupportClaims(const GraphSession& session)
 {
-    if(_bundle == nullptr || !shouldEnforceClaims())
+    // Observation, not enforcement: report mode must reach the query too, or the
+    // summary it exists to print has nothing in it.
+    if(_bundle == nullptr || !shouldObserveClaims())
     {
         return {};
     }
@@ -88,15 +91,29 @@ SupportObservation
 void IntegrationBundleVerificationHarness::recordClaimCoverage(
     const SupportObservation& observation)
 {
-    const CoverageUpdate update = coverageFor(observation, shouldEnforceClaims());
+    // Observation, so that the counters are the same numbers under both modes --
+    // the point of report mode is to predict what enforcement would see, which it
+    // cannot do from a different denominator.
+    const CoverageUpdate update = coverageFor(observation, shouldObserveClaims(), carriesSidecar());
 
     _deps.reporter->recordCoverage(update);
 
     if(update.missedQuery)
     {
-        ADD_FAILURE() << "support claims exist for " << _bundlePath
+        // The gap is equally real in report mode, but failing over it there would
+        // break the one guarantee that mode makes. Same text, demoted to a warning.
+        if(shouldEnforceClaims())
+        {
+            ADD_FAILURE() << "support claims exist for " << _bundlePath
+                          << " but were never queried; enforcement would have passed "
+                             "without checking them";
+        }
+        else
+        {
+            std::cerr << "Warning: support claims exist for " << _bundlePath
                       << " but were never queried; enforcement would have passed "
-                         "without checking them";
+                         "without checking them\n";
+        }
     }
 }
 

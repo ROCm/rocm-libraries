@@ -149,10 +149,22 @@ public:
         const auto observation = checkSupportClaims(session);
         recordClaimCoverage(observation);
 
+        // Only enforcement lets a broken claim stand in for the verification. Under
+        // report mode the verdict is already recorded and will be printed, and the
+        // graph goes on to run normally -- a claim the engine has stopped honouring
+        // says nothing about whether the comparison still passes, and the point of
+        // the mode is to count claims without changing what any test does.
+        const bool blockOnBrokenClaim = shouldEnforceClaims();
+
         VerificationOutcome outcome;
         try
         {
-            if(const auto blocked = claimBlocked(observation))
+            std::optional<VerificationOutcome> blocked;
+            if(blockOnBrokenClaim)
+            {
+                blocked = claimBlocked(observation);
+            }
+            if(blocked)
             {
                 outcome = *blocked;
             }
@@ -238,15 +250,39 @@ private:
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
-    // The single definition of "this graph's claims must be checked": a sidecar
-    // exists, enforcement is on, and an engine was named to check against. Checked
-    // in the same order everywhere so a harness with no injected engine never asks
-    // about the sidecar.
+    // The single definition of "this graph's claims must be looked at": a sidecar
+    // exists, claim checking is on in either mode, and an engine was named to check
+    // against. Checked in the same order everywhere so a harness with no injected
+    // engine never asks about the sidecar.
+    //
+    // Separate from shouldEnforceClaims() because observing and failing are two
+    // decisions, not one. Folding them together is what made report mode
+    // impossible: the query never ran, so the summary had nothing to print.
+    bool shouldObserveClaims() const
+    {
+        return carriesSidecar() && _engineUnderTest.has_value()
+               && (_deps.policy.reportSupportClaims || _deps.policy.enforceSupportClaims);
+    }
+
+    // "There is a sidecar here", and nothing more -- no engine, no mode. The run's
+    // verified-nothing guard counts against this rather than shouldObserveClaims()
+    // because the two disagree in precisely the case worth catching: a build whose
+    // engine plugin never loaded observes nothing while the sidecars sit untouched.
+    // Factored out rather than repeated so the guard's denominator cannot drift
+    // away from the predicate that decides whether the query happens.
+    bool carriesSidecar() const
+    {
+        return !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath);
+    }
+
+    // ...and the definition of "a broken claim must fail this test". Strictly
+    // narrower: everything enforcement needs, plus the enforcement flag. Report
+    // mode observes the identical facts and returns false here, which is the whole
+    // reason it leaves the exit code alone.
     bool shouldEnforceClaims() const
     {
-        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
-               && std::filesystem::exists(_claimLocator.sidecarPath)
-               && _deps.policy.enforceSupportClaims;
+        return shouldObserveClaims() && _deps.policy.enforceSupportClaims;
     }
 
     VerificationDepth bundleRequiredDepth() const

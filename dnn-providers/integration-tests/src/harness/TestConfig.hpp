@@ -139,6 +139,7 @@ struct TestConfigOptions
     std::optional<VerificationMode> verificationMode;
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
+    bool reportSupportClaims = false;
     bool writeSupportClaims = false;
 };
 
@@ -207,6 +208,7 @@ public:
         }
 
         instance._enforceSupportClaims = opts.enforceSupportClaims;
+        instance._reportSupportClaims = opts.reportSupportClaims;
         instance._writeSupportClaims = opts.writeSupportClaims;
 
         // Golden bundle configuration — default is ON; env var can override.
@@ -434,6 +436,18 @@ public:
         return _enforceSupportClaims;
     }
 
+    /// Observe claims and print the summary, but never fail a test over one.
+    ///
+    /// Enforcement is a superset of this, so it implies it: a run given both flags
+    /// enforces. Kept as a separate query from enforceSupportClaims() because the
+    /// two gate different things -- this one gates whether the query happens at
+    /// all, that one gates whether a broken claim is fatal.
+    bool reportSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _reportSupportClaims || _enforceSupportClaims;
+    }
+
     bool writeSupportClaims() const
     {
         throwIfNotInitialized();
@@ -482,6 +496,7 @@ private:
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
     bool _enforceSupportClaims = false;
+    bool _reportSupportClaims = false;
     bool _writeSupportClaims = false;
     bool _initialized = false;
 };

@@ -45,6 +45,7 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
 
     EXPECT_EQ(policy.mode, TestConfig::get().getVerificationMode());
     EXPECT_EQ(policy.enforceSupportClaims, TestConfig::get().enforceSupportClaims());
+    EXPECT_EQ(policy.reportSupportClaims, TestConfig::get().reportSupportClaims());
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
     EXPECT_EQ(policy.deviceVramMb, TestConfig::get().getCurrentDeviceVramMb());

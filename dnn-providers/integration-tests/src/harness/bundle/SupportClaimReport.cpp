@@ -16,29 +16,40 @@ SupportClaimCoverage& supportClaimCoverage()
     return s_coverage;
 }
 
-CoverageUpdate coverageFor(const SupportObservation& observation, bool enforcementExpected)
+CoverageUpdate coverageFor(const SupportObservation& observation,
+                           bool observationExpected,
+                           bool carriesSidecar)
 {
     const bool read = observation.sidecar == SidecarState::CHECKED;
 
     CoverageUpdate update;
     update.queried = read;
+    // Reaching here at all means a test body ran, so this is the run-time half of
+    // the pair verifiedNothing() compares. Not conditioned on observationExpected:
+    // a failed engine load makes that false while leaving the sidecar exactly where
+    // it was, and that run is the one that most needs to be caught.
+    update.selectedWithClaims = carriesSidecar;
     // Read in full, but silent about this arch/platform/case. Counted so "we checked
     // and it holds" reads differently from "we checked and nobody had said anything"
     // — the verdict tallies look the same for both, and only one of them means the
     // cell is covered.
     update.noApplicableClaim = read && !observation.hasApplicableClaim();
     // The graph never opened, so the query was impossible rather than skipped.
-    update.notOpened = enforcementExpected && observation.sidecar == SidecarState::NOT_QUERIED;
-    // NONE with enforcement expected means a sidecar is sitting there and nothing
+    update.notOpened = observationExpected && observation.sidecar == SidecarState::NOT_QUERIED;
+    // NONE with observation expected means a sidecar is sitting there and nothing
     // looked at it, which is a harness bug. NOT_QUERIED is the honest case, already
     // reported where it happened.
-    update.missedQuery = enforcementExpected && observation.sidecar == SidecarState::NONE;
+    update.missedQuery = observationExpected && observation.sidecar == SidecarState::NONE;
     return update;
 }
 
 bool verifiedNothing(const SupportClaimCoverage& coverage)
 {
-    return coverage.graphsWithClaims > 0 && coverage.graphsQueried == 0;
+    // graphsSelectedWithClaims, not graphsWithClaims: the latter is seeded at
+    // registration and cannot see --gtest_filter, so against it every suite that
+    // selects only unclaimed bundles -- hipblaslt's ffm-quick tier, ASM SDPA's
+    // gpu-reference target -- looks identical to a run whose engine never loaded.
+    return coverage.graphsSelectedWithClaims > 0 && coverage.graphsQueried == 0;
 }
 
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,

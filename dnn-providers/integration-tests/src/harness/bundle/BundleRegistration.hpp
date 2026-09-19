@@ -409,18 +409,23 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
 /// the engine named by --test-engine.
 inline void registerBundleTests()
 {
-    // Enforcement needs a named engine to check against, so a run without
+    // Either mode needs a named engine to check against, so a run without
     // --test-engine has nothing to count; seeding the coverage counters anyway
-    // would trip verifiedNothing() on a run that never intended to enforce.
+    // would trip verifiedNothing() on a run that never intended to check claims.
+    //
+    // reportSupportClaims() already folds in enforcement, so this covers both: the
+    // counters have to be seeded identically under report mode or graphsFound and
+    // graphsWithClaims come back zero, the summary early-returns, and the mode
+    // prints nothing -- which is the only thing it exists to do.
     const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
-    const bool enforcing = TestConfig::get().enforceSupportClaims() && engineUnderTest.has_value();
+    const bool observing = TestConfig::get().reportSupportClaims() && engineUnderTest.has_value();
 
     // Write mode needs `graphsFound` as the denominator for what the observer
     // saw: SetUp() can skip a bundle before the observer runs, and such a graph
     // is invisible to the observation log.
     const bool writing = TestConfig::get().writeSupportClaims();
 
-    auto bundles = detail::discoverAndLoadBundles(enforcing || writing);
+    auto bundles = detail::discoverAndLoadBundles(observing || writing);
     if(!bundles.has_value())
     {
         return;
