@@ -159,7 +159,10 @@ endif()
 if(GPU_TARGETS MATCHES "gfx1250")
     add_gtest_executable(test_ck_tile_streamk_gfx1250_wmma
         test_gemm_streamk_gfx1250_wmma.cpp test_gemm_streamk_util.cpp)
-    set_property(TARGET test_ck_tile_streamk_gfx1250_wmma PROPERTY HIP_ARCHITECTURES gfx1250)
+    set(GFX1250_STREAMK_TARGETS ${SUPPORTED_GPU_TARGETS})
+    list(FILTER GFX1250_STREAMK_TARGETS INCLUDE REGEX "^gfx1250")
+    set_property(TARGET test_ck_tile_streamk_gfx1250_wmma
+                 PROPERTY HIP_ARCHITECTURES ${GFX1250_STREAMK_TARGETS})
     target_compile_options(test_ck_tile_streamk_gfx1250_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
     set_tests_properties(test_ck_tile_streamk_gfx1250_wmma PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
     add_custom_target(ck_tile_gemm_streamk_tests
