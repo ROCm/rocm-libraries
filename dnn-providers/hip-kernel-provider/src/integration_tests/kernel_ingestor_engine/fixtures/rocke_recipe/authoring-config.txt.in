@@ -1,0 +1,4 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+arches=@_recipe_arches@
+llvm_flavor=@HIPKERNELPROVIDER_ROCKE_RECIPE_LLVM_FLAVOR@

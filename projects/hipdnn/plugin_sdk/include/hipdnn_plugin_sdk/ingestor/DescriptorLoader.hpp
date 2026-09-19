@@ -486,6 +486,10 @@ inline KernelSourceKind kernelSourceKindFromString(const std::string& text,
     {
         return KernelSourceKind::HSACO_FILE;
     }
+    if(text == "rocke_recipe")
+    {
+        return KernelSourceKind::ROCKE_RECIPE;
+    }
     if(text == "rocke_builder")
     {
         return KernelSourceKind::ROCKE_BUILDER;
@@ -895,15 +899,16 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
                       "toc_key",
                       "symbol",
                       "sha256",
-                      "signature"},
+                      "signature",
+                      "bundle",
+                      "recipe_key"},
                      where);
 
     KernelSource source;
     const std::string kindText = requireString(root, "kind", where);
     source.kind = kernelSourceKindFromString(kindText, where);
-    // Kinds are accepted only where an adapter can call them: the dispatch handler never
-    // inspects source.kind, so accepting one it cannot serve would let applicability
-    // advertise a kernel that throws at plan-build time instead of failing cleanly at load.
+    // Parse the supported representations here. The state manager separately checks
+    // whether the pack's resolved dispatch handler supports the source kind.
     if(source.kind == KernelSourceKind::EMBEDDED_SOURCE)
     {
         // Not cross-checked against the provider's embedded kernel map: that map is
@@ -928,10 +933,17 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
         requireSha256Shape(source.sha256, where);
         source.signature = requireKernelSignature(root, where);
     }
+    else if(source.kind == KernelSourceKind::ROCKE_RECIPE)
+    {
+        requireKnownKeys(root, {"kind", "bundle", "recipe_key"}, where);
+        source.recipe = RecipeSource{requireString(root, "bundle", where),
+                                     requireString(root, "recipe_key", where)};
+    }
     else
     {
         fail("kernel source kind '" + kindText + "' in " + where
-             + " has no implementation yet; only 'embedded_source' and 'kpack' can be dispatched");
+             + " has no implementation yet; only 'embedded_source', 'kpack', and "
+               "'rocke_recipe' can be dispatched");
     }
     return source;
 }

@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "ad33f966-8519-4938-a200-5d43e817f1bf",
+  "name": "hipkernel:RockeSdpaExample",
+  "graph_match": {
+    "native": "hipkernel.rocke_sdpa.graph_match"
+  },
+  "heuristic": "77df042a-ecf0-4c3f-ba3f-f76622cd89bc",
+  "metadata": "f8193586-ed22-4f1f-8587-a7d3686d8fcb",
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

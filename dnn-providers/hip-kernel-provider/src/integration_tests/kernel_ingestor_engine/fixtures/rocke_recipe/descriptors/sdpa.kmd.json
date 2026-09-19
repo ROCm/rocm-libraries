@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "id": "f8193586-ed22-4f1f-8587-a7d3686d8fcb",
+  "name": "SDPA recipe variants",
+  "fields": [
+    {
+      "name": "variant",
+      "type": "int",
+      "default_value": 0
+    }
+  ]
+}

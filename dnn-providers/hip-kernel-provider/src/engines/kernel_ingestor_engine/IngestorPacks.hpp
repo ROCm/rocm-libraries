@@ -48,6 +48,10 @@ void resetPointwiseModuleCache();
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();
 
+#ifdef HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE
+void registerRockeSdpaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+#endif
+
 /// Drops every pack's cached kpack modules, so the next dispatch re-reads its archive
 /// from disk.
 ///

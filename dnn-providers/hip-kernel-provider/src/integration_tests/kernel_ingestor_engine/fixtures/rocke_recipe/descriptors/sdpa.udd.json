@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "5374d08e-7108-4b73-b8ec-2104c409cfc3",
+  "name": "SDPA recipe dispatch",
+  "dispatch_symbol": "hipkernel.rocke_sdpa.dispatch"
+}
