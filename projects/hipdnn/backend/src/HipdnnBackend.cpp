@@ -29,6 +29,7 @@
 #include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 
 #include <cstring>
+#include <memory>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -89,7 +90,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy(hipdnnHandle_t handle)
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
         throwIfNull(handle);
 
-        delete handle;
+        auto owned = std::unique_ptr<hipdnnHandle>(handle);
 
         LOG_API_SUCCESS(apiName, "handle destroyed", "");
     });
