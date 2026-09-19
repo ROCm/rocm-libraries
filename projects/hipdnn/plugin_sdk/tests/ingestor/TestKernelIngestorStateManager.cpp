@@ -892,6 +892,77 @@ TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
         << recorder.getRecordedLogsAsString();
 }
 
+/// A dispatch handler that only supports KPACK drops EMBEDDED_SOURCE kernels at
+/// catalog-build time, so they never reach matching or plan building.
+TEST(TestKernelIngestorStateManager, SupportsSourceKindDropsKernelsWithUnsupportedSourceKind)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    // A handler that only supports KPACK, not EMBEDDED_SOURCE.
+    class KpackOnlyHandler : public IKernelDispatchHandler<TestHandle>
+    {
+    public:
+        size_t workspaceBytes(const MatchContext& /*context*/,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& /*kernel*/) const override
+        {
+            return 0;
+        }
+
+        std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                                  const BoundTokens& /*bound*/,
+                                                  const KernelDefinition& /*kernel*/) const override
+        {
+            return nullptr;
+        }
+
+        void launch(const TestHandle& /*handle*/,
+                    const PreparedDispatch& /*prepared*/,
+                    const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                    uint32_t /*numDeviceBuffers*/,
+                    void* /*workspace*/) const override
+        {
+        }
+
+        bool supportsSourceKind(KernelSourceKind kind) const override
+        {
+            return kind == KernelSourceKind::KPACK;
+        }
+    };
+
+    const KpackOnlyHandler kpackOnlyHandler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", kpackOnlyHandler);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptAllKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    // Default kernels from makePack use EMBEDDED_SOURCE; add one KPACK kernel.
+    KernelDescriptor kpackKernel = makeKernel(testId(0x80), "kernel_kpack", 128, "FLOAT");
+    kpackKernel.source = makeKpackSource();
+    pack.kernels = {makeKernel(testId(0x64), "kernel_embedded", 64, "FLOAT"), kpackKernel};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
+
+    const TestGraph graph(makeGraphId(0x80));
+    const auto properties = testDeviceProperties();
+    const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+    // Only the KPACK kernel survives; the EMBEDDED_SOURCE one was dropped.
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "kernel_kpack");
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "uses source kind that its dispatch handler does not "
+                                          "support"))
+        << recorder.getRecordedLogsAsString();
+}
+
 /// `source.library` is relative, so a definition is only usable together with the
 /// directory of the descriptor that declared it. The state manager carries the anchor
 /// through unchanged; the loader is what fills it.

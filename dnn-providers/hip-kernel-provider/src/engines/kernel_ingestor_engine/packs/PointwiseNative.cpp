@@ -473,6 +473,11 @@ public:
             .launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
     }
 
+    bool supportsSourceKind(KernelSourceKind kind) const override
+    {
+        return kind == KernelSourceKind::EMBEDDED_SOURCE || kind == KernelSourceKind::KPACK;
+    }
+
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
