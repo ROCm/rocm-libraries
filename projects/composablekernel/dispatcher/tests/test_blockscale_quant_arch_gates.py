@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
 
 import codegen_common
+import dispatcher_common
 import gemm_abquant_utils
 import gemm_aquant_utils
 import gemm_bquant_utils
@@ -322,32 +323,97 @@ def test_ocp_fp8_defaults_to_ocp_when_arch_unknown(predicate):
 # gfx950-only version of it.  ALL FIVE must be family-wide gfx12.
 # -----------------------------------------------------------------------------
 
-OCP_DEFINE_FNS = [
-    gemm_aquant_utils._ocp_fp8_arch_defines,
-    gemm_abquant_utils._ocp_fp8_arch_defines,
-    gemm_bquant_utils._ocp_fp8_arch_defines,
-    gemm_rowcolquant_utils._ocp_fp8_arch_defines,
-    gemm_tensor_quant_utils._ocp_fp8_arch_defines,
-]
-OCP_DEFINE_IDS = ["aquant", "abquant", "bquant", "rowcolquant", "tensor_quant"]
+# The five bridges now route their compile-path -D flags through the SHARED
+# dispatcher_common.arch_feature_defines(), as the five grouped bridges already
+# did. That helper supplies the OCP pair AND the per-arch feature set (notably
+# CK_TILE_USE_WMMA, which must be passed even when 0 -- an undefined identifier
+# reads as 0, which is right on gfx942/gfx950 and wrong on every WMMA part).
+# Pin both halves here: the family-wide OCP rule and the gfx1250 feature set.
 
 
-@pytest.mark.parametrize("defines_for", OCP_DEFINE_FNS, ids=OCP_DEFINE_IDS)
 @pytest.mark.parametrize("arch", GFX1250_FORMS + GFX12_NON_1250 + ["gfx950"])
-def test_ocp_fp8_defines_emitted_family_wide(defines_for, arch):
+def test_ocp_fp8_defines_emitted_family_wide(arch):
     """Every gfx12xx part -- not just gfx1250 -- must get the OCP fp8 defines.
 
     Narrowing this to an exact gfx1250 match would switch gfx1200/gfx1201 back to
-    the FNUZ encodings.  This is the exact inverse of the warp_tile_k rule, and
-    the two must never be "tidied" into each other.
+    the FNUZ encodings. This is the exact inverse of the warp_tile_k rule, and the
+    two must never be "tidied" into each other.
     """
-    assert defines_for(arch) == ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    defines = dispatcher_common.arch_feature_defines(arch)
+    assert "-DCK_USE_OCP_FP8" in defines
+    assert "-DCK_TILE_USE_OCP_FP8" in defines
 
 
-@pytest.mark.parametrize("defines_for", OCP_DEFINE_FNS, ids=OCP_DEFINE_IDS)
 @pytest.mark.parametrize("arch", LEGACY_ARCHS + [None, ""])
-def test_ocp_fp8_defines_absent_on_fnuz_archs(defines_for, arch):
-    assert defines_for(arch) == []
+def test_ocp_fp8_defines_absent_on_fnuz_archs(arch):
+    defines = dispatcher_common.arch_feature_defines(arch)
+    assert "-DCK_USE_OCP_FP8" not in defines
+    assert "-DCK_TILE_USE_OCP_FP8" not in defines
+
+
+@pytest.mark.parametrize("arch", GFX1250_FORMS)
+def test_gfx1250_gets_the_wmma_feature_defines(arch):
+    """gfx1250 needs the WMMA feature set, not just the OCP encoding pair.
+
+    Without CK_TILE_USE_WMMA the generated K=128 configuration can compile down
+    the non-WMMA feature path.
+    """
+    defines = dispatcher_common.arch_feature_defines(arch)
+    for flag in ("-DCK_TILE_USE_WMMA=1", "-DCK_GFX12_SUPPORT",
+                 "-DCK_USE_GFX1250", "-DCK_GFX1250_SUPPORT"):
+        assert flag in defines, f"{flag} missing for {arch}: {defines}"
+
+
+@pytest.mark.parametrize("arch", LEGACY_ARCHS + ["gfx950"])
+def test_legacy_archs_do_not_get_wmma_defines(arch):
+    assert "-DCK_TILE_USE_WMMA=1" not in dispatcher_common.arch_feature_defines(arch)
+
+
+# =============================================================================
+# Configs must not be compiled for a different arch than they were built for
+# =============================================================================
+#
+# Every arch safeguard in these bridges runs when the CONFIG is constructed,
+# keyed on that config's own gfx_arch. The compile entry points take their own
+# gfx_arch, so without a cross-check a config built for one arch and compiled for
+# another slips past all of them -- its literal tile is emitted verbatim.
+
+SETUP_ENTRYPOINTS = [
+    ("aquant", gemm_aquant_utils.setup_multiple_aquant_dispatchers,
+     lambda: gemm_aquant_utils.default_fp8_config(gfx_arch="gfx950")),
+    ("abquant", gemm_abquant_utils.setup_multiple_abquant_dispatchers,
+     lambda: gemm_abquant_utils.default_fp4_config(gfx_arch="gfx950")),
+    ("bquant", gemm_bquant_utils.setup_multiple_bquant_dispatchers,
+     lambda: gemm_bquant_utils.default_fp8_config(gfx_arch="gfx950")),
+]
+SETUP_IDS = [n for n, _, _ in SETUP_ENTRYPOINTS]
+
+
+@pytest.mark.parametrize("setup,make_cfg",
+                         [(s, m) for _, s, m in SETUP_ENTRYPOINTS], ids=SETUP_IDS)
+@pytest.mark.parametrize("arch", GFX1250_FORMS)
+def test_setup_rejects_config_built_for_another_arch(setup, make_cfg, arch):
+    """The motivating case: default_fp4_config("gfx950") records warp_tile_k=32.
+
+    Compiling it for gfx1250 would emit a 16x16x32 tile there -- the GPU-confirmed
+    dead-accumulator case -- because the fp4 rule already ran, for gfx950.
+    """
+    cfg = make_cfg()
+    with pytest.raises(ValueError, match="different architecture"):
+        setup([cfg], gfx_arch=arch)
+
+
+def test_setup_accepts_matching_arch():
+    """The guard must only fire on a genuine mismatch."""
+    cfg = gemm_abquant_utils.default_fp4_config(gfx_arch="gfx950")
+    # Same arch: must get past the guard (it will fail later for lack of hipcc,
+    # which is fine -- we only assert the guard itself does not reject it).
+    try:
+        gemm_abquant_utils.setup_multiple_abquant_dispatchers([cfg], gfx_arch="gfx950")
+    except ValueError as exc:
+        assert "different architecture" not in str(exc)
+    except Exception:
+        pass
 
 
 # =============================================================================

@@ -246,6 +246,41 @@ def ocp_arch_defines(arch: Optional[str]) -> List[str]:
     return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
 
 
+def validate_configs_match_arch(configs, arch, bridge: str = "") -> None:
+    """Reject configs that were built for a different arch than we are compiling for.
+
+    Every arch-dependent safeguard in these bridges -- the warp_tile_k selectors,
+    the fp4 rule, the i4 rejection -- runs when the CONFIG is constructed, keyed on
+    that config's own gfx_arch. The compile entry points take their own gfx_arch,
+    so a config built for one arch and handed to a build for another slips past all
+    of them: the config's literal tile is emitted verbatim and compiled for the
+    other target.
+
+    Concretely, default_fp4_config(gfx_arch="gfx950") records warp_tile_k=32, and
+    compiling it with gfx_arch="gfx1250" emits a 16x16x32 tile for gfx1250 -- the
+    GPU-confirmed dead-accumulator case the fp4 rule exists to prevent. The same
+    hole bypasses the AQuant/BQuant i4 rejection.
+
+    Configs with no recorded arch are left alone; only a genuine mismatch raises.
+    """
+    target = normalize_arch(arch)
+    mismatched = []
+    for i, cfg in enumerate(configs or []):
+        cfg_arch = normalize_arch(getattr(cfg, "gfx_arch", None))
+        if cfg_arch and target and cfg_arch != target:
+            name = getattr(cfg, "name", None) or f"<config {i}>"
+            mismatched.append(f"  [{i}] {name}: built for {cfg_arch!r}")
+    if mismatched:
+        raise ValueError(
+            f"{bridge or 'bridge'}: refusing to compile for {target!r} using configs "
+            f"built for a different architecture. Their arch-dependent fields "
+            f"(warp_tile_k in particular) were derived for the other target and would "
+            f"be emitted verbatim, bypassing the arch safeguards that ran at "
+            f"construction time. Rebuild them with gfx_arch={target!r}:\n"
+            + "\n".join(mismatched)
+        )
+
+
 def arch_feature_defines(arch: Optional[str]) -> List[str]:
     """`ocp_arch_defines` plus the per-arch feature-enablement defines.
 

@@ -841,12 +841,20 @@ def _fp8_warp_tile_k(gfx_arch: str) -> int:
 
 
 def _preshuffleb_warp_tile_k(gfx_arch: str) -> int:
-    """warp_tile_k for preshuffleB FlatMM: 128 on gfx950/gfx1250, 64 on gfx942.
+    """warp_tile_k for preshuffleB FlatMM: 128 on gfx950, 64 otherwise.
 
-    Mirrors abquant's _preshuffleb_warp_tile_k; same CK_GFX950_SUPPORT branch,
-    plus gfx1250 for the same reason as _fp8_warp_tile_k.
+    Mirrors abquant's _preshuffleb_warp_tile_k; same CK_GFX950_SUPPORT branch.
+
+    Deliberately NOT extended to gfx1250, unlike _fp8_warp_tile_k above. This
+    selector feeds six public constructors (preshuffle-B, preshuffle-quant and
+    the combined form, fp8 and bf8), none of which has gfx1250 test coverage or
+    on-device validation. gfx1250 does have a 16x16x64 fp8 WMMA fragment, so the
+    64 it gets here is instantiable rather than a silent-zero tile, and it is the
+    value the arch already receives today -- so leaving it alone adds no
+    unvalidated numeric behaviour. Extending it wants GPU correctness coverage
+    for those six paths first.
     """
-    return 128 if normalize_gfx_arch(gfx_arch or "") in _WARP_TILE_K_128_ARCHS else 64
+    return 128 if normalize_gfx_arch(gfx_arch or "") == "gfx950" else 64
 
 
 def default_fp8_config(

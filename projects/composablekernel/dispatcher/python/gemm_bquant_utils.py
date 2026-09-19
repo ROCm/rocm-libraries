@@ -25,7 +25,7 @@ Usage (end-to-end):
   result = runner.run(A, B, BQ, BQuantGemmProblem(M=16, N=64, K=256))
 """
 
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import validate_configs_match_arch, unified_framework_flags, arch_feature_defines
 import ctypes
 import json
 import functools
@@ -875,24 +875,6 @@ def _get_dispatcher_static_lib() -> Optional[Path]:
     return static_lib if static_lib.exists() else None
 
 
-def _ocp_fp8_arch_defines(gfx_arch):
-    """-D flags selecting the OCP fp8/bf8 encodings instead of the legacy FNUZ pair.
-
-    The ``"gfx12"`` test here is deliberately FAMILY-WIDE and must NOT be narrowed
-    to the exact gfx1250 match used for warp_tile_k (see ``_is_gfx1250``): every
-    gfx12xx part -- gfx1200, gfx1201 and gfx1250 -- uses OCP e4m3/e5m2, so
-    narrowing it would switch gfx1200/gfx1201 back to FNUZ.  These two predicates
-    look textually similar and must never be "tidied" into each other.
-
-    Kept as a named helper (rather than inlined at the call site, as it was) so the
-    invariant is unit-testable across all five block-scale quant bridges; abquant
-    silently lacked the gfx12 half until it was caught in review.
-    """
-    if "gfx12" in (gfx_arch or "") or "gfx950" in (gfx_arch or ""):
-        return ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
-    return []
-
-
 def _compile_bquant_kernel(
     hpp_path: Path,
     so_path: Path,
@@ -919,9 +901,15 @@ def _compile_bquant_kernel(
     # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
     # These mirror the CMakeLists.txt definitions that are normally injected by CMake
     # but are absent in the standalone hipcc build path.
-    arch_defines = _ocp_fp8_arch_defines(gfx_arch)
-    if "gfx950" in gfx_arch:
-        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
+    # Architecture defines for the standalone hipcc path, from the shared helper
+    # (dispatcher_common.arch_feature_defines) that the five grouped bridges
+    # already use. It supplies the OCP fp8 pair AND the per-arch feature set the
+    # top-level CMakeLists provides for a normal build but the JIT path does not:
+    # notably CK_TILE_USE_WMMA, which must be passed even when 0 -- leaving it
+    # undefined only works because the preprocessor reads it as 0, which is right
+    # on gfx942/gfx950 and wrong on every WMMA part, so a gfx1250 kernel could
+    # compile down the non-WMMA feature path.
+    arch_defines = arch_feature_defines(gfx_arch)
 
     # TE backend codegen flags: mirror the -mllvm set CK's CMake injects into the
     # tile_engine gemm_quant example so the bridge .so is backend-identical to
@@ -1023,6 +1011,7 @@ def setup_multiple_bquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
+    validate_configs_match_arch(configs, arch, "BQuant")
 
     # Python-side MX guard: fail early (before hipcc) if any MX variant targets a
     # non-gfx950 arch, rather than relying solely on the C++ #error. Mirrors
