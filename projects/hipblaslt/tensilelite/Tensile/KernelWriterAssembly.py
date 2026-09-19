@@ -19583,6 +19583,32 @@ class KernelWriterAssembly(KernelWriter):
       self._emitTdmIterCount(mod, sIter, remainRowsSgpr, rows_per_il, tile_dim1)
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
+  def _emitSwizzleTdmIterateInit(self, mod, kernel, tc, dtype, descSgprName,
+                                 swzTile0, swzRows, bpe, globalIncSgpr):
+    """TDM iterate-mode init for the swizzled-B VW>1 LDS pad.
+
+    Unlike the generic _emitTdmIterateInit (which walks contiguous N-rows in pad-block
+    chunks), the swizzle descriptor's unit of iteration is one nO-tile: dim0 = swzTile0
+    already spans a full nO's DepthU slice, so each iteration deposits one nO-tile and
+    jumps the LDS write pointer by (nO-tile + LdsPad) to open a per-nO pad that breaks
+    the VW>1 bank conflict. iter_count = swzRows (#nO this wave/component holds);
+    global_inc = the nO global stride (MI_N*paddedK, already in globalIncSgpr, the same
+    value the 2-D dim1 walk used). Caller sets dim1/tile1 = 1 and setPadding(0,0)."""
+    comp = TensorDataMoverLoad.find(self)
+    dss = TensorDataMoverLoad.dataSizeShift(dtype)
+    pad_bytes = int(round(kernel["LdsPad%s" % tc] * bpe))
+    nOTileBytes = int(round(swzTile0 * bpe))
+    assert nOTileBytes == kernel["LdsBlockSizePerPad%s" % tc], \
+        "swizzle nO-tile (%d B) must equal LdsBlockSizePerPad%s (%d); read/LDS-size match" \
+        % (nOTileBytes, tc, kernel["LdsBlockSizePerPad%s" % tc])
+    assert 0 < swzRows <= 256, "swizzle TDM iter_count(%d) outside HW range 1..256" % swzRows
+    lds_inc = (nOTileBytes + pad_bytes) >> dss
+    mod.add(comp.setIterationEnabled(descSgprName(1), True))
+    with self.allocTmpSgpr(1, tag="swzTdmIterCount") as itTmp:
+      mod.add(SMovB32(sgpr(itTmp.idx), swzRows - 1, "TDM iterate: #nO(%d) - 1 (field = n-1)" % swzRows))
+      mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, globalIncSgpr))
+      mod.add(comp.setIterations(descSgprName(2), itTmp.idx))
+
   def _tdmParityNeedsTmp(self, kernel) -> bool:
     """True when Serial remat needs a dest SGPR (WaveIdx dead and ArgType unpacked)."""
     return not self.isTdmWaveIdxLive(kernel) and not self.states.tdmParityPackedInArgType
@@ -19904,18 +19930,27 @@ class KernelWriterAssembly(KernelWriter):
       swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
       swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
       swzRows   = (mt // swzMiN) // numWaves              # nO rows per wave
-      with self.allocTmpSgpr(1, tag="swzTDM_desc") as swzTmp:
-        sIdx = swzTmp.idx
-        mod.add(SAddU32(sgpr(sIdx), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
-        mod.add(SAndB32(sgpr(sIdx), sgpr(sIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
-        mod.add(SMulI32(sgpr(sIdx), sgpr(sIdx), swzMiN, "stride0 = MI_N * paddedK"))
-        mod.add(comp.setTensorStride0(descSgprName(1), sIdx, 0))
+      # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
+      # stride (setPadding(0,0) already applied above for isTdmIter). dim1 stays the full
+      # nO extent (walk clamp); tile1 drops to 1 (one nO per iteration). Non-iterate (VW==1)
+      # keeps tile1 = swzRows (all nO in one contiguous 2-D issue).
+      swzTilePerIssue = 1 if isTdmIter else swzRows
+      with self.allocTmpSgpr(2, tag="swzTDM_desc") as swzTmp:
+        sIdx    = swzTmp.idx        # reused for dim/tile values
+        strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
+        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN, "stride0 = MI_N * paddedK"))
+        mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
         mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
-        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = tile1 = #nO"))
+        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = #nO (walk clamp)"))
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
+        if isTdmIter:
+          self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
+                                          swzTile0, swzRows, bpe, strideS)
       mod.add(comp.setTensorTile0(descSgprName(1), swzTile0, self, 0))
-      mod.add(comp.setTensorTile1(descSgprName(1), swzRows, self))
+      mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
     elif isMetadataML1:
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, sizeShifter, False, isSparseTrack=isSparseTrack, isMetadata=isMetadata))
@@ -19983,7 +20018,9 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), splitBoundary, comment=f"tdm{tc} Lds Split Incs({round(mt * du * bpe // dim1Divisor)})"))
       mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), strideRefG, globalIncConst, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
 
-    if isTdmIter:
+    if isTdmIter and not swizzledTDM:
+      # Swizzled-B runs its own iterate init in the branch above (nO-tile walk, not the
+      # generic contiguous-N-row walk); only the generic tensors reach here.
       # Solution.py rejects iterate mode on a tlu tensor, so dim1 is the tile height.
       assert unrolledMajor, "TDM iterate mode requires an unroll-major tensor"
       # TDMInst is limited to 0 or 3 and subtile has its own descriptor path, so the
@@ -20123,20 +20160,32 @@ class KernelWriterAssembly(KernelWriter):
       swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
       swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
       swzRows   = (mt // swzMiN) // numComp               # nO rows per component
+      # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
+      # stride, and the pad_interval field (which cannot encode the 4096B nO block) is
+      # disabled. dim1 stays the full nO extent (walk clamp); tile1 drops to 1 (one nO per
+      # iteration). Non-iterate (VW==1) keeps tile1 = swzRows (all nO in one 2-D issue).
+      swzTilePerIssue = 1 if isTdmIter else swzRows
       mod.add(comp.setIterationEnabled(descSgprName(1), False))
-      mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
-      with self.allocTmpSgpr(1, tag="swzTDM_descWS") as swzTmp:
-        sIdx = swzTmp.idx
-        mod.add(SAddU32(sgpr(sIdx), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
-        mod.add(SAndB32(sgpr(sIdx), sgpr(sIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
-        mod.add(SMulI32(sgpr(sIdx), sgpr(sIdx), swzMiN, "stride0 = MI_N * paddedK"))
-        mod.add(comp.setTensorStride0(descSgprName(1), sIdx, 0))
+      if isTdmIter:
+        mod.add(comp.setPadding(descSgprName(1), 0, 0))
+      else:
+        mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+      with self.allocTmpSgpr(2, tag="swzTDM_descWS") as swzTmp:
+        sIdx    = swzTmp.idx        # reused for dim/tile values
+        strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
+        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN, "stride0 = MI_N * paddedK"))
+        mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
         mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
-        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = tile1 = #nO per component"))
+        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = #nO per component (walk clamp)"))
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
+        if isTdmIter:
+          self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
+                                          swzTile0, swzRows, bpe, strideS)
       mod.add(comp.setTensorTile0(descSgprName(1), swzTile0, self, 0))
-      mod.add(comp.setTensorTile1(descSgprName(1), swzRows, self))
+      mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
       return mod
 
     #TODO: refactor, currently special handling for FP4 along K-dim

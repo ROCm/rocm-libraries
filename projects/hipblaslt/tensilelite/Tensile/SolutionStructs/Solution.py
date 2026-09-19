@@ -4214,12 +4214,29 @@ class Solution(collections.abc.Mapping):
         # VW-strided N into (nO,nI) so the swizzled read produces the VW-interleaved register layout the
         # WMMA/acc expect (which also lets the MXSB scale loads widen via the tileSpan). VWB must still
         # divide MIWaveTile[1] (enforced by the generic VW checks).
-        if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
-          reject(state, printRejectionReason, f"SwizzleTensorB requires LdsPadB==0 and LdsBlockSizePerPadB==0 (got {state['LdsPadB']}, {state['LdsBlockSizePerPadB']})")
-          return
-        if state.get("_TDMIterateModeB", False):
-          reject(state, printRejectionReason, "SwizzleTensorB is incompatible with TDMIterateMode (B); swizzle uses its own TDM descriptor")
-          return
+        # VW>1 swizzle-B hits a VWB-way LDS bank conflict: nOStride = MI_N*DepthU is a multiple of
+        # the 256B/64-bank cycle, so a lane crossing into nO+1 aliases the nO lanes' banks. Break it
+        # with a 16B (4-bank) pad per nO-tile. The single-descriptor pad_interval field caps at a
+        # 1024B block, too small for the 4096B nO-tile, so apply the pad via TDM iterate-mode, which
+        # supplies it through the per-iteration LDS write stride (lds_inc = LdsBlockSizePerPad +
+        # LdsPad*bpe) and works for any block size. VW==1 stays unpadded (already conflict-free) and
+        # byte-identical to before. See initTDMDescriptor / _localReadSwizzledTDM for the read match.
+        if swizzleBIsTDM and state["VectorWidthB"] > 1:
+          bpeB = int(state["ProblemType"]["DataTypeB"].numBytes())
+          nOStrideBytes = state["MatrixInstN"] * state["_DepthUB"] * bpeB   # per-nO LDS tile size
+          state["LdsBlockSizePerPadB"] = nOStrideBytes
+          state["LdsPadB"] = 16 // bpeB                                      # 16B = 4-bank shift (ds_load b128 width)
+          state["_TDMIterateModeB"] = True
+          state["TDMIterateMode"] = state["TDMIterateMode"] | 2              # kernel naming (bit1 = B)
+        else:
+          # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
+          # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+          if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
+            reject(state, printRejectionReason, f"SwizzleTensorB requires LdsPadB==0 and LdsBlockSizePerPadB==0 (got {state['LdsPadB']}, {state['LdsBlockSizePerPadB']})")
+            return
+          if state.get("_TDMIterateModeB", False):
+            reject(state, printRejectionReason, "SwizzleTensorB is incompatible with TDMIterateMode (B); swizzle uses its own TDM descriptor")
+            return
         if not state["DirectToVgprB"] and not swizzleBIsTDM:
           reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
           return

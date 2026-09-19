@@ -780,6 +780,12 @@ class LocalReadMFMA(LocalRead):
         # the acc->arch layout. vw==1 -> vIdx=nt, eIdx=0 -> byte-identical to the flat nt-major loop.
         vw            = kernel["VectorWidth%s" % tc]
         numVecPerTile = numNtile // vw
+        # VW>1 breaks the LDS bank conflict with a per-nO-tile pad, deposited by TDM iterate-mode
+        # (see initTDMDescriptor). The nO-crossing term must step by the PADDED nO stride to match;
+        # eIdx/kOStride/kI stay within one nO-tile (no pad). The per-lane base pad is applied by
+        # lraFinalOffset. padElems==0 (VW==1) -> byte-identical to the unpadded reader.
+        padElems       = kernel["LdsPad%s" % tc]
+        nOStridePadded = nOStride + padElems
         for nt in range(numNtile):
             vIdx = nt // vw
             eIdx = nt %  vw
@@ -787,7 +793,7 @@ class LocalReadMFMA(LocalRead):
                 # localReadOffset carries the K-sub-iteration progression in the immediate (like the
                 # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
                 # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
-                off = vIdx * vw * nWaveN * nOStride + eIdx * innerK + r * kOStride + swapByteOff + int(tP["localReadOffset"])
+                off = vIdx * vw * nWaveN * nOStridePadded + eIdx * innerK + r * kOStride + swapByteOff + int(tP["localReadOffset"])
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)
