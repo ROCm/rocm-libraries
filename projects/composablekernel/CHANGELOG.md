@@ -6,6 +6,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added a gfx1250 WMMA configuration and reduction-strategy selection to the CK Tile GEMM Stream-K dispatcher benchmark.
+* Added gfx1250 support and WMMA regression tests for CK Tile GEMM Stream-K with atomic, linear, and tree reduction.
 * Added support for building Composable Kernel for the target-agnostic SPIR-V target (`amdgcnspirv`), which is compiled to native code at run time.
 * Added grouped convolution forward, backward data, and backward weight instances for gfx1250.
 * Added a wavelet GEMM pipeline for convolution forward that specializes waves into separate load and math roles to reduce VALU contention.
