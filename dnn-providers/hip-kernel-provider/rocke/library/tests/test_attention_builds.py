@@ -2771,6 +2771,275 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         )
 
 
+class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
+    """The gfx942 twin of :class:`TestAttentionDenseRuntimeShapeCollision`.
+
+    Same property, same failure mode, different body -- and the gfx942 body is
+    the one with an extra way to get it wrong. Its ``kernel_name()`` appends
+    ``_b{batch}`` on top of the base name, so dropping batch from the cache key
+    without dropping it from the symbol gives two specs that share ONE cache
+    slot two DIFFERENT names -- which the ``assert art.kernel_name ==
+    spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
+    shape served from the cache. The name assertion below covers that.
+
+    The control uses ``persistent`` rather than ``sliding_window``: gfx942
+    rejects sliding_window in ``supports_attention_dense``, so a swa spec never
+    reaches the builder at all and could not lower for the comparison.
+    """
+
+    # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
+    # that the exp2_fast policy reads compile-time config only.
+    # test_bf16_d128_default_is_on_the_runtime_path covers the bf16 D128 config
+    # that used to be excluded.
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_n=64,
+        causal=True,
+        dtype="fp16",
+    )
+
+    # Far apart in every dimension and across the block_m/block_n tiling
+    # boundaries -- and straddling the exp2_fast cut at 4096 -- so a baked trip
+    # count, partial-tile predicate, buffer extent, or shape-dependent policy
+    # shows a hash split.
+    _SHAPES = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192))
+
+    @staticmethod
+    def _spec(**kw):
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+        return Gfx942AttentionDenseSpec(**kw)
+
+    @staticmethod
+    def _ir_sha(spec):
+        import hashlib
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx942.attention_dense import build_attention_dense
+
+        kernel = build_attention_dense(spec, arch="gfx942")
+        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+
+    def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
+        """Shapes that collapse to one cache key must emit one kernel -- and,
+        on gfx942, one symbol name."""
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        base = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base gfx942 spec is not on the runtime-shape path",
+        )
+        self.assertEqual(base.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
+
+        keys, irs, names = {}, {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                irs[shape] = self._ir_sha(spec)
+                names[shape] = spec.kernel_name()
+
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"runtime-shape gfx942 specs did not share one cache key: {self._SHAPES}",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            1,
+            "gfx942 specs sharing ONE cache key lowered to DIFFERENT IR "
+            + repr({s: irs[s][:12] for s in self._SHAPES})
+            + " -- a shape field reached codegen on the runtime path, so "
+            "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
+            "every other shape.",
+        )
+        # gfx942-only: the b{batch} token must drop with the rest of the shape,
+        # or run_attention_dense_torch's kernel-name assert fires on the second
+        # shape served from the shared cache slot.
+        self.assertEqual(
+            len(set(names.values())),
+            1,
+            "gfx942 specs sharing ONE cache key produced DIFFERENT kernel names "
+            + repr(sorted(set(names.values())))
+            + " -- a shape token is still in kernel_name(), so the cached "
+            "launcher's symbol will not match the second spec's name.",
+        )
+        for shape, name in names.items():
+            for tok in (f"_b{shape[0]}", f"sq{shape[1]}", f"sk{shape[2]}"):
+                self.assertNotIn(
+                    tok,
+                    name,
+                    f"runtime-shape gfx942 name still carries {tok!r}: {name}",
+                )
+
+    def test_baked_shape_specs_split_both_key_and_ir(self):
+        """Control: off the runtime path, each shape keeps its own key and IR.
+
+        Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
+        emitting one kernel that is wrong everywhere -- would satisfy the guard
+        above vacuously. ``persistent`` is the only way off the runtime path on
+        gfx942; ragged/varlen/paged/swa are rejected by
+        ``supports_attention_dense`` and never reach the builder.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        # num_persistent must not exceed the work space nqb*Hq*B of the SMALLEST
+        # shape under test, or spec construction rejects it.
+        base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
+        self.assertFalse(
+            base.runtime_shape,
+            "test setup error: persistent no longer leaves the runtime path",
+        )
+        self.assertEqual(base.runtime_param_fields, ())
+
+        keys, irs = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                irs[shape] = self._ir_sha(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            len(self._SHAPES),
+            "baked-shape gfx942 specs shared a cache key; shape must split "
+            "identity when it is not a runtime kernel argument",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            len(self._SHAPES),
+            "baked-shape gfx942 specs lowered to identical IR; the builder is "
+            "ignoring shape on a path that bakes it, so the guard test above "
+            "would pass vacuously",
+        )
+
+    def test_bf16_d128_default_is_on_the_runtime_path(self):
+        """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
+
+        This config was once excluded from the runtime path, because the policy
+        then cut on ``seqlen_q``: the emitted softmax was a function of the shape,
+        and since ``_tuning_name_tags`` emits no token when the resolved value
+        matches the policy, two shapes straddling the cut would have shared a cache
+        key AND a kernel name while lowering to different IR -- a stale binary that
+        the name assert in ``run_attention_dense_torch`` cannot catch.
+
+        The policy now reads compile-time config only, so the exclusion is gone.
+        Asserted in the strong direction, byte-level: the same body must lower for
+        shapes on either side of the retired 4096 boundary. If someone reintroduces
+        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
+        than silently reopening the collision.
+        """
+        from dataclasses import replace
+
+        bf16 = self._spec(**{**self._BASE_KWARGS, "dtype": "bf16"})
+        self.assertTrue(
+            bf16.runtime_shape,
+            "bf16 D128 lowers one body for every shape; it belongs on the "
+            "runtime path",
+        )
+        self.assertEqual(bf16.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
+
+        lo = replace(bf16, seqlen_q=2048, seqlen_kv=2048)
+        hi = replace(bf16, seqlen_q=4096, seqlen_kv=4096)
+        self.assertEqual(
+            lo.resolved_use_exp2_fast(),
+            hi.resolved_use_exp2_fast(),
+            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "policy collides two bodies in one cache slot under a single name",
+        )
+        self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))
+        self.assertEqual(lo.kernel_name(), hi.kernel_name())
+
+    def test_persistent_stays_baked(self):
+        """The gating holds the excluded sub-mode baked, through the shipped
+        dispatch factory rather than a hand-built spec.
+
+        The cheap CPU counterpart of the 5 unchanged ``persist_*`` cases in the
+        gfx942 IR golden: this fails fast with a readable message if the
+        predicate is ever loosened, instead of surfacing as an opaque hash diff.
+        """
+        from dispatch.attention.gfx942 import _dense_spec
+        from dispatch.attention.common import AttentionRequest
+
+        req = AttentionRequest(
+            batch=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            nhead_q=32,
+            nhead_k=8,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx942",
+            dtype="bf16",
+            mask_type=1,  # causal
+        )
+        spec = _dense_spec(req)
+        if not spec.persistent:
+            self.skipTest(
+                "shipped gfx942 dispatch no longer selects persistent for this "
+                "shape; the golden's persist_* cases remain the binding check"
+            )
+        self.assertFalse(spec.runtime_shape)
+        self.assertEqual(spec.runtime_param_fields, ())
+        name = spec.kernel_name()
+        for tok in (f"sq{spec.seqlen_q}", f"sk{spec.seqlen_kv}", f"_b{spec.batch}"):
+            self.assertIn(
+                tok,
+                name,
+                f"persistent gfx942 name lost the baked token {tok!r}: {name}",
+            )
+
+    def test_signature_matches_the_declared_params(self):
+        """The ABI grew exactly three i32 args, in the position the builder
+        declares them.
+
+        ``attention_dense_signature`` mirrors the ``b.param`` order in
+        ``build_attention_dense`` BY HAND. A skew fails no other CPU test -- it
+        mis-binds kernargs at launch and corrupts results on GPU only.
+        """
+        from kernels.gfx942.attention_dense import attention_dense_signature
+
+        rt = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(rt.runtime_shape)
+        names = [a["name"] for a in attention_dense_signature(rt)]
+        self.assertEqual(
+            names,
+            [
+                "q_ptr",
+                "k_ptr",
+                "v_ptr",
+                "o_ptr",
+                "scale",
+                "batch",
+                "seqlen_q",
+                "seqlen_kv",
+            ],
+            "runtime-shape gfx942 ABI does not match the declared param order",
+        )
+        by_name = {a["name"]: a for a in attention_dense_signature(rt)}
+        for f in ("batch", "seqlen_q", "seqlen_kv"):
+            self.assertEqual(by_name[f]["type"], "i32", f"{f} is not i32")
+
+        baked = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
+        self.assertFalse(baked.runtime_shape)
+        self.assertEqual(
+            [a["name"] for a in attention_dense_signature(baked)],
+            ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"],
+            "the baked gfx942 path's ABI must be unchanged -- its body declares "
+            "no shape params, so extra kernargs would be read as garbage",
+        )
+
+
 # ---------------------------------------------------------------------
 # AttentionDenseSpec — the shared supports() preflight
 # ---------------------------------------------------------------------
