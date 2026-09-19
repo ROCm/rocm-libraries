@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,13 @@ TimedRunOutcome runUntilStable(int maxIterations,
             outcome.benchmarkFailed = true;
             break;
         }
+        if(!std::isfinite(elapsed) || elapsed < 0.0f)
+        {
+            outcome.errorMessage = "Benchmark iteration " + std::to_string(t)
+                                   + " reported a non-finite or negative elapsed time";
+            outcome.benchmarkFailed = true;
+            break;
+        }
         outcome.timings.push_back(elapsed);
 
         // Compute CoV for convergence check and logging.
@@ -128,6 +136,13 @@ TimedRunOutcome
         {
             outcome.errorMessage = "Benchmark failed on iteration " + std::to_string(t) + ": "
                                    + benchErr.get_message();
+            outcome.benchmarkFailed = true;
+            break;
+        }
+        if(!std::isfinite(elapsed) || elapsed < 0.0f)
+        {
+            outcome.errorMessage = "Benchmark iteration " + std::to_string(t)
+                                   + " reported a non-finite or negative elapsed time";
             outcome.benchmarkFailed = true;
             break;
         }
