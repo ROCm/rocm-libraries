@@ -21,10 +21,37 @@
 #ifndef ROCFFT_RTC_GENERATOR_H
 #define ROCFFT_RTC_GENERATOR_H
 
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+// Width of the integer type used for index/offset arithmetic inside
+// generated kernels. Kernels declare such arguments as "integer_type".
+enum class KIntType
+{
+    U32,
+    U64,
+};
+
+// Size of one "integer_type" element, for packing arrays that kernels
+// read through an integer_type pointer.
+static inline size_t rtc_kint_type_size(KIntType itype)
+{
+    switch(itype)
+    {
+    case KIntType::U32:
+        return sizeof(unsigned int);
+    case KIntType::U64:
+        return sizeof(unsigned long long);
+    }
+
+    throw std::runtime_error("Invalid kernel integer type");
+}
+
+#ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
 
 // runtime_compile dispatches to subclasses, those subclasses
 // return callables to do the code generation, so that the
@@ -68,5 +95,7 @@ private:
     generator_func f;
     std::string    kernel_src;
 };
+
+#endif
 
 #endif
