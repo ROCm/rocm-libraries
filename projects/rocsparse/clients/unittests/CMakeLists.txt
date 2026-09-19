@@ -370,8 +370,7 @@ if(BUILD_CODE_COVERAGE)
       target_compile_options(${_cov_tgt} PRIVATE
         "SHELL:-Xarch_device -fno-profile-instr-generate"
         "SHELL:-Xarch_device -fno-coverage-mapping")
-      target_link_options(${_cov_tgt} PRIVATE -u__llvm_profile_runtime)
-      target_link_libraries(${_cov_tgt} PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
+      target_link_options(${_cov_tgt} PRIVATE "SHELL:-Xarch_host -fprofile-instr-generate")
     endif()
   endforeach()
 endif()

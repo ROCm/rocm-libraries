@@ -79,23 +79,6 @@ option(BUILD_CLIENTS_SAMPLES "Build examples" OFF)
 option(BUILD_CLIENTS_ONLY "Build only clients" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(BUILD_CODE_COVERAGE "Build rocSPARSE with code coverage enabled" OFF)
-if(BUILD_CODE_COVERAGE)
-  # Locate the host profile runtime so coverage targets can link it directly.
-  # Passing -fprofile-instr-generate to a HIP link instead makes the driver
-  # forward -fprofile-instr-generate to clang-linker-wrapper as a device
-  # compiler option, which puts the device profile runtime and its
-  # __llvm_profile_sections_* table into the device image; the HIP runtime then
-  # aborts trying to register that table at profile dump (AISPARSE-778).
-  execute_process(COMMAND ${CMAKE_CXX_COMPILER}
-                          --print-file-name=libclang_rt.profile-x86_64.a
-                  OUTPUT_VARIABLE ROCSPARSE_PROFILE_RUNTIME
-                  OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(NOT EXISTS "${ROCSPARSE_PROFILE_RUNTIME}")
-    message(FATAL_ERROR
-      "BUILD_CODE_COVERAGE: could not locate libclang_rt.profile-x86_64.a")
-  endif()
-  message(STATUS "Host profile runtime: ${ROCSPARSE_PROFILE_RUNTIME}")
-endif()
 option(BUILD_ADDRESS_SANITIZER "Build rocSPARSE with address sanitizer enabled" OFF)
 option(BUILD_MEMSTAT "Build rocSPARSE with memory statistics enabled" OFF)
 option(BUILD_ROCSPARSE_ILP64 "Build rocSPARSE with rocsparse_int equal to int64_t" OFF)
