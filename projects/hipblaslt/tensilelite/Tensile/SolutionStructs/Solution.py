@@ -2246,6 +2246,8 @@ class Solution(collections.abc.Mapping):
       for ch in _cacheHintTensors:
         state["NonVolatile%s"%ch] = state["NonVolatile"]
 
+    state["_HasTemporalHint"] = isaInfoMap[isa].asmCaps.get("HasTHModifier", False)
+
     if not isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
       unsupportedTH = [
         "TemporalHint%s"%ch for ch in _cacheHintTensors
