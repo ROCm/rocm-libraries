@@ -59,8 +59,8 @@ namespace TensileLite
         Count
     };
 
-    TENSILELITEHOST_EXPORT std::string   ToString(KernelLanguage d);
-    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(KernelLanguage d);
+    TENSILELITEHOST_EXPORT std::string ToString(KernelLanguage d);
+    TENSILELITEHOST_EXPORT std::string TypeAbbrev(KernelLanguage d);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, KernelLanguage const& t);
     TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, KernelLanguage& t);
 
@@ -70,9 +70,9 @@ namespace TensileLite
  */
     struct KernelLanguageTypeInfo
     {
-        static KernelLanguageTypeInfo const& Get(int index);
-        static KernelLanguageTypeInfo const& Get(KernelLanguage t);
-        static KernelLanguageTypeInfo const& Get(std::string const& str);
+        TENSILELITEHOST_EXPORT static KernelLanguageTypeInfo const& Get(int index);
+        TENSILELITEHOST_EXPORT static KernelLanguageTypeInfo const& Get(KernelLanguage t);
+        TENSILELITEHOST_EXPORT static KernelLanguageTypeInfo const& Get(std::string const& str);
 
         KernelLanguage m_kernelLanguage;
         std::string    name;
@@ -148,4 +148,3 @@ namespace std
         }
     };
 } // namespace std
-
