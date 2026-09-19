@@ -68,8 +68,9 @@ _TOL = 5e-2
 class _Shape:
     """One test problem for direct conv.
 
-    ``cpg`` must equal ``kpg`` and must be 1 (depthwise) or a positive
-    multiple of 4.  ``stride`` must be 1 for depthwise.
+    For fprop ``cpg`` must equal ``kpg`` (both symmetric). For dgrad they may
+    differ; ``kpg=0`` (the default) means kpg == cpg (symmetric).
+    ``stride`` must be 1 for depthwise fprop.
     """
 
     id: str
@@ -77,11 +78,12 @@ class _Shape:
     H: int
     W: int
     groups: int
-    cpg: int  # channels-per-group (= kpg)
+    cpg: int  # input channels-per-group
     KH: int = 3
     KW: int = 3
     PAD: int = 1
     stride: int = 1
+    kpg: int = 0  # output channels-per-group; 0 means same as cpg
 
 
 # One representative shape per cpg variant.  groups is chosen to be a
@@ -585,6 +587,302 @@ class TestDirectConvCorrectness(unittest.TestCase):
         for s in _SPATIAL_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_depthwise_spatial(s)
+
+
+# ---------------------------------------------------------------------------
+# Dgrad shapes
+# ---------------------------------------------------------------------------
+
+_DGRAD_SHAPES: List[_Shape] = [
+    _Shape("dg_16c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=16),
+    _Shape("dg_32c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=32),
+    # Asymmetric grouped: cpg != kpg — exercises the independent cpg/kpg path.
+    _Shape("dg_asym_cpg16_kpg32_g4", N=2, H=8, W=8, groups=4, cpg=16, kpg=32),
+    # Grouped stride-2: non-unit stride grouped dgrad.
+    _Shape("dg_16c_N2H8W8_g8_s2", N=2, H=8, W=8, groups=8, cpg=16, stride=2),
+]
+
+# Depthwise dgrad shapes (cpg=kpg=1).  Stride-2 exercises the divisibility
+# checks and the ho/wo output-size path.
+_DW_DGRAD_SHAPES: List[_Shape] = [
+    _Shape("dw_dgrad_s1_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1, stride=1),
+    _Shape("dw_dgrad_s2_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1, stride=2),
+]
+
+
+def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify the direct dgrad kernel.
+
+    Returns ``(passed, reason)``.
+    """
+    import math
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_direct_grouped import (
+        DirectConvDgradSpec,
+        DirectConvProblem,
+        build_direct_conv_dgrad,
+        is_valid_dgrad_spec,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    kpg = shape.kpg if shape.kpg > 0 else shape.cpg
+    p = DirectConvProblem(
+        N=shape.N,
+        H=shape.H,
+        W=shape.W,
+        groups=shape.groups,
+        cpg=shape.cpg,
+        kpg=kpg,
+        KH=shape.KH,
+        KW=shape.KW,
+        PAD=shape.PAD,
+        stride=shape.stride,
+    )
+    spec = DirectConvDgradSpec(problem=p, name=f"test_dgrad_{shape.id}")
+
+    ok, reason = is_valid_dgrad_spec(spec, arch=arch)
+    if not ok:
+        return False, f"skip invalid spec: {reason}"
+
+    try:
+        kernel = build_direct_conv_dgrad(spec, arch=arch)
+    except ValueError as e:
+        return False, f"build failed: {e}"
+
+    try:
+        artifact = compile_kernel(kernel, arch=arch)
+    except Exception as e:
+        return False, f"compile failed: {e}"
+
+    torch.manual_seed(42)
+    total_c = shape.groups * shape.cpg
+    total_k = shape.groups * kpg
+
+    # dY: output gradient [N, Ho, Wo, K]
+    dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16).uniform_(-0.5, 0.5)
+    # W:  weights         [K, KH, KW, cpg]
+    W = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=torch.float16).uniform_(
+        -0.5, 0.5
+    )
+    dX = torch.zeros(p.N, p.H, p.W, total_c, dtype=torch.float16)
+
+    # Reference: dX = conv_transpose2d(dY, W)
+    # output_padding recovers the exact input H, W (matters when stride > 1).
+    dY_nchw = dY.permute(0, 3, 1, 2).float()
+    W_nchw = W.permute(0, 3, 1, 2).float()  # [K, cpg, KH, KW]
+    h_base = (p.Ho - 1) * p.stride - 2 * p.PAD + p.KH
+    w_base = (p.Wo - 1) * p.stride - 2 * p.PAD + p.KW
+    ref_nchw = torch.nn.functional.conv_transpose2d(
+        dY_nchw,
+        W_nchw,
+        padding=p.PAD,
+        stride=p.stride,
+        groups=p.groups,
+        output_padding=(p.H - h_base, p.W - w_base),
+    )
+    ref = ref_nchw.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
+
+    rt = Runtime()
+    dY_dev = rt.alloc(dY.nbytes)
+    W_dev = rt.alloc(W.nbytes)
+    dX_dev = rt.alloc(dX.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
+    rt.memcpy_h2d(W_dev, _u8(W), W.nbytes)
+    rt.memset(dX_dev, 0, dX.nbytes)
+
+    sig = conv_args_signature("fp16")
+    try:
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=sig,
+        )
+    except HipError as e:
+        rt.free(dY_dev)
+        rt.free(W_dev)
+        rt.free(dX_dev)
+        return False, f"kernel load failed: {e}"
+
+    # Grid: (ceil(Wi / block_q), groups / block_groups, N * Hi)
+    q_tiles = math.ceil(p.W / spec.block_q)
+    g_tiles = p.groups // spec.block_groups
+    grid = (q_tiles, g_tiles, p.N * p.H)
+    block = (spec.threads_per_block, 1, 1)
+
+    values = {
+        "A": dY_dev,
+        "B": W_dev,
+        "D": dX_dev,
+        "A_bytes": dY.nbytes,
+        "B_bytes": W.nbytes,
+        "D_bytes": dX.nbytes,
+    }
+    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+
+    dX_cpu = torch.empty_like(dX)
+    rt.memcpy_d2h(_u8(dX_cpu), dX_dev, dX.nbytes)
+    rt.free(dY_dev)
+    rt.free(W_dev)
+    rt.free(dX_dev)
+    synchronize_and_release(0)
+
+    out_f32 = dX_cpu.float()
+    ref_f32 = ref.float().cpu()
+    abs_diff = (out_f32 - ref_f32).abs()
+    ref_scale = ref_f32.abs().max().clamp(min=1.0)
+    rel_err = float(abs_diff.max() / ref_scale)
+    passed = rel_err < _TOL
+    if not passed:
+        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
+    print(f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    return True, ""
+
+
+def _run_dw_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify the direct depthwise dgrad kernel."""
+    import math
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_direct_grouped import (
+        DirectConvProblem,
+        DirectDepthwiseDgradSpec,
+        build_direct_depthwise_dgrad,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    p = DirectConvProblem(
+        N=shape.N,
+        H=shape.H,
+        W=shape.W,
+        groups=shape.groups,
+        cpg=1,
+        kpg=1,
+        KH=shape.KH,
+        KW=shape.KW,
+        PAD=shape.PAD,
+        stride=shape.stride,
+    )
+    spec = DirectDepthwiseDgradSpec(problem=p, name=f"test_dw_dgrad_{shape.id}")
+
+    try:
+        kernel = build_direct_depthwise_dgrad(spec, arch=arch)
+    except ValueError as e:
+        return False, f"build failed: {e}"
+
+    try:
+        artifact = compile_kernel(kernel, arch=arch)
+    except Exception as e:
+        return False, f"compile failed: {e}"
+
+    torch.manual_seed(42)
+    total_c = shape.groups  # cpg=kpg=1
+
+    dY = torch.empty(p.N, p.Ho, p.Wo, total_c, dtype=torch.float16).uniform_(-0.5, 0.5)
+    W = torch.empty(total_c, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-0.5, 0.5)
+    dX = torch.zeros(p.N, p.H, p.W, total_c, dtype=torch.float16)
+
+    dY_nchw = dY.permute(0, 3, 1, 2).float()
+    W_nchw = W.permute(0, 3, 1, 2).float()
+    h_base = (p.Ho - 1) * p.stride - 2 * p.PAD + p.KH
+    w_base = (p.Wo - 1) * p.stride - 2 * p.PAD + p.KW
+    ref_nchw = torch.nn.functional.conv_transpose2d(
+        dY_nchw,
+        W_nchw,
+        padding=p.PAD,
+        stride=p.stride,
+        groups=p.groups,
+        output_padding=(p.H - h_base, p.W - w_base),
+    )
+    ref = ref_nchw.permute(0, 2, 3, 1).contiguous()
+
+    rt = Runtime()
+    dY_dev = rt.alloc(dY.nbytes)
+    W_dev = rt.alloc(W.nbytes)
+    dX_dev = rt.alloc(dX.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
+    rt.memcpy_h2d(W_dev, _u8(W), W.nbytes)
+    rt.memset(dX_dev, 0, dX.nbytes)
+
+    sig = conv_args_signature("fp16")
+    try:
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=sig,
+        )
+    except HipError as e:
+        rt.free(dY_dev)
+        rt.free(W_dev)
+        rt.free(dX_dev)
+        return False, f"kernel load failed: {e}"
+
+    q_tiles = math.ceil(p.W / spec.block_w)
+    g_tiles = math.ceil(p.groups / spec.block_ch)
+    grid = (q_tiles, g_tiles, p.N)
+    block = (spec.threads_per_block, 1, 1)
+
+    values = {
+        "A": dY_dev,
+        "B": W_dev,
+        "D": dX_dev,
+        "A_bytes": dY.nbytes,
+        "B_bytes": W.nbytes,
+        "D_bytes": dX.nbytes,
+    }
+    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+
+    out_host = torch.empty_like(dX)
+    rt.memcpy_d2h(_u8(out_host), dX_dev, dX.nbytes)
+    rt.free(dY_dev)
+    rt.free(W_dev)
+    rt.free(dX_dev)
+    synchronize_and_release(0)
+
+    ref_f32 = ref.float().cpu()
+    out_f32 = out_host.float()
+    abs_diff = (out_f32 - ref_f32).abs()
+    ref_scale = ref_f32.abs().max().clamp(min=1.0)
+    rel_err = float(abs_diff.max() / ref_scale)
+    if not (rel_err < _TOL):
+        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
+    print(f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+    return True, ""
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestDirectConvDgradWgradCorrectness(unittest.TestCase):
+    """Correctness tests for direct conv backward pass (dgrad only)."""
+
+    def _run_dgrad(self, shape: _Shape) -> None:
+        passed, reason = _run_dgrad_one(GPU_ARCH, shape)
+        if reason.startswith("skip"):
+            self.skipTest(reason)
+        self.assertTrue(passed, f"FAIL dgrad {shape.id} on {GPU_ARCH}: {reason}")
+
+    def test_dgrad(self):
+        for s in _DGRAD_SHAPES:
+            with self.subTest(shape=s.id):
+                self._run_dgrad(s)
+
+    def _run_dw_dgrad(self, shape: _Shape) -> None:
+        passed, reason = _run_dw_dgrad_one(GPU_ARCH, shape)
+        if reason.startswith("skip"):
+            self.skipTest(reason)
+        self.assertTrue(passed, f"FAIL dw_dgrad {shape.id} on {GPU_ARCH}: {reason}")
+
+    def test_dw_dgrad(self):
+        for s in _DW_DGRAD_SHAPES:
+            with self.subTest(shape=s.id):
+                self._run_dw_dgrad(s)
 
 
 if __name__ == "__main__":
