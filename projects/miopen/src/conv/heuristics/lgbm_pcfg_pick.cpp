@@ -14,6 +14,7 @@
 #include <miopen/env.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
+#include <miopen/timer.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 
@@ -222,7 +223,12 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
                                     const Handle& handle)
 {
-    const auto& meta = LgbmPcfgMetadata::Get();
+    const LgbmPcfgMetadata* meta_ptr = nullptr;
+    {
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.MetadataGet");
+        meta_ptr = &LgbmPcfgMetadata::Get();
+    }
+    const auto& meta = *meta_ptr;
     if(!meta.IsReady())
         return {};
 
@@ -230,7 +236,11 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     if(model == nullptr || !model->forest)
         return {}; // no perf-config model for this solver
 
-    const std::string gfx_id = handle.GetDeviceName();
+    std::string gfx_id;
+    {
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
+        gfx_id = handle.GetDeviceName();
+    }
 
     // Two-tower KTN takes precedence where it applies: defer to the solver's own
     // default-config path (which runs it) rather than preempting it here.
@@ -256,9 +266,17 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     }
 
     std::vector<double> prefix;
-    FillProblemPrefix(prefix, problem, handle, gfx_id, model->has_gfx_code);
+    {
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.FillProblemPrefix");
+        FillProblemPrefix(prefix, problem, handle, gfx_id, model->has_gfx_code);
+    }
 
-    auto ranked = RankBucket(*model->forest, *model, prefix, bit->second);
+    std::vector<std::string> ranked;
+    {
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.RankBucket(" +
+                           std::to_string(bit->second.size()) + " cands)");
+        ranked = RankBucket(*model->forest, *model, prefix, bit->second);
+    }
     if(!ranked.empty())
         MIOPEN_LOG_I2("lgbm_pcfg: "
                       << solver_name << " ranked " << ranked.size() << " configs, top=\""
