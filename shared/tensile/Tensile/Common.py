@@ -2096,8 +2096,10 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
     else:
       derivedAsmCaps["MaxVmcnt"] = 0
 
-    # TODO- Need to query the max cap, just like vmcnt as well?
-    derivedAsmCaps["MaxLgkmcnt"] = 15
+    if tryAssembler(isaVersion, "s_waitcnt lgkmcnt(63)"):
+      derivedAsmCaps["MaxLgkmcnt"] = 63
+    else:
+      derivedAsmCaps["MaxLgkmcnt"] = 15
 
     derivedAsmCaps["KernargPreloading"] = tryAssembler(isaVersion, """
       TestKernel:
