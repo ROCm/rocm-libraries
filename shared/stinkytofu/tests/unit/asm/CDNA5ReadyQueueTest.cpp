@@ -29,6 +29,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "transforms/asm/dag/RegionDAG.hpp"
 
 #define DEBUG_TYPE "CDNA5ReadyQueueTest"
 #if defined(__clang__) || defined(__GNUC__)
@@ -52,6 +53,7 @@ PassContext makeClusterBarrierCtx(bool clusterBarrier) {
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.dagFeatures.clusterBarrier = clusterBarrier;
+    pfc.loopConfig.unrollGemm = true;
     ctx.setPassFeatureConfig(pfc);
     return ctx;
 }
@@ -80,6 +82,25 @@ StinkyInstruction* makeWorkgroupBarrierWait(BasicBlock& bb, int ldsToken) {
     StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_barrier_wait, GfxArchID::Gfx1250));
     inst->addSrcReg(StinkyRegister(-1));
     inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+    inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+    return inst;
+}
+
+StinkyInstruction* makeDsLoad(BasicBlock& bb, int ldsToken) {
+    AsmIRBuilder builder(bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_load_b32, GfxArchID::Gfx1250));
+    inst->addSrcReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+    inst->addDestReg(StinkyRegister("v", 1, 1));
+    return inst;
+}
+
+StinkyInstruction* makeTensorLoad(BasicBlock& bb, int ldsToken) {
+    AsmIRBuilder builder(bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst =
+        builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, GfxArchID::Gfx1250));
+    inst->addSrcReg(StinkyRegister("s", 20, 4));
+    inst->addSrcReg(StinkyRegister("s", 24, 8));
     inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
     return inst;
 }
@@ -137,6 +158,63 @@ TEST_F(CDNA5ReadyQueueTest, OpenSccChainWithOnlyBarriersReadyAborts) {
             pickWithOpenChainAndOnlyBarriersReady(queue, *bb);
         },
         "open SCC chain but only barriers are ready");
+}
+
+TEST_F(CDNA5ReadyQueueTest, ClassifiesTensorOnlyBarrier) {
+    StinkyInstruction* dsBarrier = makeWorkgroupBarrierSignal(*bb, /*ldsToken=*/1);
+    StinkyInstruction* tensorBarrier = makeWorkgroupBarrierSignal(*bb, /*ldsToken=*/2);
+    StinkyInstruction* unrelatedBarrier = makeWorkgroupBarrierSignal(*bb, /*ldsToken=*/3);
+    makeDsLoad(*bb, /*ldsToken=*/1);
+    StinkyInstruction* tensorLoad = makeTensorLoad(*bb, /*ldsToken=*/2);
+
+    const auto classification = classifyBarriersByLoadToken(bb->begin(), bb->end());
+
+    EXPECT_EQ(classification.dsMatchedBarriers.count(dsBarrier), 1);
+    EXPECT_EQ(classification.tensorOnlyBarriers.count(tensorBarrier), 1);
+    EXPECT_EQ(classification.tensorOnlyLoads.count(tensorLoad), 1);
+    EXPECT_EQ(classification.dsMatchedBarriers.count(unrelatedBarrier), 0);
+    EXPECT_EQ(classification.tensorOnlyBarriers.count(unrelatedBarrier), 0);
+}
+
+TEST_F(CDNA5ReadyQueueTest, TensorOnlyBarrierDoesNotPreemptOrdinaryReadyWork) {
+    StinkyInstruction* ordinary = makeSCmpDef(*bb);
+    StinkyInstruction* barrier = makeWorkgroupBarrierSignal(*bb, /*ldsToken=*/1);
+    makeTensorLoad(*bb, /*ldsToken=*/1);
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    std::vector<HardSchedulingConstraint> constraints;
+    const RegionDependencies deps{regionDag, constraints};
+    PassContext ctx = makeClusterBarrierCtx(/*clusterBarrier=*/false);
+    CDNA5ReadyQueue queue(ctx);
+    queue.onInit(bb->begin(), bb->end());
+    queue.onInitRegion(bb->begin(), bb->end(), bb->begin(), deps);
+
+    DAGNode ordinaryNode(ordinary, /*id=*/0);
+    DAGNode barrierNode(barrier, /*id=*/1);
+    queue.push(&ordinaryNode);
+    queue.push(&barrierNode);
+
+    EXPECT_EQ(queue.pickOne(), &ordinaryNode);
+}
+
+TEST_F(CDNA5ReadyQueueTest, TensorOnlyBarrierAndLoadOrderBeforeDsBarrier) {
+    StinkyInstruction* tensorBarrier = makeWorkgroupBarrierSignal(*bb, /*ldsToken=*/2);
+    StinkyInstruction* tensorLoad = makeTensorLoad(*bb, /*ldsToken=*/2);
+    StinkyInstruction* dsBarrier = makeWorkgroupBarrierSignal(*bb, /*ldsToken=*/1);
+    makeDsLoad(*bb, /*ldsToken=*/1);
+    const dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(bb->begin(), bb->end());
+    std::vector<HardSchedulingConstraint> constraints;
+    const RegionDependencies deps{regionDag, constraints};
+    PassContext ctx = makeClusterBarrierCtx(/*clusterBarrier=*/false);
+    CDNA5ReadyQueue queue(ctx);
+    queue.onInit(bb->begin(), bb->end());
+    queue.onInitRegion(bb->begin(), bb->end(), bb->begin(), deps);
+
+    EXPECT_NE(std::find(constraints.begin(), constraints.end(),
+                        HardSchedulingConstraint{tensorBarrier, dsBarrier}),
+              constraints.end());
+    EXPECT_NE(std::find(constraints.begin(), constraints.end(),
+                        HardSchedulingConstraint{tensorLoad, dsBarrier}),
+              constraints.end());
 }
 
 TEST_F(CDNA5ReadyQueueTest, DsLoadDescCarriesDrainParams) {

@@ -343,6 +343,84 @@ static std::vector<BarrierTokenGroup> groupBarrierTokens(
     return groups;
 }
 
+struct BarrierLoadTokenClassification {
+    std::unordered_set<StinkyInstruction*> dsMatchedBarriers;
+    std::unordered_set<StinkyInstruction*> tensorOnlyBarriers;
+    std::unordered_set<StinkyInstruction*> tensorOnlyLoads;
+};
+
+// Find barriers whose tokens match ds_reads, and barriers whose tokens match
+// tensor_loads but no ds_read. Check both operand sides because tensor/barrier
+// forms may expose their token as a source or destination. Tokenless barriers
+// and barriers with no matching load keep normal ordering.
+static BarrierLoadTokenClassification classifyBarriersByLoadToken(
+    IRList::iterator regionStart, IRList::iterator regionEnd) {
+    std::unordered_set<uint32_t> dsLoadTokens;
+    struct TensorLoadTokens {
+        StinkyInstruction* load;
+        std::unordered_set<uint32_t> tokens;
+    };
+    std::vector<TensorLoadTokens> tensorLoads;
+    std::unordered_set<uint32_t> tensorLoadTokens;
+
+    auto collectTokens = [](const StinkyInstruction& inst) {
+        std::unordered_set<uint32_t> tokens;
+        auto collect = [&](const auto& regs) {
+            for (const StinkyRegister& reg : regs) {
+                if (isPseudoReg(reg)) tokens.insert(reg.reg.idx);
+            }
+        };
+        collect(inst.getSrcRegs());
+        collect(inst.getDestRegs());
+        return tokens;
+    };
+
+    for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+        StinkyInstruction& inst = getStinkyInst(it);
+        if (isDSRead(inst)) {
+            for (const StinkyRegister& src : inst.getSrcRegs()) {
+                if (isPseudoReg(src)) dsLoadTokens.insert(src.reg.idx);
+            }
+        }
+        if (isTensorLoad(inst)) {
+            auto tokens = collectTokens(inst);
+            tensorLoadTokens.insert(tokens.begin(), tokens.end());
+            tensorLoads.push_back({&inst, std::move(tokens)});
+        }
+    }
+
+    BarrierLoadTokenClassification result;
+    std::unordered_set<uint32_t> tensorOnlyBarrierTokens;
+    for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+        StinkyInstruction& inst = getStinkyInst(it);
+        if (!isBarrier(inst)) continue;
+
+        const auto tokens = collectTokens(inst);
+        bool matchesDsLoad = false;
+        bool matchesTensorLoad = false;
+        for (uint32_t token : tokens) {
+            matchesDsLoad |= dsLoadTokens.count(token) != 0;
+            matchesTensorLoad |= tensorLoadTokens.count(token) != 0;
+        }
+        if (matchesDsLoad) {
+            result.dsMatchedBarriers.insert(&inst);
+        } else if (matchesTensorLoad) {
+            result.tensorOnlyBarriers.insert(&inst);
+            tensorOnlyBarrierTokens.insert(tokens.begin(), tokens.end());
+        }
+    }
+
+    for (const TensorLoadTokens& tensorLoad : tensorLoads) {
+        for (uint32_t token : tensorLoad.tokens) {
+            if (tensorOnlyBarrierTokens.count(token)) {
+                result.tensorOnlyLoads.insert(tensorLoad.load);
+                break;
+            }
+        }
+    }
+    return result;
+}
+
 // -------------------------------------------------------------------------
 // CDNA5ReadyQueue — WMMA scheduling policy (Gfx1250)
 // -------------------------------------------------------------------------
@@ -2432,6 +2510,20 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
+    const auto barrierTokenClasses = classifyBarriersByLoadToken(regionStart, regionEnd);
+    // A tensor-only barrier and its tensor_load must both precede barriers that
+    // protect ds_loads. They do not need to jump ahead of unrelated compute.
+    // Cyclic requests are rejected by the scheduler's normal constraint merge.
+    for (StinkyInstruction* tensorBarrier : barrierTokenClasses.tensorOnlyBarriers) {
+        for (StinkyInstruction* dsBarrier : barrierTokenClasses.dsMatchedBarriers) {
+            deps.requestedConstraints.emplace_back(tensorBarrier, dsBarrier);
+        }
+    }
+    for (StinkyInstruction* tensorLoad : barrierTokenClasses.tensorOnlyLoads) {
+        for (StinkyInstruction* dsBarrier : barrierTokenClasses.dsMatchedBarriers) {
+            deps.requestedConstraints.emplace_back(tensorLoad, dsBarrier);
+        }
+    }
     std::vector<WmmaHideBudgetBarrierInfo> hideBudgetBarriers;
     if (hasWMMAInRegion_) {
         // Layer 1/3 (base merge):
@@ -2768,6 +2860,27 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // barrier_signal/barrier_wait pair shares one threshold.
         normalizeBarrierPairs(/*useSrcTokens=*/true);
         normalizeBarrierPairs(/*useSrcTokens=*/false);
+
+        // Place every tensor-only barrier immediately before the earliest
+        // threshold-controlled ds_load barrier instead of forcing it at region
+        // start. The hard ordering above also keeps its tensor_load ahead of
+        // ds_load barriers that have no computed threshold.
+        int earliestDsBarrierThreshold = INT_MAX;
+        for (StinkyInstruction* barrier : barrierTokenClasses.dsMatchedBarriers) {
+            auto it = barrierWmmaThresholds_.find(barrier);
+            if (it != barrierWmmaThresholds_.end())
+                earliestDsBarrierThreshold = std::min(earliestDsBarrierThreshold, it->second);
+        }
+        if (earliestDsBarrierThreshold != INT_MAX) {
+            const int tensorBarrierThreshold = std::max(0, earliestDsBarrierThreshold - 1);
+            for (StinkyInstruction* barrier : barrierTokenClasses.tensorOnlyBarriers)
+                barrierWmmaThresholds_[barrier] = tensorBarrierThreshold;
+            PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion tensor-only barriers] count="
+                                 << barrierTokenClasses.tensorOnlyBarriers.size()
+                                 << " threshold=" << tensorBarrierThreshold
+                                 << " earliestDsBarrierThreshold=" << earliestDsBarrierThreshold
+                                 << "\n");
+        }
 
         // Publish the final, normalized threshold together with each barrier
         // estimator's DS-load demand. Publish once per split-barrier group:
