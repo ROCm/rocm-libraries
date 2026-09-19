@@ -26,12 +26,26 @@
 
 #include "Rotating.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <math.h>
 
 namespace TensileLite
 {
+    int32_t clampRotatingNum(int32_t rotatingNum, size_t rotatingSize, size_t rotatingAllocatedSize)
+    {
+        if(rotatingNum <= 0 || rotatingSize == 0)
+            return std::max(0, rotatingNum);
+
+        // 64-bit throughout: rotatingNum * rotatingSize can exceed INT32_MAX.
+        size_t maxFit = rotatingAllocatedSize / rotatingSize;
+        if(static_cast<size_t>(rotatingNum) > maxFit)
+            return static_cast<int32_t>(maxFit);
+        return rotatingNum;
+    }
+
     void RotatingMemory::addRotatingSize(std::vector<size_t> sizes)
     {
         if(m_rotatingBufferNum != sizes.size())
