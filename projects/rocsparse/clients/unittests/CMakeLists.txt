@@ -366,11 +366,11 @@ if(BUILD_CODE_COVERAGE)
     if(TARGET ${_cov_tgt})
       target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
       # Host-only instrumentation, as for the library target: device-side
-      # __profd_* globals crash the HIP runtime at profile dump (AISPARSE-778).
+      # coverage crashes the HIP runtime at profile dump (AISPARSE-778).
       target_compile_options(${_cov_tgt} PRIVATE
         "SHELL:-Xarch_device -fno-profile-instr-generate"
         "SHELL:-Xarch_device -fno-coverage-mapping")
-      target_link_libraries(${_cov_tgt} PRIVATE -fprofile-instr-generate)
+      target_link_options(${_cov_tgt} PRIVATE "SHELL:-Xarch_host -fprofile-instr-generate")
     endif()
   endforeach()
 endif()
