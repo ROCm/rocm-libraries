@@ -806,16 +806,14 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        constexpr ck_tile::index_t kM0 = Problem::BlockFmhaShape::kM0;
-        if constexpr(kM0 > 64)
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
         {
-            // Prefill: same layout as qr_async_trload kernel allocations.
-            // Two K buffers (ping/pong) + two V buffers (ping/pong).
+            // Double K/V LDS buffers: two K buffers (ping/pong) and two V buffers (ping/pong).
             return 2 * GetSmemSizeK<Problem, true>() + 2 * GetSmemSizeV<Problem>();
         }
         else
         {
-            // Decode: single buffer; Q, K, S, V laid out sequentially.
+            // Single K/V LDS buffers: Q, K, S, V laid out sequentially.
             return max(GetSmemSizeQ<Problem>(),
                        GetSmemSizeK<Problem>() + GetSmemSizeS<Problem>() + GetSmemSizeV<Problem>());
         }
@@ -825,18 +823,19 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 namespace detail {
 
 // One 256-byte-aligned arena backs every qr_tdm LDS region. Q intentionally aliases K0 at offset
-// zero and, on decode, overlaps the later S/V regions: the pipeline loads Q into registers and
+// zero and, on the single K/V LDS buffer path, overlaps the later S/V regions: the pipeline loads
+// Q into registers and
 // completes the tensor-count barrier before K/V overwrite that storage. For the measured d=128
 // K+V configuration the layouts are:
-//   prefill: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
-//   decode:  Q/K0=0, S=4336, V0=4352, end=22784
+//   double K/V LDS buffer: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
+//   single K/V LDS buffer: Q/K0=0, S=4336, V0=4352, end=22784
 // Region alignment follows one gfx1250 LDS bank row.
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmLdsArenaLayout
 {
     using Shape = typename Problem::BlockFmhaShape;
 
-    static constexpr bool kDoubleBuffer       = Shape::kM0 > 64;
+    static constexpr bool kUseDoubleKVLdsBuffer = Problem::kUseDoubleKVLdsBuffer;
     static constexpr index_t kArenaAlignment  = 256;
     static constexpr index_t kRegionAlignment = 256;
     static constexpr index_t kSRequiredAlignment =
@@ -851,7 +850,9 @@ struct QrTdmLdsArenaLayout
                                              kQrTdmLdsAccessBytes>();
     static constexpr auto k_descriptor = make_qr_tdm_row_major_lds_descriptor <
                                          typename Problem::KDataType,
-                          Shape::kN0, kDoubleBuffer ? Shape::kSubQKHeaddim : Shape::kK0, KPadding,
+                          Shape::kN0,
+                          kUseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim : Shape::kK0,
+                          KPadding,
                           kQrTdmLdsAccessBytes > ();
     static constexpr auto v_descriptor =
         make_qr_tdm_row_major_lds_descriptor<typename Problem::VDataType,
@@ -872,11 +873,15 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kQOffset  = 0;
     static constexpr index_t kK0Offset = 0;
     static constexpr index_t kK1Offset =
-        kDoubleBuffer ? integer_least_multiple(kK0Offset + kKBytes, kRegionAlignment) : 0;
+        kUseDoubleKVLdsBuffer
+            ? integer_least_multiple(kK0Offset + kKBytes, kRegionAlignment)
+            : 0;
     static constexpr index_t kSOffset =
-        kDoubleBuffer ? 0 : integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
+        kUseDoubleKVLdsBuffer
+            ? 0
+            : integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
     static constexpr index_t kV0Offset = [] {
-        if constexpr(kDoubleBuffer)
+        if constexpr(kUseDoubleKVLdsBuffer)
         {
             constexpr index_t kKRegionEnd = kK1Offset + kKBytes;
             return integer_least_multiple(max(kKRegionEnd, kQBytes), kRegionAlignment);
@@ -887,9 +892,11 @@ struct QrTdmLdsArenaLayout
         }
     }();
     static constexpr index_t kV1Offset =
-        kDoubleBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment) : kV0Offset;
+        kUseDoubleKVLdsBuffer
+            ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
+            : kV0Offset;
     static constexpr index_t kArenaBytes = [] {
-        if constexpr(kDoubleBuffer)
+        if constexpr(kUseDoubleKVLdsBuffer)
         {
             return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
         }
@@ -901,20 +908,21 @@ struct QrTdmLdsArenaLayout
 
     static constexpr bool kHasProductionAlignment =
         kQOffset % kRegionAlignment == 0 && kK0Offset % kRegionAlignment == 0 &&
-        (!kDoubleBuffer || kK1Offset % kRegionAlignment == 0) &&
-        kV0Offset % kRegionAlignment == 0 && (!kDoubleBuffer || kV1Offset % kRegionAlignment == 0);
+        (!kUseDoubleKVLdsBuffer || kK1Offset % kRegionAlignment == 0) &&
+        kV0Offset % kRegionAlignment == 0 &&
+        (!kUseDoubleKVLdsBuffer || kV1Offset % kRegionAlignment == 0);
 
     static_assert(kHasProductionAlignment);
     static_assert(kQOffset + kQBytes <= kArenaBytes);
     static_assert(kV0Offset + kVBytes <= kArenaBytes);
-    static_assert(!kDoubleBuffer || kK0Offset + kKBytes <= kK1Offset);
-    static_assert(!kDoubleBuffer || kK1Offset + kKBytes <= kV0Offset);
-    static_assert(!kDoubleBuffer || kQOffset + kQBytes <= kV0Offset);
-    static_assert(kDoubleBuffer || kK0Offset + kKBytes <= kSOffset);
-    static_assert(kDoubleBuffer || kSOffset + kSBytes <= kV0Offset);
-    static_assert(!kDoubleBuffer || !KPadding::kEnabled ||
+    static_assert(!kUseDoubleKVLdsBuffer || kK0Offset + kKBytes <= kK1Offset);
+    static_assert(!kUseDoubleKVLdsBuffer || kK1Offset + kKBytes <= kV0Offset);
+    static_assert(!kUseDoubleKVLdsBuffer || kQOffset + kQBytes <= kV0Offset);
+    static_assert(kUseDoubleKVLdsBuffer || kK0Offset + kKBytes <= kSOffset);
+    static_assert(kUseDoubleKVLdsBuffer || kSOffset + kSBytes <= kV0Offset);
+    static_assert(!kUseDoubleKVLdsBuffer || !KPadding::kEnabled ||
                   (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
-    static_assert(!kDoubleBuffer || !VPadding::kEnabled ||
+    static_assert(!kUseDoubleKVLdsBuffer || !VPadding::kEnabled ||
                   (kV1Offset - kV0Offset) % VPadding::kIntervalBytes == 0);
     static_assert(kArenaBytes <= 128 * 1024);
     static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * 2 <= 320 * 1024);
@@ -1040,15 +1048,18 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
     constexpr auto d   = make_qr_tdm_reader_distribution<TensorTag, Problem>();
     using Distribution = remove_cvref_t<decltype(d)>;
 
-    constexpr bool IsPrefill         = Shape::kM0 > 64;
+    constexpr bool UseDoubleKVLdsBuffer = Problem::kUseDoubleKVLdsBuffer;
     constexpr index_t Rows           = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
     constexpr index_t Cols           = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
-                                       : TensorTag::Id == 1 ? (IsPrefill ? Shape::kSubQKHeaddim : Shape::kK0)
+                                       : TensorTag::Id == 1
+                                           ? (UseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim
+                                                                  : Shape::kK0)
                                                             : Shape::kN1;
     constexpr index_t WindowRows     = TensorTag::Id == 2 ? Shape::kK1 : Rows;
     constexpr index_t WindowCols     = TensorTag::Id == 1 ? Shape::kK0 : Cols;
     constexpr index_t RowWindows     = TensorTag::Id == 2 ? Rows / WindowRows : 1;
-    constexpr index_t ColWindows     = TensorTag::Id == 1 && IsPrefill ? Cols / WindowCols : 1;
+    constexpr index_t ColWindows =
+        TensorTag::Id == 1 && UseDoubleKVLdsBuffer ? Cols / WindowCols : 1;
     constexpr index_t VectorElements = kQrTdmLdsAccessBytes / sizeof(DataType);
 
     static_assert(numeric_traits<DataType>::PackedSize == 1);

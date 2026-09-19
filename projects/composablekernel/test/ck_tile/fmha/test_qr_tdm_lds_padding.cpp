@@ -78,7 +78,7 @@ using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
                                                false,
                                                ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>;
 
-template <typename DataType, ck_tile::index_t M>
+template <typename DataType, ck_tile::index_t M, bool UseDoubleKVLdsBuffer = false>
 using TestFmhaProblem =
     ck_tile::BlockFmhaPipelineProblem<DataType,
                                       DataType,
@@ -96,7 +96,8 @@ using TestFmhaProblem =
                                       ck_tile::ComposedAttention<0>,
                                       ck_tile::SimplifiedGenericAttentionMask<false>,
                                       false,
-                                      TestFmhaTraits>;
+                                      TestFmhaTraits,
+                                      UseDoubleKVLdsBuffer>;
 
 template <typename BaseProblem, typename QDataType_, typename KDataType_, typename VDataType_>
 struct TestProblemWithDataTypes : BaseProblem
@@ -154,7 +155,7 @@ constexpr bool is_disabled_selection()
            std::is_same_v<typename Selection::V, NoPad>;
 }
 
-using SelectionBaseProblem = TestFmhaProblem<ck_tile::half_t, 128>;
+using SelectionBaseProblem = TestFmhaProblem<ck_tile::half_t, 128, true>;
 using MixedTypeProblem     = TestProblemWithDataTypes<SelectionBaseProblem,
                                                       ck_tile::half_t,
                                                       ck_tile::bf16_t,
@@ -271,8 +272,8 @@ static_assert(!ck_tile::is_detected<PaddedQDescriptor, ck_tile::pk_fp4_t>::value
 template <typename DataType>
 constexpr bool validate_production_geometries()
 {
-    using PrefillProblem = TestFmhaProblem<DataType, 128>;
-    using DecodeProblem  = TestFmhaProblem<DataType, 64>;
+    using PrefillProblem = TestFmhaProblem<DataType, 128, true>;
+    using DecodeProblem  = TestFmhaProblem<DataType, 64, false>;
 
     return ck_tile::detail::validate_qr_tdm_issue_geometry<QTag, PrefillProblem>() &&
            ck_tile::detail::validate_qr_tdm_issue_geometry<KTag, PrefillProblem, true>() &&
@@ -296,7 +297,7 @@ static_assert(validate_production_geometries<ck_tile::half_t>());
 template <typename Layout>
 constexpr bool has_aligned_production_regions()
 {
-    if constexpr(Layout::kDoubleBuffer)
+    if constexpr(Layout::kUseDoubleKVLdsBuffer)
     {
         return Layout::kQOffset % 256 == 0 && Layout::kK0Offset % 256 == 0 &&
                Layout::kK1Offset % 256 == 0 && Layout::kV0Offset % 256 == 0 &&
@@ -314,7 +315,7 @@ struct TestLegacyPhaseLayout
 {
     using Production = ck_tile::detail::QrTdmLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
 
-    static_assert(Production::kDoubleBuffer,
+    static_assert(Production::kUseDoubleKVLdsBuffer,
                   "legacy-phase diagnostics are defined only for the prefill path");
 
     static constexpr ck_tile::index_t kQOffset    = 0;
@@ -337,8 +338,8 @@ struct TestLegacyPhaseLayout
 template <typename DataType>
 constexpr bool validate_arena_layouts()
 {
-    using PrefillProblem = TestFmhaProblem<DataType, 128>;
-    using DecodeProblem  = TestFmhaProblem<DataType, 64>;
+    using PrefillProblem = TestFmhaProblem<DataType, 128, true>;
+    using DecodeProblem  = TestFmhaProblem<DataType, 64, false>;
     using Policy         = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
 
     using PrefillAll = typename Policy::template LdsArenaLayout<PrefillProblem, QKPad, QKPad, VPad>;
@@ -403,10 +404,10 @@ constexpr bool validate_arena_layouts()
 static_assert(validate_arena_layouts<ck_tile::bf16_t>());
 static_assert(validate_arena_layouts<ck_tile::half_t>());
 
-template <typename DataType, ck_tile::index_t M>
+template <typename DataType, ck_tile::index_t M, bool UseDoubleKVLdsBuffer>
 constexpr bool validate_policy_coupling()
 {
-    using Problem  = TestFmhaProblem<DataType, M>;
+    using Problem  = TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer>;
     using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
     using QConfig  = typename Policy::template LdsPaddingConfigQ<Problem>;
     using KConfig  = typename Policy::template LdsPaddingConfigK<Problem>;
@@ -418,7 +419,8 @@ constexpr bool validate_policy_coupling()
     using Pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
 
     constexpr auto q_desc = Policy::template MakeQLdsBlockDescriptor<Problem>();
-    constexpr auto k_desc = Policy::template MakeKLdsBlockDescriptor<Problem, (M > 64)>();
+    constexpr auto k_desc =
+        Policy::template MakeKLdsBlockDescriptor<Problem, UseDoubleKVLdsBuffer>();
     constexpr auto v_desc = Policy::template MakeVLdsBlockDescriptor<Problem>();
 
     static_assert(std::is_same_v<QConfig, NoPad>);
@@ -428,9 +430,13 @@ constexpr bool validate_policy_coupling()
     static_assert(KRaw::kEnabled && KRaw::kPadInterval == 5 && KRaw::kPadAmount == 3);
     static_assert(VRaw::kEnabled && VRaw::kPadInterval == 5 && VRaw::kPadAmount == 7);
     static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 128);
-    static_assert(k_desc.get_element_space_size() * sizeof(DataType) == (M > 64 ? 17392 : 4336));
+    static_assert(k_desc.get_element_space_size() * sizeof(DataType) ==
+                  (UseDoubleKVLdsBuffer ? 17392 : 4336));
     static_assert(v_desc.get_element_space_size() * sizeof(DataType) == 18400);
-    static_assert(Layout::kArenaBytes == (M > 64 ? 71680 : 22784));
+    static_assert(Layout::kArenaBytes ==
+                  (UseDoubleKVLdsBuffer ? 71680 : (M == 128 ? 32768 : 22784)));
+    static_assert(Layout::kUseDoubleKVLdsBuffer == UseDoubleKVLdsBuffer);
+    static_assert(Pipeline::kKLoadOnce == UseDoubleKVLdsBuffer);
     static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
 
     using EnabledQ   = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
@@ -446,22 +452,26 @@ constexpr bool validate_policy_coupling()
 }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx125__)
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 128>());
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
-static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
-static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, false>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, false>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 128, true>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 128, false>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 64, true>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 64, false>());
 #else
 static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128>>>());
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128, true>>>());
 static_assert(is_disabled_selection<
               ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 64>>>());
 static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128>>>());
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128, true>>>());
 static_assert(is_disabled_selection<
               ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 64>>>());
 #endif
 
-using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128>;
+using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128, true>;
 static_assert(
     ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVSTdm<DispatchProblem>>);
 static_assert(
@@ -499,11 +509,13 @@ struct QrTdmRoundTripKernel
     using Layout   = typename Policy::template LdsArenaLayout<Problem, QConfig, KConfig, VConfig>;
 
     static constexpr ck_tile::index_t kBlockSize    = Problem::kBlockSize;
-    static constexpr bool kPrefill                  = Shape::kM0 > 64;
+    static constexpr bool kUseDoubleKVLdsBuffer     = Problem::kUseDoubleKVLdsBuffer;
     static constexpr ck_tile::index_t kRows         = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
     static constexpr ck_tile::index_t kCols         = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
                                                       : TensorTag::Id == 1
-                                                          ? (kPrefill ? Shape::kSubQKHeaddim : Shape::kK0)
+                                                          ? (kUseDoubleKVLdsBuffer
+                                                                 ? Shape::kSubQKHeaddim
+                                                                 : Shape::kK0)
                                                           : Shape::kN1;
     static constexpr ck_tile::index_t kRegionOffset = [] {
         if constexpr(TensorTag::Id == 0)
@@ -548,7 +560,7 @@ struct QrTdmRoundTripKernel
                                              {0, 0},
                                              detail::make_qr_tdm_writer_distribution < TensorTag,
                                              Problem,
-                                             TensorTag::Id == 1 && kPrefill > ());
+                                             TensorTag::Id == 1 && kUseDoubleKVLdsBuffer > ());
 
         TDMConfig config;
         using Raw                      = detail::EncodedTdmPadding<Padding>;
@@ -586,7 +598,8 @@ struct QrTdmRoundTripKernel
                 make_tuple(kCols, 1),
                 number<8>{},
                 number<1>{});
-            constexpr index_t Windows = kPrefill ? Shape::kQKHeaddim / Shape::kK0 : 1;
+            constexpr index_t Windows =
+                kUseDoubleKVLdsBuffer ? Shape::kQKHeaddim / Shape::kK0 : 1;
             static_for<0, Windows, 1>{}([&](auto i) {
                 constexpr auto lengths = make_tuple(number<Shape::kN0>{}, number<Shape::kK0>{});
                 const array<index_t, 2> origin{0, i * Shape::kK0};
@@ -709,7 +722,7 @@ bool run_qr_tdm_round_trip()
         return false;
     }
 
-    if constexpr(Kernel0::kPrefill && TensorTag::Id != 0)
+    if constexpr(Kernel0::kUseDoubleKVLdsBuffer && TensorTag::Id != 0)
     {
         using Kernel1 = QrTdmRoundTripKernel<TensorTag, Problem, QConfig, KConfig, VConfig, 1>;
         output_device.SetZero();
@@ -732,7 +745,7 @@ bool run_qr_tdm_round_trip()
 template <typename DataType, ck_tile::index_t M>
 bool run_round_trip_matrix()
 {
-    using Problem = TestFmhaProblem<DataType, M>;
+    using Problem = TestFmhaProblem<DataType, M, (M > 64)>;
 
     return run_qr_tdm_round_trip<QTag, Problem, NoPad, NoPad, NoPad>() &&
            run_qr_tdm_round_trip<KTag, Problem, NoPad, NoPad, NoPad>() &&

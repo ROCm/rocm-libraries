@@ -39,7 +39,7 @@ struct BlockFmhaPipelineQRKSVSTdm
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    static constexpr bool kKLoadOnce = BlockFmhaShape::kM0 > 64;
+    static constexpr bool kKLoadOnce = Problem::kUseDoubleKVLdsBuffer;
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -165,7 +165,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         return p_tile;
     }
 
-    // Decode (single shared-memory buffer)
+    // Single K/V LDS buffer path.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -173,7 +173,7 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
-    run_decode(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
+    run_single_kv_lds_buffer(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
                const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
                const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
                const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
@@ -809,7 +809,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         return o_acc;
     }
 
-    // Prefill, double lds
+    // Double K/V LDS buffer path.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -817,7 +817,7 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
-    run_prefill(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
+    run_double_kv_lds_buffer(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
                 const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
                 const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
                 const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
@@ -846,7 +846,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             "wrong!");
 
         // Hybrid loaders: Q/K via TDM, V via async_load + ds_load_tr (same
-        // as the single-buffer overload above; see notes there).
+        // as the single K/V LDS buffer overload above; see notes there).
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -1500,16 +1500,28 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         void* smem_ptr,
                                         float sink_v) const
     {
-        return run_decode(q_dram_block_window_tmp,
-                          k_dram_block_window_tmp,
-                          v_dram_block_window_tmp,
-                          bias_dram_block_window_tmp,
-                          lse_acc_dram_window_tmp,
-                          mask,
-                          position_encoding,
-                          scale_s,
-                          smem_ptr,
-                          sink_v);
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
+            return run_double_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_ptr,
+                                            sink_v);
+        else
+            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_ptr,
+                                            sink_v);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -1529,16 +1541,28 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         float sink_v,
                                         void* smem_arena) const
     {
-        return run_prefill(q_dram_block_window_tmp,
-                           k_dram_block_window_tmp,
-                           v_dram_block_window_tmp,
-                           bias_dram_block_window_tmp,
-                           lse_acc_dram_window_tmp,
-                           mask,
-                           position_encoding,
-                           scale_s,
-                           smem_arena,
-                           sink_v);
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
+            return run_double_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_arena,
+                                            sink_v);
+        else
+            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_arena,
+                                            sink_v);
     }
 };
 

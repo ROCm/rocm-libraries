@@ -127,7 +127,8 @@ using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
     fmha_variant,
     fmha_mask,
     {F_trload},
-    fmha_traits>;
+    fmha_traits,
+    {F_use_double_kv_lds_buffer}>;
 
 using fmha_pipeline = {F_pipeline}<
     fmha_pipeline_problem>;
@@ -407,6 +408,7 @@ class FmhaFwdPipeline:
     F_trload: str  # true/false
     F_sink: str  # true/false
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    F_use_double_kv_lds_buffer: str = "f"  # true/false
 
     @property
     def name(self) -> str:
@@ -716,6 +718,9 @@ class FmhaFwdKernel:
             F_mask=get_mask_cpp_type(self.F_pipeline.F_mask),
             F_mode=MODE_MAP[self.F_mode],
             F_trload=BOOL_MAP[self.F_pipeline.F_trload],
+            F_use_double_kv_lds_buffer=BOOL_MAP[
+                self.F_pipeline.F_use_double_kv_lds_buffer
+            ],
             F_pipeline=PIPELINE_MAP[self.F_pipeline.tag],
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
@@ -1389,8 +1394,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ["t", "f"],
                     ["t", "f"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
             # qr_tdm (e.g., bias, dropout, skip, d!=128).
