@@ -106,3 +106,30 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
     ctx.setGemmTileConfig(cfg);
     EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
 }
+
+// The lookup key must stay unique and gfx1250v0 must keep mirroring gfx1250; no numbers pinned.
+TEST(HWModel, Gfx1250WaitHideFormTable) {
+    const HWModel& hw = hwModelForArch(kGfx1250);
+
+    // Two rows sharing a {costLatency, dstVgprs} key would make the lookup order-dependent.
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
+        for (size_t j = i + 1; j < hw.waitHide.forms.size(); ++j) {
+            const auto& a = hw.waitHide.forms[i];
+            const auto& b = hw.waitHide.forms[j];
+            EXPECT_FALSE(a.costLatency == b.costLatency && a.dstVgprs == b.dstVgprs)
+                << "duplicate key: latency " << a.costLatency << " dst " << a.dstVgprs;
+        }
+    }
+
+    // A deliberate alias, not an accidental fallthrough.
+    const HWModel& v0 = hwModelForArch(kGfx1250v0);
+    ASSERT_EQ(v0.waitHide.forms.size(), hw.waitHide.forms.size());
+    EXPECT_EQ(v0.waitHide.vmVsrcLds, hw.waitHide.vmVsrcLds);
+    EXPECT_EQ(v0.waitHide.vmVsrcTex, hw.waitHide.vmVsrcTex);
+    for (size_t i = 0; i < hw.waitHide.forms.size(); ++i) {
+        EXPECT_EQ(v0.waitHide.forms[i].costLatency, hw.waitHide.forms[i].costLatency);
+        EXPECT_EQ(v0.waitHide.forms[i].dstVgprs, hw.waitHide.forms[i].dstVgprs);
+        EXPECT_EQ(v0.waitHide.forms[i].xdlVaVdst, hw.waitHide.forms[i].xdlVaVdst);
+        EXPECT_EQ(v0.waitHide.forms[i].csmaccVaVdst, hw.waitHide.forms[i].csmaccVaVdst);
+    }
+}

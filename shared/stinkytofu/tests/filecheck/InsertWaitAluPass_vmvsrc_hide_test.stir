@@ -1,0 +1,132 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+#
+# Enough later same-class reads after an in-flight read satisfy its vm_vsrc WAR wait, so
+# none is emitted. The counts come from the arch's WaitHide entries.
+
+#===----------------------------------------------------------------------===#
+# A TEX read with 11 later TEX reads: hidden, no wait before the op overwriting v0.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_vmtex_hidden_11_no_wait
+# CHECK: buffer_load_b32
+# CHECK-NOT: vm_vsrc
+# CHECK: v_mov_b32
+
+st.func @gfx1250_vmtex_hidden_11_no_wait() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+  v111 = "st.buffer_load_b32"(v11) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# 10 is one short. The field is 3 bits, so the emitted wait saturates at 6.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_vmtex_not_hidden_10_wait
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 6
+# CHECK: v_mov_b32
+
+st.func @gfx1250_vmtex_not_hidden_10_wait() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# Same for LDS, which reads its own count.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_lds_hidden_11_no_wait
+# CHECK: ds_load_b32
+# CHECK-NOT: vm_vsrc
+# CHECK: v_mov_b32
+
+st.func @gfx1250_lds_hidden_11_no_wait() {
+^entry:
+  v100 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v101 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v4) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v5) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v7) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v9) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v111 = "st.ds_load_b32"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# The other class never counts: a TEX read with 11 later LDS reads still has 0 TEX
+# followers, so it drains fully.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_tex_lds_between_dont_count
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @gfx1250_tex_lds_between_dont_count() {
+^entry:
+  v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+  v101 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v102 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v103 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v104 = "st.ds_load_b32"(v4) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v105 = "st.ds_load_b32"(v5) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v106 = "st.ds_load_b32"(v6) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v107 = "st.ds_load_b32"(v7) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v108 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v109 = "st.ds_load_b32"(v9) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v110 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v111 = "st.ds_load_b32"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#===----------------------------------------------------------------------===#
+# A flat_* belongs to both classes, so the TEX count alone hides it even with no LDS
+# followers.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_flat_hidden_by_tex_either_fifo
+# CHECK: flat_load_b32
+# CHECK-NOT: vm_vsrc
+# CHECK: v_mov_b32
+
+st.func @gfx1250_flat_hidden_by_tex_either_fifo() {
+^entry:
+  v100 = "st.flat_load_b32"(v[0:1], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  v101 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v102 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v103 = "st.buffer_load_b32"(v4) { issueCycles = 1, latencyCycles = 100 }
+  v104 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+  v105 = "st.buffer_load_b32"(v6) { issueCycles = 1, latencyCycles = 100 }
+  v106 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
+  v107 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
+  v108 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
+  v109 = "st.buffer_load_b32"(v12) { issueCycles = 1, latencyCycles = 100 }
+  v110 = "st.buffer_load_b32"(v13) { issueCycles = 1, latencyCycles = 100 }
+  v111 = "st.buffer_load_b32"(v14) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
+}
