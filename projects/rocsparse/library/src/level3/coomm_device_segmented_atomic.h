@@ -40,7 +40,7 @@ namespace rocsparse
                                                               int64_t              nnz,
                                                               I                    m,
                                                               I                    n,
-                                                              I                    nstart,
+                                                              I                    col_offset,
                                                               T                    alpha,
                                                               const I*             coo_row_ind,
                                                               const I*             coo_col_ind,
@@ -62,8 +62,7 @@ namespace rocsparse
         __shared__ I shared_row[WF_SIZE];
         __shared__ T shared_val[COLS][WF_SIZE];
 
-        const I       col_offset = nstart + COLS * hipBlockIdx_y;
-        const int64_t offset     = hipBlockIdx_x * LOOPS * WF_SIZE;
+        const int64_t offset = hipBlockIdx_x * LOOPS * WF_SIZE;
 
         if(offset >= nnz)
         {

@@ -369,7 +369,9 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coommtn_atomic_main<256, false, T>),
-                    dim3((nnz - 1) / 256 + 1, n, get_batch_grid_size<I>(batch_count_C)),
+                    dim3((nnz - 1) / 256 + 1,
+                         get_grid_size<I>(n, max_batch_grid_size),
+                         get_batch_grid_size<I>(batch_count_C)),
                     dim3(256),
                     0,
                     handle->stream,
@@ -402,7 +404,9 @@ namespace rocsparse
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coommtn_atomic_main<256, true, T>),
-                    dim3((nnz - 1) / 256 + 1, n, get_batch_grid_size<I>(batch_count_C)),
+                    dim3((nnz - 1) / 256 + 1,
+                         get_grid_size<I>(n, max_batch_grid_size),
+                         get_batch_grid_size<I>(batch_count_C)),
                     dim3(256),
                     0,
                     handle->stream,
