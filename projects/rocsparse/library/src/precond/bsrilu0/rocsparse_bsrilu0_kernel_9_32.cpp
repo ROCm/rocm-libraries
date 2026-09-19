@@ -57,7 +57,20 @@ namespace rocsparse
         static constexpr uint32_t DIMY = BLOCKSIZE / BBDIM;
 
         // Current row this wavefront is working on
-        J row = map[blockIdx.x];
+        const J idx = blockIdx.x;
+
+        //
+        // Do not run out of bounds. The row map is indexed by the block id, and
+        // bsrilu0_kernel_general is the only kernel in the family that checked
+        // it; the CSR kernels all do. Cheap, and the only thing standing between
+        // a grid rounded up past mb and a read outside the map allocation.
+        //
+        if(idx >= mb)
+        {
+            return;
+        }
+
+        J row = map[idx];
 
         // Diagonal entry point of the current row
         I row_diag = bsr_diag_ind[row];
