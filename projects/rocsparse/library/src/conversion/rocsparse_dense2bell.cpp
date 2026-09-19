@@ -62,13 +62,17 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
 
     const int64_t mb = (m + ell_block_size - 1) / ell_block_size;
 
+    const int64_t num_blocks_x
+        = rocsparse::min(mb, static_cast<int64_t>(handle->properties.maxGridSize[0]));
+
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_nnz_kernel<256>),
-                                       dim3(mb),
+                                       dim3(num_blocks_x),
                                        dim3(256),
                                        0,
                                        stream,
                                        m,
                                        n,
+                                       mb,
                                        A,
                                        ld,
                                        order,
@@ -161,13 +165,17 @@ rocsparse_status rocsparse::dense2bell_template(rocsparse_handle          handle
     // fill kernel skips at the matrix boundary) are well defined.
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(bell_val, 0, sizeof(T) * m * ell_cols, stream));
 
+    const int64_t num_blocks_x
+        = rocsparse::min(mb, static_cast<int64_t>(handle->properties.maxGridSize[0]));
+
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_fill_kernel<256>),
-                                       dim3(mb),
+                                       dim3(num_blocks_x),
                                        dim3(256),
                                        0,
                                        stream,
                                        m,
                                        n,
+                                       mb,
                                        A,
                                        ld,
                                        order,
