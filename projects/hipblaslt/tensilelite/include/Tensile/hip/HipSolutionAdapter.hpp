@@ -55,6 +55,10 @@ namespace TensileLite
 
             void codeObjectDir(std::string codeObjectDir);
 
+            // Record the normalized helper-code-object location before a
+            // primary code-object load can need module-reload recovery.
+            void setLazyLoadingContext(std::string architecture, std::string codeObjectDir);
+
             hipError_t loadCodeObjectFile(std::string const& path);
 
             hipError_t initializeLazyLoading(std::string architecture, std::string codeObjectDir);
@@ -110,6 +114,7 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 
             std::mutex m_access;
@@ -150,4 +155,3 @@ namespace TensileLite
         std::ostream& operator<<(std::ostream& stream, std::shared_ptr<SolutionAdapter> const& ptr);
     } // namespace hip
 } // namespace TensileLite
-
