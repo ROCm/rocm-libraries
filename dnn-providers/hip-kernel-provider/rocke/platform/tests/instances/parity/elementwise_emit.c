@@ -68,6 +68,18 @@ static int make_spec(int idx, rocke_elementwise_spec_t* spec)
         spec->block_size = 256;
         spec->vec = 8;
         break;
+    case 8:
+        spec->op = "tanh";
+        spec->dtype = "f16";
+        spec->block_size = 256;
+        spec->vec = 8;
+        break;
+    case 9:
+        spec->op = "tanh";
+        spec->dtype = "bf16";
+        spec->block_size = 256;
+        spec->vec = 8;
+        break;
     default:
         return -1;
     }
