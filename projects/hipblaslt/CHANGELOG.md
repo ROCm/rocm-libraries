@@ -66,6 +66,15 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
+* `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
+  dirty-buffer check for the handle's inter-workgroup flag buffers, which their
+  kernels must leave at zero (`1`, `on` or `true` to enable; anything else
+  disables). It scans the whole `Synchronizer` buffer used by GSU
+  MultipleBufferSingleKernel and amaxD, and the Stream-K flag block bound to the
+  launch's stream. Covers `rocblaslt_matmul_impl` only. Unlike
+  `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
+  device-to-host copy, so this is single-threaded debugging use only, not for
+  concurrent-stream workloads.
 * `HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT`,
   `hipblaslt_ext::GemmPreference::setUniformSummationOrder`, and
   `hipblasLtSetUniformSummationOrder` / `hipblasLtGetUniformSummationOrder`

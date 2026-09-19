@@ -1,0 +1,209 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "SynchronizerValidator.hpp"
+
+#include "ResultReporter.hpp"
+
+#include <Tensile/hip/HipUtils.hpp>
+
+#include <cassert>
+#include <sstream>
+
+namespace TensileLite
+{
+    namespace Client
+    {
+        bool scanSynchronizerResidue(uint8_t const* host, size_t bytes, SynchronizerResidue& out)
+        {
+            // The buffer is declared with the alpha type but every consumer
+            // writes 32-bit counters, so an int offset names the counter left
+            // set. Callers guarantee an int-sized-or-wider alpha, so the byte
+            // count always divides evenly.
+            assert(bytes % sizeof(uint32_t) == 0);
+            size_t const    ints    = bytes / sizeof(uint32_t);
+            uint32_t const* v       = reinterpret_cast<uint32_t const*>(host);
+            size_t          nonzero = 0;
+            size_t          first   = ints;
+            for(size_t i = 0; i < ints; i++)
+            {
+                if(v[i] != 0)
+                {
+                    if(nonzero == 0)
+                        first = i;
+                    nonzero++;
+                }
+            }
+
+            if(nonzero == 0)
+                return false;
+
+            out.totalInts   = ints;
+            out.nonzeroInts = nonzero;
+            out.firstInt    = first;
+
+            return true;
+        }
+
+        SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
+            : m_enabled(args["check-synchronizer"].as<bool>())
+        {
+        }
+
+        void SynchronizerValidator::preProblem(ContractionProblem* const problem)
+        {
+            m_problem = problem;
+        }
+
+        void SynchronizerValidator::preSolution(ContractionSolution* const solution)
+        {
+            m_dirtyInSolution = false;
+            // Mirrors the three conditions under which the dispatcher appends
+            // the pointer: Flags in singleCallArgs for StreamK, the
+            // dstD/Synchronizer block for MBSK, and AmaxSync for amaxD. Any
+            // other solution is never handed the buffer, so its scan could only
+            // come back clean. Not reproduced here is sk.reduction == parallel,
+            // which also passes a null Flags but needs a Problem and Hardware to
+            // evaluate; scanning it reports nothing.
+            //
+            // An unknown solution is scanned rather than skipped.
+            if(solution == nullptr)
+            {
+                m_usesSynchronizer = true;
+                return;
+            }
+
+            auto const& sm      = solution->sizeMapping;
+            bool const  streamK = sm.streamK > 0 && sm.streamKAtomic == 0
+                                 && sm.streamKForceDPOnly == 0;
+            bool const mbsk    = sm.globalAccumulation == 3;
+            m_usesSynchronizer = streamK || mbsk || solution->problemType.outputAmaxD;
+        }
+
+        void SynchronizerValidator::postSolution()
+        {
+            if(m_dirtyInSolution)
+            {
+                m_errorsReported++;
+                // Overrides the reference verdict so the CSV and library logic
+                // fed from it cannot crown a solution that corrupts the buffer.
+                m_reporter->report(ResultKey::Validation, "FAILED");
+            }
+
+            m_dirtyInSolution = false;
+        }
+
+        void SynchronizerValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
+                                                    TimingEvents const&            startEvents,
+                                                    TimingEvents const&            stopEvents)
+        {
+            checkInputs(inputs, "warmup");
+        }
+
+        void SynchronizerValidator::checkInputs(std::shared_ptr<ProblemInputs> inputs,
+                                                char const*                    stage)
+        {
+            if(!active() || m_problem == nullptr || inputs == nullptr)
+                return;
+
+            if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+            {
+                auto const& result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
+                for(size_t j = 0; j < problems->gemms.size(); j++)
+                {
+                    if(!checkBuffer(problems->gemms[j], result.grouped[j].Synchronizer, stage, j))
+                        m_dirtyInSolution = true;
+                }
+            }
+            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+            {
+                auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
+                if(!checkBuffer(*problem, result.Synchronizer, stage, 0))
+                    m_dirtyInSolution = true;
+            }
+            else
+            {
+                throw std::runtime_error("Failed to cast to any ContractionProblem.");
+            }
+        }
+
+        SynchronizerValidator::~SynchronizerValidator()
+        {
+            if(m_staging != nullptr)
+                static_cast<void>(hipHostFree(m_staging));
+        }
+
+        uint8_t* SynchronizerValidator::stagingBuffer(size_t bytes)
+        {
+            if(m_stagingBytes >= bytes)
+                return m_staging;
+
+            uint8_t* old   = m_staging;
+            m_staging      = nullptr;
+            m_stagingBytes = 0;
+            if(old != nullptr)
+                HIP_CHECK_EXC(hipHostFree(old));
+            HIP_CHECK_EXC(hipHostMalloc(&m_staging, bytes));
+            m_stagingBytes = bytes;
+
+            return m_staging;
+        }
+
+        bool SynchronizerValidator::checkBuffer(ContractionProblemGemm const& problem,
+                                                void*                         deviceSynchronizer,
+                                                char const*                   stage,
+                                                size_t                        gemmIdx)
+        {
+            if(deviceSynchronizer == nullptr)
+                return true;
+
+            auto const&  tensor = problem.tensors()[ContractionProblemGemm::TENSOR::Synchronizer];
+            size_t const bytes  = tensor.totalAllocatedBytes();
+            if(bytes == 0)
+                return true;
+
+            // A narrower-than-int alpha leaves the tail of the kernel's range
+            // outside the allocation, where residue is unreadable rather than
+            // merely unreported.
+            if(bytes < tensor.totalAllocatedElements() * sizeof(int))
+            {
+                // Skipped, not failed: a limit of the checker, not a kernel that
+                // failed to self-clean. Warned once so it cannot pass unnoticed.
+                if(!m_narrowAlphaWarned)
+                {
+                    m_narrowAlphaWarned = true;
+                    std::ostringstream msg;
+                    msg << "Synchronizer is declared with a type narrower than int (" << bytes
+                        << " bytes for " << tensor.totalAllocatedElements()
+                        << " elements); --check-synchronizer cannot cover the range the kernel "
+                           "uses and is skipped for these problems.\n";
+                    m_reporter->log(LogLevel::Error, msg.str());
+                }
+                return true;
+            }
+
+            // Once per solution, so the copy is hot: pinned staging avoids the
+            // pageable bounce buffer.
+            uint8_t* host = stagingBuffer(bytes);
+            HIP_CHECK_EXC(hipMemcpy(host, deviceSynchronizer, bytes, hipMemcpyDeviceToHost));
+
+            SynchronizerResidue residue;
+            if(!scanSynchronizerResidue(host, bytes, residue))
+                return true;
+
+            std::ostringstream msg;
+            msg << "Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
+                << "): " << residue.nonzeroInts << "/" << residue.totalInts
+                << " ints nonzero, first at int offset " << residue.firstInt
+                << " -- the kernel did not reset the shared Synchronizer buffer on exit.\n";
+            m_reporter->log(LogLevel::Error, msg.str());
+
+            // resetOutput skips the Synchronizer (it is not an output tensor),
+            // so clear the residue here to report it once rather than for every
+            // solution that follows.
+            HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
+
+            return false;
+        }
+    } // namespace Client
+} // namespace TensileLite
