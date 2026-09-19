@@ -460,7 +460,6 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     v_lane = b.div(w_tid, b.const_i32(WTK))
     warp_k_start = b.mul(k_lane, b.const_i32(VPT))
     gv_start = b.add(b.mul(wid, b.const_i32(WTV)), v_lane)
-    k_lane0 = b.mul(v_lane, b.const_i32(WTK))  # first lane of this WTK group
 
     read_pool = b.global_load_i32(RIDX, b_i)
     write_pool = b.global_load_i32(WIDX, b_i)

@@ -88,15 +88,22 @@ def _sha_for(build, flavor):
 
 def _build_doc():
     doc = {"schema": "gdn_decode_gfx950.ir_golden_sha256/v1", "flavors": {}}
+    failures = []
     for flavor in _FLAVORS:
         cases = {}
         for cid, build in _cases().items():
             try:
                 sha, nbytes = _sha_for(build, flavor)
-                cases[cid] = {"sha256": sha, "bytes": nbytes}
             except Exception as exc:  # pragma: no cover - diagnostic only
-                cases[cid] = {"error": str(exc)[:160]}
+                failures.append(f"{flavor}/{cid}: {exc}")
+                continue
+            cases[cid] = {"sha256": sha, "bytes": nbytes}
         doc["flavors"][flavor] = {"cases": cases}
+    if failures:
+        raise RuntimeError(
+            "refusing to write golden fixture with lowering failures:\n  "
+            + "\n  ".join(failures)
+        )
     return doc
 
 
@@ -112,8 +119,10 @@ def test_gdn_decode_ir_matches_golden():
         pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
     drift = []
     for cid, build in _cases().items():
-        want = recorded["cases"].get(cid, {}).get("sha256")
-        if want is None:
+        entry = recorded["cases"].get(cid, {})
+        want = entry.get("sha256")
+        if not want:
+            drift.append(f"{cid}: no sha256 recorded ({entry})")
             continue
         got, _ = _sha_for(build, flavor)
         if got != want:
@@ -135,10 +144,74 @@ def test_every_shipped_configuration_is_recorded():
     recorded = golden.get("flavors", {}).get(flavor)
     if not recorded:
         pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
-    missing = sorted(set(_cases()) - set(recorded["cases"]))
-    assert not missing, f"configurations with no golden entry: {missing}"
+    missing = sorted(
+        cid for cid in _cases() if not recorded["cases"].get(cid, {}).get("sha256")
+    )
+    assert not missing, f"configurations without a SHA-256: {missing}"
 
 
+
+def test_golden_ir_check_rejects_entry_without_sha256(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object()})
+    fixture = tmp_path / "gdn_decode_gfx950_ir_sha256.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "flavors": {
+                    _current_flavor(): {
+                        "cases": {
+                            cid: {"error": "synthetic lowering failure"}
+                            for cid in _cases()
+                        }
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_GOLDEN", fixture)
+
+    with pytest.raises(AssertionError, match="no sha256 recorded"):
+        test_gdn_decode_ir_matches_golden()
+
+
+def test_config_coverage_rejects_entry_without_sha256(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object()})
+    fixture = tmp_path / "gdn_decode_gfx950_ir_sha256.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "flavors": {
+                    _current_flavor(): {
+                        "cases": {
+                            cid: {"error": "synthetic lowering failure"}
+                            for cid in _cases()
+                        }
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_GOLDEN", fixture)
+
+    with pytest.raises(AssertionError, match="without a SHA-256"):
+        test_every_shipped_configuration_is_recorded()
+
+
+def test_build_doc_refuses_lowering_failure(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object()})
+    def fail_lowering(*_):
+        raise RuntimeError("synthetic lowering failure")
+
+    monkeypatch.setattr(sys.modules[__name__], "_sha_for", fail_lowering)
+
+    with pytest.raises(RuntimeError, match="refusing to write"):
+        _build_doc()
 if __name__ == "__main__":
     if "--write" in sys.argv:
         _GOLDEN.parent.mkdir(parents=True, exist_ok=True)
