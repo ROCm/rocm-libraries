@@ -143,7 +143,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_fill_numeric_multipass_kernel<CSRGEAM_DIM, 32>),
-                dim3((m - 1) / (CSRGEAM_DIM / 32) + 1),
+                dim3(rocsparse::get_grid_size(
+                    m, CSRGEAM_DIM / 32, handle->properties.maxGridSize[0])),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
@@ -170,7 +171,8 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrgeam_fill_numeric_multipass_kernel<CSRGEAM_DIM, 64>),
-                dim3((m - 1) / (CSRGEAM_DIM / 64) + 1),
+                dim3(rocsparse::get_grid_size(
+                    m, CSRGEAM_DIM / 64, handle->properties.maxGridSize[0])),
                 dim3(CSRGEAM_DIM),
                 0,
                 stream,
