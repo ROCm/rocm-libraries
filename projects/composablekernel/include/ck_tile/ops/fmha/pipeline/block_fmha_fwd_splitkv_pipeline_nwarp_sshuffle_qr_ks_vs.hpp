@@ -258,7 +258,15 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
         clear_tile(o_acc);
         if((__builtin_isinf_sign(sink_v) >= 0) && i_split == 0)
         {
-            set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E)});
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E) * scale_s});
+            else
+                set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E)});
+#else
+            set_tile(m, SMPLComputeDataType{sink_v});
+#endif
             set_tile(l, SMPLComputeDataType{1.0f});
         }
         else
@@ -295,9 +303,48 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    if(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0)
+                    // The sink logit must enter the combined softmax denominator
+                    // exactly once. Split 0 owns it only while some split has work of
+                    // its own: if split 0's tile range is empty, the first non-empty
+                    // split seeds m/l with the sink instead, because it looks one
+                    // split back and sees an empty predecessor. Publishing a
+                    // sink-bearing lse_acc here as well would count exp(sink) twice.
+                    bool keeps_sink = (__builtin_isinf_sign(sink_v) >= 0) && i_split == 0;
+                    if(keeps_sink && 1 < num_splits)
                     {
-                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                        // Re-query the range over the whole key axis (num_splits=1).
+                        const auto full_range = [&mask, &q_origin]() {
+                            if constexpr(kHasSink)
+                                return mask.GetSinkTileRangeAlongX(
+                                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
+                            else
+                            {
+                                auto [start, end] = mask.GetTileRangeAlongX(
+                                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
+                                return ck_tile::make_tuple(0, start, end);
+                            }
+                        }();
+                        // Keep the sink here only when no split at all has work.
+                        keeps_sink = (full_range.get(ck_tile::number<0>{}) <= 0 &&
+                                      full_range.get(ck_tile::number<2>{}) <=
+                                          full_range.get(ck_tile::number<1>{}));
+                    }
+                    if(keeps_sink)
+                    {
+                        // Mirror the main-path lse formula below for the state this
+                        // publishes (m = sink seed, l = 1). Under soft cap the
+                        // score already carries scale_s, so m is in final-logit
+                        // units and dividing by C_LOG2E leaves sink_v alone; the
+                        // static_assert above makes soft cap imply NO_BIAS, and
+                        // forbids it entirely when FAST_EXP2 is off.
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                        if constexpr(kHasLogitsSoftCap)
+                            set_tile(lse_acc, SMPLComputeDataType{sink_v});
+                        else
+                            set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+#else
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v});
+#endif
                     }
                     else
                     {
@@ -322,7 +369,16 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
                 q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, num_splits, i_split - 1);
             if((__builtin_isinf_sign(sink_v) >= 0) && start >= end)
             {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    set_tile(m,
+                             SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E) * scale_s});
+                else
+                    set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E)});
+#else
                 set_tile(m, SMPLComputeDataType{sink_v});
+#endif
                 set_tile(l, SMPLComputeDataType{1.0f});
             }
         }
