@@ -539,16 +539,16 @@ class ApplyPatchTest(unittest.TestCase):
         content = (self.repo / "file.txt").read_text()
         self.assertIn("line2 modified", content)
 
-    @pytest.mark.xfail(
-        reason="BUG: applying a patch a second time raises RuntimeError; there is no already-synced guard and no --3way flag so it errors out instead of being a no-op",
-        strict=True,
-    )
-    def test_applying_same_patch_twice_raises(self):
+    def test_applying_same_patch_twice_is_a_noop(self):
         sut._apply_patch(self.repo, self.patch_file)
         _git(["add", "."], cwd=self.repo)
         _git(["commit", "-m", "apply patch"], cwd=self.repo)
 
-        sut._apply_patch(self.repo, self.patch_file)  # should be a no-op, not raise
+        sut._apply_patch(self.repo, self.patch_file)
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=self.repo
+        ).decode()
+        self.assertEqual(status, "")
 
     def test_patch_failure_raises_runtime_error(self):
         # Corrupt the working tree so the patch cannot apply cleanly.
