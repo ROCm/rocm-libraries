@@ -215,15 +215,15 @@ hand-written code.
 | Descriptor | Purpose | Exists in hipDNN today as |
 |---|---|---|
 | **KMD** (metadata) | One schema per engine, shared across every kernel it owns: the variant fields each kernel carries, each with a type and an optional default (tile size, block size, and the like). Each kernel supplies concrete values, and that completed tuple is the kernel's unique key in the catalog, so the field set must uniquely describe every kernel variant. The heuristic ranks the catalog on it, and matchers read the fields as `$kernel.<field>` | The compile-time template and tuning parameters that distinguish one kernel variant from another |
-| **UHD** (heuristic) | One kernel-selection model, one per engine. Given the kernels that fit a graph, the engine's **catalog** for that graph, it ranks them on kernel metadata, problem shape, and device details, and picks the best one for the problem | A ranking model living inside an engine's dispatcher |
-| **UED** (engine) | One engine, carrying no logic of its own: a stable identity, the **structural pattern** naming the graph shape it serves and the symbols matching it publishes, the KMD fields it exposes as knobs, and its behavior and numerical notes. It **names** the engine's one heuristic (UHD) and one metadata schema (KMD) by id, because a single selector ranks all of the engine's kernels over one feature space. An engine is a named group of kernels | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
+| **UHD** (heuristic) | A kernel-selection model. Given the kernels that fit a graph, the engine's **catalog** for that graph, it ranks them on kernel metadata, problem shape, and device details, and picks the best one for the problem. An engine carries up to three role-scoped UHDs — kernel-catalog ranking, a cheap engine-level performance estimate, and a future candidate generator — each mapped by architecture ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md), [RFC 0019](0019_UniversalHeuristicDescriptor.md)) | A ranking model living inside an engine's dispatcher |
+| **UED** (engine) | One engine, carrying no logic of its own: a stable identity, the **structural pattern** naming the graph shape it serves and the symbols matching it publishes, the KMD fields it exposes as knobs, and its behavior and numerical notes. It **names** the engine's role-scoped heuristics (UHDs) and one metadata schema (KMD) by id, arch-keyed, because these selectors rank the engine's kernels over one feature space. An engine is a named group of kernels | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UMD** (match) | One applicability check over the graph, device properties, and kernel metadata, written as a declarative criteria expression over the symbols the engine's pattern bound; a pack's matcher **set** is its full applicability test, and what survives it is the engine's catalog for that graph | The provider's entire applicability implementation: graph-level, device-level, and per-kernel checks a hand-written `isApplicable` performs before a kernel is a candidate |
 | **UDD** (dispatch) | How to invoke a kernel: the dispatch application binary interface (ABI), meaning argument binding and ordering, grid, block, shared memory, and workspace | The bespoke launch and argument-wiring code |
 | **UKD** (kernel) | One launchable kernel, carrying no logic of its own: a source, either a compiled kernel or the details for building it ahead of time (AOT), plus concrete values for the fields the engine's KMD declares. It inherits everything else, matchers and dispatch from its pack, heuristic and metadata schema from that pack's engine, and it applies only when **all** of its pack's matchers pass | The compiled kernel module (code object) and its hand-tracked build config |
 | **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel registration and launch scaffolding |
 
 A UED is 1:1 with a hipDNN engine, so "the engine" and "the UED" name the same unit going
-forward. An engine serves a scoped family of kernels, tight enough that one heuristic and
+forward. An engine serves a scoped family of kernels, tight enough that its heuristics and
 one metadata schema cover the kernels it owns. Legacy engines are not scoped this way
 today; mapping UED onto the existing registration restructures how engines are organized,
 not merely describing current practice.
@@ -296,7 +296,7 @@ until something needs the catalog ranked. What the provider keeps up front is on
 descriptor inventory: the ids, kinds, and locations that say what exists
 ([Section 8](#8-end-to-end-flow) has the exact order and what each step loads).
 
-Each UED becomes an engine that names its heuristic (UHD) and metadata schema (KMD) and
+Each UED becomes an engine that names its heuristics (UHDs) and metadata schema (KMD) and
 carries the pattern its kernels match; the KDPs naming it contribute their criteria,
 dispatch, and kernels. Deciding which kernels apply to a graph is two cheap stages: the
 engine's pattern binds the graph once, then each pack's criteria run over that binding,
@@ -446,7 +446,7 @@ each format are specified in that format's follow-up RFC.
   "id":     "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // stable, unique; referenced by the KDP
   "name":   "rocke:example_attention_fwd",           // globally-unique, scoped `namespace:local`
   "sdk_version": "1.0",   // hipDNN graph schema version this pattern was authored against
-  "heuristic":   "ae896b07-80cd-473c-b3f4-6a8892998519",  // optional: one UHD, the selector for this engine's kernels
+  "sort_kernel_catalog": {"default": "ae896b07-80cd-473c-b3f4-6a8892998519"},  // optional: ranks this engine's kernels, arch-keyed (RFC 0020 §4.6)
   "metadata":    "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD: the variant schema this engine's kernels fill
   "graph_match": {        // how this engine matches a graph and binds the symbols every consumer reads
     "nodes": [            // the declarative arm: the graph this engine serves
@@ -530,7 +530,7 @@ solvers to compute a workspace default.
 ```jsonc
 {
   "version": "1.0",
-  "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by the UED (one per engine)
+  "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by a UED heuristic role
   "name":   "Example attention LightGBM selector",
   "kind":   "model",          // "model" | "static_order" | "custom_library"
   "model": {
@@ -580,7 +580,7 @@ so the schema grows to describe the variants the engine spans. This is additive 
 carries no retrain obligation until the new field is exposed to selection
 ([Section 16](#16-risks)).
 
-The KMD is the feature space the engine's heuristic ranks over, which is why the UED owns
+The KMD is the feature space the engine's heuristics rank over, which is why the UED owns
 both the KMD and the one UHD. The coupling is not unconditional: an additive change, a new
 field or new legal values added to an existing field, does not require a retrain until the
 change is exposed, because the old feature space is still valid. A breaking change, one
@@ -889,7 +889,7 @@ it constrains them:
   "version": "1.0",
   "id":   "5c9d1f38-2a74-4b60-8e13-c4f70b2d9a56",
   "name": "rocke:sdpa_fwd",
-  "heuristic": "ae896b07-80cd-473c-b3f4-6a8892998519",   // one UHD, ranked over the symbols below
+  "sort_kernel_catalog": {"default": "ae896b07-80cd-473c-b3f4-6a8892998519"},  // ranks the catalog over the symbols below
   "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",   // one KMD, supplying $kernel.*
   "graph_match": {
     "nodes": [
@@ -1077,7 +1077,7 @@ chain as a single kernel.
   "version": "1.0",
   "id":   "6f1a0c93-84be-4d27-9c3a-70b5e2d81f44",
   "name": "rocke:conv_bias_relu",
-  "heuristic": "b3d81a52-0c47-4f9e-8a16-2d7c5e0b943f",
+  "sort_kernel_catalog": {"default": "b3d81a52-0c47-4f9e-8a16-2d7c5e0b943f"},
   "metadata":  "c07e4b31-95a2-4d68-b1fc-3e8a06d25b7c",
   "graph_match": {
     "nodes": [
@@ -2408,7 +2408,7 @@ choices; none is a dependency.
 - **UED (Universal Engine Descriptor):** one engine: a stable identity, the `graph_match` stating
   how it matches a graph and publishing the symbols every consumer reads, the KMD fields it exposes
   as knobs, and its behavior/numerical notes. It names the engine's one metadata schema (KMD) and,
-  optionally, one heuristic (UHD); many KDPs may share one engine, and they all inherit its one
+  optionally, its role-scoped heuristics (UHDs, arch-keyed); many KDPs may share one engine, and they all inherit its one
   match.
 - **`graph_match`:** the UED member holding stage one, in one of two arms — the declarative
   **structural pattern** (`nodes`) or the **native match** (`native`), the escape hatch that ships
@@ -2417,7 +2417,8 @@ choices; none is a dependency.
   edges the engine matches against the graph. It runs at most once per engine per graph, and its
   binding is what a UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
-  a graph and picks one. One per engine, named by the UED.
+  a graph and picks one. An engine names up to three by role (catalog ranking, engine-level estimate,
+  candidate generator), each mapped by architecture ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md)).
 - **KMD (Kernel Metadata Descriptor):** despite the name, an **engine-wide schema, not a per-kernel
   file**: one KMD per engine, named by the UED, declaring the variant fields every kernel in that
   engine carries, each with a type and optional default. It is the feature space the UHD ranks over,
