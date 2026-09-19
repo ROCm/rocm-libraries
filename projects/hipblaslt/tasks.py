@@ -863,14 +863,19 @@ def build(
     if install_pkg:
         with c.cd(str(build_subdir)):
             c.run("make package")
+        # hipBLASLt does not only produce hipblaslt-* packages: libtensilelite-host.so
+        # ships as tensilelite-host (see CMakeLists.txt, rocm_package_setup_component).
+        # Globbing hipblaslt-* alone leaves the .so uninstalled, and a downstream
+        # find_package(hipblaslt) then fails on the imported roc::tensilelite-host
+        # target pointing at a file that was never installed.
         if distro == "ubuntu":
-            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb")
+            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb {build_subdir}/tensilelite-host[-_]*.deb")
         elif distro in ("centos", "rhel", "almalinux"):
-            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm")
         elif distro == "fedora":
-            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm")
         elif distro in ("sles", "opensuse-leap"):
-            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm")
 
 
 # ---------------------------------------------------------------------------

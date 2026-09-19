@@ -899,6 +899,25 @@ if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
+# libtensilelite-host.so ships as its own package (tensilelite-host) instead of
+# inside hipblaslt's runtime component, so hipSPARSELt can depend on the one
+# ~6.5 MB shared library without pulling hipblaslt's ~1.6 GB of Tensile kernel
+# binaries. See AIHPBLAS-4434.
+#
+# Guard on the target TYPE rather than BUILD_SHARED_LIBS: that variable is not
+# reliably set at this scope (it is assigned further down, near line 805), so
+# testing it here would silently skip the component in a shared build.
+if(TARGET tensilelite-host)
+    get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+    if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
+        rocm_package_setup_component(tensilelite
+            LIBRARY_NAME tensilelite
+            PACKAGE_NAME host
+        )
+    endif()
+    unset(_tensilelite_host_type)
+endif()
+
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
     set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
     rocm_create_package(
