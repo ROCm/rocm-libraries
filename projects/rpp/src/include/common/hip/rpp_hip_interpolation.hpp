@@ -31,8 +31,8 @@ SOFTWARE.
 
 __device__ __forceinline__ void rpp_hip_roi_range_check(float2* locSrcFloor_f2, int4* roiPtrSrc_i4,
                                                         int2* locSrc_i2) {
-    locSrc_i2->x = (int)fminf(fmaxf(locSrcFloor_f2->x, roiPtrSrc_i4->x), roiPtrSrc_i4->z - 1);
-    locSrc_i2->y = (int)fminf(fmaxf(locSrcFloor_f2->y, roiPtrSrc_i4->y), roiPtrSrc_i4->w - 1);
+    locSrc_i2->x = (int)fminf(fmaxf(locSrcFloor_f2->x, roiPtrSrc_i4->x), roiPtrSrc_i4->z);
+    locSrc_i2->y = (int)fminf(fmaxf(locSrcFloor_f2->y, roiPtrSrc_i4->y), roiPtrSrc_i4->w);
 }
 
 __device__ __forceinline__ float rpp_hip_math_sinc(float x) {
