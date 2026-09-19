@@ -17,9 +17,9 @@ key->value matrix), per the gated delta rule:
     S     = S + outer(v_new, k_hat)            # rank-1 write
 
 Only pages named by ``read_indices`` / ``write_indices`` are touched. The
-contract is that ``-1`` is the ONLY valid skip sentinel and every non-negative
-write index is unique within a launch. Repeated read pages are allowed, and one
-sequence may update the page it read. The host guard rejects any other negative
+contract is that ``-1`` is the ONLY valid skip sentinel and every active lane
+owns a unique write index. Repeated read pages are allowed, and one sequence
+may update the page it read. The host guard rejects any other negative
 value before launch. This code is a lenient superset of that contract: it skips
 on ``read < 0 or write < 0``, so on a path that bypasses the host guard
 (``validate_indices=False``) a stray ``-7`` is silently treated as a skip rather

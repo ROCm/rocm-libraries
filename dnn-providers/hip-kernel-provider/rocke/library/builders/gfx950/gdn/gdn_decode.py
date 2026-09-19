@@ -269,8 +269,9 @@ def _validate_decode_inputs(
                 f"{name} out of range: [{lo}, {hi}] escapes -1 (skip) or "
                 f"[0, {pool_depth})"
             )
-    live_writes = inp["write_indices"][inp["write_indices"] >= 0]
-    if live_writes.numel() != live_writes.unique().numel():
+    active = (inp["read_indices"] >= 0) & (inp["write_indices"] >= 0)
+    active_writes = inp["write_indices"][active]
+    if active_writes.numel() != active_writes.unique().numel():
         raise ValueError("write_indices must be unique across active sequences")
 
 

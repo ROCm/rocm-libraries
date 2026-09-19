@@ -177,6 +177,28 @@ def test_padding_lanes_are_skipped_and_leave_state_untouched(harness):
     ), "state of an inactive (negative-index) sequence was modified"
 
 
+
+@requires_gfx950
+def test_mismatched_skip_index_leaves_write_page_untouched(harness):
+    """A lane with ``read=-1`` must not write its otherwise-valid target page."""
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    spec = GdnDecodeSpec()
+    batch = 8
+    lane = 1
+    inp = harness["make_inputs"](spec, batch)
+    target = int(inp["write_indices"][lane])
+    inp["read_indices"][lane] = -1
+
+    before = inp["state"].clone()
+    values, cfg = harness["prepare"](spec, inp, batch)
+    harness["launch"](harness["launcher_for"](spec), values, cfg)
+    torch.cuda.synchronize()
+
+    assert torch.equal(
+        values["state"][target], before[target]
+    ), "a mismatched skip lane modified its write page"
+
 @requires_gfx950
 def test_large_pool_crosses_the_i32_offset_boundary(harness):
     """A pool deep enough that ``slot * S_POOL`` overflows a signed i32 must

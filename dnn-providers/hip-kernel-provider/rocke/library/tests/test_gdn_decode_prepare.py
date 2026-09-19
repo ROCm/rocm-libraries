@@ -37,6 +37,7 @@ def test_out_of_range_index_is_rejected():
         ("read_indices", pool_depth),  # == depth: the first OOB slot
         ("write_indices", pool_depth + 5),
         ("read_indices", -2),  # below the -1 skip sentinel
+        ("write_indices", -2),
     ):
         inp = make_inputs(spec, batch, device=DEVICE)
         inp[name][0] = bad
@@ -52,6 +53,15 @@ def test_duplicate_active_write_index_is_rejected():
     inp["write_indices"][1] = inp["write_indices"][0]
     with pytest.raises(ValueError, match="unique across active sequences"):
         prepare(spec, inp, batch)
+
+def test_inactive_mismatched_lane_does_not_reserve_a_write_index():
+    """A lane with either negative index is inactive and cannot claim a page."""
+    spec = GdnDecodeSpec()
+    batch = 8
+    inp = make_inputs(spec, batch, device=DEVICE)
+    inp["read_indices"][1] = -1
+    inp["write_indices"][1] = inp["write_indices"][0]
+    prepare(spec, inp, batch)  # must not raise: lane 1 is inactive
 
 def test_the_skip_sentinel_is_accepted():
     """``-1`` marks an idle continuous-batching slot and must pass the guard."""
