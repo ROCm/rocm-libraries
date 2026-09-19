@@ -248,10 +248,12 @@ def evaluate(state):
     # Auto takes only the no-trade-off tight branch; the LDS-growing aligned branch needs 1.
     mode = state.get("LDSSegmentInterleave", -1)
     if mode == 0:                                              return _no("parameter off")
-    # Swizzled tensors (gfx1250 TDM SwizzleTensor{A,B}) use a fixed off-order contiguous LDS layout.
-    # The per-component segment jump (wtid0*(fA+fB)) is not threaded through the swizzle TDM write/read
-    # paths, so an interleaved layout makes waveN>0 read B from the wrong segment (garbage). Incompatible.
-    if pt.get("SwizzleTensorA") or pt.get("SwizzleTensorB"):   return _no("swizzled tensor: fixed off-order LDS layout")
+    # Swizzle-A LSI is not threaded through the swizzle write/read, so keep rejecting it.
+    if pt.get("SwizzleTensorA"):                              return _no("swizzle-A: LSI not threaded (VWA==1 only)")
+    # Swizzle-B CAN interleave: the write already honors ldsBaseB + wtid0*writeStrideBytes, and the swizzle
+    # read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM). Only the tight MIWaveGroup=[2,2] symmetric
+    # case where B spans its whole LDS component (pure-REPLACE branch) is validated; gate the rest below.
+    _swzB = bool(pt.get("SwizzleTensorB"))
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")
@@ -282,6 +284,7 @@ def evaluate(state):
     # [4,1]/[1,4]: exactly one MIWaveGroup dim is 1 -> one active + one shared tensor.
     wgM, wgN = state["MIWaveGroup"][0], state["MIWaveGroup"][1]
     if (wgM == 1) ^ (wgN == 1):
+        if _swzB:                                             return _no("swizzle-B LSI: only MIWaveGroup=[2,2] symmetric supported")
         return _evaluate_asymmetric(state)
     if [wgM, wgN] != [2, 2]:
         return _no("MIWaveGroup unsupported")
@@ -289,6 +292,13 @@ def evaluate(state):
     # [2,2]: A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
     _portSplit = _port_split_a(state)
     if not (_coarse(state, "A") or _portSplit):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
+    # Swizzle-B prototype: only the tight coarse case where B spans its whole LDS component (so the read's
+    # wtid0*strideWaveN term is a pure REPLACE by wtid0*writeStrideBytes). portSplit needs TDMSplit; defer.
+    if _swzB:
+        if _portSplit:                                        return _no("swizzle-B LSI: portSplit (TDMSplit) path unsupported")
+        _compColsB = state["MacroTile1"] // (state["NumWaves"] // 2)
+        if min(state["MatrixInstM"], state["MatrixInstN"]) * state["VectorWidthB"] < _compColsB:
+            return _no("swizzle-B LSI: B does not span its LDS component (increase VWB); read has no REPLACE branch")
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
     bBaselineSpan = _tensor_footprint(state, "B")
