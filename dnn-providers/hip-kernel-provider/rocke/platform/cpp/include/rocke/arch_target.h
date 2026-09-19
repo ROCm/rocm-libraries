@@ -103,18 +103,27 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
 
 /* ============================== MMA atom =============================== */
 
-/* Logical scale format and source elements along K per scale.
- * {NULL, 0} means unscaled. */
-typedef struct rocke_mma_scale_operand
+/* Shared K-group size. NONE is only the unscaled sentinel. */
+typedef enum rocke_mma_scale_block_k
 {
-    const char* dtype;
-    int block_size;
-} rocke_mma_scale_operand_t;
+    ROCKE_MMA_SCALE_NONE = 0,
+    ROCKE_MMA_SCALE_K16 = 16,
+    ROCKE_MMA_SCALE_K32 = 32
+} rocke_mma_scale_block_k_t;
+
+/* Complete scale query: independent A/B types, shared K-group size.
+ * {NULL, NULL, 0} selects unscaled atoms. */
+typedef struct rocke_mma_scale_filter
+{
+    const char* a_scale_dtype;
+    const char* b_scale_dtype;
+    rocke_mma_scale_block_k_t scale_block_k;
+} rocke_mma_scale_filter_t;
 
 /* A supported matrix-multiply-accumulate atom. Frozen, in static storage.
  * Mirrors MmaOp: family is "mma", "wmma", or "wmma_scaled"; matrix dtypes
  * are canonical catalog keys. C describes both accumulator input and result.
- * op_id is an opaque backend handle; scaled WMMA uses semantic contract IDs.
+ * op_id is an opaque backend handle; lowering reads metadata, not its spelling.
  * Layout pointers are NULL when no verified lane map is registered. */
 typedef struct rocke_mma_op
 {
@@ -133,12 +142,10 @@ typedef struct rocke_mma_op
     const rocke_layout_map_t* a_layout; /* may be NULL */
     const rocke_layout_map_t* b_layout; /* may be NULL */
     const rocke_layout_map_t* c_layout; /* may be NULL */
-    rocke_mma_scale_operand_t a_scale;
-    rocke_mma_scale_operand_t b_scale;
+    const char* a_scale_dtype; /* NULL when unscaled */
+    const char* b_scale_dtype; /* NULL when unscaled */
+    rocke_mma_scale_block_k_t scale_block_k; /* shared by A/B; NONE when unscaled */
 } rocke_mma_op_t;
-
-/* Write the semantic contract ID into caller-owned out; NULL on truncation. */
-const char* rocke_mma_op_semantic_id(const rocke_mma_op_t* op, char* out, size_t cap);
 
 /* MmaOp.shape -> (m, n, k) via out params. */
 void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
@@ -184,8 +191,8 @@ typedef struct rocke_mma_catalog
 /* MmaCatalog.ops accessor (count + pointer). */
 const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int* num_out);
 
-/* Optional A/B scale pair: NULL leaves scales unconstrained; {NULL, 0}
- * selects an unscaled input. C callers supply the pair explicitly.
+/* Optional scale filter: NULL leaves scales unconstrained; {NULL, NULL, 0}
+ * selects unscaled atoms. C callers supply the filter pointer explicitly.
  * Exact selection and largest-K ties raise a query error on ambiguity.
  * As with layout queries, C++ callers catch ckc::Error at their entry boundary. */
 #ifdef __cplusplus
@@ -208,48 +215,47 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 int n,
                                 const rocke_mma_op_t** out,
                                 int cap,
-                                const rocke_mma_scale_operand_t scales[2] ROCKE_MMA_DEFAULT_SCALES);
+                                const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
 
 /* MmaCatalog.has_shape. family NULL => "mma". */
-bool rocke_mma_catalog_has_shape(
-    const rocke_mma_catalog_t* cat,
-    const char* family,
-    const char* a_dtype,
-    const char* b_dtype,
-    const char* c_dtype,
-    int m,
-    int n,
-    int k,
-    const rocke_mma_scale_operand_t scales[2] ROCKE_MMA_DEFAULT_SCALES);
+bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
+                                 const char* family,
+                                 const char* a_dtype,
+                                 const char* b_dtype,
+                                 const char* c_dtype,
+                                 int m,
+                                 int n,
+                                 int k,
+                                 const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
 
 /* MmaCatalog.select_largest_k: the matching atom with the largest k (k <= k_max
  * if k_max >= 0; pass k_max<0 for Python None). Returns NULL if none match. */
-const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(
-    const rocke_mma_catalog_t* cat,
-    const char* family,
-    const char* a_dtype,
-    const char* b_dtype,
-    const char* c_dtype,
-    int m,
-    int n,
-    int k_max,
-    const rocke_mma_scale_operand_t scales[2] ROCKE_MMA_DEFAULT_SCALES);
+const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog_t* cat,
+                                                         const char* family,
+                                                         const char* a_dtype,
+                                                         const char* b_dtype,
+                                                         const char* c_dtype,
+                                                         int m,
+                                                         int n,
+                                                         int k_max,
+                                                         const rocke_mma_scale_filter_t* scales
+                                                             ROCKE_MMA_DEFAULT_SCALES);
 
 /* MmaCatalog.by_op_id. Returns NULL if absent. */
 const rocke_mma_op_t* rocke_mma_catalog_by_op_id(const rocke_mma_catalog_t* cat, const char* op_id);
 
 /* MmaCatalog.op_for_shape: the atom with exactly (m, n, k). NULL if absent.
  * family NULL => "mma". */
-const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(
-    const rocke_mma_catalog_t* cat,
-    const char* family,
-    const char* a_dtype,
-    const char* b_dtype,
-    const char* c_dtype,
-    int m,
-    int n,
-    int k,
-    const rocke_mma_scale_operand_t scales[2] ROCKE_MMA_DEFAULT_SCALES);
+const rocke_mma_op_t*
+    rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* cat,
+                                   const char* family,
+                                   const char* a_dtype,
+                                   const char* b_dtype,
+                                   const char* c_dtype,
+                                   int m,
+                                   int n,
+                                   int k,
+                                   const rocke_mma_scale_filter_t* scales ROCKE_MMA_DEFAULT_SCALES);
 
 /* ===================== bare-op_id SSOT lookups ======================== */
 /* These resolve a bare op_id string (no MmaOp / ArchTarget in hand) against the

@@ -69,7 +69,9 @@ static bool rocke_mma_is_int_acc(const char* op_id)
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
-    if(op_id && strncmp(op_id, "wmma.scaled.", 12) == 0)
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_op_t* atom = op_id ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+    if(atom && strcmp(atom->family, "wmma_scaled") == 0)
         return "mxacc";
     size_t i;
     if(op_id)

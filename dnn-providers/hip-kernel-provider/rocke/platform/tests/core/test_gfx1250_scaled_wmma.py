@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from unittest import mock
 
-from rocke.core.arch import ArchTarget, MmaScaleOperand
+from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
@@ -23,13 +23,13 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
 
 
 def _scaled_atom(dtype="fp8", scale16=False):
-    scale = MmaScaleOperand("e8m0", 16 if scale16 else 32)
+    block_k = 16 if scale16 else 32
     atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
         family="wmma_scaled",
         a_dtype=dtype,
         b_dtype=dtype,
         c_dtype="fp32",
-        scales=(scale, scale),
+        scales=("e8m0", "e8m0", block_k),
         m=16,
         n=16,
         k=128,
@@ -56,6 +56,17 @@ def _build_scaled_atom(*, scale16: bool):
 
 
 class TestGfx1250ScaledWmma(unittest.TestCase):
+    def test_backend_rejects_unsupported_scale_type_on_either_input(self):
+        catalog = ArchTarget.from_gfx("gfx1250").mma
+        for field in ("a_scale_dtype", "b_scale_dtype"):
+            atom = replace(_scaled_atom(), **{field: "e4m3"})
+            with (
+                self.subTest(field=field),
+                mock.patch.object(catalog, "by_op_id", return_value=atom),
+                self.assertRaisesRegex(ValueError, "unsupported scaled WMMA"),
+            ):
+                gfx1250_scaled_wmma(atom.op_id)
+
     def test_backend_derives_each_matrix_carrier_and_selector(self):
         # Synthetic metadata exercises the lowering contract without adding atoms.
         atom = replace(_scaled_atom(), b_dtype="bf8e5m2", b_frag_len=8)
@@ -108,7 +119,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     self.assertEqual(call.count(f"i32 {selector}, <16 x i32>"), 2)
                     self.assertEqual(call.count(f", {scale_ty} %"), 2)
 
-    def test_semantic_ids_survive_serialization(self):
+    def test_catalog_ids_survive_serialization(self):
         for scale16 in (False, True):
             kernel = _build_scaled_atom(scale16=scale16)
             text = serialize(kernel)
@@ -126,8 +137,8 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
     def test_catalog_fragment_lengths(self):
         target = ArchTarget.from_gfx("gfx1250")
         for op_id in (
-            "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32",
-            "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32",
+            "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
+            "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16",
         ):
             with self.subTest(op_id=op_id):
                 op = target.mma.by_op_id(op_id)
@@ -172,8 +183,9 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
 
     def test_scaled_wmma_rejects_pre_llvm23_flavors(self):
         for flavor in ("llvm20", "llvm22"):
-            with self.subTest(flavor=flavor), self.assertRaisesRegex(
-                NotImplementedError, "requires llvm23"
+            with (
+                self.subTest(flavor=flavor),
+                self.assertRaisesRegex(NotImplementedError, "requires llvm23"),
             ):
                 lower_kernel_to_llvm(
                     _build_scaled_atom(scale16=False),

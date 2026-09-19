@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from ...core.dtypes import normalize_dtype
-from ...core.arch import ArchTarget, MmaScaleOperand
+from ...core.arch import ArchTarget
 from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
     BF16,
@@ -123,15 +123,13 @@ class BlockScaledGemmSpec:
 
 
 def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
-    scale = MmaScaleOperand(
-        "e8m0" if spec.scale_dtype == "i8" else spec.scale_dtype, spec.block_k
-    )
+    scale_dtype = "e8m0" if spec.scale_dtype == "i8" else spec.scale_dtype
     return target.mma.op_for_shape(
         family="wmma_scaled",
         a_dtype=spec.dtype_a,
         b_dtype=spec.dtype_b,
         c_dtype=spec.dtype_acc,
-        scales=(scale, scale),
+        scales=(scale_dtype, scale_dtype, spec.block_k),
         m=_BLOCK_M,
         n=_BLOCK_N,
         k=_WMMA_SCALE_K,

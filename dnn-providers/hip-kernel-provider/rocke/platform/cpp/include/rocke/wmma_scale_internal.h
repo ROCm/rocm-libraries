@@ -50,7 +50,7 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
     spec.op_id = atom->op_id;
     const char* dtypes[2] = {atom->a_dtype, atom->b_dtype};
     const int words[2] = {atom->a_frag_len, atom->b_frag_len};
-    const rocke_mma_scale_operand_t scales[2] = {atom->a_scale, atom->b_scale};
+    const char* scale_dtypes[2] = {atom->a_scale_dtype, atom->b_scale_dtype};
     for(int i = 0; i < 2; ++i)
     {
         if(strcmp(dtypes[i], "fp8e4m3") == 0)
@@ -59,16 +59,15 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
             spec.matrix_formats[i] = 1;
         else
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA matrix format");
-        if(!scales[i].dtype || strcmp(scales[i].dtype, "e8m0") != 0
-           || (scales[i].block_size != 16 && scales[i].block_size != 32))
+        if(!scale_dtypes[i] || strcmp(scale_dtypes[i], "e8m0") != 0)
             ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA scale format");
         spec.scale_formats[i] = 0; // E8M0.
         spec.matrix_words[i] = words[i];
     }
-    if(atom->a_scale.block_size != atom->b_scale.block_size || strcmp(atom->c_dtype, "fp32") != 0
-       || atom->m != 16 || atom->n != 16 || atom->k != 128)
+    if((atom->scale_block_k != 16 && atom->scale_block_k != 32)
+       || strcmp(atom->c_dtype, "fp32") != 0 || atom->m != 16 || atom->n != 16 || atom->k != 128)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");
-    spec.scales.block_k = atom->a_scale.block_size;
+    spec.scales.block_k = atom->scale_block_k;
     spec.scales.count = atom->k / spec.scales.block_k;
     char suffix[96];
     snprintf(suffix,

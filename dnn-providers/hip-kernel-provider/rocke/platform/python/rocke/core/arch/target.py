@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from enum import IntEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -98,38 +99,35 @@ class LayoutMap:
         return self.fn(builder, lane, slot)
 
 
-@dataclass(frozen=True)
-class MmaScaleOperand:
-    """Scale value format and granularity for one matrix source.
+class MmaScaleBlockK(IntEnum):
+    """Number of K elements sharing one scale, common to both matrix inputs."""
 
-    ``dtype`` is one of ``e8m0``, ``e4m3``, or ``e5m3``; ``fp8e4m3`` is an
-    alias for ``e4m3``. It describes the scale values independently of the
-    source dtype and the backend's packed register carrier. ``block_size``
-    is the number of source elements along K sharing one scale value. Only
-    16 and 32 are valid: SCALE and SCALE16 use 32 and 16, respectively.
-    """
+    K16 = 16
+    K32 = 32
 
-    dtype: str
-    block_size: int
 
-    def __post_init__(self) -> None:
-        if self.dtype == "fp8e4m3":
-            object.__setattr__(self, "dtype", "e4m3")
-        if self.dtype not in ("e8m0", "e4m3", "e5m3"):
-            raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3")
-        if type(self.block_size) is not int or self.block_size not in (16, 32):
-            raise ValueError(
-                "MMA scale block_size must be an integer equal to 16 or 32"
-            )
+def _normalize_mma_scales(
+    a_dtype: str | None, b_dtype: str | None, block_k: int | None
+) -> tuple[str | None, str | None, MmaScaleBlockK | None]:
+    """Validate the complete scale contract, independently of backend support."""
+    if a_dtype is None and b_dtype is None and block_k is None:
+        return None, None, None
+    a = "e4m3" if a_dtype == "fp8e4m3" else a_dtype
+    b = "e4m3" if b_dtype == "fp8e4m3" else b_dtype
+    if a not in ("e8m0", "e4m3", "e5m3") or b not in ("e8m0", "e4m3", "e5m3"):
+        raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3")
+    if type(block_k) not in (int, MmaScaleBlockK) or block_k not in (16, 32):
+        raise ValueError("MMA scale_block_k must be an integer equal to 16 or 32")
+    return a, b, MmaScaleBlockK(block_k)
 
 
 @dataclass(frozen=True)
 class MmaOp:
     """A single supported matrix-multiply-accumulate atom on a target.
 
-    ``op_id`` identifies a concrete operand contract. Scaled WMMA uses semantic
-    IDs including matrix dtypes and per-input scales. The backend maps this
-    identity to an intrinsic and format selectors.
+    ``op_id`` identifies a concrete operand contract. Scaled WMMA IDs extend
+    the target/accumulator/shape/input convention with A/B scale types and a
+    shared K-group size. The backend reads metadata, not the ID spelling.
 
     The ``*_frag_len`` fields and the layout-map accessors describe the
     *physical* register fragmentation of the atom: how many values of each
@@ -160,21 +158,19 @@ class MmaOp:
     _b_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
     _c_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
 
-    a_scale: MmaScaleOperand | None = None
-    b_scale: MmaScaleOperand | None = None
+    # All absent means unscaled. The K-group size applies to both inputs;
+    # scale types describe values, not the backend's packed register carrier.
+    a_scale_dtype: str | None = None
+    b_scale_dtype: str | None = None
+    scale_block_k: MmaScaleBlockK | None = None
 
-    def semantic_id(self) -> str:
-        """Logical identity; C describes both accumulator input and result."""
-        fields = [self.family.replace("_", "."), f"{self.m}x{self.n}x{self.k}"]
-        for i, (dtype, scale) in enumerate(
-            ((self.a_dtype, self.a_scale), (self.b_dtype, self.b_scale))
-        ):
-            field = f"src{i}_{normalize_dtype(dtype)}"
-            if scale is not None:
-                field += f"_{scale.dtype}_b{scale.block_size}"
-            fields.append(field)
-        acc = normalize_dtype(self.c_dtype)
-        return ".".join(fields + [f"src2_{acc}", f"dst_{acc}"])
+    def __post_init__(self) -> None:
+        a, b, block_k = _normalize_mma_scales(
+            self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
+        )
+        object.__setattr__(self, "a_scale_dtype", a)
+        object.__setattr__(self, "b_scale_dtype", b)
+        object.__setattr__(self, "scale_block_k", block_k)
 
     @property
     def shape(self) -> Tuple[int, int, int]:
@@ -762,7 +758,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # Native gfx1250 scaled WMMA. FP8/BF8 use 64 bytes per lane as <16 x i32>.
     # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
     # bytes in i64. Both share the gfx12 column-distributed accumulator.
-    "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32": _FragInfo(
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32": _FragInfo(
         16,
         16,
         8,
@@ -771,7 +767,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b32.src1_bf8e5m2_e8m0_b32.src2_fp32.dst_fp32": _FragInfo(
+    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32": _FragInfo(
         16,
         16,
         8,
@@ -780,7 +776,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32": _FragInfo(
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16": _FragInfo(
         16,
         16,
         8,
@@ -789,7 +785,7 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b16.src1_bf8e5m2_e8m0_b16.src2_fp32.dst_fp32": _FragInfo(
+    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16": _FragInfo(
         16,
         16,
         8,
@@ -839,8 +835,9 @@ class ResourceLimits:
 class MmaCatalog:
     """The arch-selected MMA atoms, with optional exact A/B scale filtering.
 
-    ``scales=None`` leaves scales unconstrained; ``(None, None)`` selects
-    unscaled inputs. Exact selection and largest-K ties must be unambiguous.
+    ``scales=(a_dtype, b_dtype, block_k)`` selects the complete scale contract.
+    ``None`` leaves scales unconstrained; ``(None, None, None)`` selects unscaled
+    atoms. Exact selection and largest-K ties must be unambiguous.
     """
 
     def __init__(self, ops: List[MmaOp]) -> None:
@@ -857,12 +854,14 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        scales: tuple[MmaScaleOperand | None, MmaScaleOperand | None] | None = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: Optional[int] = None,
         n: Optional[int] = None,
     ) -> List[MmaOp]:
-        if scales is not None and len(scales) != 2:
-            raise ValueError("scales must contain exactly 2 entries")
+        if scales is not None:
+            if len(scales) != 3:
+                raise ValueError("scales must contain exactly 3 entries")
+            scales = _normalize_mma_scales(*scales)
         a, b, c = (
             normalize_dtype(a_dtype),
             normalize_dtype(b_dtype),
@@ -874,7 +873,10 @@ class MmaCatalog:
                 continue
             if (op.a_dtype, op.b_dtype, op.c_dtype) != (a, b, c):
                 continue
-            if scales is not None and (op.a_scale, op.b_scale) != tuple(scales):
+            if (
+                scales is not None
+                and (op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k) != scales
+            ):
                 continue
             if m is not None and op.m != m:
                 continue
@@ -890,7 +892,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        scales: tuple[MmaScaleOperand | None, MmaScaleOperand | None] | None = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k: int,
@@ -915,7 +917,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        scales: tuple[MmaScaleOperand | None, MmaScaleOperand | None] | None = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k_max: Optional[int] = None,
@@ -958,7 +960,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
-        scales: tuple[MmaScaleOperand | None, MmaScaleOperand | None] | None = None,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k: int,
@@ -1107,8 +1109,9 @@ def _build_mma_op(o: dict) -> MmaOp:
         _a_layout=_mk("a", info.a_frag_len, info.a_fn),
         _b_layout=_mk("b", info.b_frag_len, info.b_fn),
         _c_layout=_mk("c", info.c_frag_len, info.c_fn),
-        a_scale=MmaScaleOperand(**o["a_scale"]) if o.get("a_scale") else None,
-        b_scale=MmaScaleOperand(**o["b_scale"]) if o.get("b_scale") else None,
+        a_scale_dtype=o.get("a_scale_dtype"),
+        b_scale_dtype=o.get("b_scale_dtype"),
+        scale_block_k=o.get("scale_block_k"),
     )
 
 

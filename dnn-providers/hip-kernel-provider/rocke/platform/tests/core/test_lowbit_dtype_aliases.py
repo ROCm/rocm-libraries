@@ -32,7 +32,7 @@ def test_alias_catalog_lookup(alias, canonical):
             found = True
             assert catalog.has_shape(
                 family=op.family,
-                scales=(op.a_scale, op.b_scale),
+                scales=(op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k),
                 a_dtype=alias,
                 b_dtype=op.b_dtype,
                 c_dtype=op.c_dtype,

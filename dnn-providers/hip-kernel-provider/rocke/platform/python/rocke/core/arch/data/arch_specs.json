@@ -177,10 +177,10 @@
         {"family": "wmma", "a": "fp8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_fp8_bf8"},
         {"family": "wmma", "a": "bf8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_fp8"},
         {"family": "wmma", "a": "bf8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_bf8"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale": {"dtype": "e8m0", "block_size": 32}, "b_scale": {"dtype": "e8m0", "block_size": 32}, "m": 16, "n": 16, "k": 128, "op_id": "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale": {"dtype": "e8m0", "block_size": 32}, "b_scale": {"dtype": "e8m0", "block_size": 32}, "m": 16, "n": 16, "k": 128, "op_id": "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b32.src1_bf8e5m2_e8m0_b32.src2_fp32.dst_fp32"},
-        {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale": {"dtype": "e8m0", "block_size": 16}, "b_scale": {"dtype": "e8m0", "block_size": 16}, "m": 16, "n": 16, "k": 128, "op_id": "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32"},
-        {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale": {"dtype": "e8m0", "block_size": 16}, "b_scale": {"dtype": "e8m0", "block_size": 16}, "m": 16, "n": 16, "k": 128, "op_id": "wmma.scaled.16x16x128.src0_bf8e5m2_e8m0_b16.src1_bf8e5m2_e8m0_b16.src2_fp32.dst_fp32"}
+        {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32"},
+        {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 32, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32"},
+        {"family": "wmma_scaled", "a": "fp8", "b": "fp8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16"},
+        {"family": "wmma_scaled", "a": "bf8", "b": "bf8", "c": "fp32", "a_scale_dtype": "e8m0", "b_scale_dtype": "e8m0", "scale_block_k": 16, "m": 16, "n": 16, "k": 128, "op_id": "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16"}
       ]
     },
     "gfx11-generic": {

@@ -99,12 +99,10 @@ int main(void)
     CHECK(gfx1250 != NULL, "gfx1250 target");
     if(gfx1250)
     {
-        check_catalog_fragments(
-            &gfx1250->mma,
-            "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b32.src1_fp8e4m3_e8m0_b32.src2_fp32.dst_fp32");
-        check_catalog_fragments(
-            &gfx1250->mma,
-            "wmma.scaled.16x16x128.src0_fp8e4m3_e8m0_b16.src1_fp8e4m3_e8m0_b16.src2_fp32.dst_fp32");
+        check_catalog_fragments(&gfx1250->mma,
+                                "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32");
+        check_catalog_fragments(&gfx1250->mma,
+                                "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16");
     }
 
     /* Unknown op_id must be rejected. The engine's error path either returns

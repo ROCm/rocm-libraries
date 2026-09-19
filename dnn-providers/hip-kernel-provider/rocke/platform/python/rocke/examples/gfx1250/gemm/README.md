@@ -26,5 +26,5 @@ its accepted matrix and scale formats.
 `e8m0` identifies a scale format carried in bytes and packed integer operands.
 It is not a general scalar IR type or conversion API. Native scaled WMMA uses
 one `wmma_scaled` catalog family. Its operation IDs encode the matrix source
-and result dtypes and each source's scale format and block size; the backend
+and accumulator dtype, each source's scale format, and a shared K-group size; the backend
 selects the LLVM intrinsic and packed operand types from that contract.

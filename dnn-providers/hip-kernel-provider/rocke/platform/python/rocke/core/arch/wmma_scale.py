@@ -80,14 +80,14 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     if atom is None or atom.family != "wmma_scaled":
         return None
     formats = {"fp8e4m3": 0, "bf8e5m2": 1}
-    # The current backend signatures require matching E8M0 scale packing.
+    # The current backend supports E8M0 for both inputs and a shared K-group size.
     # Keep these restrictions here, independently of the catalog query model.
     if (
         atom.a_dtype not in formats
         or atom.b_dtype not in formats
-        or atom.a_scale is None
-        or atom.a_scale != atom.b_scale
-        or atom.a_scale.dtype != "e8m0"
+        or atom.a_scale_dtype != "e8m0"
+        or atom.b_scale_dtype != "e8m0"
+        or atom.scale_block_k not in (16, 32)
         or atom.c_dtype != "fp32"
         or atom.shape != (16, 16, 128)
     ):
@@ -97,6 +97,6 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
         scale_formats=(0, 0),  # E8M0 for each source.
         scales=E8M0ScalePacking(
-            count=atom.k // atom.a_scale.block_size, block_k=atom.a_scale.block_size
+            count=atom.k // atom.scale_block_k, block_k=atom.scale_block_k
         ),
     )

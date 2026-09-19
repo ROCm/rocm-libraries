@@ -309,10 +309,7 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
-        if (
-            op.name.startswith("tile.wmma.")
-            and gfx1250_scaled_wmma(op.name) is not None
-        ):
+        if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
