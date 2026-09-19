@@ -646,6 +646,29 @@ function(hkp_require_kpack_runtime interp what)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_interpreter_site_dirs(<out_var> <interp>)
+#   The site directories <interp> imports from, as a CMake list. Takes the union
+#   of site.getsitepackages() and purelib, keeping those that exist: neither
+#   alone covers both a venv and a Debian-derived system interpreter.
+# ---------------------------------------------------------------------------
+function(hkp_interpreter_site_dirs out_var interp)
+    execute_process(
+        COMMAND "${interp}" -c
+"import os, site, sysconfig
+dirs = list(site.getsitepackages()) + [sysconfig.get_paths()['purelib']]
+print(';'.join(sorted({d for d in dirs if os.path.isdir(d)})))"
+        OUTPUT_VARIABLE _dirs
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        COMMAND_ERROR_IS_FATAL ANY)
+    if(NOT _dirs)
+        message(FATAL_ERROR
+            "hkp: ${interp} reports no existing site directory, so the pack "
+            "interpreter cannot inherit rocm_kpack's runtime dependencies.")
+    endif()
+    set(${out_var} "${_dirs}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_rocke_wheel_python_interp(<out_interp> <out_ready> <wheel_stamp>)
 #   Provision a build-local interpreter carrying the rocke + rocke_library
 #   wheels. With ROCKE_BUILD_PYENV ON they are built by the rocke-wheels target,
@@ -658,21 +681,23 @@ endfunction()
 #
 #   TWO rules, with deliberately different dependency sets:
 #
-#     Rule A produces the interpreter. Expensive -- it reaches the index for
-#     msgpack/zstandard -- and carries NO content dependency, so it runs once per
-#     build tree and never again.
+#     Rule A produces the interpreter. It carries NO content dependency, so it
+#     runs once per build tree and never again.
 #     Rule B produces <out_ready>, reinstalling the wheels into that venv. Cheap
 #     and offline, and the only rule keyed on wheel content.
 #
 #   Merged, as they once were, one edited rocKE kernel tore the whole venv down
-#   and re-provisioned it over the network. Pack steps therefore depend on
-#   <out_ready>, never on <out_interp>.
+#   and re-provisioned it. Pack steps therefore depend on <out_ready>, never on
+#   <out_interp>.
 #
-#   The venv is HERMETIC:
-#     - no --system-site-packages: the dev venv inherits it to pick up the
-#       system ROCm torch, but torch is not a build dependency. Inheriting the
-#       system environment is how a build silently starts depending on whatever
-#       happens to be installed on the machine.
+#   The venv reaches NO index, and it is NOT self-contained: it inherits the
+#   invoking interpreter's site directories through a seeded .pth, so everything
+#   installed there is importable, not only the two packages rocm_kpack needs.
+#   hkp_require_kpack_runtime asserts those two at configure time.
+#   rocke/kernels must NOT be inherited, and are not: Rule B force-reinstalls
+#   those wheels into this venv, whose site-packages precedes the seeded paths.
+#
+#   Flags that keep the install offline:
 #     - no `pip install --upgrade pip`: unconditional network access on every
 #       provisioning run, to install two local files.
 #     - --no-index: hermeticity enforced by the build rather than assumed.
@@ -727,21 +752,42 @@ function(hkp_rocke_wheel_python_interp out_interp out_ready wheel_stamp)
     set(_library_wheel
         "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
 
-    # Rule A -- the venv itself, carrying rocm_kpack's runtime dependencies (see
-    # hkp_require_kpack_runtime). Those two come from the index, unlike the rocke
-    # wheels: they are third-party packages with no local artifact to install
-    # from, and they are what makes this the expensive rule. Scoped to exactly
-    # these two pinned-floor names, so the venv stays reproducible in everything
-    # that describes OUR code.
+    # Rule A -- the venv itself. rocm_kpack's runtime dependencies (msgpack,
+    # zstandard) are inherited from the invoking interpreter, which TheRock
+    # supplies through its requirements.txt, and asserted here because the
+    # pack step's own probe runs in a venv that does not exist until the build.
+    #
+    # --system-site-packages cannot express this: venv inherits from
+    # sys.base_prefix, not from the invoking interpreter, and the superbuild's
+    # interpreter is itself a venv. Seed its actual site directories instead.
+    # They enter sys.path after this venv's own site-packages, so the wheels
+    # Rule B installs still shadow anything inherited.
     #
     # No wheel dependency, so editing a rocKE kernel never reaches this rule.
+    hkp_require_kpack_runtime("${Python3_EXECUTABLE}"
+                              "the interpreter the pack venv inherits from")
+    hkp_interpreter_site_dirs(_inherited_site_dirs "${Python3_EXECUTABLE}")
+    if(WIN32)
+        set(_venv_site "${_venv}/Lib/site-packages")
+    else()
+        set(_venv_site
+            "${_venv}/lib/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
+    endif()
+    # file(GENERATE) rewrites only on a content change, so a reconfigure that
+    # resolves the same interpreter does not tear the venv down.
+    set(_pth_staged "${CMAKE_CURRENT_BINARY_DIR}/hkp-kpack-runtime.pth")
+    string(JOIN "\n" _pth_content ${_inherited_site_dirs})
+    file(GENERATE OUTPUT "${_pth_staged}" CONTENT "${_pth_content}\n")
+
     add_custom_command(
         OUTPUT "${_venv_py}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_venv}"
         COMMAND "${Python3_EXECUTABLE}" -m venv --copies "${_venv}"
-        COMMAND "${_venv_py}" -m pip install -q
-                "msgpack>=1.0.0" "zstandard>=0.20.0"
-        COMMENT "hkp: provisioning hermetic rocke wheel interpreter"
+        COMMAND "${CMAKE_COMMAND}" -E copy "${_pth_staged}"
+                "${_venv_site}/_hkp_kpack_runtime.pth"
+        COMMAND "${_venv_py}" -c "import msgpack, zstandard"
+        DEPENDS "${_pth_staged}"
+        COMMENT "hkp: provisioning rocke wheel interpreter"
         VERBATIM)
 
     # Rule B -- the wheels in it. Offline, and the only rule keyed on their content.

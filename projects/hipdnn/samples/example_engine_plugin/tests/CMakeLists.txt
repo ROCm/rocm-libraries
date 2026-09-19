@@ -1,19 +1,29 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-include(FetchContent)
-
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-    SYSTEM
+set(EXAMPLE_PROVIDER_GTEST_VERSION "1.16.0" CACHE STRING
+    "GoogleTest version fetched when no GTest package is available"
 )
-# Prevent GoogleTest from overriding our compiler/linker options on Windows
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-# Prevent GoogleTest from being installed with cmake --install
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+
+# The build environment is expected to provide GTest. The fetch below is a
+# fallback for a standalone configure against a prefix that has none.
+find_package(GTest CONFIG QUIET)
+
+if(NOT GTest_FOUND)
+    include(FetchContent)
+
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v${EXAMPLE_PROVIDER_GTEST_VERSION}
+        SYSTEM
+    )
+    # Prevent GoogleTest from overriding our compiler/linker options on Windows
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # Prevent GoogleTest from being installed with cmake --install
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 # Disable clang-tidy on GoogleTest targets (clang-tidy reports naming/style issues
 # in third-party code when building the gtest/gmock libraries themselves)

@@ -55,11 +55,21 @@
 | Python3 | Latest | For test name validation |
 
 #### Third-Party Libraries
-The following libraries are automatically managed by CMake (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
+These libraries are resolved with `find_package` (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
 - [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
 - [Google Test](https://github.com/google/googletest) - Unit testing framework
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
+
+The build environment provides them: TheRock's third-party tree, or an install prefix on `CMAKE_PREFIX_PATH`. This follows TheRock's [dependency policy](https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md), which keeps third-party acquisition in TheRock rather than in each sub-project. A missing library fails configuration with an error naming it.
+
+To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. The superbuild sets it for you, so this only applies to a standalone configure against a prefix that does not supply everything.
+
+```bash
+cmake -S . -B build -DALLOW_FETCH_DEPS=ON
+```
+
+`HIPDNN_NO_DOWNLOAD` is the previous, inverted spelling of this option. It still works and reports a deprecation warning; use `ALLOW_FETCH_DEPS` instead.
 
 ## Superbuild vs. Standalone Build
 
