@@ -13,9 +13,6 @@
 *.dylib
 *.dll
 
-# Fortran module files
-*.mod
-
 # Compiled Static libraries
 *.lai
 *.la
@@ -49,6 +46,7 @@ CMakeCache.txt
 cmake_install.cmake
 *.make
 *.cmake
+!cmake/hipblaslt_materialize_monorepo_paths.cmake
 *.o.d
 
 # matrices

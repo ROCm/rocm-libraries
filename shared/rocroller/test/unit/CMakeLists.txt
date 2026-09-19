@@ -21,14 +21,13 @@ target_link_libraries(
             rocroller::isa-spec-manager
             GTest::gtest_main
             GTest::gmock
-            ${BLAS_LIBRARIES}
 )
 
 
 target_link_libraries(rocroller-tests
     PRIVATE
         rocroller::common-test-utilities
-        ${BLAS_LIBRARIES}
+        roc::host-numerics-amd-gpu-layout
         GTest::gtest_main
         GTest::gmock
         libdivide::libdivide

@@ -219,8 +219,8 @@ globalParameters["BatchMode"] = 0
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
-# When this parameter is set to 0, the Tensile client will use srand(time(NULL)).
-# If not 0 the Tensile client will use srand(seed).
+# The Tensile client always uses this exact seed. Zero is a valid deterministic
+# seed rather than an alias for wall-clock time.
 globalParameters["DataInitSeed"] = 0
 globalParameters["PruneSparseMode"] = (
     0  # Prune mode for Sparse Matrix: 0=random, 1=XX00, 2=X0X0, 3=0XX0, 4=X00X, 5=0X0X, 6=00XX

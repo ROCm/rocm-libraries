@@ -230,6 +230,27 @@ def test_fp32_pad_is_even_dwords():
                 assert _pad_bytes_x2(pad, 4.0) % 16 == 0, (mt, wt, wg, vw, pad)
 
 
+def test_even_dword_filter_rejects_an_odd_dword_pad():
+    assert _L._even_dword_only({"perBlock": 64, "pad": 1}, 4.0) == {
+        "perBlock": 0,
+        "pad": 0,
+    }
+    assert _L._even_dword_only({"perBlock": 64, "pad": 2}, 4.0) == {
+        "perBlock": 64,
+        "pad": 2,
+    }
+
+
+def test_fp32_search_without_a_candidate_uses_no_padding(monkeypatch):
+    _L._compute_fp32_config.cache_clear()
+    monkeypatch.setattr(_L, "_search_padding", lambda *_args, **_kwargs: None)
+    assert _L._compute_fp32_config(32, 1, 2, 2, 2, 1, _K_B32, _TDM) == {
+        "perBlock": 0,
+        "pad": 0,
+    }
+    _L._compute_fp32_config.cache_clear()
+
+
 def test_metadata_pad_is_even_dwords():
     for wg in _WAVE_GROUPS:
         for wt in _WAVE_TILES:

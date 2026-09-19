@@ -2,4 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 add_executable(sample_hipblaslt_gemm_mix_precision_ext "${CMAKE_CURRENT_SOURCE_DIR}/sample_hipblaslt_gemm_mix_precision_ext.cpp")
-target_link_libraries(sample_hipblaslt_gemm_mix_precision_ext PRIVATE sample-helper)
+target_link_libraries(sample_hipblaslt_gemm_mix_precision_ext
+    PRIVATE
+        sample-helper
+        roc::host-numerics
+)

@@ -89,7 +89,7 @@ If you wish to have granular control over the build, use `-D ROCM_LIBS_ENABLE_CO
 
 ```bash
 # configure
-cmake -B build -S . -D ROCM_LIBS_ENABLE_COMPONENTS="mxdatagenerator;rocroller"
+cmake -B build -S . -D ROCM_LIBS_ENABLE_COMPONENTS="host-numerics;rocroller"
 # build
 cmake --build build
 ```

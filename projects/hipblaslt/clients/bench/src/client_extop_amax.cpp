@@ -28,11 +28,15 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
 #include <hipblaslt_datatype2string.hpp>
-#include <hipblaslt_init.hpp>
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/validation.hpp>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -47,30 +51,6 @@ void printUsage(char* programName)
               << "\t-n, --n\t\t\t\tSize of dim 1, default is 64\n"
               << "\t--initialization \t\tInitialize matrix data. Options: rand_int, trig_float, "
                  "hpl(floating), special, zero. (default is hpl)\n";
-}
-
-template <typename T>
-T abs(T a)
-{
-    return (a > 0) ? a : -a;
-}
-
-template <typename T>
-T max(T a, T b)
-{
-    return (a > b) ? a : b;
-}
-
-template <typename Ti, typename To>
-void cpuAMax(To* out, Ti* in, std::uint32_t length)
-{
-    // calculate amax
-    Ti m = 0;
-    for(int j = 0; j < length; j++)
-    {
-        m = max(m, abs(in[j]));
-    }
-    out[0] = To(m);
 }
 
 int parseArgs(int                       argc,
@@ -136,71 +116,18 @@ int parseArgs(int                       argc,
     return EXIT_SUCCESS;
 }
 
-template <typename Dtype>
-void dumpBuffer(const char* title, Dtype* data, int N)
+void reportComparison(const char*                        title,
+                      const roc::host_numerics::Tensor& observed,
+                      const roc::host_numerics::Tensor& expected)
 {
-    std::cout << "----- " << title << "----- " << std::endl;
-    for(int n = 0; n < N; n++)
-    {
-        std::cout << float(data[n]) << " ";
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
-}
-
-template <typename T>
-void compare(const char* title, const std::vector<T>& cpuOutput, const std::vector<T>& refOutput)
-{
-    T maxErr = 0.0;
-    for(int i = 0; i < cpuOutput.size(); i++)
-    {
-        T err  = abs(refOutput[i] - cpuOutput[i]);
-        maxErr = max(maxErr, err);
-    }
-
-    std::cout << "max error : " << float(maxErr) << std::endl;
-}
-
-template <typename DType>
-void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
-{
-    switch(initMethod)
-    {
-    case hipblaslt_initialization::rand_int:
-        hipblaslt_init<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::trig_float:
-        hipblaslt_init_cos<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::hpl:
-        hipblaslt_init_hpl<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::uniform_low_precision:
-        hipblaslt_init_low_precision<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::special:
-        hipblaslt_init_alt_impl_big<DType>(data, numElements, 1, 1);
-        break;
-    case hipblaslt_initialization::zero:
-        hipblaslt_init_zero<DType>(data, numElements, 1, 1);
-        break;
-    // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill instead
-    // of silently skipping (buffers would stay default-constructed).
-    case hipblaslt_initialization::integer_exact:
-    case hipblaslt_initialization::norm_dist:
-    case hipblaslt_initialization::uniform_01:
-    case hipblaslt_initialization::fp16_accumulator_probe:
-        hipblaslt_init_zero<DType>(data, numElements, 1, 1);
-        break;
-    default:
-        break;
-    }
+    const auto report = roc::host_numerics::compare(observed, expected);
+    std::cout << title << " max error : " << report.maxAbsoluteDifference << std::endl;
 }
 
 template <typename Ti, typename To>
 int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initialization& init)
 {
-    int         numElements = m * n;
+    std::size_t numElements = static_cast<std::size_t>(m) * static_cast<std::size_t>(n);
     std::size_t tiNumBytes  = sizeof(Ti);
     std::size_t toNumBytes  = sizeof(To);
 
@@ -210,28 +137,33 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
     auto hipErr = hipMalloc(&gpuOutput, toNumBytes);
     hipErr      = hipMalloc(&gpuInput, m * n * tiNumBytes);
 
-    std::vector<To> cpuOutput(1, 0.f);
-    std::vector<Ti> cpuInput(m * n, 0.f);
-    std::vector<To> refOutput(1, 0.f);
+    const auto scalarType = hipblaslt::host_numerics::scalarType<To>();
+    roc::host_numerics::Tensor observedOutput(scalarType, roc::host_numerics::Shape{});
+    roc::host_numerics::Tensor referenceOutput(scalarType, roc::host_numerics::Shape{});
+    const roc::host_numerics::Tensor cpuInput
+        = roc::host_numerics::generate(hipblaslt::host_numerics::scalarType<Ti>(),
+                                       roc::host_numerics::Shape{numElements},
+                                       hipblaslt::host_numerics::initializationRecipe(
+                                           hipblaslt::host_numerics::scalarType<Ti>(),
+                                           init,
+                                           hipblaslt::host_numerics::defaultInitializationSeed,
+                                           hipblaslt::host_numerics::TrigonometricComponent::Cosine));
 
-    initData(cpuInput.data(), numElements, init);
-
-    hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * tiNumBytes);
+    hipErr = hipMemcpyHtoD(gpuInput,
+                           cpuInput.rawEncodedBackingStorage().data(),
+                           cpuInput.rawEncodedBackingStorage().size());
 
     hipStream_t stream{};
     hipErr = hipStreamCreate(&stream);
     //warmup
     auto hipblasltErr = hipblasltExtAMax(type, dtype, gpuOutput, gpuInput, m, n, stream);
 
-    hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, toNumBytes);
+    hipErr = hipMemcpyDtoH(
+        observedOutput.rawEncodedBackingStorage().data(), gpuOutput, toNumBytes);
 
-    cpuAMax(refOutput.data(), cpuInput.data(), m * n);
-
-    // dumpBuffer("Input", cpuInput.data(), m * n);
-    // dumpBuffer("GPU", cpuOutput.data(), 1);
-    // dumpBuffer("CPU", refOutput.data(), 1);
-
-    compare("Output", cpuOutput, refOutput);
+    roc::host_numerics::referenceMaximumAbsoluteInto(
+        cpuInput, referenceOutput, roc::host_numerics::ScalarType::Float32);
+    reportComparison("Output", observedOutput, referenceOutput);
 
     hipEvent_t beg, end;
     hipErr      = hipEventCreate(&beg);

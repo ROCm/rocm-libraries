@@ -1,31 +1,21 @@
-# AMD's Floating Point Data Generator
-This library supports data generation for different floating point formats, as well as conversion instructions between lower precision floating points and single precision floating point.
+# Temporary mxDataGenerator compatibility project
 
-## Formats Supported
-- F32 (E8M23)
-- FP16 (E5M2)
-- BF16 (E8M7)
-- OCP MX-FP8 (E4M3)
-- OCP MX-BF8 (E5M2)
-- OCP MX-FP6 (E2M3)
-- OCP MX-BF6 (E3M2)
-- OCP MX-FP4 (E2M1)
+The mxDataGenerator implementation has been removed. Its live CPU numerical
+functionality and physical layout transforms now live in ROCHostNumerics.
 
-## Building the library
+This directory contains no numerical code or installed headers. It exists only
+because the TheRock revision currently pinned by rocm-libraries still
+configures and stages `shared/mxdatagenerator` as a support subproject.
 
-### Dependencies
-- C++ 20
-- Compatible Compilers
-    - amdclang
-    - g++
-    - hipcc
-### Quick start instruction
+`MXDATAGENERATOR_BUILD_TESTING=ON` builds the temporary
+`mxDataGeneratorTests` compatibility-target smoke executable expected by older
+Jenkins jobs. It links only the empty `roc::mxDataGenerator` interface target
+and does not restore any removed numerical implementation.
 
-To build mxDataGenerator natively
-```
-git clone git@github.com:ROCm/mxDataGenerator.git
-cd mxDataGenerator
-mkdir -p build; cd build;
-CXX=[clang++|g++|hipcc] cmake ..
-make -j
-```
+Do not add new consumers or functionality here.
+
+Delete this directory after:
+
+- TheRock removes the `mxDataGenerator` support subproject and build
+  dependencies; and
+- rocm-libraries advances its TheRock pin to include that change.

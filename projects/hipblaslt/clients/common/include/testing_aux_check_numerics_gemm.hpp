@@ -36,13 +36,16 @@
 #include "hipblaslt_test.hpp"
 
 #include <hipblaslt/hipblaslt.h>
+#include <roc/host_numerics/generation.hpp>
 
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <streambuf>
 #include <string>
@@ -117,10 +120,26 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         hipStream_t stream = nullptr;
         CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
-        std::vector<float> A_clean(M * K, 1.0f);
-        std::vector<float> B_h(K * N, 1.0f);
+        std::vector<float> A_clean(M * K);
+        std::vector<float> B_h(K * N);
+        const auto         ones = roc::host_numerics::GenerationRecipe::realOnly(
+            roc::host_numerics::GenerationRecipe::constant({.value = 1.0}));
+        roc::host_numerics::Tensor cleanTensor
+            = roc::host_numerics::generate(roc::host_numerics::ScalarType::Float32,
+                                             roc::host_numerics::Shape{A_clean.size()},
+                                             ones);
+        std::memcpy(A_clean.data(), cleanTensor.rawEncodedBackingStorage().data(), cleanTensor.rawEncodedBackingStorage().size());
+        roc::host_numerics::Tensor bTensor
+            = roc::host_numerics::generate(roc::host_numerics::ScalarType::Float32,
+                                             roc::host_numerics::Shape{B_h.size()},
+                                             ones);
+        std::memcpy(B_h.data(), bTensor.rawEncodedBackingStorage().data(), bTensor.rawEncodedBackingStorage().size());
         std::vector<float> A_dirty = A_clean;
-        A_dirty[0]                 = std::numeric_limits<float>::quiet_NaN();
+        const auto         nan     = roc::host_numerics::GenerationRecipe::realOnly(
+            roc::host_numerics::GenerationRecipe::typeNaN());
+        roc::host_numerics::Tensor dirtyTensor = cleanTensor.deepCopy();
+        roc::host_numerics::generateAt(dirtyTensor, 0, nan);
+        std::memcpy(A_dirty.data(), dirtyTensor.rawEncodedBackingStorage().data(), dirtyTensor.rawEncodedBackingStorage().size());
 
         float *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr;
         CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float) * M * K));
@@ -156,10 +175,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
         // 1 MiB is plenty and keeps per-scenario hipMalloc cheap.
         uint64_t ws_size = 1ull * 1024ull * 1024ull;
         EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulPreferenceSetAttribute(pref,
-                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                  &ws_size,
-                                                  sizeof(ws_size)),
+            hipblasLtMatmulPreferenceSetAttribute(
+                pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws_size, sizeof(ws_size)),
             HIPBLAS_STATUS_SUCCESS);
 
         hipblasLtMatmulHeuristicResult_t heur[1]{};

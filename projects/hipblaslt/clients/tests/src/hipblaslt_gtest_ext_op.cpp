@@ -5,113 +5,16 @@
  *
  *******************************************************************************/
 
-#include <algorithm>
-#include <cstdlib>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt_init.hpp>
-#include <limits>
-#include <numeric>
+#include <hipblaslt/host_numerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_numerics/Types.hpp>
+#include <roc/host_numerics/validation.hpp>
 #include <vector>
 
-#include "../include/hipblaslt_random.hpp"
-#include "../include/unit.hpp"
 #include "hipblaslt_arguments.hpp"
-
-namespace
-{
-    template <typename DType>
-    void cpuSoftmax(DType* m, DType* a, std::uint32_t numRows, std::uint32_t numCols)
-    {
-        for(std::uint32_t i = 0; i < numRows; ++i)
-        {
-            const auto rowMax = *std::max_element(a + i * numCols, a + i * numCols + numCols);
-            auto       rowSum = 0.f;
-            std::transform(a + i * numCols,
-                           a + i * numCols + numCols,
-                           m + i * numCols,
-                           [&rowSum, rowMax](auto v) {
-                               const auto u = std::exp(v - rowMax);
-                               rowSum += u;
-                               return u;
-                           });
-
-            std::transform(m + i * numCols,
-                           m + i * numCols + numCols,
-                           m + i * numCols,
-                           [rowSum](auto v) { return v / rowSum; });
-        }
-    }
-
-    template <typename DType>
-    void cpuLayerNorm(DType*        out,
-                      DType*        mean,
-                      DType*        invvar,
-                      DType*        in,
-                      std::uint32_t batch,
-                      std::uint32_t length,
-                      DType         eps   = 1e-05,
-                      DType*        gamma = nullptr,
-                      DType*        beta  = nullptr)
-    {
-        // calculate mean
-        for(int i = 0; i < batch; i++)
-        {
-            int    count = 0;
-            DType* inC   = in + i * length;
-            DType* outC  = out + i * length;
-
-            for(int j = 0; j < length; j++)
-            {
-                count        = count + 1;
-                float delta  = inC[j] - mean[i];
-                mean[i]      = mean[i] + delta / count;
-                float delta2 = inC[j] - mean[i];
-                invvar[i]    = invvar[i] + delta * delta2;
-            }
-            invvar[i] = 1 / std::sqrt((invvar[i] / length) + eps);
-
-            // calculate invvar
-            for(int j = 0; j < length; j++)
-            {
-                outC[j] = (inC[j] - mean[i]) * invvar[i];
-
-                if(gamma != nullptr)
-                    outC[j] = outC[j] * gamma[j];
-
-                if(beta != nullptr)
-                    outC[j] = outC[j] + beta[j];
-            }
-        }
-    }
-
-    template <typename T>
-    T abs(T a)
-    {
-        return (a > 0) ? a : -a;
-    }
-
-    template <typename T>
-    T max(T a, T b)
-    {
-        return (a > b) ? a : b;
-    }
-
-    template <typename Ti, typename To>
-    void cpuAMax(To* out, Ti* in, std::uint32_t length)
-    {
-        // calculate amax
-        Ti m = 0;
-        for(int j = 0; j < length; j++)
-        {
-            m = max(m, abs(in[j]));
-        }
-        out[0] = To(m);
-    }
-
-}
 
 enum class amaxInitMethod
 {
@@ -152,29 +55,40 @@ class ExtOpAMaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataTy
 
 TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 {
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
+
     uint32_t           m = GetParam();
     uint32_t           n = 16;
-    std::vector<float> input(m * n, 0.f);
     std::vector<float> output(m * n, 0.f);
-    hipblaslt_uniform_int_1_10_run_float(input.data(), input.size());
+    const Tensor       input = generate(ScalarType::Float32,
+                                  Shape{m, n},
+                                  initializationRecipe(ScalarType::Float32,
+                                                       hipblaslt_initialization::rand_int,
+                                                       defaultInitializationSeed,
+                                                       TrigonometricComponent::Cosine));
     float* gpuInput{};
     float* gpuOutput{};
 
     auto err          = hipMalloc(&gpuInput, m * n * sizeof(float));
     err               = hipMalloc(&gpuOutput, m * n * sizeof(float));
-    err               = hipMemcpyHtoD(gpuInput, input.data(), m * n * sizeof(float));
+    err               = hipMemcpyHtoD(
+        gpuInput, input.rawEncodedBackingStorage().data(), input.rawEncodedBackingStorage().size());
     auto hipblasltErr = hipblasltExtSoftmax(HIP_R_32F, m, n, 1, gpuOutput, gpuInput, nullptr);
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
     err = hipDeviceSynchronize();
     ASSERT_EQ(err, hipSuccess);
-    std::vector<float> cpuRef(m * n, 0.f);
-    cpuSoftmax(cpuRef.data(), input.data(), m, n);
     err = hipMemcpyDtoH(output.data(), gpuOutput, m * n * sizeof(float));
+    ASSERT_EQ(err, hipSuccess);
 
-    for(std::size_t i = 0; i < m * n; ++i)
-    {
-        EXPECT_NEAR(output[i], cpuRef[i], 1e-5);
-    }
+    Tensor expected(ScalarType::Float32, Shape{m, n});
+    referenceSoftmaxInto(input, expected, 1, ScalarType::Float32);
+    const ComparisonReport comparison = compare(
+        copyTensorFromEncodedStorage(
+            output.data(), output.size(), Layout::contiguousLastDimensionFastest(Shape{m, n})),
+        expected,
+        nearComparisonOptions(1e-5));
+    EXPECT_TRUE(comparison.passed());
 
     err = hipFree(gpuInput);
     err = hipFree(gpuOutput);
@@ -182,19 +96,27 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
 
 TEST_P(ExtOpLayerNormTest, layernormSuccess)
 {
+    using namespace roc::host_numerics;
+    using namespace hipblaslt::host_numerics;
+
     uint32_t m = GetParam();
     uint32_t n = 16;
 
     std::vector<float> output(m * n, 0.f);
     std::vector<float> mean(m, 0.f);
     std::vector<float> invvar(m, 0.f);
-    std::vector<float> input(m * n, 0.f);
-    std::vector<float> gamma(n, 1.f);
-    std::vector<float> beta(n, 0.f);
-
-    hipblaslt_init_hpl(input, n, m, n);
-    hipblaslt_init_hpl(gamma, n, 1, n);
-    hipblaslt_init_hpl(beta, n, 1, n);
+    const auto         initialized = [](Shape shape, initialization::OperandSequence sequence) {
+        return generate(ScalarType::Float32,
+                        std::move(shape),
+                        initializationRecipe(
+                            ScalarType::Float32,
+                            hipblaslt_initialization::hpl,
+                            initialization::seedForSequence(defaultInitializationSeed, sequence),
+                            TrigonometricComponent::Cosine));
+    };
+    const Tensor input = initialized(Shape{m, n}, initialization::OperandSequence::MatrixA);
+    const Tensor gamma = initialized(Shape{n}, initialization::OperandSequence::ScaleA);
+    const Tensor beta  = initialized(Shape{n}, initialization::OperandSequence::Bias);
 
     float* gpuOutput{};
     float* gpuMean{};
@@ -210,9 +132,12 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     err      = hipMalloc(&gpuGamma, n * sizeof(float));
     err      = hipMalloc(&gpuBeta, n * sizeof(float));
 
-    err = hipMemcpyHtoD(gpuInput, input.data(), m * n * sizeof(float));
-    err = hipMemcpyHtoD(gpuGamma, gamma.data(), n * sizeof(float));
-    err = hipMemcpyHtoD(gpuBeta, beta.data(), n * sizeof(float));
+    err = hipMemcpyHtoD(
+        gpuInput, input.rawEncodedBackingStorage().data(), input.rawEncodedBackingStorage().size());
+    err = hipMemcpyHtoD(
+        gpuGamma, gamma.rawEncodedBackingStorage().data(), gamma.rawEncodedBackingStorage().size());
+    err = hipMemcpyHtoD(
+        gpuBeta, beta.rawEncodedBackingStorage().data(), beta.rawEncodedBackingStorage().size());
 
     auto hipblasltErr = hipblasltExtLayerNorm(HIP_R_32F,
                                               gpuOutput,
@@ -229,35 +154,48 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     err = hipDeviceSynchronize();
     ASSERT_EQ(err, hipSuccess);
 
-    std::vector<float> cpuRef(m * n, 0.0f);
-    std::vector<float> cpuMean(m, 0.0f);
-    std::vector<float> cpuInvvar(m, 0.0f);
-    cpuLayerNorm<float>(cpuRef.data(),
-                        cpuMean.data(),
-                        cpuInvvar.data(),
-                        input.data(),
-                        m,
-                        n,
-                        1e-05,
-                        gamma.data(),
-                        beta.data());
-
     err = hipMemcpyDtoH(output.data(), gpuOutput, m * n * sizeof(float));
     err = hipMemcpyDtoH(mean.data(), gpuMean, m * sizeof(float));
     err = hipMemcpyDtoH(invvar.data(), gpuInvvar, m * sizeof(float));
 
-    for(std::size_t i = 0; i < m * n; ++i)
-    {
-        EXPECT_NEAR(output[i], cpuRef[i], 1e-5);
-    }
-    for(std::size_t i = 0; i < m; ++i)
-    {
-        EXPECT_NEAR(mean[i], cpuMean[i], 1e-5);
-    }
-    for(std::size_t i = 0; i < m; ++i)
-    {
-        EXPECT_NEAR(invvar[i], cpuInvvar[i], 1e-5);
-    }
+    const Layout tensorLayout     = Layout::contiguousLastDimensionFastest(Shape{m, n});
+    const Layout statisticsLayout = Layout::contiguousLastDimensionFastest(Shape{m});
+
+    LayerNormOptions options;
+    options.axis    = 1;
+    options.gamma                    = gamma;
+    options.beta                     = beta;
+    options.epsilon = 1e-5;
+    const LayerNormOutputs reference = referenceLayerNorm(input,
+                                                          {.output          = ScalarType::Float32,
+                                                           .mean            = ScalarType::Float32,
+                                                           .inverseVariance = ScalarType::Float32},
+                                                          options);
+
+    const ComparisonOptions comparisonOptions = nearComparisonOptions(1e-5);
+    const ComparisonReport  outputComparison
+        = compare(copyTensorFromEncodedStorage(output.data(), output.size(), tensorLayout),
+                  reference.output,
+                  comparisonOptions);
+    EXPECT_TRUE(outputComparison.passed())
+        << "LayerNorm output mismatches: " << outputComparison.mismatches
+        << ", max absolute difference: " << outputComparison.maxAbsoluteDifference;
+
+    const ComparisonReport meanComparison
+        = compare(copyTensorFromEncodedStorage(mean.data(), mean.size(), statisticsLayout),
+                  *reference.mean,
+                  comparisonOptions);
+    EXPECT_TRUE(meanComparison.passed())
+        << "LayerNorm mean mismatches: " << meanComparison.mismatches
+        << ", max absolute difference: " << meanComparison.maxAbsoluteDifference;
+
+    const ComparisonReport inverseVarianceComparison
+        = compare(copyTensorFromEncodedStorage(invvar.data(), invvar.size(), statisticsLayout),
+                  *reference.inverseVariance,
+                  comparisonOptions);
+    EXPECT_TRUE(inverseVarianceComparison.passed())
+        << "LayerNorm inverse-variance mismatches: " << inverseVarianceComparison.mismatches
+        << ", max absolute difference: " << inverseVarianceComparison.maxAbsoluteDifference;
 
     err = hipFree(gpuOutput);
     err = hipFree(gpuMean);
@@ -277,35 +215,50 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     To* gpuOutput{nullptr};
     Ti* gpuInput{nullptr};
 
-    auto hipErr = hipMalloc(&gpuOutput, outNumBytes);
-    hipErr      = hipMalloc(&gpuInput, m * n * inNumBytes);
+    ASSERT_EQ(hipMalloc(&gpuOutput, outNumBytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&gpuInput, m * n * inNumBytes), hipSuccess);
 
     std::vector<To> cpuOutput(1, 0.f);
-    std::vector<Ti> cpuInput(m * n, 0.f);
     std::vector<To> refOutput(1, 0.f);
+    using namespace roc::host_numerics;
+    const Tensor cpuInput = generate(hipblaslt::host_numerics::scalarType<Ti>(),
+                                     Shape{numElements},
+                                     hipblaslt::host_numerics::initializationRecipe(
+                                         hipblaslt::host_numerics::scalarType<Ti>(),
+                                         hipblaslt_initialization::hpl,
+                                         hipblaslt::host_numerics::defaultInitializationSeed,
+                                         hipblaslt::host_numerics::TrigonometricComponent::Cosine));
 
-    hipblaslt_init_hpl(cpuInput, m * n, 1, m * n);
-
-    hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes);
+    ASSERT_EQ(hipMemcpyHtoD(gpuInput,
+                            cpuInput.rawEncodedBackingStorage().data(),
+                            cpuInput.rawEncodedBackingStorage().size()),
+              hipSuccess);
 
     hipStream_t stream{};
-    hipErr            = hipStreamCreate(&stream);
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
     auto hipblasltErr = hipblasltExtAMax(type, dtype, gpuOutput, gpuInput, m, n, stream);
+    ASSERT_EQ(hipblasltErr, HIPBLAS_STATUS_SUCCESS);
+    // The call is asynchronous on stream, and the allocator may reuse the preceding parameter's
+    // output storage. Wait before copying the result to the host.
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes), hipSuccess);
 
-    hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes);
-
-    cpuAMax(refOutput.data(), cpuInput.data(), m * n);
+    Tensor referenceOutput = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+        refOutput.data(), refOutput.size(), Layout::contiguousLastDimensionFastest(Shape{}));
+    referenceMaximumAbsoluteInto(cpuInput, referenceOutput, ScalarType::Float32);
+    hipblaslt::host_numerics::copyTensorEncodedBackingStorageToBuffer(
+        refOutput.data(), refOutput.size(), referenceOutput);
 
     EXPECT_NEAR(float(refOutput[0]), float(cpuOutput[0]), 1e-5);
 
-    hipErr = hipStreamDestroy(stream);
-    hipErr = hipFree(gpuOutput);
-    hipErr = hipFree(gpuInput);
+    EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
+    EXPECT_EQ(hipFree(gpuOutput), hipSuccess);
+    EXPECT_EQ(hipFree(gpuInput), hipSuccess);
 }
 
 TEST_P(ExtOpAMaxTest, amaxSuccess)
 {
-    AMaxTestData    testdata = GetParam();
+    AMaxTestData testdata = GetParam();
 
     if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F)
     {
