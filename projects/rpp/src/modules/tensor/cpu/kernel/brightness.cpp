@@ -852,12 +852,12 @@ static inline RppStatus brightness_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescP
                 dstPtrTempB += vectorIncrementPerChannel;
             }
             for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                *dstPtrTempR++ =
-                    (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(srcPtrTemp[0] + 128)) * alpha) + beta - 128);
-                *dstPtrTempG++ =
-                    (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(srcPtrTemp[1] + 128)) * alpha) + beta - 128);
-                *dstPtrTempB++ =
-                    (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(srcPtrTemp[2] + 128)) * alpha) + beta - 128);
+                *dstPtrTempR++ = (Rpp8s)RPPPIXELCHECKI8(
+                    std::nearbyintf((((Rpp32f)(srcPtrTemp[0] + 128)) * alpha) + beta) - 128);
+                *dstPtrTempG++ = (Rpp8s)RPPPIXELCHECKI8(
+                    std::nearbyintf((((Rpp32f)(srcPtrTemp[1] + 128)) * alpha) + beta) - 128);
+                *dstPtrTempB++ = (Rpp8s)RPPPIXELCHECKI8(
+                    std::nearbyintf((((Rpp32f)(srcPtrTemp[2] + 128)) * alpha) + beta) - 128);
                 srcPtrTemp += 3;
             }
 
@@ -905,12 +905,12 @@ static inline RppStatus brightness_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescP
                 dstPtrTemp += vectorIncrement;
             }
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                *dstPtrTemp++ =
-                    (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(*srcPtrTempR + 128)) * alpha) + beta - 128);
-                *dstPtrTemp++ =
-                    (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(*srcPtrTempG + 128)) * alpha) + beta - 128);
-                *dstPtrTemp++ =
-                    (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(*srcPtrTempB + 128)) * alpha) + beta - 128);
+                *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8(
+                    std::nearbyintf((((Rpp32f)(*srcPtrTempR + 128)) * alpha) + beta) - 128);
+                *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8(
+                    std::nearbyintf((((Rpp32f)(*srcPtrTempG + 128)) * alpha) + beta) - 128);
+                *dstPtrTemp++ = (Rpp8s)RPPPIXELCHECKI8(
+                    std::nearbyintf((((Rpp32f)(*srcPtrTempB + 128)) * alpha) + beta) - 128);
                 srcPtrTempR++;
                 srcPtrTempG++;
                 srcPtrTempB++;
@@ -957,8 +957,8 @@ static inline RppStatus brightness_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescP
                     dstPtrTemp += 16;
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8((((Rpp32f)(*srcPtrTemp) + 128) * alpha) +
-                                                         beta - 128);
+                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                        std::nearbyintf((((Rpp32f)(*srcPtrTemp) + 128) * alpha) + beta) - 128);
 
                     srcPtrTemp++;
                     dstPtrTemp++;
