@@ -22,6 +22,10 @@
  *
  * ************************************************************************ */
 
+// rocsparse::bsrsm_copy_scale, rocsparse::bsrsm_{lower,upper}_large_kernel (the
+// __global__ wrappers carrying the grid-stride loops) and the grid sizing helpers
+// live in these two headers so clients/unittests can launch the kernels with a
+// deliberately undersized grid.
 #include "bsrsm_device.h"
 #include "bsrsm_device_large.h"
 #include "rocsparse_bsrsm.hpp"
@@ -29,20 +33,31 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <limits>
+
 namespace rocsparse
 {
-#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                             \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),  \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                 \
-                                       dim3(wfsize, bsize / wfsize),                          \
-                                       0,                                                     \
-                                       stream,                                                \
-                                       dir,                                                   \
-                                       nnzb,                                                  \
-                                       (const rocsparse_int*)trm_info->get_transposed_perm(), \
-                                       bsr_val,                                               \
-                                       bsrt_val,                                              \
-                                       block_dim)
+    // wfsize * nnzb was a signed 32 bit product that overflowed at 33,554,431
+    // non-zero blocks with a 64 wide wavefront, so cast before the multiply. The
+    // clamp is a one line substitution for
+    //     rocsparse::get_grid_size(num_blocks, rocsparse::max_grid_size_x)
+    // once PR #11512 (AISPARSE-696) lands. rocsparse::bsr_gather grid-strides over
+    // whatever the clamp leaves behind; that kernel is shared with bsrsv, so this
+    // is deliberately the same expression AISPARSE-656 uses there (PR #11118).
+#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                      \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
+        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                          \
+        dim3(rocsparse::min((static_cast<int64_t>(wfsize) * nnzb - 1) / bsize + 1,     \
+                            static_cast<int64_t>(handle->properties.maxGridSize[0]))), \
+        dim3(wfsize, bsize / wfsize),                                                  \
+        0,                                                                             \
+        stream,                                                                        \
+        dir,                                                                           \
+        nnzb,                                                                          \
+        (const rocsparse_int*)trm_info->get_transposed_perm(),                         \
+        bsr_val,                                                                       \
+        bsrt_val,                                                                      \
+        block_dim)
 
 #define LAUNCH_BSRSM_GTHR(bsize, wfsize, dim) \
     if(dim <= 2)                              \
@@ -60,21 +75,6 @@ namespace rocsparse
     else                                      \
     {                                         \
         LAUNCH_BSRSM_GTHR_DIM(bsize, 64, 8);  \
-    }
-
-    template <uint32_t BLOCKSIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void bsrsm_copy_scale(rocsparse_int m,
-                          rocsparse_int n,
-                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                          const T* B,
-                          int64_t  ldb,
-                          T*       X,
-                          int64_t  ldx,
-                          bool     is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::bsrsm_copy_scale_device(m, n, alpha, B, ldb, X, ldx);
     }
 
     template <typename T>
@@ -100,8 +100,22 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+// One thread block per (RHS panel, block row) pair, flattened onto grid.x.
+// ((nrhs - 1) / NCOL + 1) * mb was a signed 32 bit product, so the count is now
+// formed in 64 bit and clamped to the device grid limit before it is narrowed;
+// the kernels grid-stride over whatever is left over.
+//
+// bsrsm_solve_grid_size returns at most maxGridSize[0], except when mb alone
+// exceeds it: then it returns mb so the launch fails with
+// hipErrorInvalidConfiguration instead of running a grid too small to hold one
+// RHS panel, which the kernels cannot stride. Saturate the narrowing so that
+// stays true if mb also exceeds UINT32_MAX, rather than wrapping into a legal
+// looking grid.
 #define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                        \
-    dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                                           \
+    const int64_t bsrsm_grid_x                                                                 \
+        = rocsparse::bsrsm_solve_grid_size(mb, nrhs, NCOL, handle->properties.maxGridSize[0]); \
+    dim3 bsrsm_blocks(static_cast<uint32_t>(rocsparse::min(                                    \
+        bsrsm_grid_x, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()))));           \
     dim3 bsrsm_threads(NCOL* M_);                                                              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                              \
                                        bsrsm_blocks,                                           \
@@ -134,6 +148,13 @@ namespace rocsparse
         static constexpr uint32_t NCOL = 16;
 
         const int narrays = (nrhs - 1) / NCOL + 1;
+
+        // Number of scalar rows. mb * block_dim was a signed 32 bit product at
+        // every use below (the bsrsm_copy_scale grid and row count, and the three
+        // dense_transpose calls, whose m parameter is a template one that forwards
+        // to an int64_t overload and so truncated before it widened). Form it once
+        // in 64 bit (AISPARSE-670).
+        const int64_t m_rows = static_cast<int64_t>(mb) * block_dim;
 
         // done_array
         int* done_array = reinterpret_cast<int*>(ptr);
@@ -177,23 +198,36 @@ namespace rocsparse
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
-                    handle, mb * block_dim, nrhs, alpha, B, ldb, Xt, ldimX));
+                    handle, m_rows, static_cast<int64_t>(nrhs), alpha, B, ldb, Xt, ldimX));
             }
             else
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
-                    handle, mb * block_dim, nrhs, *alpha, B, ldb, Xt, ldimX));
+                    handle, m_rows, static_cast<int64_t>(nrhs), *alpha, B, ldb, Xt, ldimX));
             }
         }
         else
         {
-            // Copy B into X and scale it with alpha
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrsm_copy_scale<1024>),
-                                               dim3((mb * block_dim - 1) / 1024 + 1),
-                                               dim3(1024),
+            // Copy B into X and scale it with alpha.
+            //
+            // The grid is built from the 64 bit m_rows and clamped to the device
+            // limit -- another one line substitution for rocsparse::get_grid_size
+            // once PR #11512 (AISPARSE-696) lands -- and bsrsm_copy_scale
+            // grid-strides over the rows the clamp left behind. No panel rounding
+            // is needed: that kernel has no cross-block dependencies, so any
+            // stride covers all rows.
+            static constexpr uint32_t COPY_BLOCKSIZE = 1024;
+
+            const int64_t copy_blocks
+                = rocsparse::min((m_rows - 1) / COPY_BLOCKSIZE + 1,
+                                 static_cast<int64_t>(handle->properties.maxGridSize[0]));
+
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrsm_copy_scale<COPY_BLOCKSIZE>),
+                                               dim3(static_cast<uint32_t>(copy_blocks)),
+                                               dim3(COPY_BLOCKSIZE),
                                                0,
                                                stream,
-                                               mb * block_dim,
+                                               m_rows,
                                                nrhs,
                                                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
                                                B,
@@ -298,8 +332,8 @@ namespace rocsparse
         // Transpose X back if X was not initially transposed
         if(trans_X == rocsparse_operation_none)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::dense_transpose_back(handle, mb * block_dim, nrhs, Xt, ldimX, X, ldx));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_back(
+                handle, m_rows, static_cast<int64_t>(nrhs), Xt, ldimX, X, ldx));
         }
 
         return rocsparse_status_success;

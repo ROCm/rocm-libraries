@@ -2731,25 +2731,26 @@ namespace rocsparse
         int lid = threadIdx.x & (BSRDIM - 1);
         int wid = threadIdx.x / BSRDIM;
 
-        // Non-permuted nnz index
-        I j = blockIdx.x * DIMY + threadIdx.y;
-
-        // Do not exceed the number of elements
-        if(j >= nnzb)
+        // Grid-stride loop over the non-permuted nnz index so a grid clamped
+        // against maxGridSize[0] still covers the full range. The index is
+        // computed in 64-bit to avoid overflowing the block-grid product.
+        const int64_t stride = static_cast<int64_t>(gridDim.x) * DIMY;
+        for(int64_t jj = static_cast<int64_t>(blockIdx.x) * DIMY + threadIdx.y; jj < nnzb;
+            jj += stride)
         {
-            return;
-        }
+            const I j = static_cast<I>(jj);
 
-        // Load the permuted nnz index
-        I p = perm[j];
+            // Load the permuted nnz index
+            const I p = perm[j];
 
-        // Gather values from A and store them to T with respect to the
-        // given row / column permutation
-        for(I bi = lid; bi < block_dim; bi += BSRDIM)
-        {
-            for(I bj = wid; bj < block_dim; bj += BSRDIM)
+            // Gather values from A and store them to T with respect to the
+            // given row / column permutation
+            for(I bi = lid; bi < block_dim; bi += BSRDIM)
             {
-                bsr_val_T[BSR_IND(j, bi, bj, dir)] = bsr_val_A[BSR_IND(p, bj, bi, dir)];
+                for(I bj = wid; bj < block_dim; bj += BSRDIM)
+                {
+                    bsr_val_T[BSR_IND(j, bi, bj, dir)] = bsr_val_A[BSR_IND(p, bj, bi, dir)];
+                }
             }
         }
     }
