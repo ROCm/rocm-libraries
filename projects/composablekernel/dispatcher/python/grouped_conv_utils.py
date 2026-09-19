@@ -661,6 +661,18 @@ class GpuGroupedConvRunner:
                 self._dispatch_lib = GroupedConvDispatcherLib.find()
 
             if self._dispatch_lib is None:
+                # Record WHY. This used to `return` silently, leaving
+                # _init_error None while is_available() reported False, so the
+                # caller had no way to tell "no dispatcher .so was found" apart
+                # from "the GPU context failed to initialise" -- and the
+                # grouped-conv examples surfaced both as a bare
+                # "JIT build failed" even when codegen and hipcc had succeeded.
+                searched = self._lib_path or "auto-detect via GroupedConvDispatcherLib.find()"
+                self._init_error = (
+                    f"No grouped-conv dispatcher library could be loaded ({searched}). "
+                    f"The kernel may have been generated and compiled successfully but "
+                    f"not placed where find() looks for it."
+                )
                 return
 
             # Load HIP library - THIS creates GPU context.
