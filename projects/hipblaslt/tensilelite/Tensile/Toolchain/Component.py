@@ -54,7 +54,7 @@ def _invoke(args: List[str], desc: str=""):
   return out
 
 
-def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
+def _getVersion(executable: str, versionFlag: str, regex: str) -> SemanticVersion:
     """Compute the version string of a toolchain component.
 
     Args:
@@ -73,20 +73,37 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         match = search(regex, output, IGNORECASE)
         if match:
             result = match.group(1)
-            return SemanticVersion(*[int(c.split("-")[0]) for c in result.split(".")[:3]])
+            return _parseVersion(result)
         raise Exception(f"No version from {output} matches regex {regex}")
     except Exception as e:
         raise RuntimeError(f"Failed to get version when calling {args}: {e}")
 
 
-def get_rocm_version() -> str:
-    """Compute the ROCm version string using hipconfig.
+def _parseVersion(version: str) -> SemanticVersion:
+    """Parse the numeric major, minor, and patch prefix from a version string."""
+    version_match = search(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+    if not version_match:
+        raise ValueError(f"Invalid version string: {version}")
+    return SemanticVersion(*(int(component) for component in version_match.groups()))
+
+
+def get_rocm_version() -> SemanticVersion:
+    """Return the HIP package version supplied by CMake or reported by hipconfig.
+
+    Configured hipBLASLt builds pass CMake's ``hip_VERSION`` as
+    ``ROCM_VERSION``. Standalone callers retain the existing ``hipconfig``
+    fallback.
 
     Raises:
-        RuntimeError: If hipconfig fails to execute.
+        RuntimeError: If ROCM_VERSION is invalid or hipconfig fails to execute.
     Return:
-        ROCm version string
+        ROCm SemanticVersion
     """
+    if version := environ.get("ROCM_VERSION"):
+        try:
+            return _parseVersion(version)
+        except ValueError as error:
+            raise RuntimeError(f"Invalid ROCM_VERSION: {version}") from error
     return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
 
 
