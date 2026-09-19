@@ -26,8 +26,6 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef HANDLE_H
-#define HANDLE_H
 
 #include "rocblaslt.h"
 #include <hipblaslt/hipblaslt-opt-in-features.h>
@@ -471,5 +469,3 @@ inline int32_t effective_uniform_summation_order(const _rocblaslt_handle*      h
         return 1;
     return 0;
 }
-
-#endif // HANDLE_H

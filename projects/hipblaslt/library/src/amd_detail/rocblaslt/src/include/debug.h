@@ -26,8 +26,6 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef DEBUG_H
-#define DEBUG_H
 
 #include <iostream>
 static constexpr const char* s_rocblaslt_debug_str = "//rocblaslt.degug: ";
@@ -70,5 +68,3 @@ inline rocblaslt_status rocblaslt_return_status_trace(const char*      function,
 #define ROCBLASLT_RETURN_STATUS(token__)  \
     return rocblaslt_return_status_trace( \
         __FUNCTION__, __FILE__, __LINE__, rocblaslt_status_##token__)
-
-#endif // DEBUG_H

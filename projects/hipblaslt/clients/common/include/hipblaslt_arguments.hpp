@@ -695,12 +695,6 @@ enum hipblaslt_argument : int
 };
 #undef CREATE_ENUM
 
-#if __clang__
-#define HIPBLASLT_CLANG_STATIC static
-#else
-#define HIPBLASLT_CLANG_STATIC
-#endif
-
 // ArgumentsHelper contains a templated lambda apply<> where there is a template
 // specialization for each line in the CPP macro FOR_EACH_ARGUMENT. For example,
 // the first lambda is:  apply<e_M> = [](auto&& func, const Arguments& arg, auto){func("M", arg.m);};
