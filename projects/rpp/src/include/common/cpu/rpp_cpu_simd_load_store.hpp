@@ -431,9 +431,9 @@ inline void rpp_store48_f32pln3_to_u8pkd3(Rpp8u* dstPtr, __m128* p) {
     _mm_storeu_si128(
         (__m128i*)(dstPtr + 24),
         px[2]); /* store [R09|G09|B09|R10|G10|B10|R11|G11|B11|R12|G12|B12|00|00|00|00] */
-    _mm_storeu_si128(
-        (__m128i*)(dstPtr + 36),
-        px[3]); /* store [R13|G13|B13|R14|G14|B14|R15|G15|B15|R16|G16|B16|00|00|00|00] */
+    // Store only 12 bytes for the last register to write exactly 48 bytes total
+    _mm_storel_epi64((__m128i*)(dstPtr + 36), px[3]);       /* store first 8 bytes */
+    rpp_storeu_si32(dstPtr + 44, _mm_srli_si128(px[3], 8)); /* store last 4 bytes */
 }
 
 inline void rpp_load48_u8pkd3_to_u8pln3(Rpp8u* srcPtr, __m128i* px) {
@@ -739,7 +739,9 @@ inline void rpp_store12_f32pln3_to_f32pkd3(Rpp32f* dstPtr, __m128* p) {
     _mm_storeu_ps(dstPtr, p[0]);
     _mm_storeu_ps(dstPtr + 3, p[1]);
     _mm_storeu_ps(dstPtr + 6, p[2]);
-    _mm_storeu_ps(dstPtr + 9, p[3]);
+    // Store only 3 floats (12 bytes) to avoid writing beyond 48-byte boundary
+    rpp_storeu_si64(dstPtr + 9, _mm_castps_si128(p[3]));  /* store first 2 floats (8 bytes) */
+    _mm_store_ss(dstPtr + 11, _mm_movehl_ps(p[3], p[3])); /* store 3rd float (4 bytes) */
 }
 
 inline void rpp_load8_f32_to_f32(Rpp32f* srcPtr, __m128* p) {
@@ -941,9 +943,9 @@ inline void rpp_store48_f32pln3_to_i8pkd3(Rpp8s* dstPtr, __m128* p) {
     _mm_storeu_si128(
         (__m128i*)(dstPtr + 24),
         px[2]); /* store [R09|G09|B09|R10|G10|B10|R11|G11|B11|R12|G12|B12|00|00|00|00] */
-    _mm_storeu_si128(
-        (__m128i*)(dstPtr + 36),
-        px[3]); /* store [R13|G13|B13|R14|G14|B14|R15|G15|B15|R16|G16|B16|00|00|00|00] */
+    // Store only 12 bytes for the last register to write exactly 48 bytes total
+    _mm_storel_epi64((__m128i*)(dstPtr + 36), px[3]);       /* store first 8 bytes */
+    rpp_storeu_si32(dstPtr + 44, _mm_srli_si128(px[3], 8)); /* store last 4 bytes */
 }
 
 inline void rpp_load48_i8pln3_to_i32pln3_avx(Rpp8s* srcPtrR, Rpp8s* srcPtrG, Rpp8s* srcPtrB,
@@ -2613,7 +2615,9 @@ inline void rpp_store24_f32pln3_to_f32pkd3_avx(Rpp32f* dstPtr, __m256* p) {
     _mm_storeu_ps(dstPtr, p128[0]);
     _mm_storeu_ps(dstPtr + 3, p128[1]);
     _mm_storeu_ps(dstPtr + 6, p128[2]);
-    _mm_storeu_ps(dstPtr + 9, p128[3]);
+    // Store only 3 floats (12 bytes) to avoid writing beyond 48-byte boundary
+    rpp_storeu_si64(dstPtr + 9, _mm_castps_si128(p128[3]));     /* store first 2 floats (8 bytes) */
+    _mm_store_ss(dstPtr + 11, _mm_movehl_ps(p128[3], p128[3])); /* store 3rd float (4 bytes) */
 
     p128[0] = _mm256_extractf128_ps(pRow[0], 1); /* get R05|G05|B05|00 */
     p128[1] = _mm256_extractf128_ps(pRow[1], 1); /* get R06|G06|B06|00 */
