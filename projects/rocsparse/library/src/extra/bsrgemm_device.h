@@ -152,14 +152,11 @@ namespace rocsparse
                       rocsparse_index_base idx_base_in,
                       rocsparse_index_base idx_base_out)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx >= size)
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < size;
+            idx += static_cast<I>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[idx] = in[idx] - idx_base_in + idx_base_out;
         }
-
-        out[idx] = in[idx] - idx_base_in + idx_base_out;
     }
 
     // Copy and scale an array
