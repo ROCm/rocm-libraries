@@ -5,6 +5,7 @@ set(EXAMPLE_GEMM_COMPILE_OPTIONS)
 if(CK_USE_OCP_FP8)
     list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
 endif()
+
 set(EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS)
 if(CK_USE_OCP_FP8)
     list(APPEND EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS -DCK_TILE_USE_OCP_FP8)
@@ -150,5 +151,21 @@ if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950|gfx11|gfx12" AND NOT GPU_TARGETS MA
         COMMENT "Running all ck_tile gemm_streamk tests..."
     )
 else()
-    message(DEBUG "Skipping test_ck_tile_streamk unit tests for current target")
+    message(DEBUG "Skipping generated Stream-K fixtures for current target")
+endif()
+
+# gfx1250 uses 16x16x32/64 WMMA tiles, unlike the gfx11/gfx12 fixtures.
+# Keep a dedicated suite that forces cross-workgroup reduction with these tiles.
+if(GPU_TARGETS MATCHES "gfx1250")
+    add_gtest_executable(test_ck_tile_streamk_gfx1250_wmma
+        test_gemm_streamk_gfx1250_wmma.cpp test_gemm_streamk_util.cpp)
+    set_property(TARGET test_ck_tile_streamk_gfx1250_wmma PROPERTY HIP_ARCHITECTURES gfx1250)
+    target_compile_options(test_ck_tile_streamk_gfx1250_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+    set_tests_properties(test_ck_tile_streamk_gfx1250_wmma PROPERTIES LABELS "CK_TILE_GEMM_STREAMK_TESTS")
+    add_custom_target(ck_tile_gemm_streamk_tests
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_GEMM_STREAMK_TESTS"
+        DEPENDS test_ck_tile_streamk_gfx1250_wmma
+        USES_TERMINAL
+        COMMENT "Running gfx1250 ck_tile gemm_streamk tests..."
+    )
 endif()
