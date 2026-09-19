@@ -1,0 +1,22 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block config_constructor -%}
+    rocprim::run_length_encode_config<
+        rocprim::reduce_by_key_config<
+            {{ config.block_size_x }},
+            {{ config.ipt }},
+            rocprim::block_load_method::block_load_transpose,
+            rocprim::block_load_method::block_load_direct,
+            rocprim::block_scan_algorithm::using_warp_scan
+        >,
+        rocprim::default_config
+    >
+{%- endblock %}
+
+{% block benchmark_type %}
+    using benchmark_type = device_run_length_encode_benchmark<key_type, {{ config.max_length }}, config>;
+{% endblock %}
+
+{% block type_definitions %}
+    using key_type = {{ key_type }};
+{% endblock %}
