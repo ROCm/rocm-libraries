@@ -1589,7 +1589,9 @@ RppStatus hip_exec_normalize_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDesc
     bool computeStdDev =
         computeMeanStddev & 2;  // if 1st bit in computeMeanStddev is set, computeStdDev is set to
                                 // true. Otherwise it is set to false
-    if ((!computeMean) && (!computeStdDev)) maxParamVolume = 0;
+    // maxParamVolume is the per-sample stride into meanTensor/stdDevTensor (paramIndex =
+    // id_z * maxParamVolume). It must stay per-sample even when both statistics are supplied, so
+    // that each sample reads its own parameter block instead of sample 0's.
 
     // Zero-initialize the mean and standard deviation tensors
     if (computeMean)
