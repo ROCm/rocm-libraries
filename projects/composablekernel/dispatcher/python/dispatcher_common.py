@@ -61,17 +61,15 @@ def get_codegen_dir() -> Path:
 # HIP runtime loading
 # ============================================================================
 
-# Candidate sonames for the HIP runtime, most-specific last-resort ordering.
+# Fallback sonames for installations without a usable library discovery tool.
 #
 # The bare ``libamdhip64.so`` is the *development* symlink: it ships in
 # ``$ROCM_PATH/lib`` but is frequently NOT in the ldconfig cache, so a plain
 # ``CDLL("libamdhip64.so")`` fails on an otherwise healthy ROCm node unless the
 # caller happens to have ``LD_LIBRARY_PATH`` set. Only the versioned soname is
-# guaranteed to be registered, and its major version tracks the ROCm release
-# (ROCm 6 -> .so.6, ROCm 7 -> .so.7, ...), so pinning a single version silently
-# breaks on the next one. Try the unversioned name first (correct when the dev
-# package is on the path), then known versioned names, then the explicit
-# ROCm lib directory.
+# registered on runtime-only installations. Discover the registered soname
+# instead of assuming its major version; the list below remains a fallback
+# when the system lookup tools are unavailable.
 _HIP_SONAMES = (
     "libamdhip64.so",
     "libamdhip64.so.7",
@@ -83,20 +81,44 @@ _HIP_SONAMES = (
 def hip_library_candidates() -> List[str]:
     """Return the HIP runtime names/paths to try, in order.
 
-    Ends with absolute paths under ``$ROCM_PATH`` (default ``/opt/rocm``) so the
-    load still succeeds when the versioned library is present but unregistered.
+    Consult the system library cache for the installed soname, then discover
+    versioned files under ``$ROCM_PATH/{lib,lib64}`` (default ``/opt/rocm``).
+    Neither path requires the unversioned development symlink or a hardcoded
+    runtime major version.
     """
+    import ctypes.util
     import os
+    import re
 
-    candidates: List[str] = list(_HIP_SONAMES)
-    rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
-    for soname in _HIP_SONAMES:
-        candidates.append(str(Path(rocm) / "lib" / soname))
-    return candidates
+    candidates: List[str] = [_HIP_SONAMES[0]]
+    try:
+        installed = ctypes.util.find_library("amdhip64")
+    except OSError:
+        installed = None
+    if installed:
+        candidates.append(installed)
+    candidates.extend(_HIP_SONAMES[1:])
+
+    rocm = Path(os.environ.get("ROCM_PATH", "/opt/rocm")).expanduser()
+    for libdir in (rocm / "lib", rocm / "lib64"):
+        candidates.append(str(libdir / _HIP_SONAMES[0]))
+        # Numeric ordering tries .so.10 before .so.9 and accepts full filenames
+        # such as .so.10.0.26306 when even the major-version symlink is absent.
+        versioned = []
+        try:
+            for path in libdir.glob("libamdhip64.so.*"):
+                match = re.fullmatch(r"libamdhip64\.so\.(\d+(?:\.\d+)*)", path.name)
+                if match and path.is_file():
+                    versioned.append((tuple(map(int, match[1].split("."))), str(path)))
+        except OSError:
+            pass
+        candidates.extend(path for _, path in sorted(versioned, reverse=True))
+        candidates.extend(str(libdir / soname) for soname in _HIP_SONAMES[1:])
+    return list(dict.fromkeys(candidates))
 
 
 def load_hip_runtime():
-    """Load libamdhip64 via ctypes, trying every known soname.
+    """Load libamdhip64 via ctypes using discovered and fallback candidates.
 
     Single source of truth so the bridges cannot drift into their own partial
     lists -- grouped_conv hardcoded the bare ``libamdhip64.so`` (which fails

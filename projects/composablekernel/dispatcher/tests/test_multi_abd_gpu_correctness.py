@@ -35,6 +35,7 @@ import numpy as np
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,

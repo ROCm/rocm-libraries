@@ -26,6 +26,7 @@ Usage (end-to-end):
 """
 
 from dispatcher_common import validate_configs_match_arch, unified_framework_flags, arch_feature_defines
+from quant_default_config import deferred_arch_default, resolve_default_configs
 import ctypes
 import json
 import functools
@@ -69,11 +70,9 @@ from codegen_common import make_bquant_kernel_name  # noqa: E402
 
 _DEFAULT_HIPCC = "hipcc"
 
-# Placeholder arch used ONLY for pure name-construction in the convenience
-# factory functions / dataclass default (KERNEL_NAME does not depend on arch).
-# It is NOT a build fallback: the build path (setup_multiple_bquant_dispatchers)
-# requires a real arch, detected via _detect_gpu_arch() (which raises) or passed
-# explicitly via gfx_arch=. Do not use this to silently target a build.
+# The direct dataclass and explicit JSON sweeps retain their historical target.
+# Untargeted convenience factories use a naming preview, then setup resolves
+# their architecture-dependent defaults for the explicit or detected target.
 _NAME_ONLY_GFX_ARCH = "gfx950"
 
 # MX variants require gfx950 (e8m0 block scale / native MX support).
@@ -1011,6 +1010,7 @@ def setup_multiple_bquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
+    configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "BQuant")
 
     # Python-side MX guard: fail early (before hipcc) if any MX variant targets a
@@ -1211,10 +1211,11 @@ def _warp_tile_k_for(gfx_arch: str, is_flatmm: bool = False) -> int:
 # =============================================================================
 
 
+@deferred_arch_default
 def default_fp8_config(
     quant_group_k: int = 128,
     quant_group_n: int = 1,
-    gfx_arch: str = _NAME_ONLY_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> BQuantKernelConfig:
     """Default fp8 BQuant config (tile = 16x64x256, warp = 1x4x1).
 
@@ -1237,10 +1238,11 @@ def default_fp8_config(
     )
 
 
+@deferred_arch_default
 def default_bf8_config(
     quant_group_k: int = 128,
     quant_group_n: int = 1,
-    gfx_arch: str = _NAME_ONLY_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> BQuantKernelConfig:
     """Default bf8 BQuant config (tile = 16x64x256, warp = 1x4x1).
 
@@ -1263,10 +1265,11 @@ def default_bf8_config(
     )
 
 
+@deferred_arch_default
 def default_fp8i4_config(
     quant_group_k: int = 128,
     quant_group_n: int = 1,
-    gfx_arch: str = _NAME_ONLY_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> BQuantKernelConfig:
     """Default fp8i4 BQuant config (A=fp8, B=pk_int4, Q=fp8; tile = 16x64x256).
 
@@ -1292,10 +1295,11 @@ def default_fp8i4_config(
     )
 
 
+@deferred_arch_default
 def default_bf8i4_config(
     quant_group_k: int = 128,
     quant_group_n: int = 1,
-    gfx_arch: str = _NAME_ONLY_GFX_ARCH,
+    gfx_arch: Optional[str] = None,
 ) -> BQuantKernelConfig:
     """Default bf8i4 BQuant config (A=bf8, B=pk_int4, Q=bf8; tile = 16x64x256).
 
@@ -1340,7 +1344,8 @@ def _preshuffleb_config(variant_key, warp_tile_k, quant_group_k, quant_group_n, 
     )
 
 
-def default_fp8_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_fp8_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """fp8 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<fp8_t>).
 
     IsFlatMM=true: warp_tile_k = 128 on gfx950, 64 on gfx942.
@@ -1349,7 +1354,8 @@ def default_fp8_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=
         "fp8", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_bf8_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_bf8_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """bf8 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<bf8_t>).
 
     IsFlatMM=true: warp_tile_k = 128 on gfx950, 64 on gfx942.
@@ -1358,7 +1364,8 @@ def default_bf8_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=
         "bf8", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_fp8i4_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_fp8i4_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """fp8i4 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<fp8_t>).
 
     Instantiated with 8-bit-float PrecType (pk_int4 B does not drive K_Warp_Tile),
@@ -1369,7 +1376,8 @@ def default_fp8i4_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arc
         "fp8i4", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_bf8i4_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_bf8i4_preshuffleb_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """bf8i4 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<bf8_t>).
 
     Instantiated with 8-bit-float PrecType (pk_int4 B does not drive K_Warp_Tile),
@@ -1398,7 +1406,8 @@ def _preshufflequant_config(variant_key, warp_tile_k, quant_group_k, quant_group
     )
 
 
-def default_fp8_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_fp8_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """fp8 preshuffle_bquant prefill config (GemmConfigPreshuffleBQuantPrefill<fp8_t>).
 
     Derives from GemmConfigQuantPrefill (IsFlatMM=false): 128 on gfx950, 32 on gfx942.
@@ -1407,19 +1416,22 @@ def default_fp8_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_a
         "fp8", _warp_tile_k_for(gfx_arch), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_bf8_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_bf8_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """bf8 preshuffle_bquant prefill config (IsFlatMM=false: 128 gfx950, 32 gfx942)."""
     return _preshufflequant_config(
         "bf8", _warp_tile_k_for(gfx_arch), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_fp8i4_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_fp8i4_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """fp8i4 preshuffle_bquant prefill config (8-bit PrecType; 128 gfx950, 32 gfx942)."""
     return _preshufflequant_config(
         "fp8i4", _warp_tile_k_for(gfx_arch), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_bf8i4_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_bf8i4_preshufflequant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """bf8i4 preshuffle_bquant prefill config (8-bit PrecType; 128 gfx950, 32 gfx942)."""
     return _preshufflequant_config(
         "bf8i4", _warp_tile_k_for(gfx_arch), quant_group_k, quant_group_n, gfx_arch)
@@ -1445,25 +1457,29 @@ def _preshuffleb_bquant_config(variant_key, warp_tile_k, quant_group_k, quant_gr
     )
 
 
-def default_fp8_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_fp8_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """fp8 preshuffle_b+preshuffle_bquant config (IsFlatMM=true: 128 gfx950, 64 gfx942)."""
     return _preshuffleb_bquant_config(
         "fp8", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_bf8_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_bf8_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """bf8 preshuffle_b+preshuffle_bquant config (IsFlatMM=true: 128 gfx950, 64 gfx942)."""
     return _preshuffleb_bquant_config(
         "bf8", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_fp8i4_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_fp8i4_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """fp8i4 preshuffle_b+preshuffle_bquant config (8-bit PrecType; 128 gfx950, 64 gfx942)."""
     return _preshuffleb_bquant_config(
         "fp8i4", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
 
 
-def default_bf8i4_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_bf8i4_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """bf8i4 preshuffle_b+preshuffle_bquant config (8-bit PrecType; 128 gfx950, 64 gfx942)."""
     return _preshuffleb_bquant_config(
         "bf8i4", _warp_tile_k_for(gfx_arch, is_flatmm=True), quant_group_k, quant_group_n, gfx_arch)
@@ -1483,7 +1499,8 @@ def default_bf8i4_preshuffleb_bquant_config(quant_group_k=128, quant_group_n=1, 
 # =============================================================================
 
 
-def default_mx_bf16bf16_config(quant_group_k=32, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_mx_bf16bf16_config(quant_group_k=32, quant_group_n=1, gfx_arch=None):
     """MX bf16+bf16 config (A=bf16, B=bf16, Q=e8m0; GemmConfigQuantPrefill<bf16_t>)."""
     return BQuantKernelConfig(
         variant_key="mx_bf16bf16", layout="rcr", pipeline="microscale",
@@ -1496,7 +1513,8 @@ def default_mx_bf16bf16_config(quant_group_k=32, quant_group_n=1, gfx_arch=_NAME
     )
 
 
-def default_mx_bf16bf8_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_mx_bf16bf8_config(quant_group_k=128, quant_group_n=1, gfx_arch=None):
     """MX bf16+bf8 config (A=bf16, B=bf8, Q=e8m0; GemmConfigMixedPrecision, warp_tile_k=64)."""
     return BQuantKernelConfig(
         variant_key="mx_bf16bf8", layout="rcr", pipeline="microscale",
@@ -1509,7 +1527,8 @@ def default_mx_bf16bf8_config(quant_group_k=128, quant_group_n=1, gfx_arch=_NAME
     )
 
 
-def default_mx_bf16fp4_config(quant_group_k=32, quant_group_n=1, gfx_arch=_NAME_ONLY_GFX_ARCH):
+@deferred_arch_default
+def default_mx_bf16fp4_config(quant_group_k=32, quant_group_n=1, gfx_arch=None):
     """MX bf16+fp4 config (A=bf16, B=pk_fp4, Q=e8m0; GemmConfigQuantPrefill<bf16_t>)."""
     return BQuantKernelConfig(
         variant_key="mx_bf16fp4", layout="rcr", pipeline="microscale",

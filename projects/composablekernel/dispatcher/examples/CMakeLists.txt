@@ -449,7 +449,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory ${GEMM_FALLBACK_KERNEL_DIR}
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../codegen/unified_gemm_codegen.py 
             --datatype fp16 --layout rcr --variants standard
-            --gpu-target ${GPU_TARGET}
+            --gpu-target ${_gemm_fallback_arch}
             --output-dir ${GEMM_FALLBACK_KERNEL_DIR}
             --tile-config-json "${GEMM_FALLBACK_TILE_CONFIG}"
     # Fail here, not three steps later. unified_gemm_codegen.py exits 0 even when

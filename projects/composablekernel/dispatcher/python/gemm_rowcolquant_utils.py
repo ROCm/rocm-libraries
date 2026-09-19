@@ -29,6 +29,7 @@ Usage (end-to-end):
 """
 
 from dispatcher_common import validate_configs_match_arch, unified_framework_flags, arch_feature_defines
+from quant_default_config import deferred_arch_default, resolve_default_configs
 import ctypes
 import json
 import logging
@@ -620,6 +621,7 @@ def setup_multiple_rowcolquant_dispatchers(
         return []
 
     arch = gfx_arch or _detect_gpu_arch()
+    configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "RowColQuant")
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
@@ -765,7 +767,8 @@ def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
     return 32
 
 
-def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelConfig:
+@deferred_arch_default
+def default_fp8_config(gfx_arch: Optional[str] = None) -> RowColQuantKernelConfig:
     """Return the default fp8 RowColQuant config (tile = 16x64x256, warp = 1x4x1).
 
     Matches GemmConfigRowColQuant<fp8_t>. WarpTileK is arch-derived via
@@ -788,7 +791,8 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
     )
 
 
-def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelConfig:
+@deferred_arch_default
+def default_bf8_config(gfx_arch: Optional[str] = None) -> RowColQuantKernelConfig:
     """Return the default bf8 RowColQuant config (tile = 16x64x256, warp = 1x4x1).
 
     Matches GemmConfigRowColQuant<bf8_t>. WarpTileK is arch-derived via

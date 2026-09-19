@@ -24,6 +24,7 @@ Usage (end-to-end):
 """
 
 from dispatcher_common import validate_configs_match_arch, unified_framework_flags, arch_feature_defines
+from quant_default_config import deferred_arch_default, resolve_default_configs
 import ctypes
 import json
 import logging
@@ -202,14 +203,30 @@ class AQuantKernelConfig:
     # ctypes .so name lines up with the generated header (and the matched Old-TE stem).
     epilogue: str = "cshuffle"
 
-    # No default arch: caller must pass a valid one (or use _detect_gpu_arch()).
+    # Custom configs record their target. Untargeted default_* factories keep a
+    # naming preview that setup resolves separately for the actual build target.
     gfx_arch: str = "gfx950"
 
 
     def __post_init__(self):
         # Single choke point: catches the public default_* constructors, the
         # internal config builders, and expand_*_sweep, all of which land here.
-        _reject_i4_on_gfx1250(self.variant_key, self.gfx_arch)
+        self.validate_target()
+
+    def validate_target(self, gfx_arch=None):
+        """Reject known unsafe gfx1250 overrides, including mutable configs."""
+        arch = self.gfx_arch if gfx_arch is None else gfx_arch
+        _reject_i4_on_gfx1250(self.variant_key, arch)
+        if (_is_gfx1250(arch)
+                and self.variant_key in ("fp8", "bf8")
+                and (self.warp_tile_m, self.warp_tile_n) == (16, 16)
+                and self.warp_tile_k not in (64, 128)):
+            raise ValueError(
+                f"AQuant {self.variant_key} on {arch!r} supports "
+                "warp_tile_k=64 or warp_tile_k=128 for the 16x16 WMMA tile; "
+                f"got warp_tile_k={self.warp_tile_k}. The gfx1250 default "
+                "uses the GPU-validated WMMA fragment."
+            )
 
     @property
     def pipeline_key(self) -> str:
@@ -244,6 +261,7 @@ class AQuantKernelConfig:
 
     def to_codegen_config(self) -> dict:
         """Produce the JSON config dict consumed by unified_gemm_aquant_codegen.py."""
+        self.validate_target()
         return {
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
@@ -634,7 +652,10 @@ def setup_multiple_aquant_dispatchers(
         return []
 
     arch = _validate_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
+    configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "AQuant")
+    for config in configs:
+        config.validate_target(arch)
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
         return _compile_aquant_kernel(
@@ -832,8 +853,9 @@ def _decode_config(
     )
 
 
+@deferred_arch_default
 def default_fp8_config(quant_group_k: int = 128, quant_group_n: int = 1,
-                       layout: str = "rcr", gfx_arch: str = "gfx950",
+                       layout: str = "rcr", gfx_arch: Optional[str] = None,
                        warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """Default fp8 AQuant decode config (GemmConfigQuantDecodeInterwave<fp8_t>).
 
@@ -845,8 +867,9 @@ def default_fp8_config(quant_group_k: int = 128, quant_group_n: int = 1,
     return _decode_config("fp8", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
+@deferred_arch_default
 def default_bf8_config(quant_group_k: int = 128, quant_group_n: int = 1,
-                       layout: str = "rcr", gfx_arch: str = "gfx950",
+                       layout: str = "rcr", gfx_arch: Optional[str] = None,
                        warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """Default bf8 AQuant decode config (GemmConfigQuantDecodeInterwave<bf8_t>).
 
@@ -857,8 +880,9 @@ def default_bf8_config(quant_group_k: int = 128, quant_group_n: int = 1,
     return _decode_config("bf8", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
+@deferred_arch_default
 def default_fp8i4_config(quant_group_k: int = 128, quant_group_n: int = 1,
-                         layout: str = "rcr", gfx_arch: str = "gfx950",
+                         layout: str = "rcr", gfx_arch: Optional[str] = None,
                          warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """Default fp8i4 AQuant decode config (A=pk_int4, B=fp8, Q=fp8).
 
@@ -870,8 +894,9 @@ def default_fp8i4_config(quant_group_k: int = 128, quant_group_n: int = 1,
     return _decode_config("fp8i4", warp_tile_k, quant_group_k, quant_group_n, layout, gfx_arch)
 
 
+@deferred_arch_default
 def default_bf8i4_config(quant_group_k: int = 128, quant_group_n: int = 1,
-                         layout: str = "rcr", gfx_arch: str = "gfx950",
+                         layout: str = "rcr", gfx_arch: Optional[str] = None,
                          warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """Default bf8i4 AQuant decode config (A=pk_int4, B=bf8, Q=bf8).
 
@@ -912,9 +937,10 @@ def _preshufflequant_config(
     )
 
 
+@deferred_arch_default
 def default_fp8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                        layout: str = "rcr",
-                                       gfx_arch: str = "gfx950",
+                                       gfx_arch: Optional[str] = None,
                                        warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """fp8 AQuant preshufflequant config (GemmConfigPreshuffleQuantDecode<fp8_t>).
 
@@ -927,9 +953,10 @@ def default_fp8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: 
                                    layout, gfx_arch)
 
 
+@deferred_arch_default
 def default_bf8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                        layout: str = "rcr",
-                                       gfx_arch: str = "gfx950",
+                                       gfx_arch: Optional[str] = None,
                                        warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """bf8 AQuant preshufflequant config (GemmConfigPreshuffleQuantDecode<bf8_t>).
 
@@ -941,9 +968,10 @@ def default_bf8_preshufflequant_config(quant_group_k: int = 128, quant_group_n: 
                                    layout, gfx_arch)
 
 
+@deferred_arch_default
 def default_fp8i4_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                          layout: str = "rcr",
-                                         gfx_arch: str = "gfx950",
+                                         gfx_arch: Optional[str] = None,
                                          warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """fp8i4 AQuant preshufflequant config (A=pk_int4, B=fp8, Q=fp8).
 
@@ -955,9 +983,10 @@ def default_fp8i4_preshufflequant_config(quant_group_k: int = 128, quant_group_n
                                    layout, gfx_arch)
 
 
+@deferred_arch_default
 def default_bf8i4_preshufflequant_config(quant_group_k: int = 128, quant_group_n: int = 1,
                                          layout: str = "rcr",
-                                         gfx_arch: str = "gfx950",
+                                         gfx_arch: Optional[str] = None,
                                          warp_tile_k: Optional[int] = None) -> AQuantKernelConfig:
     """bf8i4 AQuant preshufflequant config (A=pk_int4, B=bf8, Q=bf8).
 

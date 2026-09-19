@@ -36,6 +36,7 @@ Usage (end-to-end):
 """
 
 from dispatcher_common import validate_configs_match_arch, unified_framework_flags, arch_feature_defines
+from quant_default_config import deferred_arch_default, resolve_default_configs
 import ctypes
 import json
 import logging
@@ -717,6 +718,7 @@ def setup_multiple_abquant_dispatchers(
         return []
 
     arch = _validate_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
+    configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "ABQuant")
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
@@ -1073,7 +1075,8 @@ def _abquant_prefill_config(
 # =============================================================================
 
 
-def default_fp8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
+@deferred_arch_default
+def default_fp8_config(bquant_group_n: int = 1, gfx_arch: Optional[str] = None) -> ABQuantKernelConfig:
     """fp8 ABQuant, non-preshuffle.
 
     Old-TE (gemm_abquant_quantgrouped_fp8.cpp):
@@ -1088,7 +1091,8 @@ def default_fp8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQ
                                    transpose_c=(bquant_group_n > 1), gfx_arch=gfx_arch)
 
 
-def default_bf8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
+@deferred_arch_default
+def default_bf8_config(bquant_group_n: int = 1, gfx_arch: Optional[str] = None) -> ABQuantKernelConfig:
     """bf8 ABQuant, non-preshuffle (same alias split as fp8)."""
     if bquant_group_n > 1 and _uses_eight_waves("bf8", gfx_arch):
         return _abquant_eight_waves_config("bf8", pipeline="compv3", preshuffle_b=False,
@@ -1098,7 +1102,8 @@ def default_bf8_config(bquant_group_n: int = 1, gfx_arch: str = "gfx950") -> ABQ
                                    transpose_c=(bquant_group_n > 1), gfx_arch=gfx_arch)
 
 
-def default_fp4_config(gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
+@deferred_arch_default
+def default_fp4_config(gfx_arch: Optional[str] = None) -> ABQuantKernelConfig:
     """fp4 ABQuant, non-preshuffle (only bquant_group_n=128; hardcoded
     GemmConfigABQuantPrefill<pk_fp4_raw_t>, never eight_waves, warp_tile_k=32)."""
     return _abquant_prefill_config("fp4", warp_tile_k=_warp_tile_k_for("fp4", gfx_arch),
@@ -1111,8 +1116,9 @@ def default_fp4_config(gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
 # =============================================================================
 
 
+@deferred_arch_default
 def default_fp8_preshufflequant_config(
-    bquant_group_n: int = 1, gfx_arch: str = "gfx950"
+    bquant_group_n: int = 1, gfx_arch: Optional[str] = None
 ) -> ABQuantKernelConfig:
     """fp8 ABQuant + preshufflequant (GemmConfigPreshuffleBQuantPrefill<fp8>).
 
@@ -1179,8 +1185,9 @@ def _abquant_preshuffleb_config(
     )
 
 
+@deferred_arch_default
 def default_fp8_preshuffleb_config(
-    bquant_group_n: int = 1, gfx_arch: str = "gfx950"
+    bquant_group_n: int = 1, gfx_arch: Optional[str] = None
 ) -> ABQuantKernelConfig:
     """fp8 ABQuant + preshuffleb.
 
@@ -1197,8 +1204,9 @@ def default_fp8_preshuffleb_config(
         preshuffle_bquant=False, transpose_c=True, gfx_arch=gfx_arch)
 
 
+@deferred_arch_default
 def default_bf8_preshuffleb_config(
-    bquant_group_n: int = 1, gfx_arch: str = "gfx950"
+    bquant_group_n: int = 1, gfx_arch: Optional[str] = None
 ) -> ABQuantKernelConfig:
     """bf8 ABQuant + preshuffleb (same GemmConfigPrefill alias split as fp8)."""
     if _uses_eight_waves("bf8", gfx_arch):
@@ -1210,7 +1218,8 @@ def default_bf8_preshuffleb_config(
         preshuffle_bquant=False, transpose_c=True, gfx_arch=gfx_arch)
 
 
-def default_fp4_preshuffleb_config(gfx_arch: str = "gfx950") -> ABQuantKernelConfig:
+@deferred_arch_default
+def default_fp4_preshuffleb_config(gfx_arch: Optional[str] = None) -> ABQuantKernelConfig:
     """fp4 ABQuant + preshuffleb (only bquant_group_n=128; explicit
     GemmConfigPreshuffleB_ABQuant_Prefill<pk_fp4_raw_t>, never eight_waves)."""
     return _abquant_preshuffleb_config(
@@ -1225,8 +1234,9 @@ def default_fp4_preshuffleb_config(gfx_arch: str = "gfx950") -> ABQuantKernelCon
 # =============================================================================
 
 
+@deferred_arch_default
 def default_fp8_preshuffleb_preshufflequant_config(
-    bquant_group_n: int = 1, gfx_arch: str = "gfx950"
+    bquant_group_n: int = 1, gfx_arch: Optional[str] = None
 ) -> ABQuantKernelConfig:
     """fp8 ABQuant + preshuffleb + preshufflequant
     (GemmConfigPreshuffleB_ABQuant_PreshuffleBQuant_Prefill<fp8, TransposeC>).
@@ -1246,7 +1256,7 @@ def default_fp8_preshuffleb_preshufflequant_config(
 # =============================================================================
 
 
-def all_default_configs(gfx_arch: str = "gfx950") -> List[ABQuantKernelConfig]:
+def all_default_configs(gfx_arch: Optional[str] = None) -> List[ABQuantKernelConfig]:
     """Return every ABQuant config that maps to a Old-TE gemm_abquant lut entry.
 
     dtype x layout x preshuffle matrix:

@@ -28,6 +28,7 @@ Behavioral parity: Old-TE example/ck_tile/38_block_scale_gemm/gemm_quant_tensor.
 """
 
 from dispatcher_common import validate_configs_match_arch, unified_framework_flags, arch_feature_defines
+from quant_default_config import deferred_arch_default, resolve_default_configs
 import ctypes
 import json
 import logging
@@ -530,7 +531,8 @@ def setup_multiple_tensor_quant_dispatchers(
     if not configs:
         return []
 
-    arch = gfx_arch or _detect_gpu_arch()
+    arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
+    configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "TensorQuant")
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
@@ -670,7 +672,8 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     return 128 if (_is_gfx1250(gfx_arch) or "gfx950" in gfx_arch) else 32
 
 
-def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
+@deferred_arch_default
+def default_fp8_config(gfx_arch: Optional[str] = None) -> TensorQuantKernelConfig:
     """Default fp8 TensorQuant config (tile = 16x64x256, warp = 1x4x1).
 
     WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950, mirroring
@@ -691,7 +694,8 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelCo
     )
 
 
-def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
+@deferred_arch_default
+def default_bf8_config(gfx_arch: Optional[str] = None) -> TensorQuantKernelConfig:
     """Default bf8 TensorQuant config (tile = 16x64x256, warp = 1x4x1).
 
     WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950, mirroring
