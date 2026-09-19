@@ -168,11 +168,12 @@ as described in the notes.
 - gfx942/gfx950 cells use a portable f16 16x16x16 config; an instance marked ❌
   for a CDNA arch lacks the specific atom that config selects (e.g. `mfma_gemm`
   and `direct_conv_16c` need the CDNA4 16x16x32 atom absent on gfx942).
-- **`gdn_decode` is gfx950-only by registration, not by capability.** The kernel
-  itself is arch-neutral SSA and its validator accepts any target whose
-  `max_threads_per_block` fits the chosen tiling; the ❌ cells mean no candidate
-  is registered for those arches and the tile table has only been measured on
-  gfx950. Adding an arch is a new module under `library/dispatch/gdn/` plus a
-  tuning run, not a kernel change. This instance is GPU-numeric-verified on
+- **`gdn_decode` dispatch is gfx950-only by registration and a wave64 target
+  match.** Its candidates are registered only for gfx950 and create a default
+  `GdnDecodeSpec` with `wave_size=64`. `is_valid_spec` requires that value to
+  match the target's hardware wave size, rejecting wave32 targets before it
+  considers the thread-block limit. The lane mapping and XOR butterfly depend
+  on this match. Adding an arch requires a new module under
+  `library/dispatch/gdn/` plus a tuning run. This instance is GPU-numeric-verified on
   gfx950 against an fp32 reference, covering both the output and the in-place
   recurrent-state update.
