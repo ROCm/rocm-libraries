@@ -383,8 +383,9 @@ RppStatus sobel_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 #endif
                     /* exclude 2 * padLength number of columns from alignedLength calculation
                     since padLength number of columns from the beginning and end of each row will be
-                    computed using raw c code */
-                    Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                    computed using raw c code. alignedLength's divisor must stay a multiple of the
+                    loop's per-pass increment (12) to avoid overshooting past the ROI right edge */
+                    Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 12) * 12;
                     for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                         int vectorLoopCount = 0;
                         bool padLengthRows = (i < padLength) ? 1 : 0;
@@ -480,8 +481,9 @@ RppStatus sobel_filter_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 #endif
                     /* exclude 2 * padLength number of columns from alignedLength calculation
                     since padLength number of columns from the beginning and end of each row will be
-                    computed using raw c code */
-                    Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                    computed using raw c code. alignedLength's divisor must stay a multiple of the
+                    loop's per-pass increment (12) to avoid overshooting past the ROI right edge */
+                    Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 12) * 12;
                     for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                         int vectorLoopCount = 0;
                         bool padLengthRows = (i < padLength) ? 1 : 0;
