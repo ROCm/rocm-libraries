@@ -3066,6 +3066,8 @@ Tests:
   transB: N
   alpha: 2.0
   beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
   initialization: integer_exact
   unit_check: 1
   gpu_arch: '1201'

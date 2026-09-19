@@ -63,6 +63,33 @@ _WRAPU_COMMENT = "Number of bytes accessed by the unroll loop"
 _SIGNED_HI = re.compile(r"^\s*s_mul_hi_i32\b")
 _UNSIGNED_HI = re.compile(r"^\s*s_mul_hi_u32\b")
 
+# calculateStagger opens each tensor's block with this comment. incrementSrd emits
+# "gra SRD += inc(upper)" from nine call sites, most of them the ordinary
+# global-read increment that every kernel emits, so an unanchored search for that
+# text says nothing about the stagger path. Everything below is scoped to a block.
+_STAGGER_BLOCK_OPEN = re.compile(
+    r"^\s*/\* addr \+= \(StaggerUIter\) \* GlobalReadIncs(?P<tc>\w+?)\+\d+ \*/\s*$"
+)
+
+
+def _stagger_blocks(src):
+    """Yield ``(tc, body_lines)`` for each calculateStagger block in ``src``.
+
+    A block runs from its opening comment to the next comment line, which is
+    where the generator starts emitting something else.
+    """
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        match = _STAGGER_BLOCK_OPEN.match(line)
+        if not match:
+            continue
+        body = []
+        for following in lines[i + 1 :]:
+            if following.strip().startswith("/*"):
+                break
+            body.append(following)
+        yield match.group("tc"), body
+
 
 def _emit_asm(config_path, arch, limit):
     """Emit kernel assembly for ``config_path``, returning [(base, src)]."""
@@ -150,17 +177,52 @@ def test_globalreadincs_widened_unsigned(emitted, comment):
 def test_stagger_offset_feeds_the_srd_increment(emitted):
     """Pin that the widened stagger offset is what moves the global-read SRD.
 
-    Without this, the test above could keep passing while the stagger offset
+    Without this, the tests above could keep passing while the stagger offset
     stopped reaching the SRD, which would make its signedness irrelevant and hide
     a real behavior change.
+
+    The check ties the two registers the stagger multiply writes to the two the
+    SRD increment reads, inside one block. Merely finding an SRD increment is not
+    enough: the ordinary global-read increment emits the identical instruction and
+    comment in every kernel, so that would hold even with the stagger increment
+    deleted.
     """
+    checked = 0
     for base, src in emitted:
         if "sgprStaggerUIter" not in src:
             continue
-        assert re.search(
-            r"^\s*s_addc_u32\s+s\[sgprSrd[AB]\+1\].*gra SRD \+= inc\(upper\)",
-            src,
-            re.MULTILINE,
-        ), f"{base}: stagger offset no longer carried into the global-read SRD high word"
-        return
-    pytest.skip("no emitted kernel reached the stagger path")
+        for tc, body in _stagger_blocks(src):
+            low = high = None
+            for line in body:
+                # The sparse arm reuses the phrase for its own tensor; it has its
+                # own increment and is not what this test pins.
+                if "stagger byte offset" not in line or "of metadata" in line:
+                    continue
+                hi_match = re.match(r"\s*s_mul_hi_u32\s+([^,]+),", line)
+                if hi_match:
+                    high = hi_match.group(1)
+                low_match = re.match(r"\s*s_mul_i32\s+([^,]+),", line)
+                if low_match:
+                    low = low_match.group(1)
+            assert low and high, (
+                f"{base}: the {tc} stagger block no longer computes a 64-bit "
+                "stagger byte offset"
+            )
+
+            block = "\n".join(body)
+            for reg, half, mnemonic in ((low, "0", "s_add_u32"), (high, "1", "s_addc_u32")):
+                assert re.search(
+                    rf"{mnemonic}\s+s\[sgprSrd{tc}\+{half}\],\s*"
+                    rf"s\[sgprSrd{tc}\+{half}\],\s*{re.escape(reg)}\b",
+                    block,
+                ), (
+                    f"{base}: the {tc} stagger offset in {reg} is no longer added "
+                    f"into sgprSrd{tc}+{half}, so its signedness cannot affect the "
+                    "global-read base"
+                )
+            checked += 1
+
+    assert checked, (
+        "no emitted kernel reached the stagger path, so this test proved nothing. "
+        "Pick a config whose solutions keep StaggerU enabled."
+    )
