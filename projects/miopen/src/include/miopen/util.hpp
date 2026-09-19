@@ -25,7 +25,9 @@ float Im2ColGPU(const Handle& handle,
                 const std::vector<int>& stride_spatial,
                 const std::vector<int>& dilation_spatial,
                 Data_t col,
-                miopenDataType_t type);
+                miopenDataType_t type,
+                bool layoutNHWC,
+                int num_groups = 1);
 
 float Col2ImGPU(const Handle& handle,
                 std::size_t spatial_dim,
@@ -39,7 +41,9 @@ float Col2ImGPU(const Handle& handle,
                 const std::vector<size_t>& in_spatial,
                 Data_t im,
                 std::size_t im_offset,
-                miopenDataType_t type);
+                miopenDataType_t type,
+                bool layoutNHWC,
+                int num_groups);
 
 float Col2Im3dGPUBatched(const Handle& handle,
                          ConstData_t col,
