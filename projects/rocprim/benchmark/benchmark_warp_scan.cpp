@@ -22,6 +22,7 @@
 
 #include "benchmark_warp_scan.hpp"
 
+#include "benchmark_utils.hpp"
 #include "primbench.hpp"
 
 #define CREATE_BENCHMARK(T, BS, WS) executor.queue<warp_scan_benchmark<T, BS, WS, Benchmark>>();
@@ -53,29 +54,19 @@ void add_benchmarks(primbench::executor& executor)
     if constexpr(std::is_same_v<Benchmark, inclusive_scan>
                  || std::is_same_v<Benchmark, exclusive_scan>)
     {
-        BENCHMARK_TYPE(int32_t)
-        BENCHMARK_TYPE(float)
-        BENCHMARK_TYPE(double)
-        BENCHMARK_TYPE(int8_t)
-        BENCHMARK_TYPE(uint8_t)
-        BENCHMARK_TYPE(rocprim::half)
-        BENCHMARK_TYPE(custom_f64_f64)
-        BENCHMARK_TYPE(custom_i32_f64)
-        BENCHMARK_TYPE(rocprim::int128_t)
-        BENCHMARK_TYPE(rocprim::uint128_t)
+        benchmark_types::queue_type<(benchmark_types::Type_Category::warp
+                                     | benchmark_types::Type_Category::type_custom_f64_f64
+                                     | benchmark_types::Type_Category::type_custom_i32_f64)>(
+            executor,
+            [&](auto type_tag) { BENCHMARK_TYPE(typename decltype(type_tag)::type) });
     }
     else if constexpr(std::is_same_v<Benchmark, broadcast>)
     {
-        BENCHMARK_TYPE_P2(int32_t)
-        BENCHMARK_TYPE_P2(float)
-        BENCHMARK_TYPE_P2(double)
-        BENCHMARK_TYPE_P2(int8_t)
-        BENCHMARK_TYPE_P2(uint8_t)
-        BENCHMARK_TYPE_P2(rocprim::half)
-        BENCHMARK_TYPE_P2(custom_f64_f64)
-        BENCHMARK_TYPE_P2(custom_i32_f64)
-        BENCHMARK_TYPE_P2(rocprim::int128_t)
-        BENCHMARK_TYPE_P2(rocprim::uint128_t)
+        benchmark_types::queue_type<(benchmark_types::Type_Category::warp
+                                     | benchmark_types::Type_Category::type_custom_f64_f64
+                                     | benchmark_types::Type_Category::type_custom_i32_f64)>(
+            executor,
+            [&](auto type_tag) { BENCHMARK_TYPE_P2(typename decltype(type_tag)::type) });
     }
 }
 

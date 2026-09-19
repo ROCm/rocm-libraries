@@ -53,13 +53,11 @@ int main(int argc, char* argv[])
     settings.size = 512 * primbench::MiB;
     primbench::executor executor(argc, argv, settings);
 
-    CREATE_TYPED_BENCHMARK(int8_t)
-    CREATE_TYPED_BENCHMARK(int16_t)
-    CREATE_TYPED_BENCHMARK(int32_t)
-    CREATE_TYPED_BENCHMARK(int64_t)
-    CREATE_TYPED_BENCHMARK(custom_i64_i64)
-    CREATE_TYPED_BENCHMARK(rocprim::int128_t)
-    CREATE_TYPED_BENCHMARK(rocprim::uint128_t)
+    benchmark_types::queue_type<(benchmark_types::Type_Category::integer_signed
+                                 | benchmark_types::Type_Category::integer_128
+                                 | benchmark_types::Type_Category::type_custom_i64_i64)>(
+        executor,
+        [&](auto type_tag) { CREATE_TYPED_BENCHMARK(typename decltype(type_tag)::type) });
 
     executor.run();
 }
