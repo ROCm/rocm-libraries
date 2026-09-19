@@ -83,6 +83,37 @@
 #   ``TEST_NAME_PREFIX``
 #     Optional prefix for generated category suite CTest names. Defaults to
 #     ``TARGET_NAME``.
+#
+#   Support-claim mode is not a per-target keyword; it is the cache option
+#   ``HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS`` below, applied uniformly
+#   to every lane this module registers.
+
+# Support-claim mode for every lane registered by this module.
+#
+# ON (default) -> --enforce-support-claims. A bundle whose sidecar claims this engine on
+#   this arch/platform, and which the engine then declines, FAILS the test. Enforcement
+#   implies reporting, so the summary still prints.
+# OFF -> --report-support-claims. Same sidecar query, same verdicts, same summary, no test
+#   failures. For local `ctest` runs that should observe claims without going red.
+#
+# CI leaves this ON. Turning it off is a deliberate reconfigure (-D...=OFF); no environment
+# variable can flip it behind your back. Running the binary directly is the other local
+# route and needs no reconfigure:
+#   hipdnn_integration_tests --test-article <plugin>.so --test-engine <ENGINE> \
+#       --report-support-claims
+option(HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS
+    "Fail integration tests on a broken support claim (OFF = report only, never fails)" ON
+)
+
+if(HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS)
+    set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--enforce-support-claims"
+        CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
+    )
+else()
+    set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--report-support-claims"
+        CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
+    )
+endif()
 
 # Builds the build-tree command for an external integration test.
 #
@@ -90,15 +121,14 @@
 #   out_var - Variable to receive the command list
 # ~~~
 macro(_build_external_integration_command out_var)
-    # Enforcing: a bundle whose sidecar claims this engine on this arch/platform, and
-    # which the engine then declines, fails the test. Enforcement implies reporting, so
-    # every lane still prints the support-claim summary. --report-support-claims is the
-    # observe-only half, for local runs that should not go red over a claim.
+    # --enforce-support-claims by default; --report-support-claims when
+    # HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF. Either way the lane prints the
+    # support-claim summary — the option only decides whether a broken claim is fatal.
     set(${out_var}
         $<TARGET_FILE:hipdnn_integration_tests>
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
         --test-engine ${ARG_ENGINE_NAME}
-        --enforce-support-claims
+        ${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}
     )
     if(ARG_TEST_CONFIG)
         list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
@@ -142,7 +172,7 @@ macro(_stage_external_integration_install_test)
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
 
         if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
-            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\" \"--enforce-support-claims\"")
+            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\" \"${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}\"")
             if(ARG_TEST_CONFIG)
                 string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
             endif()
@@ -191,7 +221,7 @@ macro(_add_external_integration_category_suites)
         set(_category_command_args
             "--test-article" "$<TARGET_FILE:${ARG_PLUGIN_TARGET}>"
             "--test-engine" "${ARG_ENGINE_NAME}"
-            "--enforce-support-claims"
+            "${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}"
         )
         if(ARG_TEST_CONFIG)
             list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
@@ -220,7 +250,7 @@ macro(_add_external_integration_category_suites)
             set(_category_install_command_args
                 "--test-article" "${_install_plugin}"
                 "--test-engine" "${ARG_ENGINE_NAME}"
-                "--enforce-support-claims"
+                "${HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG}"
             )
             if(ARG_TEST_CONFIG)
                 list(APPEND _category_install_command_args "--test-config" "${_install_config}")
