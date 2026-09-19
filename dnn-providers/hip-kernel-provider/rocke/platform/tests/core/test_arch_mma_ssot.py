@@ -12,7 +12,13 @@ across the arches that list a given op_id.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest import mock
+
+import pytest
+
+from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp, MmaScaleBlockK
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
     _load_specs,
@@ -58,6 +64,200 @@ class TestOpIdCDtype(unittest.TestCase):
                     _op_id_c_dtype()
         finally:
             _op_id_c_dtype.cache_clear()
+
+
+def _contracts():
+    base = MmaOp(
+        family="wmma_scaled",
+        a_dtype="fp8e4m3",
+        b_dtype="bf8e5m2",
+        c_dtype="fp32",
+        a_scale_dtype="e8m0",
+        b_scale_dtype="e8m0",
+        scale_block_k=32,
+        m=16,
+        n=16,
+        k=128,
+        op_id="fixture",
+    )
+    rows = [base]
+    for field in ("a_scale_dtype", "b_scale_dtype"):
+        for dtype in ("e4m3", "e5m3"):
+            rows.append(replace(base, **{field: dtype}))
+    rows.append(replace(base, scale_block_k=16))
+    rows.append(
+        replace(base, a_scale_dtype=None, b_scale_dtype=None, scale_block_k=None)
+    )
+    return [replace(row, op_id=f"fixture_{i}") for i, row in enumerate(rows)]
+
+
+def test_full_contract_queries_distinguish_each_scale_type_and_shared_block():
+    rows = _contracts()
+    assert len({row.op_id for row in rows}) == len(rows)
+    catalog = MmaCatalog(rows)
+    for row in rows:
+        query = dict(
+            family=row.family,
+            a_dtype=row.a_dtype,
+            b_dtype=row.b_dtype,
+            c_dtype=row.c_dtype,
+            scales=(row.a_scale_dtype, row.b_scale_dtype, row.scale_block_k),
+            m=row.m,
+            n=row.n,
+        )
+        assert catalog.enumerate(**query) == [row]
+        assert catalog.has_shape(**query, k=row.k)
+        assert catalog.op_for_shape(**query, k=row.k) is row
+        assert catalog.select_largest_k(**query) is row
+        assert catalog.select_largest_k(**query, k_max=64) is None
+
+
+def test_partial_query_rejects_ambiguity_but_enumeration_and_existence_are_valid():
+    catalog = MmaCatalog(_contracts())
+    query = dict(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="bf8",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+    )
+    assert len(catalog.enumerate(**query)) == 7
+    assert catalog.has_shape(**query, k=128)
+    with pytest.raises(ValueError, match="ambiguous MMA query"):
+        catalog.op_for_shape(**query, k=128)
+    with pytest.raises(ValueError, match="ambiguous MMA query"):
+        catalog.select_largest_k(**query)
+    assert len(catalog.enumerate(**query, scales=(None, None, None))) == 1
+    assert catalog.op_for_shape(**query, scales=("e5m3", "e5m3", 32), k=128) is None
+    with pytest.raises(ValueError, match="exactly 3"):
+        catalog.enumerate(**query, scales=(None,))
+
+
+def test_scale_alias_selects_the_same_contract():
+    catalog = MmaCatalog(_contracts())
+    query = dict(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="bf8",
+        c_dtype="f32",
+        m=16,
+        n=16,
+        k=128,
+    )
+    for scales, field in (
+        (("fp8e4m3", "e8m0", 32), "a_scale_dtype"),
+        (("e8m0", "fp8e4m3", 32), "b_scale_dtype"),
+    ):
+        row = catalog.op_for_shape(**query, scales=scales)
+        assert row is not None and getattr(row, field) == "e4m3"
+        assert getattr(replace(row, **{field: "fp8e4m3"}), field) == "e4m3"
+
+
+def test_scaled_catalog_identity_and_backend_contract():
+    catalog = ArchTarget.from_gfx("gfx1250").mma
+    rows = [row for row in catalog.ops if row.family == "wmma_scaled"]
+    assert len(rows) == 4
+    assert len({row.op_id for row in rows}) == 4
+    for row in rows:
+        dtype = {"fp8e4m3": "fp8", "bf8e5m2": "bf8"}[row.a_dtype]
+        assert row.op_id == (
+            f"wmma_gfx1250_f32_16x16x128_{dtype}_{dtype}"
+            f"_scale_e8m0_e8m0_k{row.scale_block_k}"
+        )
+        assert row.a_scale_dtype == row.b_scale_dtype == "e8m0"
+        assert isinstance(row.scale_block_k, MmaScaleBlockK)
+        packing = gfx1250_scaled_wmma(row.op_id)
+        assert packing.atom is row
+        assert packing.matrix_formats == (
+            (0, 0) if row.a_dtype == "fp8e4m3" else (1, 1)
+        )
+        assert packing.scales.count * packing.scales.block_k == row.k
+        assert packing.matrix_llvm_types == ("<16 x i32>", "<16 x i32>")
+    for family in ("wmma_scale", "wmma_scale16"):
+        old_id = f"{family}_f32_16x16x128_fp8_fp8"
+        assert catalog.by_op_id(old_id) is None
+        assert gfx1250_scaled_wmma(old_id) is None
+
+
+def test_scale_block_k_is_a_two_value_enum():
+    assert list(MmaScaleBlockK) == [MmaScaleBlockK.K16, MmaScaleBlockK.K32]
+    for block in MmaScaleBlockK:
+        assert replace(_contracts()[0], scale_block_k=block).scale_block_k is block
+        assert replace(_contracts()[0], scale_block_k=int(block)).scale_block_k is block
+    with pytest.raises(ValueError):
+        MmaScaleBlockK(64)
+
+
+@pytest.mark.parametrize("field", ["a_scale_dtype", "b_scale_dtype"])
+@pytest.mark.parametrize("dtype", ["i32", "fp4", "e5m2", "", None])
+def test_invalid_scale_format(field, dtype):
+    with pytest.raises(ValueError, match="e8m0, e4m3, or e5m3"):
+        replace(_contracts()[0], **{field: dtype})
+
+
+@pytest.mark.parametrize("block", [0, 8, 64, 16.0, True, "32", None])
+def test_invalid_scale_block_size(block):
+    with pytest.raises(ValueError, match="integer equal to 16 or 32"):
+        replace(_contracts()[0], scale_block_k=block)
+
+
+@pytest.mark.parametrize(
+    "scales",
+    [
+        ("e8m0", None, 32),
+        (None, "e8m0", 32),
+        (None, None, 32),
+        ("e8m0", "e8m0", None),
+        ("i32", "e8m0", 32),
+        ("e8m0", "e8m0", 0),
+        ("e8m0", "e8m0", 16.0),
+        ("e8m0", "e8m0", True),
+    ],
+)
+def test_invalid_scale_query_even_for_empty_catalog(scales):
+    with pytest.raises(ValueError, match="MMA scale"):
+        MmaCatalog([]).enumerate(
+            family="wmma_scaled",
+            a_dtype="fp8",
+            b_dtype="fp8",
+            c_dtype="fp32",
+            scales=scales,
+        )
+
+
+def test_unscaled_defaults_have_no_scale_metadata():
+    row = MmaOp("wmma", "fp8e4m3", "fp8e4m3", "fp32", 16, 16, 64, "fixture")
+    assert (row.a_scale_dtype, row.b_scale_dtype, row.scale_block_k) == (
+        None,
+        None,
+        None,
+    )
+    assert (
+        MmaCatalog([row]).op_for_shape(
+            family="wmma",
+            a_dtype="fp8",
+            b_dtype="fp8",
+            c_dtype="fp32",
+            m=16,
+            n=16,
+            k=64,
+            scales=(None, None, None),
+        )
+        is row
+    )
+
+
+def test_largest_k_only_rejects_ties_at_the_selected_k():
+    rows = _contracts()
+    unique = replace(rows[0], k=256)
+    catalog = MmaCatalog([*rows, unique])
+    query = dict(
+        family="wmma_scaled", a_dtype="fp8", b_dtype="bf8", c_dtype="fp32", m=16, n=16
+    )
+    assert catalog.select_largest_k(**query) is unique
+    with pytest.raises(ValueError, match="ambiguous MMA query"):
+        catalog.select_largest_k(**query, k_max=128)
 
 
 if __name__ == "__main__":  # pragma: no cover

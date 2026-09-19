@@ -26,8 +26,8 @@
  * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
  * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
  * the accumulator fragment length and dtype for the atom. Both come from the
- * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_c_frag_len (the
- * _MMA_FRAGMENT_INFO projection) and the accumulator dtype from
+ * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_c_frag_len
+ * (the _MMA_FRAGMENT_INFO projection) and the accumulator dtype from
  * rocke_arch_mma_op_id_c_dtype (the JSON catalog aggregation). This bucket keeps
  * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
  * / _MMA_C_INT_OP_IDS.
@@ -49,11 +49,9 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
-    {"wmma_scale_f32_16x16x128_fp8_fp8", "mxacc"},
-    {"wmma_scale16_f32_16x16x128_fp8_fp8", "mxacc"},
 };
 
-/* Accumulator fragment length for op_id, from the arch SSOT
+/* accumulator fragment length for op_id, from the arch SSOT
  * (target._frag_info(op_id).c_frag_len). Returns <= 0 for an unknown atom (the
  * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
 static int rocke_mma_c_frag_len(const char* op_id)
@@ -71,6 +69,10 @@ static bool rocke_mma_is_int_acc(const char* op_id)
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_op_t* atom = op_id ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+    if(atom && strcmp(atom->family, "wmma_scaled") == 0)
+        return "mxacc";
     size_t i;
     if(op_id)
     {
@@ -651,32 +653,6 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
     extra[0] = a_scale;
     extra[1] = b_scale;
     return rocke_b_mma(b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2);
-}
-
-rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
-                                                        rocke_value_t* a,
-                                                        rocke_value_t* bb,
-                                                        rocke_value_t* c,
-                                                        rocke_value_t* a_scale,
-                                                        rocke_value_t* b_scale)
-{
-    rocke_value_t* extra[2];
-    extra[0] = a_scale;
-    extra[1] = b_scale;
-    return rocke_b_mma(b, "wmma_scale_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
-}
-
-rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
-                                                          rocke_value_t* a,
-                                                          rocke_value_t* bb,
-                                                          rocke_value_t* c,
-                                                          rocke_value_t* a_scale,
-                                                          rocke_value_t* b_scale)
-{
-    rocke_value_t* extra[2];
-    extra[0] = a_scale;
-    extra[1] = b_scale;
-    return rocke_b_mma(b, "wmma_scale16_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
 }
 
 /* ===================================================================== */

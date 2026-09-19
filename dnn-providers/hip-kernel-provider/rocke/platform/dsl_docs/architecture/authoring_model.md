@@ -31,6 +31,53 @@ Matrix-operation choices start from the exact gfx target. Resolve
 and validate the operation's wave and layout contract. The exact catalog is
 listed in [`kernel_taxonomy.md`](./kernel_taxonomy.md).
 
+MMA metadata uses `a_dtype`, `b_dtype`, and `c_dtype`, with C describing both
+the accumulator input and result. Optional `a_scale_dtype`, `b_scale_dtype`,
+and `scale_block_k` fields describe independent scale types and a shared K-group
+size. `MmaScaleBlockK.K16` and `MmaScaleBlockK.K32` are the only scaled sizes;
+all three fields are `None` for unscaled atoms. Integer 16/32 values from JSON
+are normalized to the enum. Scale types are independent of matrix dtypes and
+packed register types. Fragment and layout accessors retain their A/B/C roles.
+
+For scaled operations, query the complete contract and pass the selected atom
+to `IRBuilder.mma`:
+
+```python
+from rocke.core.arch import ArchTarget, MmaScaleBlockK
+
+atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+    family="wmma_scaled",
+    a_dtype="fp8", b_dtype="fp8", c_dtype="fp32",
+    scales=("e8m0", "e8m0", MmaScaleBlockK.K32),
+    m=16, n=16, k=128,
+)
+assert atom is not None
+# result = builder.mma(atom, a, b, c, scale_a, scale_b)
+```
+
+Omitting `scales` leaves scales unconstrained. Passing `(a_type, b_type, block_k)`
+matches the scale contract exactly; `(None, None, None)` selects unscaled atoms.
+Partially specified scale contracts are invalid. Enumeration
+and existence queries may match several records, while `op_for_shape` and
+`select_largest_k` reject ambiguous exact matches or largest-K ties. The C queries
+use the same rules: a NULL `rocke_mma_scale_filter_t` pointer is unconstrained,
+and `{NULL, NULL, ROCKE_MMA_SCALE_NONE}` requests an unscaled atom. The C block
+enum has `ROCKE_MMA_SCALE_K16` and `ROCKE_MMA_SCALE_K32`, plus the unscaled
+sentinel. Scale value formats are `e8m0`, `e4m3`, and `e5m3`, with
+`fp8e4m3` accepted as an alias for `e4m3`; actual target support comes from the
+catalog.
+
+Scaled-WMMA IDs have the form
+`wmma_<gfx>_<acc>_<MxNxK>_<a>_<b>_scale_<a_scale>_<b_scale>_k<block>`.
+For example, `wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32`
+has atom K=128 and one scale per 32 K elements for both inputs. Both scale
+types are written even when equal. Lowering reads the catalog fields, never
+parses the ID, and selects LLVM intrinsic names and packed carriers separately.
+Existing `wmma_scale*_f32_*` and dotted `wmma.scaled.*` IDs are retired, as are
+the dedicated scaled builder wrappers; serialized IR using those IDs must be regenerated.
+Use `tile.mma` with a resolved catalog atom. Other MMA operation IDs retain
+their existing spelling.
+
 Kernel definitions in
 [`<platform_root>/python/rocke/instances/`](../../python/rocke/instances/) and
 [`<library_root>/kernels/`](../../../library/kernels/) follow the same

@@ -56,7 +56,6 @@ from .ir import (
     split_loc,
 )
 
-
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
 # -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
@@ -608,13 +607,13 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
         "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
     ),
-    "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8": (
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
         "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
         "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
         "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
         "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
     ),
-    "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8": (
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
         "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
         "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
         "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
