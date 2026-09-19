@@ -54,6 +54,7 @@ def test_duplicate_active_write_index_is_rejected():
     with pytest.raises(ValueError, match="unique across active sequences"):
         prepare(spec, inp, batch)
 
+
 def test_inactive_mismatched_lane_does_not_reserve_a_write_index():
     """A lane with either negative index is inactive and cannot claim a page."""
     spec = GdnDecodeSpec()
@@ -62,6 +63,7 @@ def test_inactive_mismatched_lane_does_not_reserve_a_write_index():
     inp["read_indices"][1] = -1
     inp["write_indices"][1] = inp["write_indices"][0]
     prepare(spec, inp, batch)  # must not raise: lane 1 is inactive
+
 
 def test_the_skip_sentinel_is_accepted():
     """``-1`` marks an idle continuous-batching slot and must pass the guard."""

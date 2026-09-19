@@ -177,7 +177,6 @@ def test_padding_lanes_are_skipped_and_leave_state_untouched(harness):
     ), "state of an inactive (negative-index) sequence was modified"
 
 
-
 @requires_gfx950
 def test_mismatched_skip_index_leaves_write_page_untouched(harness):
     """A lane with ``read=-1`` must not write its otherwise-valid target page."""
@@ -198,6 +197,7 @@ def test_mismatched_skip_index_leaves_write_page_untouched(harness):
     assert torch.equal(
         values["state"][target], before[target]
     ), "a mismatched skip lane modified its write page"
+
 
 @requires_gfx950
 def test_large_pool_crosses_the_i32_offset_boundary(harness):

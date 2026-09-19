@@ -150,7 +150,6 @@ def test_every_shipped_configuration_is_recorded():
     assert not missing, f"configurations without a SHA-256: {missing}"
 
 
-
 def test_golden_ir_check_rejects_entry_without_sha256(monkeypatch, tmp_path):
     import pytest
 
@@ -205,6 +204,7 @@ def test_build_doc_refuses_lowering_failure(monkeypatch):
     import pytest
 
     monkeypatch.setattr(sys.modules[__name__], "_cases", lambda: {"default": object()})
+
     def fail_lowering(*_):
         raise RuntimeError("synthetic lowering failure")
 
@@ -212,6 +212,8 @@ def test_build_doc_refuses_lowering_failure(monkeypatch):
 
     with pytest.raises(RuntimeError, match="refusing to write"):
         _build_doc()
+
+
 if __name__ == "__main__":
     if "--write" in sys.argv:
         _GOLDEN.parent.mkdir(parents=True, exist_ok=True)
