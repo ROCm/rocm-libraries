@@ -568,6 +568,9 @@ struct config_t {
   /// LDS load vector width for matrix B (elements per LDS read)
   int vector_width_b = 1;
 
+  /// cluster dimensions
+  dim3_t cluster_dim{1, 1, 1};
+
   /// Backend-specific parameters (type should match target).
   /// Use tensile() accessor to get/set Tensile-specific params.
   backend_params_t backend{};
@@ -593,7 +596,7 @@ struct config_t {
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
-           vector_width_b == o.vector_width_b && backend == o.backend;
+           vector_width_b == o.vector_width_b && cluster_dim == o.cluster_dim && backend == o.backend;
   }
 
   std::size_t hash() const {
@@ -616,7 +619,10 @@ struct config_t {
                                           grvw_b,
                                           gwvw_d,
                                           vector_width_a,
-                                          vector_width_b);
+                                          vector_width_b,
+                                          cluster_dim.m,
+                                          cluster_dim.n,
+                                          cluster_dim.k);
     // Hash backend-specific parameters if present. The visitor pattern allows
     // automatic handling of any backend type that provides a hash() method,
     // while std::monostate (no backend params) is a no-op.
