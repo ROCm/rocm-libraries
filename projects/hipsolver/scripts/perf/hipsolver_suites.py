@@ -41,7 +41,7 @@ This could be revisited and changed in the future)
 from itertools import chain, repeat
 
 # Common benchmark arguments - always do 7 iterations in perf mode
-COMMON_ARGS = '--iters 7 --perf 1'
+COMMON_ARGS = '--iters 5 --perf 1'
 
 
 def get_size_configurations(case):
@@ -149,7 +149,7 @@ def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
     for shape in ['upper', 'lower']:
         if shape == 'upper': upl = 'U'
         else: upl = 'L'
-        for nv in ['one', 'half_n', 'n']:
+        for nv in ['one']: #['one', 'half_n', 'n'] cuda currently only support 1 rhs 
             nrhs = 1
             for s, bc in size:
                 if s < 4000: ld = s + 1
@@ -230,17 +230,17 @@ def getrf_suite(*, suite, precision, sizenormal, sizebatch):
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
 
-def getrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GETRFBATCH tests are run with the given precision and sizes (only square case)
-    """
-    fn = 'getrf_batched'
-    size = sizebatch
-    for s, bc in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
-        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
-        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
+#def getrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GETRFBATCH tests are run with the given precision and sizes (only square case)
+#    """
+#    fn = 'getrf_batched'
+#    size = sizebatch
+#    for s, bc in size:
+#        if s < 4000: ld = s + 1
+#        else: ld = s + 64
+#        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
+#        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
 
 
 def getrfNpvt_suite(*, suite, precision, sizenormal, sizebatch):
@@ -256,17 +256,17 @@ def getrfNpvt_suite(*, suite, precision, sizenormal, sizebatch):
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
 
-def getrfNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GETRFNPVTBATCH tests are run with the given precision and sizes (only square case)
-    """
-    fn = 'getrf_npvt_batched'
-    size = sizebatch
-    for s, bc in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
-        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
-        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
+#def getrfNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GETRFNPVTBATCH tests are run with the given precision and sizes (only square case)
+#    """
+#    fn = 'getrf_npvt_batched'
+#    size = sizebatch
+#    for s, bc in size:
+#        if s < 4000: ld = s + 1
+#        else: ld = s + 64
+#        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
+#        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
 
 
 def getrs_suite(*, suite, precision, sizenormal, sizebatch):
@@ -287,93 +287,93 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GETRSBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
-    The operation argument does not test any new path.
-    """
-    fn = 'getrs_batched'
-    size = sizebatch
-    for nv in ['one', 'half_n', 'n']:
-        nrhs = 1
-        for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nv == 'half_n': nrhs = s//2
-            elif nv == 'n': nrhs = s
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+#def getrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GETRSBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
+#    The operation argument does not test any new path.
+#    """
+#    fn = 'getrs_batched'
+#    size = sizebatch
+#    for nv in ['one', 'half_n', 'n']:
+#        nrhs = 1
+#        for s, bc in size:
+#            if s < 4000: ld = s + 1
+#            else: ld = s + 64
+#            if nv == 'half_n': nrhs = s//2
+#            elif nv == 'n': nrhs = s
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
+#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrsNpvt_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GETRSNPVT tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
-    The operation argument does not test any new path.
-    """
-    fn = 'getrs_npvt'
-    size = sizenormal
-    for nv in ['one', 'half_n', 'n']:
-        nrhs = 1
-        for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nv == 'half_n': nrhs = s//2
-            elif nv == 'n': nrhs = s
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+#def getrsNpvt_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GETRSNPVT tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
+#    The operation argument does not test any new path.
+#    """
+#    fn = 'getrs_npvt'
+#    size = sizenormal
+#    for nv in ['one', 'half_n', 'n']:
+#        nrhs = 1
+#        for s in size:
+#            if s < 4000: ld = s + 1
+#            else: ld = s + 64
+#            if nv == 'half_n': nrhs = s//2
+#            elif nv == 'n': nrhs = s
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
+#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getrsNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GETRSNPVTBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
-    The operation argument does not test any new path.
-    """
-    fn = 'getrs_npvt_batched'
-    size = sizebatch
-    for nv in ['one', 'half_n', 'n']:
-        nrhs = 1
-        for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nv == 'half_n': nrhs = s//2
-            elif nv == 'n': nrhs = s
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+#def getrsNpvtBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GETRSNPVTBATCH tests are run with the given precision and sizes, and with 1, n/2 and n right-hand-vectors
+#    The operation argument does not test any new path.
+#    """
+#    fn = 'getrs_npvt_batched'
+#    size = sizebatch
+#    for nv in ['one', 'half_n', 'n']:
+#        nrhs = 1
+#        for s, bc in size:
+#            if s < 4000: ld = s + 1
+#            else: ld = s + 64
+#            if nv == 'half_n': nrhs = s//2
+#            elif nv == 'n': nrhs = s
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
+#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
-def getriBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GETRIBATCH tests are run with the given precision and sizes
-    """
-    fn = 'getri_batched'
-    size = sizebatch
-    for s, bc in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
-        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
-        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
+#def getriBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GETRIBATCH tests are run with the given precision and sizes
+#    """
+#    fn = 'getri_batched'
+#    size = sizebatch
+#    for s, bc in size:
+#        if s < 4000: ld = s + 1
+#        else: ld = s + 64
+#        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
+#        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
 
 
-def trtri_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    TRTRI tests are run with the given precision and sizes, and for upper and lower cases.
-    Upper case uses:        | Lower case uses:   
-    trtri_upper             | trtri_lower
-    trmv_upper_none         | trmv_lower_none
-    trmm_upper_left_none    | trmm_lower_left_none
-    trsm_upper_right_none   | trsm_lower_right_none
-    <trti2_small_upper>     | <trti2_small_lower>
-    """
-    fn = 'trtri'
-    size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
-        for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
+#def trtri_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    TRTRI tests are run with the given precision and sizes, and for upper and lower cases.
+#    Upper case uses:        | Lower case uses:   
+#    trtri_upper             | trtri_lower
+#    trmv_upper_none         | trmv_lower_none
+#    trmm_upper_left_none    | trmm_lower_left_none
+#    trsm_upper_right_none   | trsm_lower_right_none
+#    <trti2_small_upper>     | <trti2_small_lower>
+#    """
+#    fn = 'trtri'
+#    size = sizenormal
+#    for shape in ['upper', 'lower']:
+#        if shape == 'upper': upl = 'U'
+#        else: upl = 'L'
+#        for s in size:
+#            if s < 4000: ld = s + 1
+#            else: ld = s + 64
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
+#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
 
 
 def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
@@ -399,33 +399,34 @@ def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {s} --lda {ld}')
 
 
-def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GEQRFBATCH tests are run, for the given precision and number of rows,
-    with 26 columns and also for the square case (#rows = #columns)
-    geqrf uses: 
-    larft_forward_column
-    larfb_forward_column_letf_transposed
-    """
-    fn = 'geqrf_batched'
-    size = sizebatch
-    for nc in [0, 26]:
-        if nc == 0: nn = 'sq'
-        else: nn = nc
-        for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nc == 0: n = s
-            else: n = nc
-            if s >= n:
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'cols': nn, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {s} --lda {ld}')
+#def geqrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GEQRFBATCH tests are run, for the given precision and number of rows,
+#    with 26 columns and also for the square case (#rows = #columns)
+#    geqrf uses: 
+#    larft_forward_column
+#    larfb_forward_column_letf_transposed
+#    """
+#    fn = 'geqrf_batched'
+#    size = sizebatch
+#    for nc in [0, 26]:
+#        if nc == 0: nn = 'sq'
+#        else: nn = nc
+#        for s, bc in size:
+#            if s < 4000: ld = s + 1
+#            else: ld = s + 64
+#            if nc == 0: n = s
+#            else: n = nc
+#            if s >= n:
+#                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'cols': nn, 'n': s}
+#                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {s} --lda {ld}')
 
 
 def gels_suite(*, suite, precision, sizenormal, sizebatch):
     """
-    GELS tests are run, for the given precision and number of rows, with 160 columns and with 1, 
-    n/2 and n right-hand-vectors. Only with m < n to actually test gelqf and ormlq/unmlq. 
+    GELS tests are run, for the given precision and number of rows (columns), with 160 columns (rows) and with 1, 
+    n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n 
+    to actually test gelqf and ormlq/unmlq. 
     gelqf uses:
     larft_forward_row
     larfb_forward_row_right_none
@@ -435,16 +436,29 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'gels'
     size = sizenormal
-    for nv in ['one', 'half_n', 'n']:
-        nrhs = 1
-        for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nv == 'half_n': nrhs = s//2
-            elif nv == 'n': nrhs = s
-            if s >= 160:
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m 160 --nrhs {nrhs} -n {s} --lda 161 --ldb {ld}')
+    for tt in ['overdet', 'underdet']:
+        for nv in ['one', 'half_n', 'n']:
+            nrhs = 1
+            for s in size:
+                if s < 4000: ld = s + 1
+                else: ld = s + 64
+                if nv == 'half_n': nrhs = s//2
+                elif nv == 'n': nrhs = s
+                if s >= 160:
+                    if tt == 'overdet':
+                        mm = s
+                        nn = 160
+                        ld_a = ld
+                        ld_b = ld
+                        ld_x = 161
+                    else:
+                        mm = 160
+                        nn = s
+                        ld_a = 161
+                        ld_b = ld
+                        ld_x = ld
+                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'type': tt, 'nrhs': nv, 'n': s}
+                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {mm} --nrhs {nrhs} -n {nn} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
 def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
@@ -833,6 +847,7 @@ def gesvdjBatch_suite(*, suite, precision, sizenormal, sizebatch):
 
 
 # Registry of all available benchmark suites
+#### TODO: add back missing functions when they become available in hipsolver ####
 SUITES = {
     # Symmetric linear systems
     'potrf': potrf_suite,
@@ -845,24 +860,24 @@ SUITES = {
     
     # General linear systems
     'getrf': getrf_suite,
-    'getrfBatch': getrfBatch_suite,
+#    'getrfBatch': getrfBatch_suite,
     'getrfNpvt': getrfNpvt_suite,
-    'getrfNpvtBatch': getrfNpvtBatch_suite,
+#    'getrfNpvtBatch': getrfNpvtBatch_suite,
     'getrs': getrs_suite,
-    'getrsBatch': getrsBatch_suite,
-    'getrsNpvt': getrsNpvt_suite,               
-    'getrsNpvtBatch': getrsNpvtBatch_suite,     
-    'getriBatch': getriBatch_suite,
-    'trtri': trtri_suite,
+#    'getrsBatch': getrsBatch_suite,
+#    'getrsNpvt': getrsNpvt_suite,               
+#    'getrsNpvtBatch': getrsNpvtBatch_suite,     
+#    'getriBatch': getriBatch_suite,
+#    'trtri': trtri_suite,
 
     # Over-determined linear systems (least-squares)
     'geqrf': geqrf_suite,
-    'geqrfBatch': geqrfBatch_suite,
+#    'geqrfBatch': geqrfBatch_suite,
     'gels': gels_suite,                          
-    'gelsBatch': gelsBatch_suite,               
+#    'gelsBatch': gelsBatch_suite,               
     'xxgqr': xxgqr_suite,
     'xxmqr': xxmqr_suite,
-    'larft': larft_suite,
+#    'larft': larft_suite,
 
     # Matrix reductions (tridiagonalization, bidiagonalization)
     'xxtrd': xxtrd_suite, 
@@ -872,7 +887,7 @@ SUITES = {
     'xxgbr': xxgbr_suite,           
  
     # Symmetric Eigenvalue problem
-    'stedc': stedc_suite,
+#    'stedc': stedc_suite,
     'xxevd': xxevd_suite,
     'xxgvd': xxgvd_suite,
     'xxevBatch': xxevBatch_suite,
