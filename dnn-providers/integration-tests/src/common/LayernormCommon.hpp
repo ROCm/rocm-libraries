@@ -69,11 +69,16 @@ struct LayernormTestCase
 //
 //   Quick          < 1K elements     normalization-axis and boundary sweep
 //   Standard       <= 400K elements  small production shapes
-//   Comprehensive  <= 5M elements    mid-size production shapes
-//   Full           > 5M elements     heaviest production and large-batch shapes
+//   Full           > 400K elements   mid-size, heaviest and large-batch shapes
+//
+// There is no Comprehensive tier. The 400K-5M band used to be one, but at 2
+// layouts x 7 backward fixtures it cost 382 s of a nightly job that dies at a
+// hard 30-minute wall (ROCm/rocm-libraries#11529), so it was folded into Full
+// -- which is where the rest of the >400K shapes already lived. Anything added
+// above 400K elements belongs in Full, not in a revived Comprehensive tier.
 //
 // Production shapes are imported from the MIOpen layernorm suite. 4D tops out
-// at 262K elements, so it has no Comprehensive or Full tier.
+// at 262K elements, so it has no Full tier.
 // ============================================================================
 
 // 4D Quick: normalization boundary swept across every axis on a minimal tensor.
@@ -148,12 +153,16 @@ inline std::vector<LayernormTestCase> getLayernorm5DStandardTestCases()
     };
 }
 
-// 5D Comprehensive: mid-size production shapes, 400K to 5M elements.
-inline std::vector<LayernormTestCase> getLayernorm5DComprehensiveTestCases()
+// 5D Full: everything above 400K elements -- the mid-size production shapes
+// (400K-5M, previously the Comprehensive tier) followed by the heaviest shapes
+// above 5M including the batch-256/512 volumetric set. Roughly 50 minutes
+// across both directions - weekly tier only.
+inline std::vector<LayernormTestCase> getLayernorm5DFullTestCases()
 {
     const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
+        // 400K-5M elements.
         {{1, 3, 8, 128, 171}, 4, false, seed}, // 3D convnet on video
         {{1, 3, 8, 128, 171}, 4, true, seed},
         {{1, 3, 16, 112, 112}, 4, false, seed}, // 3D convnet on video
@@ -174,16 +183,7 @@ inline std::vector<LayernormTestCase> getLayernorm5DComprehensiveTestCases()
         {{1, 3, 16, 240, 320}, 4, true, seed},
         {{32, 32, 14, 12, 29}, 4, false, seed},
         {{32, 32, 14, 12, 29}, 4, true, seed},
-    };
-}
-
-// 5D Full: the heaviest shapes, above 5M elements, including the batch-256/512
-// volumetric set. Roughly 40 minutes across both directions - weekly tier only.
-inline std::vector<LayernormTestCase> getLayernorm5DFullTestCases()
-{
-    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    return {
+        // Above 5M elements.
         {{16, 32, 6, 50, 50}, 4, false, seed}, // Multi-view 3D convnet
         {{16, 32, 6, 50, 50}, 4, true, seed},
         {{256, 1, 32, 32, 32}, 4, false, seed}, // batch-256 volumetric
