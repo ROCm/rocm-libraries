@@ -58,7 +58,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
-  VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
+  VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddNCU64, VAddU32, VAndB32, \
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
@@ -2031,6 +2031,7 @@ class KernelWriterAssembly(KernelWriter):
       GOList.append(("B", kernel["ProblemType"]["IndexAssignmentsB"], kernel["BufferLoad"], tPB, True))
 
     for (tc, indices, justOffset32, tP, isSwizzled) in GOList:
+      use64bGroOffset = kernel["Use64bShadowLimit"] and justOffset32
 
       # BufferStore does not use this macro so don't generate it:
       # Subtile impl does not use these macros either
@@ -2194,7 +2195,7 @@ class KernelWriterAssembly(KernelWriter):
                 src0=self.strideRef(tc, indices[i]), \
                 src1=offset, \
                 comment="mul d%u lower"%i))
-            if not justOffset32:
+            if not justOffset32 or use64bGroOffset:
               macro.add(VMulHIU32(dst=destHi,
                   src0=self.strideRef(tc, indices[i]), \
                   src1=offset, \
@@ -2227,7 +2228,7 @@ class KernelWriterAssembly(KernelWriter):
             comment="accumulate %s lower"%idxChar))
 
           # addr += offset * stride (hi)
-          if not justOffset32:
+          if not justOffset32 or use64bGroOffset:
             macro.add(VAddCCOU32(dst=vgpr("Addr+1", isMacro=True), dst1=VCC(), \
                 src0="v[\\vgprTmp+1]", src1=srcHi, src2=VCC(), \
                 comment="accumulate %s upper"%idxChar))
@@ -2240,7 +2241,7 @@ class KernelWriterAssembly(KernelWriter):
         destLo = vgpr("Addr+0", isMacro=True)
         if writeDirectToAddr:
           macro.add(VMovB32(dst=destLo, src=offset, comment="setup d0 lower"))
-          if not justOffset32:
+          if not justOffset32 or use64bGroOffset:
             macro.add(VMovB32(dst=vgpr("Addr+1", isMacro=True), src=0, comment="d0 upper"))
         else:
           macro.add(VAddCOU32(dst=destLo, dst1=VCC(), \
@@ -4430,7 +4431,7 @@ class KernelWriterAssembly(KernelWriter):
       margin = tP["glvw"] if tP["rtv"] else 1
 
     module.addComment("Using GLNC for %s"%tc)
-    groVgpr0 = "GlobalReadOffset%s+%u" % (tc, 0)
+    groVgpr0 = self.groVgprName(tc, 0)
     parDimSize = kernel["MacroTile%s"%tc] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["DepthU"]
     numThreadsCoalesced = (parDimSize // kernel["GlobalReadVectorWidth%s"%tc])
 
@@ -4445,8 +4446,8 @@ class KernelWriterAssembly(KernelWriter):
 
     module.add(VMovB32(dst=vgpr(groVgpr0), src=vgpr("Serial")))
     for perp in range(1, tP["ntpl"]):
-      groVgpr = "GlobalReadOffset%s+%u" % (tc, perp)
-      groVgprPrev = "GlobalReadOffset%s+%u" % (tc, perp - 1)
+      groVgpr = self.groVgprName(tc, perp)
+      groVgprPrev = self.groVgprName(tc, perp - 1)
       strideLoad = kernel["NumThreads"] # stride between consecutive loads
       module.add(VAddU32(dst=vgpr(groVgpr), src0=strideLoad, src1=vgpr(groVgprPrev), comment=" = vgprSerial + %u * %u"%(perp, strideLoad)))
 
@@ -4492,7 +4493,7 @@ class KernelWriterAssembly(KernelWriter):
 
     for perp in range(0, tP["ntpl"]):
       strideChar = 'L' if tc == 'A' else 'K'
-      grov = "GlobalReadOffset%s+%u" % (tc, perp)
+      grov = self.groVgprName(tc, perp)
       # Compute division
       # tmpv = vgprSerial // divsor
       if useMagicDiv:
@@ -4577,7 +4578,10 @@ class KernelWriterAssembly(KernelWriter):
 
       module.add(VAddU32(dst=vgpr(grov), src0=vgpr(tmpv), src1=vgpr(grov), \
                          comment="final" ))
-      module.add(vectorMultiplyBpe(grov, grov, tP["bpeGR"]))
+      if self.groUses64bByteOffset(tc):
+        module.add(vectorMultiply64Bpe(grov, grov, tP["bpeGR"], tmpv, comment="64-bit GRO byte offset"))
+      else:
+        module.add(vectorMultiplyBpe(grov, grov, tP["bpeGR"]))
       ptrshift = int(self.states.srdShiftLeft[tc] * tP["bpeGR"])
       module.add(VAddU32(dst=vgpr(grov), src0=ptrshift , src1=vgpr(grov), \
                          comment="ptr-shift" ))
@@ -4621,7 +4625,7 @@ class KernelWriterAssembly(KernelWriter):
           bfName = "GLOBAL_OFFSET_%s_SWIZZLED" % tP["tensorChar"]
         else:
           bfName = "GLOBAL_OFFSET_%s" % tP["tensorChar"]
-        bfArgs = ["vgprGlobalReadOffset%s+%u"%(tP["tensorChar"], graIdx)]
+        bfArgs = ["vgprGlobalReadOffset%s+%u"%(tP["tensorChar"], self.groVgprIdx(graIdx, tc))]
       else:
         bfName = "GLOBAL_OFFSET_%s" % tP["tensorChar"]
         bfArgs = ["vgprGlobalReadAddr%s+%u"%(tP["tensorChar"], graIdx)]
@@ -4655,9 +4659,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.globalOffset(kernel, tP, tc, bfArgs, bfComment))
       else:
         module.add(MacroInstruction(name=bfName, args=bfArgs, comment=bfComment))
-      dest = f'GlobalReadOffset{tP["tensorChar"]}+{graIdx}'
       if kernel["BufferLoad"]:
-          module.add(vectorMultiplyBpe(dest, dest, tP["bpeGR"]))
+          self.scaleGroOffsetToBpe(module, tc, graIdx, tmp, tP)
       else:
           startVgpr = self.startVgprGlobalReadAddressesA if tc == 'A' else self.startVgprGlobalReadAddressesB
           destVgpr = startVgpr + graIdx
@@ -4668,7 +4671,7 @@ class KernelWriterAssembly(KernelWriter):
         # modify start
         if (not kernel["_UseSgprForGRO"]) and kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]:
           # add room for instruction offset
-          groVgpr = "GlobalReadOffset%s+%u" % (tP["tensorChar"], graIdx)
+          groVgpr = self.groVgprName(tc, graIdx)
           module.add(SMovB32(dst=sgpr(tmpSgpr), src=self.buff_load_inst_offset_max))
           module.add(VAddU32(dst=vgpr(groVgpr), src0=vgpr(groVgpr), src1=sgpr(tmpSgpr), comment="shift for UseInstOffsetForGRO"))
 
@@ -4752,8 +4755,8 @@ class KernelWriterAssembly(KernelWriter):
         print(tc, "tileStride=", tileStride, "unrollStride=", unrollStride, \
               "stride=%s"%(stride1))
 
-        module.add(self.getVectorDiffAssert(vgpr("GlobalReadOffset%s+%u"%(tc,0)), \
-                                            vgpr("GlobalReadOffset%s+%u"%(tc,graIdx)), \
+        module.add(self.getVectorDiffAssert(vgpr(self.groVgprName(tc, 0)), \
+                                            vgpr(self.groVgprName(tc, graIdx)), \
                                             sgpr(scalarGro)))
 
     needFirstSgprOffset = kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]
@@ -11154,9 +11157,9 @@ class KernelWriterAssembly(KernelWriter):
                   # of the srd limit - so base+limit stays constant and also points at maximum
                   # element that should be accessed.
                   if kernel["_UseSgprForGRO"]:
-                    offsetVgpr = "GlobalReadOffset%s+0"%(tc)
+                    offsetVgpr = self.groVgprName(tc, 0)
                   else:
-                    offsetVgpr = "GlobalReadOffset%s+%u"%(tc, graIdx)
+                    offsetVgpr = self.groVgprName(tc, graIdx)
 
                   # Vgpr for GRO
                   if not kernel["_UseSgprForGRO"]:
@@ -11276,13 +11279,9 @@ class KernelWriterAssembly(KernelWriter):
                       if (numElementsPerLoad == 2 and r % numElementsPer4Bytes != 0) or \
                          (numElementsPerLoad != 2 and ((r + 1) % numElementsPer4Bytes != 0)):
                         module.addComment0("g2l=%u, load component %u"%(g2lIdx, r))
-                        module.add(self.chooseGlobalRead(useBuffer, \
-                                  bpl, destVgpr=loadVgpr, \
-                                  addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
-                                  soffset=soffset, offset=offset, \
-                                  glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
-                                  tr=isTr, hi16=hi16, \
-                                  comment=comment, scope=scope, th=th, nv=nv))
+                        self.chooseGlobalReadFromGro(module, kernel, tc, graIdx, useBuffer, isTr, \
+                                  bpl, loadVgpr, offsetVgpr, soffset, offset, \
+                                  isGlc, isSlc, isNT, isLds, hi16, comment, scope, th, nv)
                         tmpVgprIdx += 1
 
                         if (numElementsPerLoad == 2 and r == (numLoadVectorComp - 1)) or \
@@ -11291,13 +11290,9 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     if (doTailOpt == 0) or (doTailOpt == 2 and behavior == "LOAD" and r >= rStart and r < rEnd):
 
-                      module.add(self.chooseGlobalRead(useBuffer, \
-                                bpl, destVgpr=loadVgpr, \
-                                addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
-                                soffset=soffset, offset=offset, \
-                                glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
-                                tr=isTr, hi16=hi16, \
-                                comment=comment, scope=scope, th=th, nv=nv))
+                      self.chooseGlobalReadFromGro(module, kernel, tc, graIdx, useBuffer, isTr, \
+                                bpl, loadVgpr, offsetVgpr, soffset, offset, \
+                                isGlc, isSlc, isNT, isLds, hi16, comment, scope, th, nv)
                       loadCnt = loadCnt + 1
                   if unrollMirrorWithSoffset:
                     codeMod = Module("mirrorIdx%u"%loopCnt)
@@ -12059,9 +12054,9 @@ class KernelWriterAssembly(KernelWriter):
 
               if kernel["BufferLoad"]:
                 if kernel["_UseSgprForGRO"]:
-                  offsetVgpr= "GlobalReadOffset%s+0"%(tc)
+                  offsetVgpr= self.groVgprName(tc, 0)
                 else:
-                  offsetVgpr= "GlobalReadOffset%s+%u"%(tc, graIdx)
+                  offsetVgpr= self.groVgprName(tc, graIdx)
 
                 # vgpr for GRO
                 if not kernel["_UseSgprForGRO"]:
@@ -12134,13 +12129,10 @@ class KernelWriterAssembly(KernelWriter):
 
                 useBuffer = not isTr
 
-                loadModule.add( self.chooseGlobalRead(useBuffer, \
-                          bpl, destVgpr=destVgpr, \
-                          addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
-                          soffset=soffset, offset=instOffset, \
-                          glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
-                          tr=isTr, hi16=isHigh16Bits , \
-                          comment="G -> Reg %u_%u_%u_%u"%(para, sPara, perp, sPerp), scope=scope, th=th, nv=nv))
+                self.chooseGlobalReadFromGro(loadModule, kernel, tc, graIdx, useBuffer, isTr, \
+                          bpl, destVgpr, offsetVgpr, soffset, instOffset, \
+                          isGlc, isSlc, isNT, isLds, isHigh16Bits, \
+                          "G -> Reg %u_%u_%u_%u"%(para, sPara, perp, sPerp), scope, th, nv)
 
                 if unrollMirrorWithSoffset:
                   codeMod = Module("mirrorIdx%u"%loopCnt)
@@ -14550,6 +14542,47 @@ class KernelWriterAssembly(KernelWriter):
         module.add(gsuLabel)
 
     return module
+
+  ##############################################################################
+  def groUses64bByteOffset(self, tc):
+    if tc in ["MXSA", "MXSB"]:
+      return self.states.use64bShadowLimitMX
+    return self.states.use64bShadowLimit
+
+  def groVgprIdx(self, graIdx, tc):
+    if self.groUses64bByteOffset(tc):
+      return graIdx * 2
+    return graIdx
+
+  def groVgprName(self, tc, graIdx):
+    return "GlobalReadOffset%s+%u" % (tc, self.groVgprIdx(graIdx, tc))
+
+  def scaleGroOffsetToBpe(self, module, tc, graIdx, tmp, tP):
+    gro = self.groVgprName(tc, graIdx)
+    if self.groUses64bByteOffset(tc):
+      module.add(vectorMultiply64Bpe(gro, gro, tP["bpeGR"], tmp, comment="64-bit GRO byte offset"))
+    else:
+      module.add(vectorMultiplyBpe(gro, gro, tP["bpeGR"]))
+
+  def chooseGlobalReadFromGro(self, module, kernel, tc, graIdx, useBuffer, isTr, bpl, destVgpr, offsetVgpr, soffset, offset, glc, slc, nt, lds, hi16, comment, scope, th, nv):
+    if kernel["BufferLoad"] and self.groUses64bByteOffset(tc) and not isTr:
+      flatGroVgpr = self.groVgprName(tc, graIdx if not kernel["_UseSgprForGRO"] else 0)
+      flatAddrVgpr = self.vgprPool.checkOut(2, tag="chooseGlobalReadFromGro_flatAddr")
+      module.add(VAddNCU64(vgpr(flatAddrVgpr, 2), vgpr(flatGroVgpr, 2), sgpr("Srd%s"%tc, 2), comment="flat addr = Srd + 64b GRO"))
+      module.add(self.chooseGlobalRead(False, bpl, destVgpr=destVgpr, \
+                addr0=vgpr(flatAddrVgpr, 2), addr1="", \
+                soffset=soffset, offset=offset, \
+                glc=glc, slc=slc, nt=nt, lds=lds, \
+                tr=False, hi16=hi16, \
+                comment=comment, scope=scope, th=th, nv=nv))
+      self.vgprPool.checkIn(flatAddrVgpr)
+    else:
+      module.add(self.chooseGlobalRead(useBuffer, bpl, destVgpr=destVgpr, \
+                addr0=vgpr(offsetVgpr), addr1=sgpr("Srd%s"%tc, 2 if isTr else 4), \
+                soffset=soffset, offset=offset, \
+                glc=glc, slc=slc, nt=nt, lds=lds, \
+                tr=isTr, hi16=hi16, \
+                comment=comment, scope=scope, th=th, nv=nv))
 
   ##############################################################################
   def shiftSrd(self, tc) -> Module:
@@ -19475,6 +19508,7 @@ class KernelWriterAssembly(KernelWriter):
     isSwizzled = False if tP == None else tP["isSwizzled"]
     indices = kernel["ProblemType"]["NumIndicesC"] if tc == "C" else kernel["ProblemType"]["IndexAssignments%s"%tc]
     justOffset32 =  kernel["BufferStore"] if tc == "C" else kernel["BufferLoad"]
+    use64bGroOffset = kernel["Use64bShadowLimit"] and justOffset32
     aidx = 1
     if args[0].isdigit():
       tmp = int(args[0])
@@ -19661,7 +19695,7 @@ class KernelWriterAssembly(KernelWriter):
               src0=self.strideRef(tc, indices[i]), \
               src1=offset, \
               comment="mul d%u lower"%i))
-          if not justOffset32:
+          if not justOffset32 or use64bGroOffset:
             module.add(VMulHIU32(dst=destHi,
                 src0=self.strideRef(tc, indices[i]), \
                 src1=offset, \
@@ -19694,7 +19728,7 @@ class KernelWriterAssembly(KernelWriter):
           comment="accumulate %s lower"%idxChar))
 
         # addr += offset * stride (hi)
-        if not justOffset32:
+        if not justOffset32 or use64bGroOffset:
           module.add(VAddCCOU32(dst=addrVgpr1, dst1=VCC(), \
               src0=tmpVgpr1, src1=srcHi, src2=VCC(), \
               comment="accumulate %s upper"%idxChar))
@@ -19707,7 +19741,7 @@ class KernelWriterAssembly(KernelWriter):
       destLo = addrVgpr0
       if writeDirectToAddr:
         module.add(VMovB32(dst=destLo, src=offset, comment="setup d0 lower"))
-        if not justOffset32:
+        if not justOffset32 or use64bGroOffset:
           module.add(VMovB32(dst=addrVgpr1, src=0, comment="d0 upper"))
       else:
         module.add(VAddCOU32(dst=destLo, dst1=VCC(), \

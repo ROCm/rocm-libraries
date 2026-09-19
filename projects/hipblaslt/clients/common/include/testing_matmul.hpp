@@ -2002,6 +2002,11 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
+    // Host mirrors of A/B/C are only needed for verification, swizzle, MX init, or dumps.
+    // Bench runs without --unit_check should not pin multi-GB host buffers.
+    const bool need_host_ABC = arg.unit_check || arg.norm_check || arg.allclose_check
+                               || do_swizzle_a || do_swizzle_b || arg.dump_matrix
+                               || isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB);
 
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
@@ -2645,9 +2650,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
 
             // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-            hA.emplace_back(TiA, size_A[i]);
-            hB.emplace_back(TiB, size_B[i]);
-            hC.emplace_back(To, size_C[i]);
+            if(need_host_ABC)
+            {
+                hA.emplace_back(TiA, size_A[i]);
+                CHECK_HOST_ALLOCATION(hA.back(), size_A[i]);
+                hB.emplace_back(TiB, size_B[i]);
+                CHECK_HOST_ALLOCATION(hB.back(), size_B[i]);
+                hC.emplace_back(To, size_C[i]);
+                CHECK_HOST_ALLOCATION(hC.back(), size_C[i]);
+            }
             hD_gold.emplace_back(To, size_D_copy[i]);
             hD_1.emplace_back(To, size_D_copy[i]);
             if(size_bias[i] * block_count != 0)
@@ -2743,9 +2754,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
 
                 // Naming: dX is in GPU (device) memory. hK is in CPU (host) memory
-                hA.emplace_back(TiA, size_A[i]);
-                hB.emplace_back(TiB, size_B[i]);
-                hC.emplace_back(To, size_C[i]);
+                if(need_host_ABC)
+                {
+                    hA.emplace_back(TiA, size_A[i]);
+                    CHECK_HOST_ALLOCATION(hA.back(), size_A[i]);
+                    hB.emplace_back(TiB, size_B[i]);
+                    CHECK_HOST_ALLOCATION(hB.back(), size_B[i]);
+                    hC.emplace_back(To, size_C[i]);
+                    CHECK_HOST_ALLOCATION(hC.back(), size_C[i]);
+                }
                 hD_gold.emplace_back(To, size_D_copy[i]);
                 hD_1.emplace_back(To, size_D_copy[i]);
                 if(size_bias[i] * block_count != 0)

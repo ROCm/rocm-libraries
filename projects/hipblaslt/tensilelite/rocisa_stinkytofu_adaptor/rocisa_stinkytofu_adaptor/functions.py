@@ -21,7 +21,7 @@ from .instruction import (
     SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64,
     SLoadB32, SLoadB64, SLoadB128, SLoadB256, SLoadB512,
     SMulHIU32, SMulI32, SMovB32, SMovB64, SNop, SSubU32,
-    VAddCCOU32, VAddLShiftLeftU32, VAddU32, VAndB32, VCmpEQF32,
+    VAddCCOU32, VAddCOU32, VAddLShiftLeftU32, VAddU32, VAndB32, VCmpEQF32,
     VCmpEQF64, VCmpNeU32, VCmpXEqU32, VCmpXGeU32, VCmpXGtU32,
     VCvtF32toU32, VCvtF64toU32, VCvtU32toF32, VCvtU32toF64,
     VLShiftLeftAddU32, VLShiftLeftB32, VLShiftLeftB64,
@@ -1063,6 +1063,32 @@ def vectorAddMultiplyBpe(dst, src0, src1, bpe, comment=""):
             module.add(VAddLShiftLeftU32(
                 dst=dstVgpr, shiftHex=bpe_log2, src0=src0Vgpr, src1=src1Vgpr,
                 comment=mcomment))
+    return module
+
+
+def vectorAddMultiply64Bpe(dst, src0, src1, bpe, tmp, comment=""):
+    module = Module("vectorAddMultiply64Bpe")
+    mcomment = comment + " (add and multiply bpe, 64-bit)"
+    dstVgpr = vgpr(dst, 2)
+    src0Vgpr = vgpr(src0)
+    src1Vgpr = vgpr(src1)
+    if bpe == 0.5:
+        module.add(VAddU32(dst=vgpr(dst), src0=src0Vgpr, src1=src1Vgpr, comment=mcomment))
+        module.add(VMovB32(dst=_get_vgpr(dst, 1), src=0, comment=mcomment))
+        module.add(VLShiftRightB64(dst=dstVgpr, shiftHex=1, src=dstVgpr, comment=mcomment))
+    elif bpe == 0.75:
+        module.add(VAddU32(dst=vgpr(dst), src0=src0Vgpr, src1=src1Vgpr, comment=mcomment))
+        module.add(VMovB32(dst=_get_vgpr(dst, 1), src=0, comment=mcomment))
+        module.add(VMulLOU32(dst=vgpr(dst), src0=6, src1=vgpr(dst), comment=mcomment))
+        module.add(VLShiftRightB64(dst=dstVgpr, shiftHex=3, src=dstVgpr, comment=mcomment))
+    else:
+        bpe_log2 = int(math.log2(bpe))
+        module.add(VMovB32(dst=vgpr(dst), src=src0Vgpr, comment=mcomment))
+        module.add(VMovB32(dst=_get_vgpr(dst, 1), src=0, comment=mcomment))
+        module.add(VAddCOU32(dst=vgpr(dst), dst1=VCC(), src0=vgpr(dst), src1=src1Vgpr, comment=mcomment))
+        module.add(VAddCCOU32(dst=_get_vgpr(dst, 1), dst1=VCC(), src0=_get_vgpr(dst, 1), src1=0, src2=VCC(), comment=mcomment))
+        if bpe_log2 != 0:
+            module.add(VLShiftLeftB64(dst=dstVgpr, shiftHex=bpe_log2, src=dstVgpr, comment=mcomment))
     return module
 
 

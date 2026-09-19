@@ -917,6 +917,14 @@ namespace rocisa
                             float bpe,
                             const std::string&  comment = "");
 
+    std::shared_ptr<Module>
+        vectorAddMultiply64Bpe(int dst,
+                               int src0,
+                               int src1,
+                               float bpe,
+                               int tmp,
+                               const std::string& comment = "");
+
     template<typename DST, typename SRC>
     std::shared_ptr<Module>
         vectorMultiplyBpe(DST dst,

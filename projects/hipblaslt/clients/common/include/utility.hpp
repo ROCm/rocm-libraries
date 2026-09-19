@@ -81,6 +81,20 @@
 #endif
 
 #define LIMITED_MEMORY_STRING "Error: Attempting to allocate more memory than available."
+
+// Check HipHostBuffer after allocation when host mirrors are required (bench).
+// Gtest builds define CHECK_HOST_ALLOCATION in hipblaslt_test.hpp.
+#ifndef GOOGLE_TEST
+#define CHECK_HOST_ALLOCATION(BUF, NUM_ELEMENTS)                 \
+    do                                                           \
+    {                                                            \
+        if((NUM_ELEMENTS) > 0 && (BUF).buf() == nullptr)         \
+        {                                                        \
+            hipblaslt_cerr << LIMITED_MEMORY_STRING << std::endl; \
+            exit(EXIT_FAILURE);                                  \
+        }                                                        \
+    } while(0)
+#endif
 #define TOO_MANY_DEVICES_STRING "Error: Too many devices requested."
 #define HMM_NOT_SUPPORTED "Error: HMM not supported."
 #define KNOWN_BUG_STRING "Known bug for current GPU platform (see known_bugs.yaml)."

@@ -97,6 +97,9 @@ Definitions:
     - { M: 2048, N: 2048, K: 2048, lda: 1049100, ldb:    2048, ldc:    2048, ldd:    2048 }
     - { M: 2048, N: 2048, K: 2048, lda:    2048, ldb: 1049100, ldc:    2048, ldd:    2048 }
     - { M: 2048, N: 2048, K: 2048, lda:    2048, ldb:    2048, ldc: 1049100, ldd: 1049100 }
+    # Conv3d-shaped boundary: lda*K = 2^31 elements, max A index = INT32_MAX.
+    # Requires ~8 GiB device memory for f32 A; host mirrors skipped unless unit_check.
+    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864, ldd: 67108864 }
 
   # Output-only oversized leading dimension (C and D): the ROCM-26455 write
   # path. K is kept small so the CPU reference / unit_check stays inexpensive.
