@@ -1,32 +1,16 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <memory>
+#include <span>
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 
 using namespace stinkytofu;
@@ -45,6 +29,31 @@ class AllocationConstraintsTest : public ::testing::Test {
         return func->createBasicBlock(label);
     }
 
+    /// s40 = s_mov_b32(s\p source), where \p source is read before anything
+    /// writes it and so lifts to a live-in. Returns its value ID.
+    SSAValueID scalarLiveIn(BasicBlock& entry, uint32_t source) {
+        AsmIRBuilder builder(entry, kRaTestArch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::s_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("s", 40, 1));
+        mov->addSrcReg(StinkyRegister("s", source, 1));
+        if (!liftForAllocation(*func)) return kInvalidSSAValueID;
+        const StinkySSAValue* value = ssaSourceValue(*mov, 0);
+        return value == nullptr ? kInvalidSSAValueID : value->valueId();
+    }
+
+    /// The same for vectors: v40 = v_mov_b32(v\p source). No metadata to set --
+    /// the vector line comes from the architecture's work-item ID packing, which
+    /// kRaTestArch declares.
+    SSAValueID vectorLiveIn(BasicBlock& entry, uint32_t source) {
+        AsmIRBuilder builder(entry, kRaTestArch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 40, 1));
+        mov->addSrcReg(StinkyRegister("v", source, 1));
+        if (!liftForAllocation(*func)) return kInvalidSSAValueID;
+        const StinkySSAValue* value = ssaSourceValue(*mov, 0);
+        return value == nullptr ? kInvalidSSAValueID : value->valueId();
+    }
+
     std::unique_ptr<Function> func;
 };
 
@@ -61,6 +70,31 @@ bool hasAffinity(const AllocationConstraints& constraints, SSAValueID id) {
     }
     return false;
 }
+
+bool isUndefinedLiveIn(const AllocationConstraints& constraints, SSAValueID id) {
+    const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
+    return std::find(undefined.begin(), undefined.end(), id) != undefined.end();
+}
+
+/// entry branches two ways and v\p defined is written on one side only, so the
+/// merge at join takes it from the entry live-in on the other.
+const SSABlockArgument* mergeOfOneDefinedPath(Function& function, uint32_t defined) {
+    BasicBlock* entry = function.createBasicBlock("entry");
+    BasicBlock* left = function.createBasicBlock("left");
+    BasicBlock* right = function.createBasicBlock("right");
+    BasicBlock* join = function.createBasicBlock("join");
+    function.addEdge(entry, left);
+    function.addEdge(entry, right);
+    function.addEdge(left, join);
+    function.addEdge(right, join);
+    createVAddInBlock(left, kRaTestArch, defined, 20, 21);
+    createVAddInBlock(join, kRaTestArch, 6, defined, defined);
+    if (!liftForAllocation(function)) return nullptr;
+    return vgprArgumentFor(*join, defined);
+}
+
+/// s0-s31, what .amdhsa_user_sgpr_count 29 plus three workgroup ids fills.
+constexpr uint64_t kDispatchFills = 32;
 
 }  // namespace
 
@@ -120,4 +154,139 @@ TEST_F(AllocationConstraintsTest, MergeIsAnAffinitySet) {
         << setup.constraints().toString();
     EXPECT_FALSE(setup.constraints().affinitySets().empty());
     EXPECT_GE(setup.constraints().affinitySets().front().members.size(), 2u);
+}
+
+TEST_F(AllocationConstraintsTest, LiveInTheDispatchFilledIsPinned) {
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, kDispatchFills);
+    const SSAValueID liveIn = scalarLiveIn(*block("entry"), /*source=*/8);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_FALSE(isUndefinedLiveIn(setup.constraints(), liveIn));
+}
+
+TEST_F(AllocationConstraintsTest, LiveInAboveWhatTheDispatchFillsIsUndefinedAndFree) {
+    // Nothing wrote s100, so it holds nothing and any register serves it equally.
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, kDispatchFills);
+    const SSAValueID liveIn = scalarLiveIn(*block("entry"), /*source=*/100);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_FALSE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn)) << setup.constraints().toString();
+}
+
+TEST_F(AllocationConstraintsTest, WithoutTheBoundaryEveryLiveInStaysPinned) {
+    // No metadata, as a .stir file or this suite leaves it. Unknown pins: not
+    // knowing what the dispatch filled is no licence to move a register it did.
+    const SSAValueID liveIn = scalarLiveIn(*block("entry"), /*source=*/100);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_TRUE(setup.constraints().undefinedLiveIns().empty());
+}
+
+TEST_F(AllocationConstraintsTest, VectorLiveInTheDispatchFilledIsPinned) {
+    // v0 is the whole vector line on a target that packs the work-item ID
+    // dimensions into it, which is what the workitem id arrives in.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSAValueID liveIn = vectorLiveIn(*block("entry"), /*source=*/0);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_FALSE(isUndefinedLiveIn(setup.constraints(), liveIn));
+}
+
+TEST_F(AllocationConstraintsTest, VectorLiveInAboveV0IsUndefinedAndKeepsItsHint) {
+    // Nothing wrote v300: the dispatch fills v0 alone whatever
+    // .amdhsa_system_vgpr_workitem_id enabled, so pinning it would hold a block
+    // in place to preserve contents that do not exist. It stays hinted, which
+    // is the right strength for a value whose contents do not matter.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSAValueID liveIn = vectorLiveIn(*block("entry"), /*source=*/300);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_FALSE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn)) << setup.constraints().toString();
+    EXPECT_EQ(setup.constraints().hintFor(liveIn), (RegKey{RegType::V, 300, RegHalf::NONE}));
+}
+
+TEST_F(AllocationConstraintsTest, AnUndefinedLiveInLeavesTheMergeItReaches) {
+    // Only one path writes v5, so the merge reads the entry live-in on the
+    // other. Nothing filled that register, so the merge reads garbage along
+    // that edge whichever colour it takes, and welding the two would spend its
+    // freedom for nothing. The computed edge keeps the weld it needs.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSABlockArgument* merge = mergeOfOneDefinedPath(*func, /*defined=*/5);
+    ASSERT_NE(merge, nullptr);
+    ASSERT_NE(merge->value, nullptr);
+    ASSERT_EQ(merge->incoming.size(), 2u);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+
+    size_t undefinedEdges = 0;
+    size_t definedEdges = 0;
+    for (const SSABlockIncoming& incoming : merge->incoming) {
+        const StinkySSAValue* value = incoming.use->value();
+        ASSERT_NE(value, nullptr);
+        if (value->isUndefined()) {
+            ++undefinedEdges;
+            EXPECT_FALSE(hasAffinity(setup.constraints(), value->valueId()))
+                << setup.constraints().toString();
+            EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), value->valueId()));
+        } else {
+            ++definedEdges;
+            EXPECT_TRUE(hasAffinity(setup.constraints(), value->valueId()))
+                << setup.constraints().toString();
+        }
+    }
+    EXPECT_EQ(undefinedEdges, 1u) << setup.constraints().toString();
+    EXPECT_EQ(definedEdges, 1u) << setup.constraints().toString();
+
+    // Welded to less, not unwelded: dropping a member must not dissolve the
+    // set that holds the real edge in place.
+    EXPECT_TRUE(hasAffinity(setup.constraints(), merge->value->valueId()))
+        << setup.constraints().toString();
+}
+
+TEST_F(AllocationConstraintsTest, ALiveInTheDispatchFilledStaysWeldedToItsMerge) {
+    // Same shape over v0, which the dispatch fills on a packed target. That
+    // edge carries the workitem id, so the merge must read it from the same
+    // register: the freedom above is what a filled register may not have.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSABlockArgument* merge = mergeOfOneDefinedPath(*func, /*defined=*/0);
+    ASSERT_NE(merge, nullptr);
+    ASSERT_EQ(merge->incoming.size(), 2u);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    for (const SSABlockIncoming& incoming : merge->incoming) {
+        const StinkySSAValue* value = incoming.use->value();
+        ASSERT_NE(value, nullptr);
+        EXPECT_FALSE(value->isUndefined()) << setup.constraints().toString();
+        EXPECT_TRUE(hasAffinity(setup.constraints(), value->valueId()))
+            << setup.constraints().toString();
+    }
+}
+
+TEST_F(AllocationConstraintsTest, AScalarLiveInIsUnaffectedByTheVectorLine) {
+    // The two lines are separate: a vector live-in being free above v0 says
+    // nothing about s100, which stays pinned for want of a scalar boundary.
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, kDispatchFills);
+    BasicBlock* entry = block("entry");
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+    mov->addDestReg(StinkyRegister("v", 40, 1));
+    mov->addSrcReg(StinkyRegister("v", 300, 1));
+    const SSAValueID scalar = scalarLiveIn(*entry, /*source=*/8);
+    ASSERT_NE(scalar, kInvalidSSAValueID);
+    const StinkySSAValue* vector = ssaSourceValue(*mov, 0);
+    ASSERT_NE(vector, nullptr);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(scalar)) << setup.constraints().toString();
+    EXPECT_FALSE(setup.constraints().isPinned(vector->valueId())) << setup.constraints().toString();
 }
