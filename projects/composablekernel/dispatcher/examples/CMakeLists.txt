@@ -466,6 +466,21 @@ add_custom_command(
 add_custom_target(generate_gemm_fallback_kernel DEPENDS ${GEMM_FALLBACK_KERNEL})
 
 # GEMM dynamic library for Python
+# This directory can be configured without CK's parent CMakeLists.txt. Use the
+# same target features and framework gate as the standalone Python builds; in
+# particular, gfx1250 must not pick the unsupported unified-framework default.
+execute_process(
+    COMMAND python3 -c
+            "import sys; sys.path.insert(0, sys.argv[1]); from dispatcher_common import arch_feature_defines, unified_framework_flags; print(';'.join(arch_feature_defines(sys.argv[2]) + unified_framework_flags(sys.argv[2])))"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../python" "${GPU_TARGET}"
+    OUTPUT_VARIABLE _gemm_fallback_arch_flags
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _gemm_fallback_flags_rc
+)
+if(NOT _gemm_fallback_flags_rc EQUAL 0)
+    message(FATAL_ERROR "Cannot determine GEMM compile flags for ${GPU_TARGET}")
+endif()
+
 add_library(dispatcher_gemm_lib SHARED ${CMAKE_CURRENT_SOURCE_DIR}/../bindings/ctypes/gemm_ctypes_lib.cpp)
 target_link_libraries(dispatcher_gemm_lib PRIVATE ck_tile_dispatcher)
 target_include_directories(dispatcher_gemm_lib PRIVATE
@@ -474,6 +489,7 @@ target_include_directories(dispatcher_gemm_lib PRIVATE
     ${GEMM_FALLBACK_KERNEL_DIR}
 )
 target_compile_options(dispatcher_gemm_lib PRIVATE
+    ${_gemm_fallback_arch_flags}
     -DCK_TILE_SINGLE_KERNEL_INCLUDE
     -include ${GEMM_FALLBACK_KERNEL}
     -DGFX_ARCH="${GPU_TARGET}"

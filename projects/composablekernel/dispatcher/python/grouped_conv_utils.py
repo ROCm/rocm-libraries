@@ -59,6 +59,7 @@ from dispatcher_common import (
     validate_wave_config,
     validate_warp_tile_config,
     unified_framework_flags,
+    arch_feature_defines,
 )
 
 
@@ -1706,6 +1707,7 @@ class GroupedConvCodegenRunner:
                 f"--offload-arch={c.arch}",
                 f'-DGFX_ARCH="{c.arch}"',
                 *unified_framework_flags(c.arch),
+                *arch_feature_defines(c.arch),
                 "-mllvm",
                 "-enable-noalias-to-md-conversion=0",
                 "-Wno-undefined-func-template",
