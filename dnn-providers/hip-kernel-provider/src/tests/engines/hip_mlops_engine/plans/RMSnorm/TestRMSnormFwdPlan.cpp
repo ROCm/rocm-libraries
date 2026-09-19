@@ -35,8 +35,21 @@ TEST(TestRMSnormFwdParams, ConstructsFromSingleNodeGraph)
 
     EXPECT_NO_THROW(const RMSnormFwdParams params(attr, graph.getTensorMap()));
 }
+TEST(TestRMSnormFwdParams, ConstructsFromDoubleNodeGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNode)
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    EXPECT_NO_THROW(const RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap()));
+}
+
+TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -52,9 +65,33 @@ TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForSingleNode)
     EXPECT_NE(params.scale(), nullptr);
     EXPECT_EQ(params.bias(), nullptr); // Optional and not set in `createValidRMSNormGraph`
     EXPECT_EQ(params.invRMS(), nullptr); // Optional and not set in `createValidRMSNormGraph`
+    EXPECT_FALSE(params.optActivation().has_value()); // Not set by single node graph
+    EXPECT_EQ(params.activationOut(), nullptr); // Not set by single node graph
 }
 
-TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUids)
+TEST(TestRMSnormFwdParams, HasCorrectTensorPointersForDoubleNodeGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    const RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap());
+
+    EXPECT_NE(params.x(), nullptr);
+    EXPECT_NE(params.y(), nullptr);
+    EXPECT_NE(params.scale(), nullptr);
+    EXPECT_EQ(params.bias(), nullptr); // Optional and not set in `createValidRMSNormGraph`
+    EXPECT_EQ(params.invRMS(), nullptr); // Optional and not set in `createValidRMSNormGraph`
+    EXPECT_TRUE(params.optActivation().has_value());
+    EXPECT_NE(params.activationOut(), nullptr);
+}
+
+TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUidsForSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -70,7 +107,26 @@ TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUids)
     EXPECT_EQ(params.scale()->uid(), attr.scale_tensor_uid());
 }
 
-TEST(TestRMSnormFwdParams, IsMoveConstructible)
+TEST(TestRMSnormFwdParams, TensorPointersMatchExpectedUidsForDoubleNodeGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    const RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap());
+
+    EXPECT_EQ(params.x()->uid(), attrFwd.x_tensor_uid());
+    EXPECT_EQ(params.y()->uid(), attrFwd.y_tensor_uid());
+    EXPECT_EQ(params.scale()->uid(), attrFwd.scale_tensor_uid());
+    EXPECT_EQ(params.activationOut()->uid(), attrActivation.out_0_tensor_uid());
+}
+
+TEST(TestRMSnormFwdParams, IsMoveConstructibleForSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -84,6 +140,25 @@ TEST(TestRMSnormFwdParams, IsMoveConstructible)
 
     EXPECT_NE(moved.x(), nullptr);
     EXPECT_NE(moved.y(), nullptr);
+}
+
+TEST(TestRMSnormFwdParams, IsMoveConstructibleForDoubleNodeGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap());
+    const RMSnormFwdParams moved(std::move(params));
+
+    EXPECT_NE(moved.x(), nullptr);
+    EXPECT_NE(moved.y(), nullptr);
+    EXPECT_NE(moved.activationOut(), nullptr);
 }
 
 TEST(TestRMSnormFwdParams, IsNotCopyConstructible)
@@ -115,29 +190,73 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
     return {std::move(builder), RMSnormFwdPlan{std::move(params)}};
 }
 
+std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
+    createFusedActivationPlanFromGraph(const std::vector<int64_t>& strides
+                                       = {150528, 50176, 224, 1},
+                                       const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                                       = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+        strides, dims, inputDataType);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap());
+    return {std::move(builder), RMSnormFwdPlan{std::move(params)}};
+}
+
 } // namespace
 
 // ============================================================================
 // RMSnormFwdPlan - basic behavior
 // ============================================================================
 
-TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrows)
+TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrowsForSingleNodeGraph)
 {
     auto [fbb, plan] = createPlanFromGraph();
     const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZero)
+TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrowsForDoubleNodeGraph)
+{
+    auto [fbb, plan] = createFusedActivationPlanFromGraph();
+    const Handle handle;
+    EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZeroForSingleNodeGraph)
 {
     auto [fbb, plan] = createPlanFromGraph();
     const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
-TEST(TestRMSnormFwdPlan, IsMoveConstructible)
+TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZeroForDoubleNodeGraph)
+{
+    auto [fbb, plan] = createFusedActivationPlanFromGraph();
+    const Handle handle;
+    EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
+}
+
+TEST(TestRMSnormFwdPlan, IsMoveConstructibleForSingleNodeGraph)
 {
     auto [fbb, plan] = createPlanFromGraph();
+
+    const RMSnormFwdPlan moved(std::move(plan));
+    const Handle handle;
+    EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
+}
+
+TEST(TestRMSnormFwdPlan, IsMoveConstructibleForDoubleNodeGraph)
+{
+    auto [fbb, plan] = createFusedActivationPlanFromGraph();
 
     const RMSnormFwdPlan moved(std::move(plan));
     const Handle handle;
@@ -153,7 +272,7 @@ TEST(TestRMSnormFwdPlan, IsNotCopyConstructible)
 // RMSnormFwdPlan - compile
 // ============================================================================
 
-TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
+TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelNameForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -174,7 +293,28 @@ TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelName)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
+TEST(TestRMSnormFwdPlan, CompileCallsCompilerWithCorrectKernelNameForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    auto mockKernel = std::make_unique<MockRunnableKernel>();
+    EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+
+    auto mockProgram = std::make_unique<MockCompiledProgram>();
+    EXPECT_CALL(*mockProgram, getKernel("RMSnormFwd"))
+        .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
+
+    EXPECT_CALL(mockCompiler, compile("RMSNormFwd.cpp", ::testing::_))
+        .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+
+    auto [fbb, plan] = createFusedActivationPlanFromGraph();
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+}
+
+TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOptionForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -196,7 +336,29 @@ TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestRMSnormFwdPlanFp32, CompileSetsCorrectDefines)
+TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOptionForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    auto mockKernel = std::make_unique<MockRunnableKernel>();
+    EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+
+    auto mockProgram = std::make_unique<MockCompiledProgram>();
+    EXPECT_CALL(*mockProgram, getKernel(::testing::_))
+        .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
+
+    EXPECT_CALL(mockCompiler,
+                compile(::testing::_, ::testing::Contains(std::string("--offload-arch=gfx942"))))
+        .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+
+    auto [fbb, plan] = createFusedActivationPlanFromGraph();
+    auto deviceProps = createTestDeviceProps("gfx942");
+
+    plan.compile(mockCompiler, deviceProps);
+}
+
+TEST(TestRMSnormFwdPlanFp32, CompileSetsCorrectDefinesForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -232,9 +394,49 @@ TEST(TestRMSnormFwdPlanFp32, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormFwdPlanFp16, CompileSetsCorrectDefines)
+TEST(TestRMSnormFwdPlanFp32, CompileSetsCorrectDefinesForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createFusedActivationPlanFromGraph();
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=10"));
+}
+
+TEST(TestRMSnormFwdPlanFp16, CompileSetsCorrectDefinesForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -272,9 +474,52 @@ TEST(TestRMSnormFwdPlanFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=half"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormFwdPlanBfp16, CompileSetsCorrectDefines)
+TEST(TestRMSnormFwdPlanFp16, CompileSetsCorrectDefinesForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan]
+        = createFusedActivationPlanFromGraph({150528, 50176, 224, 1},
+                                             {1, 3, 224, 224},
+                                             hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=half"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=10"));
+}
+
+TEST(TestRMSnormFwdPlanBfp16, CompileSetsCorrectDefinesForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -313,9 +558,52 @@ TEST(TestRMSnormFwdPlanBfp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=__bf16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
 }
 
-TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)
+TEST(TestRMSnormFwdPlanBfp16, CompileSetsCorrectDefinesForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createFusedActivationPlanFromGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=__bf16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=10"));
+}
+
+TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrowsForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -336,7 +624,30 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrows)
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
+TEST(TestRMSnormFwdPlan, CompileWithUnsupportedDimensionThrowsForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // 3D tensor is not supported
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+        {12, 4, 1}, {1, 3, 4}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap());
+    RMSnormFwdPlan plan(std::move(params));
+
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrowsForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -357,7 +668,30 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRMSnormFwdPlan, CompileWithChannelLastInputCorrectlySetsDefines)
+TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrowsForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // Number of workgroups exeeds UINT32_MAX
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph(
+        {4, 4, 2, 1}, {UINT32_MAX, 1, 2, 2}, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& nodeFwd = graph.getNode(0);
+    const auto& attrFwd = *nodeFwd.attributes_as_RMSNormAttributes();
+    const auto& nodeActivation = graph.getNode(1);
+    const auto& attrActivation = *nodeActivation.attributes_as_PointwiseAttributes();
+
+    RMSnormFwdParams params(attrFwd, attrActivation, graph.getTensorMap());
+    RMSnormFwdPlan plan(std::move(params));
+
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestRMSnormFwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForSingleNodeGraph)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -393,4 +727,44 @@ TEST(TestRMSnormFwdPlan, CompileWithChannelLastInputCorrectlySetsDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=0"));
+}
+
+TEST(TestRMSnormFwdPlan, CompileWithChannelLastInputCorrectlySetsDefinesForDoubleNodeGraph)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createFusedActivationPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_NRN_OP_ID=10"));
 }

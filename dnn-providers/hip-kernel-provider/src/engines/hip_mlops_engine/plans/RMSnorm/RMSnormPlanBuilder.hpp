@@ -57,4 +57,4 @@ private:
     const IDevicePropertyProvider& _devicePropertyProvider;
 };
 
-}
+} // namespace hip_kernel_provider::rmsnorm
