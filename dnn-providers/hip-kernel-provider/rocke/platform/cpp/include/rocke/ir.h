@@ -955,6 +955,13 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra);
 
 /* ----- inline asm ----- */
+/* Value-preserving optimization boundary for numeric scalars and i1 predicates.
+ * Use the returned value; unused results may be eliminated. Empty tied
+ * VGPR asm hides the producer from consumers without memory/thread ordering.
+ * Predicates and byte storage bridge through i32. Pointers/vectors are rejected. Register moves
+ * may still be required. */
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value);
+
 /* operands/result_types are explicit arrays; constraints/template are strings.
  * Returns the op (results accessible via op->results) since asm may be 0/1/N
  * results. */
