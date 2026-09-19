@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "EpsilonTestUtils.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -42,7 +43,8 @@ inline flatbuffers::FlatBufferBuilder
                             const DataType yDataType,
                             const DataType scaleBiasDataType,
                             const std::optional<DataType> meanInvVarianceDataType,
-                            const DataType computeDataType)
+                            const DataType computeDataType,
+                            const DataType epsilonDataType)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -55,17 +57,8 @@ inline flatbuffers::FlatBufferBuilder
         builder, scaleUid, "scale", scaleBiasDataType, &scaleStrides, &scaleDims));
     tensors.push_back(CreateTensorAttributesDirect(
         builder, biasUid, "bias", scaleBiasDataType, &biasStrides, &biasDims));
-    const std::vector<int64_t> epsilonDimsStrides = {1};
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder,
-                                     epsilonUid,
-                                     "epsilon",
-                                     DataType::FLOAT,
-                                     &epsilonDimsStrides,
-                                     &epsilonDimsStrides,
-                                     false,
-                                     TensorValue::Float32Value,
-                                     builder.CreateStruct(Float32Value(epsilon)).Union()));
+    tensors.push_back(createEpsilonTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType));
+
     if(meanUid.has_value() && meanDims.has_value() && meanStrides.has_value()
        && meanInvVarianceDataType.has_value())
     {
@@ -135,7 +128,8 @@ inline flatbuffers::FlatBufferBuilder
                             const DataType yDataType,
                             const DataType scaleBiasDataType,
                             const std::optional<DataType> meanInvVarianceDataType,
-                            const DataType computeDataType)
+                            const DataType computeDataType,
+                            const DataType epsilonDataType)
 {
     const auto normalizedDim = static_cast<int64_t>(ioDims.size()) - normalizedDimCount;
 
@@ -182,7 +176,8 @@ inline flatbuffers::FlatBufferBuilder
                                    yDataType,
                                    scaleBiasDataType,
                                    meanInvVarianceDataType,
-                                   computeDataType);
+                                   computeDataType,
+                                   epsilonDataType);
 }
 
 } // namespace hipdnn_integration_tests::test_utils
