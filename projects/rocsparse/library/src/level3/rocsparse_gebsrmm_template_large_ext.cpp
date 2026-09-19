@@ -58,23 +58,33 @@ namespace rocsparse
             return;
         }
 
-        rocsparse::gebsrmm_large_blockdim_device_ext<BSR_BLOCK_DIM, BLK_SIZE_Y, UNROLL_SIZE_Y>(
-            direction,
-            trans_B,
-            mb,
-            n,
-            alpha,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val,
-            row_block_dim,
-            col_block_dim,
-            B,
-            ldb,
-            beta,
-            C,
-            ldc,
-            idx_base);
+        // Grid-stride over the column panels: grid.y is clamped to 65535, so each grid
+        // sweep only covers hipGridDim_y * BLK_SIZE_Y * UNROLL_SIZE_Y columns. The bound
+        // depends solely on block uniform values, so every thread of a block runs the same
+        // number of iterations and stays convergent at the __syncthreads() inside the
+        // device call.
+        for(rocsparse_int col_offset = hipBlockIdx_y * (BLK_SIZE_Y * UNROLL_SIZE_Y); col_offset < n;
+            col_offset += hipGridDim_y * (BLK_SIZE_Y * UNROLL_SIZE_Y))
+        {
+            rocsparse::gebsrmm_large_blockdim_device_ext<BSR_BLOCK_DIM, BLK_SIZE_Y, UNROLL_SIZE_Y>(
+                col_offset,
+                direction,
+                trans_B,
+                mb,
+                n,
+                alpha,
+                bsr_row_ptr,
+                bsr_col_ind,
+                bsr_val,
+                row_block_dim,
+                col_block_dim,
+                B,
+                ldb,
+                beta,
+                C,
+                ldc,
+                idx_base);
+        }
     }
 
     typedef enum
@@ -137,7 +147,7 @@ namespace rocsparse
                               "This function is designed for col_block_dim <= 32.");
 
 #define LAUNCH_LARGE_KERNEL(M_, N_, K_)                                                            \
-    dim3 gebsrmm_blocks((mb - 1) / 1 + 1, (n - 1) / (N_ * K_) + 1);                                \
+    dim3 gebsrmm_blocks((mb - 1) / 1 + 1, rocsparse::min((n - 1) / (N_ * K_) + 1, 65535));         \
     dim3 gebsrmm_threads(M_, N_);                                                                  \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gebsrmm_large_blockdim_kernel_ext<M_, N_, K_>), \
                                        gebsrmm_blocks,                                             \
