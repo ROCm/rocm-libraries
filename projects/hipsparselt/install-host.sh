@@ -42,6 +42,7 @@ function display_help()
   echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
   echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
   echo "    [--static] build static library"
+  echo "    [--therock] build against a staged hipBLASLt package (find_package) instead of add_subdirectory"
   echo "    [--address-sanitizer] build with address sanitizer"
   echo "    [--codecoverage] build with code coverage profiling enabled"
   echo "    [--build_dir] Specify the name of the build folder"
@@ -320,6 +321,7 @@ install_prefix=hipsparselt-install
 rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
+build_therock=false
 gpu_architecture=all
 cpu_ref_lib=blis
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -349,7 +351,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,disable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,therock,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,disable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -389,6 +391,9 @@ while true; do
             shift ;;
         --static)
             build_static=true
+            shift ;;
+        --therock)
+            build_therock=true
             shift ;;
         --address-sanitizer)
             build_address_sanitizer=true
@@ -617,6 +622,15 @@ pushd .
     compiler="${rocm_path}/bin/amdclang++" #force amdclang++ for static libs, g++ doesn't work
     compiler_c="${rocm_path}/bin/amdclang"
     printf "Forcing compiler to amdclang++ for static library.\n"
+  fi
+
+  # Consume a staged hipBLASLt package (find_package) instead of forking its
+  # build tree via add_subdirectory. This is the path that links the shared
+  # libtensilelite-host.so rather than recompiling TensileLite into
+  # libhipsparselt.so. Requires hipBLASLt to be installed under ${rocm_path}.
+  if [[ "${build_therock}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DHIPSPARSELT_ENABLE_THEROCK=ON"
+    printf "Building against the staged hipBLASLt package (HIPSPARSELT_ENABLE_THEROCK=ON).\n"
   fi
 
   # clients
