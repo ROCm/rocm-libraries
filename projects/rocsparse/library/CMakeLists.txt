@@ -150,7 +150,8 @@ if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsparse PRIVATE
     "SHELL:-Xarch_device -fno-profile-instr-generate"
     "SHELL:-Xarch_device -fno-coverage-mapping")
-  target_link_options(rocsparse PRIVATE "SHELL:-Xarch_host -fprofile-instr-generate")
+  target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
+  target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
 endif()
 
 if (NOT WIN32)
