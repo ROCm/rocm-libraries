@@ -940,7 +940,9 @@ def _run_dgrad_sweep(
         from kernels.common.conv_direct_grouped import (
             make_dgrad_fprop_spec,
             build_direct_transpose_weights_dgrad,
+            DirectTransposeWeightsDgradSpec,
             build_direct_reorganize_weights,
+            DirectReorganizeWeightsSpec,
             build_direct_mfma_dgrad,
             direct_dgrad_workspace_bytes,
             direct_dgrad_coalesced_workspace_bytes,
@@ -1009,9 +1011,14 @@ def _run_dgrad_sweep(
                             n_skipped += 1
                             continue
                         try:
-                            kt1 = build_direct_transpose_weights_dgrad(p, arch=arch)
+                            kt1 = build_direct_transpose_weights_dgrad(
+                                DirectTransposeWeightsDgradSpec(problem=p), arch=arch
+                            )
                             kt2 = build_direct_reorganize_weights(
-                                p, arch=arch, fold_k32=use_k32
+                                DirectReorganizeWeightsSpec(
+                                    problem=p, fold_k32=use_k32
+                                ),
+                                arch=arch,
                             )
                             kf = build_direct_conv(fprop_spec, arch=arch)
                             kt = (kt1, kt2)  # two-step transpose pipeline
