@@ -792,7 +792,8 @@ RppStatus rppt_color_cast(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
                           RpptDescPtr dstDescPtr, RpptRGB* rgbTensor, Rpp32f* alphaTensor,
                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                           RppBackend executionBackend) {
-    if (srcDescPtr->c != 3) return RPP_ERROR_INVALID_CHANNELS;
+    if ((srcDescPtr->c != 1) && (srcDescPtr->c != 3)) return RPP_ERROR_INVALID_CHANNELS;
+    if (dstDescPtr->c != srcDescPtr->c) return RPP_ERROR_INVALID_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
