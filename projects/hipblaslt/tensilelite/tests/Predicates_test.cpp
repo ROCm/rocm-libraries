@@ -127,3 +127,100 @@ TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
     problem.setParams().setFallbackStatus(true);
     EXPECT_TRUE((*pred)(problem)) << "With fallback status, effective XCC=1 so 38 % 1 == 0";
 }
+
+// ----------------------------------------------------------------------------
+// WorkgroupMappingXCCCheck on non-standard-CU devices.
+// A non-standard-CU device (e.g. 228 CU) must accept a generic XCC=8 entry on
+// the first heuristic lookup, before the runtime sets fallbackStatus(). The
+// predicate treats a non-standard-CU device as an implicit fallback. The
+// device classification is the public isStandardCUDevice member, set directly
+// here so the branch is exercised on CPU without a GPU.
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, WorkgroupMappingXCCCheck_NonStandardCUDevice_XCC8_Passes)
+{
+    using namespace TensileLite;
+    // 228 CU, generic XCC=8, no fallbackStatus. 228 % 8 != 0, but a non-standard
+    // CU device is treated as an implicit fallback -> effective XCC=1 -> pass.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{8, -1}, 228u);
+    pred->isStandardCUDevice = false;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_TRUE((*pred)(problem))
+        << "Non-standard-CU (228) must accept generic XCC=8 on first lookup";
+}
+
+TEST(Predicates, WorkgroupMappingXCCCheck_StandardCUDevice_228_XCC8_Fails)
+{
+    using namespace TensileLite;
+    // Same shape (228 CU, XCC=8, no fallbackStatus) but a standard-CU device: the
+    // implicit-fallback branch is not taken, so 228 % 8 != 0 rejects. Isolates the
+    // device classification as the single deciding factor.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{8, -1}, 228u);
+    pred->isStandardCUDevice = true;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_FALSE((*pred)(problem))
+        << "Standard-CU device does not coerce XCC=8 to 1 (228 % 8 != 0)";
+}
+
+TEST(Predicates, WorkgroupMappingXCCCheck_StandardCUDevice_304_XCC8_Passes)
+{
+    using namespace TensileLite;
+    // 304 CU, standard-CU, generic XCC=8, no fallbackStatus: a no-op for the
+    // non-standard-CU path (304 % 8 == 0 regardless), confirming standard-CU
+    // devices are unaffected.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{8, -1}, 304u);
+    pred->isStandardCUDevice = true;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_TRUE((*pred)(problem)) << "Standard-CU (304) keeps passing XCC=8 (304 % 8 == 0)";
+}
+
+// ----------------------------------------------------------------------------
+// Device-tuned CU libraries (gfx942_80cu, gfx942_152cu, ...) are unaffected.
+//
+// Solutions in a CU-variant logic directory are guaranteed by the build-time
+// ValidWorkGroupMappingXCC check (Tensile/TensileLogic/ValidWorkGroupMappingXCC.py)
+// to carry a WorkGroupMappingXCC that is -1 or a power of two dividing the
+// directory's CU count. Such a solution therefore passes the strict check
+// already, and coercing XCC to 1 cannot change the verdict: the implicit
+// fallback is a no-op for every device-tuned lib.
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, WorkgroupMappingXCCCheck_TunedCULib_UnaffectedByImplicitFallback)
+{
+    using namespace TensileLite;
+    // (cuCount, WorkGroupMappingXCC) pairs taken from the shipped CU-variant
+    // logic dirs: 80cu uses XCC=4/8/16, 152cu uses XCC=4, 228cu uses XCC=1.
+    struct Case
+    {
+        unsigned cuCount;
+        int      xcc;
+    };
+    const Case cases[] = {{80u, 4}, {80u, 8}, {80u, 16}, {152u, 4}, {228u, 1}, {64u, 8}};
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
+
+    for(auto const& c : cases)
+    {
+        auto strictPred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+            std::array<int, 2>{c.xcc, -1}, c.cuCount);
+        strictPred->isStandardCUDevice = true;
+
+        auto relaxedPred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+            std::array<int, 2>{c.xcc, -1}, c.cuCount);
+        relaxedPred->isStandardCUDevice = false;
+
+        EXPECT_EQ((*strictPred)(problem), (*relaxedPred)(problem))
+            << "Implicit fallback must be a no-op for a tuned lib: cuCount=" << c.cuCount
+            << " WGMXCC=" << c.xcc;
+        EXPECT_TRUE((*relaxedPred)(problem))
+            << "Tuned-lib solution must be accepted: cuCount=" << c.cuCount
+            << " WGMXCC=" << c.xcc;
+    }
+}
