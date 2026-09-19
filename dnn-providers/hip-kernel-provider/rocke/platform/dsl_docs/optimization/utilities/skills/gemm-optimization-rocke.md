@@ -18,6 +18,12 @@ CK DSL on AMD CDNA GPUs (MI300X gfx942, MI350 gfx950).
 
 Based on the CK DSL `instances/gemm.py` framework.
 
+The optimization recipes (MFMA atoms, LDS budgets, async-copy knobs) are CDNA-
+specific. The `rocke.benchmark.perf.tool` measurement commands in §10.2 are not:
+set `ARCH` to the GPU being profiled (`gfx942`, `gfx950`, `gfx1201`, etc.). On RDNA,
+interpret matrix instructions as WMMA and expect the documented reduced counter
+coverage; `busy_cycles` comparison and ELF-note occupancy still work.
+
 ---
 
 ## 1. CK DSL GEMM Architecture Overview
@@ -505,21 +511,20 @@ if tile_n >= 128 and LDS_budget_allows:
 
 ### 10.2 Profiling Checkpoints
 
-After each change:
+The measurement path is not GEMM-specific. Follow the operator-agnostic
+[before/after verification workflow](../../optimization_runbook.md#repeatable-beforeafter-verification),
+using `OP=gemm`, a `SHAPE_JSON` containing `M`, `N`, and `K`, and the command that
+launches this kernel. Keep the identity and command unchanged before and after
+each optimization.
+
+Use [WaveScope](../tools/wavescope/README.md) / ATT to diagnose whether GEMM
+stalls, waits, and instruction mix moved as expected. For the GEMM-specific ISA
+check:
 
 ```bash
-# 1. Benchmark performance
-python benchmark_rocke_gemm.py --config my_spec.json
-
-# 2. Extract ISA
-python src/stage3_extract_isa/extract_isa.py --rocke my_gemm.py
-
-# 3. Count instructions
-python src/stage3_extract_isa/count_instructions.py kernel.s
-
-# 4. Check occupancy from rocprof
-rocprofv3 --stats --kernel-trace -- python my_gemm.py
-# Look at VGPR_Count, SGPR_Count, LDS_Block_Size in *_kernel_stats.csv
+/opt/rocm/llvm/bin/llvm-objdump -d --mcpu="$ARCH" kernel.hsaco > kernel.s
+python "$ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py" \
+    kernel.s
 ```
 
 ---
@@ -563,7 +568,8 @@ Look for:
 
 ```bash
 # Count instructions in compiled kernel
-python src/stage3_extract_isa/count_instructions.py kernel.s
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py \
+    kernel.s
 ```
 
 **Expected ratios for good GEMM**:
@@ -613,7 +619,7 @@ spec = GemmSpec(
 
 Compare using:
 ```bash
-python src/stage5_compare/compare_rocprof_stats.py \
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py \
     rocke_stats.csv cktile_stats.csv
 ```
 
@@ -792,5 +798,8 @@ bandwidth = 100.7 MB / 0.264 ms = 381 GB/s (7% of 5.2 TB/s peak)
 - `/empirical-case-studies` - Real-world performance data
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis
-- `src/stage1_benchmark/benchmark_rocke.py` - Benchmarking framework
-- `src/stage5_compare/compare_rocprof_stats.py` - Hardware metrics comparison
+- `dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py` -
+  compare TWO DIFFERENT kernels' rocprof stats (e.g. rocKE vs CK Tile). For a kernel
+  against its OWN baseline use `rocke.benchmark.perf.tool compare` instead.
+- `rocke/platform/python/rocke/benchmark/perf/README.md` - the perf primitives and
+  the `profile` / `occupancy` / `compare` tool used in §10.2
