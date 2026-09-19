@@ -49,6 +49,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from dispatcher_common import (
+    load_hip_runtime,
     ValidationResultBase,
     _detect_gpu_arch_via_amd_smi,
     auto_correct_trait,
@@ -662,8 +663,11 @@ class GpuGroupedConvRunner:
             if self._dispatch_lib is None:
                 return
 
-            # Load HIP library - THIS creates GPU context
-            self._hip = ctypes.CDLL("libamdhip64.so")
+            # Load HIP library - THIS creates GPU context.
+            # Via the shared loader: the bare "libamdhip64.so" hardcoded here
+            # before is the dev symlink, which is absent from the ldconfig cache
+            # on a stock ROCm install, so this silently reported "no GPU".
+            self._hip = load_hip_runtime()
             self._hip.hipMalloc.argtypes = [
                 ctypes.POINTER(ctypes.c_void_p),
                 ctypes.c_size_t,

@@ -57,6 +57,70 @@ def get_codegen_dir() -> Path:
     return get_dispatcher_root() / "codegen"
 
 
+# ============================================================================
+# HIP runtime loading
+# ============================================================================
+
+# Candidate sonames for the HIP runtime, most-specific last-resort ordering.
+#
+# The bare ``libamdhip64.so`` is the *development* symlink: it ships in
+# ``$ROCM_PATH/lib`` but is frequently NOT in the ldconfig cache, so a plain
+# ``CDLL("libamdhip64.so")`` fails on an otherwise healthy ROCm node unless the
+# caller happens to have ``LD_LIBRARY_PATH`` set. Only the versioned soname is
+# guaranteed to be registered, and its major version tracks the ROCm release
+# (ROCm 6 -> .so.6, ROCm 7 -> .so.7, ...), so pinning a single version silently
+# breaks on the next one. Try the unversioned name first (correct when the dev
+# package is on the path), then known versioned names, then the explicit
+# ROCm lib directory.
+_HIP_SONAMES = (
+    "libamdhip64.so",
+    "libamdhip64.so.7",
+    "libamdhip64.so.6",
+    "libamdhip64.so.5",
+)
+
+
+def hip_library_candidates() -> List[str]:
+    """Return the HIP runtime names/paths to try, in order.
+
+    Ends with absolute paths under ``$ROCM_PATH`` (default ``/opt/rocm``) so the
+    load still succeeds when the versioned library is present but unregistered.
+    """
+    import os
+
+    candidates: List[str] = list(_HIP_SONAMES)
+    rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
+    for soname in _HIP_SONAMES:
+        candidates.append(str(Path(rocm) / "lib" / soname))
+    return candidates
+
+
+def load_hip_runtime():
+    """Load libamdhip64 via ctypes, trying every known soname.
+
+    Single source of truth so the bridges cannot drift into their own partial
+    lists -- grouped_conv hardcoded the bare ``libamdhip64.so`` (which fails
+    wherever only the versioned soname is registered) and fmha listed only
+    ``.so``/``.so.6`` (which fails on ROCm 7).
+
+    Raises OSError naming every candidate tried, so a failure is diagnosable
+    instead of surfacing later as a bare "no GPU available".
+    """
+    import ctypes
+
+    tried: List[str] = []
+    for name in hip_library_candidates():
+        try:
+            return ctypes.CDLL(name)
+        except OSError:
+            tried.append(name)
+    raise OSError(
+        "Could not load the HIP runtime (libamdhip64). Tried: "
+        + ", ".join(tried)
+        + ". Is ROCm installed, and is $ROCM_PATH/lib on the loader path?"
+    )
+
+
 def _detect_gpu_arch_via_amd_smi() -> Optional[str]:
     """Best-effort arch via the shared amd-smi-first smi_utils wrapper.
 
