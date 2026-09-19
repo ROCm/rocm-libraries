@@ -77,20 +77,26 @@ endif( )
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option( BUILD_SHARED_LIBS "Build hipBLAS as a shared library" ON )
 
-# USE_CUDA: select the CUDA backend, invoking nvcc directly without hipcc.
+# USE_CUDA selects the CUDA backend without using hipcc.
 # This replaces the old hipcc-based USE_CUDA flow (which set ENV{HIP_PLATFORM}
 # for hipconfig). The previous USE_CUDA was deprecated because it depended on
-# hipcc/hipconfig; this new option drives the CUDA backend via nvcc directly —
-# no hipcc or hipconfig involvement.
+# hipcc/hipconfig; this option drives CUDA dependency and source selection.
 # Pass -DUSE_CUDA=ON to cmake (or --cuda to rmake.py/install.sh) to enable.
-option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipcc)" OFF)
+option(USE_CUDA "Build hipBLAS for the CUDA backend without hipcc" OFF)
+
+# Define HIP_PLATFORM before loading HIP's config package so that the package
+# does not invoke hipconfig to select its backend. hip::host is part of the
+# public hipBLAS target on both backends.
+if(USE_CUDA)
+  set(HIP_PLATFORM nvidia)
+  set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
+else()
+  set(HIP_PLATFORM amd)
+endif()
+find_package(hip CONFIG REQUIRED PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 if(USE_CUDA)
   find_package(CUDAToolkit REQUIRED)
-  set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
-else()
-  # AMD backend: hip::host / hip::device imported targets drive compilation.
-  find_package(hip CONFIG REQUIRED PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)

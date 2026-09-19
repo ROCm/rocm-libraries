@@ -118,9 +118,31 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-# USE_CUDA: build hipSOLVER for the CUDA backend using nvcc directly.
+# USE_CUDA selects the CUDA backend without using hipconfig.
 # Replaces the old hipcc/hipconfig-based HIP_PLATFORM flow.
-option(USE_CUDA "Build hipSOLVER for the CUDA backend using nvcc directly (no hipcc)" OFF)
+set(_HIPSOLVER_USE_CUDA_DEFAULT OFF)
+if(NOT DEFINED USE_CUDA AND DEFINED HIP_PLATFORM AND NOT HIP_PLATFORM STREQUAL "")
+  if(HIP_PLATFORM STREQUAL "nvidia")
+    set(_HIPSOLVER_USE_CUDA_DEFAULT ON)
+  elseif(NOT HIP_PLATFORM STREQUAL "amd")
+    message(FATAL_ERROR "HIP_PLATFORM must be 'amd' or 'nvidia'")
+  endif()
+  message(DEPRECATION "HIP_PLATFORM is deprecated; use USE_CUDA instead")
+endif()
+option(
+  USE_CUDA
+  "Build hipSOLVER against CUDA libraries"
+  ${_HIPSOLVER_USE_CUDA_DEFAULT}
+)
+unset(_HIPSOLVER_USE_CUDA_DEFAULT)
+
+# HIP's config package otherwise calls hipconfig to choose a backend. Keep this
+# as a derived implementation detail; USE_CUDA is the public selector.
+if(USE_CUDA)
+  set(HIP_PLATFORM nvidia)
+else()
+  set(HIP_PLATFORM amd)
+endif()
 
 find_package(hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
 
@@ -460,4 +482,3 @@ if(BUILD_CODE_COVERAGE)
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
-

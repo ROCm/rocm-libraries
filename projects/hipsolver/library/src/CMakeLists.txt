@@ -40,7 +40,7 @@ endfunction()
 # ########################################################################
 prepend_path(".." hipsolver_headers_public relative_hipsolver_headers_public)
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   set(hipsolver_source
     "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipsolver_conversions.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipsolver.cpp"
@@ -137,7 +137,7 @@ if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
 
 # Build hipsolver from source on AMD platform
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   # Find rocBLAS
   if(NOT TARGET rocblas)
     if(CUSTOM_ROCBLAS)
@@ -162,7 +162,7 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
 
   # TODO: This LAPACK dependency is only required to support geev
   # It should be removed once geev is implemented in rocSOLVER
-  if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+  if(NOT USE_CUDA)
       target_link_libraries(hipsolver PRIVATE lapack_libraries)
   endif()
 
@@ -258,7 +258,7 @@ rocm_install_targets(
     ${CMAKE_BINARY_DIR}/include
 )
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   rocm_export_targets(
     TARGETS roc::hipsolver
     DEPENDS PACKAGE hip
@@ -307,4 +307,3 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
   endif() # NOT WIN32
   message(STATUS "Backward Compatible Sym Link Created for include directories")
 endif()
-

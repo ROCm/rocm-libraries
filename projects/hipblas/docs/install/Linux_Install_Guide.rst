@@ -93,9 +93,9 @@ A few commands in the script require ``sudo`` access, which might prompt you for
    You can run the ``rmake.py`` script from the ``projects/hipblas`` directory.
 
 To build for the CUDA backend, pass ``--cuda`` to ``rmake.py`` or ``install.sh``.
-This sets ``-DUSE_CUDA=ON`` in CMake and invokes ``nvcc`` directly without
+This sets ``-DUSE_CUDA=ON`` in CMake and discovers the CUDA toolkit without
 relying on ``hipcc``. ``nvcc`` must be on ``PATH`` or the CUDA install location
-specified via ``--cudapath``.
+must be specified via ``--cudapath``.
 
 Common examples showing how to use ``rmake.py`` to build the library dependencies and library are listed
 in this table.
