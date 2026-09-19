@@ -424,6 +424,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BSRDIM* BSRDIM)
     void bsric0_kernel_2_8_unrolled(rocsparse_direction dir,
                                     J                   mb,
+                                    int64_t             batch_count,
                                     const I* __restrict__ bsr_row_ptr,
                                     const J* __restrict__ bsr_col_ind,
                                     T*      bsr_val,
@@ -437,18 +438,22 @@ namespace rocsparse
                                     int64_t              zero_pivot_stride,
                                     rocsparse_index_base idx_base)
     {
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::bsric0_device_2_8_unrolled<BSRDIM>(dir,
-                                                      mb,
-                                                      bsr_dim,
-                                                      bsr_row_ptr,
-                                                      bsr_col_ind,
-                                                      bsr_val + batch_index * bsr_val_stride,
-                                                      bsr_diag_ind,
-                                                      done_array + batch_index * done_array_stride,
-                                                      map,
-                                                      zero_pivot + batch_index * zero_pivot_stride,
-                                                      idx_base);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::bsric0_device_2_8_unrolled<BSRDIM>(
+                dir,
+                mb,
+                bsr_dim,
+                bsr_row_ptr,
+                bsr_col_ind,
+                bsr_val + batch_index * bsr_val_stride,
+                bsr_diag_ind,
+                done_array + batch_index * done_array_stride,
+                map,
+                zero_pivot + batch_index * zero_pivot_stride,
+                idx_base);
+        }
     }
 
     template <uint32_t BSRDIM, typename T, typename I, typename J>
@@ -464,25 +469,27 @@ namespace rocsparse
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
         auto          numeric_exact     = bsric0_info->get_singularity_numeric_exact();
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsric0_kernel_2_8_unrolled<BSRDIM>),
-                                           dim3(A->rows, A->batch_count),
-                                           dim3(BSRDIM, BSRDIM),
-                                           0,
-                                           handle->stream,
-                                           A->block_dir,
-                                           static_cast<J>(A->rows),
-                                           reinterpret_cast<const I*>(A->const_row_data),
-                                           reinterpret_cast<const J*>(A->const_col_data),
-                                           reinterpret_cast<T*>(A->val_data),
-                                           A->batch_stride,
-                                           reinterpret_cast<const I*>(trm_info->get_diag_ind()),
-                                           static_cast<J>(A->block_dim),
-                                           done_array,
-                                           done_array_stride,
-                                           reinterpret_cast<const J*>(trm_info->get_row_map()),
-                                           reinterpret_cast<J*>(numeric_exact->get_position()),
-                                           numeric_exact->get_stride(),
-                                           A->descr->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsric0_kernel_2_8_unrolled<BSRDIM>),
+            dim3(A->rows, rocsparse::get_batch_grid_size(A->batch_count)),
+            dim3(BSRDIM, BSRDIM),
+            0,
+            handle->stream,
+            A->block_dir,
+            static_cast<J>(A->rows),
+            A->batch_count,
+            reinterpret_cast<const I*>(A->const_row_data),
+            reinterpret_cast<const J*>(A->const_col_data),
+            reinterpret_cast<T*>(A->val_data),
+            A->batch_stride,
+            reinterpret_cast<const I*>(trm_info->get_diag_ind()),
+            static_cast<J>(A->block_dim),
+            done_array,
+            done_array_stride,
+            reinterpret_cast<const J*>(trm_info->get_row_map()),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
+            A->descr->base);
         return rocsparse_status_success;
     }
 

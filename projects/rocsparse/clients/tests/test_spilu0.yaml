@@ -306,6 +306,36 @@ Tests:
   function: spilu0_extra
   formatA: [rocsparse_format_csr]
 
+# AISPARSE-690 regression: see the equivalent block in test_spic0.yaml. spilu0
+# covers csrilu0 (CSR) and bsrilu0 (BSR).
+- name: spilu0_large_batch_count
+  category: quick
+  function: spilu0
+  precision: *single_precision
+  M_N:
+    - { M: 64, N: 64 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [65536]
+
+- name: spilu0_large_batch_count
+  category: quick
+  function: spilu0
+  precision: *single_precision
+  M_N:
+    - { M: 16, N: 16 }
+  block_dim: [4]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  formatA: [rocsparse_format_bsr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [65536]
+
 - name: spilu0_file
   category: stress
   function: spilu0
