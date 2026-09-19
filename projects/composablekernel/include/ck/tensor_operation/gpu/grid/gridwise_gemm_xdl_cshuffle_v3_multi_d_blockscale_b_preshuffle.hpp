@@ -48,18 +48,28 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
         __shared__ char
             p_shared[GridwiseGemm::template GetSharedMemoryNumberOfByte<true>(get_device_arch())];
 
+        // Full K needed for matrix B and for the B scale row stride
+        const index_t Kt = karg.K;
+
+        auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+
+        const index_t num_k_per_block = GridwiseGemm::CalculateBK0Shuffled(karg.K);
+        const index_t k_id            = blockIdx.z * num_k_per_block;
+
         GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-            karg.p_a_grid,
+            karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
             karg.p_b_grid,
             karg.p_ds_grid,
             karg.p_c_grid,
-            karg.p_a_scale_grid,
-            karg.p_b_scale_grid,
+            karg.p_a_scale_grid + splitk_batch_offset.scale_a_k_split_offset,
+            karg.p_b_scale_grid + splitk_batch_offset.scale_b_k_split_offset,
             p_shared,
             karg,
             karg.a_element_op,
             karg.b_element_op,
-            karg.c_element_op);
+            karg.c_element_op,
+            k_id,
+            Kt);
     }
 #else
     ignore = karg;
@@ -87,19 +97,29 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
         __shared__ char
             p_shared1[GridwiseGemm::template GetSharedMemoryNumberOfByte<true>(get_device_arch())];
 
+        // Full K needed for matrix B and for the B scale row stride
+        const index_t Kt = karg.K;
+
+        auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+
+        const index_t num_k_per_block = GridwiseGemm::CalculateBK0Shuffled(karg.K);
+        const index_t k_id            = blockIdx.z * num_k_per_block;
+
         GridwiseGemm::template Run_2Lds<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-            karg.p_a_grid,
+            karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
             karg.p_b_grid,
             karg.p_ds_grid,
             karg.p_c_grid,
-            karg.p_a_scale_grid,
-            karg.p_b_scale_grid,
+            karg.p_a_scale_grid + splitk_batch_offset.scale_a_k_split_offset,
+            karg.p_b_scale_grid + splitk_batch_offset.scale_b_k_split_offset,
             p_shared,
             p_shared1,
             karg,
             karg.a_element_op,
             karg.b_element_op,
-            karg.c_element_op);
+            karg.c_element_op,
+            k_id,
+            Kt);
     }
 #else
     ignore = karg;
@@ -766,6 +786,14 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
                 b_k_split_offset = blockIdx.z * karg.KRead;
             }
 
+            // Scale layouts are fixed by the descriptors built in Run(): A scale is
+            // [M/ScaleBlockM, K/ScaleBlockK] with K strided by M/ScaleBlockM, B scale is
+            // [N/ScaleBlockN, K/ScaleBlockK] with K contiguous.
+            const index_t k_scale_split = blockIdx.z * (karg.KRead / ScaleBlockK);
+
+            scale_a_k_split_offset = k_scale_split * math::integer_divide_ceil(karg.M, ScaleBlockM);
+            scale_b_k_split_offset = k_scale_split;
+
             if(blockIdx.z < static_cast<uint32_t>(karg.KBatch - 1))
             {
                 karg.K = karg.KRead;
@@ -778,6 +806,8 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
 
         index_t a_k_split_offset;
         index_t b_k_split_offset;
+        index_t scale_a_k_split_offset;
+        index_t scale_b_k_split_offset;
     };
 
     __device__ static constexpr auto GetBBlockDescriptor_BK0PerBlock_NPerBlock_BK1()
@@ -993,6 +1023,16 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             }
         }
 
+        if constexpr(IsTaggedPerChannelScale<DsDataType,
+                                             DsLayout,
+                                             CElementwiseOperation>::value)
+        {
+            if(karg.StrideDs[0] != 0)
+            {
+                return false;
+            }
+        }
+
         // check gridwise gemm pipeline
         const auto num_k_loop = karg.AK0 / (KPerBlock / AK1Value);
 
@@ -1053,11 +1093,13 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
                                const Problem& problem,
                                AElementwiseOperation a_element_op,
                                BElementwiseOperation b_element_op,
-                               CElementwiseOperation c_element_op)
+                               CElementwiseOperation c_element_op,
+                               const index_t k_id,
+                               const index_t Kt)
     {
         ignore                           = b_element_op;
         index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
-        index_t BK0Shuffled              = CalculateBK0Shuffled(problem.K);
+        index_t BK0Shuffled              = CalculateBK0Shuffled(Kt);
         const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
 
@@ -1070,10 +1112,12 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             make_tuple(math::integer_divide_ceil(problem.M, ScaleBlockM),
                        math::integer_divide_ceil(problem.K, ScaleBlockK)),
             make_tuple(1, math::integer_divide_ceil(problem.M, ScaleBlockM)));
+        // Row stride comes from the full K: with split-K the pointer is already advanced
+        // to this slice, but the rows of the B scale still span all of K.
         const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor(
             make_tuple(math::integer_divide_ceil(problem.N, ScaleBlockN),
                        math::integer_divide_ceil(problem.K, ScaleBlockK)),
-            make_tuple(math::integer_divide_ceil(problem.K, ScaleBlockK), 1));
+            make_tuple(math::integer_divide_ceil(Kt, ScaleBlockK), 1));
 
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -1170,7 +1214,7 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             true>(b_grid_desc_bpreshuffled,
                   make_multi_index(n_block_data_idx_on_grid,
                                    get_warp_local_1d_id() % NWave,
-                                   0,
+                                   k_id,
                                    KPack / KGroup * (get_thread_local_1d_id() % WarpSize)));
 
         // LDS allocation for A and B: be careful of alignment
@@ -1288,17 +1332,34 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
-            blockwise_gemm_pipeline,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_ds_grid,
-            p_c_grid,
-            c_element_op);
+        if constexpr(IsTaggedPerChannelScale<DsDataType,
+                                             DsLayout,
+                                             CElementwiseOperation>::value)
+        {
+            Base::template RunPerChannelScaleEpilogue<CGlobalMemoryDataOperation, true>(
+                blockwise_gemm_pipeline,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid[I0],
+                p_c_grid);
+        }
+        else
+        {
+            Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
+                blockwise_gemm_pipeline,
+                ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid,
+                p_c_grid,
+                c_element_op);
+        }
     }
 
     template <bool HasMainKBlockLoop,
@@ -1315,11 +1376,13 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
                                     const Problem& problem,
                                     AElementwiseOperation a_element_op,
                                     BElementwiseOperation b_element_op,
-                                    CElementwiseOperation c_element_op)
+                                    CElementwiseOperation c_element_op,
+                                    const index_t k_id,
+                                    const index_t Kt)
     {
         ignore                           = b_element_op;
         index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
-        index_t BK0Shuffled              = CalculateBK0Shuffled(problem.K);
+        index_t BK0Shuffled              = CalculateBK0Shuffled(Kt);
         const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
         const auto b_grid_desc_bpreshuffled =
@@ -1331,10 +1394,12 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             make_tuple(math::integer_divide_ceil(problem.M, ScaleBlockM),
                        math::integer_divide_ceil(problem.K, ScaleBlockK)),
             make_tuple(1, math::integer_divide_ceil(problem.M, ScaleBlockM)));
+        // Row stride comes from the full K: with split-K the pointer is already advanced
+        // to this slice, but the rows of the B scale still span all of K.
         const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor(
             make_tuple(math::integer_divide_ceil(problem.N, ScaleBlockN),
                        math::integer_divide_ceil(problem.K, ScaleBlockK)),
-            make_tuple(math::integer_divide_ceil(problem.K, ScaleBlockK), 1));
+            make_tuple(math::integer_divide_ceil(Kt, ScaleBlockK), 1));
 
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -1434,7 +1499,7 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             true>(b_grid_desc_bpreshuffled,
                   make_multi_index(n_block_data_idx_on_grid,
                                    get_warp_local_1d_id() % NWave,
-                                   0,
+                                   k_id,
                                    KPack / KGroup * (get_thread_local_1d_id() % WarpSize)));
 
         // LDS allocation for A and B: be careful of alignment
@@ -1553,17 +1618,34 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
-            blockwise_gemm_pipeline,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_ds_grid,
-            p_c_grid,
-            c_element_op);
+        if constexpr(IsTaggedPerChannelScale<DsDataType,
+                                             DsLayout,
+                                             CElementwiseOperation>::value)
+        {
+            Base::template RunPerChannelScaleEpilogue<CGlobalMemoryDataOperation, true>(
+                blockwise_gemm_pipeline,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid[I0],
+                p_c_grid);
+        }
+        else
+        {
+            Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, true, false>(
+                blockwise_gemm_pipeline,
+                ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_grid_desc_mblock_mperblock_nblock_nperblock,
+                c_thread_buf,
+                block_m_id,
+                block_n_id,
+                p_shared,
+                p_ds_grid,
+                p_c_grid,
+                c_element_op);
+        }
     }
 };
 
