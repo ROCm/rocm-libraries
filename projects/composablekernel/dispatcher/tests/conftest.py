@@ -28,6 +28,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Callable, Optional
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -140,6 +141,32 @@ def skip_without_ml_dtypes():
 def gpu_arch(skip_without_gpu) -> str:
     """The detected GPU arch (only resolved after the GPU skip-gate passes)."""
     return detect_gpu_arch()
+
+
+@pytest.fixture(scope="session")
+def dispatcher_static_lib(has_gpu):
+    """Build the registry dependency used by the example/JIT integration tests."""
+    if not has_gpu:
+        pytest.skip("no ROCm GPU / hipcc detected")
+    root = Path(__file__).resolve().parents[1]
+    build = root / "build"
+    archive = build / "libck_tile_dispatcher.a"
+    if not archive.exists():
+        hipcc = shutil.which("hipcc") or "/opt/rocm/bin/hipcc"
+        commands = []
+        if not (build / "CMakeCache.txt").exists():
+            commands.append([
+                "cmake", "-S", str(root), "-B", str(build),
+                f"-DCMAKE_CXX_COMPILER={hipcc}", "-DCMAKE_BUILD_TYPE=Release",
+            ])
+        commands.append([
+            "cmake", "--build", str(build), "--target", "ck_tile_dispatcher", "-j4",
+        ])
+        for command in commands:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+            assert result.returncode == 0, result.stdout + result.stderr
+    assert archive.exists(), f"Missing dispatcher dependency: {archive}"
+    return archive
 
 
 # =============================================================================

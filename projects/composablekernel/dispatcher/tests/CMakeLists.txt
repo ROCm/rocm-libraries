@@ -346,7 +346,14 @@ set_tests_properties(dispatcher_test_search_space_sampling PROPERTIES
 # every test in the file skips, which would hide a missing GPU behind a green
 # result. Run as scripts with SKIP_RETURN_CODE 77 they report Skipped instead.
 # =============================================================================
+#
+# test_blockscale_quant_arch_gates pins the gfx12 arch gates of the five
+# non-grouped block-scale quant bridges: warp_tile_k must match gfx1250 EXACTLY
+# (gfx1200/gfx1201 have no 16x16x128 8-bit WMMA fragment and would silently
+# compute wrong results), while the OCP fp8 predicates must stay family-wide.
+# =============================================================================
 foreach(_quant_test
+        test_blockscale_quant_arch_gates
         test_grouped_gemm_rowcolquant_utils
         test_grouped_gemm_tensorquant_utils
         test_quant_review_regressions)

@@ -102,9 +102,12 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
 
     if(ck_tile::is_gfx12_supported())
     {
-        constexpr int divisor      = 2;
-        constexpr int kABK1PerLane = 8;
-        int kABK0PerLane           = gemmConfig.K_Warp_Tile / divisor / kABK1PerLane;
+        constexpr int divisor = 2;
+        // Match MakeBFlatDramTileDistribution: each access loads at most
+        // 16 bytes per lane, with additional accesses outside the wave lanes.
+        const int kABK1PerLane =
+            std::min(16 / static_cast<int>(sizeof(T)), gemmConfig.K_Warp_Tile / divisor);
+        int kABK0PerLane = gemmConfig.K_Warp_Tile / divisor / kABK1PerLane;
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Warp_Tile,
                                        gemmConfig.N_Warp_Tile,
                                        k_ / gemmConfig.K_Warp_Tile,
@@ -112,7 +115,7 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
                                        divisor,
                                        kABK1PerLane});
         std::copy(t.begin(), t.end(), t_view.begin());
-        return ck_tile::reference_permute(t_view, {0, 2, 4, 1, 3, 5});
+        return ck_tile::reference_permute(t_view, {0, 2, 3, 4, 1, 5});
     }
     else if(ck_tile::is_gfx11_supported())
     {
