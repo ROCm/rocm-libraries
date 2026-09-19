@@ -1,0 +1,121 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: PR CI Overview
+
+# This workflow publishes one compact, self-updating comment per pull request.
+# It runs in the trusted base-repository context, including for fork pull
+# requests. Never check out or execute pull-request code here.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows:
+      - "Shared CTest CI"
+      - "pre-commit"
+      - "clang-tidy"
+      - "hipDNN Superbuild CI"
+      - "hipBLASLt ASAN CI"
+      - "Component CI"
+      - "TheRock Multi-Arch CI"
+      - "TheRock Multi-Arch CI ASAN"
+      - "TheRock CI"
+    types: [requested, in_progress, completed]
+  # Math CI reports classic commit statuses rather than Actions workflow runs.
+  # The job condition below ignores every status except its aggregate gate.
+  status: {}
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to refresh"
+        required: true
+        type: number
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: write
+  statuses: read
+
+jobs:
+  resolve:
+    name: Resolve pull requests
+    if: >-
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.event == 'pull_request') &&
+      (github.event_name != 'status' ||
+       github.event.context == 'Math CI Summary')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      has_targets: ${{ steps.targets.outputs.has_targets }}
+    steps:
+      # SECURITY: always use the trusted default-branch implementation. The
+      # event may originate from an untrusted fork or pull-request commit.
+      - name: Checkout trusted overview code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Resolve current pull-request heads
+        id: targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_PR: >-
+            ${{
+              github.event.pull_request.number ||
+              inputs.pr
+            }}
+          EVENT_SHA: >-
+            ${{ github.event.workflow_run.head_sha || github.event.sha }}
+        run: |
+          if [[ -n "${EVENT_PR}" ]]; then
+            MATRIX=$(python3 .github/scripts/pr_ci_overview_github.py \
+              --repo "${REPO}" --pr "${EVENT_PR}" --resolve-targets)
+          else
+            MATRIX=$(python3 .github/scripts/pr_ci_overview_github.py \
+              --repo "${REPO}" --sha "${EVENT_SHA}" --resolve-targets)
+          fi
+          echo "matrix=${MATRIX}" >> "${GITHUB_OUTPUT}"
+          if [[ "${MATRIX}" == '{"include":[]}' ]]; then
+            echo "has_targets=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "has_targets=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+  update:
+    name: Update PR #${{ matrix.pr }} CI overview
+    needs: resolve
+    if: needs.resolve.outputs.has_targets == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    concurrency:
+      group: pr-ci-overview-${{ matrix.pr }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted overview code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Update overview comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/pr_ci_overview_github.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ matrix.pr }}" \
+            --expected-head-sha "${{ matrix.head_sha }}" \
+            --update-comment
