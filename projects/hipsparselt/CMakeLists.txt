@@ -258,10 +258,61 @@ endif()
 
 if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
-        rocm_package_add_dependencies(
-            COMPONENT runtime
-            DEPENDS hipblaslt
-        )
+        # CPack uses CPACK_RPM_<COMPONENT>_PACKAGE_REQUIRES *instead of* the
+        # global CPACK_RPM_PACKAGE_REQUIRES once the component-scoped variable
+        # exists (CPackRPM.cmake:1098-1106), so adding a runtime-scoped
+        # dependency drops the global ones. hipsparselt's runtime package lost
+        # "rocm-core" this way. Carry the global lists over first, and add
+        # rocm-core explicitly because rocm_package_add_rocm_core_dependency
+        # appends it from inside rocm_create_package, which runs later.
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        # At run time libhipsparselt.so needs exactly one thing out of the
+        # hipBLASLt build: libtensilelite-host.so.1. Depending on the hipblaslt
+        # package instead would drag in ~1.1 GB of Tensile kernel binaries that
+        # hipSPARSELt never loads. Depend on the tensilelite-host package that
+        # actually owns the .so -- see AIHPBLAS-4434.
+        rocm_package_add_rpm_dependencies(COMPONENT runtime
+            DEPENDS "libtensilelite-host.so.1()(64bit)")
+
+        # Lockstep pin, matching the one hipBLASLt puts on the same package.
+        # hipblaslt_VERSION comes from find_package(hipblaslt) and carries the
+        # semantic version only (1.5.0); the packaged version additionally has
+        # the ROCm patch component appended (1.5.0.70002), so rebuild it the
+        # same way hipBLASLt does (ROCMCreatePackage.cmake:281,296).
+        rocm_get_patch_version(_hipsparselt_rocm_patch)
+        set(_hipsparselt_tlh_version "${hipblaslt_VERSION}")
+        if(_hipsparselt_rocm_patch)
+            set(_hipsparselt_tlh_version
+                "${_hipsparselt_tlh_version}.${_hipsparselt_rocm_patch}")
+        endif()
+        if(_hipsparselt_tlh_version AND NOT _hipsparselt_tlh_version STREQUAL ".")
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "tensilelite-host = ${_hipsparselt_tlh_version}")
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "tensilelite-host (= ${_hipsparselt_tlh_version})")
+        else()
+            message(WARNING
+                "hipSPARSELt: hipblaslt_VERSION is empty; emitting an unversioned "
+                "tensilelite-host dependency instead of a lockstep pin.")
+            rocm_package_add_dependencies(COMPONENT runtime DEPENDS "tensilelite-host")
+        endif()
+        unset(_hipsparselt_rocm_patch)
+        unset(_hipsparselt_tlh_version)
         rocm_package_add_deb_dependencies(
             COMPONENT devel
             DEPENDS hipblaslt-dev
