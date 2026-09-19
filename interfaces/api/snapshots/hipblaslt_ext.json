@@ -1,0 +1,6144 @@
+{
+  "declarations": [
+    {
+      "align_bits": 32,
+      "fields": [
+        {
+          "name": "x",
+          "type": "uint32_t"
+        },
+        {
+          "name": "f",
+          "type": "float"
+        }
+      ],
+      "file": "hipblaslt_e8.h",
+      "kind": "union",
+      "layout_available": true,
+      "line": 49,
+      "name": "(unnamed union at hipblaslt_e8.h:49:9)",
+      "size_bits": 32
+    },
+    {
+      "align_bits": 32,
+      "fields": [
+        {
+          "name": "x",
+          "type": "uint32_t"
+        },
+        {
+          "name": "f",
+          "type": "float"
+        }
+      ],
+      "file": "hipblaslt_e8.h",
+      "kind": "union",
+      "layout_available": true,
+      "line": 78,
+      "name": "(unnamed union at hipblaslt_e8.h:78:9)",
+      "size_bits": 32
+    },
+    {
+      "align_bits": 16,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint16_t"
+        }
+      ],
+      "file": "hipblaslt-types.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 69,
+      "name": "_hipblasLtHalf",
+      "size_bits": 16
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint8_t[16]"
+        },
+        {
+          "name": "max_workspace_bytes",
+          "type": "size_t"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 436,
+      "name": "_hipblasLtMatmulAlgo_t",
+      "size_bits": 192
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t"
+        },
+        {
+          "name": "workspaceSize",
+          "type": "size_t"
+        },
+        {
+          "name": "state",
+          "type": "hipblasStatus_t"
+        },
+        {
+          "name": "wavesCount",
+          "type": "float"
+        },
+        {
+          "name": "reserved",
+          "type": "int[4]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 457,
+      "name": "_hipblasLtMatmulHeuristicResult_t",
+      "size_bits": 448
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 115,
+      "name": "hipblasLtBatchMode_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_BATCH_MODE_STRIDED",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_BATCH_MODE_POINTER_ARRAY",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 118,
+      "name": "hipblasLtBatchMode_t",
+      "underlying_type": "enum hipblasLtBatchMode_t"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 75,
+      "name": "hipblasLtBfloat16",
+      "underlying_type": "hip_bfloat16"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 637,
+      "linkage_name": "hipblasLtCheckNumericsDrain",
+      "name": "hipblasLtCheckNumericsDrain",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "first_nan_call_id",
+          "type": "uint32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, uint32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 498,
+      "linkage_name": "hipblasLtCreate",
+      "name": "hipblasLtCreate",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 519,
+      "linkage_name": "hipblasLtDestroy",
+      "name": "hipblasLtDestroy",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "const hipblasLtHandle_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtHandle_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 85,
+      "name": "hipblasLtEpilogue_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_EPILOGUE_DEFAULT",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_BIAS",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU_BIAS",
+          "value": "6"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU",
+          "value": "32"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU_BIAS",
+          "value": "36"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU_AUX",
+          "value": "130"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU_AUX_BIAS",
+          "value": "134"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DRELU",
+          "value": "136"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DRELU_BGRAD",
+          "value": "152"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU_AUX",
+          "value": "160"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU_AUX_BIAS",
+          "value": "164"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DGELU",
+          "value": "192"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DGELU_BGRAD",
+          "value": "208"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_BGRADA",
+          "value": "256"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_BGRADB",
+          "value": "512"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_SIGMOID",
+          "value": "1024"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_SWISH_EXT",
+          "value": "65536"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT",
+          "value": "65540"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_EXT",
+          "value": "131072"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT",
+          "value": "131076"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT",
+          "value": "131200"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT",
+          "value": "131204"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 109,
+      "name": "hipblasLtEpilogue_t",
+      "underlying_type": "enum hipblasLtEpilogue_t"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 63,
+      "name": "hipblasLtFloat",
+      "underlying_type": "float"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 478,
+      "linkage_name": "hipblasLtGetArchName",
+      "name": "hipblasLtGetArchName",
+      "parameters": [
+        {
+          "name": "archName",
+          "type": "char **"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (char **)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 475,
+      "linkage_name": "hipblasLtGetGitRevision",
+      "name": "hipblasLtGetGitRevision",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "rev",
+          "type": "char *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, char *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 568,
+      "linkage_name": "hipblasLtGetSmCountTarget",
+      "name": "hipblasLtGetSmCountTarget",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "smCountTarget",
+          "type": "int32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 609,
+      "linkage_name": "hipblasLtGetUniformSummationOrder",
+      "name": "hipblasLtGetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 473,
+      "linkage_name": "hipblasLtGetVersion",
+      "name": "hipblasLtGetVersion",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "version",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 72,
+      "name": "hipblasLtHalf",
+      "underlying_type": "struct _hipblasLtHalf"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 388,
+      "name": "hipblasLtHandle_t",
+      "underlying_type": "void *"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 78,
+      "name": "hipblasLtInt32",
+      "underlying_type": "int32_t"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 77,
+      "name": "hipblasLtInt8",
+      "underlying_type": "int8_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1070,
+      "linkage_name": "hipblasLtMatmul",
+      "name": "hipblasLtMatmul",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "A",
+          "type": "const void *"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "B",
+          "type": "const void *"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "C",
+          "type": "const void *"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "D",
+          "type": "void *"
+        },
+        {
+          "name": "Ddesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "algo",
+          "type": "const hipblasLtMatmulAlgo_t *"
+        },
+        {
+          "name": "workspace",
+          "type": "void *"
+        },
+        {
+          "name": "workspaceSizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatmulDesc_t, const void *, const void *, hipblasLtMatrixLayout_t, const void *, hipblasLtMatrixLayout_t, const void *, const void *, hipblasLtMatrixLayout_t, void *, hipblasLtMatrixLayout_t, const hipblasLtMatmulAlgo_t *, void *, size_t, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 998,
+      "linkage_name": "hipblasLtMatmulAlgoGetHeuristic",
+      "name": "hipblasLtMatmulAlgoGetHeuristic",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Ddesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t"
+        },
+        {
+          "name": "requestedAlgoCount",
+          "type": "int"
+        },
+        {
+          "name": "heuristicResultsArray",
+          "type": "hipblasLtMatmulHeuristicResult_t *"
+        },
+        {
+          "name": "returnAlgoCount",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatmulDesc_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatmulPreference_t, int, hipblasLtMatmulHeuristicResult_t *, int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 444,
+      "name": "hipblasLtMatmulAlgo_t",
+      "underlying_type": "struct _hipblasLtMatmulAlgo_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 230,
+      "name": "hipblasLtMatmulDescAttributes_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_TRANSA",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_TRANSB",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_BIAS_POINTER",
+          "value": "3"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER",
+          "value": "5"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER",
+          "value": "6"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER",
+          "value": "7"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER",
+          "value": "8"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER",
+          "value": "9"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER",
+          "value": "10"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD",
+          "value": "11"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE",
+          "value": "12"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_POINTER_MODE",
+          "value": "13"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER",
+          "value": "14"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE",
+          "value": "22"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE",
+          "value": "23"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_A_SCALE_MODE",
+          "value": "31"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_B_SCALE_MODE",
+          "value": "32"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET",
+          "value": "33"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT",
+          "value": "100"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT",
+          "value": "101"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT",
+          "value": "102"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT",
+          "value": "103"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT",
+          "value": "104"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT",
+          "value": "105"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_MAX",
+          "value": "106"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 258,
+      "name": "hipblasLtMatmulDescAttributes_t",
+      "underlying_type": "enum hipblasLtMatmulDescAttributes_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 770,
+      "linkage_name": "hipblasLtMatmulDescCreate",
+      "name": "hipblasLtMatmulDescCreate",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t *"
+        },
+        {
+          "name": "computeType",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "scaleType",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t *, hipblasComputeType_t, hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 788,
+      "linkage_name": "hipblasLtMatmulDescDestroy",
+      "name": "hipblasLtMatmulDescDestroy",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "const hipblasLtMatmulDesc_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatmulDesc_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 849,
+      "linkage_name": "hipblasLtMatmulDescGetAttribute",
+      "name": "hipblasLtMatmulDescGetAttribute",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t, hipblasLtMatmulDescAttributes_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[4]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 343,
+      "name": "hipblasLtMatmulDescOpaque_t",
+      "size_bits": 256
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 345,
+      "name": "hipblasLtMatmulDescOpaque_t",
+      "underlying_type": "struct hipblasLtMatmulDescOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 813,
+      "linkage_name": "hipblasLtMatmulDescSetAttribute",
+      "name": "hipblasLtMatmulDescSetAttribute",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t, hipblasLtMatmulDescAttributes_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 400,
+      "name": "hipblasLtMatmulDesc_t",
+      "underlying_type": "hipblasLtMatmulDescOpaque_t *"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 463,
+      "name": "hipblasLtMatmulHeuristicResult_t",
+      "underlying_type": "struct _hipblasLtMatmulHeuristicResult_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 199,
+      "name": "hipblasLtMatmulMatrixScale_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F",
+          "value": "3"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F",
+          "value": "5"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT",
+          "value": "1001"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT",
+          "value": "1002"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT",
+          "value": "1003"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT",
+          "value": "1004"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT",
+          "value": "1005"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_END",
+          "value": "1006"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 212,
+      "name": "hipblasLtMatmulMatrixScale_t",
+      "underlying_type": "enum hipblasLtMatmulMatrixScale_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 263,
+      "name": "hipblasLtMatmulPreferenceAttributes_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_SEARCH_MODE",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_MAX",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 268,
+      "name": "hipblasLtMatmulPreferenceAttributes_t",
+      "underlying_type": "enum hipblasLtMatmulPreferenceAttributes_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 871,
+      "linkage_name": "hipblasLtMatmulPreferenceCreate",
+      "name": "hipblasLtMatmulPreferenceCreate",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulPreference_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 888,
+      "linkage_name": "hipblasLtMatmulPreferenceDestroy",
+      "name": "hipblasLtMatmulPreferenceDestroy",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "const hipblasLtMatmulPreference_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatmulPreference_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 951,
+      "linkage_name": "hipblasLtMatmulPreferenceGetAttribute",
+      "name": "hipblasLtMatmulPreferenceGetAttribute",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulPreferenceAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulPreference_t, hipblasLtMatmulPreferenceAttributes_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[5]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 349,
+      "name": "hipblasLtMatmulPreferenceOpaque_t",
+      "size_bits": 320
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 351,
+      "name": "hipblasLtMatmulPreferenceOpaque_t",
+      "underlying_type": "struct hipblasLtMatmulPreferenceOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 914,
+      "linkage_name": "hipblasLtMatmulPreferenceSetAttribute",
+      "name": "hipblasLtMatmulPreferenceSetAttribute",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulPreferenceAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulPreference_t, hipblasLtMatmulPreferenceAttributes_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 426,
+      "name": "hipblasLtMatmulPreference_t",
+      "underlying_type": "hipblasLtMatmulPreferenceOpaque_t *"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 124,
+      "name": "hipblasLtMatrixLayoutAttribute_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_TYPE",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_ORDER",
+          "value": "3"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_ROWS",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_COLS",
+          "value": "5"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_LD",
+          "value": "6"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE",
+          "value": "7"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_OFFSET",
+          "value": "8"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 185,
+      "name": "hipblasLtMatrixLayoutAttribute_t",
+      "underlying_type": "enum hipblasLtMatrixLayoutAttribute_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 666,
+      "linkage_name": "hipblasLtMatrixLayoutCreate",
+      "name": "hipblasLtMatrixLayoutCreate",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "hipblasLtMatrixLayout_t *"
+        },
+        {
+          "name": "type",
+          "type": "hipDataType"
+        },
+        {
+          "name": "rows",
+          "type": "uint64_t"
+        },
+        {
+          "name": "cols",
+          "type": "uint64_t"
+        },
+        {
+          "name": "ld",
+          "type": "int64_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixLayout_t *, hipDataType, uint64_t, uint64_t, int64_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 682,
+      "linkage_name": "hipblasLtMatrixLayoutDestroy",
+      "name": "hipblasLtMatrixLayoutDestroy",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "const hipblasLtMatrixLayout_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatrixLayout_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 743,
+      "linkage_name": "hipblasLtMatrixLayoutGetAttribute",
+      "name": "hipblasLtMatrixLayoutGetAttribute",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixLayoutAttribute_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixLayout_t, hipblasLtMatrixLayoutAttribute_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[4]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 346,
+      "name": "hipblasLtMatrixLayoutOpaque_t",
+      "size_bits": 256
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 348,
+      "name": "hipblasLtMatrixLayoutOpaque_t",
+      "underlying_type": "struct hipblasLtMatrixLayoutOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 707,
+      "linkage_name": "hipblasLtMatrixLayoutSetAttribute",
+      "name": "hipblasLtMatrixLayoutSetAttribute",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixLayoutAttribute_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixLayout_t, hipblasLtMatrixLayoutAttribute_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 413,
+      "name": "hipblasLtMatrixLayout_t",
+      "underlying_type": "hipblasLtMatrixLayoutOpaque_t *"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1173,
+      "linkage_name": "hipblasLtMatrixTransform",
+      "name": "hipblasLtMatrixTransform",
+      "parameters": [
+        {
+          "name": "lightHandle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "A",
+          "type": "const void *"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "B",
+          "type": "const void *"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "C",
+          "type": "void *"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatrixTransformDesc_t, const void *, const void *, hipblasLtMatrixLayout_t, const void *, const void *, hipblasLtMatrixLayout_t, void *, hipblasLtMatrixLayout_t, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 315,
+      "name": "hipblasLtMatrixTransformDescAttributes_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_SCALE_TYPE",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_POINTER_MODE",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSB",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 340,
+      "name": "hipblasLtMatrixTransformDescAttributes_t",
+      "underlying_type": "enum hipblasLtMatrixTransformDescAttributes_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1093,
+      "linkage_name": "hipblasLtMatrixTransformDescCreate",
+      "name": "hipblasLtMatrixTransformDescCreate",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t *"
+        },
+        {
+          "name": "scaleType",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t *, hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1101,
+      "linkage_name": "hipblasLtMatrixTransformDescDestroy",
+      "name": "hipblasLtMatrixTransformDescDestroy",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1139,
+      "linkage_name": "hipblasLtMatrixTransformDescGetAttribute",
+      "name": "hipblasLtMatrixTransformDescGetAttribute",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixTransformDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t, hipblasLtMatrixTransformDescAttributes_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[8]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 354,
+      "name": "hipblasLtMatrixTransformDescOpaque_t",
+      "size_bits": 512
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 356,
+      "name": "hipblasLtMatrixTransformDescOpaque_t",
+      "underlying_type": "struct hipblasLtMatrixTransformDescOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1115,
+      "linkage_name": "hipblasLtMatrixTransformDescSetAttribute",
+      "name": "hipblasLtMatrixTransformDescSetAttribute",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixTransformDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t, hipblasLtMatrixTransformDescAttributes_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 370,
+      "name": "hipblasLtMatrixTransformDesc_t",
+      "underlying_type": "hipblasLtMatrixTransformDescOpaque_t *"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 273,
+      "name": "hipblasLtOrder_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_ORDER_COL",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_ROW",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R32",
+          "value": "99"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R16",
+          "value": "100"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R8",
+          "value": "101"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R4",
+          "value": "102"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R2",
+          "value": "103"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 311,
+      "name": "hipblasLtOrder_t",
+      "underlying_type": "enum hipblasLtOrder_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 190,
+      "name": "hipblasLtPointerMode_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_POINTER_MODE_HOST",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_POINTER_MODE_DEVICE",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST",
+          "value": "4"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 194,
+      "name": "hipblasLtPointerMode_t",
+      "underlying_type": "enum hipblasLtPointerMode_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 548,
+      "linkage_name": "hipblasLtSetSmCountTarget",
+      "name": "hipblasLtSetSmCountTarget",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "smCountTarget",
+          "type": "int32_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 589,
+      "linkage_name": "hipblasLtSetUniformSummationOrder",
+      "name": "hipblasLtSetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 225,
+      "name": "hipblasLtStreamKTileSchedulingMode_t",
+      "underlying_type": "enum hipblasLtStreamKTileSchedulingMode_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 221,
+      "name": "hipblasLtStreamKTileSchedulingMode_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_STREAMK_TILE_SCHEDULING_ON",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 48,
+      "name": "hipblaslt_bf8",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 51,
+      "name": "hipblaslt_bf8",
+      "underlying_type": "struct hipblaslt_bf8"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 38,
+      "name": "hipblaslt_bf8_fnuz",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 41,
+      "name": "hipblaslt_bf8_fnuz",
+      "underlying_type": "struct hipblaslt_bf8_fnuz"
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 51,
+      "linkage_name": "_ZL23hipblaslt_cast_from_uf8hiib",
+      "name": "hipblaslt_cast_from_uf8",
+      "parameters": [
+        {
+          "name": "x",
+          "type": "uint8_t"
+        },
+        {
+          "name": "wm",
+          "type": "int"
+        },
+        {
+          "name": "we",
+          "type": "int"
+        },
+        {
+          "name": "clip",
+          "type": "_Bool"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (uint8_t, int, int, _Bool)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 47,
+      "linkage_name": "_ZL21hipblaslt_cast_to_uf8fiibbj",
+      "name": "hipblaslt_cast_to_uf8",
+      "parameters": [
+        {
+          "name": "_x",
+          "type": "float"
+        },
+        {
+          "name": "wm",
+          "type": "int"
+        },
+        {
+          "name": "we",
+          "type": "int"
+        },
+        {
+          "name": "clip",
+          "type": "_Bool"
+        },
+        {
+          "name": "stoch",
+          "type": "_Bool"
+        },
+        {
+          "name": "rng",
+          "type": "unsigned int"
+        }
+      ],
+      "return_type": "uint8_t",
+      "templated_kind": 0,
+      "type": "uint8_t (float, int, int, _Bool, _Bool, unsigned int)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 55,
+      "name": "hipblaslt_complex_double",
+      "underlying_type": "std::complex<double>"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 54,
+      "name": "hipblaslt_complex_float",
+      "underlying_type": "std::complex<float>"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_e5m3.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 63,
+      "name": "hipblaslt_e5m3",
+      "size_bits": 8
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 66,
+      "linkage_name": "_ZN14hipblaslt_e5m3C1Ev",
+      "name": "hipblaslt_e5m3::hipblaslt_e5m3",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 68,
+      "linkage_name": "_ZN14hipblaslt_e5m3C1ERKS_",
+      "name": "hipblaslt_e5m3::hipblaslt_e5m3",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const hipblaslt_e5m3 &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const hipblaslt_e5m3 &) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 70,
+      "linkage_name": "_ZN14hipblaslt_e5m3C1Ef",
+      "name": "hipblaslt_e5m3::hipblaslt_e5m3",
+      "parameters": [
+        {
+          "name": "f",
+          "type": "const float"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 101,
+      "linkage_name": "_ZNK14hipblaslt_e5m36is_infEv",
+      "name": "hipblaslt_e5m3::is_inf",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 95,
+      "linkage_name": "_ZNK14hipblaslt_e5m36is_nanEv",
+      "name": "hipblaslt_e5m3::is_nan",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 89,
+      "linkage_name": "_ZNK14hipblaslt_e5m37is_zeroEv",
+      "name": "hipblaslt_e5m3::is_zero",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 80,
+      "linkage_name": "_ZNK14hipblaslt_e5m3cvfEv",
+      "name": "hipblaslt_e5m3::operator float",
+      "parameters": [],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 106,
+      "linkage_name": "_ZNK14hipblaslt_e5m3ngEv",
+      "name": "hipblaslt_e5m3::operator-",
+      "parameters": [],
+      "return_type": "hipblaslt_e5m3",
+      "templated_kind": 0,
+      "type": "hipblaslt_e5m3 (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_e8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 38,
+      "name": "hipblaslt_e8",
+      "size_bits": 8
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 43,
+      "linkage_name": "_ZN12hipblaslt_e8C1Ev",
+      "name": "hipblaslt_e8::hipblaslt_e8",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 45,
+      "linkage_name": "_ZN12hipblaslt_e8C1ERKS_",
+      "name": "hipblaslt_e8::hipblaslt_e8",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const hipblaslt_e8 &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const hipblaslt_e8 &) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 47,
+      "linkage_name": "_ZN12hipblaslt_e8C1Ef",
+      "name": "hipblaslt_e8::hipblaslt_e8",
+      "parameters": [
+        {
+          "name": "v0",
+          "type": "float"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 71,
+      "linkage_name": "_ZNK12hipblaslt_e86is_infEv",
+      "name": "hipblaslt_e8::is_inf",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 65,
+      "linkage_name": "_ZNK12hipblaslt_e86is_nanEv",
+      "name": "hipblaslt_e8::is_nan",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 59,
+      "linkage_name": "_ZNK12hipblaslt_e87is_zeroEv",
+      "name": "hipblaslt_e8::is_zero",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 76,
+      "linkage_name": "_ZNK12hipblaslt_e8cvfEv",
+      "name": "hipblaslt_e8::operator float",
+      "parameters": [],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 92,
+      "linkage_name": "_ZNK12hipblaslt_e8ngEv",
+      "name": "hipblaslt_e8::operator-",
+      "parameters": [],
+      "return_type": "hipblaslt_e8",
+      "templated_kind": 0,
+      "type": "hipblaslt_e8 (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 643,
+      "linkage_name": "_ZN13hipblaslt_ext4GemmC1EPv18hipblasOperation_tS2_11hipDataTypeS3_S3_S3_20hipblasComputeType_t",
+      "name": "hipblaslt_ext::Gemm::Gemm",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "opA",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "opB",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "typeA",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeB",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeC",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeD",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeCompute",
+          "type": "hipblasComputeType_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtHandle_t, hipblasOperation_t, hipblasOperation_t, hipDataType, hipDataType, hipDataType, hipDataType, hipblasComputeType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 676,
+      "linkage_name": "_ZN13hipblaslt_ext4GemmC1EPvP27hipblasLtMatmulDescOpaque_tPKvS5_P29hipblasLtMatrixLayoutOpaque_tS5_S7_S5_S5_S7_S1_S7_",
+      "name": "hipblaslt_ext::Gemm::Gemm",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmul_descr",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "A",
+          "type": "const void *"
+        },
+        {
+          "name": "matA",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "B",
+          "type": "const void *"
+        },
+        {
+          "name": "matB",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "C",
+          "type": "const void *"
+        },
+        {
+          "name": "matC",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "D",
+          "type": "void *"
+        },
+        {
+          "name": "matD",
+          "type": "hipblasLtMatrixLayout_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtHandle_t, hipblasLtMatmulDesc_t, const void *, const void *, hipblasLtMatrixLayout_t, const void *, hipblasLtMatrixLayout_t, const void *, const void *, hipblasLtMatrixLayout_t, void *, hipblasLtMatrixLayout_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 689,
+      "linkage_name": "_ZN13hipblaslt_ext4GemmC1ERKS0_",
+      "name": "hipblaslt_ext::Gemm::Gemm",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const Gemm &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const Gemm &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 690,
+      "linkage_name": "_ZN13hipblaslt_ext4GemmC1EOS0_",
+      "name": "hipblaslt_ext::Gemm::Gemm",
+      "parameters": [
+        {
+          "name": "",
+          "type": "Gemm &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (Gemm &&) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 822,
+      "linkage_name": "_ZN13hipblaslt_ext4Gemm15getProblemTypesEv",
+      "name": "hipblaslt_ext::Gemm::getProblemTypes",
+      "parameters": [],
+      "return_type": "GemmProblemType",
+      "templated_kind": 0,
+      "type": "GemmProblemType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 691,
+      "linkage_name": "_ZN13hipblaslt_ext4GemmaSERKS0_",
+      "name": "hipblaslt_ext::Gemm::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const Gemm &"
+        }
+      ],
+      "return_type": "Gemm &",
+      "templated_kind": 0,
+      "type": "Gemm &(const Gemm &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 692,
+      "linkage_name": "_ZN13hipblaslt_ext4GemmaSEOS0_",
+      "name": "hipblaslt_ext::Gemm::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "Gemm &&"
+        }
+      ],
+      "return_type": "Gemm &",
+      "templated_kind": 0,
+      "type": "Gemm &(Gemm &&) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 721,
+      "linkage_name": "_ZN13hipblaslt_ext4Gemm10setProblemEllllRNS_12GemmEpilogueERNS_10GemmInputsE",
+      "name": "hipblaslt_ext::Gemm::setProblem",
+      "parameters": [
+        {
+          "name": "m",
+          "type": "int64_t"
+        },
+        {
+          "name": "n",
+          "type": "int64_t"
+        },
+        {
+          "name": "k",
+          "type": "int64_t"
+        },
+        {
+          "name": "batch_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "epilogue",
+          "type": "GemmEpilogue &"
+        },
+        {
+          "name": "inputs",
+          "type": "GemmInputs &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (int64_t, int64_t, int64_t, int64_t, GemmEpilogue &, GemmInputs &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 761,
+      "linkage_name": "_ZN13hipblaslt_ext4Gemm10setProblemEllllllllllllRNS_12GemmEpilogueERNS_10GemmInputsERNS_15GemmProblemTypeE",
+      "name": "hipblaslt_ext::Gemm::setProblem",
+      "parameters": [
+        {
+          "name": "m",
+          "type": "int64_t"
+        },
+        {
+          "name": "n",
+          "type": "int64_t"
+        },
+        {
+          "name": "k",
+          "type": "int64_t"
+        },
+        {
+          "name": "batch_count",
+          "type": "int64_t"
+        },
+        {
+          "name": "lda",
+          "type": "int64_t"
+        },
+        {
+          "name": "ldb",
+          "type": "int64_t"
+        },
+        {
+          "name": "ldc",
+          "type": "int64_t"
+        },
+        {
+          "name": "ldd",
+          "type": "int64_t"
+        },
+        {
+          "name": "strideA",
+          "type": "int64_t"
+        },
+        {
+          "name": "strideB",
+          "type": "int64_t"
+        },
+        {
+          "name": "strideC",
+          "type": "int64_t"
+        },
+        {
+          "name": "strideD",
+          "type": "int64_t"
+        },
+        {
+          "name": "epilogue",
+          "type": "GemmEpilogue &"
+        },
+        {
+          "name": "inputs",
+          "type": "GemmInputs &"
+        },
+        {
+          "name": "problemtype",
+          "type": "GemmProblemType &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, GemmEpilogue &, GemmInputs &, GemmProblemType &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 810,
+      "linkage_name": "_ZN13hipblaslt_ext4Gemm10setProblemEP27hipblasLtMatmulDescOpaque_tPKvS4_P29hipblasLtMatrixLayoutOpaque_tS4_S6_S4_S4_S6_PvS6_",
+      "name": "hipblaslt_ext::Gemm::setProblem",
+      "parameters": [
+        {
+          "name": "matmul_descr",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "A",
+          "type": "const void *"
+        },
+        {
+          "name": "matA",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "B",
+          "type": "const void *"
+        },
+        {
+          "name": "matB",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "C",
+          "type": "const void *"
+        },
+        {
+          "name": "matC",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "D",
+          "type": "void *"
+        },
+        {
+          "name": "matD",
+          "type": "hipblasLtMatrixLayout_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t, const void *, const void *, hipblasLtMatrixLayout_t, const void *, hipblasLtMatrixLayout_t, const void *, const void *, hipblasLtMatrixLayout_t, void *, hipblasLtMatrixLayout_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "pimpl",
+          "type": "std::unique_ptr<GemmEpilogueImpl>"
+        }
+      ],
+      "file": "hipblaslt-ext.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 208,
+      "name": "hipblaslt_ext::GemmEpilogue",
+      "size_bits": 64
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 211,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueC1Ev",
+      "name": "hipblaslt_ext::GemmEpilogue::GemmEpilogue",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 214,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueC1ERKS0_",
+      "name": "hipblaslt_ext::GemmEpilogue::GemmEpilogue",
+      "parameters": [
+        {
+          "name": "epilogue",
+          "type": "const GemmEpilogue &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmEpilogue &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 217,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueC1EOS0_",
+      "name": "hipblaslt_ext::GemmEpilogue::GemmEpilogue",
+      "parameters": [
+        {
+          "name": "epilogue",
+          "type": "GemmEpilogue &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GemmEpilogue &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 255,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7getAct0Ev",
+      "name": "hipblaslt_ext::GemmEpilogue::getAct0",
+      "parameters": [],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 256,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7getAct1Ev",
+      "name": "hipblaslt_ext::GemmEpilogue::getAct1",
+      "parameters": [],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 249,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue17getAuxBatchStrideEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getAuxBatchStride",
+      "parameters": [],
+      "return_type": "int",
+      "templated_kind": 0,
+      "type": "int (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 245,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue14getAuxDataTypeEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getAuxDataType",
+      "parameters": [],
+      "return_type": "hipDataType",
+      "templated_kind": 0,
+      "type": "hipDataType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 247,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue22getAuxLeadingDimensionEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getAuxLeadingDimension",
+      "parameters": [],
+      "return_type": "int",
+      "templated_kind": 0,
+      "type": "int (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 243,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue15getBiasDataTypeEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getBiasDataType",
+      "parameters": [],
+      "return_type": "hipDataType",
+      "templated_kind": 0,
+      "type": "hipDataType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 242,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue7getModeEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getMode",
+      "parameters": [],
+      "return_type": "hipblasLtEpilogue_t",
+      "templated_kind": 0,
+      "type": "hipblasLtEpilogue_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 251,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue15getScalingATypeEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getScalingAType",
+      "parameters": [],
+      "return_type": "hipblasLtMatmulMatrixScale_t",
+      "templated_kind": 0,
+      "type": "hipblasLtMatmulMatrixScale_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 253,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmEpilogue15getScalingBTypeEv",
+      "name": "hipblaslt_ext::GemmEpilogue::getScalingBType",
+      "parameters": [],
+      "return_type": "hipblasLtMatmulMatrixScale_t",
+      "templated_kind": 0,
+      "type": "hipblasLtMatmulMatrixScale_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 215,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueaSERKS0_",
+      "name": "hipblaslt_ext::GemmEpilogue::operator=",
+      "parameters": [
+        {
+          "name": "epilogue",
+          "type": "const GemmEpilogue &"
+        }
+      ],
+      "return_type": "GemmEpilogue &",
+      "templated_kind": 0,
+      "type": "GemmEpilogue &(const GemmEpilogue &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 218,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueaSEOS0_",
+      "name": "hipblaslt_ext::GemmEpilogue::operator=",
+      "parameters": [
+        {
+          "name": "epilogue",
+          "type": "GemmEpilogue &&"
+        }
+      ],
+      "return_type": "GemmEpilogue &",
+      "templated_kind": 0,
+      "type": "GemmEpilogue &(GemmEpilogue &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 238,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7setAct0Ef",
+      "name": "hipblaslt_ext::GemmEpilogue::setAct0",
+      "parameters": [
+        {
+          "name": "act0",
+          "type": "float"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 239,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7setAct1Ef",
+      "name": "hipblaslt_ext::GemmEpilogue::setAct1",
+      "parameters": [
+        {
+          "name": "act1",
+          "type": "float"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 230,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue17setAuxBatchStrideEi",
+      "name": "hipblaslt_ext::GemmEpilogue::setAuxBatchStride",
+      "parameters": [
+        {
+          "name": "auxBatchStride",
+          "type": "int"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (int)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 225,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue14setAuxDataTypeE11hipDataType",
+      "name": "hipblaslt_ext::GemmEpilogue::setAuxDataType",
+      "parameters": [
+        {
+          "name": "auxDataType",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 228,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue22setAuxLeadingDimensionEi",
+      "name": "hipblaslt_ext::GemmEpilogue::setAuxLeadingDimension",
+      "parameters": [
+        {
+          "name": "auxLeadingDimension",
+          "type": "int"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (int)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 222,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue15setBiasDataTypeE11hipDataType",
+      "name": "hipblaslt_ext::GemmEpilogue::setBiasDataType",
+      "parameters": [
+        {
+          "name": "biasDataType",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 221,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue7setModeE19hipblasLtEpilogue_t",
+      "name": "hipblaslt_ext::GemmEpilogue::setMode",
+      "parameters": [
+        {
+          "name": "mode",
+          "type": "hipblasLtEpilogue_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtEpilogue_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 233,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue15setScalingATypeE28hipblasLtMatmulMatrixScale_t",
+      "name": "hipblaslt_ext::GemmEpilogue::setScalingAType",
+      "parameters": [
+        {
+          "name": "scalingAType",
+          "type": "hipblasLtMatmulMatrixScale_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtMatmulMatrixScale_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 236,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogue15setScalingBTypeE28hipblasLtMatmulMatrixScale_t",
+      "name": "hipblaslt_ext::GemmEpilogue::setScalingBType",
+      "parameters": [
+        {
+          "name": "scalingBType",
+          "type": "hipblasLtMatmulMatrixScale_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtMatmulMatrixScale_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 212,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmEpilogueD1Ev",
+      "name": "hipblaslt_ext::GemmEpilogue::~GemmEpilogue",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 265,
+      "name": "hipblaslt_ext::GemmEpilogueV2",
+      "underlying_type": "GemmEpilogue"
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "pimpl",
+          "type": "std::unique_ptr<GemmInputsImpl>"
+        }
+      ],
+      "file": "hipblaslt-ext.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 302,
+      "name": "hipblaslt_ext::GemmInputs",
+      "size_bits": 64
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 305,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputsC1Ev",
+      "name": "hipblaslt_ext::GemmInputs::GemmInputs",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 308,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputsC1ERKS0_",
+      "name": "hipblaslt_ext::GemmInputs::GemmInputs",
+      "parameters": [
+        {
+          "name": "input",
+          "type": "const GemmInputs &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmInputs &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 311,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputsC1EOS0_",
+      "name": "hipblaslt_ext::GemmInputs::GemmInputs",
+      "parameters": [
+        {
+          "name": "input",
+          "type": "GemmInputs &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GemmInputs &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 332,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getAEv",
+      "name": "hipblaslt_ext::GemmInputs::getA",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 336,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs8getAlphaEv",
+      "name": "hipblaslt_ext::GemmInputs::getAlpha",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 347,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs8getAmaxDEv",
+      "name": "hipblaslt_ext::GemmInputs::getAmaxD",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 346,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs6getAuxEv",
+      "name": "hipblaslt_ext::GemmInputs::getAux",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 333,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getBEv",
+      "name": "hipblaslt_ext::GemmInputs::getB",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 337,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs7getBetaEv",
+      "name": "hipblaslt_ext::GemmInputs::getBeta",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 338,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs7getBiasEv",
+      "name": "hipblaslt_ext::GemmInputs::getBias",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 334,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getCEv",
+      "name": "hipblaslt_ext::GemmInputs::getC",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 335,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs4getDEv",
+      "name": "hipblaslt_ext::GemmInputs::getD",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 339,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleAEv",
+      "name": "hipblaslt_ext::GemmInputs::getScaleA",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 345,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs16getScaleAlphaVecEv",
+      "name": "hipblaslt_ext::GemmInputs::getScaleAlphaVec",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 343,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs11getScaleAuxEv",
+      "name": "hipblaslt_ext::GemmInputs::getScaleAux",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 340,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleBEv",
+      "name": "hipblaslt_ext::GemmInputs::getScaleB",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 341,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleCEv",
+      "name": "hipblaslt_ext::GemmInputs::getScaleC",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 342,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmInputs9getScaleDEv",
+      "name": "hipblaslt_ext::GemmInputs::getScaleD",
+      "parameters": [],
+      "return_type": "const void *",
+      "templated_kind": 0,
+      "type": "const void *(void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 309,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputsaSERKS0_",
+      "name": "hipblaslt_ext::GemmInputs::operator=",
+      "parameters": [
+        {
+          "name": "input",
+          "type": "const GemmInputs &"
+        }
+      ],
+      "return_type": "GemmInputs &",
+      "templated_kind": 0,
+      "type": "GemmInputs &(const GemmInputs &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 312,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputsaSEOS0_",
+      "name": "hipblaslt_ext::GemmInputs::operator=",
+      "parameters": [
+        {
+          "name": "input",
+          "type": "GemmInputs &&"
+        }
+      ],
+      "return_type": "GemmInputs &",
+      "templated_kind": 0,
+      "type": "GemmInputs &(GemmInputs &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 314,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setAEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setA",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 318,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs8setAlphaEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setAlpha",
+      "parameters": [
+        {
+          "name": "alpha",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 330,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs8setAmaxDEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setAmaxD",
+      "parameters": [
+        {
+          "name": "amaxD",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 329,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs6setAuxEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setAux",
+      "parameters": [
+        {
+          "name": "aux",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 315,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setBEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setB",
+      "parameters": [
+        {
+          "name": "b",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 319,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs7setBetaEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setBeta",
+      "parameters": [
+        {
+          "name": "beta",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 320,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs7setBiasEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setBias",
+      "parameters": [
+        {
+          "name": "bias",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 316,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setCEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setC",
+      "parameters": [
+        {
+          "name": "c",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 317,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs4setDEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setD",
+      "parameters": [
+        {
+          "name": "d",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 321,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleAEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setScaleA",
+      "parameters": [
+        {
+          "name": "scaleA",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 327,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs16setScaleAlphaVecEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setScaleAlphaVec",
+      "parameters": [
+        {
+          "name": "scaleAlphaVec",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 326,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs11setScaleAuxEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setScaleAux",
+      "parameters": [
+        {
+          "name": "scaleAux",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 322,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleBEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setScaleB",
+      "parameters": [
+        {
+          "name": "scaleB",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 323,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleCEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setScaleC",
+      "parameters": [
+        {
+          "name": "scaleC",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 324,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputs9setScaleDEPKv",
+      "name": "hipblaslt_ext::GemmInputs::setScaleD",
+      "parameters": [
+        {
+          "name": "scaleD",
+          "type": "const void *"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 306,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmInputsD1Ev",
+      "name": "hipblaslt_ext::GemmInputs::~GemmInputs",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 357,
+      "name": "hipblaslt_ext::GemmInputsV2",
+      "underlying_type": "GemmInputs"
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 412,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceC1ERKS0_",
+      "name": "hipblaslt_ext::GemmInstance::GemmInstance",
+      "parameters": [
+        {
+          "name": "rhs",
+          "type": "const GemmInstance &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmInstance &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 414,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceC1EOS0_",
+      "name": "hipblaslt_ext::GemmInstance::GemmInstance",
+      "parameters": [
+        {
+          "name": "rhs",
+          "type": "GemmInstance &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GemmInstance &&) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 600,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceC1EPvNS_8GemmTypeE",
+      "name": "hipblaslt_ext::GemmInstance::GemmInstance",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "type",
+          "type": "GemmType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtHandle_t, GemmType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 441,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance16algoGetHeuristicEiRKNS_14GemmPreferenceERSt6vectorI33_hipblasLtMatmulHeuristicResult_tSaIS5_EE",
+      "name": "hipblaslt_ext::GemmInstance::algoGetHeuristic",
+      "parameters": [
+        {
+          "name": "requestedAlgoCount",
+          "type": "const int"
+        },
+        {
+          "name": "pref",
+          "type": "const GemmPreference &"
+        },
+        {
+          "name": "heuristicResults",
+          "type": "std::vector<hipblasLtMatmulHeuristicResult_t> &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const int, const GemmPreference &, std::vector<hipblasLtMatmulHeuristicResult_t> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 591,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance12getGemmCountEv",
+      "name": "hipblaslt_ext::GemmInstance::getGemmCount",
+      "parameters": [],
+      "return_type": "size_t",
+      "templated_kind": 0,
+      "type": "size_t (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 590,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance11getGemmTypeEv",
+      "name": "hipblaslt_ext::GemmInstance::getGemmType",
+      "parameters": [],
+      "return_type": "GemmType",
+      "templated_kind": 0,
+      "type": "GemmType (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 594,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance13getKernelNameB5cxx11Ev",
+      "name": "hipblaslt_ext::GemmInstance::getKernelName",
+      "parameters": [],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 500,
+      "linkage_name": "_ZNK13hipblaslt_ext12GemmInstance20getMaxWorkspaceBytesEv",
+      "name": "hipblaslt_ext::GemmInstance::getMaxWorkspaceBytes",
+      "parameters": [],
+      "return_type": "const size_t",
+      "templated_kind": 0,
+      "type": "const size_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 593,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance15getSolutionNameB5cxx11Ev",
+      "name": "hipblaslt_ext::GemmInstance::getSolutionName",
+      "parameters": [],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 531,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance10initializeERK22_hipblasLtMatmulAlgo_tPvbP12ihipStream_t",
+      "name": "hipblaslt_ext::GemmInstance::initialize",
+      "parameters": [
+        {
+          "name": "algo",
+          "type": "const hipblasLtMatmulAlgo_t &"
+        },
+        {
+          "name": "workspace",
+          "type": "void *"
+        },
+        {
+          "name": "useUserArgs",
+          "type": "_Bool"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatmulAlgo_t &, void *, _Bool, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 568,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance10initializeERK22_hipblasLtMatmulAlgo_tRNS_10GemmTuningEPvbP12ihipStream_t",
+      "name": "hipblaslt_ext::GemmInstance::initialize",
+      "parameters": [
+        {
+          "name": "algo",
+          "type": "const hipblasLtMatmulAlgo_t &"
+        },
+        {
+          "name": "tuning",
+          "type": "GemmTuning &"
+        },
+        {
+          "name": "workspace",
+          "type": "void *"
+        },
+        {
+          "name": "useUserArgs",
+          "type": "_Bool"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatmulAlgo_t &, GemmTuning &, void *, _Bool, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 462,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance15isAlgoSupportedER22_hipblasLtMatmulAlgo_tRm",
+      "name": "hipblaslt_ext::GemmInstance::isAlgoSupported",
+      "parameters": [
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t &"
+        },
+        {
+          "name": "workspaceSizeInBytes",
+          "type": "size_t &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulAlgo_t &, size_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 483,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance15isAlgoSupportedER22_hipblasLtMatmulAlgo_tRNS_10GemmTuningERm",
+      "name": "hipblaslt_ext::GemmInstance::isAlgoSupported",
+      "parameters": [
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t &"
+        },
+        {
+          "name": "tuning",
+          "type": "GemmTuning &"
+        },
+        {
+          "name": "workspaceSizeInBytes",
+          "type": "size_t &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulAlgo_t &, GemmTuning &, size_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 413,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceaSERKS0_",
+      "name": "hipblaslt_ext::GemmInstance::operator=",
+      "parameters": [
+        {
+          "name": "rhs",
+          "type": "const GemmInstance &"
+        }
+      ],
+      "return_type": "GemmInstance &",
+      "templated_kind": 0,
+      "type": "GemmInstance &(const GemmInstance &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 415,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceaSEOS0_",
+      "name": "hipblaslt_ext::GemmInstance::operator=",
+      "parameters": [
+        {
+          "name": "rhs",
+          "type": "GemmInstance &&"
+        }
+      ],
+      "return_type": "GemmInstance &",
+      "templated_kind": 0,
+      "type": "GemmInstance &(GemmInstance &&) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 588,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance3runEP12ihipStream_tP11ihipEvent_tS4_",
+      "name": "hipblaslt_ext::GemmInstance::run",
+      "parameters": [
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        },
+        {
+          "name": "start",
+          "type": "hipEvent_t"
+        },
+        {
+          "name": "stop",
+          "type": "hipEvent_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipStream_t, hipEvent_t, hipEvent_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 493,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstance20setMaxWorkspaceBytesEm",
+      "name": "hipblaslt_ext::GemmInstance::setMaxWorkspaceBytes",
+      "parameters": [
+        {
+          "name": "workspaceBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 411,
+      "linkage_name": "_ZN13hipblaslt_ext12GemmInstanceD1Ev",
+      "name": "hipblaslt_ext::GemmInstance::~GemmInstance",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "pimpl",
+          "type": "std::unique_ptr<GemmPreferenceImpl>"
+        }
+      ],
+      "file": "hipblaslt-ext.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 61,
+      "name": "hipblaslt_ext::GemmPreference",
+      "size_bits": 64
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 64,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceC1Ev",
+      "name": "hipblaslt_ext::GemmPreference::GemmPreference",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 67,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceC1ERKS0_",
+      "name": "hipblaslt_ext::GemmPreference::GemmPreference",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "const GemmPreference &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmPreference &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 70,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceC1EOS0_",
+      "name": "hipblaslt_ext::GemmPreference::GemmPreference",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "GemmPreference &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GemmPreference &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 122,
+      "linkage_name": "_ZNK13hipblaslt_ext14GemmPreference20getMaxWorkspaceBytesEv",
+      "name": "hipblaslt_ext::GemmPreference::getMaxWorkspaceBytes",
+      "parameters": [],
+      "return_type": "const size_t",
+      "templated_kind": 0,
+      "type": "const size_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 129,
+      "linkage_name": "_ZNK13hipblaslt_ext14GemmPreference28getStreamKTileSchedulingModeEv",
+      "name": "hipblaslt_ext::GemmPreference::getStreamKTileSchedulingMode",
+      "parameters": [],
+      "return_type": "hipblasLtStreamKTileSchedulingMode_t",
+      "templated_kind": 0,
+      "type": "hipblasLtStreamKTileSchedulingMode_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 135,
+      "linkage_name": "_ZNK13hipblaslt_ext14GemmPreference24getUniformSummationOrderEv",
+      "name": "hipblaslt_ext::GemmPreference::getUniformSummationOrder",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 68,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceaSERKS0_",
+      "name": "hipblaslt_ext::GemmPreference::operator=",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "const GemmPreference &"
+        }
+      ],
+      "return_type": "GemmPreference &",
+      "templated_kind": 0,
+      "type": "GemmPreference &(const GemmPreference &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 71,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceaSEOS0_",
+      "name": "hipblaslt_ext::GemmPreference::operator=",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "GemmPreference &&"
+        }
+      ],
+      "return_type": "GemmPreference &",
+      "templated_kind": 0,
+      "type": "GemmPreference &(GemmPreference &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 79,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreference20setMaxWorkspaceBytesEm",
+      "name": "hipblaslt_ext::GemmPreference::setMaxWorkspaceBytes",
+      "parameters": [
+        {
+          "name": "workspaceBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 108,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreference28setStreamKTileSchedulingModeE36hipblasLtStreamKTileSchedulingMode_t",
+      "name": "hipblaslt_ext::GemmPreference::setStreamKTileSchedulingMode",
+      "parameters": [
+        {
+          "name": "mode",
+          "type": "hipblasLtStreamKTileSchedulingMode_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtStreamKTileSchedulingMode_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 115,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreference24setUniformSummationOrderEb",
+      "name": "hipblaslt_ext::GemmPreference::setUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "_Bool"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (_Bool)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 65,
+      "linkage_name": "_ZN13hipblaslt_ext14GemmPreferenceD1Ev",
+      "name": "hipblaslt_ext::GemmPreference::~GemmPreference",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 144,
+      "name": "hipblaslt_ext::GemmPreferenceV2",
+      "underlying_type": "GemmPreference"
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "pimpl",
+          "type": "std::unique_ptr<GemmProblemTypeImpl>"
+        }
+      ],
+      "file": "hipblaslt-ext.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 151,
+      "name": "hipblaslt_ext::GemmProblemType",
+      "size_bits": 64
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 160,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1Ev",
+      "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 161,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1E18hipblasOperation_tS1_11hipDataTypeS2_S2_S2_20hipblasComputeType_t",
+      "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
+      "parameters": [
+        {
+          "name": "opA",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "opB",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "typeA",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeB",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeC",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeD",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeCompute",
+          "type": "hipblasComputeType_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasOperation_t, hipblasOperation_t, hipDataType, hipDataType, hipDataType, hipDataType, hipblasComputeType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 170,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1ERKNS0_19GemmProblemTypeImplE",
+      "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
+      "parameters": [
+        {
+          "name": "impl",
+          "type": "const GemmProblemTypeImpl &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmProblemTypeImpl &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 172,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1ERKS0_",
+      "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "const GemmProblemType &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmProblemType &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 175,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeC1EOS0_",
+      "name": "hipblaslt_ext::GemmProblemType::GemmProblemType",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "GemmProblemType &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GemmProblemType &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 189,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType6getOpAEv",
+      "name": "hipblaslt_ext::GemmProblemType::getOpA",
+      "parameters": [],
+      "return_type": "hipblasOperation_t",
+      "templated_kind": 0,
+      "type": "hipblasOperation_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 190,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType6getOpBEv",
+      "name": "hipblaslt_ext::GemmProblemType::getOpB",
+      "parameters": [],
+      "return_type": "hipblasOperation_t",
+      "templated_kind": 0,
+      "type": "hipblasOperation_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 196,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType9getOrderAEv",
+      "name": "hipblaslt_ext::GemmProblemType::getOrderA",
+      "parameters": [],
+      "return_type": "hipblasLtOrder_t",
+      "templated_kind": 0,
+      "type": "hipblasLtOrder_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 197,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType9getOrderBEv",
+      "name": "hipblaslt_ext::GemmProblemType::getOrderB",
+      "parameters": [],
+      "return_type": "hipblasLtOrder_t",
+      "templated_kind": 0,
+      "type": "hipblasLtOrder_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 191,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeAEv",
+      "name": "hipblaslt_ext::GemmProblemType::getTypeA",
+      "parameters": [],
+      "return_type": "hipDataType",
+      "templated_kind": 0,
+      "type": "hipDataType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 192,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeBEv",
+      "name": "hipblaslt_ext::GemmProblemType::getTypeB",
+      "parameters": [],
+      "return_type": "hipDataType",
+      "templated_kind": 0,
+      "type": "hipDataType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 193,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeCEv",
+      "name": "hipblaslt_ext::GemmProblemType::getTypeC",
+      "parameters": [],
+      "return_type": "hipDataType",
+      "templated_kind": 0,
+      "type": "hipDataType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 195,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType14getTypeComputeEv",
+      "name": "hipblaslt_ext::GemmProblemType::getTypeCompute",
+      "parameters": [],
+      "return_type": "hipblasComputeType_t",
+      "templated_kind": 0,
+      "type": "hipblasComputeType_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 194,
+      "linkage_name": "_ZNK13hipblaslt_ext15GemmProblemType8getTypeDEv",
+      "name": "hipblaslt_ext::GemmProblemType::getTypeD",
+      "parameters": [],
+      "return_type": "hipDataType",
+      "templated_kind": 0,
+      "type": "hipDataType (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 171,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeaSERKNS0_19GemmProblemTypeImplE",
+      "name": "hipblaslt_ext::GemmProblemType::operator=",
+      "parameters": [
+        {
+          "name": "impl",
+          "type": "const GemmProblemTypeImpl &"
+        }
+      ],
+      "return_type": "GemmProblemType &",
+      "templated_kind": 0,
+      "type": "GemmProblemType &(const GemmProblemTypeImpl &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 173,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeaSERKS0_",
+      "name": "hipblaslt_ext::GemmProblemType::operator=",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "const GemmProblemType &"
+        }
+      ],
+      "return_type": "GemmProblemType &",
+      "templated_kind": 0,
+      "type": "GemmProblemType &(const GemmProblemType &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 176,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeaSEOS0_",
+      "name": "hipblaslt_ext::GemmProblemType::operator=",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "GemmProblemType &&"
+        }
+      ],
+      "return_type": "GemmProblemType &",
+      "templated_kind": 0,
+      "type": "GemmProblemType &(GemmProblemType &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 178,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType6setOpAE18hipblasOperation_t",
+      "name": "hipblaslt_ext::GemmProblemType::setOpA",
+      "parameters": [
+        {
+          "name": "op",
+          "type": "hipblasOperation_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasOperation_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 179,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType6setOpBE18hipblasOperation_t",
+      "name": "hipblaslt_ext::GemmProblemType::setOpB",
+      "parameters": [
+        {
+          "name": "op",
+          "type": "hipblasOperation_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasOperation_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 186,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType9setOrderAE16hipblasLtOrder_t",
+      "name": "hipblaslt_ext::GemmProblemType::setOrderA",
+      "parameters": [
+        {
+          "name": "order",
+          "type": "hipblasLtOrder_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtOrder_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 187,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType9setOrderBE16hipblasLtOrder_t",
+      "name": "hipblaslt_ext::GemmProblemType::setOrderB",
+      "parameters": [
+        {
+          "name": "order",
+          "type": "hipblasLtOrder_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtOrder_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 180,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeAE11hipDataType",
+      "name": "hipblaslt_ext::GemmProblemType::setTypeA",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 181,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeBE11hipDataType",
+      "name": "hipblaslt_ext::GemmProblemType::setTypeB",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 182,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeCE11hipDataType",
+      "name": "hipblaslt_ext::GemmProblemType::setTypeC",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 185,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType14setTypeComputeE20hipblasComputeType_t",
+      "name": "hipblaslt_ext::GemmProblemType::setTypeCompute",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "hipblasComputeType_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasComputeType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 183,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemType8setTypeDE11hipDataType",
+      "name": "hipblaslt_ext::GemmProblemType::setTypeD",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 168,
+      "linkage_name": "_ZN13hipblaslt_ext15GemmProblemTypeD1Ev",
+      "name": "hipblaslt_ext::GemmProblemType::~GemmProblemType",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 201,
+      "name": "hipblaslt_ext::GemmProblemTypeV2",
+      "underlying_type": "GemmProblemType"
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "pimpl",
+          "type": "std::unique_ptr<GemmTuningImpl>"
+        }
+      ],
+      "file": "hipblaslt-ext.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 267,
+      "name": "hipblaslt_ext::GemmTuning",
+      "size_bits": 64
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 270,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuningC1Ev",
+      "name": "hipblaslt_ext::GemmTuning::GemmTuning",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 273,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuningC1ERKS0_",
+      "name": "hipblaslt_ext::GemmTuning::GemmTuning",
+      "parameters": [
+        {
+          "name": "tuning",
+          "type": "const GemmTuning &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GemmTuning &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 276,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuningC1EOS0_",
+      "name": "hipblaslt_ext::GemmTuning::GemmTuning",
+      "parameters": [
+        {
+          "name": "tuning",
+          "type": "GemmTuning &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GemmTuning &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 286,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmTuning9getSplitKEv",
+      "name": "hipblaslt_ext::GemmTuning::getSplitK",
+      "parameters": [],
+      "return_type": "uint16_t",
+      "templated_kind": 0,
+      "type": "uint16_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 287,
+      "linkage_name": "_ZNK13hipblaslt_ext10GemmTuning6getWgmEv",
+      "name": "hipblaslt_ext::GemmTuning::getWgm",
+      "parameters": [],
+      "return_type": "int16_t",
+      "templated_kind": 0,
+      "type": "int16_t (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 274,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuningaSERKS0_",
+      "name": "hipblaslt_ext::GemmTuning::operator=",
+      "parameters": [
+        {
+          "name": "tuning",
+          "type": "const GemmTuning &"
+        }
+      ],
+      "return_type": "GemmTuning &",
+      "templated_kind": 0,
+      "type": "GemmTuning &(const GemmTuning &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 277,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuningaSEOS0_",
+      "name": "hipblaslt_ext::GemmTuning::operator=",
+      "parameters": [
+        {
+          "name": "tuning",
+          "type": "GemmTuning &&"
+        }
+      ],
+      "return_type": "GemmTuning &",
+      "templated_kind": 0,
+      "type": "GemmTuning &(GemmTuning &&)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 279,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuning9setSplitKEt",
+      "name": "hipblaslt_ext::GemmTuning::setSplitK",
+      "parameters": [
+        {
+          "name": "splitK",
+          "type": "uint16_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (uint16_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 282,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuning6setWgmEs",
+      "name": "hipblaslt_ext::GemmTuning::setWgm",
+      "parameters": [
+        {
+          "name": "wgm",
+          "type": "int16_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (int16_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 271,
+      "linkage_name": "_ZN13hipblaslt_ext10GemmTuningD1Ev",
+      "name": "hipblaslt_ext::GemmTuning::~GemmTuning",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 295,
+      "name": "hipblaslt_ext::GemmTuningV2",
+      "underlying_type": "GemmTuning"
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "enum",
+      "line": 50,
+      "name": "hipblaslt_ext::GemmType",
+      "underlying_type": "int",
+      "values": [
+        {
+          "name": "HIPBLASLT_GEMM",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_GROUPED_GEMM",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 853,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1EPv18hipblasOperation_tS2_11hipDataTypeS3_S3_S3_20hipblasComputeType_t",
+      "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "opA",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "opB",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "typeA",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeB",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeC",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeD",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeCompute",
+          "type": "hipblasComputeType_t"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtHandle_t, hipblasOperation_t, hipblasOperation_t, hipDataType, hipDataType, hipDataType, hipDataType, hipblasComputeType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 861,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1ERKS0_",
+      "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const GroupedGemm &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const GroupedGemm &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 862,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1EOS0_",
+      "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
+      "parameters": [
+        {
+          "name": "",
+          "type": "GroupedGemm &&"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (GroupedGemm &&) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 890,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmC1EPvRSt6vectorIP27hipblasLtMatmulDescOpaque_tSaIS4_EERS2_IS1_SaIS1_EESA_RS2_IP29hipblasLtMatrixLayoutOpaque_tSaISC_EESA_SF_SA_SA_SF_SA_SF_",
+      "name": "hipblaslt_ext::GroupedGemm::GroupedGemm",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmul_descr",
+          "type": "std::vector<hipblasLtMatmulDesc_t> &"
+        },
+        {
+          "name": "alpha",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "A",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matA",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        },
+        {
+          "name": "B",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matB",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        },
+        {
+          "name": "beta",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "C",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matC",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        },
+        {
+          "name": "D",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matD",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (hipblasLtHandle_t, std::vector<hipblasLtMatmulDesc_t> &, std::vector<void *> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &, std::vector<void *> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1046,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm37getDefaultValueForDeviceUserArgumentsEPv",
+      "name": "hipblaslt_ext::GroupedGemm::getDefaultValueForDeviceUserArguments",
+      "parameters": [
+        {
+          "name": "hostDeviceUserArgs",
+          "type": "void *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (void *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1033,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm15getProblemTypesEv",
+      "name": "hipblaslt_ext::GroupedGemm::getProblemTypes",
+      "parameters": [],
+      "return_type": "std::vector<GemmProblemType>",
+      "templated_kind": 0,
+      "type": "std::vector<GemmProblemType> (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 863,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmaSERKS0_",
+      "name": "hipblaslt_ext::GroupedGemm::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const GroupedGemm &"
+        }
+      ],
+      "return_type": "GroupedGemm &",
+      "templated_kind": 0,
+      "type": "GroupedGemm &(const GroupedGemm &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 864,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemmaSEOS0_",
+      "name": "hipblaslt_ext::GroupedGemm::operator=",
+      "parameters": [
+        {
+          "name": "",
+          "type": "GroupedGemm &&"
+        }
+      ],
+      "return_type": "GroupedGemm &",
+      "templated_kind": 0,
+      "type": "GroupedGemm &(GroupedGemm &&) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1064,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm3runEPvP12ihipStream_t",
+      "name": "hipblaslt_ext::GroupedGemm::run",
+      "parameters": [
+        {
+          "name": "deviceUserArgs",
+          "type": "void *"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (void *, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 930,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm10setProblemERSt6vectorIlSaIlEES4_S4_S4_RS1_INS_12GemmEpilogueESaIS5_EERS1_INS_10GemmInputsESaIS9_EE",
+      "name": "hipblaslt_ext::GroupedGemm::setProblem",
+      "parameters": [
+        {
+          "name": "m",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "n",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "k",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "batch_count",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "epilogue",
+          "type": "std::vector<GemmEpilogue> &"
+        },
+        {
+          "name": "inputs",
+          "type": "std::vector<GemmInputs> &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<GemmEpilogue> &, std::vector<GemmInputs> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 971,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm10setProblemERSt6vectorIlSaIlEES4_S4_S4_S4_S4_S4_S4_S4_S4_S4_S4_RS1_INS_12GemmEpilogueESaIS5_EERS1_INS_10GemmInputsESaIS9_EERNS_15GemmProblemTypeE",
+      "name": "hipblaslt_ext::GroupedGemm::setProblem",
+      "parameters": [
+        {
+          "name": "m",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "n",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "k",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "batch_count",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "lda",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "ldb",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "ldc",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "ldd",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "strideA",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "strideB",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "strideC",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "strideD",
+          "type": "std::vector<int64_t> &"
+        },
+        {
+          "name": "epilogue",
+          "type": "std::vector<GemmEpilogue> &"
+        },
+        {
+          "name": "inputs",
+          "type": "std::vector<GemmInputs> &"
+        },
+        {
+          "name": "problemtype",
+          "type": "GemmProblemType &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<int64_t> &, std::vector<GemmEpilogue> &, std::vector<GemmInputs> &, GemmProblemType &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1021,
+      "linkage_name": "_ZN13hipblaslt_ext11GroupedGemm10setProblemERSt6vectorIP27hipblasLtMatmulDescOpaque_tSaIS3_EERS1_IPvSaIS7_EESA_RS1_IP29hipblasLtMatrixLayoutOpaque_tSaISC_EESA_SF_SA_SA_SF_SA_SF_",
+      "name": "hipblaslt_ext::GroupedGemm::setProblem",
+      "parameters": [
+        {
+          "name": "matmul_descr",
+          "type": "std::vector<hipblasLtMatmulDesc_t> &"
+        },
+        {
+          "name": "alpha",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "A",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matA",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        },
+        {
+          "name": "B",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matB",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        },
+        {
+          "name": "beta",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "C",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matC",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        },
+        {
+          "name": "D",
+          "type": "std::vector<void *> &"
+        },
+        {
+          "name": "matD",
+          "type": "std::vector<hipblasLtMatrixLayout_t> &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (std::vector<hipblasLtMatmulDesc_t> &, std::vector<void *> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &, std::vector<void *> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &, std::vector<void *> &, std::vector<hipblasLtMatrixLayout_t> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 44,
+      "name": "hipblaslt_ext::HipBufferDeleter",
+      "underlying_type": "hipError_t (*)(void *)"
+    },
+    {
+      "file": "hipblaslt-ext.hpp",
+      "kind": "typedef",
+      "line": 45,
+      "name": "hipblaslt_ext::HipBufferPtr",
+      "underlying_type": "std::unique_ptr<void, HipBufferDeleter>"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "m",
+          "type": "uint32_t"
+        },
+        {
+          "name": "n",
+          "type": "uint32_t"
+        },
+        {
+          "name": "batch",
+          "type": "uint32_t"
+        },
+        {
+          "name": "k",
+          "type": "uint32_t"
+        },
+        {
+          "name": "d",
+          "type": "void *"
+        },
+        {
+          "name": "c",
+          "type": "void *"
+        },
+        {
+          "name": "a",
+          "type": "void *"
+        },
+        {
+          "name": "b",
+          "type": "void *"
+        },
+        {
+          "name": "strideD1",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideD2",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideC1",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideC2",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideA1",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideA2",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideB1",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideB2",
+          "type": "uint32_t"
+        },
+        {
+          "name": "alpha",
+          "type": "int8_t[16]"
+        },
+        {
+          "name": "beta",
+          "type": "int8_t[16]"
+        },
+        {
+          "name": "scaleA",
+          "type": "void *"
+        },
+        {
+          "name": "scaleB",
+          "type": "void *"
+        },
+        {
+          "name": "scaleC",
+          "type": "void *"
+        },
+        {
+          "name": "scaleD",
+          "type": "void *"
+        },
+        {
+          "name": "scaleAlphaVec",
+          "type": "void *"
+        },
+        {
+          "name": "bias",
+          "type": "void *"
+        },
+        {
+          "name": "biasType",
+          "type": "int"
+        },
+        {
+          "name": "reserved",
+          "type": "uint32_t"
+        },
+        {
+          "name": "e",
+          "type": "void *"
+        },
+        {
+          "name": "strideE1",
+          "type": "uint32_t"
+        },
+        {
+          "name": "strideE2",
+          "type": "uint32_t"
+        },
+        {
+          "name": "act0",
+          "type": "float"
+        },
+        {
+          "name": "act1",
+          "type": "float"
+        },
+        {
+          "name": "activationType",
+          "type": "int"
+        }
+      ],
+      "file": "hipblaslt-ext.hpp",
+      "kind": "record",
+      "layout_available": true,
+      "line": 366,
+      "name": "hipblaslt_ext::UserArguments",
+      "size_bits": 1568
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1244,
+      "linkage_name": "_ZN13hipblaslt_ext10copyMatmulEP27hipblasLtMatmulDescOpaque_tS1_",
+      "name": "hipblaslt_ext::copyMatmul",
+      "parameters": [
+        {
+          "name": "src",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "dst",
+          "type": "hipblasLtMatmulDesc_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t, hipblasLtMatmulDesc_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1071,
+      "linkage_name": "_ZN13hipblaslt_ext15gemmType2StringB5cxx11ENS_8GemmTypeE",
+      "name": "hipblaslt_ext::gemmType2String",
+      "parameters": [
+        {
+          "name": "type",
+          "type": "GemmType"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (GemmType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1188,
+      "linkage_name": "_ZN13hipblaslt_ext17getAlgosFromIndexEPvRSt6vectorIiSaIiEERS1_I33_hipblasLtMatmulHeuristicResult_tSaIS5_EE",
+      "name": "hipblaslt_ext::getAlgosFromIndex",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "algoIndex",
+          "type": "std::vector<int> &"
+        },
+        {
+          "name": "heuristicResults",
+          "type": "std::vector<hipblasLtMatmulHeuristicResult_t> &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, std::vector<int> &, std::vector<hipblasLtMatmulHeuristicResult_t> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1104,
+      "linkage_name": "_ZN13hipblaslt_ext11getAllAlgosEPvNS_8GemmTypeE18hipblasOperation_tS2_11hipDataTypeS3_S3_S3_20hipblasComputeType_tRSt6vectorI33_hipblasLtMatmulHeuristicResult_tSaIS6_EE",
+      "name": "hipblaslt_ext::getAllAlgos",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "typeGemm",
+          "type": "GemmType"
+        },
+        {
+          "name": "opA",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "opB",
+          "type": "hipblasOperation_t"
+        },
+        {
+          "name": "typeA",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeB",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeC",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeD",
+          "type": "hipDataType"
+        },
+        {
+          "name": "typeCompute",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "heuristicResults",
+          "type": "std::vector<hipblasLtMatmulHeuristicResult_t> &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, GemmType, hipblasOperation_t, hipblasOperation_t, hipDataType, hipDataType, hipDataType, hipDataType, hipblasComputeType_t, std::vector<hipblasLtMatmulHeuristicResult_t> &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1125,
+      "linkage_name": "_ZN13hipblaslt_ext16getIndexFromAlgoER22_hipblasLtMatmulAlgo_t",
+      "name": "hipblaslt_ext::getIndexFromAlgo",
+      "parameters": [
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t &"
+        }
+      ],
+      "return_type": "int",
+      "templated_kind": 0,
+      "type": "int (hipblasLtMatmulAlgo_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1158,
+      "linkage_name": "_ZN13hipblaslt_ext21getKernelNameFromAlgoB5cxx11EPvR22_hipblasLtMatmulAlgo_t",
+      "name": "hipblaslt_ext::getKernelNameFromAlgo",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t &"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (hipblasLtHandle_t, hipblasLtMatmulAlgo_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1141,
+      "linkage_name": "_ZN13hipblaslt_ext23getSolutionNameFromAlgoB5cxx11EPvR22_hipblasLtMatmulAlgo_t",
+      "name": "hipblaslt_ext::getSolutionNameFromAlgo",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t &"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (hipblasLtHandle_t, hipblasLtMatmulAlgo_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1284,
+      "linkage_name": "_ZN13hipblaslt_ext19isSolutionSupportedEP33_hipblasLtMatmulHeuristicResult_tPvP27hipblasLtMatmulDescOpaque_tPKvP29hipblasLtMatrixLayoutOpaque_tS8_S6_S8_S8_PmPi",
+      "name": "hipblaslt_ext::isSolutionSupported",
+      "parameters": [
+        {
+          "name": "heuristicResultsArray",
+          "type": "hipblasLtMatmulHeuristicResult_t *"
+        },
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "matA",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "matB",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "matC",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "matD",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "workspaceSize",
+          "type": "size_t *"
+        },
+        {
+          "name": "returnAlgoCount",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulHeuristicResult_t *, hipblasLtHandle_t, hipblasLtMatmulDesc_t, const void *, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, const void *, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, size_t *, int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1220,
+      "linkage_name": "_ZN13hipblaslt_ext21matmulIsAlgoSupportedEPvP27hipblasLtMatmulDescOpaque_tPKvP29hipblasLtMatrixLayoutOpaque_tS6_S4_S6_S6_R22_hipblasLtMatmulAlgo_tRm",
+      "name": "hipblaslt_ext::matmulIsAlgoSupported",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Ddesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t &"
+        },
+        {
+          "name": "workspaceSizeInBytes",
+          "type": "size_t &"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatmulDesc_t, const void *, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, const void *, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatmulAlgo_t &, size_t &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt-ext.hpp",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1247,
+      "linkage_name": "_ZN13hipblaslt_ext13matmulIsTunedEPvP27hipblasLtMatmulDescOpaque_tP29hipblasLtMatrixLayoutOpaque_tS4_S4_S4_",
+      "name": "hipblaslt_ext::matmulIsTuned",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Ddesc",
+          "type": "hipblasLtMatrixLayout_t"
+        }
+      ],
+      "return_type": "int",
+      "templated_kind": 0,
+      "type": "int (hipblasLtHandle_t, hipblasLtMatmulDesc_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 43,
+      "name": "hipblaslt_f8",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 46,
+      "name": "hipblaslt_f8",
+      "underlying_type": "struct hipblaslt_f8"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 33,
+      "name": "hipblaslt_f8_fnuz",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 36,
+      "name": "hipblaslt_f8_fnuz",
+      "underlying_type": "struct hipblaslt_f8_fnuz"
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 98,
+      "linkage_name": "_Zml12hipblaslt_e8f",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "hipblaslt_e8"
+        },
+        {
+          "name": "b",
+          "type": "float"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (hipblaslt_e8, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 103,
+      "linkage_name": "_Zmlf12hipblaslt_e8",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "float"
+        },
+        {
+          "name": "b",
+          "type": "hipblaslt_e8"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (float, hipblaslt_e8)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 112,
+      "linkage_name": "_Zml14hipblaslt_e5m3f",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "hipblaslt_e5m3"
+        },
+        {
+          "name": "b",
+          "type": "float"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (hipblaslt_e5m3, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 117,
+      "linkage_name": "_Zmlf14hipblaslt_e5m3",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "float"
+        },
+        {
+          "name": "b",
+          "type": "hipblaslt_e5m3"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (float, hipblaslt_e5m3)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 115,
+      "linkage_name": "_ZStlsRSoRK12hipblaslt_e8",
+      "name": "std::operator<<",
+      "parameters": [
+        {
+          "name": "stream",
+          "type": "std::ostream &"
+        },
+        {
+          "name": "a",
+          "type": "const hipblaslt_e8 &"
+        }
+      ],
+      "return_type": "std::ostream &",
+      "templated_kind": 0,
+      "type": "std::ostream &(std::ostream &, const hipblaslt_e8 &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 129,
+      "linkage_name": "_ZStlsRSoRK14hipblaslt_e5m3",
+      "name": "std::operator<<",
+      "parameters": [
+        {
+          "name": "stream",
+          "type": "std::ostream &"
+        },
+        {
+          "name": "a",
+          "type": "const hipblaslt_e5m3 &"
+        }
+      ],
+      "return_type": "std::ostream &",
+      "templated_kind": 0,
+      "type": "std::ostream &(std::ostream &, const hipblaslt_e5m3 &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 110,
+      "linkage_name": "_ZSt9to_stringB5cxx11RK12hipblaslt_e8",
+      "name": "std::to_string",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "const hipblaslt_e8 &"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (const hipblaslt_e8 &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 124,
+      "linkage_name": "_ZSt9to_stringB5cxx11RK14hipblaslt_e5m3",
+      "name": "std::to_string",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "const hipblaslt_e5m3 &"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (const hipblaslt_e5m3 &)",
+      "variadic": false,
+      "visibility": 2
+    }
+  ],
+  "schema_version": 1
+}

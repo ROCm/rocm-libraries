@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>hipBLASLt horizontal C API and ABI specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">hipBLASLt horizontal C API and ABI specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope-rule" id="toc-scope-rule">Scope rule</a></li>
+<li><a href="#inventory-summary" id="toc-inventory-summary">Inventory
+summary</a></li>
+<li><a href="#phase-1-mvp-functions"
+id="toc-phase-1-mvp-functions">Phase 1 MVP functions</a></li>
+<li><a href="#remaining-base-c-functions"
+id="toc-remaining-base-c-functions">Remaining base C functions</a></li>
+<li><a href="#extension-operation-c-functions"
+id="toc-extension-operation-c-functions">Extension-operation C
+functions</a></li>
+<li><a href="#required-closure-before-implementation"
+id="toc-required-closure-before-implementation">Required closure before
+implementation</a></li>
+</ul>
+</nav>
+<p>Status: scope inventory for the API and ABI entry gate. This
+specification covers exported declarations inside
+<code>extern "C"</code> blocks in the current public hipBLASLt headers.
+It does not cover the bespoke C++ API in
+<code>hipblaslt-ext.hpp</code>.</p>
+<h2 id="scope-rule">Scope rule</h2>
+<p>The horizontal workstream must give every listed function an explicit
+disposition before implementation begins:</p>
+<ul>
+<li><strong>MVP:</strong> implemented by the 13-function Phase 1
+slice;</li>
+<li><strong>Horizontal:</strong> implemented during Phase 2;</li>
+<li><strong>Remove:</strong> intentionally removed through an approved
+API and ABI transition; or</li>
+<li><strong>Retain elsewhere:</strong> remains available through a
+separately identified compatibility mechanism.</li>
+</ul>
+<p>No exported C-linkage declaration may be omitted merely because it is
+documented as internal. Exported internal-looking functions still
+require an ABI disposition.</p>
+<h2 id="inventory-summary">Inventory summary</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Header</th>
+<th style="text-align: right;">Exported C-linkage functions</th>
+<th style="text-align: right;">Phase 1 MVP</th>
+<th style="text-align: right;">Remaining disposition</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>projects/hipblaslt/library/include/hipblaslt/hipblaslt.h</code></td>
+<td style="text-align: right;">29</td>
+<td style="text-align: right;">13</td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr class="even">
+<td><code>projects/hipblaslt/library/include/hipblaslt/hipblaslt-ext-op.h</code></td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr class="odd">
+<td><strong>Total</strong></td>
+<td style="text-align: right;"><strong>45</strong></td>
+<td style="text-align: right;"><strong>13</strong></td>
+<td style="text-align: right;"><strong>32</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The API snapshot currently inventories the 29 functions from
+<code>hipblaslt.h</code> but does not inventory the 16 exported
+C-linkage declarations in <code>hipblaslt-ext-op.h</code>. Closing that
+extraction gap is part of the entry gate.</p>
+<h2 id="phase-1-mvp-functions">Phase 1 MVP functions</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>Signature summary</th>
+<th>Disposition</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>hipblasLtCreate</code></td>
+<td><code>(hipblasLtHandle_t*) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtDestroy</code></td>
+<td><code>(hipblasLtHandle_t) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatrixLayoutCreate</code></td>
+<td><code>(layout*, datatype, rows, columns, ld) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatrixLayoutDestroy</code></td>
+<td><code>(layout) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatrixLayoutSetAttribute</code></td>
+<td><code>(layout, attribute, buffer, size) -&gt; hipblasStatus_t</code></td>
+<td>MVP, selected attributes in Phase 1</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatmulDescCreate</code></td>
+<td><code>(descriptor*, compute_type, scale_type) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatmulDescDestroy</code></td>
+<td><code>(descriptor) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatmulDescSetAttribute</code></td>
+<td><code>(descriptor, attribute, buffer, size) -&gt; hipblasStatus_t</code></td>
+<td>MVP, selected attributes in Phase 1</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatmulPreferenceCreate</code></td>
+<td><code>(preference*) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatmulPreferenceDestroy</code></td>
+<td><code>(preference) -&gt; hipblasStatus_t</code></td>
+<td>MVP</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatmulPreferenceSetAttribute</code></td>
+<td><code>(preference, attribute, buffer, size) -&gt; hipblasStatus_t</code></td>
+<td>MVP, selected attributes in Phase 1</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatmulAlgoGetHeuristic</code></td>
+<td><code>(handle, operation, A/B/C/D layouts, preference, requested_count, results, result_count) -&gt; hipblasStatus_t</code></td>
+<td>MVP, bounded profile in Phase 1</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatmul</code></td>
+<td><code>(handle, operation, alpha, A/B/C/D, layouts, beta, algorithm, workspace, stream) -&gt; hipblasStatus_t</code></td>
+<td>MVP, one frozen GEMM in Phase 1</td>
+</tr>
+</tbody>
+</table>
+<p>Phase 2 must complete the attribute and operation domains of MVP
+functions; exporting a function does not establish complete behavioral
+coverage for every value it accepts.</p>
+<h2 id="remaining-base-c-functions">Remaining base C functions</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>Signature summary</th>
+<th>Horizontal group</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>hipblasLtMatrixLayoutGetAttribute</code></td>
+<td><code>(layout, attribute, buffer, size, written_size*) -&gt; hipblasStatus_t</code></td>
+<td>Objects and attributes</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatmulDescGetAttribute</code></td>
+<td><code>(descriptor, attribute, buffer, size, written_size*) -&gt; hipblasStatus_t</code></td>
+<td>Objects and attributes</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatmulPreferenceGetAttribute</code></td>
+<td><code>(preference, attribute, buffer, size, written_size*) -&gt; hipblasStatus_t</code></td>
+<td>Objects and attributes</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatrixTransformDescCreate</code></td>
+<td><code>(transform_descriptor*, scale_type) -&gt; hipblasStatus_t</code></td>
+<td>Matrix transform</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatrixTransformDescDestroy</code></td>
+<td><code>(transform_descriptor) -&gt; hipblasStatus_t</code></td>
+<td>Matrix transform</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatrixTransformDescSetAttribute</code></td>
+<td><code>(transform_descriptor, attribute, buffer, size) -&gt; hipblasStatus_t</code></td>
+<td>Matrix transform</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtMatrixTransformDescGetAttribute</code></td>
+<td><code>(transform_descriptor, attribute, buffer, size, written_size*) -&gt; hipblasStatus_t</code></td>
+<td>Matrix transform</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtMatrixTransform</code></td>
+<td><code>(handle, transform_descriptor, alpha, A/layout, beta, B/layout, C/layout, stream) -&gt; hipblasStatus_t</code></td>
+<td>Matrix transform</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtGetVersion</code></td>
+<td><code>(handle, version*) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtGetGitRevision</code></td>
+<td><code>(handle, revision_buffer) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtGetArchName</code></td>
+<td><code>(architecture_name**) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtSetSmCountTarget</code></td>
+<td><code>(handle, sm_count) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtGetSmCountTarget</code></td>
+<td><code>(handle, sm_count*) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtSetUniformSummationOrder</code></td>
+<td><code>(handle, enabled) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasLtGetUniformSummationOrder</code></td>
+<td><code>(handle, enabled*) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+<tr class="even">
+<td><code>hipblasLtCheckNumericsDrain</code></td>
+<td><code>(handle, abnormal*) -&gt; hipblasStatus_t</code></td>
+<td>Information and configuration</td>
+</tr>
+</tbody>
+</table>
+<h2 id="extension-operation-c-functions">Extension-operation C
+functions</h2>
+<p>These functions are exported with C linkage by
+<code>hipblaslt-ext-op.h</code>. The first three are documented
+extension operations. The remaining thirteen are described by the header
+as client performance arguments or internal-use queries, but they are
+still exported declarations and require an API and ABI disposition.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>Signature summary</th>
+<th>Required entry-gate decision</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>hipblasltExtSoftmax</code></td>
+<td><code>(datatype, m, n, dim, output, input, stream) -&gt; hipblasStatus_t</code></td>
+<td>Horizontal implementation or approved exclusion</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltExtLayerNorm</code></td>
+<td><code>(datatype, output, mean, invvar, input, m, n, epsilon, gamma, beta, stream) -&gt; hipblasStatus_t</code></td>
+<td>Horizontal implementation or approved exclusion</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltExtAMax</code></td>
+<td><code>(input_datatype, output_datatype, output, input, m, n, stream) -&gt; hipblasStatus_t</code></td>
+<td>Horizontal implementation or approved exclusion</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltSetFlushValue</code></td>
+<td><code>(bool) -&gt; void</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltSetRotatingBufferSizeValue</code></td>
+<td><code>(int) -&gt; void</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltSetColdIterationsValue</code></td>
+<td><code>(int) -&gt; void</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltSetHotIterationsValue</code></td>
+<td><code>(int) -&gt; void</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltGetTotalGranularityValue</code></td>
+<td><code>() -&gt; double</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltGetTilesPerCuValue</code></td>
+<td><code>() -&gt; double</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltGetTile0Granularity</code></td>
+<td><code>() -&gt; double</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltGetTile1Granularity</code></td>
+<td><code>() -&gt; double</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltGetCuGranularity</code></td>
+<td><code>() -&gt; double</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltGetWaveGranularity</code></td>
+<td><code>() -&gt; double</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltGetCUs</code></td>
+<td><code>() -&gt; int</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="odd">
+<td><code>hipblasltGetMemWriteBytesD</code></td>
+<td><code>() -&gt; size_t</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+<tr class="even">
+<td><code>hipblasltGetMemReadBytes</code></td>
+<td><code>() -&gt; size_t</code></td>
+<td>Public, retain-elsewhere, or removal decision</td>
+</tr>
+</tbody>
+</table>
+<h2 id="required-closure-before-implementation">Required closure before
+implementation</h2>
+<p>For every function above, the entry gate must record:</p>
+<ol type="1">
+<li>its disposition and owning PR;</li>
+<li>its exact exported symbol and ABI version;</li>
+<li>facade-owned versus provider-owned behavior;</li>
+<li>public state, ownership, lifetime, and concurrency semantics;</li>
+<li>private protocol operations or records required;</li>
+<li>legacy behavior and status mapping;</li>
+<li>positive, negative, ABI, and differential tests; and</li>
+<li>supported device and platform requirements.</li>
+</ol>
+<p>The inventory is complete only when the checked public headers,
+generated API snapshot, export inventory, this specification, and task
+graph agree.</p>
+</body>
+</html>

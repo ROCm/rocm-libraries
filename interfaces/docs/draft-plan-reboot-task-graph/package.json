@@ -1,0 +1,19 @@
+{
+  "name": "mathlibs-task-graph",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && bash spec-review/build-spec-review.sh",
+    "build:specifications": "bash spec-review/build-spec-review.sh"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.5",
+    "@xyflow/react": "^12.9.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "vite": "^7.1.3"
+  }
+}

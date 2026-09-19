@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ROCm interfaces specifications</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">ROCm interfaces specifications</h1>
+</header>
+<p>This review set contains the direct specifications used by the
+interfaces delivery plan.</p>
+<p>The pages use a reference-style layout: persistent navigation, a
+local contents panel, and readable dark-mode tables and code blocks.</p>
+<div class="spec-review-index">
+  <a href="architecture-component-model.html"><strong>Architecture component model</strong><span>Architecture, ownership, flows, and invariants.</span></a>
+  <a href="broker.html"><strong>Broker</strong><span>Discovery, validation, ordering, selection, and leases.</span></a>
+  <a href="cohort.html"><strong>Cohort</strong><span>Qualified provider sets and upgrade rules.</span></a>
+  <a href="facade.html"><strong>Facade</strong><span>Public identity, dispatch, and compatibility.</span></a>
+  <a href="hipblaslt-horizontal.html"><strong>hipBLASLt horizontal</strong><span>Exported C API and ABI scope inventory.</span></a>
+  <a href="hipblaslt-facade-path.html"><strong>hipBLASLt facade path</strong><span>Integrated representative GEMM path and component APIs.</span></a>
+  <a href="manifest.html"><strong>Manifest</strong><span>Candidate metadata, validation, trust, and packaging.</span></a>
+  <a href="provider-adapter.html"><strong>Provider adapter</strong><span>Translation to one implementation.</span></a>
+  <a href="provider-binding.html"><strong>Provider binding</strong><span>Retained state, ownership, and lifetime.</span></a>
+  <a href="provider-module.html"><strong>Provider module</strong><span>Loadable module artifact and exports.</span></a>
+  <a href="provider-protocol.html"><strong>Provider protocol</strong><span>Private ABI, query, records, and status.</span></a>
+  <a href="provider.html"><strong>Provider</strong><span>Logical provider composition and conformance.</span></a>
+</div>
+</body>
+</html>

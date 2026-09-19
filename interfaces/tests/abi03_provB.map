@@ -1,0 +1,6 @@
+ROCBLAS_ABI_7 {
+  global:
+    rocblas_*;
+  local:
+    *;
+};
