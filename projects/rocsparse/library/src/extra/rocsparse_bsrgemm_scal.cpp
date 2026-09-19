@@ -114,16 +114,21 @@ rocsparse_status rocsparse::bsrgemm_scal_core(rocsparse_handle          handle,
             descr_C->base);
     }
 
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrgemm_copy_scale<BSRGEMM_DIM>),
-                                       dim3((block_dim * block_dim * nnzb_D - 1) / BSRGEMM_DIM + 1),
-                                       dim3(BSRGEMM_DIM),
-                                       0,
-                                       stream,
-                                       block_dim * block_dim * nnzb_D,
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),
-                                       bsr_val_D,
-                                       bsr_val_C,
-                                       handle->pointer_mode == rocsparse_pointer_mode_host);
+    // Element count of the block-value array, computed in 64-bit to avoid the
+    // 32-bit block_dim * block_dim * nnzb_D product overflowing (AISPARSE-676).
+    const int64_t bsrgemm_scal_nnz
+        = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(nnzb_D);
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        (rocsparse::bsrgemm_copy_scale<BSRGEMM_DIM>),
+        rocsparse::csrgemm_scal_copy_blocks<BSRGEMM_DIM>(handle, bsrgemm_scal_nnz),
+        dim3(BSRGEMM_DIM),
+        0,
+        stream,
+        bsrgemm_scal_nnz,
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),
+        bsr_val_D,
+        bsr_val_C,
+        handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef BSRGEMM_DIM
 
     return rocsparse_status_success;
