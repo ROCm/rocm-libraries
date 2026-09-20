@@ -61,6 +61,7 @@ set_directory_properties(PROPERTIES COMPILE_OPTIONS "")
 
 nanobind_add_module(stinkytofu_python
     NB_STATIC  # Build as static module
+    src/AsmBridge.cpp
     src/python_bindings.cpp
     src/logical_count.cpp
     src/HardwareCaps.cpp
