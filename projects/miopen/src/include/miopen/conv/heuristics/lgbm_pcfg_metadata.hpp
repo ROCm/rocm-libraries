@@ -9,6 +9,7 @@
 
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
+#include <miopen/filesystem.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -101,7 +102,7 @@ private:
     };
 
     bool ready = false;
-    std::string bin_path;                              // path to lgbm_pcfg.bin
+    fs::path bin_path;                                  // path to lgbm_pcfg.bin
     std::unordered_map<std::string, Section> directory; // solver_name -> byte range
 
     // Lazily-parsed sections, guarded by mutex. mutable so Find() stays const.

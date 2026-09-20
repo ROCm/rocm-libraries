@@ -37,7 +37,7 @@ constexpr std::uint64_t kDirPrefixCap = 1u << 20;
 // Read exactly [offset, offset+len) of a file. Returns empty on any short read
 // or open failure (the caller then abstains). Single named-return so NRVO
 // applies (the build is -Werror=nrvo).
-std::vector<char> ReadRange(const std::string& path, std::uint64_t offset, std::uint64_t len)
+std::vector<char> ReadRange(const fs::path& path, std::uint64_t offset, std::uint64_t len)
 {
     std::vector<char> buf;
     std::ifstream in(path, std::ios::binary);
@@ -62,7 +62,7 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
     // feature counts, a FOREST block, and the candidate buckets. Only the
     // header+directory is read here (a small prefix); each section is read from
     // disk and parsed lazily in Find().
-    bin_path = (GetSystemDbPath() / "lgbm_pcfg.bin").string();
+    bin_path = GetSystemDbPath() / "lgbm_pcfg.bin";
 
     std::uint64_t file_size = 0;
     {
