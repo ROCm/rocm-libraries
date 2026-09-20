@@ -149,7 +149,7 @@ def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
     for shape in ['upper', 'lower']:
         if shape == 'upper': upl = 'U'
         else: upl = 'L'
-        for nv in ['one']: #['one', 'half_n', 'n'] cuda currently only support 1 rhs 
+        for nv in ['one']: #['one', 'half_n', 'n'] cuda currently only supports 1 rhs 
             nrhs = 1
             for s, bc in size:
                 if s < 4000: ld = s + 1
@@ -436,7 +436,7 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'gels'
     size = sizenormal
-    for tt in ['overdet', 'underdet']:
+    for tt in ['overdet']: #['overdet', 'underdet'] underdetermined systems are not currently supported in cuda
         for nv in ['one', 'half_n', 'n']:
             nrhs = 1
             for s in size:
@@ -461,34 +461,45 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {mm} --nrhs {nrhs} -n {nn} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
-def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    GELSBATCH tests are run, for the given precision and number of rows, with 26 columns and with 1, 
-    n/2 and n right-hand-vectors. Only with m < n to actually test gelqf and ormlq/unmlq.
-    Tests run ops = {none, transposed} cases. 
-    gelqf uses:
-    larft_forward_row
-    larfb_forward_row_right_none
-    ormlq uses:           
-    larft_forward_row           
-    larfb_forward_row_left_<ops>
-    """
-    fn = 'gels_batched'
-    tr = 'T' if precision == 's' or precision == 'd' else 'C'
-    size = sizebatch
-    for ops in ['none']: #['none', 'trans'] transposed is not currently supported in cuda.
-        if ops == 'none': op = 'N'
-        else: op = tr
-        for nv in ['one', 'half_n', 'n']:
-            nrhs = 1
-            for s, bc in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                if nv == 'half_n': nrhs = s//2
-                elif nv == 'n': nrhs = s
-                if s >= 26:
-                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'trans': ops, 'nrhs': nv, 'n': s}
-                    yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m 26 --trans {op} --nrhs {nrhs} -n {s} --lda 27 --ldb {ld}')
+#def gelsBatch_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    GELSBATCH tests are run, for the given precision and number of rows (columns), with 26 columns (rows) and with 1, 
+#    n/2 and n right-hand-vectors. We want the overdetermined case m >= n, but also the underdetermined m < n
+#    to actually test gelqf and ormlq/unmlq. Tests run ops = {none, transposed} cases. 
+#    gelqf uses:
+#    larft_forward_row
+#    larfb_forward_row_right_none
+#    ormlq uses:           
+#    larft_forward_row           
+#    larfb_forward_row_left_<ops>
+#    """
+#    fn = 'gels_batched'
+#    tr = 'T' if precision == 's' or precision == 'd' else 'C'
+#    size = sizebatch
+#    for tt in ['overdet']: #['overdet', 'underdet'] underdetermined systems are not currently supported in cuda
+#        for ops in ['none']: #['none', 'trans'] transposed is not currently supported in cuda.
+#            if ops == 'none': op = 'N'
+#            else: op = tr
+#            for nv in ['one', 'half_n', 'n']:
+#                nrhs = 1
+#                for s, bc in size:
+#                    if s < 4000: ld = s + 1
+#                    else: ld = s + 64
+#                    if nv == 'half_n': nrhs = s//2
+#                    elif nv == 'n': nrhs = s
+#                    if s >= 26:
+#                        if tt == 'overdet':
+#                            mm = s
+#                            nn = 26
+#                            ld_a = ld
+#                            ld_b = ld
+#                        else:
+#                            mm = 26
+#                            nn = s
+#                            ld_a = 27
+#                            ld_b = ld
+#                        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'type': tt, 'trans': ops, 'nrhs': nv, 'n': s}
+#                        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {mm} --trans {op} --nrhs {nrhs} -n {mm} --lda {ld_a} --ldb {ld_b}')
 
 
 def xxgqr_suite(*, suite, precision, sizenormal, sizebatch):
@@ -535,27 +546,27 @@ def xxmqr_suite(*, suite, precision, sizenormal, sizebatch):
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --side R --trans {op} -n {s} --lda {ld} --ldc {ld}')
 
 
-def larft_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    LARFT tests are run with the given precision and sizes, backward direction, and column-wise and
-    row-wise. Tests use 1, n/2 and n Householder vectors.
-    """
-    fn = 'larft'
-    size = sizenormal
-    for stor in ['colwise']: #['colwise', 'rowwise'] rowwise is not currently supported in cuda.
-        if stor == 'colwise': sto = 'C'
-        else: sto = 'R'
-        for nk in ['one', 'half_n', 'n']:
-            k = 1
-            for s in size:
-                if nk == 'half_n': k = s//2
-                elif nk == 'n': k = s
-                if s < 4000: ld1 = s + 1
-                else: ld1 = s + 64
-                if k < 4000: ld2 = k + 1
-                else: ld2 = k + 64
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'storev': stor, 'nk': nk, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --direct B --storev {sto} -k {k} -n {s} --ldv {ld1} --ldt {ld2}')
+#def larft_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    LARFT tests are run with the given precision and sizes, backward direction, and column-wise and
+#    row-wise. Tests use 1, n/2 and n Householder vectors.
+#    """
+#    fn = 'larft'
+#    size = sizenormal
+#    for stor in ['colwise']: #['colwise', 'rowwise'] rowwise is not currently supported in cuda.
+#        if stor == 'colwise': sto = 'C'
+#        else: sto = 'R'
+#        for nk in ['one', 'half_n', 'n']:
+#            k = 1
+#            for s in size:
+#                if nk == 'half_n': k = s//2
+#                elif nk == 'n': k = s
+#                if s < 4000: ld1 = s + 1
+#                else: ld1 = s + 64
+#                if k < 4000: ld2 = k + 1
+#                else: ld2 = k + 64
+#                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'storev': stor, 'nk': nk, 'n': s}
+#                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --direct B --storev {sto} -k {k} -n {s} --ldv {ld1} --ldt {ld2}')
 
 
 def xxtrd_suite(*, suite, precision, sizenormal, sizebatch):
@@ -651,20 +662,20 @@ def xxgbr_suite(*, suite, precision, sizenormal, sizebatch):
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --side R -m {s} --lda {ld}')
 
 
-def stedc_suite(*, suite, precision, sizenormal, sizebatch):
-    """
-    STEDC tests are run, for the given precision and sizes, with vectors and without vectors
-    """
-    fn = 'stedc' 
-    size = sizenormal
-    for v in ['I', 'N']:
-        if v == 'I': vv = 'vect'
-        else: vv = 'novect'
-        for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --compz {v} -n {s} --ldc {ld}')
+#def stedc_suite(*, suite, precision, sizenormal, sizebatch):
+#    """
+#    STEDC tests are run, for the given precision and sizes, with vectors and without vectors
+#    """
+#    fn = 'stedc' 
+#    size = sizenormal
+#    for v in ['I', 'N']:
+#        if v == 'I': vv = 'vect'
+#        else: vv = 'novect'
+#        for s in size:
+#            if s < 4000: ld = s + 1
+#            else: ld = s + 64
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'evect': vv, 'n': s}
+#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --compz {v} -n {s} --ldc {ld}')
 
 
 def xxevd_suite(*, suite, precision, sizenormal, sizebatch):
@@ -840,10 +851,11 @@ def gesvdjBatch_suite(*, suite, precision, sizenormal, sizebatch):
         if v == 'V': vv = 'vect'
         else: vv = 'novect'
         for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --jobz {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
+            if s < 33: # only sizes n <= 32 are currently supportted by cuda
+                if s < 4000: ld = s + 1
+                else: ld = s + 64
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'evect': vv, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --jobz {v} -m {s} --lda {ld} --ldu {ld} --ldv {ld}')
 
 
 # Registry of all available benchmark suites
