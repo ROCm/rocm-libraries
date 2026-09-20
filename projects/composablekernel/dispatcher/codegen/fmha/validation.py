@@ -803,6 +803,14 @@ def validate_config(
     ):
         result.add_error(f"pipeline {pipeline} is not supported on {arch}")
 
+    # The arch allowlist says which pipelines a target can build, not which
+    # family may ask for them. Only the batch_prefill kernel body knows this
+    # pipeline; every other family reaches a lookup that has no entry for it.
+    if pipeline == "batch_prefill_gfx11" and family != "batch_prefill":
+        result.add_error(
+            f"batch_prefill_gfx11 is only valid for family batch_prefill, got {family}"
+        )
+
     if pipeline in {"v3", "qr_async_trload_v3"} and not arch_info.get(
         "supports_v3", False
     ):
@@ -908,6 +916,14 @@ def validate_config(
             if len(tile) >= 5 and (tile[1], tile[3], tile[4]) != (32, 128, 32):
                 result.add_error(
                     "batch_prefill_gfx11 requires tile N0=32, N1=128, K1=32"
+                )
+            # The async copy strides K into LDS by kK1 while gemm0 reads kK0-deep
+            # chunks out of the same buffer, so the pipeline static_asserts that
+            # the two agree; see block_fmha_batch_prefill_pipeline_qr_ks_vs_async.
+            if len(tile) >= 5 and tile[2] != tile[4]:
+                result.add_error(
+                    f"batch_prefill_gfx11 requires tile K0 == K1, got "
+                    f"K0={tile[2]}, K1={tile[4]}"
                 )
 
     if family == "fwd_appendkv":
