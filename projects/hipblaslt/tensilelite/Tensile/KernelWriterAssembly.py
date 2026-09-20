@@ -78,10 +78,17 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
+from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
+from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
+                                tdmSeparateABDescriptors, tdmWaveSeparated, \
+                                tdmSharedScaleSetOwner, tdmSetOwner, tdmSetGroup, \
+                                tdmGrouping, tdmSharedSetOrder, tdmSharedScaleSetActive, \
+                                tdmMemberIsLive
+from .Components.TDMFuse import tdmWaveComponents, tdmWavePartition, tdmSoleWave, tdmWaveRangeText
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
-from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
+from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
@@ -446,7 +453,95 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def isTdmWaveSeparated(self, kernel) -> bool:
-    return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
+    """True when the TDM moves both tensors and there is more than one wave."""
+    return tdmWaveSeparated(kernel)
+
+  def tdmEmitWaveCompId(self, dstSgprIdx, compShift, waveIdxSgpr, comment):
+    """Materialise a TDM component id from WaveIdx and compShift."""
+    if compShift is None:
+      return SMovB32(sgpr(dstSgprIdx), 0, comment)
+    if compShift == 0:
+      return SMovB32(sgpr(dstSgprIdx), sgpr(waveIdxSgpr), comment)
+    return SLShiftRightB32(sgpr(dstSgprIdx), compShift, sgpr(waveIdxSgpr), comment)
+
+
+  def tdmFusePaired(self, kernel) -> bool:
+    """True when {A,MXSA} and {MXSB,B} each own a descriptor set."""
+    return self.isTdmWaveSeparated(kernel) and tdmFusePaired(kernel)
+
+
+  def tdmSeparateABDescriptors(self, kernel) -> bool:
+    """True when A's and B's TDM descriptors are distinct register sets."""
+    return tdmSeparateABDescriptors(kernel)
+
+  def tdmDescriptorSetOwner(self, kernel, tc: str) -> str:
+    """Return the SGPR owner for `tc`'s descriptor set.
+
+    Apply per-set mutations only through this owner; single-wave and subtile
+    descriptors own themselves.
+    """
+    if tc not in ("A", "B", "MXSA", "MXSB"):
+      return tc
+    if kernel["NumWaves"] == 1 or kernel.get("UseSubtileImpl"):
+      return tc
+    if not self.isTdmWaveSeparated(kernel):
+      return "A" if tc in ("A", "B") else "MXSA"
+    return tdmSetOwner(kernel, tc)
+
+  def _tdmPairedParityOrder(self, kernel, tPA, tPB):
+    """Return this pair's even/odd members from the resolved wave partition.
+
+    Parity follows tensor assignment, not argument order.
+    """
+    if not tPA["tensorChar"].endswith("A"):
+      tPA, tPB = tPB, tPA
+    # Shared-scale dispatches do not have a two-way parity order.
+    if tdmSharedScaleSetActive(kernel) or not self.isTdmWaveSeparated(kernel):
+      return tPA, tPB
+    if 0 in tdmWavePartition(kernel, tPA["tensorChar"])[1]:
+      return tPA, tPB
+    return tPB, tPA
+
+  def _tdmSetMembersByParity(self, kernel, tP1, tP2):
+    """Return actual even/odd set members, including partners outside the pair."""
+    tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tP1, tP2)
+    tcEven = tPEven["tensorChar"]
+    if not self.isTdmWaveSeparated(kernel):
+      return tcEven, tPOdd["tensorChar"]
+    return tcEven, tdmGroupPartner(kernel, tcEven, tPOdd["tensorChar"])
+
+  def _tdmSecondMemberIsOdd(self, kernel, tP1, tP2):
+    sideA, sideB = (tP1, tP2) if tP1["tensorChar"].endswith("A") else (tP2, tP1)
+    _, odd = self._tdmPairedParityOrder(kernel, sideA, sideB)
+    return odd["tensorChar"] == tP2["tensorChar"]
+
+  def _emitTdmCompId(self, mod, kernel, tc, dstIdx, waveIdxSgpr="WaveIdx"):
+    """Leave tensor `tc`'s TDM component id in SGPR `dstIdx`.
+
+    The clamp must subtract the same component's rows the LDS and global offsets
+    skipped, so it must use the same component id; a mismatched clamp still
+    assembles.
+    """
+    numComp, compShift = tdmWaveComponents(kernel, tc)
+    _, compWaves = tdmWavePartition(kernel, tc)
+    if compShift is None:
+      comment = f"wId=0 (wave {compWaves[0]} alone carries {tc})"
+    elif compShift == 0:
+      comment = f"wId=WaveIdx ({tc} divided over {numComp} waves)"
+    else:
+      comment = f"wId=WaveIdx >> {compShift} (covers {1 << compShift} waves each)"
+    mod.add(self.tdmEmitWaveCompId(dstIdx, compShift, waveIdxSgpr, comment))
+    return mod
+
+  def tdmWaveIdxReadAfterPrologue(self, kernel) -> bool:
+    """True when a loop-body reader still needs WaveIdx after the prologue."""
+    if kernel["ClusterBarrier"]:
+      return True
+    # Separate A/B descriptors guard each fill from the resolved wave partition.
+    if self.tdmSeparateABDescriptors(kernel):
+      return True
+    # Divergent LDS swaps have no in-loop WaveIdx fallback.
+    return self._dcpDivergent(kernel)
 
   def isTdmWaveIdxLive(self, kernel) -> bool:
     if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
@@ -457,6 +552,8 @@ class KernelWriterAssembly(KernelWriter):
       return True
     if self.states.waveIdxReleasedAfterStagger:
       return False
+    if self.tdmWaveIdxReadAfterPrologue(kernel):
+      return True
     return bool(self.states.staggerUCode) and self.isTdmWaveSeparated(kernel)
 
   ########################################
@@ -705,6 +802,12 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
     assert(len(names) == len(numSgprs))
+    # checkOutMulti only aligns the start of the whole block, so a repeated name
+    # remaps self.sgprs[name] to its later index, which is aligned only by luck.
+    # A 64-bit arg landing on an odd SGPR then fails assembly with "invalid
+    # register alignment" far from the duplicate that caused it.
+    assert len(set(names)) == len(names), \
+        "duplicate sgpr arg names: %s" % sorted({n for n in names if names.count(n) > 1})
 
     sgprIdxVec = self.sgprPool.checkOutMulti(numSgprs, align, tags=names)
     #self.sgprIdx = roundUpToNearestMultiple(self.sgprIdx,align)
@@ -806,7 +909,8 @@ class KernelWriterAssembly(KernelWriter):
     # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here,
     # UNLESS stagger code needs them (calculateStagger references GlobalReadIncs for all tensors).
     needsStaggerSgprs = kernel["StaggerU"] > 0 or kernel["InternalSupportParams"]["SupportCustomStaggerU"]
-    if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs:
+    if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs \
+       or (self.tdmSeparateABDescriptors(kernel) and not self.tdmFusePaired(kernel)):
       self.removeSgprVarFromPool("GlobalReadIncsA")
       self.removeSgprVarFromPool("GlobalReadIncsB")
       if kernel["ProblemType"]["MXBlockA"]:
@@ -825,6 +929,8 @@ class KernelWriterAssembly(KernelWriter):
     """
     module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
     if not self.isTdmWaveSeparated(kernel):
+      return module
+    if self.tdmSeparateABDescriptors(kernel) and not self.tdmFusePaired(kernel):
       return module
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsA"))
@@ -1044,6 +1150,10 @@ class KernelWriterAssembly(KernelWriter):
   def defineTdmSgprs(self, kernel):
     """Allocate TDM descriptor SGPRs. Extracted so subtile can defer this."""
     module = Module("DefineTdmSgprs")
+
+    def setOwner(tc):
+      return self.tdmDescriptorSetOwner(kernel, tc)
+
     if kernel["enableTDMA"]:
       module.add(self.defineSgpr("tdmAGroup0", 4, 4))
       module.add(self.defineSgpr("tdmAGroup1", 8, 4))
@@ -1060,15 +1170,23 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprtdmAGroup3", "sgprtdmAGroup2"))
 
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
-        module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
+        # Defer MXSA's alias only when B owns the set and is allocated below.
+        mxsaOwner = setOwner("MXSA")
+        if mxsaOwner == "A":
+          # Keeping the two sets at 4+8 twice holds this row at 24 SGPRs.
+          module.add(RegSet("s", "sgprtdmMXSAGroup0", "sgprtdmAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSAGroup1", "sgprtdmAGroup1"))
+        elif mxsaOwner == "MXSA":
+          module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
+          module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      # Alias B descriptor onto A for multi-wave to reduce SGPR pressure.
+      # Alias B's descriptor onto A's when the grouping seats them on one set,
+      # which halves the SGPR cost of the default row.
       # Subtile uses separate descriptors -- deferred allocation provides
       # enough SGPR headroom, and separate descriptors avoid the reinit
       # overhead before each tensor_load_to_lds.
-      if kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
+      if setOwner("B") == "A":
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
         if kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False):
@@ -1080,21 +1198,51 @@ class KernelWriterAssembly(KernelWriter):
       else:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
-        if kernel.get("_TDMIterateModeB", False) or self.states.subtileIterateModeB:
+        if (kernel.get("_TDMIterateModeB", False) or self.states.subtileIterateModeB
+            or (self.isTdmWaveSeparated(kernel)
+                and kernel.get("_TDMIterateModeA", False))):
           module.add(self.defineSgpr("tdmBGroup2", 4, 4))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmBGroup2"))
-        if kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
-          module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
+        # Allocate or alias each scale only after its descriptor owner exists.
+        for mxs in ("MXSA", "MXSB"):
+          if not kernel["ProblemType"]["MXBlock%s" % mxs[-1]]:
+            continue
+          owner = setOwner(mxs)
+          if mxs == "MXSA" and owner != "B":
+            continue  # allocated, or aliased onto A's range, in the A block
+          if owner == mxs:
+            module.add(self.defineSgpr("tdm%sGroup0" % mxs, 4, 4))
+            module.add(self.defineSgpr("tdm%sGroup1" % mxs, 8, 4))
+          else:
+            module.add(RegSet("s", "sgprtdm%sGroup0" % mxs, "sgprtdm%sGroup0" % owner))
+            module.add(RegSet("s", "sgprtdm%sGroup1" % mxs, "sgprtdm%sGroup1" % owner))
+
+    # The four-operand load reads Group2/3 for every member of an iterating set.
+    if self.isTdmWaveSeparated(kernel) and (kernel.get("_TDMIterateModeA", False)
+                                            or kernel.get("_TDMIterateModeB", False)):
+      for mxs in ("MXSA", "MXSB"):
+        if not kernel["ProblemType"]["MXBlock%s" % mxs[-1]]:
+          continue
+        if not (kernel["enableTDMA"] if mxs == "MXSA" else kernel["enableTDMB"]):
+          continue
+        host = next((m for m in (tdmSetGroup(kernel, mxs) or ()) if m in ("A", "B")), None)
+        if host is None:
+          continue
+        module.add(RegSet("s", "sgprtdm%sGroup2" % mxs, "sgprtdm%sGroup2" % host))
+        module.add(RegSet("s", "sgprtdm%sGroup3" % mxs, "sgprtdm%sGroup2" % host))
 
     if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1:
+      # tdmABIncs exists only to hold the parity-selected increment for the one
+      # shared A/B descriptor.
       module.add(self.defineSgpr("tdmABIncs", 1))
 
       # Multi-wave TDMSplit recomputes the LDS/global split increments (and the
       # dim1 H0/H1 boundaries) transiently at point of use (see
       # _tdmSplitMultiWaveInc); nothing is persisted here.
 
-      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+      # Shared-scale sets select no second scale increment.
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] \
+         and not tdmSharedScaleSetActive(kernel):
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
 
     # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
@@ -2196,6 +2344,12 @@ class KernelWriterAssembly(KernelWriter):
         msg = "not enough LDS space"
       elif self.states.overflowedResources == 9:
         msg = self.states.rapStoreNeutralityMsg
+      elif self.states.overflowedResources == 10:
+        msg = "no workgroup-wide position for a rebuilt LDS barrier"
+      elif self.states.overflowedResources == 11:
+        msg = "decoupled PGR thick-wait not covered in the emitted assembly"
+      elif self.states.overflowedResources == 12:
+        msg = "tail LDS reset has one block stride and a divergent pair has two"
       else:
         msg = "unknown"
 
@@ -6019,10 +6173,16 @@ class KernelWriterAssembly(KernelWriter):
           # needed for the VReadfirstlaneB32 in the prior code block
           if self.states.archCaps["CrosslaneWait"]:
             module.add(SNop(waitState=0, comment="1 wait states"))
-          module.add(SAddU32(dst=sgpr("Swap%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), src1=kernel["LdsOffsetA_Blk"], comment="Calculate starting lds addr of second buffer"))
+          # Runtime toggle mask for non-power-of-two strides; divergent layout uses
+          # compare-and-add in tdmSwapLdsOffset instead.
+          _lwaBlk = self._decoupledSwapStride(kernel, tc) if self._dcpDivergent(kernel) \
+                    else kernel["LdsOffsetA_Blk"]
+          module.add(SAddU32(dst=sgpr("Swap%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), src1=_lwaBlk, comment="Calculate starting lds addr of second buffer"))
           module.add(SXorB32(dst=sgpr("Swap%s"%tc), src0=sgpr("Swap%s"%tc), src1=sgpr("LocalWriteAddr%s"%tc), comment="xor both lds buffer offsets to enable swapping"))
       else:
-        module.add(VAddU32(dst=vgpr("LocalWriteSwapAddr%s"%tc), src0=kernel["LdsOffsetA_Blk"], src1=vgpr("LocalWriteAddr%s"%tc), \
+        _lwaBlk = self._decoupledSwapStride(kernel, tc) if self._dcpDivergent(kernel) \
+                  else kernel["LdsOffsetA_Blk"]
+        module.add(VAddU32(dst=vgpr("LocalWriteSwapAddr%s"%tc), src0=_lwaBlk, src1=vgpr("LocalWriteAddr%s"%tc), \
                            comment="starting lds addr of second buffer" ))
         module.add(VXorB32(dst=vgpr("LocalWriteSwapAddr%s"%tc), \
                           src0=vgpr("LocalWriteSwapAddr%s"%tc), \
@@ -6292,7 +6452,9 @@ class KernelWriterAssembly(KernelWriter):
 
     tc = tP["tensorChar"]
     if kernel["StoreSwapAddr"]:
-      module.add(VAddU32(dst=vgpr("LocalReadSwapAddr%s"%tc), src0=kernel["LdsOffsetA_Blk"], src1=vgpr("LocalReadAddr%s"%tc), \
+      _lrSwapBlk = self._decoupledSwapStride(kernel, tc) if self._dcpDivergent(kernel) \
+                   else kernel["LdsOffsetA_Blk"]
+      module.add(VAddU32(dst=vgpr("LocalReadSwapAddr%s"%tc), src0=_lrSwapBlk, src1=vgpr("LocalReadAddr%s"%tc), \
                          comment="Calculate starting lds addr of second buffer" ))
       module.add(VXorB32(dst=vgpr("LocalReadSwapAddr%s"%tc), \
                          src0=vgpr("LocalReadSwapAddr%s"%tc), \
@@ -6689,21 +6851,20 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   # TDM: apply stagger offset to TDM descriptor.
-  # Wave-separated (numWaves > 1): descriptors are aliased, so only the
-  #   matching-parity waves should apply the offset (even=A, odd=B).
-  # Non-wave-separated (numWaves == 1): A and B have independent descriptors,
-  #   all waves apply unconditionally.
+  # Wave-separated updates follow each tensor's wave partition; single-wave
+  # descriptors update unconditionally.
   ##############################################################################
   def _applyStaggerTDM(self, imod, kernel, tP, offsetSgpr, labelName="SkipStagger", commentTag="stagger", tdmGroupName=None):
-    # tdmGroupName=None: derive SRD from tP and wave-parity-gate the add. In wave-separated
-    #   mode A and B share tdm{tc}Group0 SGPR but hold different per-wave values; the parity
-    #   gate ensures only the owning waves update.
+    # tdmGroupName=None: gate by tP's wave partition.
     # tdmGroupName set (e.g. "tdmMetadataGroup0" for the sparse metadata SRD): wave-uniform
     #   add. Metadata is single-sided, but all waves run this function; non-sparse-side waves
     #   harmlessly advance a SRD copy they never read from.
     if tdmGroupName is None:
       tc = tP["tensorChar"]
       tdmGroup0 = f"tdm{tc}Group0"
+      if tdmSharedScaleSetActive(kernel):
+        return self._applyStaggerTdmSharedScale(imod, kernel, tc, tdmGroup0, offsetSgpr,
+                                               labelName, commentTag)
       useParityGate = kernel["NumWaves"] > 1
     else:
       tc = "Metadata"
@@ -6716,11 +6877,11 @@ class KernelWriterAssembly(KernelWriter):
 
       self._emitTdmWaveParitySCCAuto(imod, kernel, comment="check wave parity",
                                     tmpTag="_applyStaggerTDM_waveIdTmp")
-
-      if "A" in tc:
-        imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="skip: odd waves handle B"))
+      _, gateWaves = tdmWavePartition(kernel, tc)
+      if gateWaves[0] % 2 == 0:
+        imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=f"skip: odd waves do not carry {tc}"))
       else:
-        imod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="skip: even waves handle A"))
+        imod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment=f"skip: even waves do not carry {tc}"))
 
     imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
               src1=sgpr(offsetSgpr), comment=f"TDM addr += {commentTag} offset (lo)"))
@@ -6729,6 +6890,29 @@ class KernelWriterAssembly(KernelWriter):
 
     if skipLabel is not None:
       imod.add(skipLabel)
+
+  def _applyStaggerTdmSharedScale(self, imod, kernel, tc, tdmGroup0, offsetSgpr,
+                                  labelName, commentTag):
+    """Apply stagger only on waves carrying `tc` in a shared-scale set."""
+    _, waves = tdmWavePartition(kernel, tc)
+
+    def addOffset():
+      imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
+                src1=sgpr(offsetSgpr), comment=f"TDM addr += {commentTag} offset (lo)"))
+      imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
+                src1=sgpr(offsetSgpr+1), comment=f"TDM addr += {commentTag} offset (hi)"))
+
+    if tuple(waves) == tuple(range(kernel["NumWaves"])):
+      imod.addComment0(f"{tc}: every wave carries a component, no gate")
+      addOffset()
+      return
+
+    skipLabel = Label(label=f"{labelName}{tc}", comment="")
+    self._emitTdmWaveSetSkipSCC(imod, kernel, waves, tc)
+    imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+             comment=f"skip {tc} on the waves that do not carry it"))
+    addOffset()
+    imod.add(skipLabel)
 
   ##############################################################################
   # Remove stagger offset (before tail loop)
@@ -6800,6 +6984,9 @@ class KernelWriterAssembly(KernelWriter):
     # kernel buys back the ArgType packing and the PAP-side recompute, and leaves
     # a single spelling of the parity check to read.
     if kernel.get("ReuseAcrossPersistent"):
+      return module
+    # Loop-body readers may still need WaveIdx (tdmWaveIdxReadAfterPrologue).
+    if self.tdmWaveIdxReadAfterPrologue(kernel):
       return module
     if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
       return module
@@ -7722,10 +7909,13 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SCmpEQU32(src0=sgpr("OrigLoopCounter"), src1=0, comment="skip if main loop was not executed"))
             module.add(SCBranchSCC1(labelName=SkipHalfPLRAdjustLabel.getLabelName(), comment=""))
             module.addComment0("HalfPLR: re-enable TDM & align LDS buffer")
-            # Wave-separated TDM aliases the A descriptor for both A and B, so only
-            # A (and its MX scales) is re-enabled there.
+            # Default: A-side alias only; re-enable B/MX too when descriptors are separate.
             hplrTiles = [tPA]
             if kernel["NumWaves"] > 1:
+              if self.tdmSeparateABDescriptors(kernel):
+                hplrTiles.append(tPB)
+                if kernel["ProblemType"]["MXBlockB"]:
+                  hplrTiles.append(tPB["MX"])
               if kernel["ProblemType"]["MXBlockA"]:
                 hplrTiles.append(tPA["MX"])
             else:
@@ -8211,9 +8401,12 @@ class KernelWriterAssembly(KernelWriter):
       loopCounter = self.loopCounter(kernel, loopIdx)
       module.addComment1("closeLoop loop%s finalLoop=%d tailLoop=%d" % (loopChar, finalLoop, tailLoop))
 
-      if kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["PrefetchGlobalRead"]:
-        module.add(SWaitCnt(dscnt=0, comment="TDM PGR=0: wait all ds_reads before TDM overwrite"))
-        module.add(SBarrier(comment="TDM PGR=0: signal+wait done reading LDS"))
+      if kernel["enableTDMA"] and kernel["enableTDMB"] and \
+         (not kernel["PrefetchGlobalRead"] or decoupledSingleBuffered(kernel)):
+        # Distinguish scalar PGR=0 from a per-tensor single-buffered side.
+        warWhy = "PGR=0" if not kernel["PrefetchGlobalRead"] else "single LDS blk"
+        module.add(SWaitCnt(dscnt=0, comment=f"TDM {warWhy}: wait all ds_reads before TDM overwrite"))
+        module.add(SBarrier(comment=f"TDM {warWhy}: signal+wait done reading LDS"))
 
       # If PrefetchGlobalRead=1 the loads in the loop prefetch next macro-tile
       # For the final trip through the unroll loop we need to ensure those loads stay in bounds.
@@ -11568,7 +11761,9 @@ class KernelWriterAssembly(KernelWriter):
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       useSplitTokens = bool(kernel["TDMSplit"]) and not kernel["ProblemType"]["Sparse"]
       tdmParity = self.states.ldsTensorTokenIdx
-      if useSplitTokens:
+      if self.states.dcpTokenGate:
+        comp.setMemToken(self._dcpTdmIssueTokens(kernel, "A"))
+      elif useSplitTokens:
         comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][0]])
       else:
         comp.setMemToken([self.states.ldsTensorTokenIdx])
@@ -11581,10 +11776,9 @@ class KernelWriterAssembly(KernelWriter):
             imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
         else:
           imod.middle.add(self.tdmResetTailLdsBuffer(kernel, ldsAddrSgprName))
-      # WS mode: this single shared load also serves B (odd waves) via
-      # A's aliased SGPRs, so pass iter operands when either tile is iterate.
+      # Aliased A/B: OR iterate flags. Separate descriptors: A's load never describes B.
       isIterA = kernel.get("_TDMIterateModeA", False)
-      if self.isTdmWaveSeparated(kernel):
+      if self.isTdmWaveSeparated(kernel) and not self.tdmSeparateABDescriptors(kernel):
         isIterA = isIterA or kernel.get("_TDMIterateModeB", False)
       tdmAGroup2 = "tdmAGroup2" if isIterA else None
       tdmAGroup3 = "tdmAGroup3" if isIterA else None
@@ -11664,6 +11858,9 @@ class KernelWriterAssembly(KernelWriter):
       return imod
 
     if tc == "MXSA" and kernel["enableTDMA"]:
+      # An aliased member must not issue a second load for its descriptor set.
+      if self.tdmDescriptorSetOwner(kernel, "MXSA") != "MXSA":
+        return imod
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
       if kernel["ProblemType"]["MXBlockA"]:
@@ -11698,6 +11895,19 @@ class KernelWriterAssembly(KernelWriter):
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
+      # A shared A/B descriptor issues through A; an independently owned B set
+      # issues once on every wave.
+      if self.tdmSeparateABDescriptors(kernel):
+        comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+        if self.states.dcpTokenGate:
+          comp.setMemToken(self._dcpTdmIssueTokens(kernel, "B"))
+        else:
+          comp.setMemToken([self.states.ldsTensorTokenIdx])
+        isIterB = kernel.get("_TDMIterateModeB", False)
+        tdmBGroup2 = "tdmBGroup2" if isIterB else None
+        tdmBGroup3 = "tdmBGroup3" if isIterB else None
+        imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
+        return imod
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if numWaves == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
@@ -12016,6 +12226,122 @@ class KernelWriterAssembly(KernelWriter):
 
     return imod
 
+  # B/MXSB alias A/MXSA when NumWaves>1 and descriptors are shared.
+  _tdmDecoupledAliasPartner = {"A": "B", "MXSA": "MXSB"}
+  _tdmDecoupledAliasPartnerPaired = {"A": "MXSA", "B": "MXSB"}
+
+  def _tdmAliasPartner(self, kernel, tc):
+    """The tensor whose TDM descriptor is a RegSet alias of `tc`'s, or None."""
+    if self.tdmFusePaired(kernel):
+      return self._tdmDecoupledAliasPartnerPaired.get(tc)
+    return self._tdmDecoupledAliasPartner.get(tc)
+
+  def _tdmParityMembers(self, kernel, tc, partner):
+    """Return an aliased pair's even/odd members from the wave partition."""
+    _numComp, waves = tdmWavePartition(kernel, tc)
+    return (tc, partner) if 0 in waves else (partner, tc)
+
+  def _dcpTdmIssueTokens(self, kernel, tc):
+    """Return every live LDS-side token filled by `tc`'s descriptor set."""
+    group = tdmSetGroup(kernel, tc) or (tc,)
+    return sorted({self._dcpCurrentToken("Tensor", member) for member in group
+                   if tdmMemberIsLive(kernel, member)})
+
+  def _dcpDivergent(self, kernel):
+    """True when decoupled A and B use different LDS block counts."""
+    decoupled, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
+    return decoupled and numLdsBlkA != numLdsBlkB
+
+
+  def _tdmDecoupledBlocks(self, kernel, tc):
+    """(number of LDS copies, stride) for one tensor under the decoupled layout."""
+    _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
+    if dcpLdsSide(tc) == "A":
+      return numLdsBlkA, kernel["LdsOffsetBlkA"]
+    return numLdsBlkB, kernel["LdsOffsetBlkB"]
+
+  def _decoupledSwapStride(self, kernel, tc):
+    """Byte distance between a tensor's two LDS copies (0 when single-buffered)."""
+    numBlk, stride = self._tdmDecoupledBlocks(kernel, tc)
+    return stride if numBlk >= 2 else 0
+
+  def _tdmDecoupledSwapArm(self, kernel, tc, ldsAddrSgprName, tmpSgprIdx) -> Module:
+    """Toggle a descriptor using its tensor's second-copy base."""
+    numBlk, stride = self._tdmDecoupledBlocks(kernel, tc)
+    module = Module(f"TDM LDS swap {tc}")
+    # A single-block tensor has no second copy to swap into.
+    if numBlk < 2:
+      module.addComment0(f"TDM decoupled swap {tc}: single-buffered, no swap")
+      return module
+    secondCopyBase = kernel[f"LdsOffset{tc}"] + stride
+    # A is exempt: LdsOffsetA_Blk is the overloaded whole-block swap stride, not
+    # A's second-copy base.
+    if tc != "A":
+      assert kernel[f"LdsOffset{tc}_Blk"] == secondCopyBase, \
+        f"LdsOffset{tc}_Blk={kernel[f'LdsOffset{tc}_Blk']} disagrees with the " \
+        f"second-copy base {secondCopyBase} this swap emits"
+    module.addComment0(f"TDM decoupled swap {tc}: stride={stride} secondCopyBase={secondCopyBase}")
+    module.add(SCmpLtU32(sgpr(ldsAddrSgprName), secondCopyBase,
+                         f"{tc}: below 2nd-copy base {secondCopyBase}?"))
+    module.add(SMovB32(sgpr(tmpSgprIdx), -stride, "Init as -blk"))
+    module.add(SCSelectB32(sgpr(tmpSgprIdx), stride, sgpr(tmpSgprIdx), "<: +blk, >=: -blk"))
+    module.add(SAddI32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(tmpSgprIdx), "Do swap"))
+    return module
+
+  def _tdmSwapLdsOffsetDecoupled(self, kernel, tP, ldsAddrSgprName) -> Module:
+    """Swap each descriptor using its owning tensor's decoupled LDS stride."""
+    tc: str = tP["tensorChar"]
+    # Resolve sharing at kernel scope; an owner still names any aliases of its set.
+    aliased = kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")
+    if tc in ("A", "B") and self.tdmSeparateABDescriptors(kernel) \
+       and not self.tdmFusePaired(kernel):
+      aliased = False
+    if tdmSharedScaleSetActive(kernel) and tc == tdmSharedScaleSetOwner(kernel):
+      for mx in ("MXSA", "MXSB"):
+        assert self._tdmDecoupledBlocks(kernel, mx)[0] \
+               == self._tdmDecoupledBlocks(kernel, tc)[0], \
+          f"{mx} rides {tc}'s descriptor set but carries a different LDS " \
+          f"block count, so the shared set needs a three-way swap arm"
+    partner = self._tdmAliasPartner(kernel, tc) if (aliased and kernel["enableTDMB"]) else None
+
+    if partner is None:
+      module = Module(f"TDM LDS swap {tc} (decoupled)")
+      if self._tdmDecoupledBlocks(kernel, tc)[0] < 2:
+        module.addComment0(f"TDM decoupled swap {tc}: single-buffered, no swap")
+        return module
+      with self.allocTmpSgpr(1, tag="tdmSwapLdsOffset_tmpSgprRes") as tmpSgprRes:
+        module.add(self._tdmDecoupledSwapArm(kernel, tc, ldsAddrSgprName, tmpSgprRes.idx))
+      return module
+
+    tcEven, tcOdd = self._tdmParityMembers(kernel, tc, partner)
+    numBlkEven = self._tdmDecoupledBlocks(kernel, tcEven)[0]
+    numBlkOdd = self._tdmDecoupledBlocks(kernel, tcOdd)[0]
+    module = Module(f"TDM LDS swap {tcEven}/{tcOdd} (decoupled, wave-parity)")
+    if numBlkEven < 2 and numBlkOdd < 2:
+      module.addComment0(f"TDM decoupled swap {tcEven}/{tcOdd}: both single-buffered, no swap")
+      return module
+
+    with self.allocTmpSgpr(1, tag="tdmSwapLdsOffset_tmpSgprRes") as tmpSgprRes:
+      tmpSgprIdx = tmpSgprRes.idx
+      lblEnd = Label(self.labels.getNameInc(f"TDMSwap{tcEven}{tcOdd}End"), "")
+      module.addComment0(f"TDM decoupled swap: even waves={tcEven}({numBlkEven} blk), odd waves={tcOdd}({numBlkOdd} blk)")
+      module.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+      if numBlkEven < 2:
+        module.add(SCBranchSCC0(lblEnd.getLabelName(), f"even waves hold {tcEven}, single-buffered: skip"))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcOdd, ldsAddrSgprName, tmpSgprIdx))
+      elif numBlkOdd < 2:
+        module.add(SCBranchSCC1(lblEnd.getLabelName(), f"odd waves hold {tcOdd}, single-buffered: skip"))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcEven, ldsAddrSgprName, tmpSgprIdx))
+      else:
+        lblOdd = Label(self.labels.getNameInc(f"TDMSwap{tcOdd}"), "")
+        module.add(SCBranchSCC1(lblOdd.getLabelName(), f"Jump to {tcOdd} if wId is odd"))
+        module.add(self._tdmDecoupledSwapArm(kernel, tcEven, ldsAddrSgprName, tmpSgprIdx))
+        module.add(SBranch(lblEnd.getLabelName()))
+        module.add(lblOdd)
+        module.add(self._tdmDecoupledSwapArm(kernel, tcOdd, ldsAddrSgprName, tmpSgprIdx))
+      module.add(lblEnd)
+    return module
+
   def tdmSwapLdsOffset(self, kernel, tP) -> Module:
     tc: str = tP["tensorChar"]
     strippedTc: str = tc[-1]
@@ -12025,11 +12351,19 @@ class KernelWriterAssembly(KernelWriter):
     if not needSwap:
       return Module("TDM LDS swap (Empty)")
 
+    owner: str = self.tdmDescriptorSetOwner(kernel, tc)
+    if owner != tc:
+      return Module(f"TDM LDS swap {tc} (aliases {owner}'s set, swapped there)")
+
+    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
+
+    if self._dcpDivergent(kernel):
+      return self._tdmSwapLdsOffsetDecoupled(kernel, tP, ldsAddrSgprName)
+
     module: Module = Module("TDM LDS swap")
     storeSwapAddr = kernel["StoreSwapAddr"]
     module.addComment(f"TDM LDS swap(aligned pow2: {not storeSwapAddr})")
-    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-    ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
 
     if self.states.IncLdsBufSwitch:
       # 3+ LDS buffers (TDMPlusLdsBuf): rotate the TDM LDS write address through the
@@ -16008,7 +16342,7 @@ class KernelWriterAssembly(KernelWriter):
         # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
         # No separate compare needed: allocPostLoopSrdSuppress leaves SCC = (AddressGate == 0)
         # module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
-        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
+        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=1.0, src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
         module.add(self.shiftSrd("Gate"))
         ssslist.append("Gate")
         useSize.append(False)
@@ -19571,6 +19905,48 @@ class KernelWriterAssembly(KernelWriter):
     """True when Serial remat needs a dest SGPR (WaveIdx dead and ArgType unpacked)."""
     return not self.isTdmWaveIdxLive(kernel) and not self.states.tdmParityPackedInArgType
 
+  def tdmArgTypeWaveIdBits(self, kernel) -> int:
+    """Return the WaveIdx bit count packed into ArgType[8+]."""
+    if tdmSharedScaleSetActive(kernel):
+      return max(1, ceil(log2(kernel["NumWaves"])))
+    return 1
+
+  def _emitTdmWaveIdIntoSgpr(self, kernel, dstIdx: int, comment: str = "waveId") -> Module:
+    """Materialise WaveIdx from packed ArgType bits or Serial."""
+    mod = Module("TdmWaveId")
+    if self.states.tdmParityPackedInArgType:
+      bits: int = self.states.tdmWaveIdBitsInArgType
+      mod.add(SLShiftRightB32(dst=sgpr(dstIdx), shiftHex=8, src=sgpr("ArgType"),
+                              comment=f"{comment} from ArgType bit 8"))
+      mod.add(SAndB32(dst=sgpr(dstIdx), src0=sgpr(dstIdx), src1=hex((1 << bits) - 1),
+                      comment=f"keep the {bits} packed wave-id bit(s)"))
+      return mod
+    wavelen: int = kernel["WavefrontSize"]
+    mod.add(VReadfirstlaneB32(dst=sgpr(dstIdx), src=vgpr("Serial"), comment="get tId"))
+    mod.add(SLShiftRightB32(dst=sgpr(dstIdx), shiftHex=ceil(log2(wavelen)),
+                            src=sgpr(dstIdx), comment=comment))
+    return mod
+
+  def _emitTdmWaveSetSkipSCC(self, module: Module, kernel: Mapping, waves, tc: str):
+    """Set SCC1 when the current wave does not carry `tc`."""
+    def emitCmp(waveIdOp):
+      if len(waves) == 1:
+        module.add(SCmpLgU32(src0=waveIdOp, src1=waves[0],
+                   comment=f"only wave {waves[0]} carries {tc}"))
+        return
+      assert tuple(waves) == tuple(range(len(waves))), \
+             f"{tc}: expected a contiguous low wave run, got {waves}"
+      module.add(SCmpGeU32(src0=waveIdOp, src1=len(waves),
+                 comment=f"waves {waves[0]}-{waves[-1]} carry {tc}"))
+
+    if self.isTdmWaveIdxLive(kernel):
+      emitCmp(sgpr("WaveIdx"))
+      return
+    # SCC survives the tmp going back to the pool; only the compare needs it.
+    with self.allocTmpSgpr(1, tag="tdmWaveSetSkip_waveIdTmp") as waveIdTmp:
+      module.add(self._emitTdmWaveIdIntoSgpr(kernel, waveIdTmp.idx))
+      emitCmp(sgpr(waveIdTmp.idx))
+
   def _emitTdmWaveParitySCCAuto(self, module: Module, kernel: Mapping,
                                 comment: str = "wave parity", tmpTag: str = "tdmParityTmp"):
     """Emit parity into SCC, allocating a 1-SGPR tmp only for Serial remat."""
@@ -19830,7 +20206,9 @@ class KernelWriterAssembly(KernelWriter):
     isMetadata: bool = tP["isM"]
     isMetadataML1: bool = isMetadata and kernel["ProblemType"]["Sparse"] and kernel["ProblemType"]["MetadataLayout"]
     waveSepMetadata: bool = isMetadata and self.isTdmWaveSeparated(kernel)
-    numComp: int = numWaves // 2 if waveSepMetadata else numWaves
+    # issueLoad admits metadata on even waves; the grouping has to agree.
+    assert not waveSepMetadata or 0 in tdmWavePartition(kernel, "Metadata")[1]
+    numComp: int = tdmWaveComponents(kernel, "Metadata")[0] if waveSepMetadata else numWaves
 
     isTdmIter = (not isMetadata
                  and kernel.get("_TDMIterateMode%s" % tc, False))
@@ -19850,7 +20228,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       if waveSepMetadata:
-        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wCompId = WaveIdx // 2"))
+        self._emitTdmCompId(mod, kernel, "Metadata", waveOffsetSgprIdx)
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wCompId * (mt // numComp * du * bpe // dim1Divisor)"))
       else:
         mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
@@ -19995,8 +20373,7 @@ class KernelWriterAssembly(KernelWriter):
     bpe: float = tP["bpeGR"] if not tP["isM"] else 1
     #TODO: temp hack
     numWaves: int = kernel["NumWaves"]
-    numComp: int = numWaves // 2
-    assert numComp & (numComp - 1) == 0
+    numComp, compShift = tdmWaveComponents(kernel, tc)
     wavelen: int = kernel["WavefrontSize"]
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
@@ -20008,13 +20385,17 @@ class KernelWriterAssembly(KernelWriter):
 
     isTdmIter = (tc != "Metadata"
                  and kernel.get("_TDMIterateMode%s" % tc, False))
-    # WS mode shares one load between A and B; when either tile is iterate,
-    # the non-iterate side must also init Group2/3 (read by the shared load;
-    # stale data corrupts the non-iterate load). MXS* never share SGPRs.
-    needGroup23 = isTdmIter or (tc in ("A", "B")
-                                and self.isTdmWaveSeparated(kernel)
+    # One load is shared by every member of a descriptor set, and its 4-operand
+    # form reads Group2/3 whatever the issuing member's own iterate_enable is.
+    # So any member of a set holding a data tensor in iterate mode must init
+    # them -- including a scale tensor, which the non-default groupings seat on
+    # a data tensor's register range.
+    needGroup23 = isTdmIter or (self.isTdmWaveSeparated(kernel)
                                 and (kernel.get("_TDMIterateModeA", False)
-                                     or kernel.get("_TDMIterateModeB", False)))
+                                     or kernel.get("_TDMIterateModeB", False))
+                                and (tc in ("A", "B")
+                                     or any(m in ("A", "B")
+                                            for m in (tdmSetGroup(kernel, tc) or ()))))
     group2Name = descSgprName(2) if needGroup23 else None
     # Group 3 aliases Group 2; skip the redundant alias-side zero-init.
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
@@ -20028,7 +20409,14 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
-      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
+      if compShift is None:
+        compIdComment = f"componentId=0 ({tc})"
+      elif compShift == 1:
+        compIdComment = "componentId=WaveIdx >> 1"
+      else:
+        compIdComment = f"componentId=WaveIdx ({numComp} components)"
+      mod.add(self.tdmEmitWaveCompId(waveOffsetSgprIdx, compShift, waveIdxSgpr,
+                                     compIdComment))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       _segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
       # Active tensor only gets the component wave jump; the baseline tensor (aBaseline/bBaseline) is untouched.
@@ -20089,8 +20477,11 @@ class KernelWriterAssembly(KernelWriter):
           tmpSgprWaveOffset = tmpSgpr.idx
           if numMxKGroups < numComp:
             # M/N-splitting: offset within same k_group along tile dimension
-            mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
-            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            if compShift == 1:
+              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            else:
+              self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
             mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
             mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
@@ -20115,8 +20506,11 @@ class KernelWriterAssembly(KernelWriter):
         with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgpr3") as tmpSgpr:
           tmpSgprWaveOffset = tmpSgpr.idx
           if unrolledMajor:
-            mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
-            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            if compShift == 1:
+              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+            else:
+              self._emitTdmCompId(mod, kernel, tc, tmpSgprWaveOffset, waveIdxSgpr)
             mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp // dim1Divisor), "woffset = wId * (mt // numComp // dim1Divisor)"))
             mod.add(SSubU32(sgpr(dim1), sgpr(dim1), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
             mod.add(SCMovB32(sgpr(dim1), 0, "set to 0 for waves that no enough data to load"))
@@ -20175,23 +20569,69 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
+  def _tdmSharedScaleDispatch(self, kernel, tPA, tPB, waveIdxSgpr, emitFor, what: str) -> Module:
+    """Emit each pair member only on waves assigned by tdmWavePartition.
+
+    The A/B call precedes the scale call so a shared owner is programmed once.
+    """
+    mod = Module(f"TDM {what} Fuse {tdmGrouping(kernel).name}")
+    tcA: str = tPA["tensorChar"]
+    tcB: str = tPB["tensorChar"]
+    _, wavesA = tdmWavePartition(kernel, tcA)
+    _, wavesB = tdmWavePartition(kernel, tcB)
+    numWaves: int = kernel["NumWaves"]
+
+    def guarded(tP, waves, tc):
+      """Emit tP's setup under a guard admitting exactly `waves`."""
+      if tuple(waves) == tuple(range(numWaves)):
+        mod.addComment0(f"{tc}: every wave participates, no guard")
+        mod.add(emitFor(tP))
+        return
+      skip = Label(self.labels.getNameInc(f"TDM{what}{tc}Skip"), "")
+      if len(waves) == 1:
+        mod.add(SCmpLgU32(src0=sgpr(waveIdxSgpr), src1=waves[0],
+                comment=f"only wave {waves[0]} moves {tc}"))
+        mod.add(SCBranchSCC1(skip.getLabelName(), f"skip {tc} on every other wave"))
+      else:
+        # A contiguous low run of waves: waveIdx >= len(waves) skips.
+        assert tuple(waves) == tuple(range(len(waves))), \
+               f"{tc}: expected a contiguous low wave run, got {waves}"
+        mod.add(SCmpGeU32(src0=sgpr(waveIdxSgpr), src1=len(waves),
+                comment=f"waves {waves[0]}-{waves[-1]} move {tc}"))
+        mod.add(SCBranchSCC1(skip.getLabelName(), f"skip {tc} on the remaining waves"))
+      mod.add(emitFor(tP))
+      mod.add(skip)
+
+    guarded(tPA, wavesA, tcA)
+    guarded(tPB, wavesB, tcB)
+    return mod
+
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     #TODO: TDM implement
     mod = Module("TDM Init Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
-    tdmInitLblA = Label(self.labels.getNameInc(f"TDMInit{tcA}"), "")
-    tdmInitLblB = Label(self.labels.getNameInc(f"TDMInit{tcB}"), "")
-    tdmInitLblEnd = Label(self.labels.getNameInc(f"TDMInit{tcA}{tcB}End"), "")
+    # Shared-scale descriptors are initialized on their full assigned wave sets.
+    if tdmSharedScaleSetActive(kernel):
+      mod.add(self._tdmSharedScaleDispatch(kernel, tPA, tPB, waveIdxSgpr,
+                                       lambda tP: self.initTDMDescriptorWaveSeparatedImpl(kernel, tP, waveIdxSgpr),
+                                       "Init"))
+      return mod
+
+    tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tPA, tPB)
+    tcEven, tcOdd = tPEven["tensorChar"], tPOdd["tensorChar"]
+    tdmInitLblA = Label(self.labels.getNameInc(f"TDMInit{tcEven}"), "")
+    tdmInitLblB = Label(self.labels.getNameInc(f"TDMInit{tcOdd}"), "")
+    tdmInitLblEnd = Label(self.labels.getNameInc(f"TDMInit{tcEven}{tcOdd}End"), "")
     mod.add(tdmInitLblA)
 
     mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
-    mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), "Jump to B if wId is odd"))
+    mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), f"Jump to {tcOdd} if wId is odd"))
 
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA, waveIdxSgpr))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPEven, waveIdxSgpr))
     mod.add(SBranch(tdmInitLblEnd.getLabelName()))
     mod.add(tdmInitLblB)
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB, waveIdxSgpr))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPOdd, waveIdxSgpr))
     mod.add(tdmInitLblEnd)
     return mod
 
@@ -20207,20 +20647,30 @@ class KernelWriterAssembly(KernelWriter):
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
-    tdmGlobalOffsetLblA = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcA}"), "")
-    tdmGlobalOffsetLblB = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcB}"), "")
-    tdmGlobalOffsetLblEnd = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcA}{tcB}End"), "")
+
+    # Shared-scale dispatch computes each live start address on its assigned waves.
+    if tdmSharedScaleSetActive(kernel):
+      def startAddr(tP):
+        tc = tP["tensorChar"]
+        return comp.calculateStartAddrWaveSeparated(self, kernel, tP, f"Address{tc}",
+                                                    f"tdm{tc}Group0", waveIdxSgpr)
+      mod.add(self._tdmSharedScaleDispatch(kernel, tPA, tPB, waveIdxSgpr, startAddr, "GlobalOffset"))
+      return mod
+
+    tPEven, tPOdd = self._tdmPairedParityOrder(kernel, tPA, tPB)
+    tcEven, tcOdd = tPEven["tensorChar"], tPOdd["tensorChar"]
+    tdmGlobalOffsetLblA = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcEven}"), "")
+    tdmGlobalOffsetLblB = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcOdd}"), "")
+    tdmGlobalOffsetLblEnd = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcEven}{tcOdd}End"), "")
     mod.add(tdmGlobalOffsetLblA)
 
     mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
-    mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
+    mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), f"Jump to {tcOdd} if wId is odd"))
 
-    dstGroup0A = f"tdm{tcA}Group0"
-    dstGroup0B = f"tdm{tcB}Group0"
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}", dstGroup0A, waveIdxSgpr))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPEven, f"Address{tcEven}", f"tdm{tcEven}Group0", waveIdxSgpr))
     mod.add(SBranch(tdmGlobalOffsetLblEnd.getLabelName()))
     mod.add(tdmGlobalOffsetLblB)
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}", dstGroup0B, waveIdxSgpr))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPOdd, f"Address{tcOdd}", f"tdm{tcOdd}Group0", waveIdxSgpr))
     mod.add(tdmGlobalOffsetLblEnd)
     return mod
 
@@ -20229,11 +20679,27 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    group0Name = f"tdm{tcA}Group0"
+    group0Name = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
     # DP-only: StreamKLocalStart == 0, so the K-offset is 0 * increment == 0 and
     # applying it is a no-op. StreamKLocalStart is not allocated in DP-only mode.
     if kernel["StreamKForceDPOnly"]:
+      return mod
+
+    # A shared scale set offsets its owner once; the other data tensor remains independent.
+    if tdmSharedScaleSetActive(kernel):
+      if tcA != "A":
+        return mod
+      tcShared, tcSep = tdmSharedSetOrder(kernel, tcA, tcB)
+      with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
+        tmpSgpr = tmpSgprRes.idx
+        for group0, incs in ((f"tdm{tcShared}Group0", incSgprName),
+                             (f"tdm{tcSep}Group0", sgpr(f"GlobalReadIncs{tcSep}"))):
+          src1 = incs if isinstance(incs, RegisterContainer) else sgpr(incs)
+          mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=src1,
+                           comment=f"StreamK K-offset for {group0} = localStart * increment"))
+          mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(tmpSgpr),
+                           comment=f"Apply StreamK K-offset to TDM {group0}"))
       return mod
 
     with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
@@ -20246,11 +20712,12 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmApplyStreamKTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    # PAP rejects shared-scale groupings because this path requires tdm<tcA><tcB>Incs.
     mod = Module("TDM StreamK tail K-offset Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
-    group0Name = f"tdm{tcA}Group0"
+    group0Name = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
@@ -20321,6 +20788,7 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def papTdmUpdateDescriptor(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, preservePapBank: bool=True) -> Module:
+    # Each call requires a distinct descriptor range; PAP rejects grouping aliases.
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -20372,6 +20840,7 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def papTdmRestoreLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    # These bank shifts are non-idempotent; PAP requires distinct data/scale ranges.
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     mod = Module("TDM restore PAP LDS bank for primed path")
     skipLbl = Label(self.labels.getNameInc("SkipPapBankRestore"), "")
@@ -20542,6 +21011,12 @@ class KernelWriterAssembly(KernelWriter):
     blkOffset: int = kernel["LdsOffsetA_Blk"]
     if blkOffset == 0:
       return mod
+    # A divergent pair has two block strides and the two groups do not start at a
+    # common multiple of either, so normalizing everything by LdsOffsetA_Blk would
+    # land the second group inside the first group's allocation. Refuse instead.
+    if self._dcpDivergent(kernel):
+      self.states.overflowedResources = 12
+      return mod
     for blk in range(self.states.numLDSBlk - 1, 0, -1):
       inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")
       cmpComment = "TDM tail descriptor already in buffer 0?" if blk == 1 else \
@@ -20642,17 +21117,18 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmWrapUSelHoisted(self, kernel) -> bool:
-    """True when hoistWaveParityWrapUSel folds the wave-parity WrapU choice into WrapUA.
+    """True when hoistWaveParityWrapUSel folds the wave-parity WrapU choice into WrapU{tcEven}.
 
-    Only ever true for the A/B tensor pair. The MX scale pair is deliberately excluded:
-    its wrap offsets live in WrapUMXSA/WrapUMXSB, which calculateStagger fills using the
-    scale strides, so a WrapU selected for A/B would be the wrong offset for the scale
-    descriptor on the wrap iteration.
+    The two-way parity select covers the A/B pair only. A scale's wrap offset lives in
+    WrapUMXSA/WrapUMXSB, which calculateStagger fills from that scale's strides, so an
+    A/B-selected WrapU would be the wrong offset for a scale descriptor on the wrap
+    iteration; _hoistTdmSharedScaleWrapUSel instead folds each scale's own WrapU on the
+    wave that carries it.
     """
     return bool(self.states.staggerUCode and self.isTdmWaveSeparated(kernel))
 
   def packTdmParityIntoArgType(self, kernel) -> Module:
-    """Pack WaveIdx bit0 into named ArgType bit 8, then callers may release WaveIdx.
+    """Pack required WaveIdx bits into ArgType[8+], then callers may release WaveIdx.
 
     In-place s_and / s_bitcmp1 / s_cbranch / s_or. No allocTmpSgpr (WaveIdx is
     still live at a low index; a nested 1-wide checkout can grow the monotone
@@ -20662,6 +21138,9 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("PackTdmParityIntoArgType")
     if (kernel.get("ClusterBarrier") or kernel.get("UseSubtileImpl")
         or kernel.get("ReuseAcrossPersistent")):
+      return mod
+    # WaveIdx is not released here, so the packed copy would never be read.
+    if self.tdmWaveIdxReadAfterPrologue(kernel):
       return mod
     if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
       return mod
@@ -20674,37 +21153,57 @@ class KernelWriterAssembly(KernelWriter):
     if "ArgType" not in self.sgprs:
       return mod
 
-    skip = Label(label=self.labels.getNameInc("SkipPackTdmParityArgType"),
-                 comment="even wave: ArgType bit 8 stays 0")
-    mod.add(SAndB32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=hex(0xFFFFFEFF),
-                    comment="clear ArgType bit 8 (TDM wave-parity)"))
-    mod.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=0,
-                        comment="TDM wave-parity -> ArgType bit 8"))
-    mod.add(SCBranchSCC0(labelName=skip.getLabelName(),
-                         comment="even wave: leave bit 8 clear"))
-    mod.add(SOrB32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=hex(0x100),
-                   comment="odd wave: ArgType bit 8 = 1"))
-    mod.add(skip)
+    bits: int = self.tdmArgTypeWaveIdBits(kernel)
+    if bits == 1:
+      skip = Label(label=self.labels.getNameInc("SkipPackTdmParityArgType"),
+                   comment="even wave: ArgType bit 8 stays 0")
+      mod.add(SAndB32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=hex(0xFFFFFEFF),
+                      comment="clear ArgType bit 8 (TDM wave-parity)"))
+      mod.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=0,
+                          comment="TDM wave-parity -> ArgType bit 8"))
+      mod.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                           comment="even wave: leave bit 8 clear"))
+      mod.add(SOrB32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=hex(0x100),
+                     comment="odd wave: ArgType bit 8 = 1"))
+      mod.add(skip)
+    else:
+      mod.add(SAndB32(dst=sgpr("ArgType"), src0=sgpr("ArgType"),
+                      src1=hex(0xFFFFFFFF & ~(((1 << bits) - 1) << 8)),
+                      comment=f"clear ArgType bits 8-{8 + bits - 1} (TDM wave id)"))
+      for bit in range(bits):
+        skip = Label(label=self.labels.getNameInc("SkipPackTdmWaveIdArgType"),
+                     comment=f"WaveIdx bit {bit} clear: ArgType bit {8 + bit} stays 0")
+        mod.add(SBitcmp1B32(src0=sgpr("WaveIdx"), src1=bit,
+                            comment=f"WaveIdx bit {bit} -> ArgType bit {8 + bit}"))
+        mod.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                             comment=f"leave ArgType bit {8 + bit} clear"))
+        mod.add(SOrB32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=hex(0x100 << bit),
+                       comment=f"ArgType bit {8 + bit} = 1"))
+        mod.add(skip)
     self.states.tdmParityPackedInArgType = True
+    self.states.tdmWaveIdBitsInArgType = bits
     return mod
 
   def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
-    """Preloop: fold the loop-invariant wave-parity WrapU choice into WrapU{tcA}.
+    """Preloop: fold the loop-invariant wave-parity WrapU choice into WrapU{tcEven}.
 
-    Wave-separated TDM aliases one descriptor between even waves (which own A) and odd
-    waves (which own B), so the unroll loop has to add WrapUA or WrapUB depending on
-    this wave's parity. Parity comes from Serial and both WrapU values are fixed for the
-    tile, so the whole choice is loop-invariant:
+    Wave-separated TDM aliases one descriptor between the even and odd waves of a
+    descriptor set, so the unroll loop has to add one member's WrapU or the other's
+    depending on this wave's parity; _tdmSetMembersByParity resolves which member is
+    which from the grouping table, not from the tensor name. Parity is whatever
+    _emitTdmWaveParitySCCAuto can reach -- live WaveIdx bit 0, else packed ArgType
+    bit 8, else recomputed from Serial -- and both WrapU values are fixed for the tile,
+    so the whole choice is loop-invariant:
 
-        WrapU{tcA} = parity ? WrapU{tcB} : WrapU{tcA}
+        WrapU{tcEven} = parity ? WrapU{tcOdd} : WrapU{tcEven}
 
-    Writing the result back into WrapU{tcA} rather than a fresh pair keeps the SGPR
-    count unchanged. That is safe because every remaining reader of WrapU{tcA} is either
-    the loop increment (which wants the selected value) or removeStagger, whose
-    _applyStaggerTDM parity gate branches odd waves past the add entirely, so the value
-    it computes from a B-flavoured WrapUA is never applied. PAP already checkpoints and
-    restores WrapU{tcA} as borrowed stagger state, so the selected value survives the
-    next tile's prefetch group unchanged.
+    Writing the result back into WrapU{tcEven} rather than a fresh pair keeps the SGPR
+    count unchanged. That is safe because every remaining reader of WrapU{tcEven} is
+    either the loop increment (which wants the selected value) or removeStagger, whose
+    _applyStaggerTDM gate admits a tensor only on the waves its partition assigns, so
+    the value it computes on the other member's waves is never applied. PAP already
+    checkpoints and restores WrapU as borrowed stagger state (borrowedStaggerState), so
+    the selected value survives the next tile's prefetch group unchanged.
     """
     mod = Module("HoistWaveParityWrapUSel")
     if not self.tdmWrapUSelHoisted(kernel):
@@ -20712,12 +21211,33 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
 
+    if tdmSharedScaleSetActive(kernel):
+      # Fold wrap into the shared-set owner (tdmSharedSetOrder), not the argument pair's first member.
+      return self._hoistTdmSharedScaleWrapUSel(
+          kernel, tdmSharedSetOrder(kernel, tcA, tcB)[0])
+
+    tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tPA, tPB)
     self._emitTdmWaveParitySCCAuto(mod, kernel, comment="check wave parity",
                                   tmpTag="hoistWaveParityWrapUSel_waveIdTmp")
-    mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcA}+0"), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
-            comment=f"hoist: WrapU{tcA} = parity ? WrapU{tcB} : WrapU{tcA} (lo)"))
-    mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcA}+1"), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
-            comment=f"hoist: WrapU{tcA} = parity ? WrapU{tcB} : WrapU{tcA} (hi)"))
+    mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcEven}+0"), src0=sgpr(f"WrapU{tcOdd}+0"), src1=sgpr(f"WrapU{tcEven}+0"), \
+            comment=f"hoist: WrapU{tcEven} = parity ? WrapU{tcOdd} : WrapU{tcEven} (lo)"))
+    mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcEven}+1"), src0=sgpr(f"WrapU{tcOdd}+1"), src1=sgpr(f"WrapU{tcEven}+1"), \
+            comment=f"hoist: WrapU{tcEven} = parity ? WrapU{tcOdd} : WrapU{tcEven} (hi)"))
+    return mod
+
+  def _hoistTdmSharedScaleWrapUSel(self, kernel, tcA: str) -> Module:
+    """Fold each scale's WrapU into the shared-set owner on its assigned wave."""
+    mod = Module("HoistTdmSharedScaleWrapUSel")
+    for tc in ("MXSA", "MXSB"):
+      if not kernel["ProblemType"][f"MXBlock{tc[-1]}"]:
+        continue
+      wave = tdmSoleWave(kernel, tc)
+      mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=wave,
+              comment=f"wave {wave} carries {tc}"))
+      for half, tag in ((0, "lo"), (1, "hi")):
+        mod.add(SCSelectB32(dst=sgpr(f"WrapU{tcA}+{half}"), src0=sgpr(f"WrapU{tc}+{half}"),
+                src1=sgpr(f"WrapU{tcA}+{half}"),
+                comment=f"hoist: WrapU{tcA} = wave{wave} ? WrapU{tc} : WrapU{tcA} ({tag})"))
     return mod
 
   def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0,
@@ -20727,26 +21247,49 @@ class KernelWriterAssembly(KernelWriter):
     tcA: str = tPA['tensorChar']
     tcB: str = tPB['tensorChar']
     mod = Module("TDMGlobalIncrementsWaveSeparated")
-    tdmGroup0 = f"tdm{tcA}Group0"
     incSgprName = f"tdm{tcA}{tcB}Incs"
+    tdmGroup0 = f"tdm{self._tdmPairedParityOrder(kernel, tPA, tPB)[0]['tensorChar']}Group0"
 
-    if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
+    # Separate descriptors advance independently, each by its own GlobalReadIncs,
+    # so the wrap is per tensor because the pointer it wraps is per tensor.
+    if tdmSharedScaleSetActive(kernel):
+      # Only the A/B call advances the shared scale set.
+      if tcA != "A":
+        return mod
+      tcA, tcB = tdmSharedSetOrder(kernel, tcA, tcB)
+      if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
+        # Use the preselected WrapU for the shared owner and the independent
+        # WrapU for the other data tensor.
+        self._emitTdmSharedScaleWrappedInc(mod, kernel, prefetchIndex,
+                                       f"tdm{tcA}Group0", sgpr(incSgprName), f"WrapU{tcA}")
+        self._emitTdmSharedScaleWrappedInc(mod, kernel, prefetchIndex,
+                                       f"tdm{tcB}Group0", sgpr(f"GlobalReadIncs{tcB}"),
+                                       f"WrapU{tcB}")
+      else:
+        mod.add(comp.incrementGlobalAddr(self, f"tdm{tcA}Group0", incSgprName))
+        mod.add(comp.incrementGlobalAddr(self, f"tdm{tcB}Group0", f"GlobalReadIncs{tcB}"))
+      return mod
+
+    elif loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
       with self.allocTmpSgpr(2 if hoistedWrapUSel else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
 
         if hoistedWrapUSel:
-          # hoistWaveParityWrapUSel already folded the parity choice into WrapU{tcA}
+          # hoistWaveParityWrapUSel already folded the parity choice into WrapU{tcHoisted}
           # before the loop, so only the per-iteration wrapIter test is left here.
-          wrapLo, wrapHi = sgpr(f"WrapU{tcA}+0"), sgpr(f"WrapU{tcA}+1")
+          tcHoisted, _ = self._tdmSetMembersByParity(kernel, tPA, tPB)
+          wrapLo, wrapHi = sgpr(f"WrapU{tcHoisted}+0"), sgpr(f"WrapU{tcHoisted}+1")
         else:
           wrapTmpLo = tmpSgprInfo.idx + 2
           wrapTmpHi = tmpSgprInfo.idx + 3
+          # Select WrapU by descriptor-set parity, not argument order.
+          tcWrapEven, tcWrapOdd = self._tdmSetMembersByParity(kernel, tPA, tPB)
           self._emitTdmWaveParitySCCAuto(mod, kernel, comment="check wave parity",
                                         tmpTag="tdmIncrementABWaveSperated_tmpSgprInfo2")
-          mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
+          mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcWrapOdd}+0"), src1=sgpr(f"WrapU{tcWrapEven}+0"), \
                   comment="select WrapU based on wave parity (lo)"))
-          mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
+          mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcWrapOdd}+1"), src1=sgpr(f"WrapU{tcWrapEven}+1"), \
                   comment="select WrapU based on wave parity (hi)"))
           wrapLo, wrapHi = sgpr(wrapTmpLo), sgpr(wrapTmpHi)
 
@@ -20810,21 +21353,84 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
+  def _emitTdmSharedScaleWrappedInc(self, mod, kernel, prefetchIndex, tdmGroup0,
+                                incOperand, wrapUName: str):
+    """Advance a shared-scale descriptor by its increment or preselected WrapU."""
+    with self.allocTmpSgpr(2, tag="tdmSharedScaleWrappedInc_tmpSgprInfo") as tmpSgprInfo:
+      incTmpLo = tmpSgprInfo.idx
+      incTmpHi = tmpSgprInfo.idx + 1
+      if prefetchIndex:
+        mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
+                src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
+        mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo),
+                comment="Is this wrapIter? (pf)"))
+      else:
+        mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
+                  src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
+      mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"{wrapUName}+0"), src1=incOperand, \
+              comment="select WrapU or normal inc (lo)"))
+      mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"{wrapUName}+1"), src1=0, \
+              comment="select WrapU or normal inc (hi)"))
+      mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
+              src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
+
   def tdmSetupIncrementWaveSeparated(self, kernel, tpA, tpB) -> Module:
     mod = Module()
     tcA: str = tpA["tensorChar"]
     tcB: str = tpB["tensorChar"]
     incSgprName = f"tdm{tcA}{tcB}Incs"
+    # Separate descriptors use per-tensor GlobalReadIncs; shared sets select one inc.
+    if tdmSharedScaleSetActive(kernel):
+      # The A/B call writes the shared increment; the scale call must not overwrite it.
+      if tcA != "A":
+        return mod
+      # Chained selects always define the result; s_cmov would tie the destination
+      # as a read and let copy propagation erase its seed.
+      mxA: bool = bool(kernel["ProblemType"]["MXBlockA"])
+      mxB: bool = bool(kernel["ProblemType"]["MXBlockB"])
+      owner = tdmSharedSetOrder(kernel, tcA, tcB)[0]
+      ownerWaves = tdmWaveRangeText(kernel, owner)
+      if not (mxA or mxB):
+        mod.add(SMovB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{owner}"),
+                f"shared-set inc = {owner}'s ({ownerWaves} carry {owner})"))
+        return mod
+      fallthrough = sgpr(f"GlobalReadIncs{owner}")
+      fallthroughText = f"{owner}'s ({ownerWaves} carry {owner})"
+      for mxs, live in (("MXSA", mxA), ("MXSB", mxB)):
+        if not live:
+          continue
+        wave = tdmSoleWave(kernel, mxs)
+        mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=wave,
+                comment=f"wave {wave} carries {mxs}"))
+        mod.add(SCSelectB32(dst=sgpr(incSgprName), src0=sgpr(f"GlobalReadIncs{mxs}"),
+                src1=fallthrough,
+                comment=f"shared-set inc = {mxs}'s on wave {wave}, else {fallthroughText}"))
+        fallthrough = sgpr(incSgprName)
+        fallthroughText = "as selected"
+      return mod
+    if self.tdmFusePaired(kernel):
+      # A set's two members sit in different calls here, so both registers are
+      # primed on the A/B call and the scale call must not overwrite them. Each
+      # keeps the name of the call that advances its set.
+      if tcA != "A":
+        return mod
+      mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+      mod.add(SCSelectB32(sgpr("tdmABIncs"), sgpr("GlobalReadIncsMXSA"),
+                          sgpr("GlobalReadIncsA")))
+      mod.add(SCSelectB32(sgpr("tdmMXSAMXSBIncs"), sgpr("GlobalReadIncsB"),
+                          sgpr("GlobalReadIncsMXSB")))
+      return mod
     #TODO: should not directly use GRIA and GRIB
-    incA = self.globalReadIncsOperand(tcA, self.states.unrollIdx)
-    incB = self.globalReadIncsOperand(tcB, self.states.unrollIdx)
+    tcEven, tcOdd = self._tdmSetMembersByParity(kernel, tpA, tpB)
+    srcOdd = self.globalReadIncsOperand(tcOdd, self.states.unrollIdx)
+    srcEven = self.globalReadIncsOperand(tcEven, self.states.unrollIdx)
     # s_cselect_b32 accepts at most one literal, so when both increments are
     # compile-time constants stage the even-wave one in the destination first.
-    if not isinstance(incA, RegisterContainer) and not isinstance(incB, RegisterContainer):
-      mod.add(SMovB32(sgpr(incSgprName), incA, f"incr{tcA} (even wave)"))
-      incA = sgpr(incSgprName)
+    if not isinstance(srcOdd, RegisterContainer) and not isinstance(srcEven, RegisterContainer):
+      mod.add(SMovB32(sgpr(incSgprName), srcEven, f"incr{tcEven} (even wave)"))
+      srcEven = sgpr(incSgprName)
     mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-    mod.add(SCSelectB32(sgpr(incSgprName), incB, incA))
+    mod.add(SCSelectB32(sgpr(incSgprName), srcOdd, srcEven))
     return mod
 
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:
@@ -20833,7 +21439,7 @@ class KernelWriterAssembly(KernelWriter):
     tlu: int = tP["tlu"]
     unrolledMajor = not tlu
     numWaves: int = kernel["NumWaves"]
-    numComp: int = numWaves // 2
+    numComp, _compShift = tdmWaveComponents(kernel, tc)
 
     mod = Module(f"Reset TDM Descriptor For Tail {tc}")
     def descSgprName(idx: int) -> str:
@@ -20901,7 +21507,8 @@ class KernelWriterAssembly(KernelWriter):
     tcB: str = tPB["tensorChar"]
     numWaves: int = kernel["NumWaves"]
     wavelen: int = kernel["WavefrontSize"]
-    numComp: int = numWaves // 2
+    numCompA, compShiftA = tdmWaveComponents(kernel, tcA)
+    numCompB, compShiftB = tdmWaveComponents(kernel, tcB)
     tluA: int = tPA["tlu"]
     unrolledMajorA = not tluA
     tluB: int = tPB["tlu"]
@@ -20914,14 +21521,51 @@ class KernelWriterAssembly(KernelWriter):
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplittingA = numMxKGroups >= numComp if isMXSA else False
+    mxKSplittingA = numMxKGroups >= numCompA if isMXSA else False
     if isMXSB:
         subTc = tcB[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplittingB = numMxKGroups >= numComp if isMXSB else False
+    mxKSplittingB = numMxKGroups >= numCompB if isMXSB else False
     assert numWaves > 1
+
+    if tdmSharedScaleSetActive(kernel):
+      # Rebuild each descriptor on the waves assigned by the partition.
+      with self.allocTmpSgpr(2, tag="resetTDMDescriptorForTailSharedScale") as tmpRes:
+        waveIdxTmp = tmpRes.idx
+        waveOfstTmp = tmpRes.idx + 1
+        mod.add(VReadfirstlaneB32(sgpr(waveIdxTmp), vgpr("Serial"), "first tId"))
+        mod.add(SLShiftRightB32(sgpr(waveIdxTmp), ceil(log2(kernel["WavefrontSize"])),
+                sgpr(waveIdxTmp), "wId=fTid // wavelen"))
+
+        def resetForTail(tP):
+          """One member's tail reset, with its own component's K offset."""
+          tcM: str = tP["tensorChar"]
+          m = Module(f"TDM ResetTail {tcM}")
+          numCompM, compShiftM = tdmWaveComponents(kernel, tcM)
+          isMXSM: bool = tcM.startswith("MX")
+          unrolledMajorM = not tP["tlu"]
+          if isMXSM:
+            subM = tcM[3]
+            mxUnitM: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subM}"]
+            mxDUM = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subM}"]
+            mxKSplittingM = (mxDUM // mxUnitM) >= numCompM
+          else:
+            mxKSplittingM = False
+          if not unrolledMajorM or mxKSplittingM:
+            m.add(self.tdmEmitWaveCompId(waveOfstTmp, compShiftM, waveIdxTmp,
+                                         f"wOffset={tcM} compId"))
+            m.add(SMulI32(sgpr(waveOfstTmp), sgpr(waveOfstTmp), int(du // numCompM),
+                          "wOffset = compId * du // numComp"))
+            m.add(self.resetTDMDescriptorForTail(kernel, tP, waveOfstTmp))
+          else:
+            m.add(self.resetTDMDescriptorForTail(kernel, tP))
+          return m
+
+        mod.add(self._tdmSharedScaleDispatch(kernel, tPA, tPB, waveIdxTmp,
+                resetForTail, "ResetTail"))
+      return mod
 
     tdmResetTailLblA = Label(f"TDMResetTail{tcA}", "")
     tdmResetTailLblB = Label(f"TDMResetTail{tcB}", "")
@@ -20934,12 +21578,14 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
       mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-      mod.add(SCBranchSCC1(tdmResetTailLblB.getLabelName(), "Jump to B if wId is odd"))
+      branchToSecond = SCBranchSCC1 if self._tdmSecondMemberIsOdd(kernel, tPA, tPB) else SCBranchSCC0
+      mod.add(branchToSecond(tdmResetTailLblB.getLabelName(), f"Jump to {tcB} on its wave parity"))
 
       wOfstSgprId = None if unrolledMajorA and not isMXSA else waveOfstSgprIdx
       if not unrolledMajorA or mxKSplittingA:
-        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), 1, sgpr(waveIdSgprIdx), "wOffset=wId // 2"))
-        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numComp),
+        mod.add(self.tdmEmitWaveCompId(waveOfstSgprIdx, compShiftA, waveIdSgprIdx,
+                                       f"wOffset={tcA} compId"))
+        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numCompA),
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPA, wOfstSgprId))
       mod.add(SBranch(tdmResetTailLblEnd.getLabelName()))
@@ -20947,8 +21593,9 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(tdmResetTailLblB)
       wOfstSgprId = None if unrolledMajorB and not isMXSB else waveOfstSgprIdx
       if not unrolledMajorB or mxKSplittingB:
-        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), 1, sgpr(waveIdSgprIdx), "wOffset=wId // 2"))
-        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numComp),
+        mod.add(self.tdmEmitWaveCompId(waveOfstSgprIdx, compShiftB, waveIdSgprIdx,
+                                       f"wOffset={tcB} compId"))
+        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numCompB),
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPB, wOfstSgprId))
       mod.add(tdmResetTailLblEnd)
@@ -21045,7 +21692,12 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SCmpLeI32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
         src1=1, \
         comment="%s"%"is this the last iters"))
-    if kernel["NumWaves"] > 1:
+    if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
+      # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.
+      sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"
+      mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
+      mod.add(SCMovB32(dst=sgpr(f"GlobalReadIncs{sep}"), src=0, comment=""))
+    elif kernel["NumWaves"] > 1:
       mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
       if kernel["ProblemType"]["MXBlockA"]:
         mod.add(SCMovB32(dst=sgpr("tdmMXSAMXSBIncs"), src=0, comment=""))
