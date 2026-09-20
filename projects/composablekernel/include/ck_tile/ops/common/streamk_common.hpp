@@ -370,13 +370,14 @@ struct StreamKReductionOps
 
         store_tile(partial_tile_window, c_with_partials_dist);
         // Wait for all vector stores for this wavefront to complete
-        if constexpr(core::arch::is_target_id_any_of<CompilerTarget,
-                                                     core::arch::amdgcn_target_id::GFX1250>())
+        if constexpr(core::arch::is_target_family_any_of<
+                         CompilerTarget,
+                         core::arch::amdgcn_target_family_id::GFX12,
+                         core::arch::amdgcn_target_family_id::GFX1250>())
         {
-            // gfx1250 has separate load and store counters. s_waitcnt<0>() waits for loads
-            // here, so it cannot order these partial stores before the completion flag.
-            // Emit the store wait directly: the legacy buffer_store_fence() uses vmcnt too.
-            asm volatile("s_wait_storecnt 0" ::: "memory");
+            // gfx12 has separate load and store counters. Wait for the partial stores
+            // before publishing the completion flag in either buffer-addressing mode.
+            buffer_store_fence();
         }
         else
         {

@@ -1046,7 +1046,11 @@ CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
 
 CK_TILE_DEVICE void buffer_store_fence(index_t cnt = 0)
 {
+#if defined(__gfx12__)
+    asm volatile("s_wait_storecnt %0" : : "n"(cnt) : "memory");
+#else
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+#endif
 }
 
 CK_TILE_DEVICE auto async_load_fence_raw(index_t cnt = 0)
