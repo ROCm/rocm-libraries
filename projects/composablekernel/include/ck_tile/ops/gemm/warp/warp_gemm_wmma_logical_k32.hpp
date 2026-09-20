@@ -13,13 +13,13 @@ struct WarpGemmWmmaLogicalK32Traits : WmmaTraitsBase<gfx12_t, F8, F8, float, 32>
 {
     static_assert(std::is_same_v<F8, fp8_t> || std::is_same_v<F8, bf8_t>);
     using ArchType = gfx125_t;
-    using Logical = WmmaTraitsBase<gfx12_t, F8, F8, float, 32>;
+    using Logical  = WmmaTraitsBase<gfx12_t, F8, F8, float, 32>;
     using Physical = WmmaTraits<gfx125_t, F8, F8, float, 16, 16, 64>;
     using AVecType = typename Logical::AVecType;
     using BVecType = typename Logical::BVecType;
     using CVecType = typename Logical::CVecType;
 
-    static constexpr index_t logical_k = 32;
+    static constexpr index_t logical_k  = 32;
     static constexpr index_t physical_k = 64;
     static_assert(Logical::kK == logical_k && Physical::kK == physical_k);
     static_assert(sizeof(AVecType) == 16 && sizeof(BVecType) == 16);
@@ -50,17 +50,15 @@ struct WarpGemmWmmaLogicalK32Traits : WmmaTraitsBase<gfx12_t, F8, F8, float, 32>
 };
 
 template <typename F8>
-using WarpGemmWmmaLogicalK32Impl =
-    WarpGemmAttributeWmmaImpl<WarpGemmWmmaLogicalK32Traits<F8>>;
+using WarpGemmWmmaLogicalK32Impl = WarpGemmAttributeWmmaImpl<WarpGemmWmmaLogicalK32Traits<F8>>;
 
 // This adapter exposes only the default encoding and non-transposed C.
 // The attribute's public kK remains 32 and kKPerThread remains 16; the block
 // pipeline therefore advances by the requested logical 32 elements.
 template <typename F8>
-using WarpGemmWmmaLogicalK32 =
-    WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmWmmaLogicalK32Impl<F8>,
-                                                   false,
-                                                   WGAttrNumAccessEnum::Default,
-                                                   WGAttrNumAccessEnum::Default>>;
+using WarpGemmWmmaLogicalK32 = WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmWmmaLogicalK32Impl<F8>,
+                                                                  false,
+                                                                  WGAttrNumAccessEnum::Default,
+                                                                  WGAttrNumAccessEnum::Default>>;
 
 } // namespace ck_tile

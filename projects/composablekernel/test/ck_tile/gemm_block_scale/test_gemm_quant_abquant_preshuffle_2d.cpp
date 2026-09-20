@@ -37,7 +37,7 @@ struct GemmConfigABQuantTransposedPerColumn : public GemmConfigPreshuffleB_ABQua
     static constexpr ck_tile::index_t M_Warp = 2;
     static constexpr ck_tile::index_t N_Warp = 2;
     static constexpr ck_tile::index_t K_Tile = TileK;
-    static constexpr bool BPreshuffleQuant = PreshuffleQuant;
+    static constexpr bool BPreshuffleQuant   = PreshuffleQuant;
     static_assert(!TiledMMAPermuteN, "CShuffle requires ordinary B/BQ column order");
 };
 

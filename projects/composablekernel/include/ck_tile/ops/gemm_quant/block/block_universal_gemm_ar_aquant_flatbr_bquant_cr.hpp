@@ -280,7 +280,7 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg : public BlockGemmQuantBase
                             return nIter * KPerBlockBQ + kQScale;
                         }
                     }();
-                    auto& scale_reg     = bq_block_tensor.get_thread_buffer()[reg_offset];
+                    auto& scale_reg           = bq_block_tensor.get_thread_buffer()[reg_offset];
                     const float b_scale_reg_f = Base::cvt_scale_to_fp32<BQDataType>(scale_reg);
 
                     static_for<0, WG::kM * WG::kN / warp_size, 1>{}([&](auto c_row) {
@@ -298,9 +298,8 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg : public BlockGemmQuantBase
                                 if constexpr(Traits::TransposeC)
                                 {
                                     using Impl = typename WG::WarpGemmAttribute::Impl;
-                                    constexpr index_t n_group =
-                                        (c_row / Impl::kCM1PerLane) *
-                                        (WG::kCMLane * Impl::kCM1PerLane);
+                                    constexpr index_t n_group = (c_row / Impl::kCM1PerLane) *
+                                                                (WG::kCMLane * Impl::kCM1PerLane);
                                     const index_t n_lane =
                                         (get_lane_id() / WG::kM) * Impl::kCM1PerLane;
                                     return n_group + n_lane + c_row % Impl::kCM1PerLane;

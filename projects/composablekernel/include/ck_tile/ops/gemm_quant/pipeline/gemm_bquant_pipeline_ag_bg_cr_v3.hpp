@@ -303,16 +303,14 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
             const BQDramTileWindowStep bq_dram_tile_window_step =
                 (BPreshuffleQuant)
                     // Match the outer-row count in MakePreshuffledQuantTensorView.
-                    ? make_array(((BQuantGroupSize::kN <=
-                                   BlockGemmShape::WarpTile::at(number<1>{}))
+                    ? make_array(((BQuantGroupSize::kN <= BlockGemmShape::WarpTile::at(number<1>{}))
                                       ? ck_tile::integer_least_multiple(n, NPerBlock) /
                                             BlockGemmShape::WarpTile::at(number<1>{})
                                       : ck_tile::integer_least_multiple(
                                             ck_tile::integer_divide_ceil(n, BQuantGroupSize::kN),
                                             NPerBlockBQ)),
                                  0)
-                : is_bq_row_major ? make_array(KPerBlockBQ, 0)
-                                  : make_array(0, KPerBlockBQ);
+                    : is_bq_row_major ? make_array(KPerBlockBQ, 0) : make_array(0, KPerBlockBQ);
 
             // DRAM prefetch (global read 0)
             Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);

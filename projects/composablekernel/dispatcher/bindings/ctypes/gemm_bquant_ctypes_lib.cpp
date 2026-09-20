@@ -75,13 +75,12 @@ int dispatcher_run_bquant_gemm(const void* A,
         std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor>;
     const int64_t expected_stride_A = kAIsColumnMajor ? M : K;
     const int64_t expected_stride_B = kBIsColumnMajor ? K : N;
-    if(stride_A != expected_stride_A || stride_B != expected_stride_B ||
-       stride_BQ != QK_B || stride_C != N)
+    if(stride_A != expected_stride_A || stride_B != expected_stride_B || stride_BQ != QK_B ||
+       stride_C != N)
     {
         std::cerr << kFn << ": non-packed strides are not supported. Expected stride_A="
-                  << expected_stride_A << " stride_B=" << expected_stride_B
-                  << " stride_BQ=" << QK_B << " stride_C=" << N
-                  << ", got stride_A=" << stride_A << " stride_B=" << stride_B
+                  << expected_stride_A << " stride_B=" << expected_stride_B << " stride_BQ=" << QK_B
+                  << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
                   << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
         return -1;
     }

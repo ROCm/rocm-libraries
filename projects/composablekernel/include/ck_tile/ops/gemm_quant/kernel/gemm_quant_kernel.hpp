@@ -372,8 +372,7 @@ struct QuantGemmMultiDKernel
         }();
         const auto bq_merge_pad1_desc = transform_tensor_descriptor(
             bq_pad1_desc,
-            make_tuple(bq_merge_transform,
-                       make_pass_through_transform(pad_wave_size)),
+            make_tuple(bq_merge_transform, make_pass_through_transform(pad_wave_size)),
             make_tuple(sequence<0, 1>{}, sequence<2>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
@@ -690,8 +689,7 @@ struct QuantGemmMultiDKernel
                 }();
                 const auto aq_merge_pad1_desc = transform_tensor_descriptor(
                     aq_pad1_desc,
-                    make_tuple(aq_merge_transform,
-                               make_pass_through_transform(pad_wave_size)),
+                    make_tuple(aq_merge_transform, make_pass_through_transform(pad_wave_size)),
                     make_tuple(sequence<0, 1>{}, sequence<2>{}),
                     make_tuple(sequence<0>{}, sequence<1>{}));
 

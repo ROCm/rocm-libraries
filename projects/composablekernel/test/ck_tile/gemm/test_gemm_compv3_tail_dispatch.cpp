@@ -66,7 +66,7 @@ constexpr auto expected_scenarios()
 template <ck_tile::index_t NumWarps>
 constexpr bool check_schedule()
 {
-    using Schedule = ck_tile::BaseGemmPipelineAgBgCrCompV3<ScheduleProblem<NumWarps>>;
+    using Schedule          = ck_tile::BaseGemmPipelineAgBgCrCompV3<ScheduleProblem<NumWarps>>;
     constexpr auto expected = expected_scenarios<NumWarps>();
     for(ck_tile::index_t loops = 1; loops <= 8; ++loops)
     {
@@ -101,13 +101,13 @@ struct ReturnScenario
 template <ck_tile::index_t NumWarps>
 void check_host_dispatch()
 {
-    using Schedule = ck_tile::BaseGemmPipelineAgBgCrCompV3<ScheduleProblem<NumWarps>>;
+    using Schedule          = ck_tile::BaseGemmPipelineAgBgCrCompV3<ScheduleProblem<NumWarps>>;
     constexpr auto expected = expected_scenarios<NumWarps>();
     for(ck_tile::index_t loops = 1; loops <= 8; ++loops)
     {
         const auto actual = Schedule::TailHandler(ReturnScenario{},
-                                                 Schedule::BlockHasHotloop(loops),
-                                                 Schedule::GetBlockLoopTailNum(loops));
+                                                  Schedule::BlockHasHotloop(loops),
+                                                  Schedule::GetBlockLoopTailNum(loops));
         EXPECT_EQ(actual, expected[loops - 1]) << "K tile count: " << loops;
     }
 }
