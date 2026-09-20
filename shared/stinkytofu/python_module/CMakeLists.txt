@@ -61,6 +61,7 @@ set_directory_properties(PROPERTIES COMPILE_OPTIONS "")
 
 nanobind_add_module(stinkytofu_python
     NB_STATIC  # Build as static module
+    src/AsmBridge.cpp
     src/python_bindings.cpp
     src/logical_count.cpp
     src/HardwareCaps.cpp
@@ -169,11 +170,11 @@ install(TARGETS stinkytofu_python
     COMPONENT python_bindings
 )
 
-# Co-install libstinkytofu.so / stinkytofu.dll next to _stinkytofu so the
-# dynamic linker can find it at runtime.
-install(FILES $<TARGET_FILE:stinkytofu>
-    DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
-    COMPONENT python_bindings
+# Co-install libstinkytofu and its SONAME link next to _stinkytofu so the
+# dynamic linker can satisfy the extension's NEEDED entry at runtime.
+install(TARGETS stinkytofu
+    LIBRARY DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu COMPONENT python_bindings
+    RUNTIME DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu COMPONENT python_bindings
 )
 
 # Install Python wrapper (__init__.py)
@@ -187,7 +188,9 @@ install(FILES stinkytofu/__init__.py
 # _build_info.py is intentionally excluded so wheels behave as pre-built packages.
 if(DEFINED SKBUILD)
     install(TARGETS stinkytofu_python DESTINATION stinkytofu)
-    install(FILES $<TARGET_FILE:stinkytofu> DESTINATION stinkytofu)
+    install(TARGETS stinkytofu
+        LIBRARY DESTINATION stinkytofu
+        RUNTIME DESTINATION stinkytofu)
     install(FILES stinkytofu/__init__.py DESTINATION stinkytofu)
     install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc" DESTINATION stinkytofu)
 endif()

@@ -28,6 +28,7 @@
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
@@ -1245,6 +1246,22 @@ TEST_F(AsmEmitterTest, MultipleBasicBlocks) {
     EXPECT_NE(assembly.find("exit:"), std::string::npos);
     EXPECT_NE(assembly.find("v_mov_b32"), std::string::npos);
     EXPECT_NE(assembly.find("s_nop"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, EmitAlignmentDirectiveInBytes) {
+    AsmDirective* directive = irBuilder->createIR<AsmDirective>();
+    directive->kind = AsmDirectiveKind::ALIGN;
+    directive->name = ".align";
+    directive->intValue = 16;
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    EXPECT_EQ(emitter.emit(func), ".align 16\n");
 }
 
 TEST_F(AsmEmitterTest, CommentAlignColumn) {

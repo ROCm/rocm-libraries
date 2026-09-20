@@ -553,6 +553,18 @@ static bool isNullSmemOffsetNokOperand(const StinkyRegister& reg) {
     return false;
 }
 
+static bool isOmittedFlatSaddrOperand(const StinkyRegister& reg,
+                                      const StinkyInstruction& inst,
+                                      size_t emittedSrcIndex) {
+    if (reg.dataType != StinkyRegister::Type::LiteralString || reg.literalValue != "off")
+        return false;
+    const auto* desc = inst.getHwInstDesc();
+    if (desc == nullptr) return false;
+    const std::string_view mnemonic(desc->mnemonic ? desc->mnemonic : "");
+    return (mnemonic == "flat_load_b32" && emittedSrcIndex == 1) ||
+           (mnemonic == "flat_store_b32" && emittedSrcIndex == 2);
+}
+
 static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
                          const AsmEmitterOptions& options) {
     bool firstOperand = true;
@@ -618,6 +630,15 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
         if (isPseudoReg(srcRegs[i]) || isImplicitSrc(srcRegs[i], inst)) continue;
 
         if (nonSkippedIndex >= emitSrcCount) break;
+
+        // gfx1250 FLAT assembly spells the vector-address-only form without an
+        // explicit scalar-address token.  The bridge retains a typed "off"
+        // placeholder so descriptor validation still sees the required saddr
+        // field, then the emitter omits only that audited synthetic operand.
+        if (isOmittedFlatSaddrOperand(srcRegs[i], inst, nonSkippedIndex)) {
+            nonSkippedIndex++;
+            continue;
+        }
 
         if (!firstOperand) {
             os << ", ";
@@ -873,6 +894,11 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
     } else if (directive.kind == AsmDirectiveKind::TEXTBLOCK) {
         // Output raw text as-is (no newline added since text may already have it)
         os << directive.value;
+        return;
+    } else if (directive.kind == AsmDirectiveKind::ALIGN) {
+        // intValue is an alignment in bytes, matching InstructionSizeCosting and
+        // the raw-assembly parser's representation of `.align N`.
+        os << ".align " << directive.intValue << "\n";
         return;
     } else if (directive.kind == AsmDirectiveKind::IF ||
                directive.kind == AsmDirectiveKind::ENDIF) {

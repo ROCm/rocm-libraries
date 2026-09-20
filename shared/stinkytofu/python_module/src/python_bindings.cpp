@@ -55,11 +55,14 @@ using namespace stinkytofu;
 
 // Forward declaration for logical count bindings
 void init_logical_count(nb::module_& m);
+void init_asm_bridge(nb::module_& m);
 
 NB_MODULE(_stinkytofu, m) {
     BackendRegistry::registerAllBackends();
     AllocationRulesRegistry::registerAll();
     m.doc() = "StinkyTofu: High-Level IR for AMDGPU Assembly Generation (internal C++ module)";
+
+    init_asm_bridge(m);
 
     // ========================================================================
     // Bind StinkyAsmModule Class
@@ -483,6 +486,16 @@ NB_MODULE(_stinkytofu, m) {
     m.def(
         "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
         "Create a float literal");
+
+    m.def(
+        "hwreg", [](uint16_t id, uint16_t offset, uint16_t width) {
+            if (width == 0 || static_cast<uint32_t>(offset) + width > 32) {
+                throw nb::value_error("hwreg: offset + width must fit in 32 bits");
+            }
+            return StinkyRegister::Hwreg(id, offset, width);
+        },
+        nb::arg("id"), nb::arg("offset") = 0, nb::arg("width") = 32,
+        "Create a structured hwreg(id, offset, width) operand.");
 
     // ========================================================================
     // Architecture IDs
