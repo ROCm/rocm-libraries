@@ -22,6 +22,7 @@ from .core import (
     KernelId,
     OperatorRequest,
     ShapeRange,
+    TorchBinding,
     opt_in_probe,
     spec_identity,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "KernelId",
     "OperatorRequest",
     "ShapeRange",
+    "TorchBinding",
     "opt_in_probe",
     "spec_identity",
     "dispatch_gemm_fp16",

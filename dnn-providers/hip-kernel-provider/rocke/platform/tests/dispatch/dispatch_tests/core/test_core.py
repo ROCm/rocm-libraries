@@ -221,6 +221,7 @@ class TestRegistryCoverage(unittest.TestCase):
                 # that might raise.
                 "buildable": False,
                 "bindable": False,
+                "torch_bindable": False,
                 # Never None: registration requires a declared capability, so
                 # the manifest cannot have a hole in it.
                 "capability": _ANY_ARCH.as_dict(),
@@ -260,6 +261,7 @@ class TestRegistryCoverage(unittest.TestCase):
                 "family": "dummy",
                 "requires_build": False,
                 "requires_binding": False,
+                "requires_torch_binding": False,
                 "candidates": [],
             },
         )

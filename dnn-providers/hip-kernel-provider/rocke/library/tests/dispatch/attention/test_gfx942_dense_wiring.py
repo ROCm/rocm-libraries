@@ -10,7 +10,7 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
   - routing on gfx942, and rejection of every out-of-scope request
   - ``dense_persistent``: 'auto' resolves to off (accepted), explicit 'on' is rejected
     rather than silently downgraded
-  - the dispatched ``kernel_name_override`` is batch-unique and matches what
+  - the dispatched ``kernel_name()`` is batch-unique and matches what
     ``build_attention_dense`` actually emits
 
 The priority-3 tests are the load-bearing ones: the arm sorts ahead of every other
@@ -112,8 +112,11 @@ class TestGfx942DenseOptIn(unittest.TestCase):
         with _Gfx942Arch():
             r = dispatch_attention(_req())
             self.assertEqual(r.candidate.name, _NAME)
-            self.assertEqual(r.spec.path, "2d")
-            self.assertEqual(r.spec.name, "rocke_attention_dense_gfx942")
+            from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+            self.assertIsInstance(r.spec, Gfx942AttentionDenseSpec)
+            self.assertIn("gfx942", r.spec.kernel_name())
+            self.assertNotEqual(r.grid, (0, 0, 0))
 
 
 class TestGfx942DenseSupportGates(unittest.TestCase):
@@ -258,8 +261,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
         must disambiguate it or a name-keyed cache serves the B=1 binary."""
         with _Gfx942Arch():
             names = {
-                dispatch_attention(_req(batch=b)).spec.kernel_name_override
-                for b in (1, 2, 4)
+                dispatch_attention(_req(batch=b)).spec.kernel_name() for b in (1, 2, 4)
             }
             self.assertEqual(len(names), 3, names)
 
@@ -272,7 +274,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             self.assertTrue(_candidate().admits(req)[0])
             spec = _dense_spec(req)
             kd = build_attention_dense(spec, arch="gfx942")
-            self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name_override)
+            self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name())
 
 
 class TestGfx942SlidingWindow(unittest.TestCase):

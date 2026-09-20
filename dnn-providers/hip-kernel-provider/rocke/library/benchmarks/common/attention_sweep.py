@@ -35,9 +35,8 @@ def run_sweep(
     *supported* candidate), groups the offered engines by their launched path,
     and times each distinct path via ``run_unified_attention_torch``.
 
-    The sweep space includes the opt-in tuning candidates, which expand to tens
-    of thousands of specs for one shape -- far more than a live bench can time.
-    ``candidate_prefix`` / ``tuning_id_prefix`` narrow it to one geometry or
+    The sweep space includes the opt-in tuning candidates. Use
+    ``candidate_prefix`` / ``tuning_id_prefix`` to narrow it to one geometry or
     codepath, and ``limit`` caps how many specs are timed (0 = no cap). An
     unfiltered, uncapped call is only sensible on a registry with the tuning
     candidates excluded.

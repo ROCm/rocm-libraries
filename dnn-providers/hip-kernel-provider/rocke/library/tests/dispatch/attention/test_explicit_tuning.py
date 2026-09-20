@@ -9,7 +9,7 @@ from dataclasses import replace
 from unittest import mock
 
 import kernels.common.attention_unified as au
-from builders.common.attention_tuning_builder import (
+from dispatch.attention.tuning_specs import (
     ExplicitAttention2DConfig,
     ExplicitAttention3DConfig,
     make_explicit_attention_2d_spec,

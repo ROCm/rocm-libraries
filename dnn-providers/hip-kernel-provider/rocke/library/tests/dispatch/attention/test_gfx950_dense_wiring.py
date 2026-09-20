@@ -937,7 +937,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
         result = dispatch_attention(req)
         self.assertEqual(result.candidate.name, "attention_gfx950_dense")
 
-    def test_registered_combos_include_dense_and_unified_2d(self):
+    def test_registered_combos_include_dense_not_unified_2d(self):
         from dispatch.attention import registered_attention_combos
 
         req = _gfx950_dense_req(
@@ -952,9 +952,9 @@ class TestGfx950DenseVariants(unittest.TestCase):
         names = {c.name for c, _spec in registered_attention_combos(req)}
         self.assertIn("attention_gfx950_dense", names)
         self.assertIn("attention_gfx950_dense_grid_bm128", names)
-        self.assertIn("attention_unified_2d", names)
+        self.assertNotIn("attention_unified_2d", names)
 
-    def test_d256_combos_include_d256_not_dense(self):
+    def test_d256_combos_exclude_dense_and_routing_labels(self):
         from dispatch.attention import registered_attention_combos
 
         req = _gfx950_dense_req(
@@ -969,7 +969,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
         )
         combos = registered_attention_combos(req)
         names = {c.name for c, _spec in combos}
-        self.assertIn("attention_gfx950_d256", names)
+        self.assertNotIn("attention_gfx950_d256", names)
         self.assertFalse(
             any(c.algorithm == "attention_dense" for c, _spec in combos),
             names,

@@ -374,6 +374,20 @@ class ProblemBinding:
 
 
 @dataclass(frozen=True)
+class TorchBinding:
+    """Launch contract over caller-owned tensors.
+
+    Distinct from :class:`ProblemBinding`, which allocates HIP buffers. This
+    type never imports Torch; ``launch`` closes over tensors the caller already
+    holds. Used by attention torch harnesses and graph capture.
+    """
+
+    launch: Callable[..., Any]
+    grid: Tuple[int, int, int]
+    block: Tuple[int, int, int]
+
+
+@dataclass(frozen=True)
 class KernelCandidate:
     """One selectable implementation family for an operator request."""
 
@@ -425,6 +439,13 @@ class KernelCandidate:
     cannot drift from the dispatcher the way a hand-written adapter can.
     """
 
+    bind_torch: Callable[..., TorchBinding] | None = None
+    """``bind_torch(request, spec, tensors, **kwargs) -> TorchBinding``; optional.
+
+    Second substrate for families whose benches already hold torch tensors.
+    Must not import Torch at module load; the callable may import it lazily.
+    """
+
     def built(self, spec: Any, arch: str) -> Any:
         """Build this candidate's IR for ``spec`` on ``arch``."""
         if self.build is None:
@@ -444,6 +465,18 @@ class KernelCandidate:
                 "runner. Give it a bind to close that gap."
             )
         return self.bind(result, verify)
+
+    def bound_torch(
+        self, request: OperatorRequest, spec: Any, tensors: Mapping[str, Any], **kwargs
+    ) -> TorchBinding:
+        """Bind ``spec`` to caller-owned tensors, or explain what is missing."""
+        if self.bind_torch is None:
+            raise NotImplementedError(
+                f"candidate {self.name!r} ({self.family}) declares no bind_torch(); "
+                "it can be selected but not launched through a torch harness. "
+                "Give it a bind_torch returning a TorchBinding to close that gap."
+            )
+        return self.bind_torch(request, spec, tensors, **kwargs)
 
     def admits(self, request: OperatorRequest) -> Tuple[bool, str]:
         """Full eligibility verdict: capability prefilter, then predicate.
@@ -568,6 +601,7 @@ class CandidateRegistry:
         dim_vocabulary: Iterable[str] | None = None,
         require_build: bool = False,
         require_binding: bool = False,
+        require_torch_binding: bool = False,
     ) -> None:
         self.family = family
         self.dim_vocabulary = (
@@ -590,6 +624,8 @@ class CandidateRegistry:
         its candidates; from then on a new candidate cannot rejoin the
         unlaunchable set by omission. See ARCHITECTURE.md 5.2.
         """
+        self.require_torch_binding = require_torch_binding
+        """Whether this family refuses candidates that cannot bind torch tensors."""
         self._candidates = {}
 
     def register(self, candidate: KernelCandidate) -> None:
@@ -602,6 +638,7 @@ class CandidateRegistry:
         self._validate_capability(candidate)
         self._validate_build(candidate)
         self._validate_binding(candidate)
+        self._validate_torch_binding(candidate)
         self._candidates[candidate.name] = candidate
 
     def _validate_build(self, candidate: KernelCandidate) -> None:
@@ -622,6 +659,15 @@ class CandidateRegistry:
                 "returning a ProblemBinding (see ARCHITECTURE.md 7.5), or if "
                 "this candidate genuinely cannot be launched, that is a reason "
                 "not to register it here."
+            )
+
+    def _validate_torch_binding(self, candidate: KernelCandidate) -> None:
+        if self.require_torch_binding and candidate.bind_torch is None:
+            raise ValueError(
+                f"{candidate.name!r} declares no bind_torch, and family "
+                f"{self.family!r} requires one: every candidate it registers "
+                "must bind caller-owned tensors. Give it a bind_torch returning "
+                "a TorchBinding, or do not register it on this execution registry."
             )
 
     def _validate_capability(self, candidate: KernelCandidate) -> None:
@@ -703,6 +749,7 @@ class CandidateRegistry:
             "family": self.family,
             "requires_build": self.require_build,
             "requires_binding": self.require_binding,
+            "requires_torch_binding": self.require_torch_binding,
             "candidates": [
                 {
                     "name": c.name,
@@ -716,6 +763,7 @@ class CandidateRegistry:
                     # might raise.
                     "buildable": c.build is not None,
                     "bindable": c.bind is not None,
+                    "torch_bindable": c.bind_torch is not None,
                     "capability": (
                         None if c.capability is None else c.capability.as_dict()
                     ),
@@ -740,15 +788,15 @@ class CandidateRegistry:
     def supported(self, request: OperatorRequest) -> Tuple[KernelCandidate, ...]:
         return tuple(c for c in self.candidates() if c.admits(request)[0])
 
-    def combos(
+    def iter_combos(
         self,
         request: OperatorRequest,
         *,
         candidate_prefix: str = "",
         include_opt_in: bool = True,
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
-    ) -> Tuple[Tuple[KernelCandidate, Any], ...]:
-        """Every ``(candidate, spec)`` that can launch ``request``.
+    ) -> Iterable[Tuple[KernelCandidate, Any]]:
+        """Yield each ``(candidate, spec)`` that can launch ``request``.
 
         Unlike :meth:`supported`, this is the sweep primitive: it walks the
         full registry, probes opt-in candidates by pinning each candidate's
@@ -762,7 +810,6 @@ class CandidateRegistry:
         """
         wanted_algorithm = _request_selector(request, "algorithm")
         wanted_spec_id = _request_selector(request, "spec_id")
-        combos: list[Tuple[KernelCandidate, Any]] = []
         for candidate in self.candidates():
             if candidate_prefix and not candidate.name.startswith(candidate_prefix):
                 continue
@@ -782,12 +829,30 @@ class CandidateRegistry:
             ok, _why = candidate.admits(probe)
             if not ok:
                 continue
-            specs = tuple(candidate.sweep_space(probe))
-            if not specs:
-                specs = (candidate.select_spec(probe),)
-            for spec in specs:
-                combos.append((candidate, spec))
-        return tuple(combos)
+            yielded = False
+            for spec in candidate.sweep_space(probe):
+                yielded = True
+                yield candidate, spec
+            if not yielded:
+                yield candidate, candidate.select_spec(probe)
+
+    def combos(
+        self,
+        request: OperatorRequest,
+        *,
+        candidate_prefix: str = "",
+        include_opt_in: bool = True,
+        selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+    ) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+        """Materialized :meth:`iter_combos` for callers that need a sequence."""
+        return tuple(
+            self.iter_combos(
+                request,
+                candidate_prefix=candidate_prefix,
+                include_opt_in=include_opt_in,
+                selector_ok=selector_ok,
+            )
+        )
 
     def sweep_space(
         self,
@@ -928,3 +993,7 @@ class DispatchResult:
         chose: ``dispatch_gemm_fp16(req).bind(verify=True)``.
         """
         return self.candidate.bound(self, verify=verify)
+
+    def bind_torch(self, tensors: Mapping[str, Any], **kwargs) -> TorchBinding:
+        """Bind this selection to caller-owned tensors."""
+        return self.candidate.bound_torch(self.request, self.spec, tensors, **kwargs)

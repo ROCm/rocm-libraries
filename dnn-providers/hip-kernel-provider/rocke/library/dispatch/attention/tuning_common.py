@@ -4,18 +4,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from itertools import product
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
-from builders.common.attention_tuning_builder import (
+from .tuning_specs import (
     ExplicitAttention2DConfig,
     ExplicitAttention3DConfig,
     make_explicit_attention_2d_spec,
     make_explicit_attention_3d_specs,
 )
 from kernels.common.attention_unified import supports_native_unified_attention
-from rocke.dispatch.core import Capability, KernelCandidate, OperatorRequest, ShapeRange
+from rocke.dispatch.core import (
+    Capability,
+    KernelCandidate,
+    OperatorRequest,
+    ShapeRange,
+    stable_json_hash,
+)
 
 from .common import (
     ATTENTION_ABI_VERSION,
@@ -32,6 +38,10 @@ from .common import (
 
 
 TUNING_ALGORITHM = "unified_tuning"
+# Geometry axis is always present; 2D micro-expansion uses a reduced WPE set so
+# the per-shape space stays in the low thousands rather than ~70K.
+_SWEEP_WAVES_2D: Tuple[Optional[int], ...] = (None, 2, 4)
+_SWEEP_WAVES_3D: Tuple[Optional[int], ...] = (None, 1, 2, 3, 4)
 
 
 @dataclass(frozen=True)
@@ -74,16 +84,13 @@ _GFX950_TRANSPOSED_BASE = {
     "use_mfma_32x32": True,
     "use_transposed_qk_32x32": True,
 }
-# Masks for the lever-3 sched_barrier, using the AMDGPU bits documented on
-# ``Builder.sched_group_barrier`` (0x008 MFMA, 0x100 DS read). 0 is a hard
-# fence; the non-zero masks let compute (and LDS reads) cross while the post-QK
-# VMEM prefetch -- the thing the lever exists to hold back -- stays behind it.
 _SCHED_BARRIER_MASKS = (0, 0x008, 0x108)
 _GFX942_X8_BASE = {"use_mfma_32x32x8": True}
 _GFX942_TRANSPOSED_BASE = {
     "use_mfma_32x32x8": True,
     "use_transposed_qk_32x32": True,
 }
+_INTERLEAVE_STACKS = frozenset({"baseline", "r4_hlpv", "vdbuf"})
 
 
 def _merge(*parts: Mapping[str, object]) -> dict[str, object]:
@@ -93,184 +100,367 @@ def _merge(*parts: Mapping[str, object]) -> dict[str, object]:
     return out
 
 
-def _gfx950_profile_dicts(codepath: str) -> Iterable[dict[str, object]]:
-    """Implemented, non-dead gfx950 schedule profiles.
+def _named(name: str, knobs: Mapping[str, object]) -> dict[str, object]:
+    payload = dict(knobs)
+    payload["_stack"] = name
+    return payload
 
-    Orthogonal value axes (WPE, K-pad and softmax interleave mode) are expanded
-    below; dependency-heavy booleans are expressed as named stacks so invalid
-    2**N syntax is never materialized.
-    """
+
+def _gfx950_tuning_lds_bytes(spec) -> int:
+    """Dispatcher-side static LDS model for one explicit gfx950 tuning spec."""
+    tile = int(spec.tile_size_eff)
+    head = int(spec.head_size)
+    block_m = int(spec.block_m)
+    kv_fp8 = spec.kv_storage_dtype == "fp8e4m3"
+    fp8_qk = kv_fp8 and bool(spec.use_fp8_mfma_qk)
+    fp8_pv = kv_fp8 and bool(spec.use_fp8_mfma_pv)
+    k_elem_bytes = 1 if fp8_qk else 2
+    v_elem_bytes = 1 if fp8_pv else 2
+    k_bufs = (
+        1
+        if spec.use_k_single_buffer
+        else int(spec.kv_ring_depth) if int(spec.kv_ring_depth) > 2 else 2
+    )
+    v_bufs = 2 if spec.use_v_double_buffer else 1
+
+    pad = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
+    slab_rows = (512 // head) if pad and 512 % head == 0 else 0
+    pad_active = bool(
+        pad
+        and not fp8_qk
+        and slab_rows
+        and tile % slab_rows == 0
+        and pad % 8 == 0
+        and k_bufs == 1
+    )
+    if pad_active:
+        k_bytes = k_bufs * (tile // slab_rows) * (slab_rows * head + pad) * k_elem_bytes
+    else:
+        k_bytes = k_bufs * tile * head * k_elem_bytes
+    v_bytes = v_bufs * tile * head * v_elem_bytes
+
+    transposed_register_p = bool(spec.use_mfma_32x32 and spec.use_transposed_qk_32x32)
+    p_bytes = (
+        0
+        if spec.use_register_pv or transposed_register_p
+        else block_m * (tile + (16 if fp8_pv else 8)) * v_elem_bytes
+    )
+
+    q_bytes = block_m * head * 2
+    q_aliases_k = bool(not fp8_qk and q_bytes <= 2 * tile * head * k_elem_bytes)
+    if spec.use_q_reread or spec.use_q_direct_reg:
+        q_aliases_k = False
+    q_lds_bytes = 0 if spec.use_q_direct_reg or q_aliases_k else q_bytes
+
+    out_stripe_cols = 32 if head <= 64 else head
+    acc_bytes = block_m * out_stripe_cols * 2
+    fp8_staging_bytes = 3 * tile * head if kv_fp8 and spec.use_fp8_mfma_qk else 0
+    return k_bytes + v_bytes + p_bytes + q_lds_bytes + acc_bytes + fp8_staging_bytes
+
+
+def _supports_tuning_spec(
+    variant: AttentionGeometryVariant, kernel_spec
+) -> Tuple[bool, str]:
+    """Residual per-spec support that cannot be represented by Capability."""
+    if variant.arch != "gfx950" or variant.path != "2d":
+        return True, "supported"
+
+    if kernel_spec.use_kq_lds_pad:
+        head = int(kernel_spec.head_size)
+        tile = int(kernel_spec.tile_size_eff)
+        pad = int(kernel_spec.kq_lds_pad_halves)
+        slab_rows = (512 // head) if 512 % head == 0 else 0
+        if kernel_spec.kv_storage_dtype == "fp8e4m3" and kernel_spec.use_fp8_mfma_qk:
+            return False, "KQ LDS pad does not support native-FP8 K LDS"
+        if not slab_rows or tile % slab_rows != 0 or pad % 8 != 0:
+            return (
+                False,
+                "KQ LDS pad requires an aligned slab layout "
+                f"(head_size={head}, tile_size={tile}, pad={pad})",
+            )
+        k_bufs = (
+            1
+            if kernel_spec.use_k_single_buffer
+            else (
+                int(kernel_spec.kv_ring_depth)
+                if int(kernel_spec.kv_ring_depth) > 2
+                else 2
+            )
+        )
+        if k_bufs != 1:
+            return False, "KQ LDS pad requires a single-K schedule"
+        q_bytes = int(kernel_spec.block_m) * head * 2
+        q_aliases_k = bool(
+            q_bytes <= 2 * tile * head * 2
+            and not kernel_spec.use_q_reread
+            and not kernel_spec.use_q_direct_reg
+        )
+        if q_aliases_k:
+            return False, "padded K LDS does not support aliased Q"
+
+    from rocke.core.arch import ArchTarget
+
+    capacity = ArchTarget.from_gfx(variant.arch).lds_capacity_bytes
+    lds_bytes = _gfx950_tuning_lds_bytes(kernel_spec)
+    if lds_bytes > capacity:
+        return (
+            False,
+            f"estimated LDS {lds_bytes} B exceeds the {variant.arch} "
+            f"{capacity} B LDS budget; hipcc/comgr codegen would fail",
+        )
+    return True, "supported"
+
+
+def _gfx950_profile_dicts(codepath: str) -> Iterable[dict[str, object]]:
+    """Named schedule stacks. Invalid 2**N syntax is never materialized."""
     if codepath == "narrow":
         profiles = (
-            {},
-            {"use_register_pv": True},
-            {"use_fp8_mfma_qk": True},
-            {"use_fp8_mfma_pv": True},
-            {"use_fp8_mfma_qk": True, "use_fp8_mfma_pv": True},
-            {"use_early_v_schedule": True},
-            {"use_v_double_buffer": True},
-            {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
+            _named("baseline", {}),
+            _named("regpv", {"use_register_pv": True}),
+            _named("fp8qk", {"use_fp8_mfma_qk": True}),
+            _named("fp8pv", {"use_fp8_mfma_pv": True}),
+            _named("fp8both", {"use_fp8_mfma_qk": True, "use_fp8_mfma_pv": True}),
+            _named("early_v", {"use_early_v_schedule": True}),
+            _named("vdbuf", {"use_v_double_buffer": True}),
+            _named(
+                "vdbuf_stgw",
+                {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
+            ),
         )
         yield from profiles
-        # The sched_barrier fence is emitted only in the narrow QK loop, so it
-        # belongs to this codepath alone. Swept standalone and on top of the
-        # V-double-buffer schedule, which is the pairing the production
-        # heuristic ties it to.
         for mask in _SCHED_BARRIER_MASKS:
-            yield {"use_sched_barrier": True, "sched_barrier_mask": mask}
-            yield {
-                "use_v_double_buffer": True,
-                "use_sched_barrier": True,
-                "sched_barrier_mask": mask,
-            }
+            yield _named(
+                f"schedb_{mask:#x}",
+                {"use_sched_barrier": True, "sched_barrier_mask": mask},
+            )
+            yield _named(
+                f"vdbuf_schedb_{mask:#x}",
+                {
+                    "use_v_double_buffer": True,
+                    "use_sched_barrier": True,
+                    "sched_barrier_mask": mask,
+                },
+            )
         return
     if codepath == "wide32":
         base = {"use_mfma_32x32": True}
-        profiles = (
-            {},
-            {"use_early_v_schedule": True},
-            {"use_v_double_buffer": True},
-            {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
-        )
-        for profile in profiles:
-            yield _merge(base, profile)
+        for name, extra in (
+            ("baseline", {}),
+            ("early_v", {"use_early_v_schedule": True}),
+            ("vdbuf", {"use_v_double_buffer": True}),
+            (
+                "vdbuf_stgw",
+                {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
+            ),
+        ):
+            yield _named(name, _merge(base, extra))
         return
     if codepath != "transposed32":
         return
 
-    valu_profiles = (
-        {},
-        {"use_transposed_scalar_state": True},
+    base = dict(_GFX950_TRANSPOSED_BASE)
+    r4_s1 = _merge(
+        base,
         {
             "use_transposed_scalar_state": True,
             "use_transposed_invariant_hoist": True,
             "use_transposed_mask_once": True,
         },
+    )
+    r4_mlim = _merge(r4_s1, {"use_transposed_mask_limit": True})
+    r4_hlpv = _merge(
+        r4_mlim,
         {
-            "use_transposed_scalar_state": True,
-            "use_transposed_invariant_hoist": True,
-            "use_transposed_mask_once": True,
-            "use_transposed_mask_limit": True,
-        },
-        {
-            "use_transposed_scalar_state": True,
-            "use_transposed_invariant_hoist": True,
-            "use_transposed_mask_once": True,
-            "use_transposed_mask_limit": True,
             "use_transposed_half_local_pv": True,
             "use_mfma32_skip_legacy_qreg": True,
         },
     )
-    memory_profiles = (
-        {},
-        {"use_early_v_schedule": True},
-        {"use_v_double_buffer": True},
-        {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
-        {"use_k_single_buffer": True},
-        {"use_k_single_buffer": True, "use_q_direct_reg": True},
-        {"kv_ring_depth": 3},
-        {"use_q_direct_reg": True},
-        # Q re-read needs the transposed path and a surviving Q_lds, so it is
-        # only legal here and never alongside the direct-register Q gather --
-        # that pairing is rejected by the spec rather than filtered out here.
-        {"use_q_reread": True},
-        {"use_grouped_kv2_softmax": True},
-        {"use_fast_paged_kv_desc": True},
-        {"use_agpr_alloc_zero": True},
+    stacks = (
+        ("baseline", base),
+        ("scalar", _merge(base, {"use_transposed_scalar_state": True})),
+        ("r4_s1", r4_s1),
+        ("r4_s1_mlim", r4_mlim),
+        ("r4_hlpv", r4_hlpv),
+        ("early_v", _merge(base, {"use_early_v_schedule": True})),
+        ("vdbuf", _merge(base, {"use_v_double_buffer": True})),
+        (
+            "vdbuf_stgw",
+            _merge(
+                base,
+                {"use_v_double_buffer": True, "use_staggered_iter_wait": True},
+            ),
+        ),
+        ("ksb", _merge(base, {"use_k_single_buffer": True})),
+        (
+            "ksb_qdreg",
+            _merge(base, {"use_k_single_buffer": True, "use_q_direct_reg": True}),
+        ),
+        ("ring3", _merge(base, {"kv_ring_depth": 3})),
+        ("qdreg", _merge(base, {"use_q_direct_reg": True})),
+        ("qrr", _merge(base, {"use_q_reread": True})),
+        ("gkv2", _merge(base, {"use_grouped_kv2_softmax": True})),
+        ("fastkv", _merge(base, {"use_fast_paged_kv_desc": True})),
+        ("r4_mlim_vdbuf", _merge(r4_mlim, {"use_v_double_buffer": True})),
+        ("r4_hlpv_qrr", _merge(r4_hlpv, {"use_q_reread": True})),
+        ("r4_mlim_phase", _merge(r4_mlim, {"use_mask_phase_split": True})),
+        ("r4_hlpv_agpr0", _merge(r4_hlpv, {"use_agpr_alloc_zero": True})),
     )
-    for valu, memory in product(valu_profiles, memory_profiles):
-        yield _merge(_GFX950_TRANSPOSED_BASE, valu, memory)
+    for name, knobs in stacks:
+        yield _named(name, knobs)
 
 
 def _gfx942_profile_dicts(codepath: str) -> Iterable[dict[str, object]]:
     if codepath == "narrow":
-        yield from (
-            {},
-            {"use_register_pv": True},
-            {"use_early_v_schedule": True},
-            {"use_iglp_opt": True},
-            {"use_q_major_grid": True},
-            {"use_global_load_lds_k": True},
-            {"use_fast_paged_kv_desc": True},
-            {"use_v_hbm_direct": True},
-            {"use_k_hbm_direct": True},
-        )
+        # use_k_hbm_direct is omitted: the 16x16 QK loop always reads K_lds, so
+        # khbm (which skips K staging) is numerically wrong on this path.
+        for name, knobs in (
+            ("baseline", {}),
+            ("regpv", {"use_register_pv": True}),
+            ("early_v", {"use_early_v_schedule": True}),
+            ("iglp", {"use_iglp_opt": True}),
+            ("qmajor", {"use_q_major_grid": True}),
+            ("gldsk", {"use_global_load_lds_k": True}),
+            ("fastkv", {"use_fast_paged_kv_desc": True}),
+            ("vhbm", {"use_v_hbm_direct": True}),
+        ):
+            yield _named(name, knobs)
         return
     if codepath == "wide32x8":
-        yield from (
-            _GFX942_X8_BASE,
-            _merge(_GFX942_X8_BASE, {"use_iglp_opt": True}),
-            _merge(_GFX942_X8_BASE, {"use_q_major_grid": True}),
-        )
+        yield _named("baseline", _GFX942_X8_BASE)
+        yield _named("iglp", _merge(_GFX942_X8_BASE, {"use_iglp_opt": True}))
+        yield _named("qmajor", _merge(_GFX942_X8_BASE, {"use_q_major_grid": True}))
         return
     if codepath == "gfx942_4warp":
-        yield {}
+        yield _named("baseline", {})
         return
     if codepath != "transposed_x8":
         return
 
-    valu_profiles = (
-        {},
-        {"use_transposed_scalar_state": True},
+    base = dict(_GFX942_TRANSPOSED_BASE)
+    r4_s1 = _merge(
+        base,
         {
             "use_transposed_scalar_state": True,
             "use_transposed_invariant_hoist": True,
             "use_transposed_mask_once": True,
-        },
-        {
-            "use_transposed_scalar_state": True,
-            "use_transposed_invariant_hoist": True,
-            "use_transposed_mask_once": True,
-            "use_transposed_mask_limit": True,
         },
     )
-    memory_profiles = [
-        {},
-        {"use_conflict_free_v": True},
-        {"use_conflict_free_v_store": True},
-        {
-            "use_conflict_free_v_store": True,
-            "use_conflict_free_v_store_split": False,
-        },
-        {
-            "use_conflict_free_v_store": True,
-            "use_conflict_free_v_ck_vlds": False,
-        },
-        {"use_k_single_buffer": True},
-        {"use_q_direct_global": True},
-        {"use_v_hbm_direct": True},
-        {"use_k_hbm_direct": True},
-        {"use_global_load_lds_k": True},
-        {"use_q_major_grid": True},
-        {"use_causal_mask_phase_split": True},
-        {"use_agpr_alloc_zero": True},
-        {"use_iglp_opt": True},
-        {"use_qk_pv_sched_group_barrier": True},
-    ]
-    for depth in (2, 3):
-        for width in (8, 16, 32, 64):
-            memory_profiles.append(
+    r4_mlim = _merge(r4_s1, {"use_transposed_mask_limit": True})
+    stacks = [
+        ("baseline", base),
+        ("scalar", _merge(base, {"use_transposed_scalar_state": True})),
+        ("r4_s1", r4_s1),
+        ("r4_s1_mlim", r4_mlim),
+        ("cfv", _merge(base, {"use_conflict_free_v": True})),
+        ("cfvst", _merge(base, {"use_conflict_free_v_store": True})),
+        (
+            "cfvst_nosplit",
+            _merge(
+                base,
+                {
+                    "use_conflict_free_v_store": True,
+                    "use_conflict_free_v_store_split": False,
+                },
+            ),
+        ),
+        ("ksb", _merge(base, {"use_k_single_buffer": True})),
+        ("qdglob", _merge(base, {"use_q_direct_global": True})),
+        ("vhbm", _merge(base, {"use_v_hbm_direct": True})),
+        ("khbm", _merge(base, {"use_k_hbm_direct": True})),
+        ("gldsk", _merge(base, {"use_global_load_lds_k": True})),
+        ("qmajor", _merge(base, {"use_q_major_grid": True})),
+        ("cphase", _merge(base, {"use_causal_mask_phase_split": True})),
+        ("agpr0", _merge(base, {"use_agpr_alloc_zero": True})),
+        ("iglp", _merge(base, {"use_iglp_opt": True})),
+        ("schedg", _merge(base, {"use_qk_pv_sched_group_barrier": True})),
+        (
+            "ring_d2_w32",
+            _merge(
+                base,
                 {
                     "use_conflict_free_v_store": True,
                     "use_k_sliced_ring": True,
-                    "ring_depth": depth,
-                    "k_slice_hd": width,
-                }
-            )
-            if depth == 3:
-                memory_profiles.append(
-                    {
-                        "use_conflict_free_v_store": True,
-                        "use_k_sliced_ring": True,
-                        "ring_depth": depth,
-                        "k_slice_hd": width,
-                        "use_k_sliced_ldsseq": True,
-                    }
-                )
-    for cache_policy in ("stream", "default", "last_use"):
-        memory_profiles.append({"kv_cache_policy": cache_policy})
-    for valu, memory in product(valu_profiles, memory_profiles):
-        yield _merge(_GFX942_TRANSPOSED_BASE, valu, memory)
+                    "ring_depth": 2,
+                    "k_slice_hd": 32,
+                },
+            ),
+        ),
+        (
+            "ring_d3_w32",
+            _merge(
+                base,
+                {
+                    "use_conflict_free_v_store": True,
+                    "use_k_sliced_ring": True,
+                    "ring_depth": 3,
+                    "k_slice_hd": 32,
+                },
+            ),
+        ),
+        (
+            "ring_d3_w32_ldsseq",
+            _merge(
+                base,
+                {
+                    "use_conflict_free_v_store": True,
+                    "use_k_sliced_ring": True,
+                    "ring_depth": 3,
+                    "k_slice_hd": 32,
+                    "use_k_sliced_ldsseq": True,
+                },
+            ),
+        ),
+        ("kvcp_nt", _merge(base, {"kv_cache_policy": "nt"})),
+    ]
+    for name, knobs in stacks:
+        yield _named(name, knobs)
+
+
+def _canonical_payload(
+    *,
+    arch: str,
+    path: str,
+    builder_kind: str,
+    compile_backend: str,
+    kernel_spec,
+    reduce_spec,
+) -> dict:
+    def _as_payload(value):
+        if value is None:
+            return None
+        if is_dataclass(value) and not isinstance(value, type):
+            return asdict(value)
+        return repr(value)
+
+    return {
+        "abi": ATTENTION_ABI_VERSION,
+        "arch": arch,
+        "path": path,
+        "builder_kind": builder_kind,
+        "compile_backend": compile_backend,
+        "kernel_spec": _as_payload(kernel_spec),
+        "reduce_spec": _as_payload(reduce_spec),
+    }
+
+
+def _make_tuning_id(
+    variant: AttentionGeometryVariant,
+    kernel_spec,
+    reduce_spec=None,
+) -> str:
+    wpe = getattr(kernel_spec, "waves_per_eu", None)
+    digest = stable_json_hash(
+        _canonical_payload(
+            arch=variant.arch,
+            path=variant.path,
+            builder_kind=variant.builder_kind,
+            compile_backend=variant.compile_backend,
+            kernel_spec=kernel_spec,
+            reduce_spec=reduce_spec,
+        ),
+        n=16,
+    )
+    return f"{variant.variant_id}_wpe{wpe if wpe is not None else 'none'}@{digest}"
 
 
 def _explicit_configs(
@@ -288,7 +478,7 @@ def _explicit_configs(
             )
         else:
             knob_sets = ({},)
-        for wpe, knobs in product((None, 1, 2, 3, 4), knob_sets):
+        for wpe, knobs in product(_SWEEP_WAVES_3D, knob_sets):
             config = ExplicitAttention3DConfig(
                 num_segments=variant.num_segments,
                 tile_policy=variant.tile_policy,
@@ -301,17 +491,13 @@ def _explicit_configs(
                 )
             except (ValueError, NotImplementedError):
                 continue
-            tuning_id = (
-                f"{variant.variant_id}_wpe{wpe if wpe is not None else 'none'}"
-                f"_{segment.kernel_name()}"
-            )
             yield AttentionTuningSpec(
                 path="3d",
                 arch=variant.arch,
                 builder_kind="tiled_3d",
                 compile_backend="llvm",
                 candidate_name=variant.candidate_name,
-                tuning_id=tuning_id,
+                tuning_id=_make_tuning_id(variant, segment, reduce),
                 kernel_spec=segment,
                 reduce_spec=reduce,
             )
@@ -323,32 +509,28 @@ def _explicit_configs(
         else _gfx942_profile_dicts(variant.codepath)
     )
     for profile in profiles:
+        stack = str(profile.get("_stack", ""))
+        knobs_base = {k: v for k, v in profile.items() if k != "_stack"}
         pad_options: Sequence[Optional[int]] = (None,)
-        if variant.arch == "gfx950" and variant.codepath != "narrow":
-            pad_options = (None, 8, 16)
+        if (
+            variant.arch == "gfx950"
+            and variant.codepath != "narrow"
+            and knobs_base.get("use_k_single_buffer")
+            and (knobs_base.get("use_q_direct_reg") or knobs_base.get("use_q_reread"))
+        ):
+            pad_options = (None, 16)
         interleave_options: Sequence[Optional[Tuple[int, int]]] = (None,)
         if (
             variant.arch == "gfx950"
             and variant.codepath == "transposed32"
-            # The interleave hint and the sched_barrier fence steer the post-RA
-            # scheduler against each other. That pair is rejected by the 2D
-            # emitter rather than by ``__post_init__``, so it would survive spec
-            # construction and only fail once something built it.
-            and not profile.get("use_sched_barrier")
+            and stack in _INTERLEAVE_STACKS
+            and not knobs_base.get("use_sched_barrier")
         ):
-            interleave_options = (None, (0, 1), (1, 1), (2, 4))
-        mask_phase_options = (
-            (False, True)
-            if variant.arch == "gfx950" and variant.codepath == "transposed32"
-            else (False,)
-        )
-        for wpe, pad, interleave, mask_phase in product(
-            (None, 1, 2, 3, 4),
-            pad_options,
-            interleave_options,
-            mask_phase_options,
+            interleave_options = (None, (2, 4))
+        for wpe, pad, interleave in product(
+            _SWEEP_WAVES_2D, pad_options, interleave_options
         ):
-            knobs = dict(profile)
+            knobs = dict(knobs_base)
             if pad is not None:
                 knobs.update(use_kq_lds_pad=True, kq_lds_pad_halves=pad)
             if interleave is not None:
@@ -358,8 +540,6 @@ def _explicit_configs(
                     softmax_interleave_mode=mode,
                     softmax_interleave_groups=groups,
                 )
-            if mask_phase:
-                knobs["use_mask_phase_split"] = True
             config = ExplicitAttention2DConfig(
                 num_warps=variant.num_warps,
                 block_m_per_warp=variant.block_m_per_warp,
@@ -375,39 +555,34 @@ def _explicit_configs(
                 )
             except (ValueError, NotImplementedError):
                 continue
-            tuning_id = (
-                f"{variant.variant_id}_wpe{wpe if wpe is not None else 'none'}"
-                f"_{kernel_spec.kernel_name()}"
-            )
+            ok, _why = _supports_tuning_spec(variant, kernel_spec)
+            if not ok:
+                continue
             yield AttentionTuningSpec(
                 path="2d",
                 arch=variant.arch,
                 builder_kind=variant.builder_kind,
                 compile_backend=variant.compile_backend,
                 candidate_name=variant.candidate_name,
-                tuning_id=tuning_id,
+                tuning_id=_make_tuning_id(variant, kernel_spec),
                 kernel_spec=kernel_spec,
             )
+
+
+def iter_tuning_specs(
+    req: AttentionRequest, variant: AttentionGeometryVariant
+) -> Iterable[AttentionTuningSpec]:
+    seen: set[str] = set()
+    for spec in _explicit_configs(_problem(req), variant):
+        if spec.tuning_id not in seen:
+            seen.add(spec.tuning_id)
+            yield spec
 
 
 def tuning_specs(
     req: AttentionRequest, variant: AttentionGeometryVariant
 ) -> Tuple[AttentionTuningSpec, ...]:
-    problem = _problem(req)
-    seen = set()
-    specs = []
-    for spec in _explicit_configs(problem, variant):
-        key = (
-            spec.builder_kind,
-            spec.compile_backend,
-            spec.kernel_name(),
-            repr(spec.kernel_spec),
-            repr(spec.reduce_spec),
-        )
-        if key not in seen:
-            seen.add(key)
-            specs.append(spec)
-    return tuple(specs)
+    return tuple(iter_tuning_specs(req, variant))
 
 
 def _find_tuning_spec(
@@ -416,8 +591,9 @@ def _find_tuning_spec(
     tuning_id: str,
 ) -> Optional[AttentionTuningSpec]:
     """Find one valid point without materializing the whole sweep space."""
+    wanted = tuning_id.strip()
     for spec in _explicit_configs(_problem(req), variant):
-        if tuning_id == "auto" or spec.tuning_id == tuning_id:
+        if wanted in ("auto", "") or spec.tuning_id == wanted:
             return spec
     return None
 
@@ -469,7 +645,7 @@ def make_tuning_candidate(
         return spec
 
     def build(spec, arch):
-        from builders.common.attention_tuning_builder import (
+        from .tuning_specs import (
             build_explicit_attention_2d,
             build_explicit_attention_3d,
         )
@@ -488,7 +664,6 @@ def make_tuning_candidate(
         from kernels.common.attention_unified import (
             _3d_signature,
             _attn_signature,
-            _kv_storage_dtype,
         )
 
         if spec.path == "3d":
@@ -531,6 +706,21 @@ def make_tuning_candidate(
             return (256, 1, 1)
         return (64 * spec.kernel_spec.num_warps, 1, 1)
 
+    def bind_torch(request, spec, tensors, **kwargs):
+        from .bindings import bind_tuning_attention_torch
+
+        payload = dict(tensors)
+        if "problem" not in payload:
+            payload["problem"] = _problem(request)
+        return bind_tuning_attention_torch(
+            request,
+            spec,
+            payload,
+            grid=grid(spec, request),
+            block=block(spec),
+            **kwargs,
+        )
+
     candidate = KernelCandidate(
         name=variant.candidate_name,
         family=FAMILY,
@@ -554,5 +744,6 @@ def make_tuning_candidate(
         block=block,
         sweep_space=sweep,
         build=build,
+        bind_torch=bind_torch,
     )
     return candidate

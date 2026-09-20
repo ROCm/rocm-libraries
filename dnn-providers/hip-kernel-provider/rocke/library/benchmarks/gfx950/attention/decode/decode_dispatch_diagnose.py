@@ -4,20 +4,10 @@
 from __future__ import annotations
 
 import os
-import sys
 import traceback
 
 # gfx950 3D graph is default-on; leave the env unset so the probe
 # exercises the production gate. HIPDNN_GFX950_3D_GRAPH=0 still disables.
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.environ.get("ROCKE_ROOT") or os.path.abspath(
-    os.path.join(_HERE, os.pardir, os.pardir, os.pardir, os.pardir, os.pardir)
-)
-for _sub in ("platform/python", "library"):
-    _p = os.path.join(ROOT, _sub)
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from dispatch.attention import AttentionRequest, registered_attention_combos
 from dispatch.attention.common import _problem

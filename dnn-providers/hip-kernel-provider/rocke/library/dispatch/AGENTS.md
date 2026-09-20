@@ -58,16 +58,22 @@ Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.
 
 The priority-30 tuning candidates are generated from a bounded geometry catalog
-(160 candidates total), while each candidate's `sweep_space` expands the
-dependency-valid schedule micro-configurations for the concrete request. They
-reject `algorithm="auto"` before constructing a spec, so normal dispatch does
-not pay the enumeration cost and the historical winner is unchanged. Sweeps
-probe them with `algorithm="unified_tuning"` and execute the returned
-`AttentionTuningSpec`, which owns the concrete arch spec, builder kind, compile
-backend, launch geometry, and tuning id.
+(160 candidates total). Each candidate's `sweep_space` expands named schedule
+stacks and a small set of legal micro-axes (not a valu×memory Cartesian
+product). gfx950 stays at or below 5K specs per representative shape; gfx942
+stays at or below 1.5K. They reject `algorithm="auto"` before constructing a
+spec, so normal dispatch does not pay the enumeration cost and the historical
+winner is unchanged. Sweeps probe them with `algorithm="unified_tuning"` and
+execute the returned `AttentionTuningSpec`.
 
-Policy-free spec construction lives in
-`builders/common/attention_tuning_builder.py`. It never calls `_select_*`,
+Production `dispatch_attention` uses `ATTENTION_ROUTE_REGISTRY` (path labels
+plus pin-able specialized candidates). `registered_attention_combos` /
+`dispatch_attention_all` use `ATTENTION_EXECUTION_REGISTRY`, which requires
+`build` and `bind_torch` on every candidate.
+
+Policy-free spec construction lives next to its consumers in
+`dispatch/attention/tuning_specs.py`. It is shared by the gfx942/gfx950 tuning
+candidates and never calls `_select_*`,
 `_enable_*`, `_num_segments`, or `_resolve_lds_budget`; problem semantics are
 derived from `UnifiedAttentionProblem`, while explicit geometry/codegen points
 are accepted or rejected by the concrete spec and `supports_tiled_*` validators.
@@ -89,9 +95,9 @@ policy (default tile, persist once `nqb*Hq*B >= num_persistent`, wide DMA on
 aligned causal D128) rather than always picking the production name. Pin
 `dense_tile` / `dense_persistent` / `dense_wide_lds_dma` on `AttentionRequest`
 to filter. `registered_attention_combos(req)` is the multi-engine bench
-entry: it probes every registry candidate for `req.arch` and flattens each
-candidate's `sweep_space` (dense and unified tuning are opt-in, so
-`supported(req)` with `algorithm="auto"` would miss them).
+entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
+candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
+unified path labels are omitted.
 
 **Tier 3 is reserved for opt-in candidates.** Because they outrank every other
 tier, that opt-in check is the only thing keeping them off the default path — a
@@ -312,8 +318,9 @@ See the worked example:
 ## Testing (CPU-only, no GPU)
 
 ```bash
-PYTHONPATH=library:platform/python python -m unittest discover \
+python -m unittest discover \
     -s library/tests/dispatch/attention -p "test_*.py" -v
 ```
 
-All dispatch tests complete in < 1 s.
+Dispatch tests are CPU-only. Cardinality checks walk the reduced tuning space
+and take longer than the wiring tests.

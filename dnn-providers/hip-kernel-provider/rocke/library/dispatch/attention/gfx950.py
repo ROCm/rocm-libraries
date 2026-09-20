@@ -388,23 +388,36 @@ def _make_gfx950_attention_dense_candidate(
             return False, why
         return True, "ok"
 
-    def select(req: OperatorRequest) -> AttentionSpec:
+    def select(req: OperatorRequest):
         ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
-        assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
-        dense_spec = _dense_spec(req, variant)
-        return AttentionSpec(
-            path="2d",
-            head_size=problem.head_size,
-            block_size=problem.block_size,
-            dtype=problem.dtype,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            name="rocke_attention_dense",
-            kernel_name_override=dense_spec.kernel_name(),
-        )
+        return _dense_spec(req, variant)
+
+    def build(spec, arch):
+        from kernels.gfx950.attention_dense import build_attention_dense
+
+        return build_attention_dense(spec, arch=arch)
+
+    def signature(spec):
+        from kernels.gfx950.attention_dense import attention_dense_signature
+
+        return attention_dense_signature(spec)
+
+    def grid(spec, req):
+        from kernels.gfx950.attention_dense import attention_dense_grid
+
+        return attention_dense_grid(spec)
+
+    def block(spec):
+        from kernels.gfx950.attention_dense import attention_dense_block
+
+        return attention_dense_block(spec)
+
+    def bind_torch(request, spec, tensors, **kwargs):
+        from .bindings import bind_dense_attention_torch
+
+        return bind_dense_attention_torch(request, spec, tensors, **kwargs)
 
     candidate = KernelCandidate(
         name=name,
@@ -424,10 +437,12 @@ def _make_gfx950_attention_dense_candidate(
         ),
         _supports=support,
         select_spec=select,
-        signature=lambda _spec: (),
-        grid=lambda spec, req: (0, 0, 0),
-        block=lambda spec: (0, 0, 0),
+        signature=signature,
+        grid=grid,
+        block=block,
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=build,
+        bind_torch=bind_torch,
     )
     return candidate
 
@@ -516,7 +531,16 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
     return candidate
 
 
-def register(registry: CandidateRegistry) -> None:
+def register_route(registry: CandidateRegistry) -> None:
     for variant in GFX950_DENSE_VARIANTS:
         registry.register(_make_gfx950_attention_dense_candidate(variant))
     registry.register(_make_gfx950_d256_candidate())
+
+
+def register_execution(registry: CandidateRegistry) -> None:
+    for variant in GFX950_DENSE_VARIANTS:
+        registry.register(_make_gfx950_attention_dense_candidate(variant))
+
+
+def register(registry: CandidateRegistry) -> None:
+    register_route(registry)

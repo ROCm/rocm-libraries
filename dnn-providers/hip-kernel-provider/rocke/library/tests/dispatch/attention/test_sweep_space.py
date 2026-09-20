@@ -2,12 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Contract tests for ``attention_sweep_space`` -- the multi-engine benchmarking
 primitive.
-
-The ticket requires that benchmarking workflows can *evaluate multiple engines
-for the same problem*. ``attention_sweep_space(req)`` is that entry point: it
-returns the deduped ``select_spec`` of every candidate that supports ``req``.
-These CPU-only tests make its behavior a tested contract (previously it had no
-callers) so the benchmark ``sweep`` lane can rely on it.
 """
 
 from __future__ import annotations
@@ -16,12 +10,13 @@ import unittest
 
 import kernels.common.attention_unified as au
 from dispatch.attention import (
-    ATTENTION_REGISTRY,
+    ATTENTION_EXECUTION_REGISTRY,
     AttentionRequest,
     attention_sweep_space,
     dispatch_attention_all,
     registered_attention_combos,
 )
+from rocke.dispatch.core import spec_identity
 
 
 def _gfx942_fp16_mha(**kw) -> AttentionRequest:
@@ -55,40 +50,39 @@ class _PinnedArch:
 
 class TestSweepSpace(unittest.TestCase):
     def test_invalid_request_yields_empty(self):
-        # Malformed request (hdim_q != hdim_v) -> no specs, no raise.
         bad = _gfx942_fp16_mha(hdim_v=64)
         self.assertEqual(attention_sweep_space(bad), ())
 
-    def test_covers_all_supported_candidates(self):
+    def test_covers_executable_dense_and_tuning(self):
         with _PinnedArch("gfx942"):
             req = _gfx942_fp16_mha()
-            supported = ATTENTION_REGISTRY.supported(req)
+            combos = registered_attention_combos(req)
             specs = attention_sweep_space(req)
-        # One spec per distinct supported candidate spec (deduped by hash). This
-        # shape has >1 supported candidate (dense_pipe + unified_2d), so the sweep
-        # genuinely spans multiple engines.
-        self.assertGreater(len(supported), 1)
-        self.assertGreaterEqual(len(specs), 1)
-        self.assertGreater(len(specs), len(supported))
+        names = {c.name for c, _spec in combos}
+        self.assertIn("attention_gfx942_dense", names)
+        self.assertTrue(any(c.algorithm == "unified_tuning" for c, _ in combos))
+        self.assertNotIn("attention_unified_2d", names)
+        self.assertNotIn("attention_gfx942_dense_pipe", names)
+        self.assertGreater(len(specs), 1)
         self.assertTrue(any(hasattr(s, "tuning_id") for s in specs))
+        self.assertTrue(ATTENTION_EXECUTION_REGISTRY.require_build)
+        self.assertTrue(ATTENTION_EXECUTION_REGISTRY.require_torch_binding)
 
     def test_specs_are_deduped(self):
         with _PinnedArch("gfx942"):
             specs = attention_sweep_space(_gfx942_fp16_mha())
-        # No two returned specs are identical.
-        self.assertEqual(len(specs), len({repr(s) for s in specs}))
+        self.assertEqual(len(specs), len({spec_identity(s) for s in specs}))
 
     def test_sweep_matches_manual_candidate_selection(self):
         with _PinnedArch("gfx942"):
             req = _gfx942_fp16_mha()
             manual = []
             seen = set()
-            for _candidate, s in registered_attention_combos(req):
-                if not hasattr(s, "path"):
-                    continue
-                if repr(s) not in seen:
-                    seen.add(repr(s))
-                    manual.append(s)
+            for _candidate, spec in registered_attention_combos(req):
+                key = spec_identity(spec)
+                if key not in seen:
+                    seen.add(key)
+                    manual.append(spec)
             specs = attention_sweep_space(req)
         self.assertEqual(list(specs), manual)
 

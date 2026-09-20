@@ -18,8 +18,7 @@ arch modules, and adding an arch touches exactly one line here.
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
-from typing import Sequence, Tuple
+from typing import Iterator, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import (
@@ -30,6 +29,7 @@ from rocke.dispatch.core import (
     OperatorRequest,
     Ranker,
     make_kernel_id,
+    spec_identity,
     stable_json_hash,
 )
 
@@ -54,13 +54,36 @@ from .common import (
 
 _FAMILY = FAMILY
 
-ATTENTION_REGISTRY = CandidateRegistry(_FAMILY, dim_vocabulary=ATTENTION_DIM_VOCABULARY)
-for _module in (generic, gfx942, gfx950, gfx942_tuning, gfx950_tuning, gfx1250):
-    _module.register(ATTENTION_REGISTRY)
+ATTENTION_ROUTE_REGISTRY = CandidateRegistry(
+    _FAMILY, dim_vocabulary=ATTENTION_DIM_VOCABULARY
+)
+ATTENTION_EXECUTION_REGISTRY = CandidateRegistry(
+    _FAMILY,
+    dim_vocabulary=ATTENTION_DIM_VOCABULARY,
+    require_build=True,
+    require_torch_binding=True,
+)
+generic.register(ATTENTION_ROUTE_REGISTRY)
+gfx942.register_route(ATTENTION_ROUTE_REGISTRY)
+gfx950.register_route(ATTENTION_ROUTE_REGISTRY)
+gfx1250.register(ATTENTION_ROUTE_REGISTRY)
+gfx942_tuning.register(ATTENTION_ROUTE_REGISTRY)
+gfx950_tuning.register(ATTENTION_ROUTE_REGISTRY)
+gfx942.register_execution(ATTENTION_EXECUTION_REGISTRY)
+gfx950.register_execution(ATTENTION_EXECUTION_REGISTRY)
+gfx1250.register(ATTENTION_EXECUTION_REGISTRY)
+gfx942_tuning.register(ATTENTION_EXECUTION_REGISTRY)
+gfx950_tuning.register(ATTENTION_EXECUTION_REGISTRY)
+# Compatibility alias: production auto-dispatch and candidate listing.
+ATTENTION_REGISTRY = ATTENTION_ROUTE_REGISTRY
 
 
 def attention_candidates() -> Tuple[KernelCandidate, ...]:
     return ATTENTION_REGISTRY.candidates()
+
+
+def attention_execution_candidates() -> Tuple[KernelCandidate, ...]:
+    return ATTENTION_EXECUTION_REGISTRY.candidates()
 
 
 def _attention_selector_ok(req: OperatorRequest, candidate: KernelCandidate) -> bool:
@@ -80,42 +103,87 @@ def _attention_selector_ok(req: OperatorRequest, candidate: KernelCandidate) -> 
     return True
 
 
-def registered_attention_combos(
+def iter_registered_attention_combos(
     req: AttentionRequest,
     *,
     candidate_prefix: str = "",
     tuning_id_prefix: str = "",
-) -> Tuple[Tuple[KernelCandidate, object], ...]:
-    """Every registered attention candidate that can launch ``req``.
+) -> Iterator[Tuple[KernelCandidate, object]]:
+    """Yield each executable ``(candidate, spec)`` that can launch ``req``.
 
     Delegates the opt-in probe and ``sweep_space`` expansion to
-    :meth:`CandidateRegistry.combos`, then remaps dense candidates onto their
-    standalone dense spec (the unified ``select_spec`` is a path label, not the
-    dense builder input). ``req.algorithm`` still filters when it is not
-    ``auto``. ``spec_id`` likewise, except the gfx950 dense family id admits
-    every dense variant.
+    :meth:`CandidateRegistry.iter_combos` on :data:`ATTENTION_EXECUTION_REGISTRY`.
+    Routing-only unified path labels are not executable and are omitted.
+    ``req.algorithm`` still filters when it is not ``auto``. ``spec_id``
+    likewise, except the gfx950 dense family id admits every dense variant.
     """
     if not isinstance(req, AttentionRequest):
         raise TypeError(f"expected AttentionRequest, got {type(req).__name__}")
-    combos: list[Tuple[KernelCandidate, object]] = []
-    for candidate, spec in ATTENTION_REGISTRY.combos(
+    for candidate, spec in ATTENTION_EXECUTION_REGISTRY.iter_combos(
         req,
         candidate_prefix=candidate_prefix,
         selector_ok=_attention_selector_ok,
     ):
-        probe = replace(req, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
-        if candidate.algorithm == "attention_dense" and req.arch == "gfx950":
-            spec = gfx950.dense_spec_for_candidate(probe, candidate)
-        elif candidate.algorithm == "attention_dense":
-            spec = dense_spec_for_request(probe)
         if (
             candidate.algorithm == "unified_tuning"
             and tuning_id_prefix
             and not getattr(spec, "tuning_id", "").startswith(tuning_id_prefix)
         ):
             continue
-        combos.append((candidate, spec))
-    return tuple(combos)
+        yield candidate, spec
+
+
+def registered_attention_combos(
+    req: AttentionRequest,
+    *,
+    candidate_prefix: str = "",
+    tuning_id_prefix: str = "",
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Materialized :func:`iter_registered_attention_combos`."""
+    return tuple(
+        iter_registered_attention_combos(
+            req,
+            candidate_prefix=candidate_prefix,
+            tuning_id_prefix=tuning_id_prefix,
+        )
+    )
+
+
+def attention_dispatch_result(
+    req: AttentionRequest, candidate: KernelCandidate, spec: object
+) -> DispatchResult:
+    """Wrap an already-selected executable ``(candidate, spec)`` as a result."""
+    return DispatchResult(
+        request=req,
+        candidate=candidate,
+        spec=spec,
+        kernel_id=_kernel_id(req, candidate, spec),
+        grid=candidate.grid(spec, req),
+        block=candidate.block(spec),
+        signature=tuple(candidate.signature(spec)),
+        explanation=(
+            f"sweep {candidate.name} ({candidate.algorithm}) on {req.arch}",
+            f"algorithm={candidate.algorithm}",
+            f"spec_id={candidate.spec_id}",
+        ),
+    )
+
+
+def iter_dispatch_attention_all(
+    req: AttentionRequest,
+    *,
+    candidate_prefix: str = "",
+    tuning_id_prefix: str = "",
+) -> Iterator[DispatchResult]:
+    """Yield each :func:`attention_dispatch_result` for ``req``."""
+    if _request_errors(req):
+        return
+    for candidate, spec in iter_registered_attention_combos(
+        req,
+        candidate_prefix=candidate_prefix,
+        tuning_id_prefix=tuning_id_prefix,
+    ):
+        yield attention_dispatch_result(req, candidate, spec)
 
 
 def dense_spec_for_request(req: AttentionRequest):
@@ -157,9 +225,10 @@ def attention_sweep_space(
 ) -> Sequence[object]:
     """Every concrete engine/configuration available to a sweep.
 
-    Unlike normal dispatch, this deliberately probes opt-in candidates and
-    expands ``candidate.sweep_space``. Production ``algorithm='auto'`` selection
-    remains on ``ATTENTION_REGISTRY.supported`` and never sees tuning candidates.
+    Unlike normal dispatch, this deliberately probes opt-in executable
+    candidates and expands ``candidate.sweep_space``. Production
+    ``algorithm='auto'`` selection remains on ``ATTENTION_ROUTE_REGISTRY.supported``
+    and never sees tuning candidates.
     """
     if _request_errors(req):
         return ()
@@ -171,12 +240,7 @@ def attention_sweep_space(
         candidate_prefix=candidate_prefix,
         tuning_id_prefix=tuning_id_prefix,
     ):
-        # Dense candidates use a different tensor/layout runner. This API is
-        # the unified 2D/3D sweep surface; full multi-engine table sweeps use
-        # registered_attention_combos directly and handle dense separately.
-        if not hasattr(spec, "path"):
-            continue
-        h = stable_json_hash(asdict(spec), n=16)
+        h = spec_identity(spec)
         if h not in seen:
             seen.add(h)
             specs.append(spec)
@@ -194,24 +258,8 @@ def dispatch_attention_all(
     Uses :func:`registered_attention_combos` so dense candidates keep their
     standalone dense spec. Production :func:`dispatch_attention` is unchanged.
     """
-    if _request_errors(req):
-        return ()
     return tuple(
-        DispatchResult(
-            request=req,
-            candidate=candidate,
-            spec=spec,
-            kernel_id=_kernel_id(req, candidate, spec),
-            grid=candidate.grid(spec, req),
-            block=candidate.block(spec),
-            signature=tuple(candidate.signature(spec)),
-            explanation=(
-                f"sweep {candidate.name} ({candidate.algorithm}) on {req.arch}",
-                f"algorithm={candidate.algorithm}",
-                f"spec_id={candidate.spec_id}",
-            ),
-        )
-        for candidate, spec in registered_attention_combos(
+        iter_dispatch_attention_all(
             req,
             candidate_prefix=candidate_prefix,
             tuning_id_prefix=tuning_id_prefix,
@@ -284,8 +332,10 @@ def dispatch_attention(
 __all__ = [
     "ATTENTION_ABI_VERSION",
     "ATTENTION_DIM_VOCABULARY",
+    "ATTENTION_EXECUTION_REGISTRY",
     "ATTENTION_FEATURES",
     "ATTENTION_REGISTRY",
+    "ATTENTION_ROUTE_REGISTRY",
     "UNIFIED_BLOCK_SIZES",
     "UNIFIED_HEAD_SIZES",
     "AttentionMaskType",
@@ -293,11 +343,15 @@ __all__ = [
     "AttentionSpec",
     "AttentionTuningSpec",
     "attention_candidates",
+    "attention_execution_candidates",
     "attention_ranker",
+    "attention_dispatch_result",
     "attention_sweep_space",
     "dense_spec_for_request",
     "dispatch_attention",
     "dispatch_attention_all",
+    "iter_dispatch_attention_all",
+    "iter_registered_attention_combos",
     "priority_ranker",
     "registered_attention_combos",
 ]

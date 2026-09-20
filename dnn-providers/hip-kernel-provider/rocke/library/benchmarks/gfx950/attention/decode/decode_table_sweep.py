@@ -2,46 +2,41 @@
 """Sweep every gfx950 decode kernel the dispatcher registry offers.
 
 Per published (model, kv_len) decode shape (seqlen_q=1) this walks
-``registered_attention_combos`` and launches each admitted candidate through
-``run_unified_attention_torch`` (paged 3D / 2D) or ``run_attention_dense_torch``.
-3D candidates also sweep ``num_cus`` the same way ``benchmark_decode_live``
-does, because that is the decode split-KV tuning axis.
+``iter_dispatch_attention_all`` and launches each admitted candidate through
+``DispatchResult.bind_torch``. 3D candidates also sweep ``num_cus`` the same
+way ``benchmark_decode_live`` does, because that is the decode split-KV axis.
 
-    python decode_table_sweep.py --list-only
-    python decode_table_sweep.py --dtype bf16 --output-json results.json
+    python -m benchmarks.gfx950.attention.decode.decode_table_sweep --list-only
+    rocke-decode-table-sweep --dtype bf16 --output-json results.json
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
-import os
-import sys
 import traceback
 from dataclasses import replace
+from types import SimpleNamespace
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.environ.get("ROCKE_ROOT") or os.path.abspath(
-    os.path.join(_HERE, os.pardir, os.pardir, os.pardir, os.pardir, os.pardir)
-)
-for _sub in ("platform/python", "library"):
-    _p = os.path.join(ROOT, _sub)
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from dispatch.attention import (  # noqa: E402
+from dispatch.attention import (
     AttentionRequest,
-    registered_attention_combos,
+    attention_dispatch_result,
+    iter_dispatch_attention_all,
+    iter_registered_attention_combos,
 )
-from dispatch.attention.common import _problem  # noqa: E402
-from kernels.common.attention_dense_spec import AttentionDenseSpec  # noqa: E402
+from kernels.common.attention_dense_spec import AttentionDenseSpec
+from benchmarks.common.attention_flops import attention_flops
+from benchmarks.common.attention_combo_sweep import (
+    _kernel_name,
+    _run_result,
+    _unified_tensors,
+    init_torch_first,
+)
 
 SEQLENS = [1024, 2048, 4096, 8192, 16384, 32768]
 DEFAULT_NUM_CUS = [30, 60, 80, 120, 152, 304]
 
 # (label, num_query_heads, num_kv_heads, head_size, kv_lens)
-# Matches the published DECODE table cells (Sq=1, native batch, bf16).
 MODELS = [
     ("Llama-3-8B", 32, 8, 128, SEQLENS),
     ("Llama-3-70B", 64, 8, 128, [4096, 8192, 16384]),
@@ -81,18 +76,6 @@ def _shape_request(
     )
 
 
-def _decode_flops(*, batch: int, hq: int, d: int, sq: int, sk: int) -> int:
-    # Decode attends the new token(s) to the full KV cache.
-    return 4 * batch * hq * d * sq * sk
-
-
-def _kernel_name(spec) -> str:
-    name = getattr(spec, "kernel_name", None)
-    if callable(name):
-        return str(name())
-    return getattr(spec, "name", type(spec).__name__)
-
-
 def _spec_path(spec) -> str:
     return str(getattr(spec, "path", "dense"))
 
@@ -105,8 +88,18 @@ def _iter_shapes(args):
             yield label, hq, hkv, d, s
 
 
+def _run_args(args) -> SimpleNamespace:
+    return SimpleNamespace(
+        seed=args.seed,
+        warmup=args.warmup,
+        iters=args.iters,
+        no_check=args.no_check,
+        tolerance=_TOL,
+        verbose_errors=True,
+    )
+
+
 def list_combos(args) -> int:
-    print(f"rocke_root={ROOT}")
     print(
         f"dtype={args.dtype} algorithm={args.algorithm} "
         f"block={args.kv_block_size} (CPU list-only)"
@@ -121,10 +114,12 @@ def list_combos(args) -> int:
             algorithm=args.algorithm,
             kv_block_size=args.kv_block_size,
         )
-        combos = registered_attention_combos(
-            req,
-            candidate_prefix=args.candidate_prefix,
-            tuning_id_prefix=args.tuning_id_prefix,
+        combos = tuple(
+            iter_registered_attention_combos(
+                req,
+                candidate_prefix=args.candidate_prefix,
+                tuning_id_prefix=args.tuning_id_prefix,
+            )
         )
         print(f"\n{label} Sq=1 Sk={s} Hq={hq} Hkv={hkv} D={d}  n={len(combos)}")
         for candidate, spec in combos:
@@ -142,134 +137,32 @@ def list_combos(args) -> int:
     return 0
 
 
-def _sdpa_err(q, k, v, out):
-    qh = q.transpose(1, 2).float()
-    hq, hkv = q.shape[2], k.shape[2]
-    kh = k.transpose(1, 2).repeat_interleave(hq // hkv, 1).float()
-    vh = v.transpose(1, 2).repeat_interleave(hq // hkv, 1).float()
+def _run_unified_graph(req, result, args) -> dict:
     import torch
-
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        qh, kh, vh, is_causal=False
-    ).transpose(1, 2)
-    return (out.float() - ref).abs().max().item()
-
-
-def _run_dense(spec, *, warmup: int, iters: int, seed: int, check: bool) -> dict:
-    import torch
-    from kernels.gfx950.attention_dense import run_attention_dense_torch
     from rocke.runtime import synchronize_and_release, time_launches
 
-    dt = torch.bfloat16 if spec.dtype == "bf16" else torch.float16
-    B, Sq, Hq, D = spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size
-    Skv, Hkv = spec.seqlen_kv, spec.num_kv_heads
-    torch.manual_seed(seed)
-    q = torch.randn(B, Sq, Hq, D, dtype=dt, device="cuda")
-    k = (torch.randn(B, Skv, Hkv, D, dtype=dt, device="cuda") * 0.2).contiguous()
-    v = (torch.randn(B, Skv, Hkv, D, dtype=dt, device="cuda") * 0.2).contiguous()
-    out = torch.zeros(B, Sq, Hq, D, dtype=dt, device="cuda")
-    scale = 1.0 / math.sqrt(D)
+    tensors = _unified_tensors(req, args.seed)
     stream = torch.cuda.current_stream().cuda_stream
+    binding = result.bind_torch(tensors, stream=stream)
 
     def call():
-        run_attention_dense_torch(
-            spec=spec, q=q, k=k, v=v, out=out, scale=scale, stream=stream
-        )
+        binding.launch(stream=stream)
 
     call()
     torch.cuda.synchronize()
-    err = float("nan")
-    if check:
-        err = _sdpa_err(q, k, v, out)
-    ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
-    synchronize_and_release(stream)
-    flops = _decode_flops(batch=B, hq=Hq, d=D, sq=Sq, sk=Skv)
-    return {
-        "kernel_name": spec.kernel_name(),
-        "ms": ms,
-        "tflops": flops / (ms * 1e-3) / 1e12,
-        "max_abs": err,
-        "ok": (not check) or (err < _TOL),
-        "block_m": spec.block_m,
-        "block_n": spec.block_n,
-        "persistent": spec.persistent,
-        "wide_lds_dma": spec.wide_lds_dma,
-        "persist_decode": spec.resolved_persist_decode,
-        "path": "dense",
-    }
+    max_abs = float("nan")
+    if not args.no_check:
+        from benchmarks.common.attention_combo_sweep import _reference
 
-
-def _pack_paged(k_dense, page: int):
-    import torch
-
-    B, S, Hkv, D = k_dense.shape
-    n_pages = (S + page - 1) // page
-    pad_s = n_pages * page
-    padded = torch.zeros(B, pad_s, Hkv, D, dtype=k_dense.dtype, device=k_dense.device)
-    padded[:, :S] = k_dense
-    cache = padded.reshape(B * n_pages, page, Hkv, D).contiguous()
-    table = (
-        torch.arange(B * n_pages, device=k_dense.device, dtype=torch.int32)
-        .view(B, n_pages)
-        .contiguous()
-    )
-    return cache, table
-
-
-def _run_unified(req, spec, *, warmup: int, iters: int, seed: int, check: bool) -> dict:
-    import torch
-    from kernels import run_unified_attention_torch
-    from rocke.runtime import synchronize_and_release, time_launches
-
-    problem = _problem(req)
-    dt = torch.bfloat16 if req.dtype.lower() == "bf16" else torch.float16
-    B, Sq, Sk, Hq, Hkv, D = (
-        int(req.batch),
-        int(req.seqlen_q),
-        int(req.seqlen_k),
-        int(req.nhead_q),
-        int(req.nhead_k),
-        int(req.hdim_q),
-    )
-    page = int(req.kv_block_size)
-    torch.manual_seed(seed)
-    q_dense = torch.randn(B, Sq, Hq, D, dtype=dt, device="cuda")
-    k_dense = (torch.randn(B, Sk, Hkv, D, dtype=dt, device="cuda") * 0.2).contiguous()
-    v_dense = (torch.randn(B, Sk, Hkv, D, dtype=dt, device="cuda") * 0.2).contiguous()
-    q = q_dense.reshape(B * Sq, Hq, D).contiguous()
-    out = torch.zeros_like(q)
-    k_cache, block_table = _pack_paged(k_dense, page)
-    v_cache, _ = _pack_paged(v_dense, page)
-    cu_seqlens_q = torch.arange(0, (B + 1) * Sq, Sq, dtype=torch.int32, device="cuda")
-    seqused_k = torch.full((B,), Sk, dtype=torch.int32, device="cuda")
-    scale = 1.0 / math.sqrt(D)
-    stream = torch.cuda.current_stream().cuda_stream
-    path = getattr(spec, "path", "3d")
-    backend = "tiled" if path == "2d" else path
-
-    def call():
-        run_unified_attention_torch(
-            problem=problem,
-            q=q,
-            k=k_cache,
-            v=v_cache,
-            out=out,
-            cu_seqlens_q=cu_seqlens_q,
-            seqused_k=seqused_k,
-            softmax_scale=scale,
-            block_table=block_table,
-            softcap=0.0,
-            backend=backend,
-            stream=stream,
-            tuning_spec=spec if hasattr(spec, "kernel_spec") else None,
+        ref = _reference(
+            tensors["_dense_q"],
+            tensors["_dense_k"],
+            tensors["_dense_v"],
+            causal=bool(req.mask_type),
+            sliding_window=int(req.sliding_window),
         )
-
-    call()
-    torch.cuda.synchronize()
-    err = float("nan")
-    if check:
-        out_dense = out.reshape(B, Sq, Hq, D)
-        err = _sdpa_err(q_dense, k_dense, v_dense, out_dense)
+        out = tensors["out"]
+        max_abs = float((out.reshape_as(ref).float() - ref).abs().max().item())
 
     graph_mode = "internal"
     timed = call
@@ -294,36 +187,37 @@ def _run_unified(req, spec, *, warmup: int, iters: int, seed: int, check: bool) 
         captured = None
         timed = call
 
-    ms = time_launches(timed, warmup=warmup, iters=iters, stream=stream)
+    ms = time_launches(timed, warmup=args.warmup, iters=args.iters, stream=stream)
     synchronize_and_release(stream)
-    flops = _decode_flops(batch=B, hq=Hq, d=D, sq=Sq, sk=Sk)
-    _ = captured  # keep the graph alive across timing
+    flops = attention_flops(
+        req.batch,
+        req.nhead_q,
+        req.hdim_q,
+        req.seqlen_q,
+        req.seqlen_k,
+        causal=bool(req.mask_type),
+        sliding_window=int(req.sliding_window),
+    )
+    _ = captured
+    ok = args.no_check or (max_abs == max_abs and max_abs <= args.tolerance)
     return {
-        "kernel_name": _kernel_name(spec),
+        "status": "ok" if ok else "mismatch",
+        "kernel_name": _kernel_name(result.spec),
         "ms": ms,
+        "us": ms * 1000.0,
         "tflops": flops / (ms * 1e-3) / 1e12,
-        "max_abs": err,
-        "ok": (not check) or (err < _TOL),
-        "path": path,
-        "backend": backend,
+        "max_abs": max_abs,
+        "path": str(getattr(result.spec, "path", "unified")),
         "num_cus": int(req.num_cus),
         "cuda_graph": graph_mode,
     }
-
-
-def _combo_spec(req, candidate):
-    probe = replace(req, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
-    if candidate.algorithm == "attention_dense":
-        from dispatch.attention import gfx950
-
-        return gfx950.dense_spec_for_candidate(probe, candidate)
-    return candidate.select_spec(probe)
 
 
 def sweep(args) -> list[dict]:
     import torch
 
     rows: list[dict] = []
+    run_args = _run_args(args)
     for label, hq, hkv, d, s in _iter_shapes(args):
         base = _shape_request(
             hq=hq,
@@ -335,10 +229,12 @@ def sweep(args) -> list[dict]:
             kv_block_size=args.kv_block_size,
         )
         try:
-            combos = registered_attention_combos(
-                base,
-                candidate_prefix=args.candidate_prefix,
-                tuning_id_prefix=args.tuning_id_prefix,
+            results = tuple(
+                iter_dispatch_attention_all(
+                    base,
+                    candidate_prefix=args.candidate_prefix,
+                    tuning_id_prefix=args.tuning_id_prefix,
+                )
             )
         except Exception as exc:  # noqa: BLE001
             rec = {
@@ -356,7 +252,7 @@ def sweep(args) -> list[dict]:
             print(f"SKIP {label} Sk={s} registry: {exc}", flush=True)
             traceback.print_exc()
             continue
-        if not combos:
+        if not results:
             rec = {
                 "model": label,
                 "seqlen_q": 1,
@@ -371,8 +267,8 @@ def sweep(args) -> list[dict]:
             rows.append(rec)
             print(f"SKIP {label} Sk={s}: no registered combo", flush=True)
             continue
-        for candidate, spec in combos:
-            is_dense = isinstance(spec, AttentionDenseSpec)
+        for result in results:
+            is_dense = isinstance(result.spec, AttentionDenseSpec)
             cus_list = [0] if is_dense else list(args.num_cus)
             for cus in cus_list:
                 req = replace(base, num_cus=int(cus))
@@ -385,37 +281,35 @@ def sweep(args) -> list[dict]:
                     "head_size": d,
                     "dtype": args.dtype,
                     "kv_block_size": args.kv_block_size,
-                    "config": candidate.name,
-                    "candidate": candidate.name,
-                    "algorithm": candidate.algorithm,
-                    "spec_id": candidate.spec_id,
+                    "config": result.candidate.name,
+                    "candidate": result.candidate.name,
+                    "algorithm": result.candidate.algorithm,
+                    "spec_id": result.candidate.spec_id,
                     "num_cus": int(cus),
                 }
                 try:
-                    launch_spec = (
-                        spec if (is_dense or cus == 0) else _combo_spec(req, candidate)
-                    )
-                    if isinstance(launch_spec, AttentionDenseSpec):
-                        res = _run_dense(
-                            launch_spec,
-                            warmup=args.warmup,
-                            iters=args.iters,
-                            seed=args.seed,
-                            check=not args.no_check,
-                        )
+                    if is_dense or cus == 0:
+                        launch = result
                     else:
-                        res = _run_unified(
-                            req,
-                            launch_spec,
-                            warmup=args.warmup,
-                            iters=args.iters,
-                            seed=args.seed,
-                            check=not args.no_check,
+                        spec = result.candidate.select_spec(
+                            replace(
+                                req,
+                                algorithm=result.candidate.algorithm,
+                                spec_id=result.candidate.spec_id,
+                                attention_tuning_id=getattr(
+                                    result.spec, "tuning_id", "auto"
+                                ),
+                            )
                         )
-                    rec.update(status="ok" if res["ok"] else "mismatch", **res)
+                        launch = attention_dispatch_result(req, result.candidate, spec)
+                    if is_dense:
+                        res = _run_result(req, launch, run_args, 0)
+                    else:
+                        res = _run_unified_graph(req, launch, run_args)
+                    rec.update(**res)
                     print(
                         f"{rec['status'].upper():4} {label} Sk={s} "
-                        f"{candidate.name} cus={cus}: "
+                        f"{result.candidate.name} cus={cus}: "
                         f"{rec.get('tflops', float('nan')):.1f} TF  "
                         f"{rec.get('ms', float('nan')):.4f} ms  "
                         f"graph={rec.get('cuda_graph', '-')}  "
@@ -426,7 +320,7 @@ def sweep(args) -> list[dict]:
                     reason = f"{type(exc).__name__}: {exc}"
                     rec.update(status="unsupported", reason=reason)
                     print(
-                        f"SKIP {label} Sk={s} {candidate.name} cus={cus}: {exc}",
+                        f"SKIP {label} Sk={s} {result.candidate.name} cus={cus}: {exc}",
                         flush=True,
                     )
                     traceback.print_exc()
@@ -496,7 +390,7 @@ def main() -> int:
         "--algorithm",
         default="auto",
         help="AttentionRequest.algorithm filter; 'auto' enumerates every "
-        "registry family that admits the decode shape.",
+        "executable registry family that admits the decode shape.",
     )
     ap.add_argument("--kv-block-size", type=int, default=16)
     ap.add_argument(
@@ -527,7 +421,7 @@ def main() -> int:
 
     import torch
 
-    print(f"rocke_root={ROOT}")
+    init_torch_first()
     print(f"torch={torch.__version__} device={torch.cuda.get_device_name(0)}")
     print(
         f"dtype={args.dtype} algorithm={args.algorithm} "
