@@ -66,6 +66,7 @@ from codegen_common import (
     rcr_only_layout_guard,
     run_codegen_cli,
     tensor_quant_effective_epilogue,  # noqa: F401
+    validate_gfx1250_quant_warp_tile,
     validate_rowcol_tensor_quant_gfx_arch,
 )
 
@@ -156,6 +157,12 @@ def validate_tensor_quant_target(variant_key, warp_tile_m, warp_tile_n, warp_til
     rcr pipeline selects exactly that form. Arch-derived defaults remain K128.
     """
     validate_rowcol_tensor_quant_gfx_arch(gfx_arch)
+    if variant_key not in TENSOR_QUANT_VARIANTS:
+        raise ValueError(f"Unsupported TensorQuant variant {variant_key!r}")
+    validate_gfx1250_quant_warp_tile(
+        warp_tile_m, warp_tile_n, warp_tile_k, gfx_arch,
+        bridge="TensorQuant", logical_k32=True,
+    )
 
 
 @dataclass

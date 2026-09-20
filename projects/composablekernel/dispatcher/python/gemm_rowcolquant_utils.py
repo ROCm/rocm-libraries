@@ -64,7 +64,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_r
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_gemm_rowcolquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    make_gemm_rowcolquant_kernel_name,
+    validate_gfx1250_quant_warp_tile,
+    validate_rowcol_tensor_quant_gfx_arch,
+)
 
 _DEFAULT_HIPCC    = "hipcc"
 
@@ -75,6 +79,14 @@ from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
 # --- end Tile-Engine perf flags ---
 
 _DEFAULT_GFX_ARCH = "gfx950"
+
+
+def _validate_arch(arch: str) -> str:
+    """Retain the full target after checking this bridge's supported devices."""
+    if not arch:
+        raise ValueError(f"Unsupported GPU architecture {arch!r} for RowColQuant bridge")
+    validate_rowcol_tensor_quant_gfx_arch(arch)
+    return arch
 
 
 # =============================================================================
@@ -113,6 +125,18 @@ class RowColQuantKernelConfig:
 
     gfx_arch: str = _DEFAULT_GFX_ARCH
 
+    def __post_init__(self):
+        self.validate_target()
+
+    def validate_target(self, gfx_arch=None):
+        """Revalidate mutable target-dependent fields before code generation."""
+        arch = self.gfx_arch if gfx_arch is None else gfx_arch
+        if arch:
+            _validate_arch(arch)
+        validate_gfx1250_quant_warp_tile(
+            self.warp_tile_m, self.warp_tile_n, self.warp_tile_k, arch, bridge="RowColQuant"
+        )
+
     @property
     def name(self) -> str:
         """Byte-exact match to codegen KERNEL_NAME (delegates to make_gemm_rowcolquant_kernel_name)."""
@@ -129,6 +153,7 @@ class RowColQuantKernelConfig:
 
     def to_codegen_config(self) -> dict:
         """Produce the JSON config dict consumed by unified_gemm_rowcolquant_codegen.py."""
+        self.validate_target()
         return {
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
@@ -620,9 +645,11 @@ def setup_multiple_rowcolquant_dispatchers(
     if not configs:
         return []
 
-    arch = gfx_arch or _detect_gpu_arch()
+    arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
     configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "RowColQuant")
+    for config in configs:
+        config.validate_target(arch)
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
         return _compile_rowcolquant_kernel(

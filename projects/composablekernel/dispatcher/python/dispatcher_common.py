@@ -81,8 +81,8 @@ _HIP_SONAMES = (
 def hip_library_candidates() -> List[str]:
     """Return the HIP runtime names/paths to try, in order.
 
-    Consult the system library cache for the installed soname, then discover
-    versioned files under ``$ROCM_PATH/{lib,lib64}`` (default ``/opt/rocm``).
+    Discover files under ``$ROCM_PATH/{lib,lib64}`` (default ``/opt/rocm``),
+    then consult the system library cache and finally try fallback sonames.
     Neither path requires the unversioned development symlink or a hardcoded
     runtime major version.
     """
@@ -90,15 +90,11 @@ def hip_library_candidates() -> List[str]:
     import os
     import re
 
-    candidates: List[str] = [_HIP_SONAMES[0]]
+    candidates: List[str] = []
     try:
         installed = ctypes.util.find_library("amdhip64")
     except OSError:
         installed = None
-    if installed:
-        candidates.append(installed)
-    candidates.extend(_HIP_SONAMES[1:])
-
     rocm = Path(os.environ.get("ROCM_PATH", "/opt/rocm")).expanduser()
     for libdir in (rocm / "lib", rocm / "lib64"):
         candidates.append(str(libdir / _HIP_SONAMES[0]))
@@ -113,7 +109,9 @@ def hip_library_candidates() -> List[str]:
         except OSError:
             pass
         candidates.extend(path for _, path in sorted(versioned, reverse=True))
-        candidates.extend(str(libdir / soname) for soname in _HIP_SONAMES[1:])
+    if installed:
+        candidates.append(installed)
+    candidates.extend(_HIP_SONAMES)
     return list(dict.fromkeys(candidates))
 
 

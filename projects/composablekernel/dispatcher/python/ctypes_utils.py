@@ -2606,10 +2606,10 @@ def setup_gemm_dispatcher(
             result.error = "Failed to build or initialize the requested dispatcher library"
             return result
     elif lib is None:
-        lib = DispatcherLib.auto()
-        if lib is None or lib.get_kernel_name() != kernel_header.stem:
-            result.error = "No matching dispatcher library; enable auto_rebuild to build it"
-            return result
+        # Legacy default libraries carry no target metadata. Their kernel name
+        # alone cannot establish that they were compiled for config.gfx_arch.
+        result.error = "No matching dispatcher library; enable auto_rebuild to build it"
+        return result
 
     result.lib = lib
 

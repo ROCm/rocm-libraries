@@ -66,7 +66,7 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_b
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_bquant_kernel_name  # noqa: E402
+from codegen_common import make_bquant_kernel_name, validate_gfx1250_quant_warp_tile  # noqa: E402
 
 _DEFAULT_HIPCC = "hipcc"
 
@@ -74,6 +74,17 @@ _DEFAULT_HIPCC = "hipcc"
 # Untargeted convenience factories use a naming preview, then setup resolves
 # their architecture-dependent defaults for the explicit or detected target.
 _NAME_ONLY_GFX_ARCH = "gfx950"
+_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950", "gfx1250")
+
+
+def _validate_arch(arch: str) -> str:
+    """Validate the exact target while retaining compiler feature suffixes."""
+    if not arch or arch.split(":", 1)[0] not in _SUPPORTED_ARCHS:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r} for BQuant bridge "
+            f"(supported: {', '.join(_SUPPORTED_ARCHS)})"
+        )
+    return arch
 
 # MX variants require gfx950 (e8m0 block scale / native MX support).
 _MX_VARIANTS = {"mx_bf16bf16", "mx_bf16bf8", "mx_bf16fp4"}
@@ -87,7 +98,7 @@ def _require_mx_arch(variant_key: str, gfx_arch: str) -> None:
     catch it here with a clear Python-level message rather than a cryptic
     compiler failure. Mirrors the get_arch+throw policy.
     """
-    if variant_key in _MX_VARIANTS and gfx_arch != "gfx950":
+    if variant_key in _MX_VARIANTS and (gfx_arch or "").split(":", 1)[0] != "gfx950":
         raise ValueError(
             f"MX variant {variant_key!r} requires gfx950 (e8m0 block scale / "
             f"native MX support); got gfx_arch={gfx_arch!r}. "
@@ -232,9 +243,18 @@ class BQuantKernelConfig:
 
 
     def __post_init__(self):
-        # Single choke point: catches the public default_* constructors, the
-        # internal config builders, and expand_*_sweep, all of which land here.
-        _reject_i4_on_gfx1250(self.variant_key, self.gfx_arch)
+        self.validate_target()
+
+    def validate_target(self, gfx_arch=None):
+        """Recheck architecture, datatype and tile after any config mutation."""
+        arch = self.gfx_arch if gfx_arch is None else gfx_arch
+        if arch:
+            _validate_arch(arch)
+            _require_mx_arch(self.variant_key, arch)
+        _reject_i4_on_gfx1250(self.variant_key, arch)
+        validate_gfx1250_quant_warp_tile(
+            self.warp_tile_m, self.warp_tile_n, self.warp_tile_k, arch, bridge="BQuant"
+        )
 
     @property
     def name(self) -> str:
@@ -258,6 +278,7 @@ class BQuantKernelConfig:
 
     def to_codegen_config(self) -> dict:
         """Produce the JSON config dict consumed by unified_gemm_bquant_codegen.py."""
+        self.validate_target()
         return {
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
@@ -1018,7 +1039,7 @@ def setup_multiple_bquant_dispatchers(
     if not configs:
         return []
 
-    arch = gfx_arch or _detect_gpu_arch()
+    arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
     configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "BQuant")
 
@@ -1026,7 +1047,7 @@ def setup_multiple_bquant_dispatchers(
     # non-gfx950 arch, rather than relying solely on the C++ #error. Mirrors
     # get_arch+throw.
     for cfg in configs:
-        _require_mx_arch(cfg.variant_key, arch)
+        cfg.validate_target(arch)
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
         return _compile_bquant_kernel(

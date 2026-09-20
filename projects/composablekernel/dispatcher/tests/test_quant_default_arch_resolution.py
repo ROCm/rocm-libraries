@@ -215,3 +215,103 @@ def test_tensor_quant_setup_rejects_invalid_explicit_target(arch, monkeypatch):
     with pytest.raises(ValueError, match="Unsupported GPU architecture"):
         module.setup_multiple_tensor_quant_dispatchers([config], gfx_arch=arch)
     assert calls == []
+
+
+@pytest.mark.parametrize("op", ("abquant", "bquant", "rowcolquant", "tensor_quant"))
+@pytest.mark.parametrize("arch", ("gfx1250", "gfx1250:xnack-"))
+@pytest.mark.parametrize("mutation", ({"warp_tile_k": 16}, {"warp_tile_m": 32}))
+def test_quant_final_config_rejects_unsupported_wmma_fragment(op, arch, mutation, monkeypatch):
+    module = MODULES[op]
+    calls = capture_build(monkeypatch, module)
+    config = module.default_fp8_config(gfx_arch=arch)
+    args = {**asdict(config), **mutation}
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        type(config)(**args)
+    for key, value in mutation.items():
+        setattr(config, key, value)
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        config.to_codegen_config()
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        getattr(module, f"setup_multiple_{op}_dispatchers")([config], gfx_arch=arch)
+    assert calls == []
+
+
+@pytest.mark.parametrize("op,variant", [
+    ("abquant", "fp8"), ("abquant", "bf8"), ("abquant", "fp4"),
+    ("bquant", "fp8"), ("bquant", "bf8"),
+    ("rowcolquant", "fp8"), ("rowcolquant", "bf8"),
+])
+@pytest.mark.parametrize("arch", ("gfx1250", "gfx1250:xnack-"))
+def test_other_quant_bridges_cannot_bypass_k32_boundary(op, variant, arch, monkeypatch, tmp_path):
+    import json
+
+    module = MODULES[op]
+    calls = capture_build(monkeypatch, module)
+    config = getattr(module, f"default_{variant}_config")(gfx_arch=arch)
+    sweep = config.to_codegen_config()
+    sweep["tile_configs"][0]["warp_tile_k"] = 32
+    path = tmp_path / "unsafe.json"
+    path.write_text(json.dumps(sweep))
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        getattr(module, f"expand_{op}_sweep")(str(path), gfx_arch=arch)
+    config.warp_tile_k = 32
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        config.to_codegen_config()
+    setup = getattr(module, f"setup_multiple_{op}_dispatchers")
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        setup([config], gfx_arch=arch)
+    config.gfx_arch = None
+    with pytest.raises(ValueError, match="16x16 WMMA"):
+        setup([config], gfx_arch=arch)
+    assert calls == []
+
+
+@pytest.mark.parametrize("variant", ("fp8i4", "bf8i4", "mx_bf16bf16", "mx_bf16bf8", "mx_bf16fp4"))
+def test_bquant_mutated_variant_is_rejected_at_both_entry_points(variant, monkeypatch):
+    module = MODULES["bquant"]
+    calls = capture_build(monkeypatch, module)
+    config = module.default_fp8_config(gfx_arch="gfx1250:xnack-")
+    config.variant_key = variant
+    message = "requires gfx950" if variant.startswith("mx_") else "packed-int4"
+    with pytest.raises(ValueError, match=message):
+        config.to_codegen_config()
+    with pytest.raises(ValueError, match=message):
+        module.setup_multiple_bquant_dispatchers([config], gfx_arch="gfx1250:xnack-")
+    assert calls == []
+
+
+@pytest.mark.parametrize("op", ("abquant", "bquant", "rowcolquant", "tensor_quant"))
+@pytest.mark.parametrize("arch", ("gfx1200", "gfx1201:xnack-", "gfx12500", "gfx1250x", ""))
+def test_final_quant_setup_rejects_unsupported_arch(op, arch, monkeypatch):
+    module = MODULES[op]
+    calls = capture_build(monkeypatch, module)
+    config = module.default_fp8_config(gfx_arch="gfx1250")
+    config.gfx_arch = arch
+    with pytest.raises(ValueError, match="Unsupported GPU architecture"):
+        getattr(module, f"setup_multiple_{op}_dispatchers")([config], gfx_arch=arch)
+    if arch:
+        with pytest.raises(ValueError, match="Unsupported GPU architecture"):
+            config.to_codegen_config()
+    assert calls == []
+
+
+@pytest.mark.parametrize("op", ("abquant", "bquant", "rowcolquant", "tensor_quant"))
+@pytest.mark.parametrize("k", (64, 128))
+def test_final_quant_validation_preserves_supported_explicit_tiles(op, k, monkeypatch):
+    module = MODULES[op]
+    calls = capture_build(monkeypatch, module)
+    config = module.default_bf8_config(gfx_arch="gfx1250:xnack-")
+    config.warp_tile_k = k
+    assert config.to_codegen_config()["tile_configs"][0]["warp_tile_k"] == k
+    getattr(module, f"setup_multiple_{op}_dispatchers")([config], gfx_arch="gfx1250:xnack-")
+    assert calls[0][0][0] is config
+    assert calls[0][1] == "gfx1250:xnack-"
+
+
+def test_bquant_mx_accepts_supported_target_with_features(monkeypatch):
+    module = MODULES["bquant"]
+    calls = capture_build(monkeypatch, module)
+    config = module.default_mx_bf16bf16_config(gfx_arch="gfx950:xnack-")
+    config.to_codegen_config()
+    module.setup_multiple_bquant_dispatchers([config], gfx_arch="gfx950:xnack-")
+    assert calls[0][1] == "gfx950:xnack-"

@@ -151,20 +151,21 @@ def dispatcher_static_lib(has_gpu):
     root = Path(__file__).resolve().parents[1]
     build = root / "build"
     archive = build / "libck_tile_dispatcher.a"
-    if not archive.exists():
-        hipcc = shutil.which("hipcc") or "/opt/rocm/bin/hipcc"
-        commands = []
-        if not (build / "CMakeCache.txt").exists():
-            commands.append([
-                "cmake", "-S", str(root), "-B", str(build),
-                f"-DCMAKE_CXX_COMPILER={hipcc}", "-DCMAKE_BUILD_TYPE=Release",
-            ])
+    hipcc = shutil.which("hipcc") or "/opt/rocm/bin/hipcc"
+    commands = []
+    if not (build / "CMakeCache.txt").exists():
         commands.append([
-            "cmake", "--build", str(build), "--target", "ck_tile_dispatcher", "-j4",
+            "cmake", "-S", str(root), "-B", str(build),
+            f"-DCMAKE_CXX_COMPILER={hipcc}", "-DCMAKE_BUILD_TYPE=Release",
         ])
-        for command in commands:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=300)
-            assert result.returncode == 0, result.stdout + result.stderr
+    # An existing archive may belong to an earlier checkout. Let CMake decide
+    # whether its dependency graph is current, even when the file exists.
+    commands.append([
+        "cmake", "--build", str(build), "--target", "ck_tile_dispatcher", "-j4",
+    ])
+    for command in commands:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        assert result.returncode == 0, result.stdout + result.stderr
     assert archive.exists(), f"Missing dispatcher dependency: {archive}"
     return archive
 

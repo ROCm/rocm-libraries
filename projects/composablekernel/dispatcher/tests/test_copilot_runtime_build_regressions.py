@@ -48,7 +48,8 @@ def test_registered_hip_soname_without_development_symlink(monkeypatch, tmp_path
     handle, attempted = _loader_accepting(monkeypatch, soname)
     assert load_hip_runtime() is handle
     assert lookups == ["amdhip64"]
-    assert attempted == ["libamdhip64.so", soname]
+    assert attempted[-1] == soname
+    assert "libamdhip64.so" not in attempted
 
 
 @pytest.mark.parametrize("subdir", ["lib", "lib64"])
@@ -96,6 +97,63 @@ def test_failed_hip_load_reports_discovered_candidates(monkeypatch, tmp_path):
         load_hip_runtime()
 
 
+@pytest.mark.parametrize("installed", [None, "libamdhip64.so.7"])
+@pytest.mark.parametrize("subdir", ["lib", "lib64"])
+def test_explicit_rocm_tree_wins_over_loadable_system_runtime(
+    monkeypatch, tmp_path, installed, subdir
+):
+    libdir = tmp_path / subdir
+    libdir.mkdir()
+    library = libdir / "libamdhip64.so.10.0.26306"
+    library.touch()
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.setattr(ctypes.util, "find_library", lambda name: installed)
+    attempted = []
+
+    def cdll(name):
+        attempted.append(name)
+        if name in (str(library), "libamdhip64.so", "libamdhip64.so.7"):
+            return name
+        raise OSError(name)
+
+    monkeypatch.setattr(ctypes, "CDLL", cdll)
+    assert load_hip_runtime() == str(library)
+    assert "libamdhip64.so.7" not in attempted
+
+
+@pytest.mark.parametrize("module", ["test_library_caching", "test_grouped_gemm_gpu_correctness"])
+def test_gpu_module_arch_lookup_in_fresh_interpreter(module, tmp_path):
+    script = '''import runpy, sys
+from types import SimpleNamespace
+from unittest.mock import patch
+with patch("subprocess.run", return_value=SimpleNamespace(stdout="")):
+    ns = runpy.run_path(sys.argv[1])
+if "config" in ns:
+    config = ns["config"].__wrapped__("gfx1250", None)
+    assert config.warp_m == 16
+else:
+    class Selected(Exception): pass
+    def capture(configs, **kwargs):
+        assert configs[0].warp_tile_m == 16
+        raise Selected
+    method = ns["TestGroupedGemmGpu"]._run_dtype
+    method.__globals__["setup_multiple_gemm_dispatchers"] = capture
+    test = ns["TestGroupedGemmGpu"]()
+    test.ARCH = "gfx1250"
+    try:
+        test._run_dtype("fp16")
+    except Selected:
+        pass
+    else:
+        raise AssertionError("did not select a grouped GEMM configuration")
+'''
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(ROOT / "tests" / (module + ".py"))],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("arch,expected", [
     ("gfx942", (32, 32, 16)),
     ("gfx1250", (16, 16, 32)),
@@ -127,6 +185,13 @@ print(namespace["TestMultiAbdGemmGpu"]._fp16_warp_tile(sys.argv[2]))
 def test_cmake_fallback_generates_kernel_for_suffixed_target(tmp_path, arch, tile):
     if shutil.which("cmake") is None or shutil.which("c++") is None:
         pytest.skip("requires CMake and a host C++ compiler")
+    # The examples create dispatcher/build/generated_kernels even for an
+    # out-of-tree configure. Keep those writes out of the checkout, which may
+    # be mounted read-only in CI, and isolate parallel parameterized cases.
+    dispatcher = tmp_path / "dispatcher"
+    shutil.copytree(ROOT, dispatcher, ignore=shutil.ignore_patterns(
+        "build", "__pycache__", ".pytest_cache"
+    ))
     source = tmp_path / "source"
     source.mkdir()
     build = tmp_path / "build"
@@ -134,7 +199,7 @@ def test_cmake_fallback_generates_kernel_for_suffixed_target(tmp_path, arch, til
 project(fallback_codegen_probe LANGUAGES CXX)
 set(GPU_TARGETS "{arch}")
 add_library(ck_tile_dispatcher INTERFACE)
-add_subdirectory("{ROOT / 'examples'}" examples EXCLUDE_FROM_ALL)
+add_subdirectory("{dispatcher / 'examples'}" examples EXCLUDE_FROM_ALL)
 ''')
     env = dict(os.environ)
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")

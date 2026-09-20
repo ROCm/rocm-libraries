@@ -73,7 +73,11 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_a
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import abquant_uses_column_major_aq, make_gemm_abquant_kernel_name  # noqa: E402
+from codegen_common import (  # noqa: E402
+    abquant_uses_column_major_aq,
+    make_gemm_abquant_kernel_name,
+    validate_gfx1250_quant_warp_tile,
+)
 
 # Tile-Engine perf flags -- single source of truth (quant_bridge_flags.py).
 if str(Path(__file__).parent) not in sys.path:
@@ -149,6 +153,18 @@ class ABQuantKernelConfig:
 
     gfx_arch: str = "gfx950"
 
+    def __post_init__(self):
+        self.validate_target()
+
+    def validate_target(self, gfx_arch=None):
+        """Check the final mutable configuration before generating a kernel."""
+        arch = self.gfx_arch if gfx_arch is None else gfx_arch
+        if arch:
+            _validate_arch(arch)
+        validate_gfx1250_quant_warp_tile(
+            self.warp_tile_m, self.warp_tile_n, self.warp_tile_k, arch, bridge="ABQuant"
+        )
+
     @property
     def name(self) -> str:
         """Byte-exact match to codegen KERNEL_NAME (delegates to make_gemm_abquant_kernel_name)."""
@@ -171,6 +187,7 @@ class ABQuantKernelConfig:
 
     def to_codegen_config(self) -> dict:
         """Produce the JSON config dict consumed by unified_gemm_abquant_codegen.py."""
+        self.validate_target()
         return {
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
@@ -726,9 +743,11 @@ def setup_multiple_abquant_dispatchers(
     if not configs:
         return []
 
-    arch = _validate_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
+    arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
     configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "ABQuant")
+    for config in configs:
+        config.validate_target(arch)
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
         return _compile_abquant_kernel(

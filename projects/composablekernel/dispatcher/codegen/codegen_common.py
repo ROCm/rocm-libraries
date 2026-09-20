@@ -1081,6 +1081,25 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
 ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
 
 
+def validate_gfx1250_quant_warp_tile(
+    warp_tile_m, warp_tile_n, warp_tile_k, gfx_arch, *, bridge, logical_k32=False
+):
+    """Reject unsupported WMMA fragments without changing an explicit request.
+
+    Only TensorQuant opts into the validated logical-K32 adapter. The other
+    quant bridges retain their native K64/K128 boundary.
+    """
+    if normalize_gfx_arch(gfx_arch or "") != "gfx1250":
+        return
+    allowed_k = (32, 64, 128) if logical_k32 else (64, 128)
+    if (warp_tile_m, warp_tile_n) != (16, 16) or warp_tile_k not in allowed_k:
+        raise ValueError(
+            f"{bridge} on {gfx_arch!r} requires a 16x16 WMMA tile with "
+            f"warp_tile_k in {allowed_k}; got "
+            f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}."
+        )
+
+
 def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str, *, require_explicit: bool = False) -> str:
     """Normalize and check a caller-supplied gfx target; return the bare target.
 

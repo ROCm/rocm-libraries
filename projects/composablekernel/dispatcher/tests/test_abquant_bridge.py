@@ -267,7 +267,7 @@ class TestBqPermuteNForPermuteNKernels(unittest.TestCase):
         # An even NRepeat must not enable PermuteN input packing while the
         # emitted epilogue still writes C in ordinary column order. Exercise
         # both scale layouts and the exact geometry that failed on gfx1250.
-        for arch in ("gfx942", "gfx950", "gfx1201", "gfx1250"):
+        for arch in ("gfx942", "gfx950", "gfx1250", "gfx1250:xnack-"):
             for ctor in (
                 default_fp8_preshuffleb_config,
                 default_bf8_preshuffleb_config,
