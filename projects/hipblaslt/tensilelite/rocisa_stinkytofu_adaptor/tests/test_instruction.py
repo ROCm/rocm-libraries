@@ -878,6 +878,11 @@ class TestSMovB32Construction(unittest.TestCase):
         self.assertTrue(text.startswith("s_mov_b32 s0, s1"), text)
         self.assertTrue(text.endswith(" // probe\n"), text)
 
+    def test_positional_comment_matches_rocisa(self):
+        m = SMovB32(sgpr(0), sgpr(1), "gsuIterOffset = GSUSumIdx")
+        self.assertEqual(m.comment, "gsuIterOffset = GSUSumIdx")
+        self.assertIn("gsuIterOffset = GSUSumIdx", str(m))
+
     def test_inherits_common_instruction(self):
         m = SMovB32(sgpr(0), sgpr(1))
         self.assertIsInstance(m, Instruction)
