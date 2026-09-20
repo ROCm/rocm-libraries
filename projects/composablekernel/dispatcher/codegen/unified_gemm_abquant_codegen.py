@@ -42,6 +42,7 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
+    abquant_uses_column_major_aq,
     bquant_effective_epilogue,
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
@@ -151,7 +152,7 @@ class ABQuantKernelSpec:
     variant_key: str          # "fp8" | "bf8" | "fp4"
     layout: str               # "rcr"
     pipeline: str             # "compv3" | "preshuffleb" | "eightwaves"
-    epilogue: str             # "cshuffle" (permute_n derived from tile params)
+    epilogue: str             # "cshuffle" or native CompV3 "default"
     scheduler: str            # "intrawave"
     tile: ABQuantTileConfig
     # AQuantGroupSize is always 1x1x{aquant_group_k}; only K is configurable.
@@ -216,17 +217,12 @@ class ABQuantKernelHeaderGenerator:
         layout_c_ck = ABQUANT_LAYOUT_TO_CK[spec.layout[2]]
         # ABQuant kernel constraint (static_assert in gemm_quant_kernel.hpp):
         #   BQ layout MUST be ColumnMajor.
-        # AQ layout is RowMajor for all configs EXCEPT the n=128 EightWaves fast
-        # path, which Old-TE compiles with AQLayout=ColumnMajor (StrideAQ=M); see
-        # run_gemm_quant_example.inc:1013-1021:
-        #   ABQuantGrouped && !APreshuffleQuant && BQuantGroupSize::kN==128 &&
-        #   (M_Warp*N_Warp*K_Warp==8)  ->  Row,Col,Col,Col,Row  (else all RowMajor AQ).
-        # APreshuffleQuant is always false in this codegen, so the predicate reduces
-        # to kN==128 && warps==8 (true only for the 4x2x1 EightWaves configs).
-        # A RowMajor-AQ kernel here builds a different, slower kernel (+9..25%), so
-        # emit ColumnMajor to match Old-TE exactly.
-        aq_column_major = (
-            spec.bquant_group_n == 128 and (t.warp_m * t.warp_n * t.warp_k == 8)
+        # This layout depends on groupN and the warp shape, independently of
+        # pipeline selection. CompV3 can also use eight warps. ABQuant codegen
+        # fixes APreshuffleQuant=false; preshufflebq only changes BQ packing.
+        aq_column_major = abquant_uses_column_major_aq(
+            spec.bquant_group_n, t.warp_m, t.warp_n, t.warp_k,
+            apreshuffle_quant=False,
         )
         layout_aq_ck = ABQUANT_LAYOUT_TO_CK["c" if aq_column_major else "r"]
         layout_bq_ck = ABQUANT_LAYOUT_TO_CK["c"]
@@ -249,14 +245,11 @@ class ABQuantKernelHeaderGenerator:
         is_fp8_blockscale = spec.variant_key in _FP8_BLOCKSCALE_VARIANTS
         a_compute = ck_a if is_fp8_blockscale else "void"
 
-        # Determine effective epilogue. GemmConfig::TiledMMAPermuteN is a per-config
-        # property: ONLY the preshuffleB configs (GemmConfigPreshuffleB_*_Prefill)
-        # override it to (N_Repeat % 2 == 0). The compv3 (GemmConfigABQuantPrefill /
-        # GemmConfigPreshuffleBQuantPrefill) and eight_waves (GemmConfig*EightWaves)
-        # configs inherit TiledMMAPermuteN=false from GemmConfigBase, so they always
-        # use CShuffle. PermuteN is further disabled when BQuantGroupSize::kN > 1
-        # (mirrors run_gemm_quant_example.inc:208-209). Keep this in lockstep with
-        # make_gemm_abquant_kernel_name so the emitted name matches the emitted epilogue.
+        # Keep this decision in lockstep with make_gemm_abquant_kernel_name.
+        # The current ABQuant dispatcher emits CShuffle: its BQuant helper call
+        # retains the default preshuffle_b=False. The input packing below must
+        # follow that actual epilogue, including for even-NRepeat preshuffle-B
+        # configurations, rather than the example's independent config flag.
         use_permute_n_epilogue = (spec.preshuffle_b and not spec.eight_waves) and (
             bquant_effective_epilogue(
                 t.tile_n, t.warp_n, t.warp_tile_n, spec.bquant_group_n
@@ -264,21 +257,21 @@ class ABQuantKernelHeaderGenerator:
             == "permute_n"
         )
 
-        # GemmConfig::TiledMMAPermuteN drives whether the B weight matrix is
-        # pre-shuffled via shuffle_b_permuteN (permute_n) or plain shuffle_b.
-        # Only the non-eight_waves preshuffleB configs override it to (N_Repeat % 2
-        # == 0); every other config inherits false from GemmConfigBase. Mirror the
-        # same rule the example uses (run_gemm_quant_example.inc:773 selects
-        # shuffle_b_permuteN when TiledMMAPermuteN && BQuantGroupSize::kN == 1).
-        n_repeat = t.tile_n // (t.warp_n * t.warp_tile_n) if (t.warp_n * t.warp_tile_n) else 0
-        tiled_mma_permute_n = (
-            spec.preshuffle_b and not spec.eight_waves and (n_repeat % 2 == 0)
-        )
-        tiled_mma_permute_n_str = str(tiled_mma_permute_n).lower()
+        # The bridge's B and BQ packing must agree with the emitted epilogue.
+        # Inferring this flag independently from even NRepeat enabled PermuteN
+        # packing for CShuffle kernels, leaving their output columns permuted.
+        # PreshuffleB still selects ordinary shuffle_b when this flag is false;
+        # BPreshuffleQuant independently retains its scale-tensor shuffle.
+        tiled_mma_permute_n_str = str(use_permute_n_epilogue).lower()
         aq_column_major_str = str(aq_column_major).lower()
 
+        use_default_epilogue = (
+            spec.epilogue == "default" and spec.pipeline == "compv3"
+            and not spec.preshuffle_b and not spec.eight_waves
+        )
         epilogue_block = emit_quant_epilogue_block(
-            "permute_n" if use_permute_n_epilogue else "cshuffle", ns
+            "default" if use_default_epilogue
+            else "permute_n" if use_permute_n_epilogue else "cshuffle", ns
         )
 
         tile_dims = emit_quant_tile_dims(
@@ -361,7 +354,7 @@ struct {struct} {{
     static constexpr bool TransposeC       = {transpose_c};
     static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
     // TiledMMAPermuteN: selects shuffle_b_permuteN vs plain shuffle_b for the B
-    // weight matrix (see gemm_abquant_ctypes_lib.cpp). Mirrors GemmConfig struct.
+    // weight matrix and BQ scales. Must agree with the emitted epilogue.
     static constexpr bool TiledMMAPermuteN = {tiled_mma_permute_n_str};
     // AQIsColumnMajor: true only for the n=128 EightWaves fast path (StrideAQ=M).
     static constexpr bool AQIsColumnMajor  = {aq_column_major_str};

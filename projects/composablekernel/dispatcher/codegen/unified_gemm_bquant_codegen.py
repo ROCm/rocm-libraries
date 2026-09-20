@@ -48,7 +48,7 @@ from codegen_common import (
     QUANT_LAYOUT_TO_CK,
     QUANT_SCHEDULER_TO_CK,
     TileConfig,
-    bquant_effective_epilogue,
+    gemm_bquant_effective_epilogue,
     emit_generated_header_preamble,
     emit_quant_epilogue_block,
     emit_quant_gemm_traits,
@@ -192,7 +192,7 @@ class BQuantKernelSpec:
     variant_key: str          # "fp8", "bf8", "fp8i4", "bf8i4", "mx_bf16*"
     layout: str               # "rcr"
     pipeline: str             # "compv3" | "preshuffleb" | "microscale"
-    epilogue: str             # "cshuffle" (effective epilogue computed from tile)
+    epilogue: str             # "cshuffle" or native CompV3 "default"
     scheduler: str            # "intrawave"
     tile: BQuantTileConfig
     quant_group_m: int = 1
@@ -312,11 +312,12 @@ class BQuantKernelHeaderGenerator:
             else "ck_tile::CastPolicy::AfterLDSRead"
         )
 
-        # Determine which epilogue the kernel will use, mirroring run_gemm_quant_example.inc.
-        # Delegates to bquant_effective_epilogue (same logic used by make_bquant_kernel_name)
-        # so the generated C++ and the kernel name always agree.
-        epilogue_kind = bquant_effective_epilogue(
-            t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n, spec.preshuffle_b
+        # Keep the emitted epilogue in lockstep with the public config name,
+        # including the native builder's explicit CompV3 default trait.
+        epilogue_kind = gemm_bquant_effective_epilogue(
+            t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n,
+            pipeline=spec.pipeline, requested_epilogue=spec.epilogue,
+            preshuffle_b=spec.preshuffle_b,
         )
 
         epilogue_block = emit_quant_epilogue_block(epilogue_kind, ns)
@@ -434,6 +435,8 @@ using SelectedKernel = {struct};
             ck_q=ck_q,
             ck_acc=ck_acc,
             extra_lines=(
+                f"using ALayout = {ns}::ALayout;\n"
+                f"using BLayout = {ns}::BLayout;\n"
                 f"using QuantGroupSize = {ns}::QuantGroupSize;\n"
                 f"constexpr ck_tile::index_t GroupSizeK = {ns}::{struct}::GroupSizeK;"
             ),

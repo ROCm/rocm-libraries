@@ -40,6 +40,7 @@ from quant_default_config import deferred_arch_default, resolve_default_configs
 import ctypes
 import json
 import logging
+import re
 import subprocess
 import sys
 import tempfile
@@ -72,7 +73,7 @@ _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "gemm_a
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from codegen_common import make_gemm_abquant_kernel_name  # noqa: E402
+from codegen_common import abquant_uses_column_major_aq, make_gemm_abquant_kernel_name  # noqa: E402
 
 # Tile-Engine perf flags -- single source of truth (quant_bridge_flags.py).
 if str(Path(__file__).parent) not in sys.path:
@@ -323,7 +324,7 @@ class ABQuantDispatcherLib(DispatcherLibBase):
         for the RowMajor-B families crr/rrr. The caller sets stride_B to match.
         C must be the array that will receive output.
         aq_column_major supplies AQ as column-major bytes (leading dim = M) for
-        the n=128 EightWaves fast path; otherwise AQ is row-major (leading dim=QK_A).
+        n=128 with eight warps; otherwise AQ is row-major (leading dim=QK_A).
         a_column_major supplies A as column-major bytes (leading dim = M) for the
         ccr/crr families (ALayout=ColumnMajor, StrideA=M) so A[m,k] lives at
         k*M+m; otherwise A is row-major (leading dim = K, StrideA=K). The caller
@@ -349,7 +350,7 @@ class ABQuantDispatcherLib(DispatcherLibBase):
             B = np.asfortranarray(B) if b_column_major else np.ascontiguousarray(B)
         else:
             B = np.ascontiguousarray(B)
-        # AQLayout is ColumnMajor for the n=128 EightWaves fast path (StrideAQ=M):
+        # AQLayout is ColumnMajor for n=128 with eight warps (StrideAQ=M):
         # supply Fortran-order [M, QK_A] bytes so AQ[m,qk] lives at qk*M+m.
         if aq_column_major and AQ.ndim == 2:
             AQ = np.asfortranarray(AQ)
@@ -385,14 +386,22 @@ class ABQuantDispatcherLib(DispatcherLibBase):
 
     @staticmethod
     def kernel_uses_column_major_aq(kernel_name: str) -> bool:
-        """Whether a kernel name resolves to the ColumnMajor-AQ EightWaves path.
+        """Read the generated name's warp shape and BQ N-group size.
 
-        Mirrors the codegen AQLayout rule (run_gemm_quant_example.inc:1013-1021):
-        BQuantGroupSize::kN == 128 && M_Warp*N_Warp*K_Warp == 8. Since warps==8
-        occurs only for the 4x2x1 EightWaves configs, we detect 'eightwaves' plus
-        the 'bqg1x128x' N-group segment in the byte-exact kernel name.
+        ABQuant currently fixes APreshuffleQuant=false. The AQ layout rule is
+        independent of pipeline, so CompV3 and EightWaves use the same predicate.
+        The warp shape immediately precedes the warp-tile and quant-group tokens.
         """
-        return "eightwaves" in kernel_name and "bqg1x128x" in kernel_name
+        match = re.search(
+            r"_(\d+)x(\d+)x(\d+)_\d+x\d+x\d+_aqg\d+x\d+x\d+_bqg\d+x(\d+)x\d+(?:_|$)",
+            kernel_name,
+        )
+        if match is None:
+            return False
+        warp_m, warp_n, warp_k, group_n = map(int, match.groups())
+        return abquant_uses_column_major_aq(
+            group_n, warp_m, warp_n, warp_k, apreshuffle_quant=False
+        )
 
     @staticmethod
     def kernel_uses_column_major_a(kernel_name: str) -> bool:
@@ -462,7 +471,7 @@ class ABQuantGpuGemmRunner:
         # Output buffer -- dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)
 
-        # AQLayout is ColumnMajor for the n=128 EightWaves fast path (StrideAQ=M);
+        # AQLayout is ColumnMajor for n=128 with eight warps (StrideAQ=M);
         # RowMajor (StrideAQ=QK_A) everywhere else.
         aq_column_major = ABQuantDispatcherLib.kernel_uses_column_major_aq(self.kernel_name)
 

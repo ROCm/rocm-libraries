@@ -388,20 +388,18 @@ class BQuantDispatcherLib(DispatcherLibBase):
         """
         Call dispatcher_run_bquant_gemm with ctypes-wrapped pointers.
 
-        A, B, BQ, C must be numpy arrays (C-contiguous, packed).
-        B should be a packed (K, N) C-contiguous array -- the kernel interprets
-        it as column-major via stride_B=K, not via numpy's Fortran-order flag.
+        A, B, BQ, C must be numpy arrays. Two-dimensional A/B arrays are packed
+        according to the generated kernel's layout; one-dimensional packed
+        payloads retain their byte order. BQ is column-major.
         C must be the array that will receive output; a non-contiguous C would
         produce a temporary copy that is not returned to the caller.
         Returns (status, time_ms).
         """
         import numpy as np
 
-        A   = np.ascontiguousarray(A)
-        # Kernel BLayout is ColumnMajor (rcr): B[k,n] lives at offset n*K+k.
-        # Supply column-major bytes for 2-D B; ascontiguousarray would force
-        # row-major and silently transpose. Packed 1-D B (fp4) stays as-is.
-        B   = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
+        layout = _layout_from_kernel_name(self.get_kernel_name())
+        A   = np.asfortranarray(A) if A.ndim == 2 and layout[0] == "c" else np.ascontiguousarray(A)
+        B   = np.asfortranarray(B) if B.ndim == 2 and layout[1] == "c" else np.ascontiguousarray(B)
         # BQ is ColumnMajor [QK_B, QN_B] (leading dim QK_B) to match Old-TE's rcr
         # path and the WPQuantB pipeline; supply fortran-order bytes for 2-D BQ.
         BQ  = np.asfortranarray(BQ) if BQ.ndim == 2 else np.ascontiguousarray(BQ)
@@ -474,6 +472,16 @@ def _variant_from_kernel_name(name: str) -> Optional[str]:
         if rest.startswith(v + "_"):
             return v
     return None
+
+
+def _layout_from_kernel_name(name: str) -> str:
+    """Read A/B layout from the generated name, including MX variant prefixes."""
+    variant = _variant_from_kernel_name(name)
+    if variant is not None:
+        layout = name[len(NAME_PREFIX) + len(variant) + 2:].split("_", 1)[0]
+        if layout in ("rcr", "ccr", "rrr", "crr"):
+            return layout
+    raise ValueError(f"Cannot determine BQuant matrix layout from kernel name {name!r}")
 
 
 def _encode_e8m0(arr) -> "object":
@@ -721,9 +729,10 @@ class BQuantGpuGemmRunner:
         # Output buffer -- dtype must match the compiled kernel's CDataType.
         C = np.zeros((M, N), dtype=c_dtype)
 
-        # Strides (in elements, row-major for A and C; col-major for B and BQ).
-        stride_A  = K     # A is row-major [M, K]
-        stride_B  = K     # B is col-major [K, N] -> leading dim = K
+        # A/B packing and leading dimensions follow the generated kernel.
+        layout = _layout_from_kernel_name(self.kernel_name)
+        stride_A  = M if layout[0] == "c" else K
+        stride_B  = K if layout[1] == "c" else N
         stride_BQ = QK_B  # BQ is col-major [QK_B, QN_B] -> leading dim = QK_B
         stride_C  = N     # C is row-major [M, N]
 

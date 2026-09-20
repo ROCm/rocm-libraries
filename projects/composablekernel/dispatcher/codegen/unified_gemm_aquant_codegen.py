@@ -12,10 +12,9 @@ taking QuantGemmHostArgs -- compiled per-kernel via force-include:
 
     hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE gemm_aquant_ctypes_lib.cpp
 
-Scope (matches Old-TE gemm_aquant_quantgrouped*.cpp):
+Scope (matches the native TileEngine AQuant builder):
   dtypes : fp8, bf8, fp8i4 (A=pk_int4), bf8i4 (A=pk_int4)
-  layouts: rcr, rrr, crr, ccr  (non-preshufflequant)
-           rcr, rrr, crr       (preshufflequant -- ccr rejected by Old-TE)
+  layouts: rcr, rrr, crr, ccr  (with or without preshufflequant; AQ is RowMajor)
   pipeline: compv3  ->  AQuantGemmPipelineAgBgCrMem       (non-preshufflequant)
                         AQuantGemmPipelineAgBgCrCompV3    (preshufflequant)
   host args = ck_tile::QuantGemmHostArgs (aq_ptr set, bq_ptr = nullptr)
@@ -471,9 +470,6 @@ def _build_specs(config: dict) -> List[AQuantKernelSpec]:
     def _layout_guard(layout: str) -> Optional[str]:
         if layout not in AQUANT_AQ_LAYOUT:
             return f"Unsupported layout {layout} -- skipping"
-        # Old-TE rejects the ccr layout for the preshufflequant path.
-        if preshuffle_aquant and layout == "ccr":
-            return "ccr layout is unsupported for preshufflequant -- skipping"
         return None
 
     # AQuant has no pipeline axis, so no pipeline_map is passed.

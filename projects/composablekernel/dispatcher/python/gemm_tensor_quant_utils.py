@@ -67,7 +67,10 @@ _CTYPES_LIB_SRC = (
 _codegen_dir = str(Path(__file__).parent.parent / "codegen")
 if _codegen_dir not in sys.path:
     sys.path.insert(0, _codegen_dir)
-from unified_gemm_tensor_quant_codegen import make_tensor_quant_kernel_name  # noqa: E402
+from unified_gemm_tensor_quant_codegen import (  # noqa: E402
+    make_tensor_quant_kernel_name,
+    validate_tensor_quant_target,
+)
 
 _DEFAULT_HIPCC    = "hipcc"
 
@@ -116,6 +119,16 @@ class TensorQuantKernelConfig:
 
     gfx_arch: str = _DEFAULT_GFX_ARCH
 
+    def __post_init__(self):
+        self.validate_target()
+
+    def validate_target(self, gfx_arch=None):
+        """Recheck mutable configs against their actual compilation target."""
+        validate_tensor_quant_target(
+            self.variant_key, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k,
+            self.gfx_arch if gfx_arch is None else gfx_arch,
+        )
+
     @property
     def name(self) -> str:
         """Byte-exact match to codegen KERNEL_NAME."""
@@ -132,7 +145,9 @@ class TensorQuantKernelConfig:
 
     def to_codegen_config(self) -> dict:
         """Produce the JSON config dict consumed by unified_gemm_tensor_quant_codegen.py."""
+        self.validate_target()
         return {
+            "gfx_arch": self.gfx_arch,
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
             "pipeline": self.pipeline,
@@ -534,6 +549,8 @@ def setup_multiple_tensor_quant_dispatchers(
     arch = _validate_arch(gfx_arch if gfx_arch is not None else _detect_gpu_arch())
     configs = resolve_default_configs(configs, arch)
     validate_configs_match_arch(configs, arch, "TensorQuant")
+    for config in configs:
+        config.validate_target(arch)
 
     def _compile_fn(hpp: Path, so: Path, a: str) -> bool:
         return _compile_tensor_quant_kernel(

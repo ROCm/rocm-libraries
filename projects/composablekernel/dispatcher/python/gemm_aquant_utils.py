@@ -72,12 +72,10 @@ from quant_bridge_flags import te_perf_flags as _te_perf_flags  # noqa: E402
 
 _SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
-# Layout tags AQuant supports, and whether preshufflequant is allowed for each.
-# Derived from run_gemm_example_prec_type in run_gemm_quant_example.inc:
-#   rcr, rrr, crr : both decode and preshufflequant
-#   ccr           : decode only (rejected for APreshuffleQuant)
+# The native TileEngine builder supports all four A/B layouts with or without
+# APreshuffleQuant. AQ remains RowMajor independently of the A/B layout.
 _LAYOUTS_DECODE = ("rcr", "rrr", "crr", "ccr")
-_LAYOUTS_PRESHUFFLEQUANT = ("rcr", "rrr", "crr")
+_LAYOUTS_PRESHUFFLEQUANT = ("rcr", "rrr", "crr", "ccr")
 
 # AQ (A-scale) tensor layout, mirroring AQUANT_AQ_LAYOUT in
 # unified_gemm_aquant_codegen.py.  The scale tensor is ALWAYS RowMajor (Old-TE
@@ -689,7 +687,7 @@ def expand_aquant_sweep(
 
     The JSON format mirrors unified_gemm_aquant_codegen.py's _build_specs so the same
     config files work for both codegen and Python utils.  Every valid
-    (variant, layout, tile, quant_group) combination produces one AQuantKernelConfig;
+    (variant, layout, tile, quant_group, epilogue) combination produces one AQuantKernelConfig;
     duplicates (by .name) are collapsed.
     """
     import itertools
@@ -702,21 +700,29 @@ def expand_aquant_sweep(
     scheduler          = cfg.get("scheduler", default_scheduler)
     double_smem_buffer = cfg.get("double_smem_buffer", False)
     k_block_per_cu     = cfg.get("k_block_per_cu", 1)
+    pipeline          = cfg.get("pipeline")
+    epilogues = cfg.get("epilogues")
+    if epilogues is None:
+        epilogues = [cfg.get("epilogue", "cshuffle")]
 
     allowed_layouts = _LAYOUTS_PRESHUFFLEQUANT if preshuffle_aquant else _LAYOUTS_DECODE
 
     configs: List[AQuantKernelConfig] = []
     seen: set = set()
 
-    for variant_key, layout, tile_dict, qg in itertools.product(
+    for variant_key, layout, tile_dict, qg, epilogue in itertools.product(
         cfg.get("variant_keys", ["fp8"]),
         cfg.get("layouts", ["rcr"]),
         cfg.get("tile_configs", []),
         cfg.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
+        epilogues,
     ):
         if layout not in allowed_layouts:
             log.warning("Skipping unsupported layout %s (preshufflequant=%s)",
                         layout, preshuffle_aquant)
+            continue
+        if epilogue not in ("cshuffle", "default"):
+            log.warning("Skipping unsupported epilogue %s", epilogue)
             continue
         c = AQuantKernelConfig(
             variant_key=variant_key,
@@ -737,6 +743,8 @@ def expand_aquant_sweep(
             preshuffle_aquant=preshuffle_aquant,
             double_smem_buffer=double_smem_buffer,
             k_block_per_cu=k_block_per_cu,
+            pipeline=pipeline,
+            epilogue=epilogue,
             gfx_arch=gfx_arch,
         )
         if c.name not in seen:
