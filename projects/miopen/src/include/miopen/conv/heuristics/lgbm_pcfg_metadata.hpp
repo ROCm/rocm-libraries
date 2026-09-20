@@ -73,6 +73,10 @@ public:
     // solver has no perf-config model.
     const SolverModel* Find(const std::string& solver_name) const;
 
+    // Names of all loaded per-solver models (unordered). For test enumeration
+    // and diagnostics; the runtime path uses Find().
+    std::vector<std::string> SolverNames() const;
+
 private:
     LgbmPcfgMetadata();
 

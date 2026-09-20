@@ -8,19 +8,19 @@
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
 #include <miopen/config.hpp>                       // MIOPEN_INTERNALS_EXPORT
+#include <miopen/conv/heuristics/lgbm_binary.hpp>  // BinReader
 #include <miopen/conv/heuristics/lgbm_predict.hpp> // LgbmEntry
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 namespace miopen {
 namespace ai {
 namespace lgbm {
 
-// A gradient-boosted decision-tree forest parsed from a LightGBM text (`.txt`)
-// model at runtime and walked here.
+// A gradient-boosted decision-tree forest read from the compact binary asset
+// format (see lgbm_binary.hpp) at runtime and walked here.
 //
 // Inference sums the reached leaf value across every tree. The training
 // objective (lambdarank) has no output transform, so the raw sum is the score
@@ -30,9 +30,11 @@ namespace lgbm {
 class MIOPEN_INTERNALS_EXPORT LgbmForest
 {
 public:
-    // Parse a LightGBM text model file. On failure, IsReady() is false and
-    // Score() returns 0 (caller treats an unusable model as "abstain").
-    explicit LgbmForest(const std::string& model_path);
+    // Read one FOREST block from `reader`, advancing the cursor. On a truncated
+    // or corrupt block IsReady() is false and Score() returns 0 (caller treats
+    // an unusable model as "abstain"). Used both standalone (rank) and embedded
+    // in a per-solver section (pcfg).
+    explicit LgbmForest(BinReader& reader);
 
     bool IsReady() const { return ready_; }
 
@@ -41,7 +43,7 @@ public:
     // Pointer+count so both std::array and std::vector rows work without a copy.
     double Score(const LgbmEntry* row, std::size_t n) const;
 
-    // Lazily-loaded shared rank model (GetSystemDbPath()/lgbm_rank_model.txt),
+    // Lazily-loaded shared rank model (GetSystemDbPath()/lgbm_rank.bin),
     // mirroring LgbmMetadata::Get().
     static const LgbmForest& GetRank();
 

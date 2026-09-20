@@ -42,18 +42,12 @@ using miopen::ai::lgbm::pcfg::ScorePickForTest;
 class CPU_LgbmPcfgPicker_NONE : public ::testing::Test
 {
 protected:
-    nlohmann::json catalog;
     const LgbmPcfgMetadata& meta = LgbmPcfgMetadata::Get();
 
     void SetUp() override
     {
         if(!meta.IsReady())
             GTEST_SKIP() << "lgbm_pcfg metadata unavailable; picker disabled in this build";
-
-        const auto cpath = miopen::GetSystemDbPath() / "lgbm_pcfg_catalog.json";
-        if(!miopen::fs::exists(cpath))
-            GTEST_SKIP() << "catalog not found in " << miopen::GetSystemDbPath().string();
-        std::ifstream(cpath.string()) >> catalog;
     }
 };
 
@@ -70,12 +64,10 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
     int solvers_checked = 0;
     int buckets_checked = 0;
 
-    for(auto sit = catalog.begin(); sit != catalog.end(); ++sit)
+    for(const auto& solver : meta.SolverNames())
     {
-        const std::string solver = sit.key();
-        const auto* model        = meta.Find(solver);
-        if(model == nullptr)
-            continue; // catalog entry without a loaded model
+        const auto* model = meta.Find(solver);
+        ASSERT_NE(model, nullptr);
         ++solvers_checked;
 
         // A fixed, arbitrary problem+GPU prefix of the solver's exact length.
@@ -84,21 +76,22 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
         // works; use 1.0 to stay in-range for log-scaled columns.
         const std::vector<double> prefix(static_cast<std::size_t>(model->prob_feat_count), 1.0);
 
-        for(auto bit = sit.value().at("buckets").begin(); bit != sit.value().at("buckets").end();
-            ++bit)
+        for(const auto& bucket : model->buckets)
         {
             std::vector<std::string> descs;
             std::vector<std::vector<double>> args;
             std::unordered_set<std::string> desc_set;
-            for(const auto& c : bit.value())
+            for(const auto& c : bucket.second)
             {
-                auto d = c.at("desc").get<std::string>();
-                std::vector<double> a;
-                a.reserve(c.at("args").size());
-                for(const auto& x : c.at("args"))
-                    a.push_back(x.is_null() ? 0.0 : x.get<double>());
-                desc_set.insert(d);
-                descs.push_back(std::move(d));
+                // The loaded catalog encodes a missing arg as NaN; map it to a
+                // finite 0.0 here so the scores (hence the sort order) stay
+                // deterministic for this structural invariant.
+                std::vector<double> a = c.args;
+                for(auto& x : a)
+                    if(std::isnan(x))
+                        x = 0.0;
+                desc_set.insert(c.desc);
+                descs.push_back(c.desc);
                 args.push_back(std::move(a));
             }
             if(descs.empty())
@@ -106,29 +99,29 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
 
             const auto ranked = ScorePickForTest(solver, prefix, descs, args);
             ASSERT_EQ(ranked.size(), descs.size())
-                << solver << " bucket " << bit.key() << ": ranking size mismatch";
+                << solver << " bucket " << bucket.first << ": ranking size mismatch";
 
             // Every ranked entry is a real catalog descriptor, and the ranking
             // is a permutation (no dupes) of the input set.
             std::unordered_set<std::string> seen;
             for(const auto& r : ranked)
             {
-                EXPECT_TRUE(desc_set.count(r) == 1) << solver << " bucket " << bit.key()
+                EXPECT_TRUE(desc_set.count(r) == 1) << solver << " bucket " << bucket.first
                                                     << ": ranked non-catalog desc \"" << r << "\"";
-                EXPECT_TRUE(seen.insert(r).second) << solver << " bucket " << bit.key()
+                EXPECT_TRUE(seen.insert(r).second) << solver << " bucket " << bucket.first
                                                    << ": duplicate ranked desc \"" << r << "\"";
             }
 
             // Deterministic: a second identical call yields the same order.
             const auto ranked2 = ScorePickForTest(solver, prefix, descs, args);
             EXPECT_EQ(ranked, ranked2)
-                << solver << " bucket " << bit.key() << ": ranking not deterministic";
+                << solver << " bucket " << bucket.first << ": ranking not deterministic";
 
             ++buckets_checked;
         }
     }
 
-    ASSERT_GT(solvers_checked, 0) << "no catalog solver matched a loaded model";
+    ASSERT_GT(solvers_checked, 0) << "no loaded pcfg solver model";
     ASSERT_GT(buckets_checked, 0) << "no non-empty buckets scored";
 }
 
@@ -139,6 +132,10 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
 // LightGBM Python API from the exact models shipped in the tree.
 TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
 {
+    const auto& meta = LgbmPcfgMetadata::Get();
+    if(!meta.IsReady())
+        GTEST_SKIP() << "lgbm_pcfg metadata unavailable; picker disabled in this build";
+
     const auto gpath = miopen::GetSystemDbPath() / "lgbm_pcfg_golden.json";
     if(!miopen::fs::exists(gpath))
         GTEST_SKIP() << "pcfg golden fixture not installed in "
@@ -154,11 +151,11 @@ TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
     for(auto sit = solvers.begin(); sit != solvers.end(); ++sit)
     {
         const std::string solver = sit.key();
-        const auto model_path = miopen::GetSystemDbPath() / ("lgbm_pcfg_" + solver + "_model.txt");
-        if(!miopen::fs::exists(model_path))
-            continue; // model asset not installed in this build
-        const LgbmForest forest(model_path.string());
-        ASSERT_TRUE(forest.IsReady()) << "failed to load " << model_path.string();
+        const auto* model        = meta.Find(solver);
+        if(model == nullptr || !model->forest)
+            continue; // model not loaded in this build
+        const LgbmForest& forest = *model->forest;
+        ASSERT_TRUE(forest.IsReady()) << "forest not ready for " << solver;
         ++solvers_checked;
 
         const auto& block     = sit.value();

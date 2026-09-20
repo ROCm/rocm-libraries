@@ -6,13 +6,12 @@
 
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
 #include <miopen/db_path.hpp>
+#include <miopen/load_file.hpp>
 #include <miopen/logger.hpp>
 
 #include <cmath>
-#include <cstdlib>
-#include <fstream>
-#include <sstream>
-#include <string>
+#include <cstdint>
+#include <exception>
 #include <vector>
 
 namespace miopen {
@@ -20,164 +19,71 @@ namespace ai {
 namespace lgbm {
 
 namespace {
-
-// LightGBM decision_type is a small bitmask (see LightGBM's Tree/DecisionType):
-//   bit 0    -> split is categorical (else numeric)
-//   bit 1    -> "default left": a decided-missing feature follows the left child
-//   bits 2-3 -> missing_type: 0=None, 1=Zero, 2=NaN
-// The missing_type matters: only NaN-type nodes treat a NaN input as missing
-// and route it by the default-left bit. None/Zero-type nodes coerce a NaN input
-// to 0.0 first and then either send an exact zero via default-left (Zero type)
-// or fall through to the ordinary threshold compare.
-constexpr int kCategoricalMask  = 0x01;
-constexpr int kDefaultLeftMask  = 0x02;
-constexpr int kMissingTypeShift = 2;
-constexpr int kMissingTypeMask  = 0x03;
-constexpr int kMissingTypeZero  = 1;
-constexpr int kMissingTypeNaN   = 2;
-
-// Split a "a b c" value line (already past the '=') into doubles.
-std::vector<double> ParseDoubles(const std::string& s)
-{
-    std::vector<double> out;
-    std::istringstream iss(s);
-    std::string tok;
-    while(iss >> tok)
-        out.push_back(std::strtod(tok.c_str(), nullptr));
-    return out;
-}
-
-std::vector<int> ParseInts(const std::string& s)
-{
-    std::vector<int> out;
-    std::istringstream iss(s);
-    std::string tok;
-    while(iss >> tok)
-        out.push_back(static_cast<int>(std::strtol(tok.c_str(), nullptr, 10)));
-    return out;
-}
-
-std::vector<std::uint32_t> ParseU32(const std::string& s)
-{
-    std::vector<std::uint32_t> out;
-    std::istringstream iss(s);
-    std::string tok;
-    while(iss >> tok)
-        out.push_back(static_cast<std::uint32_t>(std::strtoul(tok.c_str(), nullptr, 10)));
-    return out;
-}
-
+// missing_type values (decoded from LightGBM's decision_type bits 2-3 by the
+// exporter): 1=Zero, 2=NaN. Only NaN-type nodes treat a NaN input as missing
+// and route it by default_left; Zero-type nodes send an exact zero left.
+constexpr int kMissingTypeZero = 1;
+constexpr int kMissingTypeNaN  = 2;
 } // namespace
 
-LgbmForest::LgbmForest(const std::string& model_path)
+LgbmForest::LgbmForest(BinReader& reader)
 {
-    std::ifstream in(model_path);
-    if(!in.is_open())
+    // FOREST block: u32 num_trees, then per tree the decoded node arrays,
+    // leaf values, and categorical bitset/offset runs. See lgbm_binary.hpp and
+    // script/convert_lgbm_binary.py; the exporter already decodes LightGBM's
+    // decision_type into split/cat/default_left/missing_type, so nothing is
+    // decoded here.
+    const std::uint32_t num_trees = reader.ReadU32();
+    for(std::uint32_t t = 0; t < num_trees; ++t)
     {
-        MIOPEN_LOG_W("LGBM forest: cannot open " << model_path << "; picker will abstain");
-        return;
-    }
+        const std::uint32_t num_nodes = reader.ReadU32();
+        const auto split_feature      = reader.ReadArray<std::int32_t>(num_nodes);
+        const auto threshold          = reader.ReadArray<double>(num_nodes);
+        const auto left               = reader.ReadArray<std::int32_t>(num_nodes);
+        const auto right              = reader.ReadArray<std::int32_t>(num_nodes);
+        const auto cat_index          = reader.ReadArray<std::int32_t>(num_nodes);
+        const auto default_left       = reader.ReadArray<std::uint8_t>(num_nodes);
+        const auto missing_type       = reader.ReadArray<std::uint8_t>(num_nodes);
 
-    // The LightGBM text dump is a sequence of "key=values" lines grouped into
-    // per-tree blocks separated by blank lines. A block that opens with a
-    // "Tree=<n>" line is one boosting round; everything before the first such
-    // block (feature_names, objective, ...) and after the last (feature
-    // importances, parameters) is ignored -- we only need the tree topology.
-    std::string line;
-    bool in_tree = false;
-    std::vector<int> split_feature, decision_type, left_child, right_child;
-    std::vector<double> threshold, leaf_value;
-    std::vector<int> cat_boundaries;
-    std::vector<std::uint32_t> cat_threshold;
+        const std::uint32_t num_leaves = reader.ReadU32();
+        auto leaf_values               = reader.ReadArray<double>(num_leaves);
 
-    auto flush_tree = [&]() {
-        if(!in_tree)
-            return;
+        const std::uint32_t cat_bitset_len = reader.ReadU32();
+        auto cat_bitset                    = reader.ReadArray<std::uint32_t>(cat_bitset_len);
+
+        const std::uint32_t cat_offsets_len = reader.ReadU32();
+        const auto cat_offsets              = reader.ReadArray<std::int64_t>(cat_offsets_len);
+
+        // Any short read latched reader.Ok() to false and left the arrays empty;
+        // stop before indexing them so a truncated file abstains cleanly.
+        if(!reader.Ok())
+            break;
+
         Tree tree;
-        tree.leaf_values = std::move(leaf_value);
-        tree.cat_offsets.assign(cat_boundaries.begin(), cat_boundaries.end());
-        tree.cat_bitset = std::move(cat_threshold);
-
-        const std::size_t n_internal = split_feature.size();
-        tree.nodes.resize(n_internal);
-        for(std::size_t i = 0; i < n_internal; ++i)
+        tree.leaf_values = std::move(leaf_values);
+        tree.cat_bitset  = std::move(cat_bitset);
+        tree.cat_offsets.assign(cat_offsets.begin(), cat_offsets.end());
+        tree.nodes.resize(num_nodes);
+        for(std::uint32_t i = 0; i < num_nodes; ++i)
         {
             Node node{};
-            const int dt       = i < decision_type.size() ? decision_type[i] : 0;
             node.split_feature = split_feature[i];
-            node.default_left  = (dt & kDefaultLeftMask) != 0;
-            node.missing_type  = (dt >> kMissingTypeShift) & kMissingTypeMask;
-            node.left          = i < left_child.size() ? left_child[i] : -1;
-            node.right         = i < right_child.size() ? right_child[i] : -1;
-            if((dt & kCategoricalMask) != 0)
-            {
-                // Categorical split: `threshold` holds the categorical-split
-                // index, i.e. which cat_offsets[k]..[k+1] bitset run to test.
-                node.cat_index = static_cast<int>(threshold[i]);
-                node.threshold = 0.0;
-            }
-            else
-            {
-                node.cat_index = -1;
-                node.threshold = i < threshold.size() ? threshold[i] : 0.0;
-            }
-            tree.nodes[i] = node;
+            node.threshold     = threshold[i];
+            node.left          = left[i];
+            node.right         = right[i];
+            node.cat_index     = cat_index[i];
+            node.default_left  = default_left[i] != 0;
+            node.missing_type  = missing_type[i];
+            tree.nodes[i]      = node;
         }
         trees_.push_back(std::move(tree));
-
-        split_feature.clear();
-        decision_type.clear();
-        left_child.clear();
-        right_child.clear();
-        threshold.clear();
-        leaf_value.clear();
-        cat_boundaries.clear();
-        cat_threshold.clear();
-        in_tree = false;
-    };
-
-    while(std::getline(in, line))
-    {
-        if(line.empty())
-        {
-            flush_tree();
-            continue;
-        }
-        const auto eq = line.find('=');
-        if(eq == std::string::npos)
-            continue;
-        const std::string key = line.substr(0, eq);
-        const std::string val = line.substr(eq + 1);
-
-        if(key == "Tree")
-        {
-            flush_tree(); // in case blocks are not blank-separated
-            in_tree = true;
-        }
-        else if(key == "split_feature")
-            split_feature = ParseInts(val);
-        else if(key == "decision_type")
-            decision_type = ParseInts(val);
-        else if(key == "left_child")
-            left_child = ParseInts(val);
-        else if(key == "right_child")
-            right_child = ParseInts(val);
-        else if(key == "threshold")
-            threshold = ParseDoubles(val);
-        else if(key == "leaf_value")
-            leaf_value = ParseDoubles(val);
-        else if(key == "cat_boundaries")
-            cat_boundaries = ParseInts(val);
-        else if(key == "cat_threshold")
-            cat_threshold = ParseU32(val);
     }
-    flush_tree(); // last tree if file didn't end on a blank line
 
-    ready_ = !trees_.empty();
+    ready_ = reader.Ok() && !trees_.empty();
     if(ready_)
-        MIOPEN_LOG_I2("LGBM forest loaded: " << trees_.size() << " trees from " << model_path);
+        MIOPEN_LOG_I2("LGBM forest loaded: " << trees_.size() << " trees (binary)");
     else
-        MIOPEN_LOG_W("LGBM forest: no trees parsed from " << model_path << "; picker will abstain");
+        MIOPEN_LOG_W("LGBM forest: binary block truncated or empty; picker will abstain");
 }
 
 double LgbmForest::ScoreTree(const Tree& tree, const LgbmEntry* row) const
@@ -250,7 +156,29 @@ double LgbmForest::Score(const LgbmEntry* row, std::size_t /*n*/) const
 
 const LgbmForest& LgbmForest::GetRank()
 {
-    static const LgbmForest instance((GetSystemDbPath() / "lgbm_rank_model.txt").string());
+    static const std::vector<char> buffer = [] {
+        try
+        {
+            return LoadFile(GetSystemDbPath() / "lgbm_rank.bin");
+        }
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_W("LGBM forest: cannot load lgbm_rank.bin (" << e.what()
+                                                                   << "); picker will abstain");
+            return std::vector<char>{};
+        }
+    }();
+    static const LgbmForest instance = [] {
+        BinReader reader(buffer.data(), buffer.size());
+        // "MIORANK1" + u32 version, then a bare FOREST block. A bad header
+        // forces the reader to EOF so the forest read yields a not-ready model.
+        if(!reader.ReadMagic("MIORANK1", 8) || reader.ReadU32() != kBinaryFormatVersion)
+        {
+            MIOPEN_LOG_W("LGBM forest: lgbm_rank.bin bad magic/version; picker will abstain");
+            reader.SeekTo(buffer.size());
+        }
+        return LgbmForest(reader);
+    }();
     return instance;
 }
 

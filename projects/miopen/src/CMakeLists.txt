@@ -332,15 +332,14 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         conv/heuristics/lgbm_pick.cpp
         conv/heuristics/lgbm_metadata.cpp
         conv/heuristics/lgbm_forest.cpp)
-    # The rank model ships as its native LightGBM text dump
-    # (kernels/lgbm_rank_model.txt, installed with the other model assets
-    # below) and is walked at runtime by lgbm_forest.cpp -- no generated C.
+    # The rank model ships as a compact binary asset (kernels/lgbm_rank.bin,
+    # installed with the other model assets below) and is read at runtime by
+    # lgbm_forest.cpp -- no generated C, no text/JSON parse.
 
-    # Perf-config picker: one LightGBM lambdarank model PER tuneable solver.
-    # Each model ships as its native text dump (kernels/lgbm_pcfg_<solver>_
-    # model.txt, installed with the other model assets below) and is loaded +
-    # walked at runtime by lgbm_forest.cpp via the pcfg metadata loader. No
-    # generated C, so no per-solver symbol-rename / ODR machinery is needed.
+    # Perf-config picker: one LightGBM lambdarank model PER tuneable solver, all
+    # packed into a single binary bundle (kernels/lgbm_pcfg.bin, installed with
+    # the other model assets below) and read at runtime by the pcfg metadata
+    # loader. See lgbm_binary.hpp and script/convert_lgbm_binary.py.
     list(APPEND MIOpen_Source
         conv/heuristics/lgbm_pcfg_pick.cpp
         conv/heuristics/lgbm_pcfg_metadata.cpp)
@@ -1077,10 +1076,8 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     file(GLOB MODEL_FILES CONFIGURE_DEPENDS
         kernels/*.model
         kernels/lgbm_model_meta.json
-        kernels/lgbm_pcfg_model_meta.json
-        kernels/lgbm_pcfg_catalog.json
-        kernels/lgbm_rank_model.txt
-        kernels/lgbm_pcfg_*_model.txt)
+        kernels/lgbm_rank.bin
+        kernels/lgbm_pcfg.bin)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()

@@ -5,14 +5,16 @@
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
-#include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/lgbm_binary.hpp>
 #include <miopen/db_path.hpp>
+#include <miopen/load_file.hpp>
 #include <miopen/logger.hpp>
 
-#include <nlohmann/json.hpp>
-
-#include <limits>
+#include <cstdint>
+#include <exception>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace miopen {
 namespace ai {
@@ -27,120 +29,116 @@ const LgbmPcfgMetadata& LgbmPcfgMetadata::Get()
 
 LgbmPcfgMetadata::LgbmPcfgMetadata()
 {
-    const auto meta_path    = GetSystemDbPath() / "lgbm_pcfg_model_meta.json";
-    const auto catalog_path = GetSystemDbPath() / "lgbm_pcfg_catalog.json";
-
+    // Single self-describing binary bundle (see lgbm_binary.hpp and
+    // script/convert_lgbm_binary.py): "MIOPCFG1" + u32 version + u32 num_solvers,
+    // a directory of (name, offset, size), then per-solver sections holding the
+    // feature counts, a FOREST block, and the candidate buckets. Loaded once
+    // (Meyers singleton) via a bulk file slurp + pointer walk -- no JSON/text
+    // parse. The verbose export-time metadata (feat_order/vocab/dtype_codes) is
+    // not needed at runtime and is not in the bundle.
+    std::vector<char> buffer;
     try
     {
-        // meta: { "<solver>": { feat_order, prob_feat_cols, arg_cols, ... }, ... }
-        auto meta = ai::common::LoadJSON(meta_path);
-        for(auto it = meta.begin(); it != meta.end(); ++it)
-        {
-            const auto& block        = it.value();
-            const std::size_t n_feat = block.at("feat_order").size();
-            const auto& prob_cols    = block.at("prob_feat_cols");
-            const std::size_t n_prob = prob_cols.size();
-            const std::size_t n_arg  = block.at("arg_cols").size();
-
-            // The prefix is the base set, optionally with a trailing gfx_code
-            // categorical (PCFG_GFXID solvers). Detect it from the last column so
-            // the C++ feature builder knows whether to append gfx_code. Reject
-            // anything else so a real schema drift fails loudly here rather than
-            // silently corrupting predictions downstream.
-            const bool has_gfx_code =
-                n_prob == static_cast<std::size_t>(kNumBaseProbFeatures) + 1 &&
-                prob_cols.back().get<std::string>() == "gfx_code";
-            const bool base_ok = n_prob == static_cast<std::size_t>(kNumBaseProbFeatures);
-            if(!(base_ok || has_gfx_code) || n_feat != n_prob + n_arg)
-            {
-                MIOPEN_LOG_W("lgbm_pcfg: skipping "
-                             << it.key() << " (feat schema mismatch: prob=" << n_prob
-                             << " arg=" << n_arg << " feat=" << n_feat << ")");
-                continue;
-            }
-
-            // Load the solver's LightGBM forest asset. A solver whose model
-            // file is missing/unparseable is dropped here (the picker abstains
-            // for it) rather than kept with no way to score.
-            const auto model_file = GetSystemDbPath() / ("lgbm_pcfg_" + it.key() + "_model.txt");
-            auto forest           = std::make_shared<const LgbmForest>(model_file.string());
-            if(!forest->IsReady())
-            {
-                MIOPEN_LOG_W("lgbm_pcfg: skipping " << it.key() << " (model file "
-                                                    << model_file.string() << " unavailable)");
-                continue;
-            }
-
-            SolverModel m;
-            m.feat_count      = static_cast<int>(n_feat);
-            m.prob_feat_count = static_cast<int>(n_prob);
-            m.arg_count       = static_cast<int>(n_arg);
-            m.has_gfx_code    = has_gfx_code;
-            m.forest          = std::move(forest);
-            models.emplace(it.key(), std::move(m));
-        }
-
-        // catalog: { "<solver>": { "buckets": { "<key>": [ {desc, args}, ... ] } } }
-        auto catalog = ai::common::LoadJSON(catalog_path);
-        for(auto it = catalog.begin(); it != catalog.end(); ++it)
-        {
-            const auto mit = models.find(it.key());
-            if(mit == models.end())
-                continue; // catalog entry without a matching model block
-            SolverModel& m      = mit->second;
-            const auto& buckets = it.value().at("buckets");
-            for(auto bit = buckets.begin(); bit != buckets.end(); ++bit)
-            {
-                auto& dst = m.buckets[bit.key()];
-                for(const auto& c : bit.value())
-                {
-                    const auto& jargs = c.at("args");
-                    // The picker indexes args[0..arg_count) positionally when
-                    // building the feature row; a candidate with the wrong arg
-                    // count would be an out-of-bounds read. Skip (and log) any
-                    // mismatch rather than trust file-loaded data blindly. The
-                    // exporter's parity gate guarantees a match, so this only
-                    // guards against a desynced catalog/meta pair.
-                    if(jargs.size() != static_cast<std::size_t>(m.arg_count))
-                    {
-                        MIOPEN_LOG_W("lgbm_pcfg: skipping candidate in "
-                                     << it.key() << " bucket " << bit.key() << " (args="
-                                     << jargs.size() << ", expected " << m.arg_count << ")");
-                        continue;
-                    }
-                    Candidate cand;
-                    cand.desc = c.at("desc").get<std::string>();
-                    cand.args.reserve(jargs.size());
-                    for(const auto& a : jargs)
-                    {
-                        // Exported args are ints, floats, or null (missing).
-                        // A missing feature is encoded as NaN downstream, so map
-                        // null -> NaN here.
-                        cand.args.push_back(a.is_null() ? std::numeric_limits<double>::quiet_NaN()
-                                                        : a.get<double>());
-                    }
-                    dst.push_back(std::move(cand));
-                }
-            }
-        }
-
-        ready = !models.empty();
-        if(ready)
-            MIOPEN_LOG_I2("lgbm_pcfg metadata loaded: " << models.size() << " solver models");
-        else
-            MIOPEN_LOG_W("lgbm_pcfg: no usable solver models; picker will abstain");
+        buffer = LoadFile(GetSystemDbPath() / "lgbm_pcfg.bin");
     }
     catch(const std::exception& e)
     {
-        MIOPEN_LOG_W("lgbm_pcfg metadata load failed (" << e.what() << "); picker will abstain");
-        ready = false;
+        MIOPEN_LOG_W("lgbm_pcfg: cannot load lgbm_pcfg.bin (" << e.what()
+                                                             << "); picker will abstain");
+        return;
     }
+
+    BinReader reader(buffer.data(), buffer.size());
+    if(!reader.ReadMagic("MIOPCFG1", 8) || reader.ReadU32() != kBinaryFormatVersion)
+    {
+        MIOPEN_LOG_W("lgbm_pcfg: lgbm_pcfg.bin bad magic/version; picker will abstain");
+        return;
+    }
+
+    struct DirEntry
+    {
+        std::string name;
+        std::uint64_t offset;
+    };
+    const std::uint32_t num_solvers = reader.ReadU32();
+    std::vector<DirEntry> directory;
+    directory.reserve(num_solvers);
+    for(std::uint32_t i = 0; i < num_solvers; ++i)
+    {
+        DirEntry entry;
+        entry.name   = reader.ReadString();
+        entry.offset = reader.ReadU64();
+        reader.ReadU64(); // section size (unused; sections are read via offsets)
+        directory.push_back(std::move(entry));
+    }
+    if(!reader.Ok())
+    {
+        MIOPEN_LOG_W("lgbm_pcfg: lgbm_pcfg.bin directory truncated; picker will abstain");
+        return;
+    }
+
+    for(const auto& entry : directory)
+    {
+        // Each section is read from its absolute offset, so a single bad section
+        // cannot desync the others.
+        reader.SeekTo(entry.offset);
+        SolverModel m;
+        m.feat_count      = reader.ReadI32();
+        m.prob_feat_count = reader.ReadI32();
+        m.arg_count       = reader.ReadI32();
+        m.has_gfx_code    = reader.ReadU8() != 0;
+
+        auto forest = std::make_shared<const LgbmForest>(reader);
+        if(!reader.Ok() || !forest->IsReady())
+        {
+            MIOPEN_LOG_W("lgbm_pcfg: skipping " << entry.name << " (forest unreadable)");
+            continue;
+        }
+        m.forest = std::move(forest);
+
+        const std::uint32_t num_buckets = reader.ReadU32();
+        for(std::uint32_t b = 0; b < num_buckets; ++b)
+        {
+            const std::string key         = reader.ReadString();
+            const std::uint32_t num_cands = reader.ReadU32();
+            auto& dst                     = m.buckets[key];
+            dst.reserve(num_cands);
+            for(std::uint32_t c = 0; c < num_cands; ++c)
+            {
+                Candidate cand;
+                cand.desc = reader.ReadString();
+                cand.args = reader.ReadArray<double>(static_cast<std::size_t>(m.arg_count));
+                dst.push_back(std::move(cand));
+            }
+        }
+        if(!reader.Ok())
+        {
+            MIOPEN_LOG_W("lgbm_pcfg: skipping " << entry.name << " (catalog truncated)");
+            continue;
+        }
+        models.emplace(entry.name, std::move(m));
+    }
+
+    ready = !models.empty();
+    if(ready)
+        MIOPEN_LOG_I2("lgbm_pcfg metadata loaded: " << models.size() << " solver models (binary)");
+    else
+        MIOPEN_LOG_W("lgbm_pcfg: no usable solver models; picker will abstain");
 }
 
 const SolverModel* LgbmPcfgMetadata::Find(const std::string& solver_name) const
 {
     const auto it = models.find(solver_name);
     return it != models.end() ? &it->second : nullptr;
+}
+
+std::vector<std::string> LgbmPcfgMetadata::SolverNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(models.size());
+    for(const auto& kv : models)
+        names.push_back(kv.first);
+    return names;
 }
 
 } // namespace pcfg
