@@ -7,11 +7,11 @@
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_binary.hpp>
 #include <miopen/db_path.hpp>
-#include <miopen/load_file.hpp>
 #include <miopen/logger.hpp>
 
+#include <algorithm>
 #include <cstdint>
-#include <exception>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,116 +27,154 @@ const LgbmPcfgMetadata& LgbmPcfgMetadata::Get()
     return instance;
 }
 
+namespace {
+
+// Cap on the header+directory prefix read at construction. The directory of a
+// realistic bundle is a few KB (a dozen solvers); 1 MiB covers thousands. A
+// bundle whose directory somehow exceeds this fails to parse and abstains.
+constexpr std::uint64_t kDirPrefixCap = 1u << 20;
+
+// Read exactly [offset, offset+len) of a file. Returns empty on any short read
+// or open failure (the caller then abstains). Single named-return so NRVO
+// applies (the build is -Werror=nrvo).
+std::vector<char> ReadRange(const std::string& path, std::uint64_t offset, std::uint64_t len)
+{
+    std::vector<char> buf;
+    std::ifstream in(path, std::ios::binary);
+    if(in.is_open())
+    {
+        in.seekg(static_cast<std::streamoff>(offset));
+        buf.resize(len);
+        in.read(buf.data(), static_cast<std::streamsize>(len));
+        if(static_cast<std::uint64_t>(in.gcount()) != len)
+            buf.clear();
+    }
+    return buf;
+}
+
+} // namespace
+
 LgbmPcfgMetadata::LgbmPcfgMetadata()
 {
     // Single self-describing binary bundle (see lgbm_binary.hpp and
     // script/convert_lgbm_binary.py): "MIOPCFG1" + u32 version + u32 num_solvers,
     // a directory of (name, offset, size), then per-solver sections holding the
-    // feature counts, a FOREST block, and the candidate buckets. Loaded once
-    // (Meyers singleton) via a bulk file slurp + pointer walk -- no JSON/text
-    // parse. The verbose export-time metadata (feat_order/vocab/dtype_codes) is
-    // not needed at runtime and is not in the bundle.
-    std::vector<char> buffer;
-    try
+    // feature counts, a FOREST block, and the candidate buckets. Only the
+    // header+directory is read here (a small prefix); each section is read from
+    // disk and parsed lazily in Find().
+    bin_path = (GetSystemDbPath() / "lgbm_pcfg.bin").string();
+
+    std::uint64_t file_size = 0;
     {
-        buffer = LoadFile(GetSystemDbPath() / "lgbm_pcfg.bin");
+        std::ifstream in(bin_path, std::ios::binary | std::ios::ate);
+        if(!in.is_open())
+        {
+            MIOPEN_LOG_W("lgbm_pcfg: cannot open " << bin_path << "; picker will abstain");
+            return;
+        }
+        file_size = static_cast<std::uint64_t>(in.tellg());
     }
-    catch(const std::exception& e)
+
+    const std::uint64_t prefix_len = std::min<std::uint64_t>(file_size, kDirPrefixCap);
+    const auto prefix              = ReadRange(bin_path, 0, prefix_len);
+    if(prefix.empty())
     {
-        MIOPEN_LOG_W("lgbm_pcfg: cannot load lgbm_pcfg.bin (" << e.what()
-                                                             << "); picker will abstain");
+        MIOPEN_LOG_W("lgbm_pcfg: cannot read " << bin_path << "; picker will abstain");
         return;
     }
 
-    BinReader reader(buffer.data(), buffer.size());
+    BinReader reader(prefix.data(), prefix.size());
     if(!reader.ReadMagic("MIOPCFG1", 8) || reader.ReadU32() != kBinaryFormatVersion)
     {
         MIOPEN_LOG_W("lgbm_pcfg: lgbm_pcfg.bin bad magic/version; picker will abstain");
         return;
     }
 
-    struct DirEntry
-    {
-        std::string name;
-        std::uint64_t offset;
-    };
     const std::uint32_t num_solvers = reader.ReadU32();
-    std::vector<DirEntry> directory;
-    directory.reserve(num_solvers);
     for(std::uint32_t i = 0; i < num_solvers; ++i)
     {
-        DirEntry entry;
-        entry.name   = reader.ReadString();
-        entry.offset = reader.ReadU64();
-        reader.ReadU64(); // section size (unused; sections are read via offsets)
-        directory.push_back(std::move(entry));
+        const std::string name  = reader.ReadString();
+        const std::uint64_t off = reader.ReadU64();
+        const std::uint64_t sz  = reader.ReadU64();
+        directory.emplace(name, Section{off, sz});
     }
     if(!reader.Ok())
     {
-        MIOPEN_LOG_W("lgbm_pcfg: lgbm_pcfg.bin directory truncated; picker will abstain");
+        MIOPEN_LOG_W("lgbm_pcfg: directory truncated or exceeds prefix cap; picker will abstain");
+        directory.clear();
         return;
     }
 
-    for(const auto& entry : directory)
-    {
-        // Each section is read from its absolute offset, so a single bad section
-        // cannot desync the others.
-        reader.SeekTo(entry.offset);
-        SolverModel m;
-        m.feat_count      = reader.ReadI32();
-        m.prob_feat_count = reader.ReadI32();
-        m.arg_count       = reader.ReadI32();
-        m.has_gfx_code    = reader.ReadU8() != 0;
-
-        auto forest = std::make_shared<const LgbmForest>(reader);
-        if(!reader.Ok() || !forest->IsReady())
-        {
-            MIOPEN_LOG_W("lgbm_pcfg: skipping " << entry.name << " (forest unreadable)");
-            continue;
-        }
-        m.forest = std::move(forest);
-
-        const std::uint32_t num_buckets = reader.ReadU32();
-        for(std::uint32_t b = 0; b < num_buckets; ++b)
-        {
-            const std::string key         = reader.ReadString();
-            const std::uint32_t num_cands = reader.ReadU32();
-            auto& dst                     = m.buckets[key];
-            dst.reserve(num_cands);
-            for(std::uint32_t c = 0; c < num_cands; ++c)
-            {
-                Candidate cand;
-                cand.desc = reader.ReadString();
-                cand.args = reader.ReadArray<double>(static_cast<std::size_t>(m.arg_count));
-                dst.push_back(std::move(cand));
-            }
-        }
-        if(!reader.Ok())
-        {
-            MIOPEN_LOG_W("lgbm_pcfg: skipping " << entry.name << " (catalog truncated)");
-            continue;
-        }
-        models.emplace(entry.name, std::move(m));
-    }
-
-    ready = !models.empty();
+    ready = !directory.empty();
     if(ready)
-        MIOPEN_LOG_I2("lgbm_pcfg metadata loaded: " << models.size() << " solver models (binary)");
+        MIOPEN_LOG_I2("lgbm_pcfg metadata: " << directory.size()
+                                             << " solver models available (lazy)");
     else
         MIOPEN_LOG_W("lgbm_pcfg: no usable solver models; picker will abstain");
 }
 
+bool LgbmPcfgMetadata::LoadSection(std::uint64_t offset, std::uint64_t size, SolverModel& out) const
+{
+    // Read just this solver's byte range from disk; the section is self-contained
+    // (no references outside [offset, offset+size)), so it parses from a local
+    // buffer at position 0.
+    const auto buf = ReadRange(bin_path, offset, size);
+    if(buf.empty())
+        return false;
+    BinReader reader(buf.data(), buf.size());
+    out.feat_count      = reader.ReadI32();
+    out.prob_feat_count = reader.ReadI32();
+    out.arg_count       = reader.ReadI32();
+    out.has_gfx_code    = reader.ReadU8() != 0;
+
+    auto forest = std::make_shared<const LgbmForest>(reader);
+    if(!reader.Ok() || !forest->IsReady())
+        return false;
+    out.forest = std::move(forest);
+
+    const std::uint32_t num_buckets = reader.ReadU32();
+    for(std::uint32_t b = 0; b < num_buckets; ++b)
+    {
+        const std::string key         = reader.ReadString();
+        const std::uint32_t num_cands = reader.ReadU32();
+        auto& dst                     = out.buckets[key];
+        dst.reserve(num_cands);
+        for(std::uint32_t c = 0; c < num_cands; ++c)
+        {
+            Candidate cand;
+            cand.desc = reader.ReadString();
+            cand.args = reader.ReadArray<double>(static_cast<std::size_t>(out.arg_count));
+            dst.push_back(std::move(cand));
+        }
+    }
+    return reader.Ok();
+}
+
 const SolverModel* LgbmPcfgMetadata::Find(const std::string& solver_name) const
 {
-    const auto it = models.find(solver_name);
-    return it != models.end() ? &it->second : nullptr;
+    const auto dit = directory.find(solver_name);
+    if(dit == directory.end())
+        return nullptr; // no perf-config model for this solver
+
+    const std::lock_guard<std::mutex> lock(mutex);
+    const auto cit = cache.find(solver_name);
+    if(cit != cache.end())
+        return &cit->second;
+
+    SolverModel m;
+    if(!LoadSection(dit->second.offset, dit->second.size, m))
+    {
+        MIOPEN_LOG_W("lgbm_pcfg: " << solver_name << " section unreadable; abstaining for it");
+        return nullptr;
+    }
+    return &cache.emplace(solver_name, std::move(m)).first->second;
 }
 
 std::vector<std::string> LgbmPcfgMetadata::SolverNames() const
 {
     std::vector<std::string> names;
-    names.reserve(models.size());
-    for(const auto& kv : models)
+    names.reserve(directory.size());
+    for(const auto& kv : directory)
         names.push_back(kv.first);
     return names;
 }

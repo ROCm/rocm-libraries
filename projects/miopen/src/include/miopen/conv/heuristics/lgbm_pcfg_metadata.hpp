@@ -10,7 +10,9 @@
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
 
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -58,10 +60,15 @@ struct SolverModel
 inline constexpr int kNumBaseProbFeatures = 27;
 
 // Singleton bundling all per-solver perf-config models. Lazily constructed,
-// thread-safe via the Meyers idiom. Loaded from GetSystemDbPath():
-//   <SystemDbPath>/lgbm_pcfg_model_meta.json   (feat schema, per solver)
-//   <SystemDbPath>/lgbm_pcfg_catalog.json      (per-bucket candidates)
-// If either file is missing/invalid, IsReady() is false and the picker abstains.
+// thread-safe via the Meyers idiom. Loaded from
+// <GetSystemDbPath()>/lgbm_pcfg.bin (see lgbm_binary.hpp). If the file is
+// missing/invalid, IsReady() is false and the picker abstains.
+//
+// Only the per-solver directory (name -> byte range) is read up front; each
+// solver's section (forest + candidate buckets) is read from disk and parsed on
+// the first Find() for that solver, then cached. A conv find typically queries
+// only one or two solvers, so this reads a few MB rather than the whole ~36 MB
+// bundle, and holds only the parsed subset resident.
 class MIOPEN_INTERNALS_EXPORT LgbmPcfgMetadata
 {
 public:
@@ -69,19 +76,39 @@ public:
 
     bool IsReady() const { return ready; }
 
-    // Look up the model for a solver (by solver_name). Returns nullptr when the
-    // solver has no perf-config model.
+    // Look up the model for a solver (by solver_name). Reads + parses + caches
+    // the solver's section on first call. Returns nullptr when the solver has no
+    // perf-config model (or its section fails to load). The returned pointer is
+    // stable for the process lifetime. Thread-safe.
     const SolverModel* Find(const std::string& solver_name) const;
 
-    // Names of all loaded per-solver models (unordered). For test enumeration
-    // and diagnostics; the runtime path uses Find().
+    // Names of all per-solver models available in the bundle (unordered), whether
+    // or not they have been parsed yet. For test enumeration and diagnostics; the
+    // runtime path uses Find().
     std::vector<std::string> SolverNames() const;
 
 private:
     LgbmPcfgMetadata();
 
+    // Read [offset, offset+size) of the bundle from disk and parse it into `out`
+    // (feature counts + FOREST + buckets). Returns false on a read/parse failure.
+    bool LoadSection(std::uint64_t offset, std::uint64_t size, SolverModel& out) const;
+
+    struct Section
+    {
+        std::uint64_t offset;
+        std::uint64_t size;
+    };
+
     bool ready = false;
-    std::unordered_map<std::string, SolverModel> models;
+    std::string bin_path;                              // path to lgbm_pcfg.bin
+    std::unordered_map<std::string, Section> directory; // solver_name -> byte range
+
+    // Lazily-parsed sections, guarded by mutex. mutable so Find() stays const.
+    // unordered_map node pointers are stable across inserts, so a pointer handed
+    // back from Find() remains valid as other solvers are cached later.
+    mutable std::mutex mutex;
+    mutable std::unordered_map<std::string, SolverModel> cache;
 };
 
 } // namespace pcfg
