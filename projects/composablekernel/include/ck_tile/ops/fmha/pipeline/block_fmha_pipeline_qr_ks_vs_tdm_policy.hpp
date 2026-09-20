@@ -44,10 +44,7 @@ CK_TILE_HOST_DEVICE constexpr index_t integer_log2_exact()
 // each row. For power-of-2 row widths this equals the full width (row-boundary
 // padding, unchanged); for non-power-of-2 widths (e.g. hdim 160 -> 80 dwords)
 // it picks the coarsest stride that still divides the row (80 -> 16 dwords).
-CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_largest_pow2_divisor(index_t x)
-{
-    return x & (-x);
-}
+CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_largest_pow2_divisor(index_t x) { return x & (-x); }
 
 // Compute the TDM LDS padding interval (in bytes) for a row of Cols elements,
 // mirroring gemm_universal_pipeline_ag_bg_cr_policy.hpp:GetLdsPaddingConfig.
@@ -249,14 +246,25 @@ struct QrTdmPaddingSelection<Problem, true>
     using Shape                          = typename Problem::BlockFmhaShape;
     static constexpr index_t kKElemBytes = sizeof(typename Problem::KDataType);
     static constexpr index_t kVElemBytes = sizeof(typename Problem::VDataType);
-    static constexpr index_t kKInterval  = qr_tdm_interval_bytes<kKElemBytes, Shape::kSubQKHeaddim>();
-    static constexpr index_t kVInterval  = qr_tdm_interval_bytes<kVElemBytes, Shape::kN1>();
-    static constexpr index_t kKPad       = 16;               // non-tr-load: dwords_per_128b * 4
-    static constexpr index_t kVPad       = 16 * kVElemBytes; // tr-load: bank_of_vecs * 4
+    static constexpr index_t kKInterval =
+        qr_tdm_interval_bytes<kKElemBytes, Shape::kSubQKHeaddim>();
+    static constexpr index_t kVInterval = qr_tdm_interval_bytes<kVElemBytes, Shape::kN1>();
+    static constexpr index_t kKPad      = 16;               // non-tr-load: dwords_per_128b * 4
+    static constexpr index_t kVPad      = 16 * kVElemBytes; // tr-load: bank_of_vecs * 4
 
     using Q = LdsPaddingConfig<false, 0, 0>;
     using K = LdsPaddingConfig<true, kKInterval, kKPad>;
-    using V = LdsPaddingConfig<true, kVInterval, kVPad>;
+
+    // V padding hurts for hdim 160: its V row width (kN1=160) forces a 64B
+    // padding interval, and the resulting LDS bloat (+38%, occupancy drop)
+    // outweighs the bank-conflict savings. Measured on gfx1250: disabling V
+    // padding for hdim 160 gives +35% (K padding is kept -- it is a net win;
+    // disabling K costs -10%). Only hdim 160 is verified; do not generalize.
+    // The predicate keys on V hdim (kN1), not Q hdim.
+    static constexpr bool kVPadDisabled = (Shape::kN1 == 160);
+    using V                             = std::conditional_t<kVPadDisabled,
+                                                             LdsPaddingConfig<false, 0, 0>,
+                                                             LdsPaddingConfig<true, kVInterval, kVPad>>;
 };
 
 } // namespace detail
