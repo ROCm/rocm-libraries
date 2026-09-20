@@ -127,7 +127,8 @@ template <typename Problem>
 std::vector<ck_tile::half_t> run_kernel(const ck_tile::DeviceMem& q_device,
                                         const ck_tile::DeviceMem& k_device,
                                         const ck_tile::DeviceMem& v_device,
-                                        ck_tile::index_t seqlen_q)
+                                        ck_tile::index_t seqlen_q,
+                                        ck_tile::index_t seqlen_k = kSeqlenK)
 {
     using Kernel = TestKernel<Problem>;
 
@@ -141,7 +142,7 @@ std::vector<ck_tile::half_t> run_kernel(const ck_tile::DeviceMem& q_device,
     args.v_ptr          = v_device.GetDeviceBuffer();
     args.o_ptr          = output_device.GetDeviceBuffer();
     args.seqlen_q       = seqlen_q;
-    args.seqlen_k       = kSeqlenK;
+    args.seqlen_k       = seqlen_k;
     args.hdim_q         = kHeadDim;
     args.hdim_v         = kHeadDim;
     args.num_head_q     = kHeads;
@@ -157,8 +158,8 @@ std::vector<ck_tile::half_t> run_kernel(const ck_tile::DeviceMem& q_device,
     args.stride_v         = kHeadDim;
     args.stride_o         = kHeadDim;
     args.nhead_stride_q   = seqlen_q * kHeadDim;
-    args.nhead_stride_k   = kSeqlenK * kHeadDim;
-    args.nhead_stride_v   = kSeqlenK * kHeadDim;
+    args.nhead_stride_k   = seqlen_k * kHeadDim;
+    args.nhead_stride_v   = seqlen_k * kHeadDim;
     args.nhead_stride_o   = seqlen_q * kHeadDim;
     args.num_head_q_total = kHeads;
     args.batch_stride_q   = kHeads * args.nhead_stride_q;
@@ -254,6 +255,33 @@ TEST(QrTdmProgressiveKLds, M128ProgressiveAndBaselineProduceEquivalentOutput)
     expect_finite_nonzero(baseline);
     expect_finite_nonzero(progressive);
     expect_close(progressive, baseline, "M128 progressive output differs from baseline output");
+}
+
+TEST(QrTdmProgressiveKLds, M128MultipleKBlocksProduceEquivalentOutput)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    constexpr ck_tile::index_t seqlen_q = 128;
+    constexpr ck_tile::index_t seqlen_k = 128;
+    const auto q = make_input(kBatch * kHeads * seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
+    const auto k = make_input(kBatch * kHeads * seqlen_k * kHeadDim, 7, 31, 15, 0.025f);
+    const auto v = make_input(kBatch * kHeads * seqlen_k * kHeadDim, 11, 37, 18, 0.02f);
+    const ck_tile::DeviceMem q_device(q.size() * sizeof(ck_tile::half_t));
+    const ck_tile::DeviceMem k_device(k.size() * sizeof(ck_tile::half_t));
+    const ck_tile::DeviceMem v_device(v.size() * sizeof(ck_tile::half_t));
+    q_device.ToDevice(q.data());
+    k_device.ToDevice(k.data());
+    v_device.ToDevice(v.data());
+
+    const auto baseline =
+        run_kernel<DoubleBufferM128Problem>(q_device, k_device, v_device, seqlen_q, seqlen_k);
+    const auto progressive =
+        run_kernel<ProgressiveM128Problem>(q_device, k_device, v_device, seqlen_q, seqlen_k);
+
+    expect_finite_nonzero(baseline);
+    expect_finite_nonzero(progressive);
+    expect_close(progressive, baseline, "M128 multi-block progressive output differs from baseline");
 }
 
 } // namespace qr_tdm_progressive_k_lds_test
