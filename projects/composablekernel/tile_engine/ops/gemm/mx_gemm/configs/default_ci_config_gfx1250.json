@@ -1,18 +1,20 @@
 {
     "tile_config": {
         "tile_m": {
-            "max": 256,
-            "min": 64,
-            "step": 256
+            "values": [
+                64,
+                128
+            ]
         },
         "tile_n": {
-            "max": 256,
-            "min": 64,
-            "step": 256
+            "values": [
+                64,
+                128
+            ]
         },
         "tile_k": {
             "values": [
-                256
+                128
             ]
         },
         "warp_m": {
@@ -49,7 +51,7 @@
     "trait_config": {
         "pipeline": {
             "values": [
-                "comp_async"
+                "comp_tdm"
             ]
         },
         "scheduler": {
@@ -59,7 +61,7 @@
         },
         "epilogue": {
             "values": [
-                "cshuffle"
+                "tdm"
             ]
         },
         "pad_m": {
@@ -79,8 +81,7 @@
         },
         "persistent": {
             "values": [
-                false,
-                true
+                false
             ]
         }
     },

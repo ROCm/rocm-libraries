@@ -54,6 +54,18 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             manifest_path=manifest_path,
         )
 
+    def _generate_trait_combinations(self):
+        arch = self.gpu_target.split(":", 1)[0]
+        expected = {
+            "gfx950": ("comp_async", "cshuffle"),
+            "gfx1250": ("comp_tdm", "tdm"),
+        }.get(arch)
+        return [
+            combo
+            for combo in super()._generate_trait_combinations()
+            if combo[:2] == expected and not (arch == "gfx1250" and combo[5])
+        ]
+
     def _generate_all_individual(self, num_workers=None):
         """Generate individual kernel files for separate compilation with parallel processing"""
         if num_workers is None:

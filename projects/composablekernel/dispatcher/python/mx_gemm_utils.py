@@ -7,7 +7,7 @@
 MX-GEMM dispatcher utilities (TileEngine -> Dispatcher bridge).
 
 Three-layer Python bridge for the dispatcher's microscaling-GEMM path
-(fp4/fp8 A.B with per-32-K e8m0 block scales, gfx950/MI350 only):
+(fp4/fp8 A.B with per-32-K e8m0 block scales, gfx950 and gfx1250):
 
   MxGemmKernelConfig       -- describes one kernel; .name is byte-exact with the
                               codegen KERNEL_NAME (obtained by shelling the codegen
@@ -20,7 +20,7 @@ Build helper (self-contained):
   setup_multiple_mx_gemm_dispatchers(configs, ...) : codegen -> hipcc -> .so paths
 
 Data types (verified against ck_tile headers / example/ck_tile/42_mx_gemm):
-  fp8 : ck_tile::fp8_t  == float8_e4m3_t (OCP e4m3, bias 7, on gfx950 device)
+  fp8 : ck_tile::fp8_t  == float8_e4m3_t (OCP e4m3, bias 7, on gfx950/gfx1250)
   fp4 : ck_tile::pk_fp4_t == pk_float4_e2m1_t (two e2m1 values packed per byte;
         low nibble = even-K element, high nibble = odd-K element)
   C   : ck_tile::fp16_t
@@ -45,7 +45,9 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-_CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "unified_mx_gemm_codegen.py"
+_CODEGEN_SCRIPT = (
+    Path(__file__).parent.parent / "codegen" / "unified_mx_gemm_codegen.py"
+)
 _CTYPES_LIB_SRC = (
     Path(__file__).parent.parent / "bindings" / "ctypes" / "mx_gemm_ctypes_lib.cpp"
 )
@@ -57,32 +59,29 @@ _HIPCC = os.environ.get("CK_TILE_HIPCC", "/opt/rocm/bin/hipcc")
 def _get_arch() -> str:
     """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
     import subprocess
+
     arch = ""
     try:
-        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        out = subprocess.check_output(
+            ["rocminfo"], text=True, stderr=subprocess.DEVNULL
+        )
         for line in out.splitlines():
             if "Name:" in line and "gfx" in line:
-                arch = line.split()[-1].strip(); break
+                arch = line.split()[-1].strip()
+                break
     except Exception:
         arch = ""
     if not arch:
-        raise RuntimeError("Could not detect GPU architecture from rocminfo; refusing to default. Pass gfx_arch explicitly.")
-    # mx_gemm targets CDNA gfx950 (MI350, XDL scale layout) and RDNA gfx1250
-    # (MI400, WMMA scale layout). Both have a host scale pre-shuffle helper in
-    # ck_tile (preShuffleScaleBuffer_gfx950 / preShuffleScaleBuffer_gfx1250) and
-    # both default to OCP fp8 (see fp8_ocp_is_default_for_arch). Validating this
-    # arch surface at the Python layer keeps codegen + the numpy reference open
-    # for gfx1250; the GPU .so path additionally needs the C++ ctypes lib to
-    # select preShuffleScaleBuffer_gfx1250 (its static_assert is gfx950-only
-    # today -- see the PR body / follow-up), so a gfx1250 build still fails
-    # loudly at compile until that C++ branch lands.
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocminfo; refusing to default. Pass gfx_arch explicitly."
+        )
     _supported = ("gfx950", "gfx1250")
     if arch not in _supported:
         raise ValueError(
-            f"mx_gemm supports {list(_supported)}; detected {arch!r} is not "
-            f"supported"
+            f"mx_gemm supports {list(_supported)}; detected {arch!r} is not supported"
         )
     return arch
+
 
 # MX GEMM scales every 32 K-elements with one e8m0 byte.
 SCALE_BLOCK = 32
@@ -95,14 +94,43 @@ E8M0_ONE = 127
 # index -> value ;  index is the 4-bit e2m1 code.
 # =============================================================================
 _FP4_E2M1_VALUES = np.array(
-    [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-     -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+    [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
+    ],
     dtype=np.float32,
 )
 # value -> 4-bit code (skip -0.0; +0.0 code 0 covers zero).
 _FP4_VALUE_TO_CODE = {
-    0.0: 0, 0.5: 1, 1.0: 2, 1.5: 3, 2.0: 4, 3.0: 5, 4.0: 6, 6.0: 7,
-    -0.5: 9, -1.0: 10, -1.5: 11, -2.0: 12, -3.0: 13, -4.0: 14, -6.0: 15,
+    0.0: 0,
+    0.5: 1,
+    1.0: 2,
+    1.5: 3,
+    2.0: 4,
+    3.0: 5,
+    4.0: 6,
+    6.0: 7,
+    -0.5: 9,
+    -1.0: 10,
+    -1.5: 11,
+    -2.0: 12,
+    -3.0: 13,
+    -4.0: 14,
+    -6.0: 15,
 }
 
 # =============================================================================
@@ -112,7 +140,7 @@ _FP4_VALUE_TO_CODE = {
 # a valid reference for a kernel compiled with CK_TILE_USE_OCP_FP8 == 1. This is
 # the gfx950 default (see include/ck_tile/core/config.hpp: OCP is selected for
 # __gfx950__ / __gfx12__ and the bridge compiles the lib with
-# --offload-arch=gfx950 without overriding the flag). On any arch where CK
+# CK_TILE_USE_OCP_FP8=1 for both host and device compilation). On any arch where CK
 # defaults to (or is built for) FNUZ e4m3 (bias 8), the DEVICE bytes for the same
 # float value differ, so this numpy reference would SILENTLY disagree with the
 # kernel. Callers that target a non-OCP arch must not use this codec.
@@ -123,10 +151,23 @@ _FP4_VALUE_TO_CODE = {
 # hand-derived grid entries (sign|exp4|mant3, bias 7).
 # =============================================================================
 _FP8_OCP_VALUE_TO_BYTE = {
-    0.0: 0x00, 0.5: 0x30, 1.0: 0x38, 1.5: 0x3C, 2.0: 0x40, 2.5: 0x42,
-    3.0: 0x44, 4.0: 0x48, 6.0: 0x4C,
-    -0.5: 0xB0, -1.0: 0xB8, -1.5: 0xBC, -2.0: 0xC0, -2.5: 0xC2,
-    -3.0: 0xC4, -4.0: 0xC8, -6.0: 0xCC,
+    0.0: 0x00,
+    0.5: 0x30,
+    1.0: 0x38,
+    1.5: 0x3C,
+    2.0: 0x40,
+    2.5: 0x42,
+    3.0: 0x44,
+    4.0: 0x48,
+    6.0: 0x4C,
+    -0.5: 0xB0,
+    -1.0: 0xB8,
+    -1.5: 0xBC,
+    -2.0: 0xC0,
+    -2.5: 0xC2,
+    -3.0: 0xC4,
+    -4.0: 0xC8,
+    -6.0: 0xCC,
 }
 _FP8_OCP_BYTE_TO_VALUE = {b: v for v, b in _FP8_OCP_VALUE_TO_BYTE.items()}
 # 256-entry byte -> value LUT for vectorized dequantize_fp8. Untested bytes stay
@@ -141,8 +182,7 @@ def fp8_ocp_is_default_for_arch(arch: str) -> bool:
 
     Mirrors include/ck_tile/core/config.hpp: OCP e4m3 is the device default only
     for gfx950 and gfx12; every other arch defaults to FNUZ e4m3. The bridge
-    compiles the mx_gemm lib without an explicit -DCK_TILE_USE_OCP_FP8, so the
-    effective fp8 format is exactly this arch default. Use this to guard the fp8
+    compiles with CK_TILE_USE_OCP_FP8=1 for both supported architectures. Use this to guard the fp8
     numpy reference (see assert_fp8_ocp_supported / quantize_fp8).
     """
     a = (arch or "").lower()
@@ -161,9 +201,7 @@ def assert_fp8_ocp_supported(arch: Optional[str] = None) -> None:
     if not fp8_ocp_is_default_for_arch(arch):
         raise ValueError(
             f"fp8 mx_gemm reference is OCP e4m3 only, but arch '{arch}' defaults to "
-            "FNUZ e4m3 (CK_TILE_USE_OCP_FP8 == 0). The bridge lib is compiled without "
-            "an explicit -DCK_TILE_USE_OCP_FP8, so its device fp8 bytes would not match "
-            "this numpy reference. OCP fp8 is supported for gfx950/gfx12 only."
+            "FNUZ e4m3. The MX bridge requires OCP fp8 (gfx950/gfx12)."
         )
 
 
@@ -202,10 +240,10 @@ def float_to_e8m0(scale) -> np.ndarray:
 @dataclass
 class MxGemmKernelConfig:
     datatype: str = "fp8"  # fp8 | fp4
-    layout: str = "rcr"    # a/b/c ; only rcr supported by mx_gemm
+    layout: str = "rcr"  # a/b/c ; only rcr supported by mx_gemm
     gpu_target: Optional[str] = None
-    pipeline: str = "comp_async"
-    epilogue: str = "cshuffle"
+    pipeline: Optional[str] = None
+    epilogue: Optional[str] = None
     scheduler: str = "intrawave"
     pad_m: bool = False
     pad_n: bool = False
@@ -228,21 +266,29 @@ class MxGemmKernelConfig:
     _name_cache: Optional[str] = field(default=None, repr=False, compare=False)
 
     def to_codegen_config(self) -> dict:
+        arch = self.gpu_target or _get_arch()
+        pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
+        epilogue = self.epilogue or ("tdm" if arch == "gfx1250" else "cshuffle")
         return {
             "datatype": self.datatype,
             "layout": self.layout,
-            "gpu_target": self.gpu_target or _get_arch(),
-            "pipeline": self.pipeline,
-            "epilogue": self.epilogue,
+            "gpu_target": arch,
+            "pipeline": pipeline,
+            "epilogue": epilogue,
             "scheduler": self.scheduler,
             "pad_m": self.pad_m,
             "pad_n": self.pad_n,
             "pad_k": self.pad_k,
             "persistent": self.persistent,
             "tile_config": {
-                "tile_m": self.tile_m, "tile_n": self.tile_n, "tile_k": self.tile_k,
-                "warp_m": self.warp_m, "warp_n": self.warp_n, "warp_k": self.warp_k,
-                "warp_tile_m": self.warp_tile_m, "warp_tile_n": self.warp_tile_n,
+                "tile_m": self.tile_m,
+                "tile_n": self.tile_n,
+                "tile_k": self.tile_k,
+                "warp_m": self.warp_m,
+                "warp_n": self.warp_n,
+                "warp_k": self.warp_k,
+                "warp_tile_m": self.warp_tile_m,
+                "warp_tile_n": self.warp_tile_n,
                 "warp_tile_k": self.warp_tile_k,
             },
             "k_block_per_cu": self.k_block_per_cu,
@@ -262,17 +308,27 @@ class MxGemmKernelConfig:
         if _CODEGEN_SCRIPT.exists():
             try:
                 r = subprocess.run(
-                    [sys.executable, str(_CODEGEN_SCRIPT),
-                     "--output-dir", tempfile.gettempdir(),
-                     "--config-json", json.dumps(self.to_codegen_config()),
-                     "--list-name"],
-                    capture_output=True, text=True, timeout=120,
+                    [
+                        sys.executable,
+                        str(_CODEGEN_SCRIPT),
+                        "--output-dir",
+                        tempfile.gettempdir(),
+                        "--config-json",
+                        json.dumps(self.to_codegen_config()),
+                        "--list-name",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
                 if r.returncode == 0 and r.stdout.strip():
                     self._name_cache = r.stdout.strip().splitlines()[-1].strip()
                     return self._name_cache
-                log.warning("codegen --list-name failed for %s:\n%s",
-                            self._fallback_name(), r.stderr[-800:])
+                log.warning(
+                    "codegen --list-name failed for %s:\n%s",
+                    self._fallback_name(),
+                    r.stderr[-800:],
+                )
             except Exception as exc:  # noqa: BLE001
                 log.warning("codegen --list-name error: %s", exc)
         self._name_cache = self._fallback_name()
@@ -288,9 +344,16 @@ class MxGemmKernelConfig:
         Only used when the codegen script is absent (never at real build time).
         """
         parts = [
-            "mx_gemm", self.datatype, self.layout,
-            self.pipeline, self.epilogue, self.scheduler,
-            str(self.pad_m), str(self.pad_n), str(self.pad_k),
+            "mx_gemm",
+            self.datatype,
+            self.layout,
+            self.pipeline
+            or ("comp_tdm" if self.gpu_target == "gfx1250" else "comp_async"),
+            self.epilogue or ("tdm" if self.gpu_target == "gfx1250" else "cshuffle"),
+            self.scheduler,
+            str(self.pad_m),
+            str(self.pad_n),
+            str(self.pad_k),
         ]
         if self.persistent:
             parts.append(str(self.persistent))
@@ -303,6 +366,42 @@ class MxGemmKernelConfig:
         if self.layout != "rcr":
             return False
         if self.datatype not in ("fp8", "fp4"):
+            return False
+        if any(
+            v <= 0
+            for v in (
+                self.tile_m,
+                self.tile_n,
+                self.tile_k,
+                self.warp_m,
+                self.warp_n,
+                self.warp_k,
+                self.warp_tile_m,
+                self.warp_tile_n,
+                self.warp_tile_k,
+            )
+        ):
+            return False
+        if self.gpu_target == "gfx1250":
+            if self.pipeline not in (None, "comp_tdm") or self.epilogue not in (
+                None,
+                "tdm",
+            ):
+                return False
+            if (
+                self.persistent
+                or self.pad_k
+                or (self.warp_m, self.warp_n, self.warp_k) != (2, 2, 1)
+            ):
+                return False
+        elif self.gpu_target not in (None, "gfx950"):
+            return False
+        elif self.pipeline not in (None, "comp_async") or self.epilogue not in (
+            None,
+            "cshuffle",
+        ):
+            return False
+        if self.scheduler != "intrawave":
             return False
         if not (
             self.tile_m % (self.warp_m * self.warp_tile_m) == 0
@@ -352,7 +451,9 @@ class MxGemmResult:
 
 
 class MxGemmDispatcherLib:
-    def __init__(self, so_path: Path, dtype: Optional[str] = None, arch: Optional[str] = None):
+    def __init__(
+        self, so_path: Path, dtype: Optional[str] = None, arch: Optional[str] = None
+    ):
         self.so_path = Path(so_path)
         if not self.so_path.exists():
             raise FileNotFoundError(f"mx_gemm .so not found: {self.so_path}")
@@ -415,9 +516,13 @@ class MxGemmDispatcherLib:
         if not isinstance(C, np.ndarray):
             raise TypeError(f"C output must be a numpy.ndarray, got {type(C).__name__}")
         if not C.flags["C_CONTIGUOUS"]:
-            raise ValueError("C output must be C-contiguous (results are written in place)")
+            raise ValueError(
+                "C output must be C-contiguous (results are written in place)"
+            )
         if not C.flags["WRITEABLE"]:
-            raise ValueError("C output must be writeable (results are written in place)")
+            raise ValueError(
+                "C output must be writeable (results are written in place)"
+            )
         sa = np.ascontiguousarray(scale_a, dtype=np.uint8)
         sb = np.ascontiguousarray(scale_b, dtype=np.uint8)
         tms = ctypes.c_float(0.0)
@@ -427,12 +532,17 @@ class MxGemmDispatcherLib:
             C.ctypes.data_as(ctypes.c_void_p),
             sa.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
             sb.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
-            int(prob.M), int(prob.N), int(prob.K), int(prob.k_batch),
+            int(prob.M),
+            int(prob.N),
+            int(prob.K),
+            int(prob.k_batch),
             ctypes.byref(tms),
         )
         if rc != 0:
-            raise RuntimeError(f"dispatcher_run_mx_gemm rc={rc} "
-                               f"({'unsupported' if rc == -2 else 'error'})")
+            raise RuntimeError(
+                f"dispatcher_run_mx_gemm rc={rc} "
+                f"({'unsupported' if rc == -2 else 'error'})"
+            )
         return tms.value
 
     def cleanup(self):
@@ -460,7 +570,9 @@ class MxGemmDispatcherLib:
 _GRID_MATCH_EPS = np.float32(1e-4)
 
 
-def _map_grid_to_bytes(vals: np.ndarray, value_to_byte: dict, grid_name: str) -> np.ndarray:
+def _map_grid_to_bytes(
+    vals: np.ndarray, value_to_byte: dict, grid_name: str
+) -> np.ndarray:
     """Vectorized exact-grid float -> byte code lookup (uint8, flattened).
 
     The inputs are drawn from a small fixed grid (see make_inputs), so instead of
@@ -505,7 +617,9 @@ def quantize_fp8(vals: np.ndarray) -> np.ndarray:
     compiled with CK_TILE_USE_OCP_FP8 == 1 (gfx950/gfx12 default). See the codec
     comment above and assert_fp8_ocp_supported(); GpuMxGemmRunner enforces this.
     """
-    return _map_grid_to_bytes(vals, _FP8_OCP_VALUE_TO_BYTE, "fp8 e4m3").reshape(vals.shape)
+    return _map_grid_to_bytes(vals, _FP8_OCP_VALUE_TO_BYTE, "fp8 e4m3").reshape(
+        vals.shape
+    )
 
 
 def dequantize_fp8(bytes_arr: np.ndarray) -> np.ndarray:
@@ -569,14 +683,14 @@ def mx_gemm_reference(A_deq, B_deq, scale_a_byte, scale_b_byte, prob: MxGemmProb
     nkb = prob.scale_k
     A = np.asarray(A_deq, dtype=np.float32).reshape(M, K)
     B = np.asarray(B_deq, dtype=np.float32).reshape(K, N)
-    sa = e8m0_to_float(scale_a_byte).reshape(M, nkb)     # [M, K/32]
-    sb = e8m0_to_float(scale_b_byte).reshape(N, nkb)     # [N, K/32]
+    sa = e8m0_to_float(scale_a_byte).reshape(M, nkb)  # [M, K/32]
+    sb = e8m0_to_float(scale_b_byte).reshape(N, nkb)  # [N, K/32]
 
     # Scale A per (m, K-block) and B per (n, K-block). Expand block scales to K.
-    sa_k = np.repeat(sa, SCALE_BLOCK, axis=1)            # [M, K]
-    sb_k = np.repeat(sb, SCALE_BLOCK, axis=1)            # [N, K]
-    A_scaled = A * sa_k                                  # [M, K]
-    B_scaled = (B.T * sb_k).T                            # [K, N]
+    sa_k = np.repeat(sa, SCALE_BLOCK, axis=1)  # [M, K]
+    sb_k = np.repeat(sb, SCALE_BLOCK, axis=1)  # [N, K]
+    A_scaled = A * sa_k  # [M, K]
+    B_scaled = (B.T * sb_k).T  # [K, N]
     C = A_scaled.astype(np.float32) @ B_scaled.astype(np.float32)  # [M, N]
     return C.astype(np.float16)
 
@@ -613,18 +727,19 @@ class GpuMxGemmRunner:
         M, N, K = prob.M, prob.N, prob.K
         rng = np.random.default_rng(seed)
         # Draw from a small grid that is exact in both fp8 e4m3 and fp4 e2m1.
-        grid = np.array([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0],
-                        dtype=np.float32)
+        grid = np.array(
+            [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0], dtype=np.float32
+        )
         A_deq = rng.choice(grid, size=(M, K)).astype(np.float32)
         B_deq = rng.choice(grid, size=(K, N)).astype(np.float32)
 
         if self.dtype == "fp8":
-            A_bytes = quantize_fp8(A_deq)                       # [M,K] uint8
+            A_bytes = quantize_fp8(A_deq)  # [M,K] uint8
             # B stored col-major (rcr) => [N,K] row-major bytes.
-            B_bytes = quantize_fp8(B_deq.T)                     # [N,K] uint8
+            B_bytes = quantize_fp8(B_deq.T)  # [N,K] uint8
         elif self.dtype == "fp4":
-            A_bytes = quantize_fp4_packed(A_deq)                # [M,K//2] uint8
-            B_bytes = quantize_fp4_packed(B_deq.T)              # [N,K//2] uint8
+            A_bytes = quantize_fp4_packed(A_deq)  # [M,K//2] uint8
+            B_bytes = quantize_fp4_packed(B_deq.T)  # [N,K//2] uint8
         else:
             raise ValueError(f"unsupported dtype {self.dtype}")
 
@@ -650,8 +765,12 @@ class GpuMxGemmRunner:
 
 def _generate_kernel(cfg: MxGemmKernelConfig, headers_dir: Path) -> Optional[Path]:
     cmd = [
-        sys.executable, str(_CODEGEN_SCRIPT), "--output-dir", str(headers_dir),
-        "--config-json", json.dumps(cfg.to_codegen_config()),
+        sys.executable,
+        str(_CODEGEN_SCRIPT),
+        "--output-dir",
+        str(headers_dir),
+        "--config-json",
+        json.dumps(cfg.to_codegen_config()),
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if r.returncode != 0:
@@ -674,10 +793,14 @@ def _generate_kernel(cfg: MxGemmKernelConfig, headers_dir: Path) -> Optional[Pat
 #
 # Unconditional set (CK CMake adds these on every supported toolchain):
 _MX_CODEGEN_FLAGS = (
-    "-mllvm", "-amdgpu-early-inline-all=true",
-    "-mllvm", "-amdgpu-function-calls=false",
-    "-mllvm", "--lsr-drop-solution=1",
-    "-mllvm", "-enable-post-misched=0",
+    "-mllvm",
+    "-amdgpu-early-inline-all=true",
+    "-mllvm",
+    "-amdgpu-function-calls=false",
+    "-mllvm",
+    "--lsr-drop-solution=1",
+    "-mllvm",
+    "-enable-post-misched=0",
     "-fno-offload-uniform-block",
     "--offload-compress",
 )
@@ -685,9 +808,7 @@ _MX_CODEGEN_FLAGS = (
 # passes (newer -mllvm options some clang builds reject, e.g. ROCm 7.2 does not
 # know -amdgpu-coerce-illegal-types). Mirror that probe so the bridge matches
 # Old-TE wherever the compiler accepts it and stays buildable where it does not.
-_MX_PROBED_CODEGEN_FLAGS = (
-    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
-)
+_MX_PROBED_CODEGEN_FLAGS = (("-mllvm", "-amdgpu-coerce-illegal-types=1"),)
 
 
 @functools.lru_cache(maxsize=None)
@@ -700,7 +821,8 @@ def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
             src.write_text("int main(){}\n")
             r = subprocess.run(
                 [_HIPCC, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
-                capture_output=True, timeout=120,
+                capture_output=True,
+                timeout=120,
             )
             return r.returncode == 0
     except Exception:
@@ -720,7 +842,8 @@ def _mx_codegen_flags() -> Tuple[str, ...]:
 
 def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
     inc = [
-        f"-I{_CK_ROOT}/include", f"-I{_CK_ROOT}",
+        f"-I{_CK_ROOT}/include",
+        f"-I{_CK_ROOT}",
         f"-I{_CK_ROOT}/tile_engine/ops",
         f"-I{_CK_ROOT}/tile_engine/ops/gemm",
         f"-I{_CK_ROOT}/tile_engine/ops/gemm/mx_gemm",
@@ -729,13 +852,30 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
         # -std=c++20 matches CK_CXX_STANDARD; codegen flags match Old-TE (see
         # _mx_codegen_flags above). Without them the byte-identical fp8 device
         # kernel ran ~30% slower than Old-TE.
-        _HIPCC, "-shared", "-fPIC", "-O3", "-std=c++20",
+        _HIPCC,
+        "-shared",
+        "-fPIC",
+        "-O3",
+        "-std=c++20",
         *_mx_codegen_flags(),
         *inc,
-        "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{hpp}",
-        "-D__HIP_PLATFORM_AMD__", f"--offload-arch={arch}", f'-DGFX_ARCH="{arch}"', *unified_framework_flags(arch),
-        "-Wno-undefined-func-template", "-Wno-float-equal",
-        str(_CTYPES_LIB_SRC), "-o", str(so),
+        "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
+        f"-include{hpp}",
+        "-DCK_TILE_USE_OCP_FP8=1",
+        *(
+            ["-DCK_TILE_USE_WMMA=1", "-DCK_USE_GFX1250", "-DCK_USE_NATIVE_MX_SUPPORT"]
+            if arch == "gfx1250"
+            else []
+        ),
+        "-D__HIP_PLATFORM_AMD__",
+        f"--offload-arch={arch}",
+        f'-DGFX_ARCH="{arch}"',
+        *unified_framework_flags(arch),
+        "-Wno-undefined-func-template",
+        "-Wno-float-equal",
+        str(_CTYPES_LIB_SRC),
+        "-o",
+        str(so),
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
@@ -755,32 +895,23 @@ def setup_multiple_mx_gemm_dispatchers(
     `configs` (None on failure). Dedups by .name; per-arch .so cache."""
     if not configs:
         return []
-    arch = gfx_arch or _get_arch()
-    # When an explicit gfx_arch is passed, pin every config to it BEFORE computing
-    # cfg.name / running codegen. Otherwise cfg.to_codegen_config() falls back to
-    # `self.gpu_target or _get_arch()`, so codegen (and the cached name) would use
-    # the host-detected arch (or fail if rocminfo is missing) while the .so is
-    # compiled for `arch` -- an arch mismatch between the header and the binary.
-    # Resetting _name_cache forces the name to be recomputed for the chosen arch.
-    if gfx_arch is not None:
-        # mx_gemm targets gfx950 (XDL) and gfx1250 (WMMA); reject any other
-        # explicit arch here so a build that can never succeed fails early with a
-        # clear message instead of at compile/runtime. NOTE: gfx1250 codegen +
-        # the numpy reference are enabled, but the shipped C++ ctypes lib still
-        # static_asserts GFX_ARCH==gfx950 (it calls preShuffleScaleBuffer_gfx950);
-        # a gfx1250 .so build therefore fails at hipcc until the C++ bridge
-        # selects preShuffleScaleBuffer_gfx1250 (tracked as follow-up).
-        _supported = ("gfx950", "gfx1250")
-        if gfx_arch not in _supported:
+    arch = gfx_arch or configs[0].gpu_target or _get_arch()
+    if arch not in ("gfx950", "gfx1250"):
+        raise ValueError(f"mx_gemm supports gfx950 and gfx1250; requested {arch!r}")
+    for config in configs:
+        if gfx_arch is None and config.gpu_target not in (None, arch):
             raise ValueError(
-                f"mx_gemm supports {list(_supported)}; requested {gfx_arch!r} is "
-                f"not supported"
+                "Build MX GEMM configurations for one architecture at a time"
             )
-        for c in configs:
-            if c.gpu_target != gfx_arch:
-                c.gpu_target = gfx_arch
-                c._name_cache = None
-    base = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="mx_gemm_bridge_"))
+        # Resolve automatic pipeline/epilogue defaults using the same target as hipcc.
+        if config.gpu_target != arch:
+            config.gpu_target = arch
+            config._name_cache = None
+    base = (
+        Path(output_dir)
+        if output_dir
+        else Path(tempfile.mkdtemp(prefix="mx_gemm_bridge_"))
+    )
     headers = base / "generated_kernels"
     libs = base / "libs"
     headers.mkdir(parents=True, exist_ok=True)
@@ -826,10 +957,19 @@ def setup_multiple_mx_gemm_dispatchers(
 
 def default_fp8_config(gfx_arch: Optional[str] = None) -> MxGemmKernelConfig:
     return MxGemmKernelConfig(
-        datatype="fp8", layout="rcr", gpu_target=gfx_arch,
-        pipeline="comp_async", epilogue="cshuffle", scheduler="intrawave",
-        tile_m=128, tile_n=128, tile_k=128, warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        datatype="fp8",
+        layout="rcr",
+        gpu_target=gfx_arch,
+        scheduler="intrawave",
+        tile_m=128,
+        tile_n=128,
+        tile_k=128,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=128,
     )
 
 

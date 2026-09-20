@@ -44,9 +44,16 @@ class TestConfigName(unittest.TestCase):
 
     def test_fallback_name_encodes_tiles(self):
         cfg = MxGemmKernelConfig(
-            datatype="fp4", tile_m=64, tile_n=128, tile_k=256,
-            warp_m=1, warp_n=2, warp_k=1,
-            warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+            datatype="fp4",
+            tile_m=64,
+            tile_n=128,
+            tile_k=256,
+            warp_m=1,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=128,
         )
         name = cfg._fallback_name()
         self.assertIn("_fp4_rcr_", name)
@@ -65,9 +72,16 @@ class TestConfigName(unittest.TestCase):
 class TestCodegenJson(unittest.TestCase):
     def test_projection_roundtrip(self):
         cfg = MxGemmKernelConfig(
-            datatype="fp8", tile_m=128, tile_n=128, tile_k=128,
-            warp_m=2, warp_n=2, warp_k=1,
-            warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+            datatype="fp8",
+            tile_m=128,
+            tile_n=128,
+            tile_k=128,
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=128,
             k_block_per_cu=3,
             # Pin the arch so to_codegen_config() does not shell out to rocminfo;
             # keeps this a CPU-only test on non-ROCm runners.
@@ -262,13 +276,6 @@ class TestCodegenNameContract(unittest.TestCase):
         self.assertTrue(name.startswith("mx_gemm_fp8_rcr_"))
 
 
-# --- gfx1250 (MI400 / RDNA-WMMA) enablement --------------------------------
-# The mx_gemm bridge historically pinned the Python arch surface to gfx950 only.
-# gfx1250 has WMMA microscaling support in ck_tile (preShuffleScaleBuffer_gfx1250
-# + WMMA MX 16x16x128) and defaults to OCP fp8, so codegen and the numpy
-# reference can be opened for it. These CPU-only tests lock that surface in.
-# (GPU .so builds for gfx1250 still fail at the C++ ctypes static_assert until a
-# preShuffleScaleBuffer_gfx1250 branch lands there -- documented in the PR body.)
 from mx_gemm_utils import fp8_ocp_is_default_for_arch  # noqa: E402
 
 
@@ -319,6 +326,106 @@ class TestGfx1250MxEnablement(unittest.TestCase):
         except Exception as exc:  # noqa: BLE001
             self.skipTest(f"Old-TE builder unavailable: {exc}")
         self.assertTrue(name.startswith("mx_gemm_fp4_rcr_"))
+
+
+class TestMxArchitectureKernels(unittest.TestCase):
+    def test_build_arch_matches_config(self):
+        from unittest.mock import patch
+        from mx_gemm_utils import setup_multiple_mx_gemm_dispatchers
+        import tempfile
+
+        cfg = default_fp8_config("gfx1250")
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "mx_gemm_utils._get_arch",
+            side_effect=AssertionError("unexpected detection"),
+        ), patch(
+            "mx_gemm_utils._generate_kernel", return_value=Path(tmp) / "kernel.hpp"
+        ), patch("mx_gemm_utils._compile_kernel", return_value=True) as compile_kernel:
+            result = setup_multiple_mx_gemm_dispatchers(
+                [cfg], output_dir=Path(tmp), parallel=False
+            )
+            self.assertIsNotNone(result[0])
+            self.assertEqual(compile_kernel.call_args.args[2], "gfx1250")
+            with self.assertRaisesRegex(ValueError, "one architecture"):
+                setup_multiple_mx_gemm_dispatchers([cfg, default_fp8_config("gfx950")])
+
+    def test_shared_builder_parity(self):
+        from unified_mx_gemm_codegen import (
+            _generate,
+            _make_builder,
+            _trait_combo_from_cfg,
+        )
+        import contextlib
+        import io
+
+        for arch in ("gfx950", "gfx1250"):
+            for dtype in ("fp8", "fp4"):
+                with self.subTest(arch=arch, dtype=dtype), contextlib.redirect_stdout(
+                    io.StringIO()
+                ):
+                    cfg = MxGemmKernelConfig(
+                        datatype=dtype, gpu_target=arch
+                    ).to_codegen_config()
+                    name, code = _generate(cfg)
+                    with _make_builder(cfg) as builder:
+                        te_name, te_code = builder._generate_kernel_instance(
+                            cfg["tile_config"], _trait_combo_from_cfg(cfg)
+                        )
+                    self.assertEqual((name, code), (te_name, te_code))
+                    if arch == "gfx1250":
+                        self.assertIn("GemmPipelineAgBgCrCompTDMV1", code)
+                        self.assertIn("MxGemmPipelineProblem", code)
+                        self.assertIn("ck_tile::TdmEpilogue<", code)
+                    else:
+                        self.assertIn("GemmPipelineAgBgCrCompAsync", code)
+                        self.assertIn("ck_tile::CShuffleEpilogue<", code)
+
+    def test_architecture_and_trait_rejections(self):
+        from unified_mx_gemm_codegen import _validate
+        from dataclasses import replace
+
+        cfg = default_fp8_config("gfx1250")
+        for changes in (
+            {"gpu_target": "gfx1200"},
+            {"pipeline": "comp_async"},
+            {"epilogue": "cshuffle"},
+            {"persistent": True},
+            {"pad_k": True},
+            {"warp_m": 0},
+            {"warp_tile_m": 32},
+            {"scheduler": "interwave"},
+        ):
+            with self.subTest(changes=changes):
+                invalid = replace(cfg, **changes)
+                self.assertFalse(invalid.is_valid())
+                with self.assertRaises(ValueError):
+                    _validate(invalid.to_codegen_config())
+
+    def test_gfx1250_ci_config_enumerates_real_kernels(self):
+        from unified_mx_gemm_codegen import _load_mx_builder
+        import tempfile
+
+        config = (
+            _DISP.parent
+            / "tile_engine/ops/gemm/mx_gemm/configs/default_ci_config_gfx1250.json"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for dtype in ("fp8", "fp4"):
+                builder = _load_mx_builder()(
+                    "mx_gemm",
+                    Path(tmp),
+                    "gfx1250",
+                    dtype,
+                    "rcr",
+                    config_json=str(config),
+                )
+                tiles = builder._get_tile_configs()
+                traits = builder._generate_trait_combinations()
+                self.assertEqual(len(tiles), 4)
+                self.assertEqual(
+                    traits,
+                    [("comp_tdm", "tdm", "intrawave", False, False, False, False)],
+                )
 
 
 if __name__ == "__main__":
