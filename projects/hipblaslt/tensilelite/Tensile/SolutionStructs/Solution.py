@@ -3871,7 +3871,7 @@ class Solution(collections.abc.Mapping):
 
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
           optPadM = max(4, (optPadB if state["ProblemType"]["Sparse"] == 2 else optPadA) // 4)
-          grvwM = (state["GlobalReadVectorWidthB"] if state["ProblemType"]["Sparse"] == 2 else state["GlobalReadVectorWidthA"])  // 4
+          grvwM = min(state["GlobalReadVectorWidthMetadata"], 8)
           vwM = (state["VectorWidthB"] if state["ProblemType"]["Sparse"] == 2 else state["VectorWidthA"]) // 4
 
           if ldsPadM == -1:
