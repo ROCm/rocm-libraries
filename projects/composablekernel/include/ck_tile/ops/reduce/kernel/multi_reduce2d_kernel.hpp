@@ -300,17 +300,23 @@ struct MultiReduce2d
                 else
                 {
                     // Multi-block case: use atomic operations for interblock reduction
-
+                    // Float atomics are scalar: validate each row even at a partial-vector tail.
+                    constexpr index_t atomic_output_vector_size =
+                        std::is_same_v<YDataType, float> ? 1 : output_vector_size;
                     auto y_tensor_view =
                         make_naive_tensor_view<address_space_enum::global,
                                                interblock_reduce_ops.get(number<i>{}).GetAtomic()>(
                             p_y_tuple + i * output_tensor_offset,
                             make_tuple(output_tensor_offset),
                             make_tuple(1),
-                            number<output_vector_size>{},
+                            number<atomic_output_vector_size>{},
                             number<1>{});
 
-                    auto y_window = make_tile_window(y_tensor_view,
+                    // Global atomics (used for float on gfx11) have no buffer resource
+                    // bounds. Mark padded rows invalid so those updates are skipped too.
+                    const auto padded_y_tensor_view = pad_tensor_view(
+                        y_tensor_view, make_tuple(number<S::Block_M>{}), sequence<true>{});
+                    auto y_window = make_tile_window(padded_y_tensor_view,
                                                      make_tuple(number<S::ThreadTile_M>{}),
                                                      {output_tile_offset},
                                                      y_compute.get_tile_distribution());

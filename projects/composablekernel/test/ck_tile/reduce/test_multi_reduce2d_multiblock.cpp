@@ -68,6 +68,13 @@ TYPED_TEST(TestCkTileMultiReduceMultiblock, Test2D_KeepDim0_ReduceDim1_192x512)
     this->RunTest2D_KeepDim0_ReduceDim1(192, 512);
 }
 
+TYPED_TEST(TestCkTileMultiReduceMultiblock, Test2D_KeepDim0_ReduceDim1_PartialVectorRows)
+{
+    // Check tails inside a four-float vector as well as inside the 128-row block tile.
+    for(int rows : {1, 65, 193})
+        this->RunTest2D_KeepDim0_ReduceDim1(rows, 512);
+}
+
 TYPED_TEST(TestCkTileMultiReduceMultiblock, Test2D_KeepDim0_ReduceDim1_1024x512)
 {
     this->RunTest2D_KeepDim0_ReduceDim1(1024, 512);
