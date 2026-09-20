@@ -161,6 +161,39 @@ class TestValidateConfig(unittest.TestCase):
         self.assertFalse(r.valid)
         self.assertTrue(any("batch_prefill_gfx11" in e for e in r.errors), r.errors)
 
+    def test_batch_prefill_gfx11_rejected_for_other_families(self):
+        """The arch allowlist admits the pipeline; only batch_prefill can use it.
+
+        Every other family reaches a kernel-body lookup that has no entry for
+        this pipeline, so letting the config through turns a config error into a
+        KeyError in codegen.
+        """
+        for family in ("fwd", "fwd_splitkv", "fwd_appendkv"):
+            cfg = _gfx11_batch_prefill_config()
+            cfg["signature"]["family"] = family
+            r = validate_config(cfg, SPECS)
+            self.assertFalse(r.valid, f"{family}: {r.errors}")
+            self.assertTrue(
+                any("only valid for family batch_prefill" in e for e in r.errors),
+                f"{family}: {r.errors}",
+            )
+
+    def test_batch_prefill_gfx11_requires_k0_equal_k1(self):
+        """Mirror of the pipeline's static_assert(kK0 == kK1).
+
+        The async copy strides K into LDS by kK1 while gemm0 reads kK0-deep
+        chunks from the same buffer, so an unequal pair compiles nowhere. The
+        other tile dimensions are already pinned, K0 was not.
+        """
+        cfg = _gfx11_batch_prefill_config()
+        tile = list(cfg["algorithm"]["tile"])
+        self.assertEqual(tile[2], tile[4], "baseline config should have K0 == K1")
+        tile[2] = tile[4] * 2
+        cfg["algorithm"]["tile"] = tile
+        r = validate_config(cfg, SPECS)
+        self.assertFalse(r.valid)
+        self.assertTrue(any("K0 == K1" in e for e in r.errors), r.errors)
+
     def test_batch_prefill_gfx11_rejected_on_other_arch(self):
         cfg = _gfx11_batch_prefill_config()
         cfg["arch"] = "gfx950"
