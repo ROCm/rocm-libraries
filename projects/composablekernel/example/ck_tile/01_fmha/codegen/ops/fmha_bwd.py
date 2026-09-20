@@ -618,12 +618,17 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 # the unroll only amortises once the Q loop is long.
                 FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True, qdo_slots=2, dispatch_max_seq_q=4096),
                 FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
-                # A short q sequence leaves most of the 64-row M tile idle:
-                # halving M is worth 8-10% at seqlen_q <= 32, and narrowing N
-                # as well is worth 37-44% while seqlen_k <= 64 cannot fill the
-                # 128-wide tile, but costs 8% by seqlen_k 1024.
-                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, dispatch_max_seq_q=32, dispatch_max_seq_k=64, lds_acc=True),
-                FmhaBwdDQDKDVTileSize( 32, 128, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, dispatch_max_seq_q=32, lds_acc=True),
+                # A short q sequence leaves most of the 64-row M tile idle, and
+                # a 128-wide N tile is not paid for either: at seqlen_q <= 32
+                # this is the fastest tile at every seqlen_k measured from 64 to
+                # 1024 -- 12.7% at 532, and still 3.8-8.7% where seqlen_k sits on
+                # a multiple of 128 and N-tile quantisation predicts a tie. It is
+                # also the only headdim 128 tile that fits two workgroups.
+                # Its seqlen_q bound puts the whole q sequence in one M tile, so
+                # the Q loop runs once and the deep ring unrolls it for nothing:
+                # depth 3 costs 17,632 bytes of LDS, 11 VGPRs and 920 bytes of
+                # scratch here against depth 2.
+                FmhaBwdDQDKDVTileSize( 32,  64, 128,  32, 128,  32, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, dispatch_max_seq_q=32, qdo_slots=2, lds_acc=True),
                 FmhaBwdDQDKDVTileSize( 32,  64, 256,  32, 256,  32, 32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
             ]  # fmt: skip
         return []
