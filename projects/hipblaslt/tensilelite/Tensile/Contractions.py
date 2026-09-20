@@ -812,7 +812,7 @@ class SizeMapping:
                    # cannot tell apart from "no GSU accumulation at all". Carry it
                    # as its own flag so the reference validator can widen its
                    # tolerance by the number of BF16 atomic adds per element.
-                   gsuAtomicDestBF16        = d['GlobalSplitUAlgorithm'] == 'AtomicDest',
+                   gsuAtomicDestBF16        = d.get('GlobalSplitUAlgorithm') == 'AtomicDest',
                    adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
