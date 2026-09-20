@@ -25,6 +25,12 @@
  *******************************************************************************/
 #include "hipblaslt_test.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
+// Included by relative path for the same reason arch_candidates_gtest.cpp does:
+// rocblaslt_arch_candidates.hpp is dependency-free, and putting the internal
+// rocblaslt include directory on this target shadows the clients' own
+// "utility.hpp" with the library's.
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_candidates.hpp"
+
 #include <cerrno>
 #include <csetjmp>
 #include <csignal>
@@ -368,16 +374,42 @@ static bool valid_category(const char* category)
     return false;
 }
 
+namespace
+{
+    /*! \brief the architecture name this device's ASIC revision implies
+     *
+     * asicRevision is the same KFD capability field ROCr consults before it
+     * decides whether to append a stepping suffix, so deriving from it cannot
+     * disagree about which part this is -- only about what it was called.
+     */
+    std::string steppingArchName(const hipDeviceProp_t& prop)
+    {
+#if HIP_VERSION >= 307
+        return rocblaslt_arch_name_candidates(prop.gcnArchName, prop.asicRevision).front();
+#else
+        // No revision to derive from; the reported name is all there is, which is
+        // what this filter used before.
+        return rocblaslt_arch_base_name(prop.gcnArchName);
+#endif
+    }
+}
+
 bool hipblaslt_client_global_filters(const Arguments& args)
 {
     int             deviceId;
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(args.gpu_arch[0] && !gpu_arch_match(deviceProperties.gcnArchName, args.gpu_arch))
+    // Match on the name the silicon revision implies, not the one ROCr reported.
+    // gcnArchName for a gfx1250 A0 is gfx1250 or gfx1250-strict depending on
+    // HSA_DISABLE_GFX12_STRICT, so a gpu_arch_exclude naming the stepping never
+    // fires with the variable unset -- on exactly the silicon it exists to
+    // exclude. Existing patterns are unaffected: they match the base digits,
+    // which the stepping name still carries.
+    const std::string arch = steppingArchName(deviceProperties);
+    if(args.gpu_arch[0] && !gpu_arch_match(arch, args.gpu_arch))
         return false;
-    if(args.gpu_arch_exclude[0]
-       && gpu_arch_match(deviceProperties.gcnArchName, args.gpu_arch_exclude))
+    if(args.gpu_arch_exclude[0] && gpu_arch_match(arch, args.gpu_arch_exclude))
         return false;
 
     return true;

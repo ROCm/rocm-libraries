@@ -6,9 +6,10 @@ gfx1250 ships in two steppings that report the same ISA but are separate compile
 targets. v0 is modelled as the architecture name ``gfx1250-strict``; v1 keeps the
 plain ``gfx1250`` name. Both canonicalize to ``IsaVersion(12,5,0)``, so the
 stepping is invisible below the build's capability map and has to be carried by
-name to reach the assembler as ``-mcpu=gfx1250-strict``. Getting that wrong is not
-cosmetic: the two targets emit different ELF machine codes (0xEB and 0x49) and
-their code objects will not load on each other's silicon.
+name. Transitionally it stops short of the toolchain: the stepping still names
+its directory, its files and its capability overrides, but assembles as
+``-mcpu=gfx1250`` so its bundle entry matches the name ROCr reports for an A0
+today. See ``toolchainTargetOf``.
 
 Because the two steppings are indistinguishable by ISA, the assembler-probed
 capability table cannot tell them apart. The v0 deltas are therefore *declared*
@@ -3141,11 +3142,15 @@ def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
 
 
 # =========================================================================== #
-# Compiler target. A stepping shares its ISA with the architecture it steps, so
-# the target cannot be derived from the ISA a kernel canonicalizes to; the
-# requested name is carried down to -mcpu and to the bundle entry instead.
+# Compiler target. A stepping shares its ISA with the architecture it steps, and
+# transitionally is also built for it -- the reported name is what HIP matches a
+# bundle entry against, and an A0 still reports gfx1250.
 # =========================================================================== #
-def test_strict_is_assembled_for_its_own_target(monkeypatch):
+def test_strict_is_assembled_for_the_architecture_it_steps(monkeypatch):
+    """Transitional, see toolchainTargetOf: HIP picks a bundle entry by matching
+    the agent's reported target, and an A0 still reports gfx1250 by default, so a
+    strict-tagged entry is rejected there. Assemble the stepping as gfx1250 until
+    ROCr reports it."""
     from Tensile.Toolchain import Component as ComponentMod
 
     captured = []
@@ -3156,10 +3161,11 @@ def test_strict_is_assembled_for_its_own_target(monkeypatch):
     assembler(GFX1250, 32, "k.s", "k.o")
 
     strictArgs, baseArgs = captured
-    assert f"-mcpu={GFX1250_STRICT}" in strictArgs, strictArgs
-    # -mcpu decides the ELF machine code, and it is the only thing that differs;
-    # the stepping keeps gfx1250's +real-true16.
-    assert [a.replace(GFX1250_STRICT, GFX1250) for a in strictArgs] == baseArgs
+    assert f"-mcpu={GFX1250}" in strictArgs, strictArgs
+    assert GFX1250_STRICT not in " ".join(strictArgs), strictArgs
+    # Nothing else moves: the stepping keeps gfx1250's +real-true16, and the two
+    # invocations are now indistinguishable.
+    assert strictArgs == baseArgs
 
 
 def _compressTargetOf(tmp_path, isa, archNames=None):

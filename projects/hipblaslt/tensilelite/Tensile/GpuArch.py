@@ -14,6 +14,7 @@ Tensile tree so ROCm test artifacts can exercise it directly; tensilelite's
 tasks.py only wraps it in an invoke @task entry point.
 """
 
+import glob
 import os
 import re
 import shutil
@@ -36,6 +37,23 @@ _AMDGPU_ARCH_RELPATHS = (
 )
 
 _ROCMINFO_RELPATHS = (("bin", "rocminfo"),)
+
+# The silicon's own description, which no environment variable rewrites. Flat
+# "key value" lines per node; host processors publish gfx_target_version 0.
+_KFD_NODE_PROPERTIES = "/sys/class/kfd/kfd/topology/nodes/*/properties"
+
+# ASIC revision: `capability` bits 25:22 (hsakmttypes.h). 0 is a part's first
+# stepping, and the only one ROCr renames.
+_ASIC_REVISION_MASK = 0x03C00000
+_ASIC_REVISION_SHIFT = 22
+
+# Architectures whose rev-0 stepping is a compiler target of its own. Spelled
+# here because this module imports nothing from Tensile; mirrors
+# ARCH_CAP_OVERRIDES and ROCr's registry, which also list gfx1250-strict alone.
+# Without the guard, a rev-0 part of any other architecture would be renamed to
+# a target that does not exist.
+_STEPPING_SUFFIX = "-strict"
+_STEPPED_ARCHS = frozenset({"gfx1250"})
 
 
 def _rocm_roots():
@@ -125,6 +143,72 @@ def _rocminfo_archs(rocminfo):
     return _real_archs(_ROCMINFO_AGENT_RE.findall(output))
 
 
+def _gfx_name(target_version):
+    """The gfx name a KFD ``gfx_target_version`` spells.
+
+    The field packs the ISA triple as major*10000 + minor*100 + step, and the
+    name prints minor and step as single hex digits -- which is what makes
+    (9, 0, 10) "gfx90a" rather than "gfx9010".
+    """
+    major, rest = divmod(target_version, 10000)
+    minor, step = divmod(rest, 100)
+    return "gfx%d%x%x" % (major, minor, step)
+
+
+def _kfd_archs():
+    """The agent names the KFD topology implies, or ``[]`` if it cannot be read.
+
+    Preferred over rocminfo, which answers through ROCr and so appends the
+    stepping suffix only when HSA_DISABLE_GFX12_STRICT allows it. That makes an
+    environment variable decide which stepping this box *is*: unset -- today's
+    default -- an A0 comes back "gfx1250", and the build and the test selection
+    both follow it onto the base architecture's kernels and configs. The
+    revision is a property of the part, so read the part.
+
+    Needs no ROCm, no render group and no environment, so it also answers where
+    rocminfo cannot. Anything unreadable yields ``[]``, leaving the caller on
+    its previous source rather than guessing.
+    """
+    names = []
+    # By node number, not by path: lexicographic order puts node 10 before node
+    # 2, and this list is positional wherever it is used as an enumeration.
+    def _node_number(path):
+        name = os.path.basename(os.path.dirname(path))
+        return int(name) if name.isdigit() else -1
+
+    for path in sorted(glob.glob(_KFD_NODE_PROPERTIES), key=_node_number):
+        try:
+            with open(path) as node:
+                fields = dict(
+                    (line.split()[0], line.split()[1])
+                    for line in node
+                    if len(line.split()) >= 2
+                )
+            version = int(fields["gfx_target_version"])
+            capability = int(fields["capability"])
+        except (OSError, ValueError, KeyError, IndexError):
+            continue
+        if not version:  # a host processor, not a GPU
+            continue
+        name = _gfx_name(version)
+        revision = (capability & _ASIC_REVISION_MASK) >> _ASIC_REVISION_SHIFT
+        if revision == 0 and name in _STEPPED_ARCHS:
+            name += _STEPPING_SUFFIX
+        names.append(name)
+    return names
+
+
+def _stepping_archs(rocminfo):
+    """The names to restore steppings from, authoritative source first.
+
+    The topology answers from the silicon; rocminfo answers from ROCr, and so
+    from HSA_DISABLE_GFX12_STRICT. rocminfo stays as the fallback where the
+    topology is not readable -- a container without /sys/class/kfd, or the
+    functional model -- which is the behaviour this replaces.
+    """
+    return _kfd_archs() or _rocminfo_archs(rocminfo)
+
+
 def _restore_steppings(archs, rocminfo_archs):
     """``archs``, with any stepping suffix only rocminfo reports put back.
 
@@ -178,7 +262,7 @@ def restore_steppings(archs):
     be pointed at truncates a stepping the same way amdgpu-arch does, so the
     answer needs the same cross-check before it names a compiler target.
     """
-    return _restore_steppings(archs, _rocminfo_archs(_tool(_ROCMINFO_RELPATHS)))
+    return _restore_steppings(archs, _stepping_archs(_tool(_ROCMINFO_RELPATHS)))
 
 
 def _probe():
@@ -202,7 +286,7 @@ def _probe():
         if output:
             archs = _real_archs(_ARCH_LINE_RE.findall(output))
             if archs:
-                return _restore_steppings(archs, _rocminfo_archs(rocminfo)), True
+                return _restore_steppings(archs, _stepping_archs(rocminfo)), True
 
     archs = _rocminfo_archs(rocminfo)
     if archs:

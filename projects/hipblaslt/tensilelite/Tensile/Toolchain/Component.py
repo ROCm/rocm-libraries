@@ -31,6 +31,7 @@ from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
 from Tensile.Common import SemanticVersion, print2
+from Tensile.Common.Architectures import toolchainTargetOf
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -171,14 +172,19 @@ class Assembler(Component):
             # genuinely bad, rather than a confusing traceback from this helper.
             return
 
+        # The `(?:-[0-9a-z]+)*` is what makes this replace a name that already
+        # carries a stepping. Without it the match stops at gfx1250 and the old
+        # `-strict` survives in the tail, leaving a directive that contradicts
+        # the -mcpu it is supposed to agree with. Feature qualifiers (`:xnack-`)
+        # are in the tail on purpose and are kept.
         target = f"amdgcn-amd-amdhsa--{targetGfx}"
         updated = sub(
-            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^"]*")',
+            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-z]+(?:-[0-9a-z]+)*([^"]*")',
             rf'\1{target}\2',
             src,
         )
         updated = sub(
-            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^\s]*)',
+            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-z]+(?:-[0-9a-z]+)*([^\s]*)',
             rf'\1{target}\2',
             updated,
         )
@@ -196,6 +202,8 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
+        # A stepping assembles as the architecture it steps; see toolchainTargetOf.
+        targetGfx = toolchainTargetOf(targetGfx)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
@@ -274,7 +282,11 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={gfx}" for gfx in target_list]
+        # A stepping compiles as the architecture it steps, so it can collide with
+        # that architecture in the same list; dict.fromkeys drops the duplicate and
+        # keeps the order. See toolchainTargetOf.
+        targets = dict.fromkeys(toolchainTargetOf(gfx) for gfx in target_list)
+        archFlags = [f"--offload-arch={gfx}" for gfx in targets]
         args = [
             *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
         ]
@@ -318,9 +330,10 @@ class Bundler(Component):
         Args:
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
-            target: The compiler target to tag the bundle entry with. This is the
-                stepping's own name where one was asked for, not the ISA-derived
-                name, since the runtime unbundles by matching the agent's target.
+            target: The compiler target to tag the bundle entry with. The runtime
+                unbundles by matching the agent's target, and a stepping is built
+                for the architecture it steps, so this is the stepped name; see
+                toolchainTargetOf.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
@@ -331,7 +344,8 @@ class Bundler(Component):
             "--compress",
             "--type=o",
             "--bundle-align=4096",
-            f"--targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa-unknown-{target}",
+            f"--targets=host-x86_64-unknown-linux-gnu,"
+            f"hipv4-amdgcn-amd-amdhsa-unknown-{toolchainTargetOf(target)}",
             f"--input={devnull}",
             f"--input={srcPath}",
             f"--output={destPath}",

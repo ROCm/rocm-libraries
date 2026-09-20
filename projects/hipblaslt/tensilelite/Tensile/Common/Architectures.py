@@ -295,6 +295,26 @@ def steppingArchOf(spec: str) -> Optional[str]:
     return derived if derived != base else None
 
 
+def toolchainTargetOf(spec: str) -> str:
+    """The target the toolchain is handed for ``spec``.
+
+    Transitional. A stepping is built for the architecture it steps, because HIP
+    picks a bundle entry by matching the agent's reported target and ROCr still
+    reports gfx1250 for an A0 by default -- an entry tagged gfx1250-strict is
+    rejected there. Only the compiler target moves; the stepping keeps naming its
+    directory, its files and its capability overrides. Remove once ROCr reports
+    the stepping by default, and the stepping becomes its own target again.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        The architecture a stepping steps (``gfx1250-strict`` -> ``gfx1250``), or
+            ``spec`` unchanged when it is not a stepping.
+    """
+    return steppingArchOf(spec) or spec
+
+
 def archNamesByIsa(specs: List[str]) -> Dict[IsaVersion, str]:
     """The architecture each ISA is being built as, keyed by ISA version.
 

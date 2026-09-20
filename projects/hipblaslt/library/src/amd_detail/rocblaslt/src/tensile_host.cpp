@@ -2686,13 +2686,42 @@ namespace
         return preceding == '_' || preceding == '-';
     }
 
+    // True when `dir` holds the lazy-loading mapping file for `processor`, in any
+    // of the three forms the producers emit.
+    //
+    // This is the "does this install actually ship a device library for that
+    // architecture" test, and so it is what decides between the name the ASIC
+    // revision prefers and the base architecture. It deliberately looks for the
+    // mapping rather than the directory: an ExtOp or Transform install creates a
+    // per-architecture directory of its own, and treating that as a Tensile
+    // library would swap a working fallback for an empty subtree.
+    //
+    // Only the lazy-loading names, which is what the probe this replaces looked
+    // for. A non-lazy build therefore never resolves past the base architecture
+    // and keeps exactly the behaviour it has today; extending this to
+    // TensileLibrary_<processor> would change which subtree such a build picks,
+    // which is a separate question from the stepping.
+    bool tensileMappingExists(const std::filesystem::path& dir, const std::string& processor)
+    {
+        const auto stem = (dir / ("TensileLibrary_lazy_" + processor)).string();
+        return std::filesystem::exists(stem + ".dat") || std::filesystem::exists(stem + ".dat.zlib")
+               || std::filesystem::exists(stem + ".yaml");
+    }
+
     TensileLite::LazyLoadingInit getLazyLoadingArch(int deviceID)
     {
         hipDeviceProp_t deviceProperties;
         HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceID));
-        // strip out xnack/ecc from name
-        std::string deviceFullString(deviceProperties.gcnArchName);
-        std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
+
+        // The preferred name rather than the reported one, and deliberately not
+        // the resolved one. All this value has to do is tell the steppings apart
+        // for the caller's dedup set, and the reported name stops doing that the
+        // moment HSA_DISABLE_GFX12_STRICT is off: an A0 and a B0 in the same box
+        // would both answer gfx1250, collide, and the second would be dropped
+        // along with its device-property and hardware entries. Whether a library
+        // for the preferred name is installed does not enter into it.
+        const std::string deviceString
+            = rocblaslt_internal_get_arch_name_candidates(deviceProperties).front();
 
         if(deviceString.find("gfx803") != std::string::npos)
         {
@@ -2900,8 +2929,14 @@ namespace
 
             std::filesystem::path path;
 
-            // The name of the current GPU platform
-            std::string processor = rocblaslt_internal_get_arch_name();
+            // The names that may serve the current GPU, best first, derived from
+            // the ASIC revision rather than from what the runtime called the
+            // device. The last entry is the base architecture, so it is the
+            // answer until a better candidate is found to be present on disk.
+            const std::vector<std::string> archCandidates
+                = rocblaslt_internal_get_arch_name_candidates();
+            std::string processor    = archCandidates.back();
+            bool        archResolved = false;
 
             // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
             // process in a secure execution context cannot be redirected to an
@@ -2948,19 +2983,26 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). Both the subdir and the mapping filenames carry `processor`,
-                // the name the runtime reports for this device -- which is the compiler
-                // target the kernels in it were built for, including a silicon-revision
-                // variant such as gfx1250-strict.
+                // builds). Both the subdir and the mapping filenames carry the
+                // architecture name -- the compiler target the kernels in it were built
+                // for, including a silicon-revision variant such as gfx1250-strict.
+                //
+                // Walking the candidates in preference order is what frees the choice of
+                // stepping from HSA_DISABLE_GFX12_STRICT without breaking the packages
+                // that do not carry the stepping yet. An A0 asks for gfx1250-strict first
+                // and gets it when it is installed; where it is not -- which is every
+                // gfx1250-only package shipping today -- it lands on exactly the gfx1250
+                // subtree it already uses, whatever the runtime happened to call the
+                // device.
+                for(const auto& candidate : archCandidates)
                 {
-                    auto processor_path     = path / processor;
-                    auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
-                    auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
-                    auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
-                       || std::filesystem::exists(mapping_yaml))
+                    auto candidate_path = path / candidate;
+                    if(tensileMappingExists(candidate_path, candidate))
                     {
-                        path = std::move(processor_path);
+                        path         = std::move(candidate_path);
+                        processor    = candidate;
+                        archResolved = true;
+                        break;
                     }
                 }
 
@@ -2970,6 +3012,32 @@ namespace
                     msg << "HIPBLASLT_TENSILE_LIBPATH not set: Using " << path << std::endl;
                     log_info(__func__, msg.str());
                 }
+            }
+
+            // The walk above cannot run when HIPBLASLT_TENSILE_LIBPATH points straight at
+            // a directory of code objects, and a single-architecture install has no
+            // sub-directory to walk in the first place. The mapping files then sit
+            // directly in `path`, so apply the same preference there. Without this the
+            // stepping would still be decided by the reported name in exactly the two
+            // layouts developers test with most.
+            if(!archResolved)
+            {
+                for(const auto& candidate : archCandidates)
+                {
+                    if(tensileMappingExists(path, candidate))
+                    {
+                        processor = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Using architecture " << processor << " (reported "
+                    << rocblaslt_internal_get_arch_name() << ")" << std::endl;
+                log_info(__func__, msg.str());
             }
 
             // only load modules for the current architecture (named for the processor
