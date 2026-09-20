@@ -47,6 +47,20 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
+# hipSPARSELt never set its own install RPATH. In the legacy build it inherited
+# one from hipBLASLt, whose CMakeLists.txt sets
+#   set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING ...)
+# as a *cache* variable, and which was pulled in via add_subdirectory().
+# Consuming hipBLASLt as a package instead means that never runs, so the
+# installed binaries lost "$ORIGIN/../llvm/lib" and hipsparselt-test failed at
+# startup with:
+#   error while loading shared libraries: libomp.so: cannot open shared object file
+# Declare the RPATH here so it does not depend on how hipBLASLt is consumed.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
+mark_as_advanced(CMAKE_INSTALL_RPATH)
+mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+
 # --- Build options and validation ---
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
