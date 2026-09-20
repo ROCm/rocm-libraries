@@ -40,6 +40,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
     static constexpr bool kKLoadOnce = Problem::kUseDoubleKVLdsBuffer;
+    static_assert(!Problem::kProgressiveDsLoadK || Problem::kUseDoubleKVLdsBuffer,
+                  "progressive K LDS loading requires double K/V LDS buffers");
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -1127,15 +1129,58 @@ struct BlockFmhaPipelineQRKSVSTdm
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_lds_read_window, {0, kK0});
-                    auto k_tile_switch = load_tile(k_lds_read_window);
+                    using Gemm0 = remove_cvref_t<decltype(gemm_0)>;
+                    if constexpr(Problem::kProgressiveDsLoadK)
+                    {
+                        static_assert(std::is_same_v<Policy,
+                                                     BlockFmhaPipelineQRKSVSTdmDefaultPolicy>);
+                        static_assert(Gemm0::MIterPerWarp == 1 || Gemm0::MIterPerWarp == 2);
+                        static_assert(Gemm0::NIterPerWarp == 4 && Gemm0::KIterPerWarp == 1);
+                        using Window = remove_cvref_t<decltype(k_lds_read_window)>;
+                        using Tile   = remove_cvref_t<decltype(k_tile)>;
+                        static_assert(std::is_same_v<Tile, decltype(load_tile(k_lds_read_window))>);
+                        static_assert(std::is_trivially_destructible_v<
+                                      typename Gemm0::WarpGemm::BWarpTensor>);
+                        static_assert(Window::Traits::NumAccess == 8);
+                        static_assert(Window::Traits::ScalarPerVector == 8);
+                        static_assert(sizeof(typename Window::Traits::vector_t) == 16);
+                        static_assert(Tile::get_thread_buffer_size() == 64);
 
-                    gemm_0(s_acc,
-                           get_slice_tile(q_tile,
-                                          sequence<0, i_k0 * kK0>{},
-                                          sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_tile);
-
-                    k_tile = k_tile_switch;
+                        // On the final M iteration, each WMMA consumes its K fragment for the
+                        // last time. Reload that fragment for the next head-dimension slice while
+                        // the remaining old-fragment WMMAs execute.
+                        gemm_0.RunWithAfterWarp(
+                            s_acc,
+                            get_slice_tile(q_tile,
+                                           sequence<0, i_k0 * kK0>{},
+                                           sequence<kM0, (i_k0 + 1) * kK0>{}),
+                            k_tile,
+                            [&k_lds_read_window, &k_tile](auto mIter, auto nIter, auto kIter) {
+                                if constexpr(mIter == Gemm0::MIterPerWarp - 1 && kIter == 0)
+                                {
+                                    // Allow VALU/SALU/VMEM/DS-write/TRANS/LDSDMA to cross while
+                                    // keeping MFMA/WMMA and DS-read ordered around the reload.
+                                    constexpr unsigned kProgressiveDsLoadSchedMask =
+                                        0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 |
+                                        0x800;
+                                    __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+                                    constexpr index_t begin = 2 * decltype(nIter)::value;
+                                    k_lds_read_window.template load_access_range<begin, begin + 2>(
+                                        k_tile);
+                                    __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+                                }
+                            });
+                    }
+                    else
+                    {
+                        auto k_tile_switch = load_tile(k_lds_read_window);
+                        gemm_0(s_acc,
+                               get_slice_tile(q_tile,
+                                              sequence<0, i_k0 * kK0>{},
+                                              sequence<kM0, (i_k0 + 1) * kK0>{}),
+                               k_tile);
+                        k_tile = k_tile_switch;
+                    }
                 });
                 // move back to the origin
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});

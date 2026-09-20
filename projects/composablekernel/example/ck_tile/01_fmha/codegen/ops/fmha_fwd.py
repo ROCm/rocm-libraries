@@ -128,7 +128,8 @@ using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
     fmha_mask,
     {F_trload},
     fmha_traits,
-    {F_use_double_kv_lds_buffer}>;
+    {F_use_double_kv_lds_buffer},
+    {F_progressive_ds_load_k}>;
 
 using fmha_pipeline = {F_pipeline}<
     fmha_pipeline_problem>;
@@ -409,6 +410,7 @@ class FmhaFwdPipeline:
     F_sink: str  # true/false
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
     F_use_double_kv_lds_buffer: str = "f"  # true/false
+    F_progressive_ds_load_k: str = "f"  # true/false
 
     @property
     def name(self) -> str:
@@ -478,6 +480,22 @@ class FmhaFwdPipeline:
             n += "_trload"
         else:
             n += "_ntrload"
+        if self.tag == "qr_tdm":
+            if (
+                self.F_progressive_ds_load_k == "t"
+                and self.F_use_double_kv_lds_buffer != "t"
+            ):
+                raise ValueError(
+                    "QR-TDM progressive K LDS loading requires K/V LDS prefetch (double buffering)"
+                )
+            if self.F_use_double_kv_lds_buffer == "t":
+                n += "_kvldsprefetch"
+            else:
+                n += "_nkvldsprefetch"
+            if self.F_progressive_ds_load_k == "t":
+                n += "_progressivedsk"
+            else:
+                n += "_nprogressivedsk"
         if self.F_sink == "t":
             n += "_sink"
         else:
@@ -720,6 +738,9 @@ class FmhaFwdKernel:
             F_trload=BOOL_MAP[self.F_pipeline.F_trload],
             F_use_double_kv_lds_buffer=BOOL_MAP[
                 self.F_pipeline.F_use_double_kv_lds_buffer
+            ],
+            F_progressive_ds_load_k=BOOL_MAP[
+                self.F_pipeline.F_progressive_ds_load_k
             ],
             F_pipeline=PIPELINE_MAP[self.F_pipeline.tag],
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
@@ -1394,8 +1415,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ["t", "f"],
                     ["t", "f"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t", F_progressive_ds_load_k="t"))  # fmt: skip
 
             # qr: generic pipeline fallback for trait combos not covered by
             # qr_tdm (e.g., bias, dropout, skip, d!=128).

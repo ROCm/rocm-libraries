@@ -768,6 +768,9 @@ TEST(QrTdmLdsPadding, CompileTimeConfiguration) { SUCCEED(); }
 
 TEST(QrTdmLdsPadding, DeviceRoundTrip)
 {
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM LDS padding is only supported on gfx1250";
+
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 128>()));
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::bf16_t, 64>()));
     EXPECT_TRUE((run_round_trip_matrix<ck_tile::half_t, 128>()));
