@@ -17,6 +17,12 @@ __device__ void block_sync_lds()
 {
 #if CK_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
 #if defined(__gfx12__)
+    // Please note that the call to wait_dscnt(0) is a workaroud for bugs in ROCm 7.2 to 10.1 where
+    // the release fences (which should have equivalent semantics, but, unlike a wait_dscnt,
+    // actually are visible to the LLVM memory model) didn't always work correctly if they were the
+    // first memory operation in a loop. This wait call prevents the removal of unneeded LDS waits
+    // and should be removed once possible (see the pre-gfx12 case below).
+    llvm_amdgcn_s_wait_dscnt(0);
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
