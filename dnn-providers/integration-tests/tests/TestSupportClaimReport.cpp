@@ -202,6 +202,7 @@ TEST_F(TestSupportClaimReport, MultiEngineQueriedCountIsPerGraph)
 {
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsQueried = 1;
 
     SupportResult r1 = makeResult(SupportVerdict::CLAIM_CONFIRMED);
@@ -223,13 +224,14 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
     const auto output = summary();
 
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
-    EXPECT_NE(output.find("2 found, 1 with claims, 1 queried"), std::string::npos);
+    EXPECT_NE(output.find("2 found, 1 with claims, 1 selected, 1 queried"), std::string::npos);
     EXPECT_NE(output.find("confirmed: 1"), std::string::npos);
     EXPECT_NE(output.find("broken: 0"), std::string::npos);
 }
@@ -285,13 +287,14 @@ TEST_F(TestSupportClaimReport, PrintNamesBundlesThatFailedInUse)
     EXPECT_EQ(output.find("CLAIM FAILURES"), std::string::npos);
 }
 
-// A filtered run discovers more claim-bearing graphs than it runs. Since a selected
-// graph can no longer go unqueried, the whole remainder is the filter's doing and
-// the summary says so instead of leaving a mismatch to be misread as a gap.
-TEST_F(TestSupportClaimReport, PrintAttributesUnqueriedGraphsToTheFilter)
+// A filtered run discovers more claim-bearing graphs than it selects. That gap --
+// discovered minus selected -- is the filter's doing and nothing else's, so the
+// summary names it instead of leaving a mismatch to be misread as a harness gap.
+TEST_F(TestSupportClaimReport, PrintAttributesUnselectedGraphsToTheFilter)
 {
     supportClaimCoverage().graphsFound = 3;
     supportClaimCoverage().graphsWithClaims = 3;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
@@ -301,14 +304,54 @@ TEST_F(TestSupportClaimReport, PrintAttributesUnqueriedGraphsToTheFilter)
               std::string::npos);
 }
 
-TEST_F(TestSupportClaimReport, PrintOmitsFilterNoteWhenEverythingRan)
+// The other half of the split. These graphs *were* selected -- the filter let them
+// through -- and then SetUp() skipped them before the query. Blaming --gtest_filter
+// for them would send a reader to edit the one knob that is already correct.
+TEST_F(TestSupportClaimReport, PrintSeparatesSelectedButSkippedFromTheFilterRemainder)
 {
-    supportClaimCoverage().graphsFound = 1;
-    supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsFound = 5;
+    supportClaimCoverage().graphsWithClaims = 5;
+    supportClaimCoverage().graphsSelectedWithClaims = 3;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
-    EXPECT_EQ(summary().find("not selected"), std::string::npos);
+    const auto output = summary();
+
+    EXPECT_NE(output.find("2 claim-bearing graph(s) were selected but skipped before the query"),
+              std::string::npos);
+    EXPECT_NE(output.find("2 claim-bearing graph(s) were discovered but not selected"),
+              std::string::npos);
+}
+
+// A graph that never opened ran and failed; it is already accounted for by its own
+// line, so it must not also be counted as skipped before the query.
+TEST_F(TestSupportClaimReport, PrintDoesNotCountUnopenedGraphsAsSkipped)
+{
+    supportClaimCoverage().graphsFound = 2;
+    supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsQueried = 1;
+    supportClaimCoverage().graphsNotOpened = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
+
+    const auto output = summary();
+
+    EXPECT_NE(output.find("1 claim-bearing graph(s) could not be opened"), std::string::npos);
+    EXPECT_EQ(output.find("skipped before the query"), std::string::npos);
+}
+
+TEST_F(TestSupportClaimReport, PrintOmitsBothShortfallNotesWhenEverythingRan)
+{
+    supportClaimCoverage().graphsFound = 1;
+    supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
+
+    const auto output = summary();
+
+    EXPECT_EQ(output.find("not selected"), std::string::npos);
+    EXPECT_EQ(output.find("skipped before the query"), std::string::npos);
 }
 
 // Otherwise invisible: a sidecar read in full that promised nothing for this cell
@@ -317,6 +360,7 @@ TEST_F(TestSupportClaimReport, PrintNamesGraphsWhoseSidecarClaimsNothingHere)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsSelectedWithClaims = 2;
     supportClaimCoverage().graphsQueried = 2;
     supportClaimCoverage().graphsWithNoApplicableClaim = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
@@ -331,6 +375,7 @@ TEST_F(TestSupportClaimReport, PrintOmitsTheNoteWhenEveryQueriedGraphWasClaimed)
 {
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
@@ -357,17 +402,19 @@ TEST_F(TestSupportClaimReport, PrintIsSilentWhenGraphsFoundButNoSidecars)
 }
 
 // The run that trips the guard must still print. Its summary is all zeros except
-// the discovery counts, and those counts are the only thing that distinguishes it
-// from a run with nothing to enforce.
+// the discovery and selection counts, and those counts are the only thing that
+// distinguishes it from a run with nothing to enforce. Selected is 1 and queried is
+// 0 because that pair — reached them, asked nothing — is exactly what trips it.
 TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
 {
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
+    supportClaimCoverage().graphsSelectedWithClaims = 1;
 
     const auto output = summary();
 
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
-    EXPECT_NE(output.find("1 with claims, 0 queried"), std::string::npos);
+    EXPECT_NE(output.find("1 with claims, 1 selected, 0 queried"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -550,6 +597,7 @@ TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
     SupportClaimCoverage coverage;
     coverage.graphsFound = 4;
     coverage.graphsWithClaims = 4;
+    coverage.graphsSelectedWithClaims = 4;
     coverage.graphsQueried = 3;
     coverage.graphsNotOpened = 1;
 

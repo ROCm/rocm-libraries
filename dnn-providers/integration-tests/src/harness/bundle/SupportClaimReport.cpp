@@ -66,6 +66,12 @@ bool verifiedNothing(const SupportClaimCoverage& coverage)
     // registration and cannot see --gtest_filter, so against it every suite that
     // selects only unclaimed bundles -- hipblaslt's ffm-quick tier, ASM SDPA's
     // gpu-reference target -- looks identical to a run whose engine never loaded.
+    //
+    // The cost of the run-time numerator is a blind spot: it is bumped in the test
+    // body, so a bundle skipped in SetUp() (arch guard, TOML skip-list, no device)
+    // bumps neither side of this comparison. A skip-list broad enough to cover every
+    // claim-bearing bundle therefore enforces nothing and exits 0 without tripping
+    // the guard. Closing that needs a counter seeded before SetUp() runs.
     return coverage.graphsSelectedWithClaims > 0 && coverage.graphsQueried == 0;
 }
 
@@ -96,8 +102,8 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
 
     os << "\n==== SUPPORT CLAIM SUMMARY ====\n"
        << "  graphs: " << coverage.graphsFound << " found, " << coverage.graphsWithClaims
-       << " with claims, " << coverage.graphsQueried << " queried (" << records.size()
-       << " verdicts)\n"
+       << " with claims, " << coverage.graphsSelectedWithClaims << " selected, "
+       << coverage.graphsQueried << " queried (" << records.size() << " verdicts)\n"
        << "  confirmed: " << confirmed << "  accepted: " << accepted
        << "  failed-in-use: " << failedInUse << "  broken: " << broke << "  errored: " << err
        << "  unclaimed: " << unc << "\n"
@@ -115,14 +121,27 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
               "  those tests are already failing on the graph itself.\n";
     }
 
-    // Discovery counts every claim-bearing bundle; only selected tests run. A
-    // selected one cannot go unqueried — the harness fails the test if its sidecar
-    // was never read — so the remainder is attributable to the filter and is named
-    // as such rather than left as a bare mismatch a reader has to interpret.
+    // Two different shortfalls, reported separately because they have two different
+    // fixes. Selected-but-unaccounted means SetUp() skipped the bundle before the
+    // query — the arch guard, a TOML skip-list, no device — and the counters cannot
+    // tell which; the remedy is a skip-list edit or a different machine. Rolling it
+    // into the filter line below would blame --gtest_filter for a bundle the filter
+    // let through.
     const size_t accountedFor = coverage.graphsQueried + coverage.graphsNotOpened;
-    if(coverage.graphsWithClaims > accountedFor)
+    if(coverage.graphsSelectedWithClaims > accountedFor)
     {
-        os << "  " << (coverage.graphsWithClaims - accountedFor)
+        os << "  " << (coverage.graphsSelectedWithClaims - accountedFor)
+           << " claim-bearing graph(s) were selected but skipped before the query "
+              "(arch guard, skip-list, or no device);\n"
+              "  their claims are unenforced by this run.\n";
+    }
+
+    // Discovery counts every claim-bearing bundle on disk; only selected ones run.
+    // The gap between the two is the filter's doing and is named as such rather than
+    // left as a bare mismatch a reader has to interpret.
+    if(coverage.graphsWithClaims > coverage.graphsSelectedWithClaims)
+    {
+        os << "  " << (coverage.graphsWithClaims - coverage.graphsSelectedWithClaims)
            << " claim-bearing graph(s) were discovered but not selected to run "
               "(--gtest_filter);\n"
               "  their claims are unenforced by this run.\n";
