@@ -1008,17 +1008,21 @@ def wgrad_group_merge_available(
     # cannot drop an off-diagonal group pair: the packed-atomic split-K store
     # would accumulate garbage into a real dW element rather than skipping it,
     # and the two-stage workspace store would need the same mask a second time.
-    # Checked before split_k so a spec that sets both gets the message naming
-    # the rule it broke rather than its side effect.
-    if spec.two_stage or spec.force_deterministic:
+    # Merging and split-K fix different things -- merging widens the loads and
+    # divides the grid by Gm, split-K multiplies the grid back -- so they
+    # compose, and the best depthwise configuration generally uses both. What a
+    # merged tile cannot use is the packed-atomic split-K epilogue: it has no
+    # way to drop an off-diagonal group pair, so it would accumulate garbage
+    # into a live dW element instead of skipping the store. Route split_k > 1
+    # through two-stage, whose workspace store carries the mask.
+    _effective_two_stage = (
+        spec.two_stage or spec.force_deterministic
+    ) and spec.split_k > 1
+    if (spec.split_k == 0 or spec.split_k > 1) and not _effective_two_stage:
         return False, (
-            "group_merge does not use the two-stage path; the two are swept as "
-            "alternatives (merged at split_k=1 vs two-stage unmerged)"
-        )
-    if spec.split_k != 1:
-        return False, (
-            f"group_merge requires split_k == 1 (got {spec.split_k}); merging "
-            f"and split-K are swept as alternatives, not combined"
+            f"group_merge with split_k={spec.split_k} needs the two-stage path "
+            f"(two_stage=True); the packed-atomic split-K epilogue cannot drop "
+            f"off-diagonal group pairs"
         )
     # The merged GEMM must fit one tile, or a tile would straddle group pairs
     # the diagonal mask cannot separate. Mirrors CK's GemmM <= MPerBlock &&
@@ -1569,6 +1573,9 @@ def build_implicit_gemm_conv_wgrad(
     # byte-identical to the pre-grouped kernel.
     grouped = _grouped
     group_v = None
+    # K-slice index within the group, needed by the merged two-stage epilogue to
+    # rebuild the true workspace slab. None whenever merging is off.
+    slice_v = None
     if grouped:
         c_kpg = b.const_i32(p_load.kpg)  # kpg: dY output-channel slab stride
         if not _is_split_k:
@@ -1587,6 +1594,8 @@ def build_implicit_gemm_conv_wgrad(
                 z_id = b.block_id_z()
                 group_v = b.to_sgpr_u32(b.div(z_id, _ks_count_param))
                 slice_id = b.mod(z_id, _ks_count_param)
+                if spec.group_merge > 1:
+                    slice_v = slice_id
                 k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
             else:
                 k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
@@ -1599,6 +1608,8 @@ def build_implicit_gemm_conv_wgrad(
                 z_id = b.block_id_z()
                 group_v = b.to_sgpr_u32(b.div(z_id, c_split_k))
                 slice_id = b.mod(z_id, c_split_k)
+                if spec.group_merge > 1:
+                    slice_v = slice_id
                 k_lo = b.to_sgpr_u32(b.mul(slice_id, c_ks))
             else:
                 k_lo = b.to_sgpr_u32(b.mul(b.block_id_z(), c_ks))
@@ -2299,6 +2310,8 @@ def build_implicit_gemm_conv_wgrad(
             block_n_off_v,
             ws_ptr,
             c_per_lane,
+            gm_group=group_v,
+            gm_slice=slice_v,
         )
     elif _is_split_k and op.family == "wmma":
         # WMMA split-K: atomic-add via the WMMA C-fragment layout (fp32/bf16/fp16).
@@ -2937,6 +2950,8 @@ def _emit_wgrad_workspace_store_epilogue(
     block_n_off: Value,
     ws_ptr: Value,
     c_per_lane: int,
+    gm_group: Optional[Value] = None,
+    gm_slice: Optional[Value] = None,
 ) -> None:
     """Two-stage Stage 1 epilogue: plain f32 store to workspace slice.
 
@@ -2951,9 +2966,14 @@ def _emit_wgrad_workspace_store_epilogue(
     Out-of-bounds elements are guarded by ``scf_if`` — a plain ``global_store``
     to a sentinel offset would compute a real address and fault on AMD GPUs.
 
-    Group merging never reaches here: it is gated to ``split_k == 1``, which
-    is the single-stage direct / CShuffle store, so this epilogue only ever
-    sees unmerged per-group tiles.
+    Under group merging the tile covers a ``Gm x Gm`` block of group pairs and
+    only the diagonal is real work, so the store predicate gains an equality
+    test. The workspace does NOT merge -- it keeps its true
+    ``[groups * split_k, wg_M, wg_N]`` shape, so Stage 2 needs no changes --
+    which means the address is rebuilt from true coordinates while the
+    accumulator *bounds* come from the merged dims. Getting that backwards
+    writes ``(1 - 1/Gm) * K`` silently-zero dW rows, which is what the
+    row-coverage guard in the correctness suite exists to catch.
     """
     p = spec.problem
     mfmas_m = spec.mfmas_per_warp_m
@@ -2970,6 +2990,25 @@ def _emit_wgrad_workspace_store_epilogue(
     # Workspace total size = groups * split_k * wg_M * wg_N (f32 elements).
     k_id = b.to_sgpr_u32(b.block_id_z())
     slice_off = b.mul(k_id, b.const_i32(wg_M * wg_N))
+
+    # Merged-path setup. Only materialised when gm > 1: IRBuilder.const_i32
+    # does no folding or CSE, so an unconditional constant would renumber every
+    # downstream SSA value and break byte-identity on the default path.
+    gm = spec.group_merge
+    bound_m_v, bound_n_v = wg_M_v, wg_N_v
+    if gm > 1:
+        if gm_group is None or gm_slice is None:
+            raise ValueError(
+                "group_merge > 1 needs the merged group and K-slice indices; "
+                "the caller must pass gm_group/gm_slice"
+            )
+        _gm_split, c_zero_v = _gm_coord_splitter(b, p, gm)
+        c_gm_v = b.const_i32(gm)
+        c_cpg_v = b.const_i32(p.cpg)
+        c_split_k_v = b.const_i32(spec.split_k)
+        c_slab_v = b.const_i32(wg_M * wg_N)
+        bound_m_v = b.const_i32(spec.grid_M)
+        bound_n_v = b.const_i32(spec.grid_N)
 
     # Per-warp M/N offsets (same as the atomic epilogue).
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
@@ -3009,7 +3048,26 @@ def _emit_wgrad_workspace_store_epilogue(
                 val_f32 = b.vec_extract(acc, i)
                 # OOB guard via conditional — global_store to a sentinel offset
                 # would compute a real address and fault; use scf_if instead.
-                in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
-                with b.scf_if(in_bounds):
-                    ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
-                    b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                if gm == 1:
+                    in_bounds = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                    with b.scf_if(in_bounds):
+                        ws_off = b.add(slice_off, b.add(b.mul(c_m, wg_N_v), c_n))
+                        b.global_store(ws_ptr, ws_off, val_f32, align=4)
+                else:
+                    gm_m, km, gm_n, yx, cc = _gm_split(b, c_m, c_n)
+                    in_bounds = b.land(
+                        b.land(b.cmp_lt(c_m, bound_m_v), b.cmp_lt(c_n, bound_n_v)),
+                        b.cmp_eq(b.xor(gm_m, gm_n), c_zero_v),
+                    )
+                    with b.scf_if(in_bounds):
+                        # True conv group, then its (kpg, Z*Y*X*cpg) slab.
+                        group_true = b.add(b.mul(gm_group, c_gm_v), gm_m)
+                        slice_true = b.add(b.mul(group_true, c_split_k_v), gm_slice)
+                        n_true = b.mul(yx, c_cpg_v) if p.cpg > 1 else yx
+                        if p.cpg > 1:
+                            n_true = b.add(n_true, cc)
+                        ws_off = b.add(
+                            b.mul(slice_true, c_slab_v),
+                            b.add(b.mul(km, wg_N_v), n_true),
+                        )
+                        b.global_store(ws_ptr, ws_off, val_f32, align=4)

@@ -2147,9 +2147,8 @@ class TestWgradGroupMergeGate(unittest.TestCase):
             dict(group_merge=3),  # not a supported degree
             dict(group_merge=128),  # not a supported degree
             dict(group_merge=8, tile_n=32, split_k=1, two_stage=False),
-            # Merging and split-K are alternatives, never combined.
+            # Atomic split-K has no diagonal mask; two-stage does.
             dict(group_merge=8, two_stage=False, split_k=4),
-            dict(group_merge=8, two_stage=True, split_k=4),
             dict(group_merge=8, wave_size=32, split_k=1, two_stage=False),
         ]
         for kw in cases:
@@ -2265,9 +2264,10 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
                     # whole group_merge axis can silently not run.
                     self.assertNotIn("skip", why, f"case did not actually run: {why}")
 
-    def test_group_merge_and_split_k_are_exclusive(self):
-        # Merging and split-K are alternative ways to spend the same
-        # parallelism and are swept against each other, never combined.
+    def test_group_merge_split_k_requires_two_stage(self):
+        # Merging and split-K compose, but a merged tile cannot use the
+        # packed-atomic split-K epilogue: it has no way to drop an off-diagonal
+        # group pair, so it would accumulate garbage into a live dW element.
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 
         spec, _p, _wtk = _make_spec(
@@ -2286,12 +2286,34 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
             two_stage=False,
         )
         ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
-        self.assertFalse(ok, "split_k > 1 + group_merge must be rejected")
-        self.assertIn("split_k == 1", why)
-        # ... and the two-stage form of the same combination.
+        self.assertFalse(ok, "atomic split-K + group_merge must be rejected")
+        self.assertIn("two-stage", why)
+        # The two-stage form of the same degree is the supported combination.
         ts = _dc_replace(spec, two_stage=True)
         ok_ts, why_ts = is_valid_wgrad_spec(ts, arch=GPU_ARCH)
-        self.assertFalse(ok_ts, "two_stage + group_merge must be rejected")
+        self.assertTrue(ok_ts, why_ts)
+
+    def test_group_merge_with_two_stage_split_k(self):
+        # The combination that matters: merging widens the loads, split-K keeps
+        # the grid full. Runs through the two-stage workspace epilogue, whose
+        # store predicate carries the diagonal mask.
+        for gm in (2, 4, 8):
+            for spk in (4, 8):
+                with self.subTest(group_merge=gm, split_k=spk):
+                    ok, why = _check_two_stage(
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        groups=64,
+                        split_k=spk,
+                        group_merge=gm,
+                        tile_m=32,
+                        tile_n=128,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        seed=70 + gm,
+                    )
+                    self.assertTrue(ok, why)
 
     def test_group_merge_equals_group_count(self):
         # grid_groups == 1: the merged problem has a single group. Before the

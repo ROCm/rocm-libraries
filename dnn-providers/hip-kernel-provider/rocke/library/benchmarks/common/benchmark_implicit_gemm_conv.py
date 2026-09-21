@@ -1535,10 +1535,7 @@ def _build_wgrad_two_stage_one(args_tuple):
         async_dma,
         split_k,
     ) = combo[:10]
-    # Merging and split-K are alternatives; a merged combo is split_k=1 and
-    # belongs to the single-stage leg.
-    if combo.group_merge > 1:
-        return None
+    group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import ConvDataSpec
@@ -1618,6 +1615,7 @@ def _build_wgrad_two_stage_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
+        group_merge=group_merge,
         two_stage=True,
         # Carried for the same comparability reason as lds_k_outer below: the
         # two legs must differ only in the epilogue, or the side-by-side
@@ -2441,6 +2439,19 @@ def _run_wgrad_sweep(
     # several kernel names and measure one kernel several times.
     _legs = [(_p, False) for _p in _PIPELINES] + [(_ASYNC_PIPELINE, True)]
 
+    # Depthwise has no usable single-stage instance: split_k == 1 leaves one
+    # workgroup per (merged) group, which cannot fill the device, and split_k
+    # in (0, 1) is the only way to reach the direct-store / runtime-atomic
+    # bodies. The reduction degree is where the parallelism comes from here, so
+    # drop the single-stage degrees rather than compile and time them.
+    _depthwise = p.cpg == 1 and p.kpg == 1 and p.groups > 1
+
+    def _degrees(pipeline: str, async_dma: bool) -> tuple:
+        vals = _split_k_values_for(pipeline, async_dma)
+        if _depthwise:
+            vals = tuple(v for v in vals if v not in (0, 1))
+        return vals
+
     combos = [
         WgradCombo(*_geom, _pipeline, _epilogue, _async_dma, _sk)
         for _geom in itertools.product(
@@ -2450,27 +2461,34 @@ def _run_wgrad_sweep(
         if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
         for _epilogue in _EPILOGUES
         for _pipeline, _async_dma in _legs
-        for _sk in _split_k_values_for(_pipeline, _async_dma)
+        for _sk in _degrees(_pipeline, _async_dma)
     ]
 
     # Depthwise (cpg == kpg == 1) additionally sweeps group-merged instances.
-    # Merging and split-K are alternative ways to spend the same parallelism --
-    # merging raises the work per workgroup and divides the grid by Gm, split-K
-    # multiplies the grid and needs a reduction -- so they are swept against
-    # each other at split_k=1 and the ranked table picks the winner. No flag:
-    # the merged family is only legal for depthwise, and for depthwise the
-    # scalar per-channel load is exactly the thing merging exists to fix.
-    if p.cpg == 1 and p.kpg == 1 and p.groups > 1:
+    # Merging fixes the load width -- a depthwise free axis is one element wide,
+    # so every load is scalar -- while split-K fixes occupancy. They act on the
+    # CTA count in opposite directions and compose, so the merged family is
+    # swept over the same split-K degrees as the unmerged one. No flag: merging
+    # is only legal for depthwise, and for depthwise the scalar per-channel load
+    # is exactly what it exists to fix.
+    if _depthwise:
         _spatial = (p.Z if getattr(p, "is_3d", False) else 1) * p.Y * p.X
         _gm_combos = [
-            WgradCombo(*_geom, _pipeline, _epilogue, False, 1, _gm)
+            WgradCombo(*_geom, _pipeline, _epilogue, False, _sk, _gm)
             for _geom in itertools.product(
                 _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
             )
             if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
             for _epilogue in _EPILOGUES
-            for _pipeline in _PIPELINES
+            # 'basic' is the Python-unrolled K-loop. Merging shrinks the grid,
+            # the groups-aware selector answers with a deeper split_k, and the
+            # shorter K-slice drops the iteration count back under the unroll
+            # cap -- so the merged combos are precisely the ones that would
+            # fully unroll and cost minutes each to compile. The unrolled body
+            # has never won a depthwise sweep, so skip it rather than pay it.
+            for _pipeline in (_p for _p in _PIPELINES if _p != "basic")
             for _gm in _GROUP_MERGE_SWEEP
+            for _sk in _degrees(_pipeline, False)
             # The merged GEMM must fit one tile, or a tile straddles group pairs
             # the diagonal mask cannot separate. Filtered here rather than left
             # to the validator so the combo count does not balloon.
@@ -2482,8 +2500,9 @@ def _run_wgrad_sweep(
         combos = combos + _gm_combos
         print(
             f"  depthwise: +{len(_gm_combos)} group-merged combos "
-            f"(Gm in {_GROUP_MERGE_SWEEP}, split_k=1) swept against the "
-            f"split-K instances.",
+            f"(Gm in {_GROUP_MERGE_SWEEP}) swept alongside the unmerged ones, "
+            f"two-stage only. Merging widens the loads and divides the grid by "
+            f"Gm; split-K multiplies it back, so the two compose.",
             flush=True,
         )
 
@@ -2954,6 +2973,7 @@ def _run_wgrad_sweep(
                     vec_b=_vb,
                     vec_c=_vc,
                     two_stage=True,
+                    group_merge=_gm,
                 )
             )
             print(
@@ -2961,6 +2981,7 @@ def _run_wgrad_sweep(
                 f"warp={warp_m}x{warp_n} "
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
                 f"{pipeline}/{epilogue:9s} spk{resolved_split_k}2s  "
+                f"{f'gm{_gm} ' if _gm > 1 else '    '}"
                 f"vec={_va}/{_vb}/{_vc} "
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
                 flush=True,
@@ -2984,11 +3005,13 @@ def _run_wgrad_sweep(
     print(f"\n{'='*92}")
     print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*92}")
-    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<10}  config"
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'mode':<14}  config"
     print(hdr)
     print("-" * 92)
     for rank, r in enumerate(results[:top_n], 1):
         mode = f"spk{r.split_k}2s" if r.two_stage else f"spk{r.split_k}"
+        if r.group_merge > 1:
+            mode += f" gm{r.group_merge}"
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
             f"warp={r.warp_m}x{r.warp_n} "
@@ -2998,7 +3021,7 @@ def _run_wgrad_sweep(
             f"{' async' if r.async_dma else ''}"
         )
         print(
-            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<10}  {cfg_str}"
+            f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {mode:<14}  {cfg_str}"
         )
 
     best = results[0]
