@@ -35,10 +35,23 @@ set( _gtest_main_lib
   ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
 
 if( NOT TARGET googletest )
+ 
+  set(GTEST_SRC_URL
+    https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+    CACHE STRING
+    "Location of GTest source code"
+  )
+  set(GTEST_SRC_SHA256
+    65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
+    CACHE
+    STRING
+    "SHA256 hash of GTest source code"
+  )
+
   ExternalProject_Add( googletest
     PREFIX ${_gtest_prefix}
-    URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
-    URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
+    URL ${GTEST_SRC_URL}
+    URL_HASH SHA256=${GTEST_SRC_SHA256}
     CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${_gtest_prefix} -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
     BUILD_BYPRODUCTS ${_gtest_lib} ${_gtest_main_lib}
     DOWNLOAD_NO_PROGRESS YES
