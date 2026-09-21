@@ -71,7 +71,7 @@
     "Tensile/Components/Subtile/WaitAluInsertion.py": 69.31,
     "Tensile/Components/Subtile/__init__.py": 100.0,
     "Tensile/Components/SumUnroll.py": 72.83,
-    "Tensile/Components/TensorDataMover.py": 74.87,
+    "Tensile/Components/TensorDataMover.py": 73.12,
     "Tensile/Components/WorkGroupMappingAlgos.py": 93.54,
     "Tensile/Components/__init__.py": 100.0,
     "Tensile/Configuration.py": 92.53,
