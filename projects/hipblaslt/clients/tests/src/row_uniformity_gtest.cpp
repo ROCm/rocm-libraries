@@ -1410,6 +1410,7 @@ namespace
         auto       solution              = probeSolution();
         solution->customKernel.name      = "DummyCustomKernel";
         solution->customKernel.generated = false;
+        solution->customKernel.macrotile = TensileLite::dim3(128, 128, 32);
 
         EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
             << "A handwritten custom kernel must be refused under uniform summation order";
