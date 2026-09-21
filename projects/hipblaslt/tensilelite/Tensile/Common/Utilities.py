@@ -369,12 +369,12 @@ def isPow2(n):
     """True when ``n`` is a positive power of two."""
     return n > 0 and (n & (n - 1)) == 0
 
-def streamKMulticast(d):
-    """True when the StreamK=3 cluster multicast path is active.
+def streamKCluster(d):
+    """True when the StreamK=3 cluster launch path is active.
 
     Single source of truth derived from ClusterDim: on StreamK=3 a spatial
     cluster (ClusterDim[0] = Cs > 1, i.e. Cs peers sharing B across M-adjacent
-    tiles) IS the cluster multicast path, so there is no separate state key to
+    tiles) IS the cluster launch path, so there is no separate state key to
     store or serialize.
 
     StreamKForceDPOnly=1 is part of the condition, not an extra gate the callers
@@ -382,6 +382,8 @@ def streamKMulticast(d):
     the mask derivation, the tile-index fold and the padded-peer exit assume.
     The two-tile (FDPO=0) SK3 cluster is cluster *reduction*, which predates this
     path and must keep emitting exactly what it emits without any of it.
+
+    TDM-multicast waits are ``streamKMulticast``.
 
     ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
     and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
@@ -391,8 +393,16 @@ def streamKMulticast(d):
             and d.get("ClusterDim", [1, 1])[0] > 1
             and bool(d.get("StreamKForceDPOnly", 0)))
 
-def streamK2DMulticast(d):
-    """True when the cluster multicasts A as well as B, i.e. Ck > 1.
+def streamKMulticast(d):
+    """True when ``streamKCluster`` also issues TDM-multicast loads.
+
+    Requires ``d["Multicast"]``. Missing key defaults True so pre-derivation
+    call sites match ``streamKCluster``.
+    """
+    return streamKCluster(d) and bool(d.get("Multicast", True))
+
+def streamK2DCluster(d):
+    """True when the cluster has both axes > 1, i.e. Ck > 1.
 
     ClusterDim = [Cs, Ck] with BOTH axes > 1: Cs/X peers share B on M-adjacent
     tiles and Ck/Y peers share A on N-adjacent tiles. A 1-D [Cs, 1] cluster is
@@ -458,6 +468,30 @@ def choose_multiplier(d, N, p):
         mhigh //= 2
         shPost -=1
     return mhigh, shPost, l
+
+def deriveWaveParams(mi, num_threads, macrotile, wavefront_size=64):
+    """Derives MIWaveGroup and MIWaveTile from matrix-instruction geometry.
+
+    Args:
+        mi: MatrixInstruction list, at least [miM, miN, ...].
+        num_threads: Total thread count (product of workgroup dimensions).
+        macrotile: [MT0, MT1] or [MT0, MT1, depthU].
+        wavefront_size: Wavefront width (default 64).
+
+    Returns:
+        (wave_group, wave_tile) where each is a two-element list [M, N].
+    """
+    num_waves = max(1, num_threads // wavefront_size)
+    wgM = math.isqrt(num_waves)
+    while wgM > 0 and num_waves % wgM != 0:
+        wgM -= 1
+    wgM = max(1, wgM)
+    wgN = num_waves // wgM
+    wave_group = [wgM, wgN]
+    wave_tile = [max(1, macrotile[0] // (mi[0] * wgM)),
+                 max(1, macrotile[1] // (mi[1] * wgN))]
+    return wave_group, wave_tile
+
 
 def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = None) -> Tuple[int]:
     # wmmaV3InputVgprLayout: (numReadsUnroll, numVecTile, numVecUnroll, NumElementPerRead)
