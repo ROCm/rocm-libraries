@@ -207,7 +207,8 @@ class TestDenseNumeric:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
-    def test_one_binary_serves_every_shape(self):
+    @pytest.mark.parametrize("sliding_window", (0, 128))
+    def test_one_binary_serves_every_shape(self, sliding_window):
         """One compiled artifact, two shapes, correct numerics at both.
 
         The cohort above runs many shapes, but it stopped discriminating the
@@ -237,7 +238,12 @@ class TestDenseNumeric:
         scale = 1.0 / math.sqrt(d)
 
         shapes = ((1, 512), (4, 1024))
-        specs = [_spec(dtype, d, hq, hkv, False, batch=b, sq=s) for b, s in shapes]
+        specs = [
+            _spec(
+                dtype, d, hq, hkv, False, batch=b, sq=s, sliding_window=sliding_window
+            )
+            for b, s in shapes
+        ]
 
         # Preconditions: genuinely different shapes, on the runtime path, and
         # sharing one key -- otherwise the reuse assertion is vacuous.
@@ -266,7 +272,7 @@ class TestDenseNumeric:
             torch.cuda.synchronize()
             launchers.append(_launcher_for(spec))
 
-            ref = _standard_reference(q, k, v, scale)
+            ref = _standard_reference(q, k, v, scale, sliding_window=sliding_window)
             max_abs = (ref - out.float()).abs().max().item()
             assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
 
