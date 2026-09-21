@@ -126,11 +126,13 @@ void fill_pitched_plane(std::vector<Rpp8u>& plane, Rpp32u pitch, Rpp32u rowBytes
     return ::testing::AssertionSuccess();
 }
 
-// The conversion is a float matrix multiply rounded to U8, so one LSB.
+// Nearest and LinearV convert through a float matrix rounded to U8, so one LSB. CubicV is integer
+// throughout and the reference reproduces it exactly.
 constexpr double kTolerance = 1.0;
+constexpr double kExactTolerance = 0.0;
 
 void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
-                    YuvChromaUpsample upsample) {
+                    YuvChromaUpsample upsample, double tolerance = kTolerance) {
     const Rpp32u width = cfg.size.w, height = cfg.size.h;
     const Rpp32u chromaHeight = height / 2;
     const Rpp32u uvRowBytes = width;  // width/2 chroma samples, two interleaved bytes each
@@ -179,7 +181,7 @@ void run_yuv_to_rgb(const TestConfig& cfg, const YuvParams& op, YuvToRgbFn fn,
 
     // (4) Compare the logical RGB bytes only.
     EXPECT_TRUE(
-        compare_rgb_pitched(actual.data(), golden.data(), width, height, dstPitch, kTolerance));
+        compare_rgb_pitched(actual.data(), golden.data(), width, height, dstPitch, tolerance));
 }
 
 }  // namespace
@@ -197,7 +199,8 @@ TEST_P(YuvToRgbTest, Correctness) {
 
 TEST_P(YuvToRgbCubicVTest, Correctness) {
     const auto& p = GetParam();
-    run_yuv_to_rgb(p.cfg, p.op, &rppt_yuv_to_rgb_cubic_v, YuvChromaUpsample::CubicV);
+    run_yuv_to_rgb(p.cfg, p.op, &rppt_yuv_to_rgb_cubic_v, YuvChromaUpsample::CubicV,
+                   kExactTolerance);
 }
 
 TEST_P(YuvToRgbLinearVTest, Correctness) {

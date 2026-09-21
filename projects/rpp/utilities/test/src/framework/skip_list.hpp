@@ -72,7 +72,6 @@ inline constexpr const char* kSkipList[] = {
     "Image_Color/HistogramEqualizeTest.Correctness/HIP_U8toU8_PLN3toPKD3_FullRoi_2x36x55",
     "Image_Color/HistogramEqualizeTest.Correctness/HIP_U8toU8_PKD3_FullRoi_1x45x13",
     "Image_Color/HistogramEqualizeTest.Correctness/HIP_U8toU8_PLN3_FullRoi_1x45x13",
-    "Image_DataExchange/YuvToRgbCubicVTest.Correctness/HIP_U8toU8_PKD3_FullRoi_*",
     "Image_Effects/CoarseDropoutTest.Correctness/HIP_*_PartialRoi_*",
     "Image_Effects/CutoutDropoutTest.Correctness/*_PartialRoi_*",
     "Image_Effects/EraseTest.Correctness/*_PartialRoi_*",
