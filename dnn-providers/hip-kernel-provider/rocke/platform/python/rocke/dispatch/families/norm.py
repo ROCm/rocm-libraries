@@ -43,6 +43,7 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 _FAMILY = "norm2d"
@@ -115,16 +116,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _selector_matches(req: NormRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
-
-
 def _make_spec(req: NormRequest, *, block_size: int, vec: int):
     """Build the instance spec for one (kind, block_size, vec) candidate."""
     dtype = _norm_dtype(req.dtype)
@@ -165,7 +156,7 @@ def _make_candidate(
         assert isinstance(req, NormRequest)
         if req.kind.lower() != kind:
             return False, f"candidate kind {kind!r} != request kind {req.kind!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         spec = _make_spec(req, block_size=block_size, vec=vec)

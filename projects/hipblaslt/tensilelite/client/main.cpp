@@ -1134,8 +1134,6 @@ int main(int argc, const char* argv[])
         numProblems = problems.size();
     int lastProblemIdx = firstProblemIdx + numProblems - 1;
 
-    int         firstSolutionIdx = args["solution-start-idx"].as<int>();
-    int         numSolutions     = args["num-solutions"].as<int>();
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -1150,17 +1148,10 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
-    if(firstSolutionIdx < 0)
-        firstSolutionIdx = library->solutions.begin()->first;
-
-    if(numSolutions < 0)
-    {
-        auto iter = library->solutions.end();
-        iter--;
-    }
-
     std::shared_ptr<DataInitialization> dataInit;
     {
+        // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
+        srand(seed);
         ScopedTimer timer("data_init_setup");
         dataInit = std::make_shared<DataInitialization>(args, problemFactory);
     }
