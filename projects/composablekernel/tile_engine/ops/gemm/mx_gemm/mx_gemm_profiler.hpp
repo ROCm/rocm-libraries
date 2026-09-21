@@ -153,6 +153,13 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
 
 #endif
 
+        const auto b_host_for_device = [&]() {
+            if constexpr(SelectedKernel::Preshuffle)
+                return ck_tile::shuffle_b<SelectedKernel>(b_k_n);
+            else
+                return b_k_n;
+        }();
+
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
@@ -160,7 +167,7 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
         ck_tile::DeviceMem scale_b_dev_buf(scale_b_shuffled.get_element_space_size_in_bytes());
 
         a_m_k_dev_buf.ToDevice(a_m_k.data());
-        b_k_n_dev_buf.ToDevice(b_k_n.data());
+        b_k_n_dev_buf.ToDevice(b_host_for_device.data());
         c_m_n_dev_buf.SetZero();
         c_m_n_dev_result.SetZero();
         scale_a_dev_buf.ToDevice(scale_a_shuffled.data());

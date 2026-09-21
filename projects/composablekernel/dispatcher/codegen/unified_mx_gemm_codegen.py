@@ -22,7 +22,8 @@ Each header is compiled per-kernel via force-include:
     hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE mx_gemm_ctypes_lib.cpp
 
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
-and gfx1250. gfx950 uses comp_async/cshuffle; gfx1250 uses comp_tdm/tdm.
+and gfx1250. gfx950 provides async, eight-wave async, and weight-preshuffle
+pipelines with CShuffle; gfx1250 provides TDM V1 and V2 with the TDM epilogue.
 Both use intrawave scheduling and a 16x16x128 warp tile.
 """
 
@@ -51,6 +52,11 @@ _MX_GEMM_DIR = _GEMM_DIR / "mx_gemm"
 for _p in (str(_GEMM_DIR), str(_MX_GEMM_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+from gemm_validation_utils import (  # noqa: E402
+    GEMM_MX_PIPELINES_BY_ARCH,
+    is_tile_config_valid,
+)
 
 
 def _load_mx_builder():
@@ -108,11 +114,11 @@ def _validate(cfg: dict) -> None:
     arch = cfg.get("gpu_target")
     if arch not in ARCH_TRAITS:
         raise ValueError("mx_gemm requires explicit gpu_target gfx950 or gfx1250")
-    valid_pipeline, valid_epilogue = ARCH_TRAITS[arch]
-    pipeline = cfg.get("pipeline", valid_pipeline)
-    if pipeline != valid_pipeline:
+    default_pipeline, valid_epilogue = ARCH_TRAITS[arch]
+    pipeline = cfg.get("pipeline", default_pipeline)
+    if pipeline not in GEMM_MX_PIPELINES_BY_ARCH[arch]:
         raise ValueError(
-            f"pipeline must be {valid_pipeline!r} for mx_gemm, got {pipeline!r}"
+            f"pipeline must be one of {GEMM_MX_PIPELINES_BY_ARCH[arch]} on {arch}, got {pipeline!r}"
         )
 
     epilogue = cfg.get("epilogue", valid_epilogue)
@@ -158,6 +164,17 @@ def _validate(cfg: dict) -> None:
             raise ValueError(
                 "gfx1250 MX GEMM does not support persistent execution or K padding"
             )
+    if not is_tile_config_valid(
+        *(tc[key] for key in _REQUIRED_TILE_KEYS),
+        datatype,
+        datatype,
+        "fp16",
+        pipeline,
+        layout,
+        arch,
+        KERNEL_NAME_PREFIX,
+    ):
+        raise ValueError(f"unsupported MX tile configuration for {arch}/{pipeline}")
 
 
 def _tile_config_from_cfg(cfg: dict) -> dict:

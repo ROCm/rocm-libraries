@@ -85,15 +85,29 @@ class TestMxGemmGpu(unittest.TestCase):
         if shutil.which("hipcc") is None and not Path("/opt/rocm/bin/hipcc").exists():
             self.skipTest("hipcc not found")
 
-    def _run_dtype(self, dtype: str, cfg):
+    def _run_dtype(self, dtype: str):
         build_dir = tempfile.TemporaryDirectory(prefix="mx_gemm_gpu_test_")
         self.addCleanup(build_dir.cleanup)
-        configs = [cfg]
+        configs = [
+            (default_fp4_config if dtype == "fp4" else default_fp8_config)(
+                self.ARCH, pipeline
+            )
+            for pipeline in (
+                "comp_async",
+                "comp_async_eight_waves",
+                "weight_preshuffle",
+            )
+        ]
         if self.ARCH == "gfx1250":
             configs = [
                 MxGemmKernelConfig(
-                    datatype=dtype, gpu_target=self.ARCH, tile_m=m, tile_n=n
+                    datatype=dtype,
+                    gpu_target=self.ARCH,
+                    pipeline=pipeline,
+                    tile_m=m,
+                    tile_n=n,
                 )
+                for pipeline in ("comp_tdm", "comp_tdm_v2")
                 for m, n in ((64, 64), (64, 128), (128, 64), (128, 128))
             ]
         so_paths = setup_multiple_mx_gemm_dispatchers(
@@ -106,11 +120,12 @@ class TestMxGemmGpu(unittest.TestCase):
         self.assertTrue(all(so_paths), f"mx_gemm {dtype} kernel failed to build")
         for config, so in zip(configs, so_paths):
             runner = GpuMxGemmRunner(so, dtype=dtype, arch=self.ARCH)
+            bm, bn, bk = config.tile_m, config.tile_n, config.tile_k
             shapes = [
-                (128, 128, 128),
-                (128, 256, 256),
-                (256, 128, 384),
-                (512, 512, 512),
+                (bm, bn, bk),
+                (bm, 2 * bn, 2 * bk),
+                (2 * bm, bn, 3 * bk),
+                (2 * bm, 2 * bn, 4 * bk),
             ]
             if self.ARCH == "gfx1250":
                 shapes += [(1, 17, 128), (63, 65, 256), (129, 257, 512)]
@@ -118,6 +133,7 @@ class TestMxGemmGpu(unittest.TestCase):
                 for seed in (5, 19):
                     with self.subTest(
                         dtype=dtype,
+                        pipeline=config.pipeline,
                         tile=(config.tile_m, config.tile_n),
                         shape=(M, N, K),
                         seed=seed,
@@ -142,23 +158,23 @@ class TestMxGemmGpu(unittest.TestCase):
                         error = _max_rel_err(got, ref)
                         self.assertLessEqual(error, _TOL)
                         print(
-                            f"[mx_gemm/{dtype}] tile={config.tile_m}x{config.tile_n} "
+                            f"[mx_gemm/{dtype}/{config.pipeline}] tile={config.tile_m}x{config.tile_n} "
                             f"shape={M}x{N}x{K} seed={seed} max_rel={error:.4e}"
                         )
             # Unsupported K tails and split-K must be rejected before reshuffling.
             for problem in (
-                MxGemmProblem(128, 128, 32),
-                MxGemmProblem(128, 128, 128, 2),
+                MxGemmProblem(bm, bn, 32),
+                MxGemmProblem(bm, bn, bk, 2),
             ):
                 _, _, a, b, sa, sb = runner.make_inputs(problem, scale=1.0, seed=5)
                 with self.assertRaisesRegex(RuntimeError, "unsupported"):
                     runner.run(problem, a, b, sa, sb)
 
     def test_fp8(self):
-        self._run_dtype("fp8", default_fp8_config(self.ARCH))
+        self._run_dtype("fp8")
 
     def test_fp4(self):
-        self._run_dtype("fp4", default_fp4_config(self.ARCH))
+        self._run_dtype("fp4")
 
 
 if __name__ == "__main__":

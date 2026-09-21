@@ -31,13 +31,14 @@ from dispatcher_common import unified_framework_flags
 import concurrent.futures
 import ctypes
 import functools
+import importlib.util
 import json
 import logging
 import os
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -54,6 +55,15 @@ _CTYPES_LIB_SRC = (
 # ck root == the composablekernel dir (three levels up from dispatcher/python).
 _CK_ROOT = Path(__file__).parent.parent.parent
 _HIPCC = os.environ.get("CK_TILE_HIPCC", "/opt/rocm/bin/hipcc")
+
+
+@functools.lru_cache(maxsize=1)
+def _mx_codegen():
+    """Use the same architecture and tile validation as kernel generation."""
+    spec = importlib.util.spec_from_file_location("mx_bridge_codegen", _CODEGEN_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _get_arch() -> str:
@@ -363,54 +373,18 @@ class MxGemmKernelConfig:
         return "_".join(parts)
 
     def is_valid(self) -> bool:
-        if self.layout != "rcr":
-            return False
-        if self.datatype not in ("fp8", "fp4"):
-            return False
-        if any(
-            v <= 0
-            for v in (
-                self.tile_m,
-                self.tile_n,
-                self.tile_k,
-                self.warp_m,
-                self.warp_n,
-                self.warp_k,
-                self.warp_tile_m,
-                self.warp_tile_n,
-                self.warp_tile_k,
-            )
-        ):
-            return False
-        if self.gpu_target == "gfx1250":
-            if self.pipeline not in (None, "comp_tdm") or self.epilogue not in (
-                None,
-                "tdm",
-            ):
-                return False
-            if (
-                self.persistent
-                or self.pad_k
-                or (self.warp_m, self.warp_n, self.warp_k) != (2, 2, 1)
-            ):
-                return False
-        elif self.gpu_target not in (None, "gfx950"):
-            return False
-        elif self.pipeline not in (None, "comp_async") or self.epilogue not in (
-            None,
-            "cshuffle",
-        ):
-            return False
-        if self.scheduler != "intrawave":
-            return False
-        if not (
-            self.tile_m % (self.warp_m * self.warp_tile_m) == 0
-            and self.tile_n % (self.warp_n * self.warp_tile_n) == 0
-            and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
-        ):
-            return False
-        # MX XDL uses 16x16x128 warp tiles on gfx950.
-        return (self.warp_tile_m, self.warp_tile_n, self.warp_tile_k) == (16, 16, 128)
+        # Unbound configs can be checked without detecting or selecting a device.
+        # Generation still requires an explicit or detected architecture.
+        arches = (self.gpu_target,) if self.gpu_target else ("gfx950", "gfx1250")
+        for arch in arches:
+            try:
+                _mx_codegen()._validate(
+                    replace(self, gpu_target=arch).to_codegen_config()
+                )
+                return True
+            except (ValueError, TypeError):
+                continue
+        return False
 
 
 # =============================================================================
@@ -955,11 +929,14 @@ def setup_multiple_mx_gemm_dispatchers(
     return results
 
 
-def default_fp8_config(gfx_arch: Optional[str] = None) -> MxGemmKernelConfig:
-    return MxGemmKernelConfig(
+def default_fp8_config(
+    gfx_arch: Optional[str] = None, pipeline: Optional[str] = None
+) -> MxGemmKernelConfig:
+    cfg = MxGemmKernelConfig(
         datatype="fp8",
         layout="rcr",
         gpu_target=gfx_arch,
+        pipeline=pipeline,
         scheduler="intrawave",
         tile_m=128,
         tile_n=128,
@@ -971,10 +948,23 @@ def default_fp8_config(gfx_arch: Optional[str] = None) -> MxGemmKernelConfig:
         warp_tile_n=16,
         warp_tile_k=128,
     )
+    if pipeline == "comp_async_eight_waves":
+        cfg.tile_n = 256
+        cfg.warp_m = 4
+    elif pipeline == "weight_preshuffle":
+        cfg.tile_n = 256
+        cfg.tile_k = 256
+        cfg.warp_m = 1
+        cfg.warp_n = 4
+    return cfg
 
 
-def default_fp4_config(gfx_arch: Optional[str] = None) -> MxGemmKernelConfig:
-    cfg = default_fp8_config(gfx_arch)
+def default_fp4_config(
+    gfx_arch: Optional[str] = None, pipeline: Optional[str] = None
+) -> MxGemmKernelConfig:
+    cfg = default_fp8_config(gfx_arch, pipeline)
     cfg.datatype = "fp4"
+    if pipeline == "weight_preshuffle":
+        cfg.tile_n = 512
     cfg._name_cache = None
     return cfg

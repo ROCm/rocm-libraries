@@ -51,7 +51,8 @@
     "trait_config": {
         "pipeline": {
             "values": [
-                "comp_tdm"
+                "comp_tdm",
+                "comp_tdm_v2"
             ]
         },
         "scheduler": {

@@ -57,13 +57,13 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
     def _generate_trait_combinations(self):
         arch = self.gpu_target.split(":", 1)[0]
         expected = {
-            "gfx950": ("comp_async", "cshuffle"),
-            "gfx1250": ("comp_tdm", "tdm"),
-        }.get(arch)
+            "gfx950": ("comp_async", "comp_async_eight_waves", "weight_preshuffle"),
+            "gfx1250": ("comp_tdm", "comp_tdm_v2"),
+        }.get(arch, ())
         return [
             combo
             for combo in super()._generate_trait_combinations()
-            if combo[:2] == expected and not (arch == "gfx1250" and combo[5])
+            if combo[0] in expected and not (arch == "gfx1250" and combo[5])
         ]
 
     def _generate_all_individual(self, num_workers=None):
@@ -80,6 +80,19 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         work_items = []
         for tile_config in tile_configs:
             for trait_combo in trait_combos:
+                if not self._validate_tile_config(
+                    tile_config["tile_m"],
+                    tile_config["tile_n"],
+                    tile_config["tile_k"],
+                    tile_config["warp_m"],
+                    tile_config["warp_n"],
+                    tile_config["warp_k"],
+                    tile_config["warp_tile_m"],
+                    tile_config["warp_tile_n"],
+                    tile_config["warp_tile_k"],
+                    trait_combo[0],
+                ):
+                    continue
                 work_items.append(
                     (
                         tile_config,

@@ -6,10 +6,30 @@ output. Layout is RCR: A is stored as `[M, K]`, B as `[N, K]`, and C as `[M, N]`
 FP4 stores the even K element in the low nibble and the odd K element in the high
 nibble, so its input storage is `[M, K/2]` and `[N, K/2]` bytes.
 
-| Target | Pipeline | Epilogue | Warp tile |
+The bridge exposes all five pipeline choices in the native MX GEMM selector:
+
+| Target | Pipeline | Native implementation | Epilogue |
 | --- | --- | --- | --- |
-| gfx950 | `comp_async` | CShuffle | 16 × 16 × 128 |
-| gfx1250 | `comp_tdm` | TDM | 16 × 16 × 128 |
+| gfx950 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
+| gfx950 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
+| gfx950 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
+| gfx1250 | `comp_tdm` | `GemmPipelineAgBgCrCompTDMV1` | TDM |
+| gfx1250 | `comp_tdm_v2` | `GemmPipelineAgBgCrCompTDMV2` | TDM |
+
+All use intrawave scheduling and a 16 × 16 × 128 warp tile. The default remains
+`comp_async` on gfx950 and `comp_tdm` on gfx1250. Select another pipeline with
+`default_fp8_config("gfx950", pipeline="weight_preshuffle")`,
+`default_fp4_config("gfx950", pipeline="comp_async_eight_waves")`, or
+`default_fp8_config("gfx1250", pipeline="comp_tdm_v2")`. These helpers choose
+compatible block tiles and warp counts for the selected pipeline.
+
+Eight-wave async requires `4 × 2 × 1` warps and M/N block tiles divisible by
+128, with a valid CShuffle distribution. Weight preshuffle requires
+`1 × 4 × 1` warps and block tiles divisible by `32 × 128 × 256`; FP4 also
+requires block N divisible by 512. The host reshuffles B for weight preshuffle,
+so callers supply the same packed RCR input buffers for every pipeline.
+The generator and Python configuration validation apply the same architecture,
+tile-distribution, and LDS limits.
 
 The gfx1250 path uses WMMA without cluster launch and supports revision 0.
 M and N may include partial tiles; the host pads their scale buffers before
@@ -42,7 +62,7 @@ from mx_gemm_utils import (
 )
 
 for make_config in (default_fp8_config, default_fp4_config):
-    config = make_config("gfx1250")
+    config = make_config("gfx1250", pipeline="comp_tdm_v2")
     library = setup_multiple_mx_gemm_dispatchers(
         [config], output_dir=Path("build/mx_bridge"), gfx_arch="gfx1250",
         parallel=False,
@@ -73,10 +93,11 @@ codecs, the CI configuration, and exact generated-header parity with Tile Engine
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_bridge.py -v
 ```
 
-The GPU suite builds all eight gfx1250 CI configurations (two input types × two
-M tiles × two N tiles), runs seven shapes with two seeds, varies scales across
-rows and K blocks, and checks K-tail/split-K rejection. It also runs on gfx950
-with that architecture's supported default configurations:
+The GPU suite builds all 16 gfx1250 CI configurations (two pipelines × two input
+types × two M tiles × two N tiles), runs seven shapes with two seeds, varies
+scales across rows and K blocks, and checks K-tail/split-K rejection. On gfx950
+it tests all three pipelines with FP4 and FP8 over four block-relative shapes
+and two seeds:
 
 ```bash
 CK_TILE_BENCH_WARMUP=1 CK_TILE_BENCH_REPEAT=2 \
@@ -96,6 +117,20 @@ ctest --test-dir build/mx_native -R test_ck_tile_mx_gemm_e8m0_gfx1250 --output-o
 
 For Tile Engine, enable `BUILD_CK_TILE_ENGINE`, use `GPU_TARGETS=gfx1250`, and
 build `benchmark_mx_gemm_all`. The MX operation selects
-`default_ci_config_gfx1250.json` automatically unless a custom MX config is
-provided. Benchmark executables accept `-m=`, `-n=`, `-k=`, `-verify=1`, `-init=0`,
+`default_config_gfx1250.json` automatically unless a custom MX config is
+provided. It uses both `comp_tdm` and `comp_tdm_v2` with the TDM epilogue,
+intrawave scheduling, `2 x 2 x 1` warps,
+a `16 x 16 x 128` warp tile, and no padding or persistent execution. Block M/N
+range from 64 to 256 in steps of 64; block K is 128 or 256. The existing
+datatype-specific LDS checks filter this search space to 22 FP4 and 7 FP8
+kernels per pipeline, for 58 kernels total.
+
+For the smaller 16-kernel CI set covering both TDM pipelines, pass
+`-DMX_GEMM_CONFIG_FILE=default_ci_config_gfx1250.json` to CMake. The
+`MX_GEMM_CONFIG_FILE` environment variable takes precedence over the CMake
+option. gfx950 selects `default_config.json`, which covers all three gfx950
+pipelines with CShuffle. Each configuration file contains pipelines supported
+by its target architecture.
+
+Benchmark executables accept `-m=`, `-n=`, `-k=`, `-verify=1`, `-init=0`,
 `-warmup=1`, and `-repeat=2` for a short correctness run with random inputs.

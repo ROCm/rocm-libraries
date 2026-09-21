@@ -318,6 +318,13 @@ int dispatcher_run_mx_gemm(const void* A,
     std::memcpy(a_m_k.mData.data(), A, a_bytes);
     std::memcpy(b_k_n.mData.data(), B, b_bytes);
 
+    const auto b_host_for_device = [&]() {
+        if constexpr(SelectedKernel::Preshuffle)
+            return ck_tile::shuffle_b<SelectedKernel>(b_k_n);
+        else
+            return b_k_n;
+    }();
+
     const std::size_t scale_a_bytes = scale_a_shuffled.get_element_space_size_in_bytes();
     const std::size_t scale_b_bytes = scale_b_shuffled.get_element_space_size_in_bytes();
 
@@ -335,7 +342,7 @@ int dispatcher_run_mx_gemm(const void* A,
         ck_tile::DeviceMem sb_dev(scale_b_bytes);
 
         a_dev.ToDevice(a_m_k.data());
-        b_dev.ToDevice(b_k_n.data());
+        b_dev.ToDevice(b_host_for_device.data());
         c_dev.SetZero();
         sa_dev.ToDevice(scale_a_shuffled.data());
         sb_dev.ToDevice(scale_b_shuffled.data());

@@ -102,7 +102,7 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
     add_dependencies(benchmark_mx_gemm_${datatype}_${layout} ${target_name})
 
     # Add to trait-specific targets
-    if(trait MATCHES "^(comp_async|comp_tdm)_")
+    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_async|comp_tdm|weight_preshuffle)_")
         set(pipeline "${CMAKE_MATCH_1}")
         string(REGEX REPLACE "^${pipeline}_" "" trait_tail "${trait}")
         string(REPLACE "_" ";" trait_parts ${trait_tail})
@@ -128,7 +128,7 @@ function(build_individual_mx_gemm_targets datatype layout)
     # Priority order:
     # 1. Environment variable MX_GEMM_CONFIG_FILE
     # 2. CMake variable MX_GEMM_CONFIG_FILE
-    # 3. Default based on layout
+    # 3. Default based on GPU target
 
     # Check environment variable first
     if(DEFINED ENV{MX_GEMM_CONFIG_FILE} AND NOT "$ENV{MX_GEMM_CONFIG_FILE}" STREQUAL "")
@@ -140,7 +140,7 @@ function(build_individual_mx_gemm_targets datatype layout)
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${MX_GEMM_CONFIG_FILE}")
         message(VERBOSE "  Using custom config: ${MX_GEMM_CONFIG_FILE}")
     elseif(MX_GEMM_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_ci_config_gfx1250.json")
+        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config_gfx1250.json")
     else()
         # Use default config for all layouts
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
@@ -313,7 +313,7 @@ else()
 
     # Create trait-based collection targets
     # These are common trait components used across all MX GEMM kernels
-    set(MX_GEMM_PIPELINES "comp_async;comp_tdm")
+    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2")
     set(MX_GEMM_EPILOGUES "cshuffle;tdm")
     set(MX_GEMM_SCHEDULERS "intrawave")
 

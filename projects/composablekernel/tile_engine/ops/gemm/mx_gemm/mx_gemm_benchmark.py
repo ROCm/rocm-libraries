@@ -66,12 +66,12 @@ class MxGemmBenchmark(GemmBenchmark):
         }
 
         parts = args.split("_")
-        if len(parts) >= 6 and parts[2] == "comp" and parts[3] in ("async", "tdm"):
+        if len(parts) >= 12:
             info["data_type"] = parts[0]
             info["layout"] = parts[1]
-            info["pipeline"] = "comp_" + parts[3]
-            info["epilogue"] = parts[4]
-            info["scheduler"] = parts[5]
+            info["pipeline"] = "_".join(parts[2:-9])
+            info["epilogue"] = parts[-9]
+            info["scheduler"] = parts[-8]
         elif len(parts) >= 5:
             info["data_type"] = parts[0]
             info["layout"] = parts[1]

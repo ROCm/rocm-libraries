@@ -335,12 +335,17 @@ class TestMxArchitectureKernels(unittest.TestCase):
         import tempfile
 
         cfg = default_fp8_config("gfx1250")
-        with tempfile.TemporaryDirectory() as tmp, patch(
-            "mx_gemm_utils._get_arch",
-            side_effect=AssertionError("unexpected detection"),
-        ), patch(
-            "mx_gemm_utils._generate_kernel", return_value=Path(tmp) / "kernel.hpp"
-        ), patch("mx_gemm_utils._compile_kernel", return_value=True) as compile_kernel:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch(
+                "mx_gemm_utils._get_arch",
+                side_effect=AssertionError("unexpected detection"),
+            ),
+            patch(
+                "mx_gemm_utils._generate_kernel", return_value=Path(tmp) / "kernel.hpp"
+            ),
+            patch("mx_gemm_utils._compile_kernel", return_value=True) as compile_kernel,
+        ):
             result = setup_multiple_mx_gemm_dispatchers(
                 [cfg], output_dir=Path(tmp), parallel=False
             )
@@ -360,8 +365,9 @@ class TestMxArchitectureKernels(unittest.TestCase):
 
         for arch in ("gfx950", "gfx1250"):
             for dtype in ("fp8", "fp4"):
-                with self.subTest(arch=arch, dtype=dtype), contextlib.redirect_stdout(
-                    io.StringIO()
+                with (
+                    self.subTest(arch=arch, dtype=dtype),
+                    contextlib.redirect_stdout(io.StringIO()),
                 ):
                     cfg = MxGemmKernelConfig(
                         datatype=dtype, gpu_target=arch
@@ -424,8 +430,135 @@ class TestMxArchitectureKernels(unittest.TestCase):
                 self.assertEqual(len(tiles), 4)
                 self.assertEqual(
                     traits,
-                    [("comp_tdm", "tdm", "intrawave", False, False, False, False)],
+                    [
+                        (pipeline, "tdm", "intrawave", False, False, False, False)
+                        for pipeline in ("comp_tdm", "comp_tdm_v2")
+                    ],
                 )
+
+    def test_all_native_mx_pipeline_defaults_and_codegen(self):
+        from unified_mx_gemm_codegen import (
+            _generate,
+            _make_builder,
+            _trait_combo_from_cfg,
+        )
+        import contextlib
+        import io
+
+        pipelines = {
+            "gfx950": {
+                "comp_async": "GemmPipelineAgBgCrCompAsync",
+                "comp_async_eight_waves": "GemmPipelineAgBgCrCompAsyncEightWaves",
+                "weight_preshuffle": "MXGemmPreshufflePipelineAGmemBGmemCRegV1",
+            },
+            "gfx1250": {
+                "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
+                "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+            },
+        }
+        for arch, implementations in pipelines.items():
+            for pipeline, implementation in implementations.items():
+                for make_config in (default_fp4_config, default_fp8_config):
+                    cfg = make_config(arch, pipeline)
+                    with self.subTest(arch=arch, pipeline=pipeline, dtype=cfg.datatype):
+                        self.assertTrue(cfg.is_valid())
+                        config = cfg.to_codegen_config()
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            name, code = _generate(config)
+                            with _make_builder(config) as builder:
+                                te_name, te_code = builder._generate_kernel_instance(
+                                    config["tile_config"], _trait_combo_from_cfg(config)
+                                )
+                        self.assertEqual((name, code), (te_name, te_code))
+                        self.assertIn(f"ck_tile::{implementation}<", code)
+                        self.assertIn("MxGemmPipelineProblem", code)
+                        self.assertIn(
+                            "Preshuffle = true;"
+                            if pipeline == "weight_preshuffle"
+                            else "Preshuffle = false;",
+                            code,
+                        )
+
+    def test_pipeline_architecture_and_tile_rejections(self):
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _validate
+
+        invalid = [
+            default_fp8_config("gfx1250", "comp_async"),
+            default_fp8_config("gfx950", "comp_tdm_v2"),
+            default_fp8_config("gfx1250", "weight_preshuffle"),
+            replace(default_fp4_config("gfx950", "comp_async"), tile_m=192, tile_n=512),
+            replace(
+                default_fp8_config("gfx950", "comp_async"),
+                tile_m=64,
+                tile_n=256,
+                tile_k=256,
+            ),
+            replace(default_fp8_config("gfx950", "comp_async_eight_waves"), warp_m=2),
+            replace(default_fp4_config("gfx950", "comp_async_eight_waves"), tile_n=384),
+            replace(
+                default_fp4_config("gfx950", "comp_async_eight_waves"),
+                tile_n=512,
+                tile_k=256,
+            ),  # Native LDS allocation is 168960 bytes, above gfx950's 163840.
+            replace(default_fp4_config("gfx950", "comp_async_eight_waves"), tile_k=384),
+            replace(default_fp8_config("gfx950", "weight_preshuffle"), warp_m=2),
+            replace(default_fp4_config("gfx950", "weight_preshuffle"), tile_n=256),
+            replace(default_fp8_config("gfx950", "weight_preshuffle"), tile_k=128),
+            replace(default_fp8_config("gfx1250", "comp_tdm_v2"), persistent=True),
+            replace(default_fp8_config("gfx1250", "comp_tdm_v2"), pad_k=True),
+            replace(default_fp8_config("gfx1250", "comp_tdm_v2"), epilogue="cshuffle"),
+        ]
+        for cfg in invalid:
+            with self.subTest(cfg=cfg):
+                self.assertFalse(cfg.is_valid())
+                with self.assertRaises(ValueError):
+                    _validate(cfg.to_codegen_config())
+
+    def test_gfx1250_default_covers_both_tdm_pipelines(self):
+        from collections import Counter
+        from unified_mx_gemm_codegen import _load_mx_builder
+        import tempfile
+
+        config = (
+            _DISP.parent
+            / "tile_engine/ops/gemm/mx_gemm/configs/default_config_gfx1250.json"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for dtype, count in (("fp4", 22), ("fp8", 7)):
+                builder = _load_mx_builder()(
+                    "mx_gemm", Path(tmp), "gfx1250", dtype, "rcr", str(config)
+                )
+                kernels = builder._get_sampled_kernel_list()
+                self.assertEqual(
+                    Counter(k["trait_combo"][0] for k in kernels),
+                    {"comp_tdm": count, "comp_tdm_v2": count},
+                )
+
+    def test_benchmark_metadata_preserves_pipeline_names(self):
+        from mx_gemm_benchmark import MxGemmBenchmark
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            benchmark = MxGemmBenchmark(tmp)
+            for arch, pipelines in (
+                (
+                    "gfx950",
+                    ("comp_async", "comp_async_eight_waves", "weight_preshuffle"),
+                ),
+                ("gfx1250", ("comp_tdm", "comp_tdm_v2")),
+            ):
+                for pipeline in pipelines:
+                    cfg = default_fp8_config(arch, pipeline)
+                    info = benchmark.extract_kernel_info(
+                        Path(tmp) / ("benchmark_" + cfg.name)
+                    )
+                    with self.subTest(pipeline=pipeline):
+                        self.assertEqual(info["pipeline"], pipeline)
+                        self.assertEqual(info["scheduler"], "intrawave")
+                        self.assertEqual(
+                            info["epilogue"], "tdm" if arch == "gfx1250" else "cshuffle"
+                        )
 
 
 if __name__ == "__main__":

@@ -553,7 +553,10 @@ class GemmKernelBuilder:
         elif self.kernel_name_prefix == "mx_gemm":
             pipeline_impl_map = {
                 "comp_async": "ck_tile::GemmPipelineAgBgCrCompAsync",
+                "comp_async_eight_waves": "ck_tile::GemmPipelineAgBgCrCompAsyncEightWaves",
+                "weight_preshuffle": "ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1",
                 "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
+                "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
             }
             base_pipeline_map = {}
         elif self.kernel_name_prefix == "gemm_aquant":
@@ -633,6 +636,8 @@ class GemmKernelBuilder:
 """
         elif self.kernel_name_prefix == "mx_gemm":
             instance_code += """#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves.hpp"
+#include "ck_tile/ops/gemm/pipeline/wp_mx_pipeline_agmem_bgmem_creg_v1.hpp"
 """
         elif self.kernel_name_prefix in ["gemm_aquant", "gemm_bquant", "gemm_abquant"]:
             instance_code += """#include "ck_tile/ops/gemm_quant.hpp"
@@ -759,7 +764,7 @@ struct SelectedKernel {{
     static constexpr bool kPadN = {"true" if pad_n in [True, "true"] else "false"};
     static constexpr bool kPadK = {"true" if pad_k in [True, "true"] else "false"};
     static constexpr bool TransposeC = {"std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> && WarpTileM == WarpTileN" if self.kernel_name_prefix == "mx_gemm" and self.gpu_target.split(":")[0] == "gfx1250" else "false"};
-    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async", "comp_tdm"] else "false"};"""
+    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async", "comp_tdm", "comp_tdm_v2", "comp_async_eight_waves", "weight_preshuffle"] else "false"};"""
 
         if self.kernel_name_prefix == "gemm_aquant":
             instance_code += f"""
@@ -791,6 +796,14 @@ struct SelectedKernel {{
                 instance_code += f"""
     static constexpr bool Preshuffle = true;
     static constexpr bool PermuteN     = {"true" if self.config.get("permute_n") else "false"};"""
+            elif self.kernel_name_prefix == "mx_gemm":
+                instance_code += f"""
+    static constexpr bool Preshuffle = {"true" if pipeline == "weight_preshuffle" else "false"};
+    // Host B reshuffling uses the native MX configuration interface.
+    static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
+    static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess =
+        std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;"""
             else:
                 instance_code += """
     static constexpr bool Preshuffle = false;"""
@@ -1054,7 +1067,6 @@ struct SelectedKernel {{
             problem_type = (
                 "MxGemmPipelineProblem"
                 if self.kernel_name_prefix == "mx_gemm"
-                and self.gpu_target.split(":")[0] == "gfx1250"
                 else "UniversalGemmPipelineProblem"
             )
             instance_code += f"""
@@ -1604,11 +1616,11 @@ struct SelectedKernel {{
             1,         // NumWaveGroups
             false,     // FixedVectorSize_
             1,         // VectorSizeC_
-            1,         // BlockedXDLNPerWarp
+            Preshuffle ? 2 : 1, // BlockedXDLNPerWarp
             {"true" if tdm else "false"},     // DoubleSmemBuffer_
             ADataType, // AComputeDataType
             BDataType, // BComputeDataType
-            true>;     // TilesPacked_
+            !Preshuffle>; // TilesPacked_
 
         using GemmEpilogue = ck_tile::{"TdmEpilogue" if tdm else "CShuffleEpilogue"}<EpilogueProblem>;"""
         return instance_code
