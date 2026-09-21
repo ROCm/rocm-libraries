@@ -4734,13 +4734,19 @@ def _make_global_prefetch_class():
         def to_stinky_logical(self) -> Any:
             import stinkytofu as _st
             factory = getattr(_st, "GlobalPrefetchB8")
-            return factory(
+            inst = factory(
                 _to_stinky_register(self.srcs[0]),
                 _to_stinky_register(self.srcs[1]),
                 self.comment)
+            _apply_global(inst, self._modifiers)
+            return inst
 
         def __deepcopy__(self, memo):
-            return CommonInstruction.__deepcopy__(self, memo)
+            clone = CommonInstruction.__deepcopy__(self, memo)
+            clone._modifiers = (
+                _deepcopy(self._modifiers, memo) if self._modifiers is not None else None
+            )
+            return clone
 
     return GlobalPrefetchB8
 
