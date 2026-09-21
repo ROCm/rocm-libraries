@@ -473,10 +473,13 @@ TEST(rocfft_UnitTest, setup_cleanup_counter)
     ROCFFT_CATCH_TEST_EXCEPTIONS
 }
 
-// check that a multi-dimensional real inverse transform gets its own twiddle
-// table when a plain complex kernel of the same size already has one cached.
-// The real transform runs on a complex kernel with fused pre-processing, which
-// needs a half-N section appended that the complex kernel does not use.
+// check that a multi-dimensional real transform gets its own twiddle table when
+// a plain complex kernel of the same size already has one cached.  A real
+// transform runs on a complex kernel with fused pre/post-processing, which needs
+// a half-N section appended that the complex kernel does not use; if the cache
+// hands it the complex kernel's shorter table it returns wrong numbers.  Both
+// the forward (R2C, post-processing) and inverse (C2R, pre-processing) direction
+// hit the same 2D kernel, so run both.
 TEST(rocfft_UnitTest, twiddle_cache_2D_real_after_complex)
 {
     PROB_SKIP_UNITTEST();
@@ -493,20 +496,20 @@ TEST(rocfft_UnitTest, twiddle_cache_2D_real_after_complex)
         const std::vector<size_t> real_lengths{8, 4};
         const std::vector<size_t> complex_lengths{4, 4};
 
-        const size_t input_elems  = (real_lengths[0] / 2 + 1) * real_lengths[1];
-        const size_t output_elems = real_lengths[0] * real_lengths[1];
+        // both sides as float counts: the real side is one float per element,
+        // the Hermitian side is a complex (two-float) element per element
+        const size_t real_floats = real_lengths[0] * real_lengths[1];
+        const size_t herm_floats = (real_lengths[0] / 2 + 1) * real_lengths[1] * 2;
 
-        // the input need not be Hermitian-symmetric - the property under test
-        // is only that the same input gives the same output
-        std::vector<rocfft_complex<float>> input(input_elems);
-        for(size_t i = 0; i < input.size(); ++i)
-            input[i] = {static_cast<float>(i % 7) - 3.0f, static_cast<float>(i % 5) - 2.0f};
-
-        auto real_inverse = [&]() {
-            const size_t                    ibytes = input.size() * sizeof(input[0]);
-            const size_t                    obytes = output_elems * sizeof(float);
-            gpubuf_t<rocfft_complex<float>> idev;
-            gpubuf_t<float>                 odev;
+        // run a real transform and return its output as floats
+        auto run_real_transform = [&](rocfft_transform_type     real_dft_type,
+                                      const std::vector<float>& input) {
+            const size_t output_floats
+                = real_dft_type == rocfft_transform_type_real_forward ? herm_floats : real_floats;
+            const size_t    ibytes = input.size() * sizeof(float);
+            const size_t    obytes = output_floats * sizeof(float);
+            gpubuf_t<float> idev;
+            gpubuf_t<float> odev;
             EXPECT_EQ(idev.alloc(ibytes), hipSuccess);
             EXPECT_EQ(odev.alloc(obytes), hipSuccess);
             EXPECT_EQ(hipMemcpy(idev.data(), input.data(), ibytes, hipMemcpyHostToDevice),
@@ -515,7 +518,7 @@ TEST(rocfft_UnitTest, twiddle_cache_2D_real_after_complex)
             rocfft_plan plan = nullptr;
             EXPECT_EQ(rocfft_plan_create(&plan,
                                          rocfft_placement_notinplace,
-                                         rocfft_transform_type_real_inverse,
+                                         real_dft_type,
                                          rocfft_precision_single,
                                          real_lengths.size(),
                                          real_lengths.data(),
@@ -527,154 +530,67 @@ TEST(rocfft_UnitTest, twiddle_cache_2D_real_after_complex)
             EXPECT_EQ(rocfft_execute(plan, &ibuf, &obuf, nullptr), rocfft_status_success);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-            std::vector<float> output(output_elems);
+            std::vector<float> output(output_floats);
             EXPECT_EQ(hipMemcpy(output.data(), obuf, obytes, hipMemcpyDeviceToHost), hipSuccess);
             EXPECT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
             return output;
         };
 
-        // baseline, with nothing else in the twiddle cache
-        rocfft_cleanup();
-        rocfft_setup();
-        const std::vector<float> expected = real_inverse();
+        // both directions hit the same 2D kernel; the float counts follow from
+        // the direction (R2C is real -> Hermitian, C2R the reverse)
+        for(const auto type :
+            {rocfft_transform_type_real_forward, rocfft_transform_type_real_inverse})
+        {
+            const bool   forward      = type == rocfft_transform_type_real_forward;
+            const size_t input_floats = forward ? real_floats : herm_floats;
 
-        // again, but after a complex transform of the colliding lengths whose
-        // plan, and so whose cached twiddle table, is still alive
-        rocfft_cleanup();
-        rocfft_setup();
+            // the input pattern is arbitrary (need not be Hermitian-symmetric) -
+            // the property under test is only that the same input gives the same
+            // output
+            std::vector<float> input(input_floats);
+            for(size_t i = 0; i < input.size(); ++i)
+                input[i] = static_cast<float>(i % 7) - 3.0f;
 
-        rocfft_plan complex_plan = nullptr;
-        ASSERT_EQ(rocfft_plan_create(&complex_plan,
-                                     rocfft_placement_inplace,
-                                     rocfft_transform_type_complex_forward,
-                                     rocfft_precision_single,
-                                     complex_lengths.size(),
-                                     complex_lengths.data(),
-                                     1,
-                                     nullptr),
-                  rocfft_status_success);
-
-        const size_t complex_bytes
-            = complex_lengths[0] * complex_lengths[1] * sizeof(rocfft_complex<float>);
-        gpubuf_t<rocfft_complex<float>> complex_dev;
-        ASSERT_EQ(complex_dev.alloc(complex_bytes), hipSuccess);
-        ASSERT_EQ(hipMemset(complex_dev.data(), 0, complex_bytes), hipSuccess);
-        void* complex_buf = complex_dev.data();
-        ASSERT_EQ(rocfft_execute(complex_plan, &complex_buf, nullptr, nullptr),
-                  rocfft_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-        const std::vector<float> actual = real_inverse();
-
-        ASSERT_EQ(rocfft_plan_destroy(complex_plan), rocfft_status_success);
-
-        ASSERT_EQ(actual.size(), expected.size());
-        for(size_t i = 0; i < expected.size(); ++i)
-            ASSERT_FLOAT_EQ(actual[i], expected[i]) << "element " << i;
-    }
-    ROCFFT_CATCH_TEST_EXCEPTIONS
-}
-
-// check that a multi-dimensional real forward transform gets its own twiddle
-// table when a plain complex kernel of the same size already has one cached.
-// The real transform runs on a complex kernel with fused post-processing, which
-// needs a half-N section appended that the complex kernel does not use.
-TEST(rocfft_UnitTest, twiddle_cache_2D_real_forward_after_complex)
-{
-    PROB_SKIP_UNITTEST();
-    try
-    {
-        LocalCleanup restore([]() {
+            // baseline, with nothing else in the twiddle cache
             rocfft_cleanup();
             rocfft_setup();
-        });
+            const std::vector<float> expected = run_real_transform(type, input);
 
-        // a real length of 8 on one dimension and 4 on the other decomposes to
-        // a 4x4 complex kernel, so it collides with the complex transform below
-        const std::vector<size_t> real_lengths{8, 4};
-        const std::vector<size_t> complex_lengths{4, 4};
+            // again, but after a complex transform of the colliding lengths whose
+            // plan, and so whose cached twiddle table, is still alive
+            rocfft_cleanup();
+            rocfft_setup();
 
-        const size_t input_elems  = real_lengths[0] * real_lengths[1];
-        const size_t output_elems = (real_lengths[0] / 2 + 1) * real_lengths[1];
-
-        // any real input will do - the property under test is only that the
-        // same input gives the same output
-        std::vector<float> input(input_elems);
-        for(size_t i = 0; i < input.size(); ++i)
-            input[i] = static_cast<float>(i % 7) - 3.0f;
-
-        auto real_forward = [&]() {
-            const size_t                    ibytes = input.size() * sizeof(input[0]);
-            const size_t                    obytes = output_elems * sizeof(rocfft_complex<float>);
-            gpubuf_t<float>                 idev;
-            gpubuf_t<rocfft_complex<float>> odev;
-            EXPECT_EQ(idev.alloc(ibytes), hipSuccess);
-            EXPECT_EQ(odev.alloc(obytes), hipSuccess);
-            EXPECT_EQ(hipMemcpy(idev.data(), input.data(), ibytes, hipMemcpyHostToDevice),
-                      hipSuccess);
-
-            rocfft_plan plan = nullptr;
-            EXPECT_EQ(rocfft_plan_create(&plan,
-                                         rocfft_placement_notinplace,
-                                         rocfft_transform_type_real_forward,
+            rocfft_plan complex_plan = nullptr;
+            ASSERT_EQ(rocfft_plan_create(&complex_plan,
+                                         rocfft_placement_inplace,
+                                         rocfft_transform_type_complex_forward,
                                          rocfft_precision_single,
-                                         real_lengths.size(),
-                                         real_lengths.data(),
+                                         complex_lengths.size(),
+                                         complex_lengths.data(),
                                          1,
                                          nullptr),
                       rocfft_status_success);
-            void* ibuf = idev.data();
-            void* obuf = odev.data();
-            EXPECT_EQ(rocfft_execute(plan, &ibuf, &obuf, nullptr), rocfft_status_success);
-            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            // hold the plan for the rest of the iteration, however it exits
+            LocalCleanup destroy_complex_plan(
+                [&]() { EXPECT_EQ(rocfft_plan_destroy(complex_plan), rocfft_status_success); });
 
-            std::vector<rocfft_complex<float>> output(output_elems);
-            EXPECT_EQ(hipMemcpy(output.data(), obuf, obytes, hipMemcpyDeviceToHost), hipSuccess);
-            EXPECT_EQ(rocfft_plan_destroy(plan), rocfft_status_success);
-            return output;
-        };
+            const size_t complex_bytes
+                = complex_lengths[0] * complex_lengths[1] * sizeof(rocfft_complex<float>);
+            gpubuf_t<rocfft_complex<float>> complex_dev;
+            ASSERT_EQ(complex_dev.alloc(complex_bytes), hipSuccess);
+            ASSERT_EQ(hipMemset(complex_dev.data(), 0, complex_bytes), hipSuccess);
+            void* complex_buf = complex_dev.data();
+            ASSERT_EQ(rocfft_execute(complex_plan, &complex_buf, nullptr, nullptr),
+                      rocfft_status_success);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        // baseline, with nothing else in the twiddle cache
-        rocfft_cleanup();
-        rocfft_setup();
-        const std::vector<rocfft_complex<float>> expected = real_forward();
+            const std::vector<float> actual = run_real_transform(type, input);
 
-        // again, but after a complex transform of the colliding lengths whose
-        // plan, and so whose cached twiddle table, is still alive
-        rocfft_cleanup();
-        rocfft_setup();
-
-        rocfft_plan complex_plan = nullptr;
-        ASSERT_EQ(rocfft_plan_create(&complex_plan,
-                                     rocfft_placement_inplace,
-                                     rocfft_transform_type_complex_forward,
-                                     rocfft_precision_single,
-                                     complex_lengths.size(),
-                                     complex_lengths.data(),
-                                     1,
-                                     nullptr),
-                  rocfft_status_success);
-        // hold the plan for the rest of the test, however the test exits
-        LocalCleanup destroy_complex_plan(
-            [&]() { EXPECT_EQ(rocfft_plan_destroy(complex_plan), rocfft_status_success); });
-
-        const size_t complex_bytes
-            = complex_lengths[0] * complex_lengths[1] * sizeof(rocfft_complex<float>);
-        gpubuf_t<rocfft_complex<float>> complex_dev;
-        ASSERT_EQ(complex_dev.alloc(complex_bytes), hipSuccess);
-        ASSERT_EQ(hipMemset(complex_dev.data(), 0, complex_bytes), hipSuccess);
-        void* complex_buf = complex_dev.data();
-        ASSERT_EQ(rocfft_execute(complex_plan, &complex_buf, nullptr, nullptr),
-                  rocfft_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-        const std::vector<rocfft_complex<float>> actual = real_forward();
-
-        ASSERT_EQ(actual.size(), expected.size());
-        for(size_t i = 0; i < expected.size(); ++i)
-        {
-            ASSERT_FLOAT_EQ(actual[i].x, expected[i].x) << "element " << i << " real part";
-            ASSERT_FLOAT_EQ(actual[i].y, expected[i].y) << "element " << i << " imaginary part";
+            ASSERT_EQ(actual.size(), expected.size());
+            for(size_t i = 0; i < expected.size(); ++i)
+                ASSERT_FLOAT_EQ(actual[i], expected[i])
+                    << "transform type " << type << ", float " << i;
         }
     }
     ROCFFT_CATCH_TEST_EXCEPTIONS

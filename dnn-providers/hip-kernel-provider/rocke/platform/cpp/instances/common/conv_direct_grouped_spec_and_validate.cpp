@@ -985,26 +985,7 @@ rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec
         return ROCKE_ERR_VALUE;
     }
     block_ch = rocke_direct_depthwise_block_ch(spec);
-    if(p->groups % block_ch != 0)
-    {
-        if(reason && reason_cap > 0)
-        {
-            snprintf(
-                reason, reason_cap, "groups %d not divisible by block_ch %d", p->groups, block_ch);
-        }
-        return ROCKE_ERR_VALUE;
-    }
-    if(p->stride != 1)
-    {
-        if(reason && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "DirectDepthwiseSpec only supports stride=1 (got %d)",
-                     p->stride);
-        }
-        return ROCKE_ERR_VALUE;
-    }
+    (void)block_ch;
     if(reason && reason_cap > 0)
     {
         strncpy(reason, "ok", reason_cap);
@@ -1051,20 +1032,388 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
         return false;
     }
     block_ch = rocke_direct_depthwise_block_ch(spec);
-    if(p->groups % block_ch != 0)
+    (void)block_ch;
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return true;
+}
+
+/* ===================================================================== *
+ *  DirectDepthwiseSpatialSpec implementations
+ * ===================================================================== */
+
+rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void)
+{
+    rocke_direct_depthwise_spatial_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_depthwise_spatial";
+    spec.block_waves = 1;
+    spec.wave_size = 64;
+    return spec;
+}
+
+int rocke_direct_depthwise_spatial_n_w_per_wave(const rocke_direct_depthwise_spatial_spec_t* spec)
+{
+    int groups = spec->problem.groups;
+    if(groups <= 0)
+    {
+        return 0;
+    }
+    return spec->wave_size / groups;
+}
+
+int rocke_direct_depthwise_spatial_block_w(const rocke_direct_depthwise_spatial_spec_t* spec)
+{
+    return spec->block_waves * rocke_direct_depthwise_spatial_n_w_per_wave(spec);
+}
+
+int rocke_direct_depthwise_spatial_threads_per_block(
+    const rocke_direct_depthwise_spatial_spec_t* spec)
+{
+    return spec->block_waves * spec->wave_size;
+}
+
+rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap)
+{
+    char prob_short[128];
+    const char* parts[2];
+    char bwv_buf[32];
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_conv_problem_short(&spec->problem, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* kernel_name_join(name, p.short(), f"bwv{block_waves}") */
+    snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
+    parts[0] = prob_short;
+    parts[1] = bwv_buf;
+    return rocke_kernel_name_join(spec->name, parts, 2, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_spatial_spec_t* spec,
+                                                  const char* arch,
+                                                  char* reason,
+                                                  size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    int n_w;
+
+    if(spec == NULL)
     {
         if(reason && reason_cap > 0)
         {
-            snprintf(
-                reason, reason_cap, "groups %d not divisible by block_ch %d", p->groups, block_ch);
+            strncpy(reason, "null spec", reason_cap);
         }
         return false;
     }
-    if(p->stride != 1)
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    if(rocke_archtarget_from_gfx(arch) == NULL)
+    {
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    p = &spec->problem;
+    if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
         {
-            snprintf(reason, reason_cap, "stride > 1 is not supported (got %d)", p->stride);
+            snprintf(reason,
+                     reason_cap,
+                     "cpg and kpg must both be 1 (got cpg=%d, kpg=%d)",
+                     p->cpg,
+                     p->kpg);
+        }
+        return false;
+    }
+    if(p->groups > spec->wave_size)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "groups %d > wave_size %d", p->groups, spec->wave_size);
+        }
+        return false;
+    }
+    n_w = rocke_direct_depthwise_spatial_n_w_per_wave(spec);
+    if(n_w <= 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "groups == wave_size: no W positions per wave (n_w_per_wave=0)");
+        }
+        return false;
+    }
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return true;
+}
+
+/* ===================================================================== *
+ *  DirectConvDgradSpec  (grouped dgrad — scalar FMA)
+ * ===================================================================== */
+
+rocke_direct_conv_dgrad_spec_t rocke_direct_conv_dgrad_spec_default(void)
+{
+    rocke_direct_conv_dgrad_spec_t spec;
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_conv_dgrad";
+    spec.block_q = 16;
+    spec.block_groups = 8;
+    spec.wave_size = 64;
+    return spec;
+}
+
+int rocke_direct_conv_dgrad_threads_per_block(const rocke_direct_conv_dgrad_spec_t* spec)
+{
+    return spec->block_groups * spec->wave_size;
+}
+
+rocke_status_t rocke_direct_conv_dgrad_kernel_name(const rocke_direct_conv_dgrad_spec_t* spec,
+                                                   char* out,
+                                                   size_t out_cap)
+{
+    char prob_short[128];
+    const char* parts[3];
+    char bq_buf[32];
+    char bg_buf[32];
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_conv_problem_short(&spec->problem, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* kernel_name_join(name, p.short(), f"bq{block_q}", f"bg{block_groups}") */
+    snprintf(bq_buf, sizeof(bq_buf), "bq%d", spec->block_q);
+    snprintf(bg_buf, sizeof(bg_buf), "bg%d", spec->block_groups);
+    parts[0] = prob_short;
+    parts[1] = bq_buf;
+    parts[2] = bg_buf;
+    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+rocke_status_t rocke_direct_conv_dgrad_validate(const rocke_direct_conv_dgrad_spec_t* spec,
+                                                char* reason,
+                                                size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    p = &spec->problem;
+    if(p->cpg < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "DirectConvDgradSpec requires cpg >= 1 (got %d)", p->cpg);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    if(p->kpg < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "DirectConvDgradSpec requires kpg >= 1 (got %d)", p->kpg);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->block_groups > 0 && p->groups % spec->block_groups != 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "groups %d not divisible by block_groups %d",
+                     p->groups,
+                     spec->block_groups);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+bool rocke_direct_conv_dgrad_is_valid_spec(const rocke_direct_conv_dgrad_spec_t* spec,
+                                           const char* arch,
+                                           char* reason,
+                                           size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+    {
+        if(reason && reason_cap > 0)
+        {
+            strncpy(reason, "null spec", reason_cap);
+        }
+        return false;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    if(rocke_archtarget_from_gfx(arch) == NULL)
+    {
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    p = &spec->problem;
+    if(p->cpg < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "cpg must be >= 1 (got %d)", p->cpg);
+        }
+        return false;
+    }
+    if(p->kpg < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "kpg must be >= 1 (got %d)", p->kpg);
+        }
+        return false;
+    }
+    if(spec->block_groups > 0 && p->groups % spec->block_groups != 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "groups %d not divisible by block_groups %d",
+                     p->groups,
+                     spec->block_groups);
+        }
+        return false;
+    }
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return true;
+}
+
+/* ===================================================================== *
+ *  DirectDepthwiseDgradSpec  (cpg=kpg=1 dgrad — scalar FMA)
+ * ===================================================================== */
+
+rocke_direct_depthwise_dgrad_spec_t rocke_direct_depthwise_dgrad_spec_default(void)
+{
+    rocke_direct_depthwise_dgrad_spec_t spec;
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_depthwise_dgrad";
+    spec.block_w = 8;
+    spec.block_waves = 1;
+    spec.wave_size = 64;
+    return spec;
+}
+
+int rocke_direct_depthwise_dgrad_threads_per_block(const rocke_direct_depthwise_dgrad_spec_t* spec)
+{
+    return spec->block_waves * spec->wave_size;
+}
+
+int rocke_direct_depthwise_dgrad_block_ch(const rocke_direct_depthwise_dgrad_spec_t* spec)
+{
+    return spec->block_waves * spec->wave_size;
+}
+
+rocke_status_t rocke_direct_depthwise_dgrad_kernel_name(
+    const rocke_direct_depthwise_dgrad_spec_t* spec, char* out, size_t out_cap)
+{
+    char prob_short[128];
+    const char* parts[3];
+    char bw_buf[32];
+    char bwv_buf[32];
+
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_conv_problem_short(&spec->problem, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv") */
+    snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
+    snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
+    parts[0] = prob_short;
+    parts[1] = bw_buf;
+    parts[2] = bwv_buf;
+    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+rocke_status_t rocke_direct_depthwise_dgrad_validate(
+    const rocke_direct_depthwise_dgrad_spec_t* spec, char* reason, size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    p = &spec->problem;
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseDgradSpec requires cpg=kpg=1 (got %d, %d)",
+                     p->cpg,
+                     p->kpg);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgrad_spec_t* spec,
+                                                const char* arch,
+                                                char* reason,
+                                                size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+    {
+        if(reason && reason_cap > 0)
+        {
+            strncpy(reason, "null spec", reason_cap);
+        }
+        return false;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    if(rocke_archtarget_from_gfx(arch) == NULL)
+    {
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    p = &spec->problem;
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "requires cpg=kpg=1 (got %d, %d)", p->cpg, p->kpg);
         }
         return false;
     }
