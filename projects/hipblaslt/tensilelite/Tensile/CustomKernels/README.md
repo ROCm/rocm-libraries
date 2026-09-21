@@ -51,8 +51,10 @@ Triton-specific concerns for the compile step / YAML argument map:
   arguments in the constrained custom-kernel layout. Use a named semantic such
   as `StrideCK` when the value depends on split-K. For packed FP4 kernels that
   take the summation size in bytes, use `SizeSumDiv2`.
-- Strip the `.amdgcn_target` / `.amdhsa_code_object_version` directives from the
-  emitted assembly so Tensile's assembler flags drive target + COV.
+- Keep the `.amdgcn_target` / `.amdhsa_code_object_version` directives: the
+  assembler rewrites `.amdgcn_target` and `amdhsa.target` when a kernel is built
+  for another architecture (`Assembler._retargetAssemblySource`), and the
+  StaggerU census disassembles each kernel at the target it declares.
 
 ## What `custom.config` looks like
 

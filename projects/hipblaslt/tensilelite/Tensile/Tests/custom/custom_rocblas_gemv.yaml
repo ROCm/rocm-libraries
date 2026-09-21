@@ -42,6 +42,7 @@ BenchmarkProblems:
                     { type: int32, semantic: SizeFree1 },
                     { type: address, semantic: AddressB },
                     { type: address, semantic: AddressA },
+                    { type: address, semantic: AddressC },
                     { type: address, semantic: AddressD },
                     { type: float32, semantic: Alpha },
                     { type: float32, semantic: Beta },
@@ -55,7 +56,11 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 4, 1, 4, 4]
         - StaggerU: [0]
         - AssertSummationElementMultiple: [8]
-        - AssertSizeEqual: [{0: 1}]
+        # M == 1 and batch == 1: the kernel has no batch stride arguments, so a
+        # strided-batched problem would leave every batch past the first unwritten.
+        - AssertSizeEqual: [{0: 1, 2: 1}]
+        # N > 8: with fewer columns than the wave tile the tail fixup underflows.
+        - AssertSizeGreaterThan: [{1: 8}]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -197,6 +197,15 @@ def test_check_params_dispatch_assert_size_equal_invalid_propagates(snapshot):
     assert str(excinfo.value) == snapshot
 
 
+def test_check_params_dispatch_covers_every_size_map_parameter():
+    # Pins the registry, not one name: a dict-valued Assert* added without a
+    # dispatch arm would take the value-list path and accept anything.
+    for name in VP.ASSERT_SIZE_MAP_PARAMETERS:
+        assert VP.checkParametersAreValid((name, [{0: 1}]), {name: -1}) is None
+        with pytest.raises(Exception, match="Must be a dict"):
+            VP.checkParametersAreValid((name, [1]), {name: -1})
+
+
 def test_check_params_dispatch_space_filling_algo_valid():
     # name == "SpaceFillingAlgo" with the -1 sentinel bypasses the value-list
     # check and dispatches to checkSpaceFillAlgoIsValid (valid -> None).

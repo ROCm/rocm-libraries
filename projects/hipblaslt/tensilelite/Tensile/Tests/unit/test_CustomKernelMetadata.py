@@ -38,8 +38,12 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ProblemPredicate
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
+from Tensile.Contractions import ASSERT_SIZE_MAP_PREDICATES, ProblemPredicate
+from Tensile.Common.ValidParameters import (
+    ASSERT_SIZE_MAP_PARAMETERS,
+    checkParametersAreValid,
+    validParameters,
+)
 from Tensile.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
@@ -221,6 +225,7 @@ def test_valid_parameters_accept_size_multiple_256():
     checkParametersAreValid(("AssertFree1ElementMultiple", [256]), validParameters)
     checkParametersAreValid(("AssertSummationElementMultiple", [256]), validParameters)
     checkParametersAreValid(("AssertSizeEqual", [{}, {0: 1}, {0: 1, 1: 4}]), validParameters)
+    checkParametersAreValid(("AssertSizeGreaterThan", [{}, {1: 8}]), validParameters)
 
 
 def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
@@ -326,6 +331,26 @@ def test_problem_predicate_ands_multi_dim_assert_size_equal():
 def test_problem_predicate_rejects_non_dict_assert_size_equal():
     with pytest.raises(RuntimeError, match="must be a dict"):
         ProblemPredicate.FromOriginalKeyPair(("AssertSizeEqual", 1))
+    with pytest.raises(RuntimeError, match="must be a dict"):
+        ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", 1))
+
+
+def test_assert_size_map_registries_agree():
+    """A key validated as an {index: size} map must also emit a predicate, or a
+    custom.config would accept it and then silently drop the constraint."""
+    assert set(ASSERT_SIZE_MAP_PARAMETERS) == set(ASSERT_SIZE_MAP_PREDICATES)
+    assert set(ASSERT_SIZE_MAP_PARAMETERS) <= set(validParameters)
+
+
+def test_problem_predicate_emits_size_greater_than():
+    """N > 8 guards the tail fixup, which underflows below one wave tile."""
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", {1: 8}))
+
+    assert pred is not None
+    assert pred.tag == "SizeGreaterThan"
+    assert pred.index == 1
+    assert pred.value == 8
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertSizeGreaterThan", {})) is None
 
 
 def test_valid_parameters_reject_assert_size_equal_bad_map():
@@ -420,6 +445,7 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
         "AssertFree0ElementMultiple": 256,
         "AssertFree1ElementMultiple": 256,
         "AssertSizeEqual": {0: 1},
+        "AssertSizeGreaterThan": {1: 8},
         "StaggerU": 0,
         "WavefrontSize": 64,
     }
@@ -440,6 +466,7 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
     assert "AssertFree0ElementMultiple: 256" in rendered
     assert "AssertFree1ElementMultiple: 256" in rendered
     assert "AssertSizeEqual: { 0: 1 }" in rendered
+    assert "AssertSizeGreaterThan: { 1: 8 }" in rendered
     assert "StaggerU: 0" in rendered
 
 
@@ -1072,14 +1099,19 @@ def test_wvspltk_hf_m1_shipped_config():
     ck = config["CustomKernel"]
     assert ck["grid"] == ["ComputeUnits", "One", "One"]
     assert ck["threads"] == [64, 16, 1]
-    assert config["AssertSizeEqual"] == {0: 1}
+    # M == 1 and batch == 1; the kernel takes no batch strides.
+    assert config["AssertSizeEqual"] == {0: 1, 2: 1}
+    # N > 8; the tail fixup underflows below one wave tile.
+    assert config["AssertSizeGreaterThan"] == {1: 8}
     assert config["AssertSummationElementMultiple"] == 8
     assert config["StaggerU"] == 0
+    # C is read (beta term) and D is written, so out-of-place calls are correct.
     assert [a["semantic"] for a in ck["args"]] == [
         "SizeSum",
         "SizeFree1",
         "AddressB",
         "AddressA",
+        "AddressC",
         "AddressD",
         "Alpha",
         "Beta",

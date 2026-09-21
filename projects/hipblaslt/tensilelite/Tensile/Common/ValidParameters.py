@@ -664,6 +664,11 @@ validParameters = { # we need to make sure this matches develop
     # Empty dict is unset. Fork YAML: AssertSizeEqual: [{0: 1}]  # M==1
     # A value of -1 for a given index is ignored (classic Tensile).
     "AssertSizeEqual": -1,
+    # Strict lower bound per dimension, same {index: size} form. The runtime
+    # predicate is size(index) > value, so a kernel whose tail handling needs
+    # at least one full tile declares the largest size it cannot handle.
+    # Fork YAML: AssertSizeGreaterThan: [{1: 8}]  # N > 8
+    "AssertSizeGreaterThan": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1380,8 +1385,12 @@ _skipTypeCheck = {
 }
 
 
+# Assert* parameters whose value is an {index: size} map instead of a scalar.
+ASSERT_SIZE_MAP_PARAMETERS = ("AssertSizeEqual", "AssertSizeGreaterThan")
+
+
 def checkAssertSizeMapIsValid(name, value):
-    """AssertSizeEqual is a dict of {index: size}; both keys and values are int."""
+    """AssertSize* is a dict of {index: size}; both keys and values are int."""
     if type(value) is not dict:
         msgBase = "Invalid parameter value: {} = {}\nMust be a dict of {{index: size}}"
         raise Exception(msgBase.format(name, value))
@@ -1485,7 +1494,7 @@ def checkParametersAreValid(
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
-        elif name == "AssertSizeEqual":
+        elif name in ASSERT_SIZE_MAP_PARAMETERS:
             checkAssertSizeMapIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
