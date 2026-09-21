@@ -4,7 +4,9 @@
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
+#include <initializer_list>
 #include <iostream>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <sstream>
@@ -62,7 +64,7 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 // ---- support claims --------------------------------------------------------
 
 SupportObservation
-    IntegrationBundleVerificationHarness::checkSupportClaims(const GraphSession& session)
+    IntegrationBundleVerificationHarness::observeSupportClaims(const GraphSession& session)
 {
     // Observation, not enforcement: report mode must reach the query too, or the
     // summary it exists to print has nothing in it.
@@ -88,31 +90,49 @@ SupportObservation
                                         _deps.policy.platform);
 }
 
-void IntegrationBundleVerificationHarness::recordClaimCoverage(
-    const SupportObservation& observation)
+ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSession& session)
 {
-    // Observation, so that the counters are the same numbers under both modes --
-    // the point of report mode is to predict what enforcement would see, which it
-    // cannot do from a different denominator.
-    const CoverageUpdate update = coverageFor(observation, shouldObserveClaims(), carriesSidecar());
+    ClaimPhase phase;
+
+    // carriesSidecar() below stats the filesystem uncached, once per test body, and
+    // no counter it feeds is read when both claim flags are off.
+    if(_deps.policy.claims == ClaimMode::OFF)
+    {
+        return phase;
+    }
+
+    phase.observation = observeSupportClaims(session);
+
+    // The observe predicate, not the enforce one: report mode has to reach the same
+    // counters enforcement would, or it cannot predict it.
+    const CoverageUpdate update
+        = coverageFor(phase.observation, shouldObserveClaims(), carriesSidecar());
 
     _deps.reporter->recordCoverage(update);
 
-    if(update.missedQuery)
+    phase.complaint = missedQueryComplaint(update, _bundlePath.string(), shouldEnforceClaims());
+    return phase;
+}
+
+void IntegrationBundleVerificationHarness::raiseComplaints(
+    std::initializer_list<std::optional<HarnessComplaint>> complaints)
+{
+    for(const auto& complaint : complaints)
     {
-        // The gap is equally real in report mode, but failing over it there would
-        // break the one guarantee that mode makes. Same text, demoted to a warning.
-        if(shouldEnforceClaims())
+        if(!complaint.has_value())
         {
-            ADD_FAILURE() << "support claims exist for " << _bundlePath
-                          << " but were never queried; enforcement would have passed "
-                             "without checking them";
+            continue;
+        }
+
+        // ADD_FAILURE() rather than FAIL(): FAIL() returns, and the caller still has
+        // an outcome to report and possibly a second complaint to raise.
+        if(complaint->fatal)
+        {
+            ADD_FAILURE() << complaint->message;
         }
         else
         {
-            std::cerr << "Warning: support claims exist for " << _bundlePath
-                      << " but were never queried; enforcement would have passed "
-                         "without checking them\n";
+            std::cerr << "Warning: " << complaint->message << "\n";
         }
     }
 }
@@ -135,9 +155,6 @@ void IntegrationBundleVerificationHarness::commitClaims(const std::vector<Suppor
     }
 }
 
-// The single place a test is marked passed, failed or skipped. Everything above
-// returns a value, which is what keeps the claim verdict and the test result read
-// off the same facts instead of off each other.
 void IntegrationBundleVerificationHarness::reportOutcome(const VerificationOutcome& outcome)
 {
     switch(outcome.status)

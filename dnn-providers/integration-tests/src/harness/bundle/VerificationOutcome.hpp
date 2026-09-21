@@ -4,7 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "harness/BundleMetadata.hpp"
@@ -178,6 +180,41 @@ inline std::string describeOutcome(const VerificationOutcome& outcome, Verificat
 
     return std::string("engine in ranked list; reached ") + toString(outcome.depth)
            + ", bundle requires " + toString(required);
+}
+
+/// Something wrong with the *run*, as a value rather than an assertion. Distinct
+/// from VerificationOutcome: that is the engine's result and becomes the test's
+/// disposition, while this is the harness objecting to how the test was conducted.
+///
+/// `fatal` because the same grievance costs differently by mode: an unqueried
+/// sidecar is a hole in enforcement, but failing over it in report mode would break
+/// the one promise report mode makes. Whoever knows the mode sets it; the raise site
+/// stays uniform.
+struct HarnessComplaint
+{
+    std::string message;
+    bool fatal = true;
+};
+
+/// The complaint, if this outcome went green without reaching `required` -- every
+/// fallback in the chain can decline, and a bundle whose oracles all decline would
+/// otherwise report success having compared nothing.
+///
+/// Self-guarding, which is why the call site needs no surrounding condition: only a
+/// PASSED outcome can trip it, so a blocked claim or a thrown exception is silently
+/// nothing.
+inline std::optional<HarnessComplaint> shallowPassComplaint(const VerificationOutcome& outcome,
+                                                            VerificationDepth required,
+                                                            std::string_view bundlePath)
+{
+    if(outcome.status != OutcomeStatus::PASSED || outcome.depth >= required)
+    {
+        return std::nullopt;
+    }
+
+    return HarnessComplaint{std::string("test passed without reaching ") + toString(required)
+                                + " for " + std::string(bundlePath),
+                            true};
 }
 
 } // namespace hipdnn_integration_tests::bundle

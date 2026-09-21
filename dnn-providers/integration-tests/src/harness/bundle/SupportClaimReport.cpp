@@ -4,7 +4,10 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <ostream>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace hipdnn_integration_tests::bundle
@@ -41,6 +44,20 @@ CoverageUpdate coverageFor(const SupportObservation& observation,
     // reported where it happened.
     update.missedQuery = observationExpected && observation.sidecar == SidecarState::NONE;
     return update;
+}
+
+std::optional<HarnessComplaint>
+    missedQueryComplaint(const CoverageUpdate& update, std::string_view bundlePath, bool fatal)
+{
+    if(!update.missedQuery)
+    {
+        return std::nullopt;
+    }
+
+    return HarnessComplaint{std::string("support claims exist for ") + std::string(bundlePath)
+                                + " but were never queried; enforcement would have passed "
+                                  "without checking them",
+                            fatal};
 }
 
 bool verifiedNothing(const SupportClaimCoverage& coverage)

@@ -117,7 +117,7 @@ derived from it in one place each.
 
 ```mermaid
 graph TD
-  Z["openGraph()<br/>ONE from_binary + ONE ranked query"] --> A["checkSupportClaims(session)"]
+  Z["openGraph()<br/>ONE from_binary + ONE ranked query"] --> A["observeSupportClaims(session)"]
   A --> B{"sidecar read?"}
   B -->|yes| C["graphsQueried++"]
   B -->|no| D{"but a sidecar<br/>exists on disk?"}
@@ -158,7 +158,7 @@ are unit-testable on their own (`TestGraphSession`).
 
 ### Phase 1 — claims, above everything
 
-`checkSupportClaims(session)` hands `session.engines` to `observeSupport()` for the set
+`observeSupportClaims(session)` hands `session.engines` to `observeSupport()` for the set
 comparison and returns `{sidecar, results}`.
 
 It sits **above `runComparison()` on purpose.** The check needs only the ranked
@@ -171,7 +171,7 @@ exited 0.
 It returns an empty observation, touching nothing, when no engine was injected, no
 sidecar exists, or enforcement is off.
 
-Neither `openGraph()` nor `checkSupportClaims()` is virtual — **the harness has no
+Neither `openGraph()` nor `observeSupportClaims()` is virtual — **the harness has no
 virtual members at all.** Everything needing a GPU, a handle, a loaded plugin, or
 process-wide state sits behind one of the four collaborators a test injects through
 `HarnessDependencies`:

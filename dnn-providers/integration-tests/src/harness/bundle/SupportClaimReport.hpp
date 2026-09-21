@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <iosfwd>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 #include "harness/bundle/SupportVerdict.hpp"
@@ -66,18 +68,22 @@ struct CoverageUpdate
     bool missedQuery = false;
 };
 
-// `observationExpected` is the harness's shouldObserveClaims(): a sidecar exists,
-// claim checking is on in either mode, and an engine was named to decide against.
-// Deliberately the observe predicate and not the enforce one -- report mode has to
-// arrive at the same counters enforcement would, or it cannot predict it.
+// `observationExpected` is shouldObserveClaims() -- the observe predicate, not the
+// enforce one, because report mode has to arrive at the same counters enforcement
+// would or it cannot predict it.
 //
-// `carriesSidecar` is the weaker fact that a sidecar file is sitting next to this
-// bundle, independent of whether anything was in a position to read it. It implies
-// nothing about the engine or the mode, which is why it and not observationExpected
-// is what verifiedNothing() counts against.
+// `carriesSidecar` is the weaker fact that a sidecar is sitting next to this bundle,
+// implying nothing about the engine or the mode. That is why it, and not
+// observationExpected, is what verifiedNothing() counts against.
 CoverageUpdate coverageFor(const SupportObservation& observation,
                            bool observationExpected,
                            bool carriesSidecar);
+
+/// The complaint owed for a coverage gap, or nullopt when there is none. `fatal` is
+/// the caller's enforce predicate; the wording is the same either way, so a CI log
+/// reader greps one string whichever mode produced it.
+std::optional<HarnessComplaint>
+    missedQueryComplaint(const CoverageUpdate& update, std::string_view bundlePath, bool fatal);
 
 class SupportClaimVerdicts
 {
