@@ -5,12 +5,15 @@
 
 #if defined(__linux__)
 #include <array>
+#include <cerrno>
 #include <climits>
 #include <cstdlib>
 #include <dlfcn.h>
 #include <filesystem>
+#include <link.h>
 #include <stdexcept>
 #include <string>
+#include <sys/auxv.h>
 #include <system_error>
 #include <unistd.h>
 
@@ -36,6 +39,32 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
     return result;
 }
 
+/// Reads AT_SECURE for privilege-elevated execution without relying on glibc's
+/// secure_getenv(). Fails closed: an unavailable entry is treated as secure.
+inline bool isSecureExecution()
+{
+    // Distinguish a missing AT_SECURE entry from a genuine zero.
+    errno = 0;
+    const unsigned long secure = getauxval(AT_SECURE);
+    if(secure == 0 && errno != 0)
+    {
+        return true;
+    }
+    return secure != 0;
+}
+
+/// Reads environment values that control code loading or execution.
+/// In secure execution, ignores the invoker-controlled environment and returns
+/// @p defaultValue, or an empty string if no default is supplied.
+inline std::string getSecureEnv(const char* var, const char* defaultValue = nullptr)
+{
+    if(isSecureExecution())
+    {
+        return defaultValue != nullptr ? defaultValue : "";
+    }
+    return getEnv(var, defaultValue);
+}
+
 inline void setEnv(const char* var, const char* value)
 {
     if(value != nullptr)
@@ -47,6 +76,32 @@ inline void setEnv(const char* var, const char* value)
 inline void unsetEnv(const char* var)
 {
     unsetenv(var);
+}
+
+/// Expands a leading `~` to HOME only when alone or followed by `/`; never expands `~user`.
+/// Returns @p path unchanged if no token qualifies or HOME is unset/empty.
+/// Never throws.
+/// Not secure-execution aware: HOME is read with getEnv(), not getSecureEnv(). Never use
+/// on a path that will subsequently be loaded as code.
+inline std::string expandUser(const std::string& path)
+{
+    if(path.empty() || path.front() != '~')
+    {
+        return path;
+    }
+
+    if(path.size() > 1 && path[1] != '/')
+    {
+        return path;
+    }
+
+    const std::string home = getEnv("HOME");
+    if(home.empty())
+    {
+        return path;
+    }
+
+    return home + path.substr(1);
 }
 
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
@@ -78,9 +133,46 @@ inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
     return handle;
 }
 
+/// Windows needs a distinct flag to search an opened module's own directory for its
+/// first-level dependents; dlopen() already honours the module's own DT_RUNPATH, so this
+/// is openLibrary().
+inline SharedLibraryHandle
+    openLibraryWithOwnDirectoryFirst(const std::filesystem::path& libraryPath)
+{
+    return openLibrary(libraryPath);
+}
+
 inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& libraryPath)
 {
     return dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+}
+
+/// The canonical parent of an already-open library's absolute loader path.
+/// Relative or empty loader names cannot reliably identify an origin.
+inline std::filesystem::path getLoadedLibraryOrigin(SharedLibraryHandle handle)
+{
+    if(handle == nullptr)
+    {
+        throw std::runtime_error("Failed to get library origin: null handle");
+    }
+
+    link_map* map = nullptr;
+    if(dlinfo(handle, RTLD_DI_LINKMAP, static_cast<void*>(&map)) != 0)
+    {
+        const char* error = dlerror();
+        throw std::runtime_error("Failed to get library origin ("
+                                 + (error != nullptr ? std::string(error) : "Unknown error") + ")");
+    }
+
+    if(map == nullptr || map->l_name == nullptr || map->l_name[0] != '/')
+    {
+        throw std::runtime_error("Failed to get library origin: no absolute loader path");
+    }
+
+    const std::filesystem::path libraryPath(map->l_name);
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(libraryPath, failed);
+    return (failed ? libraryPath : resolved).parent_path();
 }
 
 inline void closeLibrary(SharedLibraryHandle handle)
@@ -94,31 +186,45 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
     return dlsym(handle, symbolName);
 }
 
-/// The directory of the module @p address belongs to, canonicalized because dladdr()
-/// reports the path the module was loaded with verbatim -- relative to the process's
-/// current directory, or a symlink rather than the file its siblings sit beside. Works
-/// under any dlopen flag and needs nothing exported, so prefer it over the symbol-name
-/// form when asking "where am I loaded from" about the calling module itself.
+/// The directory of the module owning @p address. Normally launched dynamic
+/// executables use /proc/self/exe; other images use their canonicalized loader path.
+/// Throws when that origin cannot be established, which callers treat as unknown --
+/// never as a directory to search.
 inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
 {
     Dl_info info{};
-    if(dladdr(address, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    void* owner = nullptr;
+    if(dladdr1(address, &info, &owner, RTLD_DL_LINKMAP) == 0 || owner == nullptr)
     {
         throw std::runtime_error("Failed to find loaded library for address");
     }
+    const auto* map = static_cast<const link_map*>(owner);
+    if(map->l_name == nullptr)
+    {
+        throw std::runtime_error("Failed to find loaded library for address");
+    }
+    // An explicitly invoked ld.so is /proc/self/exe, not the address owner.
+    if(map->l_name[0] == '\0' && getauxval(AT_BASE) != 0)
+    {
+        return getCurrentExecutableDirectory();
+    }
+    // The loader keeps the name it was given. A relative one would canonicalize
+    // against the current working directory, which the process may have changed
+    // since the module was loaded, naming an unrelated tree.
+    if(info.dli_fname == nullptr || info.dli_fname[0] != '/')
+    {
+        throw std::runtime_error("Failed to find loaded library for address: "
+                                 "no absolute loader path");
+    }
 
-    // error_code overload: a module path that cannot be canonicalized is still better
-    // answered as-is than by throwing out of a lookup the caller treats as best-effort.
+    // Keep the loader path if best-effort canonicalization fails.
     std::error_code failed;
     const auto resolved = std::filesystem::weakly_canonical(info.dli_fname, failed);
     return (failed ? std::filesystem::path(info.dli_fname) : resolved).parent_path();
 }
 
-/// The directory of the module exporting @p symbolName.
-///
-/// Resolves through the dynamic linker's default scope, so the answer depends on what is
-/// loaded and how. To ask about the calling module itself, use
-/// getLoadedLibraryDirectoryForAddress() instead -- it cannot pick a different module.
+/// Directory exporting @p symbolName in the dynamic linker's default scope.
+/// Use getLoadedLibraryDirectoryForAddress() to identify a specific module.
 inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symbolName)
 {
     auto _ = dlerror();

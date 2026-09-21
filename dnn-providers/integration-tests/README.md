@@ -214,20 +214,55 @@ python3 migration-scripts/find_case.py --id f446b9 --detail
 
 ### Verification modes
 
-Bundle output can be verified against golden data or a live reference executor.
-The mode is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
+Bundle output is verified against golden data or a live reference executor. The mode
+is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 
 | Mode | Behavior |
 |------|----------|
 | `auto` (default) | golden → GPU ref → CPU ref → skip, in that order |
-| `golden` | compare against DVC-fetched golden tensors only |
+| `golden` | compare against DVC-fetched golden tensors only; **FAIL if a bundle has none** |
 | `gpu` | compute the reference on the GPU ref executor |
 | `cpu` | compute the reference on the CPU ref executor |
 
-Golden data is optional: `--verification-mode gpu` (or `cpu`) runs the bundle
-graphs without any DVC pull. Bundle registration is on by default; pass
-`--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
+`auto` is the mode with a fallback chain. An explicit mode is a demand for a
+specific oracle, so `golden` on a bundle with no golden data is a failure, not a
+skip — `dvc pull` the op, or use `auto`.
+
+Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
+runs the bundle graphs without any DVC pull. Bundle registration is on by default;
+pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
 that were compiled into the binary.
+
+### Validating golden data itself
+
+The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each
+bundle's outputs with a reference executor and compares them against the checked-in
+golden `.bin` data. No engine is loaded and no support claims are involved — it
+validates our data, not a provider. Suites are named `…_CpuRef` / `…_GpuRef`.
+
+It validates against both references by default; `--reference cpu|gpu|both` narrows
+that. The CPU reference is host-only and needs no GPU; the GPU one skips without a
+device.
+
+It has no skip path: a test is registered only when the bundle has golden data and
+every node type in its graph is in that reference's required-op set, so a reference
+that cannot run the graph is a failure. Bundles outside the set are absent from the
+suite, and the counts — plus the ops responsible — are printed at registration.
+
+Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
+`integration-test-bundles/` registers nothing and says so.
+
+This replaces the former `--verification-mode=golden-check`, and the
+`--validate-golden-data` flag that briefly stood in for it: golden-data validation
+is its own binary, not a mode of the engine harness.
+
+### Support claims
+
+A bundle may carry a `.support.json` sidecar promising that a named engine supports
+that graph on a given arch and platform. `--enforce-support-claims` (which requires
+`--test-engine`) turns a broken promise into a test failure instead of a silent
+skip. Claims are checked for the single engine under test. Off by default. See
+[`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 
 ## Test Tiers
 
@@ -353,7 +388,7 @@ Both the superbuild (target already present) and standalone provider builds
 (`find_package`) are supported; if the package is not found the target is
 skipped with a status message.
 
-### Per-provider TOML config (tolerance overrides & skips)
+### Per-provider TOML config (tolerance overrides, validator overrides & skips)
 
 Each provider owns one `--test-config` TOML file (e.g.
 `miopen-provider/config/MIOPEN_ENGINE.toml`,
@@ -364,6 +399,9 @@ recompiling or touching test source:
 - **Override tolerances** for specific tests/groups, when that engine's
   numerics legitimately differ from the default atol/rtol (e.g. reduced
   precision from split-k accumulation).
+- **Override the validator** for specific output tensors, when per-element
+  allclose is the wrong *question* for that tensor rather than merely too
+  tight. This is the only place a validator can be changed.
 - **Skip tests** on specific architectures (or globally), when that engine
   has no applicable kernel/solution for a case.
 
@@ -376,6 +414,12 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
+[[validator_overrides]]
+filters       = ["*LayernormBackward*"]
+tensors       = ["*::DSCALE", "*::DBIAS"]
+validator     = "rms"
+rms_threshold = 1e-4
+
 [[test_skips]]
 archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
 filters = ["*ConvFwdBiasActiv*"]
@@ -386,12 +430,34 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   GTest name — same string a `--gtest_filter` would match.
 - `tolerance_overrides`: later entries take precedence when multiple filters
   match. Both `atol` and `rtol` are required.
+- `validator_overrides`: later entries take precedence. An entry applies only
+  when a `filters` glob matches the test name **and** a `tensors` glob matches
+  the output tensor's label — its name (e.g. `LayernormBackward_0::DSCALE`), or
+  `uid=N` when the graph did not name it. Match on the tensor label rather than
+  the uid: uids differ between a C++ graph test and the bundle captured from it,
+  names do not. `validator` is `"allclose"` or `"rms"`; `rms_threshold` is
+  required and must be positive when the validator is `"rms"`, and must be
+  absent when it is `"allclose"` — an entry that does not say exactly what it
+  means is a load error, never a silent fall-back. `"rms"` is only defined for
+  float, half, bfloat16 and double outputs; a glob wide enough to catch an
+  integer output fails that tensor with a message naming the glob to narrow.
+  Absent any match the comparison is allclose — **allclose is the default
+  everywhere, and this section is the only thing that changes it.** Use it when
+  a per-element check is the wrong question, not to buy slack: an output that is
+  a long reduction (layernorm/RMSNorm backward `dscale`/`dbias`) has elements
+  that land arbitrarily near zero through cancellation, so per-element relative
+  error is unbounded while the aggregate relative-RMS error is not. Prefer
+  `tolerance_overrides` for everything else.
 - `test_skips`: the first matching entry wins; `reason` is surfaced in the
   `GTEST_SKIP` message. `archs` (substring match against the raw
   `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
   omit either to match any.
 - Applies to **both** bundle/sweep tests and C++ graph tests; the lookup runs
   in the shared harness (`TestConfig`/`TestSettings`), not per test type.
+  One caveat for `validator_overrides`: golden data validated against a *reference*
+  executor (`BundleReferenceValidationHarness`) is always compared with allclose at
+  the default tolerance. An engine's config describes how far that engine may
+  drift; it never relaxes the gate on our own committed data.
 - `[meta] version = 1` is required; the file is rejected on parse if missing
   or on an unsupported version.
 
@@ -610,3 +676,6 @@ for the full workflow and tooling reference.
   field mapping.
 - [RFC 0011 — Golden Reference Validation](../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md)
   — the bundle/sweep naming spec (§4.1) and design rationale.
+- [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md) —
+  `.support.json` sidecars, the verdict set comparison, the `TestBody()`
+  enforcement lifecycle, and how to read the claim summary.

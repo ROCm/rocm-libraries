@@ -21,12 +21,14 @@ add_executable(
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceResampleFwd.cpp
+    utilities/TestCpuFpReferenceResampleBwd.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceMoeGroupedMatmul.cpp
+    utilities/TestCpuFpReferenceMoeGroupedMatmulBwd.cpp
     utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
@@ -50,6 +52,7 @@ add_executable(
     utilities/TestLogRecorder.cpp
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
+    utilities/TestScratchDirectory.cpp
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
@@ -79,6 +82,8 @@ add_executable(
     utilities/cpu_graph_executor/TestMatmulSignatureKey.cpp
     utilities/cpu_graph_executor/TestMoeGroupedMatmulPlan.cpp
     utilities/cpu_graph_executor/TestMoeGroupedMatmulSignatureKey.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdPlan.cpp
+    utilities/cpu_graph_executor/TestMoeGroupedMatmulBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
     utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
@@ -88,6 +93,8 @@ add_executable(
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
     utilities/cpu_graph_executor/TestResampleFwdPlan.cpp
     utilities/cpu_graph_executor/TestResampleFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestResampleBwdPlan.cpp
+    utilities/cpu_graph_executor/TestResampleBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp

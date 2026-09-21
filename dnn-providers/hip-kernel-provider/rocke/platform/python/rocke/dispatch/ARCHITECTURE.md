@@ -1765,7 +1765,7 @@ naming a path, which no builder consumes, while this one returns its builder's
 own spec.
 
 *Convolution, gfx1250.* Onboarded over the portable
-`instances/common/conv_implicit_gemm.py` builder. It could not simply join the
+`library/kernels/common/conv_implicit_gemm.py` builder. It could not simply join the
 RDNA WMMA arch list: gfx1250's f16 WMMA atom is 16x16x**32** where gfx12's is
 16x16x16, so it needs `warp_tile_k=32` and gets its own spec factory. Tiles stay
 at 32x32 rather than following the CDNA candidates to 64x64, because these

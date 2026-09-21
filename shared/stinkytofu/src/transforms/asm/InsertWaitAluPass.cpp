@@ -59,6 +59,8 @@ bool g_enableESM2TrackValuVsrc = false;
 // va_vdst is dropped (prefetch has no dst); the vm_vsrc WAR and every non-GLOBAL
 // consumer are untouched. Safe because the DAG already spaces the vaddr producer
 // >=32 cycles ahead (CDNA5 isVmemAddrHazardConsumer covers buffer loads and prefetch).
+// Stores and atomics are not covered by that spacing guarantee, so their data
+// operand still needs the real wait.
 constexpr bool g_enableESM2SuppressValuToGlobalVaVdst = true;
 
 // ---------------------------------------------------------------------------
@@ -189,9 +191,9 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     }
     if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return EV_VGPR_LDS_READ;
     if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst)) return EV_VGPR_FLAT_READ;
-    // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
+    // TEX path. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
-    if (isVMem(inst)) return EV_VGPR_VMEM_READ;
+    if (isVmemTex(inst)) return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
 
@@ -395,11 +397,11 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        // TEMP HACK: drop the src RAW va_vdst for valu->global and valu->global_prefetch
+        // TEMP HACK: drop the src RAW va_vdst for valu->global_load and valu->global_prefetch
         // (prefetch lacks IF_GLOBALLoad, so classify it separately). Safe: the DAG already
         // spaces the vaddr producer >=32 cycles (CDNA5 isVmemAddrHazardConsumer covers it).
         const bool suppressSrcVaVdst = g_enableESM2SuppressValuToGlobalVaVdst &&
-                                       (isGLOBALOrAtomic(inst) || isGlobalPrefetch(inst));
+                                       (isGLOBALLoad(inst) || isGlobalPrefetch(inst));
 
         if (!suppressSrcVaVdst) {
             forEachVGPR(

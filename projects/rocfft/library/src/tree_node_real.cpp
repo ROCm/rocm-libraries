@@ -21,10 +21,12 @@
 #include "tree_node_real.h"
 #include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
+#include "../../shared/ptrdiff.h"
 #include "function_pool.h"
 #include "node_factory.h"
 #include "real2complex.h"
 #include <algorithm>
+#include <cstdint>
 
 // work out the real and complex lengths on a real-complex plan, and
 // return pointers to those lengths
@@ -2054,6 +2056,7 @@ void Real3DPPNode::AssignParams_internal()
  * CS_KERNEL_CMPLX_TO_R
  * CS_KERNEL_TRANSPOSE_CMPLX_TO_R
  *****************************************************/
+
 size_t PrePostKernelNode::GetTwiddleTableLength()
 {
     if(scheme == CS_KERNEL_R_TO_CMPLX || scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
