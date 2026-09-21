@@ -276,18 +276,27 @@ endif()
             )
         endif()
 
-        execute_process(
-            COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
-            RESULT_VARIABLE HIPDNN_INGESTOR_PYTEST_RESULT
-            OUTPUT_QUIET ERROR_QUIET
-        )
-        if(NOT HIPDNN_INGESTOR_PYTEST_RESULT EQUAL 0)
-            message(FATAL_ERROR
-                    "hipdnn: pytest is not importable by ${Python3_EXECUTABLE}, so the "
-                    "IngestorGenerator tests cannot run. Install pytest for that interpreter, "
-                    "or configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF."
+        # Every module the suite needs to be collected at all, not just its runner:
+        # tests/conftest.py imports codegen.config_loader, which imports yaml, and the
+        # generator renders through jinja2. Probing pytest alone leaves the other two to
+        # surface as a ModuleNotFoundError during ctest, which is the shape of failure
+        # this probe exists to convert into a configure error.
+        foreach(_ingestor_module pytest yaml jinja2)
+            execute_process(
+                COMMAND "${Python3_EXECUTABLE}" -c "import ${_ingestor_module}"
+                RESULT_VARIABLE HIPDNN_INGESTOR_IMPORT_RESULT
+                OUTPUT_QUIET ERROR_QUIET
             )
-        endif()
+            if(NOT HIPDNN_INGESTOR_IMPORT_RESULT EQUAL 0)
+                message(FATAL_ERROR
+                        "hipdnn: ${_ingestor_module} is not importable by "
+                        "${Python3_EXECUTABLE}, so the IngestorGenerator tests cannot run. "
+                        "Install the generator's requirements "
+                        "(projects/hipdnn/tools/IngestorGenerator/requirements.txt) for that "
+                        "interpreter, or configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF."
+                )
+            endif()
+        endforeach()
 
         add_test(
             NAME hipdnn_ingestor_generator_tests
