@@ -344,6 +344,39 @@ static void build_tensor_transfers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_scale_coordinates(rocke_ir_builder_t* b, rocke_mma_scale_block_k_t block)
+{
+    const auto* arch = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", block};
+    const auto* atom = rocke_mma_catalog_op_for_shape(
+        &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &scales);
+    rocke_value_t* out = frag_param(b, "coords", rocke_i32(), false);
+    rocke_value_t* lane = rocke_b_thread_id_x(b);
+    const rocke_layout_map_t* maps[]
+        = {rocke_mma_op_a_scale_layout(atom, b), rocke_mma_op_b_scale_layout(atom, b)};
+    for(int source = 0; source < 2; ++source)
+    {
+        for(int slot = 0; slot < maps[source]->frag_len; ++slot)
+        {
+            rocke_value_t *x = NULL, *y = NULL;
+            rocke_layout_map_coord(maps[source], b, lane, slot, &x, &y);
+            rocke_b_global_store(b, out, lane, x, 1);
+            rocke_b_global_store(b, out, lane, y, 1);
+        }
+    }
+    rocke_b_ret(b);
+}
+
+static void build_scale_coordinates_k32(rocke_ir_builder_t* b)
+{
+    build_scale_coordinates(b, ROCKE_MMA_SCALE_K32);
+}
+
+static void build_scale_coordinates_k16(rocke_ir_builder_t* b)
+{
+    build_scale_coordinates(b, ROCKE_MMA_SCALE_K16);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -380,6 +413,8 @@ static const config_t CONFIGS[] = {
     {build_tensor_transfers, "gfx1250"},
     {build_wmma_scale_bf8, "gfx1250"},
     {build_wmma_scale16_bf8, "gfx1250"},
+    {build_scale_coordinates_k32, "gfx1250"},
+    {build_scale_coordinates_k16, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

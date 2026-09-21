@@ -63,7 +63,9 @@ class LayoutMap:
     role
         ``"acc"`` (accumulator C/D, coords are ``(row, col)``), ``"a"`` (A
         operand, coords are ``(row, k)``) or ``"b"`` (B operand, coords are
-        ``(k, col)``).
+        ``(k, col)``), ``"a_scale"`` (``(row, K-group)``), or
+        ``"b_scale"`` (``(K-group, col)``). Scale slots count logical elements,
+        independently of the backend register carrier.
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
         length: e.g. 4 for an MFMA 16x16x16 accumulator, 8 for the WMMA
@@ -164,6 +166,15 @@ class MmaOp:
     b_scale_dtype: str | None = None
     scale_block_k: MmaScaleBlockK | None = None
 
+    a_scale_frag_len: int = 0
+    b_scale_frag_len: int = 0
+    _a_scale_layout: Optional[LayoutMap] = field(
+        default=None, repr=False, compare=False
+    )
+    _b_scale_layout: Optional[LayoutMap] = field(
+        default=None, repr=False, compare=False
+    )
+
     def __post_init__(self) -> None:
         a, b, block_k = _normalize_mma_scales(
             self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
@@ -171,6 +182,18 @@ class MmaOp:
         object.__setattr__(self, "a_scale_dtype", a)
         object.__setattr__(self, "b_scale_dtype", b)
         object.__setattr__(self, "scale_block_k", block_k)
+        for role in ("a_scale", "b_scale"):
+            count = getattr(self, f"{role}_frag_len")
+            layout = getattr(self, f"_{role}_layout")
+            if type(count) is not int or count < 0 or (block_k is None and count):
+                raise ValueError(f"invalid {role} fragment length: {count!r}")
+            if layout is not None and (
+                not count
+                or layout.role != role
+                or layout.frag_len != count
+                or layout.wave_size != self.wave_size
+            ):
+                raise ValueError(f"{role} layout does not match its fragment metadata")
 
     @property
     def shape(self) -> Tuple[int, int, int]:
@@ -188,6 +211,14 @@ class MmaOp:
     def c_layout(self) -> LayoutMap:
         """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
         return self._require_layout(self._c_layout, "c")
+
+    def a_scale_layout(self) -> LayoutMap:
+        """A scale ``(row, K-group)`` coordinates for each logical scale slot."""
+        return self._require_layout(self._a_scale_layout, "a_scale")
+
+    def b_scale_layout(self) -> LayoutMap:
+        """B scale ``(K-group, col)`` coordinates for each logical scale slot."""
+        return self._require_layout(self._b_scale_layout, "b_scale")
 
     # Convenience aliases for the accumulator (the most-used map).
     def acc_layout(self) -> LayoutMap:
@@ -574,10 +605,20 @@ def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
     return k, col
 
 
+def _wmma_gfx1250_a_scale(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(16))
+    return row, builder.const_i32(slot)
+
+
+def _wmma_gfx1250_b_scale(builder, lane, slot):
+    col = builder.mod(lane, builder.const_i32(16))
+    return builder.const_i32(slot), col
+
+
 @dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
-    (optional) lane/slot coordinate functions for A / B / accumulator."""
+    (optional) lane/slot coordinate functions for matrices and scales."""
 
     a_frag_len: int
     b_frag_len: int
@@ -586,6 +627,10 @@ class _FragInfo:
     a_fn: _LaneCoordFn = None
     b_fn: _LaneCoordFn = None
     c_fn: _LaneCoordFn = None
+    a_scale_frag_len: int = 0
+    b_scale_frag_len: int = 0
+    a_scale_fn: _LaneCoordFn = None
+    b_scale_fn: _LaneCoordFn = None
 
 
 # op_id -> physical fragment metadata. Frag lengths are populated for every
@@ -766,6 +811,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         None,
         _wmma_gfx12_acc_16x16,
+        a_scale_frag_len=4,
+        b_scale_frag_len=4,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
     ),
     "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32": _FragInfo(
         16,
@@ -775,6 +824,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         None,
         _wmma_gfx12_acc_16x16,
+        a_scale_frag_len=4,
+        b_scale_frag_len=4,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
     ),
     "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16": _FragInfo(
         16,
@@ -784,6 +837,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         None,
         _wmma_gfx12_acc_16x16,
+        a_scale_frag_len=8,
+        b_scale_frag_len=8,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
     ),
     "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16": _FragInfo(
         16,
@@ -793,6 +850,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         None,
         _wmma_gfx12_acc_16x16,
+        a_scale_frag_len=8,
+        b_scale_frag_len=8,
+        a_scale_fn=_wmma_gfx1250_a_scale,
+        b_scale_fn=_wmma_gfx1250_b_scale,
     ),
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
         16,
@@ -1082,6 +1143,22 @@ def _op_id_c_dtype() -> Dict[str, str]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _op_id_family() -> Dict[str, str]:
+    """Resolve operation families without selecting a target or parsing IDs."""
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for op in row["mma"]:
+            op_id, family = op["op_id"], op["family"]
+            previous = out.setdefault(op_id, family)
+            if previous != family:
+                raise ValueError(
+                    f"arch SSOT drift: op_id {op_id!r} has inconsistent family "
+                    f"across arches ({previous!r} vs {family!r})"
+                )
+    return out
+
+
 def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
@@ -1112,6 +1189,10 @@ def _build_mma_op(o: dict) -> MmaOp:
         a_scale_dtype=o.get("a_scale_dtype"),
         b_scale_dtype=o.get("b_scale_dtype"),
         scale_block_k=o.get("scale_block_k"),
+        a_scale_frag_len=info.a_scale_frag_len,
+        b_scale_frag_len=info.b_scale_frag_len,
+        _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn),
+        _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn),
     )
 
 

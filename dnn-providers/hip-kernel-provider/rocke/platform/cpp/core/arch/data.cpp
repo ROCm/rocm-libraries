@@ -606,9 +606,11 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     {
         if(b != NULL)
         {
-            const char* role_txt = (m->role == ROCKE_MMA_ROLE_ACC) ? "acc"
-                                   : (m->role == ROCKE_MMA_ROLE_A) ? "a"
-                                                                   : "b";
+            const char* role_txt = (m->role == ROCKE_MMA_ROLE_ACC)       ? "acc"
+                                   : (m->role == ROCKE_MMA_ROLE_A)       ? "a"
+                                   : (m->role == ROCKE_MMA_ROLE_B)       ? "b"
+                                   : (m->role == ROCKE_MMA_ROLE_A_SCALE) ? "a_scale"
+                                                                         : "b_scale";
             b->status = ROCKE_ERR_VALUE;
             snprintf(b->err,
                      ROCKE_ERR_MSG_CAP,
@@ -627,6 +629,39 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
     return true;
 }
 
+/* Scale slots describe logical K groups; both half-waves duplicate them. */
+static void _wmma_gfx1250_a_scale(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* row = rocke_b_mod(b, lane, c16);
+    rocke_value_t* group = rocke_b_const_i32(b, slot);
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = group;
+}
+
+static void _wmma_gfx1250_b_scale(rocke_ir_builder_t* b,
+                                  rocke_value_t* lane,
+                                  int slot,
+                                  rocke_value_t** out0,
+                                  rocke_value_t** out1)
+{
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+    rocke_value_t* col = rocke_b_mod(b, lane, c16);
+    rocke_value_t* group = rocke_b_const_i32(b, slot);
+    if(out0)
+        *out0 = group;
+    if(out1)
+        *out1 = col;
+}
+
 /* =========================================================================
  * Per-op_id LayoutMap statics (the precomputed _build_mma_op output)
  * =========================================================================
@@ -641,6 +676,15 @@ bool rocke_layout_map_coord(const rocke_layout_map_t* m,
  * Naming: lm_<opidkey>_{a,b,c}. Only op_ids with at least one verified map need a
  * struct; the rest carry NULL layout pointers in the catalog directly.
  */
+
+static const rocke_layout_map_t lm_wmma_scale_k32_a
+    = {ROCKE_MMA_ROLE_A_SCALE, 4, 32, _wmma_gfx1250_a_scale};
+static const rocke_layout_map_t lm_wmma_scale_k32_b
+    = {ROCKE_MMA_ROLE_B_SCALE, 4, 32, _wmma_gfx1250_b_scale};
+static const rocke_layout_map_t lm_wmma_scale_k16_a
+    = {ROCKE_MMA_ROLE_A_SCALE, 8, 32, _wmma_gfx1250_a_scale};
+static const rocke_layout_map_t lm_wmma_scale_k16_b
+    = {ROCKE_MMA_ROLE_B_SCALE, 8, 32, _wmma_gfx1250_b_scale};
 
 /* --- mfma_f32_16x16x16_f16 / _bf16: a/b/c all present (frag 4/4/4, wave64) --- */
 static const rocke_layout_map_t lm_mfma_16x16x16_a = {ROCKE_MMA_ROLE_A, 4, 64, _mfma_a_16x16};
@@ -1689,7 +1733,11 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      &lm_wmma_gfx12_c,
      "e8m0",
      "e8m0",
-     ROCKE_MMA_SCALE_K32},
+     ROCKE_MMA_SCALE_K32,
+     4,
+     4,
+     &lm_wmma_scale_k32_a,
+     &lm_wmma_scale_k32_b},
     {"wmma_scaled",
      "bf8e5m2",
      "bf8e5m2",
@@ -1707,7 +1755,11 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      &lm_wmma_gfx12_c,
      "e8m0",
      "e8m0",
-     ROCKE_MMA_SCALE_K32},
+     ROCKE_MMA_SCALE_K32,
+     4,
+     4,
+     &lm_wmma_scale_k32_a,
+     &lm_wmma_scale_k32_b},
     {"wmma_scaled",
      "fp8e4m3",
      "fp8e4m3",
@@ -1725,7 +1777,11 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      &lm_wmma_gfx12_c,
      "e8m0",
      "e8m0",
-     ROCKE_MMA_SCALE_K16},
+     ROCKE_MMA_SCALE_K16,
+     8,
+     8,
+     &lm_wmma_scale_k16_a,
+     &lm_wmma_scale_k16_b},
     {"wmma_scaled",
      "bf8e5m2",
      "bf8e5m2",
@@ -1743,7 +1799,11 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      &lm_wmma_gfx12_c,
      "e8m0",
      "e8m0",
-     ROCKE_MMA_SCALE_K16},
+     ROCKE_MMA_SCALE_K16,
+     8,
+     8,
+     &lm_wmma_scale_k16_a,
+     &lm_wmma_scale_k16_b},
 };
 
 /* =========================================================================

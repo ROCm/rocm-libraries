@@ -58,14 +58,15 @@ extern "C" {
 
 /* ============================== layout map ============================== */
 
-/* MMA fragment role. Mirrors LayoutMap.role ("acc"/"a"/"b"). The accumulator is
- * spelled "c" in the C op_id maps (MmaOp.c_layout) but role text is "acc"/"a"/
- * "b" exactly as Python LayoutMap.role. */
+/* MMA fragment role. Matrix roles mirror LayoutMap.role ("acc"/"a"/"b");
+ * scale roles are "a_scale"/"b_scale" and use logical K-group coordinates. */
 typedef enum rocke_mma_role
 {
     ROCKE_MMA_ROLE_ACC = 0, /* accumulator C/D: coords (row, col)  */
     ROCKE_MMA_ROLE_A, /* A operand:       coords (row, k)    */
-    ROCKE_MMA_ROLE_B /* B operand:       coords (k, col)    */
+    ROCKE_MMA_ROLE_B, /* B operand:       coords (k, col)    */
+    ROCKE_MMA_ROLE_A_SCALE, /* A scale: coords (row, K-group) */
+    ROCKE_MMA_ROLE_B_SCALE /* B scale: coords (K-group, col) */
 } rocke_mma_role_t;
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
@@ -145,21 +146,30 @@ typedef struct rocke_mma_op
     const char* a_scale_dtype; /* NULL when unscaled */
     const char* b_scale_dtype; /* NULL when unscaled */
     rocke_mma_scale_block_k_t scale_block_k; /* shared by A/B; NONE when unscaled */
+    /* Logical scale elements per lane, independent of the packed carrier.
+     * Appended ABI fields: native consumers must rebuild. */
+    int a_scale_frag_len;
+    int b_scale_frag_len;
+    const rocke_layout_map_t* a_scale_layout; /* may be NULL */
+    const rocke_layout_map_t* b_scale_layout; /* may be NULL */
 } rocke_mma_op_t;
 
 /* MmaOp.shape -> (m, n, k) via out params. */
 void rocke_mma_op_shape(const rocke_mma_op_t* op, int* m, int* n, int* k);
 
-/* Physical-layout accessors. Each returns the verified map for the role, or NULL
- * when none is registered. Unlike Python (which raises NotImplementedError), the
- * C getters return NULL and -- when `b` is non-NULL -- set the builder's sticky
- * error (ROCKE_ERR_NOTIMPL) with the same message text, so callers can either
- * check NULL or rely on the sticky-fail builder. Pass b=NULL for a pure lookup.
- * Mirrors MmaOp.a_layout / b_layout / c_layout / acc_layout. */
+/* Physical-layout accessors. Missing maps raise ckc::Error with
+ * ROCKE_ERR_NOTIMPL, like Python's NotImplementedError. The enclosing public
+ * builder/lowering boundary translates that exception into status + message;
+ * direct C++ callers must catch it, including when b is NULL. A NULL op returns
+ * NULL. Mirrors MmaOp's matrix and scale layout accessors. */
 const rocke_layout_map_t* rocke_mma_op_a_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_b_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_c_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
 const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_a_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b);
+const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b);
 
 /* ====================== memory caps / resource limits ================== */
 
@@ -277,6 +287,10 @@ int rocke_arch_mma_c_frag_len(const char* op_id);
  * NULL for an op_id absent from every catalog. The returned string is an
  * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
+
+/* Target-independent family projection. Unknown/NULL IDs return NULL;
+ * conflicting families for one ID raise ROCKE_ERR_VALUE. */
+const char* rocke_arch_mma_op_id_family(const char* op_id);
 
 /* ============================== arch target =========================== */
 

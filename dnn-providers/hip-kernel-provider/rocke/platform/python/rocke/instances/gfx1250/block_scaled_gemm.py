@@ -349,9 +349,8 @@ def build_block_scaled_gemm(
     n0 = ir.mul(ir.block_id_x(), c16)
     a_row = ir.add(m0, frag)  # this lane's A row
     b_row = ir.add(n0, frag)  # this lane's B row (= output col n)
-    storage_k = cK
-    a_base = ir.mul(a_row, storage_k)
-    b_base = ir.mul(b_row, storage_k)
+    a_base = ir.mul(a_row, cK)
+    b_base = ir.mul(b_row, cK)
 
     def _load_frag(ptr, base, storage_ty, k0):
         if not native_scale:
@@ -385,8 +384,9 @@ def build_block_scaled_gemm(
             packed = ir.vec_concat(packed, chunk)
         return ir.bitcast(packed, a_frag_ty)
 
-    def _pack_strided_scales(ptr, row_or_col, call_idx, *, for_b):
-        assert scale_op is not None
+    def _pack_strided_scales(ptr, call_idx, *, for_b):
+        assert scale_op is not None and atom is not None
+        layout = atom.b_scale_layout() if for_b else atom.a_scale_layout()
         packing = scale_op.scales
         count = packing.count
         word_ty = I64 if packing.word_bits == 64 else I32
@@ -394,14 +394,16 @@ def build_block_scaled_gemm(
         packed = word_const(0)
         scale_groups = spec.K // spec.block_k
         for j in range(count):
-            scale_group = call_idx * count + j
+            coord0, coord1 = layout.coord(ir, lane, j)
+            group_offset = ir.const_i32(call_idx * (atom.k // spec.block_k))
             if for_b:
-                idx = ir.add(ir.mul(ir.const_i32(scale_group), cN), row_or_col)
+                group = ir.add(group_offset, coord0)
+                col = ir.add(n0, coord1)
+                idx = ir.add(ir.mul(group, cN), col)
             else:
-                idx = ir.add(
-                    ir.mul(row_or_col, ir.const_i32(scale_groups)),
-                    ir.const_i32(scale_group),
-                )
+                row = ir.add(m0, coord0)
+                group = ir.add(group_offset, coord1)
+                idx = ir.add(ir.mul(row, ir.const_i32(scale_groups)), group)
             byte = ir.global_load(ptr, idx, I8, align=1)
             widened = ir.zext(byte, word_ty)
             shift = word_const(j * packing.element_bits)
@@ -415,8 +417,8 @@ def build_block_scaled_gemm(
             k0 = step * _WMMA_SCALE_K
             a_frag = _load_frag(A, a_base, a_ty, k0)
             b_frag = _load_frag(B, b_base, b_ty, k0)
-            a_scale = _pack_strided_scales(AScale, a_row, step, for_b=False)
-            b_scale = _pack_strided_scales(BScale, b_row, step, for_b=True)
+            a_scale = _pack_strided_scales(AScale, step, for_b=False)
+            b_scale = _pack_strided_scales(BScale, step, for_b=True)
             acc = ir.mma(op_id, a_frag, b_frag, acc, a_scale, b_scale)
 
         out_col = ir.add(n0, frag)

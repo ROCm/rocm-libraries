@@ -158,6 +158,18 @@ const rocke_layout_map_t* rocke_mma_op_acc_layout(const rocke_mma_op_t* op, rock
     return rocke_mma_op_c_layout(op, b);
 }
 
+const rocke_layout_map_t* rocke_mma_op_a_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b)
+{
+    return rocke_ati_require_layout(op, op ? op->a_scale_layout : NULL, "a_scale", b);
+}
+
+const rocke_layout_map_t* rocke_mma_op_b_scale_layout(const rocke_mma_op_t* op,
+                                                      rocke_ir_builder_t* b)
+{
+    return rocke_ati_require_layout(op, op ? op->b_scale_layout : NULL, "b_scale", b);
+}
+
 /* ============================== MMA catalog =========================== */
 
 const rocke_mma_op_t* rocke_mma_catalog_ops(const rocke_mma_catalog_t* cat, int* num_out)
@@ -369,6 +381,30 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
 }
 
 /* ===================== bare-op_id SSOT lookups ======================== */
+
+const char* rocke_arch_mma_op_id_family(const char* op_id)
+{
+    if(!op_id)
+        return NULL;
+    const char* family = NULL;
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const auto* target = rocke_ati_arch_registry[i].target;
+        if(!target)
+            continue;
+        for(int j = 0; j < target->mma.num_ops; ++j)
+        {
+            const auto& op = target->mma.ops[j];
+            if(strcmp(op.op_id, op_id) != 0)
+                continue;
+            if(family && strcmp(family, op.family) != 0)
+                ckc::raise_status(ROCKE_ERR_VALUE,
+                                  "arch SSOT drift: op_id has inconsistent family across arches");
+            family = op.family;
+        }
+    }
+    return family;
+}
 
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
 {

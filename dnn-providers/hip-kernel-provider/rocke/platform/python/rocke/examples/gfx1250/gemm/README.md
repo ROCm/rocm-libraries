@@ -28,3 +28,15 @@ It is not a general scalar IR type or conversion API. Native scaled WMMA uses
 one `wmma_scaled` catalog family. Its operation IDs encode the matrix source
 and accumulator dtype, each source's scale format, and a shared K-group size; the backend
 selects the LLVM intrinsic and packed operand types from that contract.
+
+The native loader uses the atom's `a_scale_layout()` and `b_scale_layout()` for
+lane ownership. Global scale tensors have shapes `[M, K/block_k]` and
+`[K/block_k, N]`, respectively. K32 packs four E8M0 bytes per lane into i32;
+K16 packs eight into i64, first K group in the low byte. Both half-waves carry
+the same scales. Matrix A/B lane maps for these scaled atoms are not yet exposed.
+
+CPU tests independently check every scale coordinate, multi-tile addresses and
+packed byte order. The opt-in numerical suite exercises both encodings and
+scale group sizes, one-sided/group-isolated inputs, multiple tiles and K steps,
+and HIP/COMGR compilation. These cases bound the validation; dtype recognition
+alone does not establish support for other operand contracts.

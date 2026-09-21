@@ -1857,12 +1857,11 @@ class IRBuilder:
         c_dtype = getattr(op, "c_dtype", None)
         is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
-        from .arch import ArchTarget
+        from .arch.target import _op_id_family
 
-        atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(op_id)
         hint = (
             "mxacc"
-            if atom is not None and atom.family == "wmma_scaled"
+            if _op_id_family().get(op_id) == "wmma_scaled"
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
         return self._op(

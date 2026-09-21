@@ -67,6 +67,50 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
             ):
                 gfx1250_scaled_wmma(atom.op_id)
 
+    def test_scale_fragment_counts_are_checked_for_each_source(self):
+        catalog = ArchTarget.from_gfx("gfx1250").mma
+        for role in ("a_scale", "b_scale"):
+            for count in (0, 8):
+                atom = replace(
+                    _scaled_atom(),
+                    **{
+                        f"{role}_frag_len": count,
+                        f"_{role}_layout": None,
+                    },
+                )
+                with (
+                    self.subTest(role=role, count=count),
+                    mock.patch.object(catalog, "by_op_id", return_value=atom),
+                    self.assertRaisesRegex(ValueError, "scale fragment lengths"),
+                ):
+                    gfx1250_scaled_wmma(atom.op_id)
+
+    def test_loader_requires_both_scale_maps(self):
+        for role in ("a_scale", "b_scale"):
+            atom = replace(_scaled_atom(), **{f"_{role}_layout": None})
+            spec = BlockScaledGemmSpec(
+                "missing_scale_map",
+                M=16,
+                N=16,
+                K=128,
+                block_k=32,
+                scale_dtype="e8m0",
+                matrix_path="wmma_scale",
+            )
+            with (
+                mock.patch(
+                    "rocke.instances.gfx1250.block_scaled_gemm._native_scaled_atom",
+                    return_value=atom,
+                ),
+                self.assertRaisesRegex(NotImplementedError, role),
+            ):
+                build_block_scaled_gemm(spec, arch="gfx1250")
+            # Lowering prepacked operands needs the carrier contract, not a loader map.
+            with mock.patch.object(
+                ArchTarget.from_gfx("gfx1250").mma, "by_op_id", return_value=atom
+            ):
+                self.assertEqual(gfx1250_scaled_wmma(atom.op_id).scales.count, 4)
+
     def test_backend_derives_each_matrix_carrier_and_selector(self):
         # Synthetic metadata exercises the lowering contract without adding atoms.
         atom = replace(_scaled_atom(), b_dtype="bf8e5m2", b_frag_len=8)

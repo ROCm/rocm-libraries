@@ -92,11 +92,14 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         or atom.shape != (16, 16, 128)
     ):
         raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")
+    counts = (atom.a_scale_frag_len, atom.b_scale_frag_len)
+    if any(count != atom.k // atom.scale_block_k for count in counts):
+        raise ValueError(f"unsupported scaled WMMA scale fragment lengths: {counts}")
     return ScaledWmmaOp(
         atom=atom,
         matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
         scale_formats=(0, 0),  # E8M0 for each source.
         scales=E8M0ScalePacking(
-            count=atom.k // atom.scale_block_k, block_k=atom.scale_block_k
+            count=atom.a_scale_frag_len, block_k=atom.scale_block_k
         ),
     )

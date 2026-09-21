@@ -23,6 +23,7 @@ from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.arch.target import (
     _load_specs,
     _op_id_c_dtype,
+    _op_id_family,
     normalize_dtype,
 )
 
@@ -262,3 +263,65 @@ def test_largest_k_only_rejects_ties_at_the_selected_k():
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+def test_op_id_family_matches_all_catalogs_and_rejects_conflicts():
+    specs = _load_specs()
+    for row in specs.values():
+        for op in row["mma"]:
+            assert _op_id_family()[op["op_id"]] == op["family"]
+    assert _op_id_family().get("unknown") is None
+    sample = next(op for row in specs.values() for op in row["mma"])
+    drifted = {**specs, "synthetic": {"mma": [{**sample, "family": "conflicting"}]}}
+    _op_id_family.cache_clear()
+    try:
+        with mock.patch("rocke.core.arch.target._load_specs", return_value=drifted):
+            with pytest.raises(ValueError, match="inconsistent family"):
+                _op_id_family()
+    finally:
+        _op_id_family.cache_clear()
+
+
+def test_mma_naming_without_target_lookup():
+    from rocke.core.ir import F16, F32, I32, IRBuilder
+
+    atoms = [
+        (
+            ArchTarget.from_gfx("gfx950").mma.by_op_id("mfma_f32_16x16x16_f16"),
+            F16,
+            "acc",
+        ),
+        (
+            ArchTarget.from_gfx("gfx1151").mma.by_op_id("wmma_i32_16x16x16_iu8"),
+            I32,
+            "acc",
+        ),
+        (
+            next(
+                op
+                for op in ArchTarget.from_gfx("gfx1250").mma.ops
+                if op.family == "wmma_scaled"
+            ),
+            I32,
+            "mxacc",
+        ),
+    ]
+    _op_id_family.cache_clear()
+    with mock.patch.object(
+        ArchTarget,
+        "from_gfx",
+        side_effect=AssertionError("target lookup in generic MMA"),
+    ):
+        for atom, elem, hint in atoms:
+            assert atom is not None
+            for arg in (atom, atom.op_id):
+                b = IRBuilder("neutral_mma")
+                a = b.zero_vec(elem, atom.a_frag_len)
+                c = b.zero_vec(I32 if atom.c_dtype == "i32" else F32, atom.c_frag_len)
+                extra = (
+                    (b.const_i32(0), b.const_i32(0))
+                    if atom.family == "wmma_scaled"
+                    else ()
+                )
+                result = b.mma(arg, a, a, c, *extra)
+                assert result.name.lstrip("%").startswith(hint)

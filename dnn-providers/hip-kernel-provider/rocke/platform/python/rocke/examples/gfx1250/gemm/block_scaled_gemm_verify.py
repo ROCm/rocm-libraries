@@ -67,10 +67,8 @@ def reference_result(
 
     sa = decode_e8m0(a_scale) if native else a_scale.astype(np.float64)
     sb = decode_e8m0(b_scale) if native else b_scale.astype(np.float64)
-    a_values = a.astype(np.float64)
-    b_values = b.astype(np.float64)
-    scaled_a = a_values * np.repeat(sa, block_k, axis=1)
-    scaled_b = b_values * np.repeat(sb.T, block_k, axis=1)
+    scaled_a = a.astype(np.float64) * np.repeat(sa, block_k, axis=1)
+    scaled_b = b.astype(np.float64) * np.repeat(sb.T, block_k, axis=1)
     ref = scaled_a @ scaled_b.T
     if native:
         ref = ref.astype(ml_dtypes.bfloat16)
@@ -102,9 +100,8 @@ def make_case_inputs(
         lowbit_types[spec.dtype_b]
     )
     if native:
-        max_exponent = 131
-        sa = rng.integers(125, max_exponent, size=(spec.M, groups), dtype=np.uint8)
-        sb = rng.integers(125, max_exponent, size=(groups, spec.N), dtype=np.uint8)
+        sa = rng.integers(125, 131, size=(spec.M, groups), dtype=np.uint8)
+        sb = rng.integers(125, 131, size=(groups, spec.N), dtype=np.uint8)
         neutral = 127
     else:
         sa = rng.uniform(0.5, 1.5, size=(spec.M, groups)).astype(np.float32)

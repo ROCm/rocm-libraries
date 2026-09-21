@@ -273,6 +273,34 @@ CONFIGS.extend(
 )
 
 
+def _scale_coordinates(block_k):
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="fp8",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", block_k),
+    )
+
+    def build(b):
+        out = b.param("coords", PtrType(I32, "global"), noalias=True, align=16)
+        lane = b.thread_id_x()
+        for layout in (atom.a_scale_layout(), atom.b_scale_layout()):
+            for slot in range(layout.frag_len):
+                x, y = layout.coord(b, lane, slot)
+                b.global_store(out, lane, x)
+                b.global_store(out, lane, y)
+        b.ret()
+
+    return build
+
+
+CONFIGS.extend((_scale_coordinates(block), "gfx1250") for block in (32, 16))
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

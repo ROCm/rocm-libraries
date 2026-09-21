@@ -182,9 +182,78 @@ static int test_scale_contracts()
     return 0;
 }
 
+static int test_scale_layouts_and_families()
+{
+    CHECK(!rocke_arch_mma_op_id_family(NULL));
+    CHECK(!rocke_arch_mma_op_id_family("unknown"));
+    int num_arches = 0;
+    const char* const* arches = rocke_known_arches(&num_arches);
+    int scaled = 0;
+    for(int i = 0; i < num_arches; ++i)
+    {
+        const auto* arch = rocke_arch_target_from_gfx(arches[i]);
+        for(int j = 0; j < arch->mma.num_ops; ++j)
+        {
+            const auto* op = &arch->mma.ops[j];
+            CHECK(strcmp(rocke_arch_mma_op_id_family(op->op_id), op->family) == 0);
+            if(!op->a_scale_dtype)
+            {
+                CHECK(op->a_scale_frag_len == 0 && op->b_scale_frag_len == 0);
+                CHECK(!op->a_scale_layout && !op->b_scale_layout);
+                for(auto getter : {rocke_mma_op_a_scale_layout, rocke_mma_op_b_scale_layout})
+                {
+                    bool rejected = false;
+                    try
+                    {
+                        getter(op, NULL);
+                    }
+                    catch(const ckc::Error& e)
+                    {
+                        rejected = e.code() == ROCKE_ERR_NOTIMPL;
+                    }
+                    CHECK(rejected);
+                }
+                continue;
+            }
+            ++scaled;
+            CHECK(strcmp(arches[i], "gfx1250") == 0);
+            const int count = op->scale_block_k == ROCKE_MMA_SCALE_K16 ? 8 : 4;
+            CHECK(op->a_scale_frag_len == count && op->b_scale_frag_len == count);
+            for(int source = 0; source < 2; ++source)
+            {
+                const auto* map = source ? rocke_mma_op_b_scale_layout(op, NULL)
+                                         : rocke_mma_op_a_scale_layout(op, NULL);
+                CHECK(map && map->frag_len == count && map->wave_size == 32);
+                CHECK(map->role == (source ? ROCKE_MMA_ROLE_B_SCALE : ROCKE_MMA_ROLE_A_SCALE));
+                for(int slot = -1; slot <= count; ++slot)
+                {
+                    rocke_ir_builder_t b;
+                    CHECK(rocke_ir_builder_init(&b, "scale_layout") == ROCKE_OK);
+                    auto* lane = rocke_b_thread_id_x(&b);
+                    rocke_value_t *x = NULL, *y = NULL;
+                    const bool ok = rocke_layout_map_coord(map, &b, lane, slot, &x, &y);
+                    if(slot < 0 || slot == count)
+                    {
+                        CHECK(!ok && !x && !y && b.status == ROCKE_ERR_VALUE);
+                        CHECK(strstr(b.err, source ? "'b_scale'" : "'a_scale'"));
+                    }
+                    else
+                        CHECK(ok && x && y && b.status == ROCKE_OK);
+                    rocke_ir_builder_free(&b);
+                }
+                auto invalid = *op;
+                (source ? invalid.b_scale_frag_len : invalid.a_scale_frag_len) = count / 2;
+                CHECK(rejects_query([&] { rocke_scaled_wmma_contract(&invalid); }));
+            }
+        }
+    }
+    CHECK(scaled == 4);
+    return 0;
+}
+
 int main()
 {
-    if(test_scale_contracts())
+    if(test_scale_contracts() || test_scale_layouts_and_families())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})

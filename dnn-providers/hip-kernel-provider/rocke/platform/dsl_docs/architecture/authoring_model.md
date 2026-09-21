@@ -37,7 +37,23 @@ and `scale_block_k` fields describe independent scale types and a shared K-group
 size. `MmaScaleBlockK.K16` and `MmaScaleBlockK.K32` are the only scaled sizes;
 all three fields are `None` for unscaled atoms. Integer 16/32 values from JSON
 are normalized to the enum. Scale types are independent of matrix dtypes and
-packed register types. Fragment and layout accessors retain their A/B/C roles.
+packed register types. Matrix fragment and layout accessors retain their A/B/C roles.
+
+`a_scale_frag_len` and `b_scale_frag_len` count logical scale elements per lane.
+`a_scale_layout()` maps `(lane, slot)` to `(row, K-group)`;
+`b_scale_layout()` maps it to `(K-group, column)`. These instruction-local maps
+are separate from register byte packing and global tensor strides. Unscaled
+atoms default to zero scale fragments and absent maps. An unavailable map raises
+`NotImplementedError`, including for a scaled atom whose layout is not verified.
+The native record appends corresponding counts and map pointers, so native
+consumers must rebuild; existing role enum values remain unchanged.
+
+The four gfx1250 FP8/BF8 scaled atoms provide these scale maps: lane `l` and
+slot `j` map to `(l % 16, j)` for A and `(j, l % 16)` for B. Both half-waves
+duplicate the scales. K32 uses four E8M0 elements per lane packed into i32;
+K16 uses eight packed into i64, with slot `j` at bit offset `8*j`. Matrix A/B
+maps for these atoms remain unavailable. The gfx1250 loader applies tile and
+instruction-step offsets to the scale coordinates before applying tensor strides.
 
 For scaled operations, query the complete contract and pass the selected atom
 to `IRBuilder.mma`:
