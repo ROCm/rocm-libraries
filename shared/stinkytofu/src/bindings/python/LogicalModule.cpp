@@ -95,9 +95,8 @@ const std::vector<SetDirectiveEntry>& PyLogicalModule::getSetDirectives() const 
 }
 
 void PyLogicalModule::addIfDirective(const std::string& condition) {
-    pImpl->conditionalDirectives.push_back(
-        ConditionalDirectiveEntry{pImpl->instructions.size(), pImpl->globalOrder++,
-                                  ConditionalDirectiveKind::IF, condition});
+    pImpl->conditionalDirectives.push_back(ConditionalDirectiveEntry{
+        pImpl->instructions.size(), pImpl->globalOrder++, ConditionalDirectiveKind::IF, condition});
 }
 
 void PyLogicalModule::addEndifDirective(const std::string& comment) {

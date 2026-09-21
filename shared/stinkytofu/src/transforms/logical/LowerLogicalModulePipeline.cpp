@@ -77,8 +77,7 @@ GemmTileConfig configFromOptions(std::array<int, 3> arch,
 // when TensileLite forwarded rocisa's asmCaps, else auto-probe via comgr. The
 // asm-side pipeline derives its caps this way, and ToStinkyAsmPass must see the
 // same verdict or a split ds_* half crossing a VGPR MSB bank loses its offset.
-AsmCapsConfig capsFromOptions(std::array<int, 3> arch,
-                              const StinkyAsmModule::ModuleOptions& opts) {
+AsmCapsConfig capsFromOptions(std::array<int, 3> arch, const StinkyAsmModule::ModuleOptions& opts) {
     auto msbVal = opts.VgprMsbMode;
     if (msbVal < 0 || msbVal > static_cast<int>(VgprMsbMode::Msb16)) msbVal = 0;
 
@@ -213,8 +212,10 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                         pyFunctions.push_back(std::make_unique<PyLogicalFunction>(&callable));
                         irBuilder = std::make_unique<AsmIRBuilder>(*currentBB, archId);
                     } else {
-                        assert(currentBB != entryBB && "callable end marker without a begin marker");
-                        assert(marker.name == currentCallableName && "mismatched callable end marker");
+                        assert(currentBB != entryBB &&
+                               "callable end marker without a begin marker");
+                        assert(marker.name == currentCallableName &&
+                               "mismatched callable end marker");
                         currentBB = entryBB;
                         activeGroups = entryActiveGroups;
                         entryActiveGroups.clear();

@@ -562,8 +562,7 @@ NB_MODULE(_stinkytofu, m) {
              "Record a .set directive at the current position in the instruction stream")
         .def("add_if_directive", &PyLogicalModule::addIfDirective, nb::arg("condition"),
              "Record a .if directive at the current position in the instruction stream")
-        .def("add_endif_directive", &PyLogicalModule::addEndifDirective,
-             nb::arg("comment") = "",
+        .def("add_endif_directive", &PyLogicalModule::addEndifDirective, nb::arg("comment") = "",
              "Record a .endif directive at the current position in the instruction stream")
         .def("add_label", &PyLogicalModule::addLabel, nb::arg("label_name"),
              nb::arg("alignment") = 1, nb::arg("comment") = "",
