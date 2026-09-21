@@ -45,6 +45,10 @@ namespace {
 struct CropAndPatchParams {
     Rpp32u cropX, cropY, w, h, patchX, patchY;
     std::string tag;
+    // Extent written into patchRoiTensor, which neither backend reads. 0 means same as the crop.
+    Rpp32u patchW = 0, patchH = 0;
+    // Destination region; dstW == 0 means the full image.
+    Rpp32u dstX = 0, dstY = 0, dstW = 0, dstH = 0;
     std::string name() const {
         return tag;
     }
@@ -58,23 +62,26 @@ void run_crop_and_patch(const TestConfig& cfg, const CropAndPatchParams& op) {
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
 
-    // Three per-image ROI tensors in host-accessible (pinned for HIP) memory: the destination
-    // region is always the full image; crop/patch carry the operator's rectangles.
+    // Three per-image ROI tensors in host-accessible (pinned for HIP) memory: dstRoi sizes the
+    // output and offsets the src2 read; crop/patch carry the operator's rectangles.
+    const Rpp32u dstW = op.dstW ? op.dstW : desc.w, dstH = op.dstW ? op.dstH : desc.h;
+    const Rpp32u dstX = op.dstW ? op.dstX : 0u, dstY = op.dstW ? op.dstY : 0u;
+    const Rpp32u patchW = op.patchW ? op.patchW : op.w, patchH = op.patchH ? op.patchH : op.h;
     PinnedArray<RpptROI> dstRoi(cfg.backend, shape.n), cropRoi(cfg.backend, shape.n),
         patchRoi(cfg.backend, shape.n);
     for (Rpp32u i = 0; i < shape.n; ++i) {
-        dstRoi[i].xywhROI.xy.x = 0;
-        dstRoi[i].xywhROI.xy.y = 0;
-        dstRoi[i].xywhROI.roiWidth = static_cast<int>(desc.w);
-        dstRoi[i].xywhROI.roiHeight = static_cast<int>(desc.h);
+        dstRoi[i].xywhROI.xy.x = static_cast<int>(dstX);
+        dstRoi[i].xywhROI.xy.y = static_cast<int>(dstY);
+        dstRoi[i].xywhROI.roiWidth = static_cast<int>(dstW);
+        dstRoi[i].xywhROI.roiHeight = static_cast<int>(dstH);
         cropRoi[i].xywhROI.xy.x = static_cast<int>(op.cropX);
         cropRoi[i].xywhROI.xy.y = static_cast<int>(op.cropY);
         cropRoi[i].xywhROI.roiWidth = static_cast<int>(op.w);
         cropRoi[i].xywhROI.roiHeight = static_cast<int>(op.h);
         patchRoi[i].xywhROI.xy.x = static_cast<int>(op.patchX);
         patchRoi[i].xywhROI.xy.y = static_cast<int>(op.patchY);
-        patchRoi[i].xywhROI.roiWidth = static_cast<int>(op.w);
-        patchRoi[i].xywhROI.roiHeight = static_cast<int>(op.h);
+        patchRoi[i].xywhROI.roiWidth = static_cast<int>(patchW);
+        patchRoi[i].xywhROI.roiHeight = static_cast<int>(patchH);
     }
 
     // (1) Host golden model. Two distinct operands (salt shifts the second); golden starts as a
@@ -121,15 +128,22 @@ TEST_P(CropAndPatchTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_crop_and_patch<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Only {Roi::Full} on the roi axis: crop_and_patch has no standard source ROI (its regions are the
-// crop/patch params) and its destination region is always the full image. Cases (default size
-// 2x36x48): inplace patches back onto its own crop location [8,24)x[6,18); moved patches the same
-// crop to [24,40)x[18,30) -- both rectangles fit within 48x36.
+// Only {Roi::Full} on the roi axis: crop_and_patch has no standard source ROI -- its regions are
+// the dstRoi/crop/patch params, which the cases below vary directly. Cases (default size 2x36x48):
+//   "inplace"     patches the crop back onto its own location [8,24)x[6,18).
+//   "moved"       patches the same crop to [24,40)x[18,30).
+//   "patchextent" a 4x4 patch extent against a 16x12 crop, holding the reference to the crop's.
+//   "dstroi"      the only case exercising the dstRoi frame. Kept within the destination region so
+//                 it does not hit the HOST over-hanging-patch underflow.
+// All rectangles fit within both 48x36 and 55x36.
 INSTANTIATE_TEST_SUITE_P(Image_Geometric, CropAndPatchTest,
                          ::testing::ValuesIn(with_params<CropAndPatchParams>(
                              make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
                                           {Layout::PKD3, Layout::PLN3, Layout::PLN1}, {Roi::Full},
                                           {presets::kDefaultSize, presets::kTailWidthSize}),
                              {CropAndPatchParams{8, 6, 16, 12, 8, 6, "inplace"},
-                              CropAndPatchParams{8, 6, 16, 12, 24, 18, "moved"}})),
+                              CropAndPatchParams{8, 6, 16, 12, 24, 18, "moved"},
+                              CropAndPatchParams{8, 6, 16, 12, 8, 6, "patchextent", 4, 4},
+                              CropAndPatchParams{8, 6, 16, 12, 8, 6, "dstroi", 0, 0, 8, 6, 32,
+                                                 24}})),
                          op_config_name<CropAndPatchParams>);

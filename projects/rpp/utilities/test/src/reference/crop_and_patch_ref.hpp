@@ -42,12 +42,23 @@ RPP op
 Description
   Copies the 2nd image, then overlays the rectangular crop taken from the 1st
   image at the patch co-ordinates. Crop size == patch size (no resize), the
-  documented unambiguous case. Coordinates are absolute (image origin (0,0));
-  pixels whose source or destination fall outside [0,h) x [0,w) are skipped.
+  documented unambiguous case.
+
+  dstRoi sizes the output, which is written packed at the destination origin
+  while src2 is read at the dstRoi offset. crop is absolute in src1 and gives
+  both the origin and the extent of the overlaid rectangle; patch gives its
+  origin only, in the packed output frame -- neither backend reads the patch
+  extent.
 
 Expression
-  dst           = src2                        everywhere
-  dst(patch + k) = src1(crop + k)             for k inside the patch rectangle
+  For packed output coordinate (r, c), 0 <= r < dstRoi.h, 0 <= c < dstRoi.w:
+
+    inPatch      = patch.y0 <= r < patch.y0 + crop.h
+                && patch.x0 <= c < patch.x0 + crop.w
+    dst(r, c)    = inPatch ? src1(crop.y0 + r - patch.y0, crop.x0 + c - patch.x0)
+                           : src2(dstRoi.y0 + r,          dstRoi.x0 + c)
+
+  Reads that fall outside [0,h) x [0,w) are skipped rather than clamped.
 
 Per-type form
   No arithmetic, rounding, or clamping is performed -- every output element is
@@ -56,31 +67,23 @@ Per-type form
 */
 template <typename T>
 void crop_and_patch_reference(const T* src1, const T* src2, T* dst, const RpptDesc& d,
-                              const RpptROI* /*dstRoi*/, const RpptROI* cropRoi,
+                              const RpptROI* dstRoi, const RpptROI* cropRoi,
                               const RpptROI* patchRoi, RpptRoiType roiType) {
-    // (1) Output is a copy of the 2nd image over the whole frame.
-    for (Rpp32u n = 0; n < d.n; ++n)
-        for (Rpp32u c = 0; c < d.c; ++c) {
-            const std::size_t base = plane_base(d, n, c);
-            for (Rpp32u y = 0; y < d.h; ++y)
-                for (Rpp32u x = 0; x < d.w; ++x) {
-                    const std::size_t idx = plane_index(d, base, y, x);
-                    dst[idx] = src2[idx];
-                }
-        }
-
-    // (2) Overlay the src1 crop at the patch location, in-bounds pixels only.
     for (Rpp32u n = 0; n < d.n; ++n) {
+        const RoiBounds db = roi_bounds(dstRoi[n], roiType);
         const RoiBounds cb = roi_bounds(cropRoi[n], roiType);
         const RoiBounds pb = roi_bounds(patchRoi[n], roiType);
-        for (Rpp32u r = 0; r < pb.h; ++r)
-            for (Rpp32u col = 0; col < pb.w; ++col) {
-                const Rpp32u sy = cb.y0 + r, sx = cb.x0 + col;
-                const Rpp32u dy = pb.y0 + r, dx = pb.x0 + col;
-                if (sy >= d.h || sx >= d.w || dy >= d.h || dx >= d.w) continue;
+        for (Rpp32u r = 0; r < db.h; ++r)
+            for (Rpp32u col = 0; col < db.w; ++col) {
+                const bool inPatch =
+                    (r >= pb.y0 && r < pb.y0 + cb.h) && (col >= pb.x0 && col < pb.x0 + cb.w);
+                const T* src = inPatch ? src1 : src2;
+                const Rpp32u sy = inPatch ? cb.y0 + (r - pb.y0) : db.y0 + r;
+                const Rpp32u sx = inPatch ? cb.x0 + (col - pb.x0) : db.x0 + col;
+                if (sy >= d.h || sx >= d.w) continue;
                 for (Rpp32u c = 0; c < d.c; ++c) {
                     const std::size_t base = plane_base(d, n, c);
-                    dst[plane_index(d, base, dy, dx)] = src1[plane_index(d, base, sy, sx)];
+                    dst[plane_index(d, base, r, col)] = src[plane_index(d, base, sy, sx)];
                 }
             }
     }
