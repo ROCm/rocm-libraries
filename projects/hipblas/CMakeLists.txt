@@ -87,6 +87,9 @@ option(USE_CUDA "Build hipBLAS for the CUDA backend using nvcc directly (no hipc
 
 if(USE_CUDA)
   find_package(CUDAToolkit REQUIRED)
+  # hip::host is still needed for HIP headers consumed by the public API
+  # even on the CUDA backend.
+  find_package(hip CONFIG REQUIRED PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
   set(HIPBLAS_CUDA_COMPILER_DEFINES __HIP_PLATFORM_NVCC__ __HIP_PLATFORM_NVIDIA__)
 else()
   # AMD backend: hip::host / hip::device imported targets drive compilation.
