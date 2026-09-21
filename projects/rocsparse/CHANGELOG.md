@@ -8,6 +8,7 @@ Documentation for rocSPARSE is available at
 ### Resolved issues
 * Fixed an integer overflow in `rocsparse_csr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion. ELL element counts are now stored in 64-bit arithmetic, and ELL element indices are computed using 64-bit types in the CSR-to-ELL, CSR-to-HYB, ELL-to-CSR, and HYB-to-CSR conversion kernels.
 * Fixed a second integer overflow in `rocsparse_csr2hyb`, in the maximum ELL row width check. `2 * (csr_nnz - 1)` was evaluated in 32-bit arithmetic, so for matrices with more than 2^30 (~1.07 billion) nonzeros the allowed width became negative and the conversion rejected every ELL width with `rocsparse_status_invalid_value`. The check is now evaluated in 64-bit arithmetic.
+* Fixed an integer overflow in the ELL SpMV kernels used by `rocsparse_spmv` (ELL format) and the legacy `rocsparse_Xellmv` routines when operating on matrices with more than `2^32` rows and 64-bit index types. The overflow caused rows beyond the `2^32` boundary to be mapped to incorrect row indices, leaving some output values uncomputed. Row indices are now always computed using the matrix index type.
 
 ## (Unreleased) rocSPARSE 5.1.0
 
@@ -20,6 +21,7 @@ Documentation for rocSPARSE is available at
 * Added the `rocsparse_solve_mode` enum (`triangular`, `diagonal`) and the `rocsparse_diagonal_modifier` enum (`none`, `absolute`) to enable diagonal-only solves in `rocsparse_sptrsv` and `rocsparse_sptrsm`, together with the `rocsparse_sptrsv_input_solve_mode` / `rocsparse_sptrsm_input_solve_mode` and `rocsparse_sptrsv_input_diagonal_modifier` / `rocsparse_sptrsm_input_diagonal_modifier` set-input values. The modifier selects the function applied to each diagonal value (`d` or `|d|`). CSR and CSC formats are supported.
 
 ### Optimized
+* Improved `rocsparse_Xgemvi` performance, especially when `n` is greater than `m`.
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
 
 ### Resolved issues
