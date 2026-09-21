@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .arch import target as _arch
+
 # ----------------------------- Types --------------------------------------
 
 
@@ -71,9 +73,8 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
 # ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
 # keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
-# directly, and a bare op_id string is resolved through the lazy helpers below.
-# The arch package is imported lazily (inside the helpers) so ir.py stays
-# importable without eagerly loading the arch tree.
+# directly, and a bare op_id string is resolved through the helpers below.
+# The arch module loads its JSON catalog lazily when a lookup needs it.
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
 # purely ir-side SSA naming (not arch data), kept here so the emitted value
@@ -133,12 +134,10 @@ def _check_cachepolicy(op: str, value: int) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
     ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
     the strictness callers relied on.
     """
-    from rocke.core.arch import target as _arch
-
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
         raise ValueError(
@@ -152,11 +151,9 @@ def _mma_c_is_int(op_id: str) -> bool:
     """True when ``op_id`` accumulates in i32 (integer WMMA).
 
     Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
-    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
+    Op_ids absent from the catalog default to the f32 accumulator.
     """
-    from rocke.core.arch import target as _arch
-
     return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
@@ -1857,11 +1854,9 @@ class IRBuilder:
         c_dtype = getattr(op, "c_dtype", None)
         is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
-        from .arch.target import _op_id_family
-
         hint = (
             "mxacc"
-            if _op_id_family().get(op_id) == "wmma_scaled"
+            if _arch._op_id_family().get(op_id) == "wmma_scaled"
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
         return self._op(
