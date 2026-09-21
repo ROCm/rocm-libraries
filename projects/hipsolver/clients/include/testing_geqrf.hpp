@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, typename I, typename SIZE, typename Td, typename INTd, typename Th>
 void geqrf_checkBadArgs(const hipsolverHandle_t   handle,
@@ -455,13 +456,13 @@ void geqrf_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         geqrf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_geqrf(API,
                         handle,
                         params,
@@ -478,9 +479,9 @@ void geqrf_getPerfData(const hipsolverHandle_t   handle,
                         hlwork,
                         dInfo.data(),
                         bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
@@ -618,7 +619,7 @@ void testing_geqrf(Arguments& argus)
         //                            &max_error);
 
         // // collect performance data
-        // if(argus.timing)
+        // if(argus.timing && hot_calls > 0)
         //     geqrf_getPerfData<API, T>(handle,
         //                               params,
         //                               m,
@@ -689,7 +690,7 @@ void testing_geqrf(Arguments& argus)
                                    &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geqrf_getPerfData<API, T>(handle,
                                       params,
                                       m,
