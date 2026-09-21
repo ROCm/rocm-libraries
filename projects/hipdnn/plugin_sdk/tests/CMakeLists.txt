@@ -153,6 +153,21 @@ if(HIPDNN_UHD_GEN_RUNNABLE)
     target_compile_definitions(hipdnn_plugin_sdk_tests
         PRIVATE HIPDNN_UHD_GEN_PYTHON="${Python3_EXECUTABLE}"
                 HIPDNN_UHD_GEN_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
+
+    # uhd_gen resolves the evaluator from this variable on its own, so naming it here covers
+    # every invocation rather than the ones that remembered to pass --feature-evaluator. It
+    # names a target `tools` declares, which is configured after this directory; the
+    # generator expression is resolved at generate time, and the guard above already implies
+    # HIPDNN_ENABLE_KERNEL_INGESTOR, which is what decides that target exists.
+    #
+    # Appended, not set: Sanitizers.cmake puts the ASAN symbolizer and the MIOpen cache
+    # directory in this same variable, and add_hipdnn_test() applies it through
+    # set_tests_properties, which replaces the property rather than adding to it.
+    list(APPEND TEST_ENVIRONMENT
+         "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+    # The variable only names the binary; this is what makes it exist first.
+    add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
 endif()
 
 
