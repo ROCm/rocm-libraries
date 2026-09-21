@@ -115,8 +115,8 @@ void testing_spmv_coo_aos_extra(const Arguments& arg)
     // nnz just beyond 2^32 so at least one block has a block index whose
     // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
     const I nnz = two_pow_32 + 512;
-    const I m   = 2;
-    const I n   = 2;
+    const I m   = 65537;
+    const I n   = 65536;
 
     const rocsparse_index_base base  = rocsparse_index_base_zero;
     const rocsparse_datatype   ttype = get_datatype<T>();
