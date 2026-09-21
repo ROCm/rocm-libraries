@@ -356,7 +356,7 @@ class Library:
         iters: int = 100,
         cold_iters: int = 100,
         rotating: int = 512,
-        beta: bool = True,
+        beta: bool = False,
         flush: bool = True,
         print_kernel_info: bool = True,
         initialization: str = "trig_float",
@@ -376,7 +376,7 @@ class Library:
             rotating (int, optional): Memory rotation parameter.
                 Defaults to 512.
             beta (bool, optional): Whether to use non-zero beta values.
-                Defaults to True.
+                Defaults to False.
             flush (bool, optional): Whether to flush GPU caches.
                 Defaults to True.
             print_kernel_info (bool, optional): Whether to print solution information.

@@ -30,6 +30,20 @@ def test_parse_benchmark_output_happy_path(tmp_path: Path) -> None:
     assert str(df.iloc[0]["solutionIdx"]) == "7"
 
 
+def test_ensure_scale_columns_defaults_to_zero() -> None:
+    df = pd.DataFrame([{"M": 16}])
+    butils.ensure_scale_columns(df)
+    assert df["scaleA"].iloc[0] == 0
+    assert df["scaleB"].iloc[0] == 0
+
+
+def test_ensure_scale_columns_keeps_existing_values() -> None:
+    df = pd.DataFrame([{"M": 16, "scaleA": 3, "scaleB": 3}])
+    butils.ensure_scale_columns(df)
+    assert df["scaleA"].iloc[0] == 3
+    assert df["scaleB"].iloc[0] == 3
+
+
 def test_parse_benchmark_output_invalid_format_raises(tmp_path: Path) -> None:
     f = tmp_path / "a.out"
     f.write_text("invalid\n")

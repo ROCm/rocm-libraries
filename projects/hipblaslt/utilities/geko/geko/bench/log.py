@@ -267,8 +267,8 @@ def update(
             row["initialization"] = "trig_float"
 
         row["compute_type"] = update_compute_type(row["compute_type"])
-        row.setdefault("scaleA", 1)
-        row.setdefault("scaleB", 1)
+        row.setdefault("scaleA", 0)
+        row.setdefault("scaleB", 0)
         if "scale_type" not in row:
             row["scale_type"] = row["compute_type"].lstrip("c_").lstrip("x")
 

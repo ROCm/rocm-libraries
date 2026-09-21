@@ -12,6 +12,7 @@ from __future__ import annotations
 __all__ = [
     "load_prepared_config_from_yaml",
     "validate_input_config",
+    "validate_mx_arch_support",
     "apply_input_config_defaults",
     "get_gemm_problem",
     "gemm_configs_from_gemm_log_path",
@@ -158,6 +159,27 @@ def gemm_configs_from_gemm_log_path(log_file: str | Path) -> List[GemmConfig]:
     """parse_gemm_log(as_df=True) then gemm_configs_from_gemm_dataframe (no bench)."""
     df = parse_gemm_log(log_file, as_df=True)
     return gemm_configs_from_gemm_dataframe(df)
+
+
+def validate_mx_arch_support(gemm_configs: List[GemmConfig], arch: str) -> None:
+    """Raise if any GemmConfig requests MX on an arch that doesn't support it.
+
+    Args:
+        gemm_configs: GemmConfigs to check (each may have mx True/False).
+        arch: Target gfx architecture; looked up in HARDWARE_MAP for mx_scale
+            (0 means MX is not supported on that arch).
+
+    Raises:
+        ValueError: If any gemm_configs entry has mx=True while
+            HARDWARE_MAP[arch]["mx_scale"] == 0.
+    """
+    if HARDWARE_MAP.get(arch, {}).get("mx_scale", 0) != 0:
+        return
+    if any(gc.mx for gc in gemm_configs):
+        raise ValueError(
+            f"MX (Microscaling) is not supported on ARCH '{arch}'. "
+            f"Remove MX: True / the inline 'MX' arg, or target an MX-capable arch."
+        )
 
 
 def get_gemm_problem(config: dict) -> None:
@@ -372,5 +394,7 @@ def load_prepared_config_from_yaml(
         config["GemmProblems"] = gemm_problems
     else:
         get_gemm_problem(config)
+
+    validate_mx_arch_support(config["GemmProblems"], config["ARCH"])
 
     return config

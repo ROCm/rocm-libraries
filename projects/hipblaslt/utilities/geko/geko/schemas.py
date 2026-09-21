@@ -217,18 +217,25 @@ class GemmType:
         if dt in m:
             a_type = b_type = m[dt]
         else:
-            # Try all split points for an ordered pair of known type keys.
-            pair = next(
-                ((m[dt[:i]], m[dt[i:]]) for i in range(1, len(dt))
-                 if dt[:i] in m and dt[i:] in m),
-                None,
-            )
-            if pair is None:
+            # Collect every split point that yields an ordered pair of known
+            # type keys; more than one candidate means the split is
+            # ambiguous and must not be silently resolved.
+            candidates = [
+                (m[dt[:i]], m[dt[i:]])
+                for i in range(1, len(dt))
+                if dt[:i] in m and dt[i:] in m
+            ]
+            if not candidates:
                 raise ValueError(
                     f"Cannot resolve Tensile DataType {dt!r}: not a known type "
                     f"or a valid ordered pair of types."
                 )
-            a_type, b_type = pair
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"Ambiguous Tensile DataType {dt!r}: multiple valid ordered-pair "
+                    f"splits found ({candidates}). Cannot resolve unambiguously."
+                )
+            a_type, b_type = candidates[0]
 
         try:
             c_type = m[dd]
@@ -369,10 +376,10 @@ class GemmConfig:
         Args:
             mx_scale: hipblaslt scaleA/scaleB value for MX block scaling.
                 Arch-specific: 1001 for gfx950, 3 for others.
-                Only used when self.mx is True; non-MX always uses 1.
+                Only used when self.mx is True; non-MX always uses 0 (no scaling).
         """
         base = self.gemm_type.workload_log_type_fields()
-        scale_val = mx_scale if self.mx else 1
+        scale_val = mx_scale if self.mx else 0
         rows: List[dict] = []
         for m, n, b, kk in self.sizes:
             row = {

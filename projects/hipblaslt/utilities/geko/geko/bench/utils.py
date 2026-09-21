@@ -24,11 +24,11 @@ import logging
 
 logger = logging.getLogger("GEKO")
 
-_SCALE_DEFAULTS = {"scaleA": 1, "scaleB": 1}
+_SCALE_DEFAULTS = {"scaleA": 0, "scaleB": 0}
 
 
 def ensure_scale_columns(df):
-    """Add scaleA/scaleB columns defaulting to 1 if missing. Mutates df in place."""
+    """Add scaleA/scaleB columns defaulting to 0 (no scaling) if missing. Mutates df in place."""
     for col, default in _SCALE_DEFAULTS.items():
         if col not in df.columns:
             df[col] = default

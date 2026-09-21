@@ -17,6 +17,7 @@ from geko.config_generator.load_input_config import (
     gemm_configs_from_gemm_log_path,
     load_prepared_config_from_yaml,
     validate_input_config,
+    validate_mx_arch_support,
 )
 
 
@@ -296,3 +297,50 @@ def test_mx_accepts_compatible_data_types(dtype: str) -> None:
     gt = GemmType.from_tensile("T", "N", dtype, "S", "S")
     gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
     assert gc.mx is True
+
+
+def test_validate_mx_arch_support_rejects_unsupported_arch() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        validate_mx_arch_support([gc], "gfx942")
+
+
+def test_validate_mx_arch_support_accepts_supported_arch() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    validate_mx_arch_support([gc], "gfx950")
+
+
+def test_validate_mx_arch_support_ignores_non_mx_configs_on_unsupported_arch() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "H", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]])
+    validate_mx_arch_support([gc], "gfx942")
+
+
+def test_load_prepared_config_from_yaml_rejects_mx_on_unsupported_arch(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "cfg.yaml"
+    yaml.safe_dump(
+        {
+            "ARCH": "gfx942",
+            "TRANSA": "N",
+            "TRANSB": "N",
+            "DataType": "F8",
+            "DestDataType": "S",
+            "ComputeDataType": "S",
+            "SIZE_OPTION": 0,
+            "Sizes": [[32, 32, 1, 32]],
+            "MX": True,
+        },
+        cfg_path.open("w"),
+        sort_keys=False,
+    )
+
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        load_prepared_config_from_yaml(cfg_path)

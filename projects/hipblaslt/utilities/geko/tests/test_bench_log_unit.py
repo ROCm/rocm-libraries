@@ -122,6 +122,21 @@ def test_update_sets_iters_from_latency() -> None:
     assert out[0]["compute_type"] == "c_f32_r"
 
 
+def test_update_defaults_missing_scale_columns_to_zero() -> None:
+    row = _row()
+    del row["scaleA"]
+    del row["scaleB"]
+    out = blog.update([row])[0]
+    assert out[0]["scaleA"] == 0
+    assert out[0]["scaleB"] == 0
+
+
+def test_update_keeps_existing_scale_columns() -> None:
+    out = blog.update([_row(scaleA=3, scaleB=3)])[0]
+    assert out[0]["scaleA"] == 3
+    assert out[0]["scaleB"] == 3
+
+
 def test_update_from_path_returns_output_file_and_writes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     p = tmp_path / "in.yaml"
     p.write_text("[]\n")

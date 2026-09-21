@@ -218,6 +218,26 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
     assert called["devices"] == [2]
 
 
+def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    monkeypatch.setattr(
+        pipeline.bench.log,
+        "summarize",
+        lambda *_args, **kwargs: (pd.DataFrame(), pd.DataFrame([{"M": 16}])),
+    )
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    monkeypatch.setattr(pipeline, "gemm_configs_from_gemm_dataframe", lambda _df: [gc])
+
+    with pytest.raises(ValueError, match="MX .* is not supported on ARCH 'gfx942'"):
+        pipeline.run_configure(str(hip), str(workload), devices=[0], arch="gfx942", workdir=str(tmp_path / "w"))
+
+
 def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()

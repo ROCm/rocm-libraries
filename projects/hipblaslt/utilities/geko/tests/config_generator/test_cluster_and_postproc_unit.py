@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import sys
 
 from geko.config_generator import cluster_sizes as cs
 from geko.config_generator.fork_params import post_processor as base_pp
@@ -114,6 +115,7 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
 
 
 def test_load_cms_groups_import_error(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "Tensile", None)
     monkeypatch.setattr(os.path, "isdir", lambda _p: False)
     raised = False
     try:
