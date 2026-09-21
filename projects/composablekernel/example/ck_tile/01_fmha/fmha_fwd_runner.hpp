@@ -234,6 +234,15 @@ struct ScalesConfig<TypeConfig, true>
     static constexpr ck_tile::index_t kVScaleGranularity  = TypeConfig::kVScaleGranularity;
 };
 
+// Deterministic inputs for the blockscale recurrence tests; not a command-line option.
+enum class blockscale_test_pattern
+{
+    random,
+    equal_logits,
+    dominant_key,
+    rising_max
+};
+
 template <typename DataTypeConfig>
 fwd_result fmha_fwd_run(mode_enum mode,
                         ck_tile::index_t batch,
@@ -273,7 +282,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        ck_tile::index_t block_scale_size_kv_override = 0,
+                        blockscale_test_pattern test_pattern = blockscale_test_pattern::random)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -581,7 +592,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif
 
     const ck_tile::index_t block_scale_size_kv_ =
-        fmha_fwd_block_scale_size_kv(data_type, hdim_q, hdim_v);
+        block_scale_size_kv_override > 0
+            ? block_scale_size_kv_override
+            : fmha_fwd_block_scale_size_kv(data_type, hdim_q, hdim_v);
 
     const auto seqstart_q_host              = to_seqstarts(seqlen_qs);
     const auto seqstart_k_host              = to_seqstarts(seqlen_ks);
@@ -1047,6 +1060,39 @@ fwd_result fmha_fwd_run(mode_enum mode,
             k_descale_host);
         ck_tile::FillUniformDistribution<float>{max_descale_v * 0.8f, max_descale_v, next_seed()}(
             v_descale_host);
+    }
+
+    if(test_pattern != blockscale_test_pattern::random)
+    {
+        if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+        {
+            if(mode != mode_enum::batch || qscale.type != quant_scale_enum::blockscale ||
+               !i_perm || !is_v_rowmajor || pack_gqa || seqlen_knew != 0 ||
+               shape_seqlen_k <= 0)
+                return fwd_result::failure;
+
+            q_host.ForEach([](auto& self, auto i) {
+                self(i) = ck_tile::type_convert<QDataType>(1.f);
+            });
+            k_host.ForEach([&](auto& self, auto i) {
+                const auto token = i[2]; // batch, head, sequence, dimension
+                float value = 0.f;
+                if(test_pattern == blockscale_test_pattern::dominant_key)
+                    value = token == static_cast<std::size_t>(shape_seqlen_k - 1) ? 2.f : 0.f;
+                else if(test_pattern == blockscale_test_pattern::rising_max)
+                    value = static_cast<float>(token / 128) * 0.125f;
+                self(i) = ck_tile::type_convert<KDataType>(value);
+            });
+            v_host.ForEach([](auto& self, auto i) {
+                self(i) = ck_tile::type_convert<VDataType>(
+                    1.f + static_cast<float>(i[2] / 128) + static_cast<float>(i[3] % 3) * 0.25f);
+            });
+            q_descale_host.ForEach([](auto& self, auto i) { self(i) = 1.f; });
+            k_descale_host.ForEach([](auto& self, auto i) { self(i) = 1.f; });
+            v_descale_host.ForEach([](auto& self, auto i) { self(i) = 1.f; });
+        }
+        else
+            return fwd_result::failure;
     }
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);

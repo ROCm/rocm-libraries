@@ -214,6 +214,19 @@ if(FMHA_HAS_RDNA_TARGET)
   endif()
 endif()
 
+# The streamed fp8 d128 instances need both options: the store/load optimizer merges
+# streamed LDS reads into forms that cost registers, and the post-RA scheduler hides
+# their latency. Without both, the aligned dense per-tensor instance measured ~44%
+# slower at 199 VGPRs instead of 192. Scope this to the per-tensor/blockscale instances,
+# including masked and padded variants; keep the pattern in sync with codegen names.
+foreach(fwd_blob ${FMHA_FWD_GEN_BLOBS})
+  if(fwd_blob MATCHES "fmha_fwd_d128_fp8bf16_batch_b64x128x128x128x128x128_r4x1x1_r4x1x1_w16x16x128_w16x16x128_qr_tdm_vr_(npad|pddv|pssk|psskddv)_nlogits_nbias_n?mask_nlse_ndropout_nskip_(pertensor|blockscale)_ntrload_nsink_gfx125\\.cpp$")
+    set_property(SOURCE ${fwd_blob} APPEND PROPERTY COMPILE_OPTIONS
+      "-mllvm=-enable-post-misched=1"
+      "-mllvm=-opt-disable=si-load-store-opt")
+  endif()
+endforeach()
+
 # use RTN_ASM on float to bfloat16 conversion by default, align with FA upstream
 list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
 list(APPEND FMHA_BWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
