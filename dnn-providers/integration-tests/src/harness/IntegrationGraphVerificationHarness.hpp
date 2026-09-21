@@ -20,9 +20,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -39,6 +37,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/OutputComparison.hpp"
 #include "harness/input-init/FillInputs.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
@@ -125,9 +124,11 @@ protected:
     struct TensorValidationEntry
     {
         std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
-        std::string name;
-        float atol = 0.0f;
-        float rtol = 0.0f;
+        /// Why no validator could be built; non-empty exactly when `validator` is null.
+        std::string validatorError;
+        /// The tensor's name, or "uid=N" — the same label the TOML globs match on.
+        std::string label;
+        bundle::ComparisonTolerance tolerance;
         hipdnn_flatbuffers_sdk::data_objects::DataType dataType
             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     };
@@ -265,55 +266,41 @@ protected:
         registerValidator(attr, tolerance, tolerance);
     }
 
+    // Registers the comparison for one output tensor. allclose at the resolved
+    // tolerance, unless the engine's TOML config names this tensor in a
+    // [[validator_overrides]] entry — the only thing that can select a different
+    // validator.
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
                            float absoluteTolerance,
                            float relativeTolerance)
     {
-        float finalAtol = absoluteTolerance;
-        float finalRtol = relativeTolerance;
-        applyTomlToleranceOverride(currentTestName(), finalAtol, finalRtol);
+        const auto testName = currentTestName();
+        _deferredValidators.emplace_back(
+            [this, attr, testName, absoluteTolerance, relativeTolerance]() {
+                const auto sdkDataType
+                    = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
+                const auto label = bundle::tensorLabel(attr->get_uid(), attr->get_name());
 
-        _deferredValidators.emplace_back([this, attr, finalAtol, finalRtol]() {
-            auto sdkDataType
-                = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
-            auto [it, inserted] = _tensorValidationMap.insert(
-                {attr->get_uid(),
-                 TensorValidationEntry{hipdnn_test_sdk::utilities::createAllCloseValidator(
-                                           sdkDataType, finalAtol, finalRtol),
-                                       attr->get_name(),
-                                       finalAtol,
-                                       finalRtol,
-                                       sdkDataType}});
-            if(!inserted)
-            {
-                ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
-                              << attr->get_name() << "); keeping first registration";
-            }
-            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
-        });
-    }
+                // One shared decision site for both harnesses: it picks the check and
+                // logs the one it picked.
+                const auto tolerance
+                    = gradingForTensor(testName, label, absoluteTolerance, relativeTolerance);
 
-    void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
-                              float rmsThreshold)
-    {
-        _deferredValidators.emplace_back([this, attr, rmsThreshold]() {
-            auto sdkDataType
-                = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
-            auto [it, inserted] = _tensorValidationMap.insert(
-                {attr->get_uid(),
-                 TensorValidationEntry{
-                     hipdnn_test_sdk::utilities::createRmsValidator(sdkDataType, rmsThreshold),
-                     attr->get_name(),
-                     0.0f,
-                     0.0f,
-                     sdkDataType}});
-            if(!inserted)
-            {
-                ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
-                              << attr->get_name() << "); keeping first registration";
-            }
-            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
-        });
+                auto selection = bundle::makeValidator(sdkDataType, label, tolerance);
+                auto [it, inserted] = _tensorValidationMap.insert(
+                    {attr->get_uid(),
+                     TensorValidationEntry{std::move(selection.validator),
+                                           std::move(selection.error),
+                                           label,
+                                           tolerance,
+                                           sdkDataType}});
+                if(!inserted)
+                {
+                    ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
+                                  << label << "); keeping first registration";
+                }
+                _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+            });
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
@@ -423,33 +410,21 @@ protected:
             }
 
             auto& entry = entryIt->second;
-            bool valid = entry.validator->allClose(*refTensor, *gpuTensor);
-            if(!valid)
+            if(entry.validator == nullptr)
             {
-                using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
-                const std::string tensorLabel
-                    = entry.name + " (UID " + std::to_string(tensorId) + ", output)";
-                const std::string dtypeName
-                    = entry.dataType != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET
-                          ? EnumNameDataType(entry.dataType)
-                          : "unknown";
+                ADD_FAILURE() << entry.validatorError;
+                continue;
+            }
 
-                hipdnn_test_sdk::utilities::ComparisonContext ctx{
-                    "Test: " + currentTestName(), tensorLabel, dtypeName, entry.atol, entry.rtol};
-
-                std::ostringstream report;
-                report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, *refTensor);
-                if(entry.dataType != hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
-                {
-                    hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(report,
-                                                                               entry.dataType,
-                                                                               tensorLabel,
-                                                                               *refTensor,
-                                                                               *gpuTensor,
-                                                                               entry.atol,
-                                                                               entry.rtol);
-                }
-                EXPECT_TRUE(false) << report.str();
+            if(!entry.validator->allClose(*refTensor, *gpuTensor))
+            {
+                ADD_FAILURE() << bundle::formatMismatchReport(tensorId,
+                                                              entry.label,
+                                                              entry.dataType,
+                                                              *refTensor,
+                                                              *gpuTensor,
+                                                              entry.tolerance,
+                                                              "Test: " + currentTestName());
             }
         }
     }
@@ -600,7 +575,7 @@ public:
         auto valIt = _tensorValidationMap.find(tensorId);
         if(valIt != _tensorValidationMap.end())
         {
-            return valIt->second.name;
+            return valIt->second.label;
         }
         auto nameIt = _tensorIdToNameMap.find(tensorId);
         if(nameIt != _tensorIdToNameMap.end())

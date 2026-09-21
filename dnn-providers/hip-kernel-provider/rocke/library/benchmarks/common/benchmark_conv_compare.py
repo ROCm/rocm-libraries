@@ -186,6 +186,16 @@ def _build_miopen_args(args) -> list[str]:
     return a
 
 
+def _append_implicit_gemm_args(args, implicit_args: list[str]) -> None:
+    """Append implicit-GEMM-only args (split-k, sample, seed, split-k-prune)."""
+    implicit_args += ["--split-k", str(args.split_k)]
+    if args.sample is not None:
+        implicit_args += ["--sample", str(args.sample)]
+    implicit_args += ["--seed", str(args.seed)]
+    if args.split_k_prune is not None:
+        implicit_args += ["--split-k-prune", str(args.split_k_prune)]
+
+
 def _print_summary(
     direct: tuple[float | None, str],
     implicit: tuple[float | None, str],
@@ -266,6 +276,44 @@ def main() -> int:
         help="skip the implicit-GEMM benchmark (direct-conv only)",
     )
 
+    implicit_grp = parser.add_argument_group(
+        "Implicit-GEMM options",
+        "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
+    )
+    implicit_grp.add_argument(
+        "--split-k",
+        type=int,
+        default=-1,
+        dest="split_k",
+        metavar="N",
+        help=(
+            "wgrad split-K degree: 0=sweep, 1=disabled, >1=fixed, -1=auto (default: -1)"
+        ),
+    )
+    implicit_grp.add_argument(
+        "--sample",
+        type=float,
+        default=None,
+        metavar="FRAC",
+        help="randomly sample FRAC of candidate combinations before sweeping",
+    )
+    implicit_grp.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="RNG seed used by --sample (default: 0)",
+    )
+    implicit_grp.add_argument(
+        "--split-k-prune",
+        type=float,
+        default=None,
+        dest="split_k_prune",
+        metavar="PCT",
+        help=(
+            "prune split-K sweep when TFLOPS drops by >=PCT%% (only with --split-k 0)"
+        ),
+    )
+
     miopen_grp = parser.add_argument_group(
         "MIOpen input",
         "Load the conv shape from a MIOpenDriver command instead of explicit flags.",
@@ -305,11 +353,13 @@ def main() -> int:
         shared_args = _build_miopen_args(args)
         direct_args = list(shared_args)
         implicit_args = list(shared_args)
+        _append_implicit_gemm_args(args, implicit_args)
     else:
         shared_args = _build_shape_args(args)
         direct_args = list(shared_args)
         # implicit-GEMM needs --dtype (always fp16 for comparison)
         implicit_args = list(shared_args) + ["--dtype", "fp16", "--direction", "fwd"]
+        _append_implicit_gemm_args(args, implicit_args)
 
         # Validate cpg constraints for direct conv up-front so we can skip
         # gracefully rather than propagating errors through the subprocess.
