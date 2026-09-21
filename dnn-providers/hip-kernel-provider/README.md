@@ -63,6 +63,9 @@ Either approach works as long as the installed SDK version is compatible with th
 - CMake 3.25+
 - Ninja build system
 - C++17 compatible compiler (amdclang++ recommended)
+- GoogleTest for tests, supplied through `CMAKE_PREFIX_PATH` or `GTest_DIR`; standalone fetching requires `-DALLOW_FETCH_DEPS=ON` and defaults to version 1.17.0
+
+Descriptor packaging (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`) additionally requires a supplied `Python3_EXECUTABLE` with pip, `msgpack`, and `zstandard`, a kpack source tree, and local rocKE wheels. The `hkp_rocke_wheel_python_interp` target installs those wheels only into build-owned storage with no index access or dependency resolution, then uses the supplied interpreter with a subprocess-scoped private import path. It does not install rocKE into the parent Python environment. See [Kernel packing](../../projects/hipdnn/docs/Building.md#kernel-packing-rocm_kpack) for wheel supply modes and prerequisites.
 
 ### Testing
 

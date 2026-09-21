@@ -119,10 +119,10 @@ ctest --test-dir build -R example_provider_sample
 The tests and sample can also be run directly:
 
 ```bash
-./build/bin/example_provider_tests
+./build/bin/hipdnn_example_provider_unit_tests
 ```
 ```bash
-./build/bin/example_provider_sample
+./build/bin/hipdnn_example_provider_sample
 ```
 
 Install the plugin:
@@ -151,10 +151,10 @@ ctest --test-dir build --build-config Release
 The tests and sample can also be run directly:
 
 ```powershell
-.\build\bin\Release\example_provider_tests.exe
+.\build\bin\Release\hipdnn_example_provider_unit_tests.exe
 ```
 ```powershell
-.\build\bin\Release\example_provider_sample.exe
+.\build\bin\Release\hipdnn_example_provider_sample.exe
 ```
 
 ### Windows (GNU/Clang with Ninja)
@@ -170,10 +170,10 @@ ctest --test-dir build
 The tests and sample can also be run directly:
 
 ```powershell
-.\build\bin\example_provider_tests.exe
+.\build\bin\hipdnn_example_provider_unit_tests.exe
 ```
 ```powershell
-.\build\bin\example_provider_sample.exe
+.\build\bin\hipdnn_example_provider_sample.exe
 ```
 
 ### CMake Options
@@ -183,6 +183,9 @@ The tests and sample can also be run directly:
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
 | `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable; inherited from the samples parent build |
+| `EXAMPLE_PROVIDER_GTEST_VERSION` | `1.17.0` | GoogleTest tag used by the explicit fetch fallback; installed packages and supplied source trees take precedence |
+
+The samples parent forwards an installed `GTest_DIR` or its supplied GoogleTest source tree to the plugin's separate build. An explicitly supplied source tree also works with fetching disabled. Package/source/version cache entries are refreshed when the parent inputs change. A copied standalone plugin keeps its own matching fallback default and needs no monorepo version include.
 
 To build only the plugin library (no tests or sample):
 

@@ -35,6 +35,9 @@ To build the plugin standalone, first install hipDNN and any required dependenci
 | `{PLUGINNAME}_BUILD_UNIT_TESTS` | `ON` | Build unit tests |
 | `{PLUGINNAME}_BUILD_SAMPLE` | `ON` | Build sample application |
 | `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable |
+| `EXAMPLE_PROVIDER_GTEST_VERSION` | `1.17.0` | GoogleTest fetch fallback version; installed packages or explicitly supplied sources take precedence |
+
+The copied plugin is standalone: its GoogleTest fallback default is local to the template, not imported from a monorepo file. An installed package or explicitly supplied `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` tree can be used with fetching disabled.
 
 ## Architecture
 
@@ -77,7 +80,7 @@ After building, run the test suites:
 
 ```bash
 # Unit tests
-./bin/{plugin_name}_tests
+./bin/hipdnn_{plugin_name}_unit_tests
 ```
 
 {Describe any additional testing details, test categories, or GPU requirements.}

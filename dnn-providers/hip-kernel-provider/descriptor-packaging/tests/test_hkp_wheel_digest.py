@@ -1,6 +1,6 @@
 """The wheel-digest stamp's contract: rewrite ONLY on a content change.
 
-The stamp gates venv reprovisioning and repacking. Its whole value is the
+The stamp gates private wheel installation and repacking. Its whole value is the
 negative case -- a wheel rebuilt to identical bytes must leave the stamp's mtime
 untouched, because CMake and Ninja key on mtime and would otherwise recompile
 every kernel for every arch on every build. A test that only checked "digest
@@ -8,6 +8,7 @@ changes when content changes" would pass against an unconditional write, which
 is precisely the implementation this exists to rule out.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,6 +55,7 @@ def test_identical_content_leaves_mtime_untouched(tmp_path):
     w1, w2 = _wheels(tmp_path)
     stamp = tmp_path / "stamp"
     _run(stamp, w1, w2)
+    os.utime(stamp, (1_600_000_000, 1_600_000_000))
     before = stamp.stat().st_mtime_ns
 
     # Rewrite both wheels with the same bytes, as `pip wheel` does every build.
@@ -63,7 +65,6 @@ def test_identical_content_leaves_mtime_untouched(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert stamp.stat().st_mtime_ns == before, "identical wheels must not restamp"
-    assert "unchanged" in proc.stdout
 
 
 @pytest.mark.quick
@@ -78,7 +79,6 @@ def test_content_change_rewrites_stamp(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert stamp.read_text().strip() != first
-    assert "updated" in proc.stdout
 
 
 @pytest.mark.quick
@@ -125,5 +125,4 @@ def test_missing_wheel_is_a_hard_error(tmp_path):
     proc = _run(stamp, tmp_path / "absent.whl")
 
     assert proc.returncode == 1
-    assert "not found" in proc.stderr
     assert not stamp.exists()

@@ -63,7 +63,7 @@ These libraries are resolved with `find_package` (see [Dependencies.cmake](../cm
 
 The build environment provides them: TheRock's third-party tree, or an install prefix on `CMAKE_PREFIX_PATH`. This follows TheRock's [dependency policy](https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md), which keeps third-party acquisition in TheRock rather than in each sub-project. A missing library fails configuration with an error naming it.
 
-To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. The superbuild sets it for you, so this only applies to a standalone configure against a prefix that does not supply everything.
+To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. Standalone hipDNN, providers, and samples default to `OFF`. The developer superbuild defaults to `ON`, but preserves an explicit `-DALLOW_FETCH_DEPS=OFF`.
 
 This policy also applies to standalone samples and the example engine plugin's GoogleTest dependency. Samples forward `ALLOW_FETCH_DEPS` to the plugin's separate CMake build; an explicit `OFF` is preserved. In TheRock, `hipDNN_samples` must declare its GoogleTest build dependency even when the lookup uses `QUIET`.
 
@@ -71,7 +71,9 @@ This policy also applies to standalone samples and the example engine plugin's G
 cmake -S . -B build -DALLOW_FETCH_DEPS=ON
 ```
 
-`HIPDNN_NO_DOWNLOAD` is the previous, inverted spelling of this option. It still works and reports a deprecation warning; use `ALLOW_FETCH_DEPS` instead.
+For one release, a truthy `HIPDNN_NO_DOWNLOAD` value still emits a deprecation warning and disables fetching, even when `ALLOW_FETCH_DEPS=ON`. Legacy `OFF` values are ignored: neither a fresh nor a cached `HIPDNN_NO_DOWNLOAD=OFF` opts into downloads. Remove the legacy setting and use `ALLOW_FETCH_DEPS` instead.
+
+GoogleTest fetch fallbacks default to **1.17.0** in hipDNN, the providers, and the example plugin. Installed packages and explicitly supplied source trees take precedence over fallback versions. The copied plugin retains its own matching default so it works outside the monorepo; this is default alignment, not one shared declaration or a forced package upgrade.
 
 ## Superbuild vs. Standalone Build
 
@@ -345,6 +347,8 @@ Resolution order:
 `<dir>` is whichever directory *contains* `rocm_kpack/`: a rocm-systems checkout's
 `shared/kpack/python`, or a virtual environment's `site-packages`.
 
+An explicit `HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` takes precedence over `ALLOW_FETCH_DEPS=OFF`. The build warns when that override actually acquires kpack; using a supplied local tree or reusing the pinned checkout does not emit an acquisition warning.
+
 If nothing resolves, the ASM SDPA engine logs `skipping .kpack packing` and the build proceeds;
 the runtime loads loose `.co` files, so this is not fatal. Descriptor packaging
 (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, off by default) hard-fails instead — both when kpack is
@@ -381,6 +385,16 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
   tree staged for a different Python, or one whose `msgpack`/`zstandard` are missing. Install the
   dependencies for this interpreter, or point `-DPython3_EXECUTABLE` at the one they were built
   for.
+
+#### Descriptor packaging Python environment
+
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can run `-m pip` and import `msgpack` and `zstandard`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+
+Packaging installs the exact local `rocke` and `rocke_library` wheels into the build-owned `hkp-rocke-python` directory, using `pip --target --no-index --no-deps --disable-pip-version-check`. `ROCKE_BUILD_PYENV=ON` supplies generated wheels through the existing rocKE developer build; with `ROCKE_BUILD_PYENV=OFF`, supply `ROCKE_WHEEL_DIR` and `ROCKE_WHEEL_VERSION`. Neither packaging mode installs rocKE into the supplied Python environment.
+
+The `hkp_rocke_wheel_python_interp` target prepares those private imports, not a second interpreter. Every descriptor-packaging subprocess uses the supplied interpreter with the private directory prepended to its execution-time `PYTHONPATH`; ordinary Python startup, `.pth` files, enabled user-site packages, and the rest of `PYTHONPATH` remain effective. Changed wheel content replaces the private directory, and readiness is recorded inside it only after imports succeed. Identical wheel content does not reinstall.
+
+This is a dependency-acquisition policy, not a sealed Python environment or a global offline-build guarantee. The separate rocKE editable developer environment and wheel-generation setup are outside packaging's no-index installation guarantee.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
