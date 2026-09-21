@@ -418,9 +418,6 @@ rocsparse_status rocsparse::csrsm_compute(rocsparse_handle            handle,
                                           void*                       buffer,
                                           rocsparse_error*            p_error)
 {
-    //
-    // It is assumed that B is transposed and has dimension nrhs x M
-    //
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((A_load_conjugate && op_A != rocsparse_operation_none)

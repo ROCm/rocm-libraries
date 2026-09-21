@@ -356,7 +356,6 @@ namespace rocsparse
         {
             const size_t nbytes = rocsparse::align_size(rocsparse::datatype_sizeof(Z->data_type)
                                                         * Z->rows * Z->cols * Z->batch_count);
-
             RETURN_IF_ROCSPARSE_ERROR((nbytes <= buffer_size_in_bytes)
                                           ? rocsparse_status_success
                                           : rocsparse_status_invalid_size);

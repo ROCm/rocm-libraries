@@ -292,12 +292,49 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
                            const bool                        to_int = arg.timing ? false : true;
                            rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
                            matrix_factory.init_coo(that.host());
+                           //
+                           // Scale values.
+                           //
+                           {
+                               auto&              that_host = that.host();
+                               const size_t       size      = that_host.nnz;
+                               floating_data_t<T> mx        = floating_data_t<T>(0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   mx = std::max(mx, std::abs(that_host.val[i]));
+                               }
+                               mx = (mx != floating_data_t<T>(0)) ? floating_data_t<T>(1.0) / mx
+                                                                  : floating_data_t<T>(1.0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   that_host.val[i] *= mx;
+                               }
+                           }
                        },
 
                        [&](csr_t& that) {
                            const bool                        to_int = arg.timing ? false : true;
                            rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
                            matrix_factory.init_csr(that.host());
+
+                           //
+                           // Scale values.
+                           //
+                           {
+                               auto&              that_host = that.host();
+                               const size_t       size      = that_host.nnz;
+                               floating_data_t<T> mx        = floating_data_t<T>(0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   mx = std::max(mx, std::abs(that_host.val[i]));
+                               }
+                               mx = (mx != floating_data_t<T>(0)) ? floating_data_t<T>(1.0) / mx
+                                                                  : floating_data_t<T>(1.0);
+                               for(size_t i = 0; i < size; ++i)
+                               {
+                                   that_host.val[i] *= mx;
+                               }
+                           }
                        },
 
                        [&](bsr_t& that) {
@@ -393,7 +430,6 @@ void rocsparse_clients::spmat_descr<T, I, J>::init(const Arguments& arg,
             CHECK_HIP_ERROR(hipMemcpy(
                 &host_values[i * stride], buffer, host_values_size_in_bytes, hipMemcpyDefault));
             T* p = &host_values[i * stride];
-
             for(int64_t j = 0; j < host_values_size; ++j)
             {
                 p[j] = p[j] * (1.0 + random_cached_generator<float>(1.0, 2.0) * random_multiplier);
