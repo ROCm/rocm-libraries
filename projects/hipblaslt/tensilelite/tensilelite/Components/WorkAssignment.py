@@ -196,6 +196,7 @@ class WorkAssignment(Component):
                 unaligned.append("PersistentPrefetchState")
             if kernel["ReuseAcrossPersistent"]:
                 unaligned.append("RAPResidentBatch")
+                unaligned.append("RAPResidentMTile")
         else:
             partition = processing.queuePartition()
             unaligned.append(partition.launch_rank)
@@ -774,22 +775,37 @@ class StaticGrid(WorkAssignment):
         module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
         return module
 
-    def peekTileBatch(self, writer, kernel, dstSgpr):
+    def peekTileBatch(self, writer, kernel, dstSgpr, dstMTileSgpr=None):
         """Return the batch of the tile about to be activated, without advancing it.
 
         Call at persistent-loop entry, before activateReservedOrAcquire/graWorkGroup.
         The cursor still identifies this iteration's tile here; activation advances
         it to the following tile, so peeking afterward can return a different batch.
+
+        With ``dstMTileSgpr`` the tile's M-tile comes out as well. Batch and M-tile
+        together name the A a tile reads -- A does not depend on N -- which is what
+        ReuseAcrossPersistent's entry guard compares. The M-tile is the pre-WGM
+        one, so it is the WorkGroup0 A's address is built from only because RAP
+        clears SupportCustomWGM and DefaultWGM then emits no remap at all (see
+        _disableRuntimeWGM).
         """
         partition = Component.TileProcessingStrategy.find(writer).staticPartition()
         assert partition.tile_units, "RAP needs whole-tile assignment"
         module = Module("StaticGrid peekTileBatch")
-        with writer.allocTmpSgpr(2, 2, "PersistentBatchPeek") as tmp:
+        withMTile = dstMTileSgpr is not None
+        with writer.allocTmpSgpr(3 if withMTile else 2, 2, "PersistentBatchPeek") as tmp:
             module.add(SMulI32(dst=sgpr(tmp.idx), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Tiles per batch"))
             vtmp = writer.vgprPool.checkOut(2, "PersistentBatchDivide")
+            tmpVgprRes = ContinuousRegister(idx=vtmp, size=2)
             module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=partition.cursor, divReg=tmp.idx, rReg=tmp.idx + 1,
-                tmpVgprRes=ContinuousRegister(idx=vtmp, size=2), wavewidth=kernel["WavefrontSize"], doRemainder=False,
+                tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=withMTile,
                 comment="Batch of the tile about to be activated"))
+            if withMTile:
+                # M varies fastest, so the M-tile is the remainder; the quotient is
+                # the N-tile, which A does not depend on.
+                module.add(scalarUInt32DivideAndRemainder(qReg=tmp.idx + 2, dReg=tmp.idx + 1, divReg="NumWorkGroups0", rReg=dstMTileSgpr,
+                    tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True,
+                    comment="M-tile of the tile about to be activated"))
             writer.vgprPool.checkIn(vtmp)
         return module
 

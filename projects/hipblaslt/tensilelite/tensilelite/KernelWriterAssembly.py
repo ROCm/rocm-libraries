@@ -439,11 +439,33 @@ class KernelWriterAssembly(KernelWriter):
                              comment="RAP: even wave carries A -> NULL descriptor, this load moves nothing"))
       return module
     # This load feeds the next tile, not this one. Silencing A is only right while
-    # that tile goes on reusing the resident registers; when it changes batch the
-    # entry guard sends it to the fill copy, which computes from what this prefetch
-    # left behind. Fetch A for it. WorkGroup2 already names the next tile here --
-    # prefetchAcrossPersistentSetupNextTile has run and the current tile's identity
-    # is checkpointed -- so the batch is a compare away rather than another divide.
+    # that tile goes on reusing the resident registers; when it needs a different
+    # A the entry guard sends it to the fill copy, which computes from what this
+    # prefetch left behind. Fetch A for it. WorkGroup* already names the next tile
+    # here -- prefetchAcrossPersistentSetupNextTile has run and the current tile's
+    # identity is checkpointed -- so each half of the identity is a compare away
+    # rather than another divide.
+    #
+    # Both halves, not just the batch: the entry guard refills on either, and a
+    # prefetch that stayed silent for the other would hand the fill copy a tile
+    # whose A was never fetched.
+    #
+    # The M-tile half is unreachable under today's traversal, and deliberately
+    # kept anyway. The walk advances by a fixed skGrid, so with
+    # s = skGrid % NumWorkGroups0 the M-tile is (m0 + k*s) % NumWorkGroups0:
+    # constant for every tile when s is 0, and different from its predecessor at
+    # every single tile otherwise. Neither case reaches this code -- the first
+    # never fires the guard, the second never lets the reuse copy run ahead of a
+    # change -- whereas the batch turns over rarely, which is why that half is
+    # live. Measured: removing this pair leaves the whole M-tile matrix passing,
+    # while removing the guard's M-tile compare fails NumWorkGroups0 = 3 outright.
+    #
+    # It stays because the arithmetic above is the thing most likely to change:
+    # every candidate fix for "RAP reloads every tile when skGrid is not a
+    # multiple of NumWorkGroups0" alters the stride or the decomposition, and
+    # under a non-uniform walk the M-tile turns over like the batch does. The
+    # guard and this prefetch have to agree on when A is refilled; they disagreed
+    # once already, over the batch, and nothing single-M-tile could see it.
     with self.allocTmpSgpr(1, tag="rapPapKeepA") as keepRes:
       keep = keepRes.idx
       module.add(SCSelectB32(dst=sgpr(keep), src0=-1, src1=0,
@@ -452,8 +474,12 @@ class KernelWriterAssembly(KernelWriter):
                            comment="RAP: does the next tile stay in the resident batch?"))
       module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
                              comment="RAP: next tile changes batch -> it needs A prefetched"))
+      module.add(SCmpEQU32(src0=sgpr("WorkGroup0"), src1=sgpr("RAPResidentMTile"),
+                           comment="RAP: does the next tile stay on the resident M-tile?"))
+      module.add(SCSelectB32(dst=sgpr(keep), src0=sgpr(keep), src1=-1,
+                             comment="RAP: next tile changes M-tile -> it needs A prefetched"))
       module.add(SCmpEQU32(src0=sgpr(keep), src1=0,
-                           comment="RAP: neither reason to keep the descriptor"))
+                           comment="RAP: no reason to keep the descriptor"))
     module.add(SCSelectB32(dst=sgpr(groupSgprName), src0=0, src1=sgpr(groupSgprName),
                            comment="RAP: NULL descriptor, this load moves nothing"))
     return module
