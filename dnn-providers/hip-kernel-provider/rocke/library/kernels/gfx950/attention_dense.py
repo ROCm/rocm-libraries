@@ -451,13 +451,13 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         A moving bottom-right diagonal also bakes the sequence-length difference;
         equal-length bottom-right stays in the unshifted runtime-shape cohort.
         ``persistent`` is excluded for a stronger reason: it is a separate body that
-        declares no shape params at all."""
+        declares no shape params at all. Sliding-window attention uses the runtime
+        k-tile trip count while keeping the window size specialized."""
         return not (
             self.persistent
             or self.ragged
             or self.varlen
             or self.paged
-            or self.sliding_window > 0
             or (self.causal_bottom_right and self.seqlen_q != self.seqlen_kv)
         )
 
@@ -904,8 +904,14 @@ def build_attention_dense(
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
-    # Heads are baked here; NQB comes from the seqlen_q param.
-    grid_shape = DecodeShape(b, spec, {"seqlen_q": seqlen_q_p})
+    # Heads are baked here; NQB comes from the seqlen_q param. On the runtime-shape
+    # path seqlen_kv is a param too: a sliding window is runtime-shape, and the
+    # causal balance under a window compares W against the key count, which must
+    # not be baked. Baked specs keep the constant, so their IR is unchanged.
+    grid_values = {"seqlen_q": seqlen_q_p}
+    if spec.runtime_shape:
+        grid_values["seqlen_kv"] = seqlen_kv_p
+    grid_shape = DecodeShape(b, spec, grid_values)
     if KVS > 1:
         # The segment index is the fastest-varying part of grid x, so the decode
         # sees the unsplit grid unchanged.
@@ -2785,7 +2791,7 @@ def _has_shape_params(spec: AttentionDenseSpec) -> bool:
 
     This is the ABI question. ``spec.runtime_shape`` is the narrower cache-identity
     question (does the body bake the shape *anywhere*), and the two differ for
-    paged / ragged / varlen / sliding-window / moving bottom-right causal.
+    paged / ragged / varlen / moving bottom-right causal.
     """
     return not spec.persistent
 
