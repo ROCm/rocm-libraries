@@ -30,6 +30,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <sstream>
 
@@ -48,6 +49,7 @@
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
@@ -108,6 +110,22 @@ NB_MODULE(_stinkytofu, m) {
                 return self.getFunction(name) != nullptr;
             },
             nb::arg("name"), "Return true when this module contains a Function with the name")
+        .def(
+            "getRequiredSgprCount",
+            [](StinkyAsmModule& self, int numSgprPreload, const std::array<int, 3>& workgroupIds) {
+                uint32_t required = 0;
+                for (const auto* function : self.getFunctions()) {
+                    if (function == nullptr) continue;
+                    required = std::max(required, stinkytofu::requiredSgprCount(
+                                                      *function, numSgprPreload, workgroupIds));
+                }
+                return required;
+            },
+            nb::arg("numSgprPreload"), nb::arg("workgroupIds"),
+            "SGPR count this module must declare: the highest index its code names, floored by "
+            "what the dispatch fills before entry. 0 when no function names one. Callers that "
+            "own a signature use it the way StinkyAsmModuleWithSignature::refreshSgprCount does "
+            "-- to lower a declared count, never to raise it.")
         .def(
             "registerPassAtExtensionPoint",
             [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
