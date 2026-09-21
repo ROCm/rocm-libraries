@@ -107,7 +107,10 @@ enum class SidecarState : uint8_t
 struct SupportObservation
 {
     SidecarState sidecar = SidecarState::NONE;
-    std::vector<SupportResult> results; ///< claimed engines, plus positive drift
+    /// At most one today: one lane tests one engine, so there is one cell to decide.
+    /// Empty when the sidecar promised nothing here and the engine took nothing
+    /// either -- which is why it cannot stand in for `sidecar` above.
+    std::vector<SupportResult> results;
 
     /// Did the sidecar promise anything about the arch, platform and case this run
     /// is on?
