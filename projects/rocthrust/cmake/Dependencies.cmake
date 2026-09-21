@@ -479,6 +479,9 @@ if(USER_BUILD_BENCHMARK)
     set(BUILD_BENCHMARK "${_ROCTHRUST_SAVED_BUILD_BENCHMARK}")
     set(BUILD_TEST "${_ROCTHRUST_SAVED_BUILD_TEST}")
 
+    unset(_ROCTHRUST_SAVED_BUILD_BENCHMARK)
+    unset(_ROCTHRUST_SAVED_BUILD_TEST)
+
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
