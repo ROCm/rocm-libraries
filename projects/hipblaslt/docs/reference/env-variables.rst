@@ -118,7 +118,7 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
 
     * - | ``TENSILE_STREAMK_DATA_PARALLEL``
         | Runs Stream-K kernels in data-parallel mode.
-      - | Unset or -1: Default (enabled on the AMD Instinct™ MI300A only; disabled on every other device)
+      - | Unset or -1: Default, enabled on the AMD Instinct™ MI300A only; disabled on every other device.
         | 0: Force off, including on the MI300A
         | 1: Force on, on every device
         | Any other non-zero integer is treated as 1.
