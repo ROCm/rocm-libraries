@@ -1089,6 +1089,27 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
     assert "CustomKernel" in config
 
 
+@pytest.mark.parametrize(
+    "name,rows,maxK",
+    [("wvSpltK_hf_m1", 1, None), ("wvSpltK_hf_m2", 2, 16385), ("wvSpltK_hf_m4", 4, 8193)],
+)
+def test_wvspltk_shipped_family_predicates(name, rows, maxK):
+    """Each skinny-GEMM kernel pins its own M, and the M>=2 kernels also bound K:
+    they read A only from LDS, which holds M*K <= 32768 halves."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata(name, ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig(name, {}, ck_root)
+    assert config["AssertSizeEqual"] == {0: rows, 2: 1}
+    assert config["AssertSizeGreaterThan"] == {1: 8}
+    if maxK is None:
+        assert "AssertSizeLessThan" not in config
+    else:
+        assert config["AssertSizeLessThan"] == {3: maxK}
+        assert (maxK - 1) * rows == 32768
+
+
 def test_wvspltk_hf_m1_shipped_config():
     """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
     ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")

@@ -442,6 +442,7 @@ class ProblemType:
 ASSERT_SIZE_MAP_PREDICATES = {
     "AssertSizeEqual": "SizeEqual",
     "AssertSizeGreaterThan": "SizeGreaterThan",
+    "AssertSizeLessThan": "SizeLessThan",
 }
 
 def extractDimPredicate(cls, key, value, predicateName):

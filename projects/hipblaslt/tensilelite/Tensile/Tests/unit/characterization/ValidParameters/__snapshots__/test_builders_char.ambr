@@ -1371,6 +1371,7 @@
     'AssertFree1ElementMultiple',
     'AssertSizeEqual',
     'AssertSizeGreaterThan',
+    'AssertSizeLessThan',
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
@@ -1626,6 +1627,10 @@
       'value': -1,
     }),
     'AssertSizeGreaterThan': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertSizeLessThan': dict({
       'type': 'int',
       'value': -1,
     }),

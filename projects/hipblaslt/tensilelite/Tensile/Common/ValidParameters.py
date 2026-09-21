@@ -669,6 +669,10 @@ validParameters = { # we need to make sure this matches develop
     # at least one full tile declares the largest size it cannot handle.
     # Fork YAML: AssertSizeGreaterThan: [{1: 8}]  # N > 8
     "AssertSizeGreaterThan": -1,
+    # Strict upper bound per dimension; the predicate is size(index) < value.
+    # A kernel that stages an operand in LDS declares the first size that no
+    # longer fits. Fork YAML: AssertSizeLessThan: [{3: 16385}]  # K <= 16384
+    "AssertSizeLessThan": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1386,7 +1390,11 @@ _skipTypeCheck = {
 
 
 # Assert* parameters whose value is an {index: size} map instead of a scalar.
-ASSERT_SIZE_MAP_PARAMETERS = ("AssertSizeEqual", "AssertSizeGreaterThan")
+ASSERT_SIZE_MAP_PARAMETERS = (
+    "AssertSizeEqual",
+    "AssertSizeGreaterThan",
+    "AssertSizeLessThan",
+)
 
 
 def checkAssertSizeMapIsValid(name, value):
