@@ -55,12 +55,13 @@ if _PKG_PARENT not in sys.path:
 from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     GLOBALModifiers,
+    MUBUFModifiers,
     RegisterContainer,
     SMEMModifiers,
     sgpr,
     vgpr,
 )
-from rocisa_stinkytofu_adaptor.enum import CacheScope, DelayALUType, InstType, TemporalHint  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import CacheScope, DelayALUType, InstType, NonVolatile, TemporalHint  # noqa: E402
 from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
@@ -2296,6 +2297,38 @@ class TestBufferLoadInstructions(unittest.TestCase):
                 m.add(cls(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
+    def test_to_stinky_logical_forwards_mubuf_nv(self):
+        mubuf = MUBUFModifiers(
+            offen=True, scope=CacheScope.SCOPE_CU, nv=NonVolatile.NV,
+        )
+        inst = BufferLoadB32(
+            dst=vgpr(13), vaddr=vgpr(33), saddr=sgpr(64, 4), soffset=sgpr(47),
+            mubuf=mubuf,
+        )
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.BufferLoadB32 = unittest.mock.Mock(return_value=logical)
+        fake_st.Register = lambda name: name
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda a: a,
+             ):
+            inst.to_stinky_logical()
+        self.assertEqual(logical.set_mubuf.call_args.kwargs.get("nv"), int(NonVolatile.NV))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_emit_assembly_prints_nv(self):
+        m = Module("kNvLoad")
+        m.add(BufferLoadB32(
+            dst=vgpr(13), vaddr=vgpr(33), saddr=sgpr(64, 4), soffset=sgpr(47),
+            mubuf=MUBUFModifiers(
+                offen=True, scope=CacheScope.SCOPE_CU, nv=NonVolatile.NV,
+            ),
+        ))
+        text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+        self.assertRegex(text, r"buffer_load_b32 .* nv")
+
 
 class TestBufferAtomicAddF32(unittest.TestCase):
     def test_construction(self):
@@ -2338,6 +2371,27 @@ class TestBufferStoreInstructions(unittest.TestCase):
                 m = Module()
                 m.add(cls(src=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    def test_to_stinky_logical_forwards_mubuf_nv(self):
+        mubuf = MUBUFModifiers(
+            offen=True, isStore=True, scope=CacheScope.SCOPE_CU,
+            th=TemporalHint.TH_NT, nv=NonVolatile.NV,
+        )
+        inst = BufferStoreB32(
+            src=vgpr(12), vaddr=vgpr(32), saddr=sgpr(60, 4), soffset=sgpr(46),
+            mubuf=mubuf,
+        )
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.BufferStoreB32 = unittest.mock.Mock(return_value=logical)
+        fake_st.Register = lambda name: name
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda a: a,
+             ):
+            inst.to_stinky_logical()
+        self.assertEqual(logical.set_mubuf.call_args.kwargs.get("nv"), int(NonVolatile.NV))
 
 
 class TestFlatLoadInstructions(unittest.TestCase):
