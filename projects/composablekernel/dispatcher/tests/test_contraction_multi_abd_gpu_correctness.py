@@ -49,6 +49,7 @@ from contraction_multi_abd_utils import (  # noqa: E402
     ContractionMultiABDProblem,
     ContractionMultiABDRunner,
     setup_multiple_contraction_multi_abd_dispatchers,
+    default_warp_tile_for_arch,
     _detect_gpu_arch,
     _validate_arch,
 )
@@ -60,6 +61,10 @@ TOLERANCE = 1e-2
 
 PASS = "PASS"
 FAIL = "FAIL"
+
+# ctest SKIP_RETURN_CODE: main() returns this when the box cannot run the test
+# at all, so the lane reports Skipped rather than a vacuous Passed.
+SKIP_EXIT = 77
 
 # Must match the kernel's default tile (256x256x64) exactly: the default config
 # pads nothing, so M and N have to be whole multiples of the tile or
@@ -103,6 +108,8 @@ def _reference(A: np.ndarray, B: np.ndarray, Ds: list) -> np.ndarray:
 
 
 def _build(gfx_arch: str):
+    # 32x32x16 is the gfx9 MFMA tile; gfx1250 is wave32/WMMA and needs 16x16x32.
+    wt_m, wt_n, wt_k = default_warp_tile_for_arch(gfx_arch)
     cfg = ContractionMultiABDKernelConfig(
         dtype="fp16",
         layout="rcr",
@@ -111,7 +118,7 @@ def _build(gfx_arch: str):
         scheduler="intrawave",
         tile_m=256, tile_n=256, tile_k=64,
         warp_m=2, warp_n=2, warp_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        warp_tile_m=wt_m, warp_tile_n=wt_n, warp_tile_k=wt_k,
         num_a_tensor=1,
         num_b_tensor=1,
         num_d_tensor=NUM_D,
@@ -189,7 +196,7 @@ def main() -> int:
     if not _has_gpu():
         print("SKIP: no supported GPU or hipcc detected; "
               "contraction_multi_abd GPU test skipped")
-        return 0
+        return SKIP_EXIT
 
     gfx = _validate_arch(args.gfx) if args.gfx else _detect_gpu_arch()
     log.info("Running contraction_multi_abd GPU correctness on %s", gfx)
