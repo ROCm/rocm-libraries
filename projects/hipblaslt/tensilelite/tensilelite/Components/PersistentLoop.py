@@ -421,10 +421,10 @@ class PersistentLoop(Component):
           # reuses them. Only the compute half is duplicated -- the store is the bulk
           # of the kernel and stays shared, which keeps the instruction cache footprint
           # roughly unchanged.
-          # Record which batch the fill below loads A for. Read here, at the loop head,
-          # because tile activation advances the cursor past this tile and PAP goes on to
-          # overwrite WorkGroup2 with the next tile's, so neither survives the section.
-          module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, "RAPResidentBatch"))
+          # Record which A the fill below loads. Read here, at the loop head, because
+          # tile activation advances the cursor past this tile and PAP goes on to
+          # overwrite WorkGroup* with the next tile's, so neither survives the section.
+          module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, "RAPResidentBatch", "RAPResidentMTile"))
           snapshot = writer.rapSnapshotEmitterState(kernel, tensorParametersA, tensorParametersB)
           writer.states.rapDeferSgprUndef = True
           pack = writer._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
@@ -440,19 +440,29 @@ class PersistentLoop(Component):
           module.add(SCBranchSCC1(labelName=storeJoin.getLabelName(),
                                   comment="RAP: first tile skips the reuse copy"))
           module.add(Label("RAP_IterN", ""))
-          # A is indexed by the batch, so the resident copy only serves tiles in the
-          # batch it was filled from. This copy has no A loads to supply any other, so
-          # send a tile that crossed a batch boundary through the fill copy instead --
-          # it pays one tile's worth of reloads and leaves A resident for the tiles
-          # after it. Ahead of everything else in the section: the cursor still names
-          # this tile and nothing has claimed WorkGroup* for it, so the loop head can
-          # take it from the top.
-          with writer.allocTmpSgpr(1, tag="RAPBatchGuard") as sBatch:
-            module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, sBatch.idx))
-            module.add(SCmpEQU32(src0=sgpr(sBatch.idx), src1=sgpr("RAPResidentBatch"),
+          # A is indexed by M and by the batch, so the resident copy only serves tiles
+          # sharing both with the one it was filled from. This copy has no A loads to
+          # supply any other, so send a tile that changed either through the fill copy
+          # instead -- it pays one tile's worth of reloads and leaves A resident for
+          # the tiles after it. Ahead of everything else in the section: the cursor
+          # still names this tile and nothing has claimed WorkGroup* for it, so the
+          # loop head can take it from the top.
+          #
+          # Two compares each branching to the same target, rather than one combined
+          # condition: the combining would itself write SCC, and there is nothing to
+          # gain from it here -- the second compare is only reached when the first
+          # found a match, which is the common case in either arrangement.
+          with writer.allocTmpSgpr(2, tag="RAPTileGuard") as sGuard:
+            sBatch, sMTile = sGuard.idx, sGuard.idx + 1
+            module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, sBatch, sMTile))
+            module.add(SCmpEQU32(src0=sgpr(sBatch), src1=sgpr("RAPResidentBatch"),
                                  comment="RAP: is the resident A this tile's batch?"))
             module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
                                            comment="RAP: batch changed, refill A"))
+            module.add(SCmpEQU32(src0=sgpr(sMTile), src1=sgpr("RAPResidentMTile"),
+                                 comment="RAP: is the resident A this tile's M-tile?"))
+            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
+                                           comment="RAP: M-tile changed, refill A"))
           module.add(self.reinitWaveIdx(writer, kernel))
           writer.rapRestoreEmitterState(kernel, tensorParametersA, tensorParametersB, snapshot)
           # From here on A and its scales come from the resident registers, so the
