@@ -732,8 +732,8 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
       auto problem_large  = make_problem(8192, 8192, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto config         = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      auto latency_small = origami::attention::compute_total_latency(problem_small, hardware, config, hardware.N_CU);
-      auto latency_large = origami::attention::compute_total_latency(problem_large, hardware, config, hardware.N_CU);
+      auto latency_small = origami::attention::compute_total_latency(problem_small, hardware, config);
+      auto latency_large = origami::attention::compute_total_latency(problem_large, hardware, config);
 
       REQUIRE(latency_small < latency_large);
     }
@@ -743,7 +743,7 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
       auto problem  = make_problem(2048, 2048, 128);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto latency = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto latency = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(latency > 0.0);
     }
 
@@ -753,8 +753,8 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
       auto problem_b8  = make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, 8);
       auto config      = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto latency_b1 = origami::attention::compute_total_latency(problem_b1, hardware, config, hardware.N_CU);
-      auto latency_b8 = origami::attention::compute_total_latency(problem_b8, hardware, config, hardware.N_CU);
+      auto latency_b1 = origami::attention::compute_total_latency(problem_b1, hardware, config);
+      auto latency_b8 = origami::attention::compute_total_latency(problem_b8, hardware, config);
 
       REQUIRE(latency_b8 > latency_b1);
     }
@@ -764,7 +764,7 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
       auto problem  = make_problem(2048, 2048, 128);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto total = origami::attention::compute_total_latency(problem, hardware, config);
 
       // Total latency should include prologue + at least 1 loop iteration + epilogue
       // So it should be greater than just the tile latency alone
@@ -777,7 +777,7 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
       auto problem  = make_problem(64, 64, 64);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto total = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(total > 0.0);
     }
 
@@ -786,7 +786,7 @@ TEST_CASE("Attention: compute_total_latency", "[attention]") {
       auto problem  = make_problem(16384, 16384, 256, origami::transpose_t::T, origami::transpose_t::N, 64);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto total = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(total > 0.0);
       REQUIRE(std::isfinite(total));
     }
@@ -800,7 +800,7 @@ TEST_CASE("Attention: edge cases - minimum problem sizes", "[attention][edge]") 
       auto problem  = make_problem(1, 1, 1);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto total = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(total > 0.0);
     }
 
@@ -809,7 +809,7 @@ TEST_CASE("Attention: edge cases - minimum problem sizes", "[attention][edge]") 
       auto problem  = make_problem(32, 32, 64);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto total = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(total > 0.0);
     }
 
@@ -818,7 +818,7 @@ TEST_CASE("Attention: edge cases - minimum problem sizes", "[attention][edge]") 
       auto problem  = make_problem(128, 128, 64);
       auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
 
-      auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      auto total = origami::attention::compute_total_latency(problem, hardware, config);
       REQUIRE(total > 0.0);
     }
   }
@@ -833,7 +833,7 @@ TEST_CASE("Attention: edge cases - batch scaling", "[attention][edge]") {
       double prev_latency = 0.0;
       for (size_t batch : {1UL, 2UL, 4UL, 8UL, 16UL, 32UL}) {
         auto problem = make_problem(2048, 2048, 128, origami::transpose_t::T, origami::transpose_t::N, batch);
-        auto total = origami::attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        auto total = origami::attention::compute_total_latency(problem, hardware, config);
         REQUIRE(total > 0.0);
         if (batch > 1) {
           REQUIRE(total > prev_latency);

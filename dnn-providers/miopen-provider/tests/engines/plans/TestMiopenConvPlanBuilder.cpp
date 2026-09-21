@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -14,7 +15,6 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <miopen/miopen.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "common/ConvolutionCommon.hpp"
@@ -115,6 +115,11 @@ static std::vector<test_conv_common::ConvTestCase> getWorkspaceRangeShapes()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
     return {
+        // 1D (NCL) shapes. MIOpen has no 1D convolution, so the provider pads
+        // these to 2D internally.
+        {{1, 16, 16}, {1, 16, 1}, {0}, {0}, {1}, {1}, seed},
+        {{1, 16, 16}, {1, 16, 3}, {1}, {1}, {1}, {1}, seed},
+        {{2, 32, 16}, {4, 8, 3}, {1}, {1}, {2}, {2}, seed},
         {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
         {{1, 16, 16, 16}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
@@ -137,6 +142,28 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph)
 TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+    EXPECT_FALSE(applicable);
+}
+
+TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+        {4, 4, 4, 4},
+        {64, 16, 4, 1},
+        {4, 4, 1, 1},
+        {4, 1, 1, 1},
+        {4, 4, 4, 4},
+        {64, 16, 4, 1},
+        {0, 0},
+        {0, 0},
+        {1, 1},
+        {1, 1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        /*overrideShapeEnabled=*/true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

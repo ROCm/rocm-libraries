@@ -32,9 +32,7 @@
 #include <cstddef>
 #include <unordered_set>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -143,8 +141,8 @@ namespace TensileLite
 
                     for(int index : mappingIndices)
                     {
-                        auto slnIter = ctx->solutions->find(index);
-                        if(slnIter == ctx->solutions->end())
+                        auto solution = resolveContextSolution(ctx, index);
+                        if(!solution)
                         {
                             iot::setError(
                                 io,
@@ -153,7 +151,6 @@ namespace TensileLite
                         }
                         else
                         {
-                            auto solution = slnIter->second;
                             lib.solutionmap.insert(std::make_pair(index, solution));
                         }
                     }
@@ -190,4 +187,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

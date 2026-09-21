@@ -18,9 +18,9 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
-#include "harness/gpu_graph_executor/detail/GpuConvolutionFwdPlan.hpp"
-#include "harness/gpu_graph_executor/detail/GpuConvolutionFwdSignatureKey.hpp"
-#include "harness/gpu_graph_executor/detail/GpuPlanBuilderRegistry.hpp"
+#include "harness/gpu-graph-executor/detail/GpuConvolutionFwdPlan.hpp"
+#include "harness/gpu-graph-executor/detail/GpuConvolutionFwdSignatureKey.hpp"
+#include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::types;

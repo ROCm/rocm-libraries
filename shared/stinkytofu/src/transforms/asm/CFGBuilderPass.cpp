@@ -22,12 +22,14 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 
+#include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -77,8 +79,9 @@ class CFGBuilderPassImpl : public Pass {
     }
 
     void splitAtLabels(Function& func, BasicBlock* flatBB) {
-        // Find all label positions
+        // Find all label positions, and record existing label names.
         std::vector<BasicBlock::iterator> splitPositions;
+        std::unordered_set<std::string> usedNames;
         for (auto it = flatBB->begin(); it != flatBB->end(); ++it) {
             StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (!inst) {
@@ -87,6 +90,7 @@ class CFGBuilderPassImpl : public Pass {
 
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
                 splitPositions.push_back(it);
+                if (auto* ld = inst->getModifier<LabelData>()) usedNames.insert(ld->label);
             } else if (isBranch(*inst) && inst->getNext()) {
                 auto itNext = std::next(it);
                 while (itNext != flatBB->end() &&
@@ -104,6 +108,15 @@ class CFGBuilderPassImpl : public Pass {
 
         assert(!splitPositions.empty() && "No labels found? This should not happen.");
 
+        // Return candidate if free, else append "_<k>" until unique.
+        auto uniquify = [&usedNames](std::string candidate) {
+            if (usedNames.insert(candidate).second) return candidate;
+            for (int k = 1;; ++k) {
+                std::string alt = candidate + "_" + std::to_string(k);
+                if (usedNames.insert(alt).second) return alt;
+            }
+        };
+
         // For each label, create a new BasicBlock
         std::string labelName = flatBB->getLabel();
         int count = 0;
@@ -113,18 +126,24 @@ class CFGBuilderPassImpl : public Pass {
                 continue;
             }
             StinkyInstruction* inst = cast<StinkyInstruction>(splitPos.getNodePtr());
+            std::string bbName;
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
                 // Get the label name
                 auto labelData = inst->getModifier<LabelData>();
                 labelName = labelData ? labelData->label : "";
                 count = 0;
+                bbName = labelName;
             } else {
+                // Split piece: build "<base>_<N>", uniquify, and carry the
+                // result forward so the next piece chains off the assigned name.
                 labelName += "_";
                 labelName += std::to_string(++count);
+                labelName = uniquify(labelName);
+                bbName = labelName;
             }
 
             // Create a new BasicBlock for this label
-            BasicBlock* newBB = func.createBasicBlock(labelName);
+            BasicBlock* newBB = func.createBasicBlock(bbName);
 
             // Determine the range of IR to move
             auto startIt = splitPos;
@@ -154,8 +173,11 @@ class CFGBuilderPassImpl : public Pass {
         // Build a map of label names to BasicBlocks
         std::unordered_map<std::string, BasicBlock*> labelMap;
         for (BasicBlock& bb : func) {
-            if (!bb.getLabel().empty()) {
-                labelMap[bb.getLabel()] = &bb;
+            if (bb.getLabel().empty()) continue;
+            if (!labelMap.try_emplace(bb.getLabel(), &bb).second) {
+                std::cerr << "duplicate label-block name: " << bb.getLabel() << "\n";
+                STINKY_UNREACHABLE(
+                    "duplicate label-block name in CFG — branch resolution ambiguous");
             }
         }
 
@@ -174,10 +196,11 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // Some valid indirect branches (for example bare s_setpc_b64 /
-                    // s_swappc_b64 without LabelData) do not have statically-known
-                    // targets. In that case getBranchTargets() returns an empty set
-                    // and we simply do not create any branch edges.
+                    // Some valid indirect branches (for example bare s_setpc_b64
+                    // without LabelData) do not have statically-known CFG targets.
+                    // `CallTargetData` on s_swappc_b64 lists possible callees for
+                    // call analysis only; that instruction is IF_Call (not IF_Branch)
+                    // and is handled via getCallTargets(), not getBranchTargets().
                     const auto targets = getBranchTargets(*termInst);
                     for (const std::string& targetLabel : targets) {
                         auto targetIt = labelMap.find(targetLabel);
@@ -198,12 +221,16 @@ class CFGBuilderPassImpl : public Pass {
 
                 // Fall-through when prevBB has no terminator, or when its terminator
                 // is a conditional branch (may not be taken). Unconditional branches
-                // do not fall through, including register-target branches such as
-                // s_setpc_b64 (without LabelData) and s_swappc_b64.
+                // do not fall through (including register-target branches such as
+                // s_setpc_b64 without LabelData). Calls (e.g. s_swappc_b64) are not
+                // IF_Branch and therefore fall through to the next block like ordinary
+                // non-terminating control. Function-ending instructions (s_endpgm or
+                // unannotated s_setpc_b64 returns) do not fall through.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
-                    if (isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) {
+                    if ((isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) ||
+                        isEndOfFunction(*prevTermInst)) {
                         shouldFallThrough = false;
                     }
                 }

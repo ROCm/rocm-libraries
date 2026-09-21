@@ -396,3 +396,59 @@ TEST(MUBUFVerificationTest, BufferLoadB32_WrongVdstType_Fails) {
     EXPECT_NE(error.find("'s'"), std::string::npos) << "Error should mention actual type 's'";
     EXPECT_NE(error.find("'v'"), std::string::npos) << "Error should mention expected type 'v'";
 }
+
+// ==============================================================================
+// VOP3_2SRC shift verification (AIHPBLAS-4142)
+//
+// v_lshrrev_b64 / v_lshlrev_b16 are 2-source VALU shifts. They previously used
+// the 4-field VOP3 format, whose inherited src2 left a phantom third source in
+// the descriptor; checkRegisterWidths then reported a missing operand src[2]
+// (e.g. under PrefetchGL2 on gfx1250). After moving them to the 3-field
+// VOP3_2SRC format, a well-formed 2-source instruction must verify cleanly.
+// These tests would FAIL on the pre-fix descriptor ("missing operand src[2]" /
+// "Register width validation failed") and PASS post-fix.
+// ==============================================================================
+
+namespace {
+/// Populate \p func with a single well-formed 2-source shift built directly
+/// from the gfx1250 HwInstDesc: dst, shiftAmount, value.
+void buildTwoSourceShift(Function& func, const char* mnemonic, const StinkyRegister& dst,
+                         const StinkyRegister& shiftAmount, const StinkyRegister& value) {
+    GfxArchID arch = getGfxArchID(12, 5, 0);
+    setFunctionArch(func, arch);
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, arch);
+
+    IsaOpcode opcode = getMnemonicToIsaOpcode(mnemonic, arch);
+    const HwInstDesc* desc = getMCIDByIsaOp(opcode, arch);
+    assert(desc && "2-source shift not found for gfx1250");
+
+    StinkyInstruction* inst = builder.create(desc);
+    inst->addDestReg(dst);
+    inst->addSrcReg(shiftAmount);
+    inst->addSrcReg(value);
+}
+}  // namespace
+
+// v_lshrrev_b64 v[0:1], v2, v[4:5]  — dst/value are 64-bit (2 VGPRs), shift is 32-bit.
+TEST(VOP3ShiftVerificationTest, VLshrrevB64_TwoSource_Passes) {
+    Function func("kernel");
+    buildTwoSourceShift(func, "v_lshrrev_b64", vgpr(0, 2), vgpr(2), vgpr(4, 2));
+    std::string error = validateStinkyIR(func);
+    EXPECT_TRUE(error.empty()) << "well-formed 2-source v_lshrrev_b64 should verify, got: "
+                               << error;
+    // Guard against the specific pre-fix phantom-src2 regression.
+    EXPECT_EQ(error.find("src[2]"), std::string::npos)
+        << "phantom src[2] must not be reported for v_lshrrev_b64";
+}
+
+// v_lshlrev_b16 v0, v1, v2 — all 16-bit operands (single VGPR each).
+TEST(VOP3ShiftVerificationTest, VLshlrevB16_TwoSource_Passes) {
+    Function func("kernel");
+    buildTwoSourceShift(func, "v_lshlrev_b16", vgpr(0), vgpr(1), vgpr(2));
+    std::string error = validateStinkyIR(func);
+    EXPECT_TRUE(error.empty()) << "well-formed 2-source v_lshlrev_b16 should verify, got: "
+                               << error;
+    EXPECT_EQ(error.find("src[2]"), std::string::npos)
+        << "phantom src[2] must not be reported for v_lshlrev_b16";
+}

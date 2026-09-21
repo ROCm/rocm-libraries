@@ -20,11 +20,12 @@ add_executable(
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 # To use the build tree plugin, we use the path relative to the test binary instead of the installed
-# libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
+# libhipdnn_backend.so. HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the binary
+# directory to the plugin engine directory, derived from the configured install layout.
 target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/hip_kernel_provider"
+        PLUGIN_PATH="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/hip_kernel_provider"
 )
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
@@ -38,6 +39,7 @@ target_link_libraries(
 # Ensure that the hip_kernel_plugin is built before the integration tests
 add_dependencies(hip_kernel_provider_integration_tests hip_kernel_provider)
 
+set(HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV "")
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
@@ -45,58 +47,145 @@ if(ENABLE_ASM_SDPA_ENGINE)
                 "Skipping SDPA integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
     else()
         target_sources(hip_kernel_provider_integration_tests PRIVATE
-            asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
-            asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
+        # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
         target_include_directories(hip_kernel_provider_integration_tests PRIVATE
             ${CMAKE_CURRENT_BINARY_DIR}/../engines/asm_sdpa_engine/generated
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine
         )
         # Ensure codegen runs before compiling the integration tests
         add_dependencies(hip_kernel_provider_integration_tests asm_kernel_codegen)
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE
             AITER_ASM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../engines/asm_sdpa_engine/asm/asm_kernels"
         )
+        set(HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV
+            "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
     endif()
 endif()
 
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackward.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
-        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormForward.cpp
-        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormBackward.cpp
-        hip_mlops_engine/Layernorm/IntegrationGpuLayernormForward.cpp
+        hip_mlops_engine/IntegrationGpuPassByValue.cpp
+    )
+endif()
+
+if(ENABLE_HIP_FLASH2_ENGINE)
+    if(NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "ENABLE_HIP_FLASH2_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable Flash2 integration tests.")
+    else()
+        add_subdirectory(hip_flash2_engine)
+    endif()
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
+        kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
+    )
+    # This target links only the SDKs, not hip_kernel_provider_private, so it does not
+    # inherit the provider's gate and needs the definition set directly.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
+    )
+    # The one descriptor set this binary's cases resolve, as the offset from the binary to
+    # the staged tree. main() applies it when the environment names no set, so the binary
+    # runs standalone, and the offset holds in the install tree too, so no machine-specific
+    # path is compiled in or reaches the CTest files.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
+    )
+    # The shared descriptor-root resolver lives with the unit tests
+    target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests
+    )
+    # The relative layout only, never an absolute build path: the kpack suite locates the
+    # staged tree by walking from the loaded plugin exactly as the loader does, and needs
+    # the same spelling of the subdirectory the provider compiled in. An absolute path
+    # here would be baked into the installed test binary as well, naming a build tree it
+    # cannot see.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
+    )
+    # The integration root is packed by three roots, and each stages under its own
+    # packaging target. Name each one individually.
+    foreach(_hkp_set hkp_packaging_integration hkp_packaging_integration_shared
+                     hkp_packaging_archive_fixture)
+        if(TARGET ${_hkp_set})
+            add_dependencies(hip_kernel_provider_integration_tests ${_hkp_set})
+        endif()
+    endforeach()
+
+    # The parent of the integration descriptor sets, which holds all three. A
+    # walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
+    hkp_verify_embedded_sources(
+        TARGET hip_kernel_provider_integration_tests
+        STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
+        PACK_NAMES integration integration_shared archive_fixture
     )
 endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
+# ENVIRONMENT is forwarded to add_integration_test_target() rather than set
+# afterward via set_tests_properties(): when YAML-driven CTest
+# categorization is active (DNN_PROVIDER_CTEST_CATEGORIES_YAML), the raw
+# hip_kernel_provider_integration_tests CTest test is never registered --
+# only the tiered suites created later by apply_test_category_labels() in
+# ../CMakeLists.txt are, and set_tests_properties() on the unregistered
+# name is a hard CMake configure error. add_integration_test_target()
+# publishes the merged environment as
+# hip_kernel_provider_integration_tests_TEST_ENVIRONMENT so that later call
+# can forward it to whichever suites actually exist.
+#
+# No descriptor entry: this suite loads the real plugin, and the engine resolves its
+# descriptor tree relative to the loaded module -- the staged copy in a build tree, the
+# installed copy in an install tree. Naming one explicitly would pin the build path into
+# the install-time CTest file and stop the installed descriptors from ever being read.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
-    LABELS slow)
+    LABELS slow
+    ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
 
-if(ENABLE_ASM_SDPA_ENGINE)
-    if(NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "ENABLE_ASM_SDPA_ENGINE is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping SDPA integration test environment setup.")
-    else()
-        set(ASM_KERNEL_ENV "HIPDNN_AITER_ASM_DIR=${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels")
-        if(COVERAGE_ENVIRONMENT)
-            set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
-                ENVIRONMENT "${COVERAGE_ENVIRONMENT};${ASM_KERNEL_ENV}"
-            )
-        else()
-            set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
-                ENVIRONMENT "${ASM_KERNEL_ENV}"
-            )
-        endif()
-    endif()
+# Forward the merged raw-test environment (published by add_integration_test_target)
+# to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can
+# pick it up. Setting ENVIRONMENT directly on the raw test name here is a hard
+# configure error when YAML categorization is active, hence the forwarding.
+if(DEFINED hip_kernel_provider_integration_tests_TEST_ENVIRONMENT)
+    set(hip_kernel_provider_integration_tests_TEST_ENVIRONMENT
+        "${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
+endif()
+
+# Register the cross-provider ASM SDPA gpu-reference integration test target. In
+# standalone provider builds the harness may not already be in scope, so try to
+# import it first.
+if(NOT COMMAND add_external_integration_test_target)
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+endif()
+
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    set(_synthetic_root "/__hipdnn_install_root__")
+    set(_install_cwd_abs "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider")
+    set(_install_asm_abs
+        "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
+    )
+    file(RELATIVE_PATH _install_asm_dir "${_install_cwd_abs}" "${_install_asm_abs}")
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME ASM_SDPA_ENGINE
+        INSTALL_SUBDIR hip_kernel_provider
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER
+            Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+        ENVIRONMENT
+            ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV}
+        INSTALL_ENVIRONMENT
+            "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
+    )
 endif()

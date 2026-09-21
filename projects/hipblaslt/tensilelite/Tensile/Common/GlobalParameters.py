@@ -189,6 +189,7 @@ globalParameters["DataInitTypeE"] = 0
 globalParameters["DataInitTypeAlpha"] = 2
 globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
+globalParameters["DataInitTypeGate"] = 3
 globalParameters["DataInitTypeScaleA"] = 2
 globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
@@ -211,6 +212,10 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # host for non-SK5 solutions. Default keeps behavior unchanged for
 # existing tests.
 globalParameters["StreamKHybridMode"] = [0]
+# Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
+# This is intentionally independent of ProblemType.StridedBatched so universal
+# strided kernels can exercise their ArgType==3 general-batched path.
+globalParameters["BatchMode"] = 0
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -244,6 +249,7 @@ globalParameters["PrintTensorRef"] = (
     0  # Print reference tensor.  0x1=after init; 0x2=after copy-back; 0x3=both
 )
 globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
+globalParameters["PrintTensorGate"] = 0
 globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
@@ -256,9 +262,6 @@ globalParameters["DumpTensors"] = (
 
 # If PrintMax* is greater than the dimension, the middle elements will be replaced with "..."
 
-
-# device selection
-globalParameters["Platform"] = 0  # select opencl platform
 
 # shouldn't need to change
 globalParameters["ClientExecutionLockPath"] = (
@@ -346,6 +349,7 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
+globalParameters["ValidateMetadata"] = False  # Set to True to validate custom.config metadata at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -393,6 +397,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
+# When set, each kernel's StinkyTofu module writes its cost file here via
+# StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
+globalParameters["StinkyTofuCostOutputDir"] = ""
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
@@ -428,7 +437,7 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
-    "KernArgsVersion": 2,
+    "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
     # Change this to False if the CustomKernel does not support.
     "SupportUserGSU": True,
@@ -436,6 +445,17 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
+    # Pure CAPABILITY, never policy: "this kernel's assembly contains BOTH
+    # Stream-K K-split mappings (the historical global 'first-E' mapping and the
+    # per-tile extra-iters mapping) and honors bit 29 of MagicShiftItersPerTile
+    # as the runtime selector, so the host may set that bit."
+    # It does NOT mean per-tile extra-iters is in use: whether the mapping is
+    # actually taken is decided at runtime by the host, which sets bit 29 iff
+    # this capability is true AND uniform summation order is requested.
+    # Default False so older/custom kernels -- whose asm has only one mapping
+    # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
+    # set it True in Solution.py.
+    "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
@@ -449,15 +469,15 @@ defaultBenchmarkCommonParameters = [
     {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
     {"LdsPadMXSB": [ -1 ] },
-    {"LdsPadMetadata": [0]},
+    {"LdsPadMetadata": [-1]},
     {"LdsBlockSizePerPadA": [-1]},
     {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
     {"LdsBlockSizePerPadMXSB": [ -1 ] },
-    {"LdsBlockSizePerPadMetadata": [0]},
+    {"LdsBlockSizePerPadMetadata": [-1]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
-    {"MaxOccupancy": [40]},
+    {"MaxOccupancy": [64]},
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
@@ -481,7 +501,7 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead": [1]},
     {"ScheduleLocalWrite": [1]},
     {"ScheduleIterAlg": [3]},
-    {"GlobalReadPerMfma": [1]},
+    {"GlobalReadPerMfma": [1.0]},
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
     {"OptNoLoadLoop": [1]},
@@ -523,8 +543,10 @@ defaultBenchmarkCommonParameters = [
     {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
+    {"LDSSegmentInterleave": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
+    {"NonTemporalGate": [0]},
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
@@ -536,6 +558,7 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporal": [-1]},
     {"TemporalHint": [-1]},
     {"TemporalHintE": [0]},
+    {"TemporalHintGate": [0]},
     {"TemporalHintD": [0]},
     {"TemporalHintC": [0]},
     {"TemporalHintA": [0]},
@@ -546,6 +569,7 @@ defaultBenchmarkCommonParameters = [
     {"TemporalHintMetadata": [0]},
     {"NonVolatile": [-1]},
     {"NonVolatileE": [0]},
+    {"NonVolatileGate": [0]},
     {"NonVolatileD": [0]},
     {"NonVolatileC": [0]},
     {"NonVolatileA": [0]},
@@ -555,10 +579,11 @@ defaultBenchmarkCommonParameters = [
     {"NonVolatileWS": [0]},
     {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
-    {"CustomKernelName": [""]},
+    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
+    {"UseDualFMAC": [False]},
     {"StorePriorityOpt": [False]},
     {"NumElementsPerBatchStore": [0]},
     {"StoreSyncOpt": [0]},
@@ -567,6 +592,7 @@ defaultBenchmarkCommonParameters = [
     {"StreamK": [0]},
     {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
+    {"StreamKWorkStealing": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
@@ -577,11 +603,12 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
-    {"InitCIterWmma": [0]},
+    {"InitCIterWmma": [-1]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
     {"PrefetchAcrossPersistent": [0]},
+    {"ReuseAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
@@ -594,18 +621,23 @@ defaultBenchmarkCommonParameters = [
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
+    {"TDMPlusLdsBuf": [0]},
     {"MinGRIncPerMfma": [-1]},
     {"UsePLRPack": [0]},
     {"TDMInst": [0]},
     {"TDMSplit": [False]},
+    {"TDMLoadWaveSync": [False]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
-    # SwInstructionPrefetch — True: reserve one scratch SGPR so StinkyTofu can insert software
-    # instruction prefetch when the ISA supports it (SwPrefetchInsertionPass).
+    # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):
+    # -1 Auto, 0 Off, 1 Relative (PC-relative), 2 Absolute (label-fixed base). Default 1 (Relative),
+    # preserving the legacy default kernel naming. Set -1 (Auto) to opt into Absolute on gfx1250
+    # non-Stream-K (Relative otherwise), or 2 for explicit Absolute.
     # Purpose: CP prefetch covers only a bounded window; very large kernels can see early kernel
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
-    # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
-    {"SwInstructionPrefetch": [True]},
+    # ahead of execution. Legacy booleans are accepted as a deprecated alias
+    # (True -> Relative, False -> Off) so shipped library-logic YAMLs keep loading.
+    {"SwInstructionPrefetch": [1]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
@@ -810,6 +842,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
@@ -822,6 +855,14 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
 ]
 
 
+def validateRuntimeLanguage(runtimeLanguage):
+    if runtimeLanguage is not None and runtimeLanguage not in {"HIP", "HSA"}:
+        printExit(
+            f"Unsupported RuntimeLanguage {runtimeLanguage!r}. "
+            "Supported runtime languages are HIP and HSA."
+        )
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -830,6 +871,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
 
     global globalParameters
+
+    validateRuntimeLanguage(config.get("RuntimeLanguage"))
 
     # Minimum Required Version
     if "MinimumRequiredVersion" in config:

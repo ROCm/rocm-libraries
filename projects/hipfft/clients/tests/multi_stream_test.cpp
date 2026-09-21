@@ -547,7 +547,7 @@ try
     // ParamsForMultiStreamDFT::num_streams different streams
     const size_t isize = parameters.get_data_size<true>();
     const size_t osize = parameters.get_data_size<false>();
-    gpubuf_t     input_buf, output_buf;
+    gpubuf       input_buf, output_buf;
     allocate_buffer(input_buf, isize);
     if(parameters.placement != fft_placement_inplace)
     {

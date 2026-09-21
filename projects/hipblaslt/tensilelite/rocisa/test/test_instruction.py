@@ -25,6 +25,8 @@ from rocisa.container import sgpr, vgpr
 from copy import deepcopy
 import math
 
+import pytest
+
 def test_instruction_common():
     from rocisa.instruction import SMovB32
 
@@ -349,6 +351,153 @@ def test_instruction_global_inv():
     assert "// mutated" not in str(inst2)
 
 
+def test_instruction_scalar_float():
+    # gfx12+ scalar-float / scalar-u64 instruction wrappers. Each src is an
+    # InstructionInput variant (register | int | double | str); the cases below
+    # exercise those arms and assert the emitted mnemonic/operands.
+    from rocisa.instruction import SMulF32, SAddF32, SCvtF32U32, SCvtU32F32, \
+        VSRcpF32, SMulU64
+
+    # --- SMulF32: s_mul_f32 dst, src0, src1 ---
+    inst = SMulF32(sgpr(0), sgpr(1), sgpr(2))
+    assert str(inst) == "s_mul_f32 s0, s1, s2\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(inst.srcs[1]) == "s2"
+    assert str(SMulF32(sgpr(0), sgpr(1), 2)) == "s_mul_f32 s0, s1, 2\n"
+    assert str(SMulF32(sgpr(0), "s1", sgpr(2))) == "s_mul_f32 s0, s1, s2\n"
+
+    # --- SAddF32: s_add_f32 dst, src0, src1 ---
+    inst = SAddF32(sgpr(0), sgpr(1), sgpr(2))
+    assert str(inst) == "s_add_f32 s0, s1, s2\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(inst.srcs[1]) == "s2"
+    assert str(SAddF32(sgpr(0), sgpr(1), 3)) == "s_add_f32 s0, s1, 3\n"
+    # integral doubles get a ".0" suffix
+    assert str(SAddF32(sgpr(0), sgpr(1), 2.0)) == "s_add_f32 s0, s1, 2.0\n"
+
+    # --- SCvtF32U32: s_cvt_f32_u32 dst, src ---
+    inst = SCvtF32U32(sgpr(0), sgpr(1))
+    assert str(inst) == "s_cvt_f32_u32 s0, s1\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(SCvtF32U32(sgpr(0), "s2")) == "s_cvt_f32_u32 s0, s2\n"
+
+    # --- SCvtU32F32: s_cvt_u32_f32 dst, src ---
+    inst = SCvtU32F32(sgpr(0), sgpr(1))
+    assert str(inst) == "s_cvt_u32_f32 s0, s1\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(SCvtU32F32(sgpr(0), 1.5)) == "s_cvt_u32_f32 s0, 1.5\n"
+
+    # --- VSRcpF32: v_s_rcp_f32 dst, src (vgpr dst) ---
+    inst = VSRcpF32(vgpr(0), sgpr(1))
+    assert str(inst) == "v_s_rcp_f32 v0, s1\n"
+    assert str(inst.dst) == "v0"
+    assert str(inst.srcs[0]) == "s1"
+    # vgpr src must stay clean (no s_set_vgpr_msb) under the default ISA
+    assert str(VSRcpF32(vgpr(0), vgpr(1))) == "v_s_rcp_f32 v0, v1\n"
+    assert str(VSRcpF32(vgpr(0), 0.5)) == "v_s_rcp_f32 v0, 0.5\n"
+
+    # --- SMulU64: s_mul_u64 dst, src0, src1 (64-bit register pairs) ---
+    inst = SMulU64(sgpr(0, 2), sgpr(2, 2), sgpr(4, 2))
+    assert str(inst) == "s_mul_u64 s[0:1], s[2:3], s[4:5]\n"
+    assert str(inst.dst) == "s[0:1]"
+    assert str(inst.srcs[0]) == "s[2:3]"
+    assert str(inst.srcs[1]) == "s[4:5]"
+    assert str(SMulU64(sgpr(0, 2), sgpr(2, 2), 4)) == "s_mul_u64 s[0:1], s[2:3], 4\n"
+
+    # --- Comment formatting (relaxed to sidestep the 50-col alignment pad) ---
+    inst = SMulF32(sgpr(0), sgpr(1), sgpr(2), comment="scale")
+    assert str(inst).startswith("s_mul_f32 s0, s1, s2")
+    assert "// scale" in str(inst)
+    assert str(inst).endswith("\n")
+    assert inst.comment == "scale"
+
+    # --- deepcopy independence + comment accessor, one per class ---
+    for a in [
+        SMulF32(sgpr(0), sgpr(1), sgpr(2), comment="orig"),
+        SAddF32(sgpr(0), sgpr(1), sgpr(2), comment="orig"),
+        SCvtF32U32(sgpr(0), sgpr(1), comment="orig"),
+        SCvtU32F32(sgpr(0), sgpr(1), comment="orig"),
+        VSRcpF32(vgpr(0), sgpr(1), comment="orig"),
+        SMulU64(sgpr(0, 2), sgpr(2, 2), sgpr(4, 2), comment="orig"),
+    ]:
+        assert a.comment == "orig"
+        b = deepcopy(a)
+        a.comment = "mutated"
+        assert b.comment == "orig"
+        assert "// orig" in str(b)
+        assert "// mutated" not in str(b)
+
+
+def test_instruction_vmax_f16_true16():
+    # Regression for the true16 (real-true16) activation-clamp defect.
+    #
+    # On a NoSDWA target (isaVersion 11/12) the v_max_f16 activation clamp must
+    # be emitted in true16 form, binding a half-word selector (.l) to every
+    # register operand via the NoSDWA-gated t16() helper. The abs() source keeps
+    # its suffix *inside* the closing paren: abs(v[..].l) is valid,
+    # abs(v[..]).l is not.
+    #
+    # Assertions are substring/regex based to stay agnostic to the ~50-column
+    # comment padding, matching test_instruction_swait_xcnt / _global_wb.
+    import os
+    import re
+    import shutil
+
+    import rocisa
+    from rocisa.container import vgpr
+    from rocisa.enum import HighBitSel
+    from rocisa.instruction import VMaxF16, t16
+
+    # Initialize a NoSDWA gfx11 ISA so t16() selects the true16 path. Resolve
+    # the assembler via ROCM_PATH first (matching test_mubuf.py::_isa_context) so
+    # this works when ROCm's bin dir is not on PATH (common in CI / Windows).
+    isa = (11, 0, 0)
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    search_path = os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])
+    assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
+    ri = rocisa.rocIsa.getInstance()
+    ri.init(isa, assembler, False)
+    ri.setKernel(isa, 32)
+    assert ri.getArchCaps()["NoSDWA"], "expected NoSDWA cap for gfx11"
+
+    try:
+        low = HighBitSel.LOW
+
+        # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
+        inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                       t16(vgpr("Value+0", isAbs=True), low))
+        s = str(inst)
+        assert re.search(
+            r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+abs\(v\[vgprValue\+0\]\.l\)",
+            s,
+        ), f"activation clamp not in true16 form: {s!r}"
+        # The suffix must be inside the abs() paren, never outside it.
+        assert "abs(v[vgprValue+0].l)" in s
+        assert "abs(v[vgprValue+0]).l" not in s
+        # And it must not be the bare fake16 form.
+        assert "abs(v[vgprValue+0])," not in s and not s.rstrip().endswith("abs(v[vgprValue+0])")
+
+        # Plain register sources (the merge_sum shape): every operand gets .l.
+        inst2 = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                        t16(vgpr("OutputB"), low))
+        s2 = str(inst2)
+        assert re.search(
+            r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+v\[vgprOutputB\]\.l",
+            s2,
+        ), f"merge clamp not in true16 form: {s2!r}"
+    finally:
+        legacy = (9, 4, 2)
+        ri.init(legacy, assembler, False)
+        ri.setKernel(legacy, 64)
+
+
 if __name__ == "__main__":
     test_instruction_common()
     test_instruction_cvt()
@@ -357,3 +506,4 @@ if __name__ == "__main__":
     test_instruction_swait_xcnt()
     test_instruction_global_wb()
     test_instruction_global_inv()
+    test_instruction_scalar_float()

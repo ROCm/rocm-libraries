@@ -139,11 +139,6 @@ using namespace conv_hip_igemm_xdlops;
 
 TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
 {
-#if MIOPEN_BACKEND_OPENCL
-
-    GTEST_SKIP() << "MIOPEN_BACKEND_HIP needed for this test";
-
-#else // MIOPEN_BACKEND_HIP, OCL_DISABLED
 #if MIOPEN_USE_COMPOSABLEKERNEL
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle))
@@ -156,7 +151,6 @@ TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
     }
 #else
     GTEST_SKIP();
-#endif
 #endif
 };
 

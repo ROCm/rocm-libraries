@@ -33,8 +33,8 @@
 #include <miopen/op_kernel_args.hpp>
 
 #include <array>
-#include <cassert>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace miopen {
@@ -50,6 +50,28 @@ inline HipEventPtr make_hip_event()
 
     return HipEventPtr{result};
 }
+
+/// Validates that a kernel's total work-item count can be expressed by the HIP module
+/// launch APIs. Both hipExtModuleLaunchKernel() and hipModuleLaunchCooperativeKernel()
+/// bound the per-dimension work-item count to uint32_t -- the former takes it directly,
+/// the latter takes a workgroup count that the runtime multiplies back out by the
+/// workgroup size -- so the same limit applies to both. A count of 2^32 or more is not
+/// representable and is silently truncated modulo 2^32:
+///
+///   - a multiple of 2^32 truncates to zero, which HIP rejects asynchronously from an
+///     unrelated later call, making the true origin hard to attribute, and
+///   - any other value truncates to a smaller non-zero grid, which HIP accepts. The
+///     kernel then covers only part of the problem and returns wrong results with no
+///     error reported anywhere.
+///
+/// Note this bounds the number of WORK-ITEMS per dimension, not the number of
+/// workgroups; there is no separate per-dimension workgroup-count limit on either path.
+///
+/// \param gdims Global work size, in work-items (already gridDim * blockDim).
+/// \param name Kernel name, used in the exception message.
+/// \throws miopen::Exception if the global work size is not representable.
+MIOPEN_INTERNALS_EXPORT void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims,
+                                                    const std::string& name);
 
 struct HipEventProfiler
 {
@@ -218,8 +240,16 @@ struct HIPOCKernel
                 std::vector<size_t> global_dims)
         : program(p), name(kernel_name)
     {
-        assert(!local_dims.empty() && local_dims.size() <= 3);
-        assert(!global_dims.empty() && global_dims.size() <= 3);
+        if(local_dims.empty() || local_dims.size() > ldims.size())
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Invalid local work dimensions: size " +
+                             std::to_string(local_dims.size()) + " (expected 1.." +
+                             std::to_string(ldims.size()) + ").");
+        if(global_dims.empty() || global_dims.size() > gdims.size())
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Invalid global work dimensions: size " +
+                             std::to_string(global_dims.size()) + " (expected 1.." +
+                             std::to_string(gdims.size()) + ").");
         ldims.fill(1);
         gdims.fill(1);
         std::copy(local_dims.begin(), local_dims.end(), ldims.begin());

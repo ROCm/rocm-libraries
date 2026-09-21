@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -98,9 +98,9 @@ def setGlobalParams(versionString: dict, problemTypeState: dict) -> dict:
     res["DataInitTypeB"] = 13 if problemTypeState["DataType"] != "I8" else 3
     res["DataInitTypeC"] = 12 if problemTypeState["DataType"] != "I8" else 3
     res["DataInitTypeD"] = 12 if problemTypeState["DataType"] != "I8" else 3
-    res["PreciseKernelTime"] = 0
+    res["PreciseKernelTime"] = False
     res["Device"] = 0
-    res["SkipSlowSolutionRatio"] = 0
+    res["SkipSlowSolutionRatio"] = 0.0
     res["KeepBuildTmp"] = False
     return res
 
@@ -129,6 +129,12 @@ def formProblemTypeYamlData(problemTypeState: dict) -> dict:
         # Print default keys with no default values
         if problemTypeKey in defaultProblemType:
             if problemTypeValue != defaultProblemType[problemTypeKey]:
+                # Shipped library-logic encodes some bool fields (e.g.
+                # Activation) as int 0/1; restore the bool type expected by the
+                # strict ProblemType type gate when the registry default is a
+                # bool (int-typed fields like UseBias are left untouched).
+                if isinstance(defaultProblemType[problemTypeKey], bool):
+                    problemTypeValue = bool(problemTypeValue)
                 data[problemTypeKey] = makeFlow(problemTypeValue)
                 continue
 
@@ -249,7 +255,9 @@ def formProblemSize(
     temp = {}
     biasTypeArgs = problemTypeStat["BiasDataTypeList"]
     temp["BiasTypeArgs"] = FlowList(biasTypeArgs)
-
+    gateTypeArgs = problemTypeStat.get("GateResidualDataTypeList", [])
+    if gateTypeArgs:
+        temp["GateTypeArgs"] = FlowList(gateTypeArgs)
     data["BenchmarkFinalParameters"].append(temp)
 
     return data
@@ -262,6 +270,12 @@ def formLibraryLogic(
     # Form final library logic string
     data["ScheduleName"] = Quoted(scheduleName)
     data["DeviceNames"] = FlowList([Quoted(deviceNames[0])])
+    # rawLibraryLogic may return the architecture as a dict
+    # ({'Architecture': 'gfx950', 'CUCount': 128}); Quoted() would str()-ify it
+    # into a repr string that downstream arch matching (load_logic_gfx_arch)
+    # cannot resolve. Emit the plain arch name expected by createLibraryLogic.
+    if isinstance(architectureName, dict):
+        architectureName = architectureName.get("Architecture", architectureName)
     data["ArchitectureName"] = Quoted(architectureName)
 
     return data

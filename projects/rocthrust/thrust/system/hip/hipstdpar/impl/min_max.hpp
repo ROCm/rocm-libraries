@@ -55,6 +55,8 @@ namespace std
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I max_element(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   return ::thrust::max_element(::thrust::device, f, l);
 }
@@ -72,6 +74,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   return ::thrust::max_element(::thrust::device, f, l, ::std::move(r));
 }
@@ -98,6 +102,8 @@ inline I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I min_element(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   return ::thrust::min_element(::thrust::device, f, l);
 }
@@ -115,6 +121,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline I min_element(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   return ::thrust::min_element(::thrust::device, f, l, ::std::move(r));
 }
@@ -141,6 +149,8 @@ inline I min_element(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline pair<I, I> minmax_element(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   auto [m, M] = ::thrust::minmax_element(::thrust::device, f, l);
 
@@ -160,6 +170,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline pair<I, I> minmax_element(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   auto [m, M] = ::thrust::minmax_element(::thrust::device, f, l, ::std::move(r));
 

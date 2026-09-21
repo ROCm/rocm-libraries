@@ -26,6 +26,9 @@ private:
     std::shared_ptr<const plugin::EngineExecutionContextWrapper> _executionContext;
     std::shared_ptr<plugin::EnginePluginResourceManager> _pluginResourceManager;
     std::vector<int64_t> _tensorUids;
+    // Required device-pointer byte alignment per tensor, parallel to _tensorUids
+    // (_tensorAlignments[i] applies to _tensorUids[i]).
+    std::vector<int64_t> _tensorAlignments;
     int64_t _workspaceSize = INVALID_WORKSPACE_SIZE;
     int64_t _engineId = INVALID_ENGINE_ID;
     bool _isOverrideShapeEnabled = false;
@@ -78,6 +81,7 @@ public:
     virtual std::shared_ptr<const EngineConfigDescriptor> getEngineConfig() const;
     virtual int64_t getEngineId() const;
     virtual const std::vector<int64_t>& getTensorUids() const;
+    virtual const std::vector<int64_t>& getTensorAlignments() const;
     virtual bool isOverrideShapeEnabled() const;
     virtual hipdnnEnginePluginExecutionContext_t getExecutionContext() const;
     virtual void serializeBackendPlan(size_t requestedByteSize,

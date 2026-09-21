@@ -44,7 +44,7 @@ struct Handle;
 // Perhaps redundant
 enum FusionKernelSourceType
 {
-    OpenclText,
+    KernelText,
     AsmText,
     Binary, /// \todo Unused, consider removing.
 };

@@ -142,6 +142,7 @@ def collect_sk5_regset_aliases() -> list[tuple[str, str, int]]:
         "VectorWidthMXSB": 1,
         "MIWaveTileA": 1,
         "MIWaveTileB": 1,
+        "PrefetchGL2": 0,
     }
     tPA = {"is_sparse": False, "tpsMetadata": {}, "MX": None}
     tPB = {"is_sparse": False, "tpsMetadata": {}, "MX": None}

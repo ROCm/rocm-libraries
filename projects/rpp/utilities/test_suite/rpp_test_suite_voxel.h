@@ -361,14 +361,16 @@ inline void write_nifti_file(nifti_1_header* niftiHeader, NIFTI_DATATYPE* niftiD
 }
 
 #if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
-inline void write_image_from_nifti_opencv(uchar* niftiDataXYFrameU8, int niftiHeaderImageWidth,
+inline void write_image_from_nifti_opencv(unsigned char* niftiDataXYFrameU8,
+                                          int niftiHeaderImageWidth,
                                           RpptRoiXyzwhd* roiGenericSrcPtr,
-                                          uchar* outputBufferOpenCV, int zPlane, int Channel,
-                                          int batchCount, string dst_path, string func, int index) {
+                                          unsigned char* outputBufferOpenCV, int zPlane,
+                                          int Channel, int batchCount, string dst_path, string func,
+                                          int index) {
     static int imageCount = 0;
     if (imageCount > MAX_IMAGE_DUMP) exit(0);
-    uchar* outputBufferOpenCVRow = outputBufferOpenCV;
-    uchar* niftiDataXYFrameU8Row = niftiDataXYFrameU8;
+    unsigned char* outputBufferOpenCVRow = outputBufferOpenCV;
+    unsigned char* niftiDataXYFrameU8Row = niftiDataXYFrameU8;
     for (int i = 0; i < roiGenericSrcPtr[batchCount].roiHeight; i++) {
         memcpy(outputBufferOpenCVRow, niftiDataXYFrameU8Row, roiGenericSrcPtr[batchCount].roiWidth);
         outputBufferOpenCVRow += roiGenericSrcPtr[batchCount].roiWidth;
@@ -384,10 +386,12 @@ inline void write_image_from_nifti_opencv(uchar* niftiDataXYFrameU8, int niftiHe
 }
 #else
 /* OpenCV not linked: slice JPG dumps are disabled; NIfTI QA/compare paths do not use this. */
-inline void write_image_from_nifti_opencv(uchar* niftiDataXYFrameU8, int niftiHeaderImageWidth,
+inline void write_image_from_nifti_opencv(unsigned char* niftiDataXYFrameU8,
+                                          int niftiHeaderImageWidth,
                                           RpptRoiXyzwhd* roiGenericSrcPtr,
-                                          uchar* outputBufferOpenCV, int zPlane, int Channel,
-                                          int batchCount, string dst_path, string func, int index) {
+                                          unsigned char* outputBufferOpenCV, int zPlane,
+                                          int Channel, int batchCount, string dst_path, string func,
+                                          int index) {
     (void)niftiDataXYFrameU8;
     (void)niftiHeaderImageWidth;
     (void)roiGenericSrcPtr;

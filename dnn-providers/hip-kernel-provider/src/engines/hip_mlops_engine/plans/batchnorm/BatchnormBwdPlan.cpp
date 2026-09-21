@@ -198,7 +198,14 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         _activationBeta = static_cast<float>(_params.optActivation()->beta);
     }
 
-    constexpr unsigned int STASH_VALUES_BWD = 2;
+    // _usesSavedStats is true when the caller supplied mean/variance, so the backward
+    // pass need not recompute them. That sets how many per-channel fields the
+    // multi-workgroup reduction path stashes into the dx-aliased buffer: 4 when it must
+    // compute stats (mean, variance, dscale, dbias), 2 when they are supplied (dscale,
+    // dbias only). The applicability gate selects that path only when this many fields
+    // fit in dx, so this count must not be too small. This matches the logic captured
+    // in MIOpen backward_spatial.cpp.
+    const unsigned int stashValuesBwd = !_usesSavedStats ? 4u : 2u;
     KernelConfig config;
     if(useMultiple(dims.n,
                    dims.h,
@@ -215,7 +222,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                      dims.isLayoutNHWC,
                                      dims.useFp32,
                                      minWorkgroups,
-                                     STASH_VALUES_BWD,
+                                     stashValuesBwd,
                                      config);
         if(config.variant == -1)
         {
@@ -263,7 +270,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         activationMode = (*_params.optActivation()).mode;
     }
 
-    BatchnormKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_params.x(),
+                                          _params.dx(),
+                                          _params.savedMean(),
+                                          _params.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
@@ -317,7 +329,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
         stashMethod = getStashMethod(dims.isLayoutNHWC,
                                      dims.useFp32,
-                                     STASH_VALUES_BWD,
+                                     stashValuesBwd,
                                      dims.c,
                                      dims.n,
                                      dims.inCstride,
@@ -399,28 +411,38 @@ void BatchnormBwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "BatchnormBwdPlan::execute() called before compile()");
     }
 
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dyBuffer = findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dxBuffer = findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer = findDeviceBuffer(_params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer = findDeviceBuffer(_params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dyBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dxBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dscaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
 
     void* biasPtr = nullptr;
     if(_params.bias() != nullptr)
     {
-        biasPtr = findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+        biasPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+                      _params.bias()->uid(), deviceBuffers, numDeviceBuffers)
+                      .ptr;
     }
 
     void* savedMeanPtr = nullptr;
     void* savedInvVariancePtr = nullptr;
     if(_usesSavedStats)
     {
-        savedMeanPtr
-            = findDeviceBuffer(_params.savedMean()->uid(), deviceBuffers, numDeviceBuffers).ptr;
-        savedInvVariancePtr
-            = findDeviceBuffer(_params.savedInvVariance()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
+        savedMeanPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+                           _params.savedMean()->uid(), deviceBuffers, numDeviceBuffers)
+                           .ptr;
+        savedInvVariancePtr = hipdnn_plugin_sdk::findDeviceBuffer(_params.savedInvVariance()->uid(),
+                                                                  deviceBuffers,
+                                                                  numDeviceBuffers)
+                                  .ptr;
     }
 
     if(_kernelVariant != 2)

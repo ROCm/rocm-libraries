@@ -61,6 +61,7 @@ function(create_individual_gemm_target datatype layout trait tile_config config_
                 --kernel_name "${datatype}_${layout}_${trait}_${tile_config}"
                 --tile_config "${tile_config}"
                 --trait_combo "${trait}"
+                --gpu_targets "${GEMM_GPU_TARGETS_INDIVIDUAL}"
         DEPENDS ${GEMM_SOURCE_DIR}/gemm_streamk_instance_builder.py ${config_json}
         COMMENT "Generating ${instance_header}"
     )
@@ -184,7 +185,7 @@ function(build_individual_gemm_targets datatype layout)
                 --datatype ${datatype}
                 --layout ${layout}
                 --config_json ${json_blob}
-                --gpu_target "${GEMM_GPU_TARGETS_INDIVIDUAL}"
+                --gpu_targets "${GEMM_GPU_TARGETS_INDIVIDUAL}"
                 --list_kernels
                 ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
@@ -230,9 +231,9 @@ message(VERBOSE "GEMM_STREAMK_DATATYPE: ${GEMM_STREAMK_DATATYPE}")
 message(VERBOSE "GEMM_STREAMK_LAYOUT: ${GEMM_STREAMK_LAYOUT}")
 message(VERBOSE "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
-# Filter GPU targets to only gfx90a, gfx942
+# Filter GPU targets to only gfx90a, gfx942, gfx950
 set(GEMM_GPU_TARGETS_INDIVIDUAL "")
-set(DESIRED_TARGETS "gfx90a;gfx942") # TODO: Add gfx950 when supported
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST DESIRED_TARGETS)
@@ -243,7 +244,7 @@ endforeach()
 
 # Skip build if no matching targets found
 if(NOT GEMM_GPU_TARGETS_INDIVIDUAL)
-    message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (gfx90a, gfx942) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (gfx90a, gfx942, gfx950) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual GEMM targets for GPU targets: ${GEMM_GPU_TARGETS_INDIVIDUAL}")
 

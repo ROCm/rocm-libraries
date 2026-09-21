@@ -20,14 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_BENCHMARK_UTILS_HPP_
-#define HIPCUB_BENCHMARK_UTILS_HPP_
+#pragma once
 
-#ifndef BENCHMARK_UTILS_INCLUDE_GUARD
-    #error benchmark_utils.hpp must ONLY be included by common_benchmark_header.hpp. Please include common_benchmark_header.hpp instead.
-#endif
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <functional>
+#include <iostream>
+#include <numeric>
+#include <random>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
-// hipCUB API
+#include "primbench.hpp"
+
+#include <hip/hip_runtime.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include <hipcub/backend/rocprim/util_ptx.hpp>
 #elif defined(__HIP_PLATFORM_NVIDIA__)
@@ -45,62 +55,64 @@
 
 namespace benchmark_utils
 {
+
 const size_t default_max_random_size = 1024 * 1024;
+
 // get_random_data() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
 template<class T>
 inline auto
-    get_random_data(size_t size, T min, T max, size_t max_random_size = default_max_random_size) ->
+    get_random_data(size_t items, T min, T max, size_t max_random_size = default_max_random_size) ->
     typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device         rd;
     std::default_random_engine gen(rd());
     using distribution_type = typename std::conditional<(sizeof(T) == 1), short, T>::type;
     std::uniform_int_distribution<distribution_type> distribution(min, max);
-    std::vector<T>                                   data(size);
+    std::vector<T>                                   data(items);
     std::generate(data.begin(),
-                  data.begin() + std::min(size, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]() { return distribution(gen); });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
+    for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
 
 template<class T>
 inline auto
-    get_random_data(size_t size, T min, T max, size_t max_random_size = default_max_random_size) ->
+    get_random_data(size_t items, T min, T max, size_t max_random_size = default_max_random_size) ->
     typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
 {
     std::random_device                rd;
     std::default_random_engine        gen(rd());
     std::uniform_real_distribution<T> distribution(min, max);
-    std::vector<T>                    data(size);
+    std::vector<T>                    data(items);
     std::generate(data.begin(),
-                  data.begin() + std::min(size, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]() { return distribution(gen); });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
+    for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
 
 template<class T>
 inline std::vector<T>
-    get_random_data01(size_t size, float p, size_t max_random_size = default_max_random_size)
+    get_random_data01(size_t items, float p, size_t max_random_size = default_max_random_size)
 {
     std::random_device          rd;
     std::default_random_engine  gen(rd());
     std::bernoulli_distribution distribution(p);
-    std::vector<T>              data(size);
+    std::vector<T>              data(items);
     std::generate(data.begin(),
-                  data.begin() + std::min(size, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]() { return distribution(gen); });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
+    for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
@@ -191,7 +203,8 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
         if(key_compare_op(*k_first, *++k_first))
         {
             sum = op(sum, static_cast<result_type>(*first));
-        } else
+        }
+        else
         {
             sum = initial_value;
         }
@@ -224,46 +237,54 @@ struct custom_type
     HIPCUB_HOST_DEVICE inline ~custom_type() = default;
 #endif
 
-    HIPCUB_HOST_DEVICE inline custom_type& operator=(const custom_type& other)
+    HIPCUB_HOST_DEVICE
+    inline custom_type& operator=(const custom_type& other)
     {
         x = other.x;
         y = other.y;
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE inline custom_type operator+(const custom_type& rhs) const
+    HIPCUB_HOST_DEVICE
+    inline custom_type operator+(const custom_type& rhs) const
     {
         return custom_type(x + rhs.x, y + rhs.y);
     }
 
-    HIPCUB_HOST_DEVICE inline custom_type operator-(const custom_type& other) const
+    HIPCUB_HOST_DEVICE
+    inline custom_type operator-(const custom_type& other) const
     {
         return custom_type(x - other.x, y - other.y);
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator<(const custom_type& rhs) const
+    HIPCUB_HOST_DEVICE
+    inline bool operator<(const custom_type& rhs) const
     {
         // intentionally suboptimal choice for short-circuting,
         // required to generate more performant device code
         return ((x == rhs.x && y < rhs.y) || x < rhs.x);
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator>(const custom_type& other) const
+    HIPCUB_HOST_DEVICE
+    inline bool operator>(const custom_type& other) const
     {
         return (x > other.x || (x == other.x && y > other.y));
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator==(const custom_type& rhs) const
+    HIPCUB_HOST_DEVICE
+    inline bool operator==(const custom_type& rhs) const
     {
         return x == rhs.x && y == rhs.y;
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator!=(const custom_type& other) const
+    HIPCUB_HOST_DEVICE
+    inline bool operator!=(const custom_type& other) const
     {
         return !(*this == other);
     }
 
-    HIPCUB_HOST_DEVICE custom_type& operator+=(const custom_type& rhs)
+    HIPCUB_HOST_DEVICE
+    custom_type& operator+=(const custom_type& rhs)
     {
         this->x += rhs.x;
         this->y += rhs.y;
@@ -289,7 +310,8 @@ struct custom_type_decomposer
     using T = typename CustomType::first_type;
     using U = typename CustomType::second_type;
 
-    HIPCUB_HOST_DEVICE ::hipcub::tuple<T&, U&> operator()(CustomType& key) const
+    HIPCUB_HOST_DEVICE
+    ::hipcub::tuple<T&, U&> operator()(CustomType& key) const
     {
         return ::hipcub::tuple<T&, U&>{key.x, key.y};
     }
@@ -340,15 +362,15 @@ struct generate_limits<T, std::enable_if_t<std::is_floating_point<T>::value>>
 };
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024) ->
+inline auto get_random_data(size_t items, T min, T max, size_t max_random_size = 1024 * 1024) ->
     typename std::enable_if<is_custom_type<T>::value, std::vector<T>>::type
 {
     using first_type  = typename T::first_type;
     using second_type = typename T::second_type;
-    std::vector<T> data(size);
-    auto           fdata = get_random_data<first_type>(size, min.x, max.x, max_random_size);
-    auto           sdata = get_random_data<second_type>(size, min.y, max.y, max_random_size);
-    for(size_t i = 0; i < size; i++)
+    std::vector<T> data(items);
+    auto           fdata = get_random_data<first_type>(items, min.x, max.x, max_random_size);
+    auto           sdata = get_random_data<second_type>(items, min.y, max.y, max_random_size);
+    for(size_t i = 0; i < items; i++)
     {
         data[i] = T(fdata[i], sdata[i]);
     }
@@ -356,16 +378,16 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024) ->
+inline auto get_random_data(size_t items, T min, T max, size_t max_random_size = 1024 * 1024) ->
     typename std::enable_if<!is_custom_type<T>::value
                                 && !std::is_same<decltype(max.x), void>::value,
                             std::vector<T>>::type
 {
 
     using field_type = decltype(max.x);
-    std::vector<T> data(size);
-    auto           field_data = get_random_data<field_type>(size, min.x, max.x, max_random_size);
-    for(size_t i = 0; i < size; i++)
+    std::vector<T> data(items);
+    auto           field_data = get_random_data<field_type>(items, min.x, max.x, max_random_size);
+    for(size_t i = 0; i < items; i++)
     {
         data[i] = T(field_data[i]);
     }
@@ -374,7 +396,7 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 
 template<typename T>
 std::vector<T>
-    get_random_segments(const size_t size, const size_t max_segment_length, const int seed_value)
+    get_random_segments(const size_t items, const size_t max_segment_length, const int seed_value)
 {
     static_assert(std::is_arithmetic<T>::value, "Key type must be arithmetic");
 
@@ -384,13 +406,13 @@ std::vector<T>
                                                      std::uniform_int_distribution<T>,
                                                      std::uniform_real_distribution<T>>;
     key_distribution_type key_distribution(std::numeric_limits<T>::max());
-    std::vector<T>        keys(size);
+    std::vector<T>        keys(items);
 
     size_t keys_start_index = 0;
-    while(keys_start_index < size)
+    while(keys_start_index < items)
     {
         const size_t new_segment_length = segment_length_distribution(prng);
-        const size_t new_segment_end    = std::min(size, keys_start_index + new_segment_length);
+        const size_t new_segment_end    = std::min(items, keys_start_index + new_segment_length);
         const T      key                = key_distribution(prng);
         std::fill(std::next(keys.begin(), keys_start_index),
                   std::next(keys.begin(), new_segment_end),
@@ -426,24 +448,24 @@ using engine_type = std::default_random_engine;
 // because benchmarks usually do not need "true" random sequence.
 template<class OutputIter, class U, class V, class Generator>
 inline auto generate_random_data_n(
-    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
+    OutputIter it, size_t items, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if_t<std::is_integral<it_value_t<OutputIter>>::value, OutputIter>
 {
     using T = it_value_t<OutputIter>;
 
     using dis_type = typename std::conditional<(sizeof(T) == 1), short, T>::type;
     std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
-    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
+    std::generate_n(it, std::min(items, max_random_size), [&]() { return distribution(gen); });
+    for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(it, std::min(size - i, max_random_size), it + i);
+        std::copy_n(it, std::min(items - i, max_random_size), it + i);
     }
-    return it + size;
+    return it + items;
 }
 
 template<class OutputIterator, class U, class V, class Generator>
 inline auto generate_random_data_n(OutputIterator it,
-                                   size_t         size,
+                                   size_t         items,
                                    U              min,
                                    V              max,
                                    Generator&     gen,
@@ -453,12 +475,12 @@ inline auto generate_random_data_n(OutputIterator it,
     using T = typename std::iterator_traits<OutputIterator>::value_type;
 
     std::uniform_real_distribution<T> distribution((T)min, (T)max);
-    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
+    std::generate_n(it, std::min(items, max_random_size), [&]() { return distribution(gen); });
+    for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(it, std::min(size - i, max_random_size), it + i);
+        std::copy_n(it, std::min(items - i, max_random_size), it + i);
     }
-    return it + size;
+    return it + items;
 }
 
 template<std::size_t Size, std::size_t Alignment>
@@ -525,4 +547,38 @@ public:
 };
 } // namespace std
 
-#endif // HIPCUB_BENCHMARK_UTILS_HPP_
+#define HIP_CHECK(condition)                                                           \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }
+
+PRIMBENCH_REGISTER_TYPE(int8_t, "i8")
+PRIMBENCH_REGISTER_TYPE(int16_t, "i16")
+PRIMBENCH_REGISTER_TYPE(int32_t, "i32")
+PRIMBENCH_REGISTER_TYPE(int64_t, "i64")
+PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
+PRIMBENCH_REGISTER_TYPE(uint16_t, "u16")
+PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
+PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
+PRIMBENCH_REGISTER_TYPE(float, "f32")
+PRIMBENCH_REGISTER_TYPE(double, "f64")
+PRIMBENCH_REGISTER_TYPE(__half, "f16")
+
+using custom_int_t       = benchmark_utils::custom_type<int>;
+using custom_float2      = benchmark_utils::custom_type<float, float>;
+using custom_double2     = benchmark_utils::custom_type<double, double>;
+using custom_char_double = benchmark_utils::custom_type<char, double>;
+using custom_double_char = benchmark_utils::custom_type<double, char>;
+using custom_int_double  = benchmark_utils::custom_type<int, double>;
+
+PRIMBENCH_REGISTER_TYPE(custom_int_t, "custom<i32>");
+PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32,f32>")
+PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64,f64>")
+PRIMBENCH_REGISTER_TYPE(custom_char_double, "custom<i8,f64>")
+PRIMBENCH_REGISTER_TYPE(custom_double_char, "custom<f64,i8>")
+PRIMBENCH_REGISTER_TYPE(custom_int_double, "custom<i32,f64>")

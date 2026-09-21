@@ -19,7 +19,7 @@ In this document, all base objects (matrices, vectors, and stencils) for computa
 
 The compute node contains none, one or more accelerators. The compute node could be any kind of shared memory (single, dual, quad CPU) system.
 
-.. note:: 
+.. note::
 
   The host and accelerator memory can be physically different.
 
@@ -51,7 +51,7 @@ Allocation and free
   :outline:
 .. doxygenfunction:: rocalution::LocalMatrix::AllocateDENSE
 
-.. note:: 
+.. note::
 
   More detailed information on the additional parameters required for matrix allocation is given in :ref:`matrix_formats`.
 
@@ -64,11 +64,11 @@ Matrix formats
 
 Matrices, where most of the elements are equal to zero, are called sparse. In most practical applications, the number of non-zero entries is proportional to the size of the matrix (e.g. typically, if the matrix :math:`A \in \mathbb{R}^{N \times N}`, then the number of elements are of order :math:`O(N)`). To save memory, storing zero entries can be avoided by introducing a structure corresponding to the non-zero elements of the matrix. rocALUTION supports sparse CSR, MCSR, COO, ELL, DIA, HYB and dense matrices (DENSE).
 
-.. note:: 
+.. note::
 
   The functionality of every matrix object is different and depends on the matrix format. The CSR format provides the highest support for various functions. For a few operations, an internal conversion is performed, however, for many routines an error message is printed and the program is terminated.
 
-.. note:: 
+.. note::
 
   In the current version, some of the conversions are performed on the host (disregarding the actual object allocation - host or accelerator).
 
@@ -110,7 +110,7 @@ The most intuitive sparse format is the coordinate format (COO). It represents t
 ``coo_col_ind``   Array of ``nnz`` elements containing the column indices (integer).
 ================ ====================================================================
 
-.. note:: 
+.. note::
 
   The COO matrix is expected to be sorted by row indices and column indices per row. Furthermore, each pair of indices should appear only once.
 
@@ -149,7 +149,7 @@ The CSR storage format represents a :math:`m \times n` matrix by:
 ``csr_col_ind`` Array of ``nnz`` elements containing the column indices (integer).
 =============== =========================================================================
 
-.. note:: 
+.. note::
 
   The CSR matrix is expected to be sorted by column indices within each row. Furthermore, each pair of indices should appear only once.
 
@@ -253,7 +253,7 @@ It represents a :math:`m \times n` matrix by:
 ``ell_col_ind`` Array of ``m times ell_width`` elements containing the column indices (integer).
 =============== ================================================================================
 
-.. note:: 
+.. note::
 
   The ELL matrix is assumed to be stored in column-major format. Rows with less than ``ell_width`` non-zero elements are padded with zeros (``ell_val``) and :math:`-1` (``ell_col_ind``).
 
@@ -366,7 +366,7 @@ Access
   :outline:
 .. doxygenfunction:: rocalution::LocalVector::operator[](int64_t) const
 
-.. note:: 
+.. note::
 
   Accessing elements via the *[]* operators is slow. Use this for debugging purposes only. There is no direct access to the elements of matrices due to the sparsity structure. Matrices can be imported by a copy function. For CSR matrices, this is :cpp:func:`rocalution::LocalMatrix::CopyFromCSR` and :cpp:func:`rocalution::LocalMatrix::CopyToCSR`.
 
@@ -429,20 +429,20 @@ With ``LeaveDataPtr``, the raw data from the object can be obtained. This leaves
   :outline:
 .. doxygenfunction:: rocalution::LocalMatrix::LeaveDataPtrDENSE
 
-.. note:: 
+.. note::
 
   If the object is allocated on the host, then the pointers obtained from :ref:`SetDataPtr` and :ref:`LeaveDataPtr` will be on the host. If the vector object is on the accelerator, then the data pointers will be on the accelerator.
 
-.. note:: 
-  
+.. note::
+
   If the object is moved to and from the accelerator, then the original pointer will be invalid.
 
-.. note:: 
-  
+.. note::
+
   Never rely on old pointers, hidden object movement to and from the accelerator will make them invalid.
 
-.. note:: 
-  
+.. note::
+
   Whenever you pass or obtain pointers to/from a rocALUTION object, you need to use the same memory allocation/free functions. Please check the source code for that (for host *src/utils/allocate_free.cpp* and for HIP *src/base/hip/hip_allocate_free.cpp*)
 
 Copy CSR matrix host data
@@ -470,8 +470,8 @@ All matrix and vector objects provide a *CopyFrom()* function. The destination o
 .. doxygenfunction:: rocalution::LocalVector::CopyFrom(const LocalVector<ValueType>&)
 .. doxygenfunction:: rocalution::LocalMatrix::CopyFrom
 
-.. note:: 
-  
+.. note::
+
   For vectors, the user can specify source and destination offsets and thus copy only a part of the whole vector into another vector.
 
 .. doxygenfunction:: rocalution::LocalVector::CopyFrom(const LocalVector<ValueType>&, int64_t, int64_t, int64_t)

@@ -58,7 +58,8 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* estMean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* estVariance() const;
-    double epsilonValue() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
     const std::optional<ActivationParams>& optActivation() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
@@ -70,7 +71,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estMean;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estVariance;
-    double _epsilonValue;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     std::optional<ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;

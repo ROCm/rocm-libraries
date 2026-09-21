@@ -21,28 +21,28 @@
   'ExplicitName'
 # ---
 # name: test_kernel_file_base_generated
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_J5fN-PqZZHaG3sf4Ra41sB3oPau-xn6LxQN5r_42D8A='
 # ---
 # name: test_kernel_name_min
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2_WGMXCC1'
 # ---
 # name: test_kernel_name_min_split_gsu_unit
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_MIWT2_2_WGMXCC1'
 # ---
 # name: test_key_no_internal_args[nosplit_gsu0]
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU0_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU0_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCC1_WGMXCCGM'
 # ---
 # name: test_key_no_internal_args[nosplit_gsu4]
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCC1_WGMXCCGM'
 # ---
 # name: test_key_no_internal_args[split_gsu1]
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU1_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSU1_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCC1_WGMXCCGM'
 # ---
 # name: test_key_no_internal_args[split_gsu4]
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGM'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCC1_WGMXCCGM'
 # ---
 # name: test_key_no_internal_args_with_codeobject_and_devices
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCCM_WGMXCCGMkernels.cogfx942'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_DU16_GSUM_GSUCM_GSUWGMRRM_MIWT2_2_SFCWGMM_SUM_SUMM_SUSM_UCMLS0_WGMM_WGMXCC1_WGMXCCGMkernels.cogfx942'
 # ---
 # name: test_name_custom_kernel_early_return
   dict({
@@ -52,7 +52,7 @@
   })
 # ---
 # name: test_name_gsu_zero_no_discard
-  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_GSU0_MIWT2_2'
+  'Cij_Aik_Bjk_S_B_UserArgs_MT128x128x16_MI16x16x1_SN_GSU0_MIWT2_2_WGMXCC1'
 # ---
 # name: test_name_no_macrotile
   'Cij_Aik_Bjk_S_B_UserArgs_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_MIWT2_2_SFCWGM_SU0_SUM0_SUS0_UCMLS0_WGM1_WGMXCC1_WGMXCCG0'

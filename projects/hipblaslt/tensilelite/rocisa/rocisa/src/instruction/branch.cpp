@@ -27,6 +27,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/vector.h>
 
 namespace nb = nanobind;
 
@@ -104,6 +105,7 @@ void branch_inst(nb::module_ m_branch)
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("comment") = "")
+        .def_rw("calleeFuncs", &rocisa::SSwapPCB64::calleeFuncs)
         .def("__deepcopy__", [](const rocisa::SSwapPCB64& self, nb::dict&) {
             return new rocisa::SSwapPCB64(self);
         });

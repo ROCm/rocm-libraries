@@ -25,10 +25,6 @@
 #ifndef TESTING_SPMV_BSR_HPP
 #define TESTING_SPMV_BSR_HPP
 
-#include <hipsparse/hipsparse-version.h>
-
-#ifdef HIPSPARSE_WITH_SPMV_BSR
-
 #include "display.hpp"
 #include "flops.hpp"
 #include "gbyte.hpp"
@@ -346,8 +342,11 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
     // Preprocess (optional)
-    CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
-        handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
+    if(argus.call_preprocess)
+    {
+        CHECK_HIPSPARSE_ERROR(hipsparseSpMV_preprocess(
+            handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, buffer));
+    }
 
     if(argus.unit_check)
     {
@@ -452,7 +451,5 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
-
-#endif // HIPSPARSE_WITH_SPMV_BSR
 
 #endif // TESTING_SPMV_BSR_HPP

@@ -609,6 +609,8 @@ DECLARE_UNITTEST(TestVectorInequality);
 template <class Vector>
 void TestVectorResizing()
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   Vector v;
 
   v.resize(3);
@@ -658,6 +660,8 @@ DECLARE_VECTOR_UNITTEST(TestVectorResizing);
 template <class Vector>
 void TestVectorReserving()
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   Vector v;
 
   v.reserve(3);

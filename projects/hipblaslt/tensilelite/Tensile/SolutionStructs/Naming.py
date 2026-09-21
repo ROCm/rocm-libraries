@@ -34,7 +34,7 @@ from .Problem import ProblemType
 # fields compile to identical code objects.
 _INTERNAL_ARGS = (
     "WorkGroupMapping",
-    "WorkGroupMappingXCC",
+    # "WorkGroupMappingXCC", # WGMXCC affects asm code gen
     "WorkGroupMappingXCCGroup",
     "StaggerU",
     "StaggerUStride",
@@ -51,7 +51,9 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   parameters — they don't change the generated assembly. This function
   produces a canonical key where those parameters are masked to "M" and
   GroupedGemm is forced to False, so that kernels differing only in
-  internal args map to the same key.
+  internal args map to the same key. GroupedGemm masking is skipped when
+  SupportUserArgs is set, because the batch-offset codegen is gated on
+  GroupedGemm there and the assembly genuinely differs.
 
   Used to:
     - Deduplicate kernels before code generation (BenchmarkProblems.py,
@@ -70,8 +72,13 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   gsu_backup = s["GlobalSplitU"]
   gg_backup = pt["GroupedGemm"]
 
-  # Mask internal args
-  pt["GroupedGemm"] = False
+  # Mask internal args. GroupedGemm normally does not change the generated
+  # assembly, so it is masked to dedup grouped/non-grouped kernels. But when
+  # SupportUserArgs is set, the batch-offset codegen (KernelWriterAssembly /
+  # Signature) is gated on GroupedGemm, so grouped and non-grouped kernels
+  # differ and must keep distinct keys -- preserve the real value in that case.
+  if "SupportUserArgs" not in pt or not pt["SupportUserArgs"]:
+    pt["GroupedGemm"] = False
   if splitGSU:
     s["GlobalSplitU"] = "M" if (gsu_backup > 1 or gsu_backup == -1) else gsu_backup
   elif gsu_backup != 0:
@@ -137,20 +144,33 @@ def getParameterValueAbbreviation(key, value):
     return '_'.join(getParameterValueAbbreviation(key, v) for v in value)
   elif isinstance(value, dict):
     return "_".join(f"{pos:d}{k:d}" for pos,k in value.items())
-  else:
-    raise Exception(f"Parameter {key}={value} is new object type ({type(value)})")
 
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
 
-  if "CustomKernelName" in state and state["CustomKernelName"]:
+  ck = state.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name"):
+    return ck["name"]
+  if state.get("CustomKernelName", ""):
     return state["CustomKernelName"]
 
   gsuBackup = state["GlobalSplitU"]
   ggBackup = state["ProblemType"]["GroupedGemm"]
+  wgmxccBackup = state["WorkGroupMappingXCC"]
+
+  # Include WGMXCC in kernel name as either n1 for auto or 1 for set value
+  # Fixed values produce different assembly code
+  # If the key is missing from name, kernels are dropped as duplicates when they should be kept
+  if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
+    state["WorkGroupMappingXCC"] = 1
 
   if ignoreInternalArgs:
-    state["ProblemType"]["GroupedGemm"] = False
+    # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
+    # one key. When SupportUserArgs is set the batch-offset codegen depends on
+    # GroupedGemm, so grouped and non-grouped kernels are not identical and must
+    # keep distinct keys -- preserve the real value in that case.
+    if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
+      state["ProblemType"]["GroupedGemm"] = False
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
@@ -161,7 +181,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("GlobalSplitU")
   else:
     requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
-                                                           "WorkGroupMappingXCC",
+                                                          #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
                                                            "WorkGroupMappingXCCGroup",
                                                            "StaggerU",
                                                            "StaggerUStride",
@@ -180,7 +200,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
 
   if "MatrixInstM" in state:
-    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{state["MatrixInstM"]}x{state["MatrixInstN"]}x{state["MatrixInstB"]}')
+    # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
+    # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
+    _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
+    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
     requiredParametersTemp.add("MIWaveTile")
   else:
     requiredParametersTemp.add("ThreadTile")
@@ -194,13 +217,21 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
+  # would rename all of them.
+  if state.get("TDMFuse", 0):
+    requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
+
   for key in sorted(requiredParametersTemp):
-    if key not in state or key == "CustomKernelName":
+    if key not in state or key == "CustomKernel":
       continue
     components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup
+  state["WorkGroupMappingXCC"] = wgmxccBackup
 
   return '_'.join(components)
 
@@ -220,7 +251,10 @@ def shortenFileBase(splitGSU, kernel):
 
 
 def getKernelFileBase(splitGSU: bool, kernel):
-  if "CustomKernelName" in kernel and kernel["CustomKernelName"]:
+  ck = kernel.get("CustomKernel")
+  if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+    fileBase = ck["name"]
+  elif kernel.get("CustomKernelName", ""):
     fileBase = kernel["CustomKernelName"]
   else:
     fileBase = shortenFileBase(splitGSU, kernel)

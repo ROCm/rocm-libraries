@@ -123,7 +123,7 @@ def test_streamk_force_dp_only_round_trips_to_size_mapping():
 
 def test_streamk_force_dp_only_requires_streamk3():
     state = {
-        "StreamK": 2,
+        "StreamK": 4,
         "StreamKAtomic": 0,
         "StreamKForceDPOnly": 1,
         "Valid": True,

@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <type_traits>
-
-#include "RMSNormCommon.hpp"
+#include "VectorTypes.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
 constexpr unsigned int INNER_SIZE = HIP_PLUGIN_RMSNORM_INNER_SIZE;
@@ -43,18 +41,18 @@ extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
             size_t idx = o * INNER_SIZE * STRIDE + tidx * STRIDE + s;
 
             float prstd = rstd[o * STRIDE + s];
-            float pdy = hip_kernel_provider::rmsnorm::to_float32<DyType>(dy[idx]);
-            float px = hip_kernel_provider::rmsnorm::to_float32<XType>(x[idx]);
+            float pdy = hip_kernel_provider::cast<float>(dy[idx]);
+            float px = hip_kernel_provider::cast<float>(x[idx]);
 
             sum_dw += pdy * px * prstd;
             sum_db += pdy;
         }
     }
 
-    dweight[tidx] = hip_kernel_provider::rmsnorm::from_float32<ScaleType>(sum_dw);
+    dweight[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dw);
     if(dbias)
     {
-        dbias[tidx] = hip_kernel_provider::rmsnorm::from_float32<ScaleType>(sum_db);
+        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sum_db);
     }
 }
 
@@ -80,9 +78,9 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-        float pdy = hip_kernel_provider::rmsnorm::to_float32<DyType>(dy[idx]);
-        float px = hip_kernel_provider::rmsnorm::to_float32<XType>(x[idx]);
-        float pw = hip_kernel_provider::rmsnorm::to_float32<ScaleType>(weight[i]);
+        float pdy = hip_kernel_provider::cast<float>(dy[idx]);
+        float px = hip_kernel_provider::cast<float>(x[idx]);
+        float pw = hip_kernel_provider::cast<float>(weight[i]);
 
         mean += pdy * pw * px;
     }
@@ -107,11 +105,11 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-        float pdy = hip_kernel_provider::rmsnorm::to_float32<DyType>(dy[idx]);
-        float px = hip_kernel_provider::rmsnorm::to_float32<XType>(x[idx]);
-        float pw = hip_kernel_provider::rmsnorm::to_float32<ScaleType>(weight[i]);
+        float pdy = hip_kernel_provider::cast<float>(dy[idx]);
+        float px = hip_kernel_provider::cast<float>(x[idx]);
+        float pw = hip_kernel_provider::cast<float>(weight[i]);
 
         float dx_val = (pdy * pw * prstd) - (mean * px * prstd * prstd * prstd);
-        dx[idx] = hip_kernel_provider::rmsnorm::from_float32<DxType>(dx_val);
+        dx[idx] = hip_kernel_provider::cast<DxType>(dx_val);
     }
 }

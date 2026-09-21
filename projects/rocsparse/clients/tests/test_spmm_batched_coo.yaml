@@ -494,3 +494,24 @@ Tests:
   rand_gen_max: 100.0
   convert_to_int: true
   filename: [mac_econ_fwd500]
+
+- name: spmm_batched_coo_file
+  category: stress
+  function: spmm_batched_coo
+  indextype: *i32
+  precision: *single_only_precisions
+  M: 1
+  N: [2, 65]
+  K: 1
+  batch_count_A: [1]
+  batch_count_B: [65537]
+  batch_count_C: [65537]
+  alpha_beta: *alpha_beta_range_stress
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_coo_atomic, rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  filename: [nos4]

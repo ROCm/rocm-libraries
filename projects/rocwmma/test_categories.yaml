@@ -35,40 +35,90 @@ test_categories:
       - ".*unpack_util_test.*"
       - ".*contamination_test.*"
       - ".*map_util_test.*"
+      - ".* smoke"
     labels:
       - "quick"
 
   standard:
     description: "rocWMMA standard tests"
     test_patterns:
-      - ".*"
+      # Negative lookahead excludes the smoke/regression emulation variants
+      # so this tier only picks up full (non-emulation) test runs.
+      - "(?!.* (?:smoke|regression)$).*"
     exclude:
       - ".*unpack_util_test.*"
       - ".*contamination_test.*"
       - ".*map_util_test.*"
+      - ".* regression"
+      - ".* smoke"
     labels:
       - "standard"
 
   comprehensive:
     description: "rocWMMA comprehensive tests"
     test_patterns:
-      - ".*"
+      # Negative lookahead excludes the smoke/regression emulation variants
+      # so this tier only picks up full (non-emulation) test runs.
+      - "(?!.* (?:smoke|regression)$).*"
     exclude:
       - ".*unpack_util_test.*"
       - ".*contamination_test.*"
       - ".*map_util_test.*"
+      - ".* regression"
+      - ".* smoke"
     labels:
       - "comprehensive"
 
   full:
-    description: "rocWMMA full test suite - includes flaky/problematic tests excluded from lower tiers"
+    description: "rocWMMA full test suite - includes flaky/problematic tests (unpack_util, contamination, map_util) excluded from lower tiers"
     test_patterns:
-      - ".*"
-    # No exclude list: 'full' is the absolute superset and is the only way
-    # to exercise tests that are flaky under current infrastructure
-    # (unpack_util_test, contamination_test, map_util_test). These remain
-    # excluded from quick/standard/comprehensive so routine CI stays green;
-    # `ctest -L full` is the opt-in path for running them. See PR #7535
-    # review thread for context.
+      # Negative lookahead excludes the smoke/regression emulation variants
+      # added to the main install CTestTestfile — those are available via the
+      # smoke/ and regression/ install subdirectories or via ffm-quick.
+      # Using a lookahead instead of exclude means `ctest -L full` works
+      # without needing `-LE full_exclude`.
+      - "(?!.* (?:smoke|regression)$).*"
+    exclude:
+      - ".* regression"
+      - ".* smoke"
     labels:
       - "full"
+
+  ffm-quick:
+    description: "FFM simulator tests"
+    test_patterns:
+      - "regression_tests"
+      - "float_test"
+      - "vector_test smoke"
+      - "vector_util_test smoke"
+      - "vector_iterator_test smoke"
+      - "tuple_test smoke"
+      - "pack_util_test smoke"
+      - "io_traits_test smoke"
+      - "io_shape_test smoke"
+      - "cross_lane_ops_test smoke"
+      - "fill_fragment_test smoke"
+      - "transforms_test smoke"
+      - "layout_test smoke"
+      - "layout_traits_test smoke"
+      - "load_store_matrix_sync_test smoke"
+      - "gemm_PGR0_LB0_MP0_MB_NC-validate smoke"
+      - "gemm_PGR0_LB0_MP0_SB_NC-validate smoke"
+      - "gemm_PGR1_LB2_MP0_MB_CP_BLK-validate smoke"
+      - "gemm_PGR0_LB0_MP0_MB_NC_ad_hoc-validate"
+      - "gemm_PGR0_LB0_MP0_SB_NC_ad_hoc-validate"
+      - "gemm_PGR1_LB2_MP0_MB_CP_ad_hoc-validate"
+      - "dlrm_dot_test-validate smoke"
+      - "dlrm_dot_lds_test-validate smoke"
+      - "load_store_matrix_coop_sync_test shard0 smoke"
+      - "contamination_test smoke"
+      - "map_util_test smoke"
+      - "unpack_util_test smoke"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  category_timeouts:
+    ffm-quick: 7200       # 2 hours (FFM simulator budget)
+    ffm-full: 7200

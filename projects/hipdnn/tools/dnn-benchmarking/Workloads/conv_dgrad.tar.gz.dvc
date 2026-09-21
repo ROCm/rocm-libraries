@@ -1,5 +1,0 @@
-outs:
-- md5: 27e3994fd53513ac0e16763af9afb1d2
-  size: 9508
-  hash: md5
-  path: conv_dgrad.tar.gz

@@ -202,6 +202,80 @@ TEST_F(TestGraphTensorBundle, ToDeviceVariantPackReturnsCorrectMapping)
     }
 }
 
+TEST(TestGraphTensorBundleStandalone, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1};
+    const std::vector<int64_t> strides = {1};
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         42,
+                                                         "epsilon",
+                                                         DataType::FLOAT,
+                                                         &strides,
+                                                         &dims,
+                                                         false,
+                                                         TensorValue::NONE,
+                                                         0,
+                                                         true);
+    builder.Finish(attrOffset);
+
+    const auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap = {{42, attr}};
+    GraphTensorBundle bundle(tensorMap);
+    bundle.getTensor(42).fillTensorWithValue(0.01f);
+
+    auto variantPack = bundle.toDeviceVariantPack();
+
+    ASSERT_EQ(variantPack.at(42), bundle.getTensor(42).rawHostData());
+    EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(42)), 0.01f);
+}
+
+TEST(TestGraphTensorBundleStandalone, AddTensorRejectsDuplicateUidAndLeavesRuntimePbvUnset)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1};
+    const std::vector<int64_t> strides = {1};
+
+    // Original tensor is NOT runtime-PBV.
+    const auto originalAttrOffset
+        = CreateTensorAttributesDirect(builder, 42, "x", DataType::FLOAT, &strides, &dims);
+    builder.Finish(originalAttrOffset);
+    const auto* originalAttr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap = {{42, originalAttr}};
+    GraphTensorBundle bundle(tensorMap);
+    ASSERT_TRUE(bundle.tensors.count(42) != 0);
+    auto* const originalTensor = bundle.tensors.at(42).get();
+
+    // Duplicate insert for the same uid, this time marked runtime-PBV. If
+    // addTensor's `inserted &&` guard were dropped, the uid would wrongly be
+    // added to _runtimePassByValueTensorIds despite the insert being rejected.
+    flatbuffers::FlatBufferBuilder duplicateBuilder;
+    const auto duplicateAttrOffset = CreateTensorAttributesDirect(duplicateBuilder,
+                                                                  42,
+                                                                  "x",
+                                                                  DataType::FLOAT,
+                                                                  &strides,
+                                                                  &dims,
+                                                                  false,
+                                                                  TensorValue::NONE,
+                                                                  0,
+                                                                  true);
+    duplicateBuilder.Finish(duplicateAttrOffset);
+    const auto* duplicateAttr
+        = flatbuffers::GetRoot<TensorAttributes>(duplicateBuilder.GetBufferPointer());
+
+    EXPECT_FALSE(bundle.addTensor(
+        *duplicateAttr, hipdnn_test_sdk::detail::createTensorFromAttribute(*duplicateAttr)));
+    EXPECT_EQ(bundle.tensors.at(42).get(), originalTensor);
+
+    // Runtime-PBV membership is only observable via toDeviceVariantPack():
+    // the rejected duplicate must not flip uid 42 to host-pointer delivery.
+    SKIP_IF_NO_DEVICES();
+    auto variantPack = bundle.toDeviceVariantPack();
+    EXPECT_EQ(variantPack.at(42), originalTensor->rawDeviceData());
+}
+
 TEST_F(TestGraphTensorBundle, GetTensorReturnsCorrectTensor)
 {
     auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);

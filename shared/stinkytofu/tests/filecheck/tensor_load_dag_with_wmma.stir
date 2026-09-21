@@ -2,21 +2,25 @@
 #
 # DS reads + WMMAs with tensor_loads + distributeGlobalRead throttle.
 #
-# VALU instructions are in a separate valuQueue and do not suppress
-# the tensor_load throttle. Both tensor_loads issue first, then VALU,
-# then ds_loads, then WMMAs.
+# Both tensor_loads issue first (own in-flight queue). Loads then take priority
+# over compute while no WMMA is ready: ds_loads drain ahead of the independent
+# v_add rather than the address-calc/independent VALU front-running them. Each
+# WMMA issues once its source ds_loads complete, so the two WMMAs interleave with
+# the remaining ds_loads instead of both being deferred to the end.
 #
 # tensor_loads use tokens 1/2 (independent of ds_loads on token 0).
 # Extends dag_dsread_wmma_no_consecutive with tensor_load_to_lds.
 #
-# Both tensor_loads before VALU
+# Both tensor_loads first
 # CHECK: tensor_load_to_lds
 # CHECK: tensor_load_to_lds
-# CHECK: v_add_f32
-# ds_loads scheduled before WMMAs due to latency
+# ds_loads drain before the independent VALU (loads prioritized, no WMMA ready)
 # CHECK: ds_load_b128
-# WMMAs come last
+# CHECK: v_add_f32
+# first WMMA issues once its sources are ready
 # CHECK: v_wmma_f32_16x16x16_bf16
+# remaining ds_loads fill the gap before the second WMMA
+# CHECK: ds_load_b128
 # CHECK: v_wmma_f32_16x16x16_bf16
 # No tensor_load after WMMAs
 # CHECK-NOT: tensor_load_to_lds

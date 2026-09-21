@@ -116,10 +116,10 @@ LegacyPerformanceConfig ConvHipDirectFwdLegacyExhaustiveSearch::GetDefaultPerfor
  */
 template <typename Tgpu, class... Solvers>
 static int MeasurePerfConfig(const Handle& handle,
-                             ConstData_t bot_ocl_buf,
-                             Data_t top_ocl_buf,
-                             ConstData_t wei_ocl_buf,
-                             ConstData_t bias_ocl_buf,
+                             ConstData_t bot_buf,
+                             Data_t top_buf,
+                             ConstData_t wei_buf,
+                             ConstData_t bias_buf,
                              double& processing_time,
                              const ExecutionContext& ctx,
                              const ProblemDescription& problem,
@@ -146,7 +146,7 @@ static int MeasurePerfConfig(const Handle& handle,
     {
         return 1;
     }
-    if(problem.GetBias() && bias_ocl_buf == nullptr)
+    if(problem.GetBias() && bias_buf == nullptr)
     {
         MIOPEN_LOG_WE("Legacy search: Bias buffer required");
         return 2;
@@ -171,11 +171,11 @@ static int MeasurePerfConfig(const Handle& handle,
 
         if(problem.GetBias())
         {
-            k(bot_ocl_buf, wei_ocl_buf, bias_ocl_buf, top_ocl_buf, padding_value);
+            k(bot_buf, wei_buf, bias_buf, top_buf, padding_value);
         }
         else
         {
-            k(bot_ocl_buf, wei_ocl_buf, top_ocl_buf, padding_value);
+            k(bot_buf, wei_buf, top_buf, padding_value);
         }
         processing_time = handle.GetKernelTime();
     }
@@ -236,12 +236,12 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
 
     auto& profile_h           = ctx.GetStream();
     const auto& invoke_params = invoke_ctx.CastTo<miopen::conv::DataInvokeParams>();
-    const auto bot_ocl_ptr    = invoke_params.tensors.in;
-    const auto top_ocl_ptr    = invoke_params.tensors.out;
-    const auto wei_ocl_ptr    = invoke_params.tensors.w;
+    const auto bot_ptr        = invoke_params.tensors.in;
+    const auto top_ptr        = invoke_params.tensors.out;
+    const auto wei_ptr        = invoke_params.tensors.w;
     // There was no place in the source, where it has been actually set to something other than
     // nullptr.
-    const auto bias_ocl_ptr = static_cast<Data_t>(nullptr);
+    const auto bias_ptr = static_cast<Data_t>(nullptr);
     AutoEnableProfiling enableProfiling{profile_h};
 
     // search loop here
@@ -404,10 +404,10 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                         }
 
                         const auto ret = MeasurePerfConfig<Tgpu, ConvHipDirectFwd>(profile_h,
-                                                                                   bot_ocl_ptr,
-                                                                                   top_ocl_ptr,
-                                                                                   wei_ocl_ptr,
-                                                                                   bias_ocl_ptr,
+                                                                                   bot_ptr,
+                                                                                   top_ptr,
+                                                                                   wei_ptr,
+                                                                                   bias_ptr,
                                                                                    processing_time,
                                                                                    ctx,
                                                                                    problem,
@@ -555,10 +555,10 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
 
                                     const auto ret =
                                         MeasurePerfConfig<Tgpu, ConvHipDirectFwd>(profile_h,
-                                                                                  bot_ocl_ptr,
-                                                                                  top_ocl_ptr,
-                                                                                  wei_ocl_ptr,
-                                                                                  bias_ocl_ptr,
+                                                                                  bot_ptr,
+                                                                                  top_ptr,
+                                                                                  wei_ptr,
+                                                                                  bias_ptr,
                                                                                   processing_time,
                                                                                   ctx,
                                                                                   problem,
@@ -624,10 +624,10 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
         double default_time       = std::numeric_limits<double>::max();
         const auto default_config = GetDefaultPerformanceConfig(ctx, problem);
         ret                       = MeasurePerfConfig<Tgpu, ConvHipDirectFwd>(profile_h,
-                                                        bot_ocl_ptr,
-                                                        top_ocl_ptr,
-                                                        wei_ocl_ptr,
-                                                        bias_ocl_ptr,
+                                                        bot_ptr,
+                                                        top_ptr,
+                                                        wei_ptr,
+                                                        bias_ptr,
                                                         default_time,
                                                         ctx,
                                                         problem,

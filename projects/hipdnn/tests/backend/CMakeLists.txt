@@ -59,6 +59,7 @@ target_compile_definitions(
             TEST_DUPLICATE_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_ID_B_PLUGIN_NAME}"
             TEST_INCOMPLETE_API_PLUGIN_NAME="${TEST_INCOMPLETE_API_PLUGIN_NAME}"
             TEST_GOOD_DEFAULT_PLUGIN_NAME="${TEST_GOOD_DEFAULT_PLUGIN_NAME}"
+            TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
             TEST_KNOBS_PLUGIN_NAME="${TEST_KNOBS_PLUGIN_NAME}"
             TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME="${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}"
             TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME="${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}"
@@ -68,6 +69,7 @@ target_compile_definitions(
             TEST_SECOND_OVERRIDE_PLUGIN_NAME="${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}"
             TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
             TEST_VERSION_ZERO_PLUGIN_NAME="${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}"
+            TEST_PASS_BY_VALUE_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}"
             TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
 )
 
@@ -79,6 +81,7 @@ add_dependencies(
     test_no_applicable_engines_a_plugin
     test_no_applicable_engines_b_plugin
     test_good_default_plugin
+    ${TEST_MISMATCHED_NAME_PLUGIN_NAME}
     test_duplicate_id_a_plugin
     test_duplicate_id_b_plugin
     test_incomplete_api_plugin
@@ -91,8 +94,9 @@ add_dependencies(
     ${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}
     ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
     ${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}
+    ${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}
     test_good_heuristic_plugin
 )
 
 clang_tidy_check(hipdnn_public_backend_tests)
-add_integration_test_target(hipdnn_public_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

@@ -94,7 +94,7 @@ T warp_move_dpp(const T& input)
             //       __builtin_amdgcn_update_dpp, hence fail to parse the template altogether. (Except MSVC
             //       because even using /permissive- they somehow still do delayed parsing of the body of
             //       function templates, even though they pinky-swear they don't.)
-            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+            if(ROCPRIM_HAS_DPP())
             {
                 return ::__builtin_amdgcn_mov_dpp(v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
             }

@@ -77,7 +77,7 @@ protected:
 
     // --- Component Validators ---
 
-    virtual void checkTensorLayoutsAndDimsSupported() = 0;
+    virtual void checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds) = 0;
 
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&

@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
-#include "ck_tile/core/arch/mma/mma_op_family.hpp"
-#include "ck_tile/core/arch/mma/mma_selector.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
+#include "ck_tile/core/arch/mma/mma.hpp"
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 
@@ -15,7 +13,6 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <cstdint>
 #include <type_traits>
 
 using namespace ck_tile;
@@ -27,9 +24,6 @@ using namespace ck_tile::core::arch::testing;
 constexpr uint32_t DummyTargetIdVal = 55555u;
 using DummyCompilerTarget = amdgcn_target<static_cast<amdgcn_target_id>(DummyTargetIdVal)>;
 struct DummyOpType;
-struct DummyCtrlFlags
-{
-};
 
 /** @brief Returns true if the given target id matches the dummy */
 constexpr bool is_dummy_target(DummyCompilerTarget dummy)
@@ -49,7 +43,7 @@ using enable_if_target_id_dummy_t = std::enable_if_t<is_dummy_target(CompilerTar
 template <typename CompilerTarget>
 // clang-format off
 //               | A B C DataTypes      | MNK + WaveSize |AParams |BPar |CPar |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, DummyCtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_dummy_t<CompilerTarget>>
+struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_dummy_t<CompilerTarget>>
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, 64u, 1, 1, 1, 1, 1, 1, 1, DummyOpType, MmaOpFamily::DENSE>
 // clang-format on
 {
@@ -63,15 +57,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, DummyCtrlFlags, CompilerTa
 // Have an alias so we can test supported arch vs unsupported arch
 // TODO: c++20 template <amdgcn_target_arch_id CompilerTarget>
 template <typename CompilerTarget>
-using DummyAmdgcnMma = amdgcn_mma<fp32_t,
-                                  fp32_t,
-                                  fp32_t,
-                                  8u,
-                                  8u,
-                                  8u,
-                                  DummyCtrlFlags,
-                                  CompilerTarget,
-                                  MmaOpFamily::DENSE>;
+using DummyAmdgcnMma =
+    amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, CompilerTarget, MmaOpFamily::DENSE>;
 
 /*! @struct MmaDefaultSelector
  * @brief For dummy Id only, instantiate tests for both MFMA and WMMA selectors so we can them both

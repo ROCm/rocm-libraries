@@ -132,6 +132,7 @@ Datatypes:
         HIPSPARSE_SPMV_COO_ALG2: 4
         HIPSPARSE_SPMV_SELL_ALG1: 5
         HIPSPARSE_SPMV_BSR_ALG1: 6
+        HIPSPARSE_SPMV_CSR_ALG3: 7
   - hipsparseSpSVAlg_t:
       bases: [c_int ]
       attr:
@@ -400,6 +401,7 @@ Arguments:
   - timing: c_int
   - iters: c_int
   - graph_test: c_bool
+  - call_preprocess: c_bool
   - filename: c_char*192
   - function: c_char*64
   - category: c_char*32
@@ -512,6 +514,7 @@ Defaults:
   timing: 0
   iters: 10
   graph_test: false
+  call_preprocess: false
   filename: '*'
   function: '*'
   category: '*'

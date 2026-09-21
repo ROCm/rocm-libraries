@@ -22,6 +22,11 @@
 
 # Dependencies
 
+# NOTE: hipRAND and rocRAND share CMake options for building tests.
+#       Until that's not fixed, we have to save/restore them.
+set(USER_BUILD_TEST ${BUILD_TEST})
+set(BUILD_TEST OFF)
+
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
@@ -214,7 +219,7 @@ function(fetch_dep method repo_name repo_path download_branch)
         execute_process(COMMAND ${GIT_PATH} sparse-checkout init --cone
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
-        execute_process(COMMAND ${GIT_PATH} sparse-checkout set projects/${repo_name}
+        execute_process(COMMAND ${GIT_PATH} sparse-checkout set projects/${repo_name} shared/primbench
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
         # Finally, download the files using git checkout.
@@ -299,7 +304,7 @@ if(BUILD_FORTRAN_WRAPPER)
 endif()
 
 # Test dependencies
-if(BUILD_TEST)
+if(USER_BUILD_TEST)
   # NOTE: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
   #
   # FindGTest.cmake defines:   GTest::GTest, GTest::Main, GTEST_FOUND
@@ -332,3 +337,6 @@ if(BUILD_TEST)
     find_package(GTest CONFIG REQUIRED PATHS ${GTEST_ROOT})
   endif()
 endif()
+
+# Restore user global state
+set(BUILD_TEST ${USER_BUILD_TEST})

@@ -66,6 +66,11 @@ def _occ(kw, *, numThreads, vgprs, accvgprs, sgprs, ldsBytes, doubleVgpr=True):
         ((9, 0, 10), 8),   # gfx90a  – ArchAccUnifiedRegs, capped at 8
         ((9, 4, 2), 8),    # gfx942  – ArchAccUnifiedRegs, capped at 8
         ((9, 5, 0), 8),    # gfx950  – ArchAccUnifiedRegs, capped at 8
+        ((11, 0, 0), 16),  # gfx1100 – 16 wave slots (was wrongly 10)
+        ((11, 5, 1), 16),  # gfx1151 – 16 wave slots
+        ((12, 0, 0), 16),  # gfx1200 – 16 wave slots
+        ((12, 0, 1), 16),  # gfx1201 – 16 wave slots
+        ((12, 5, 0), 10),  # gfx1250 – CDNA-class (isa 12.5.x), stays at 10
     ],
 )
 def test_max_waves_per_simd_from_arch_caps(isa, expected):
@@ -121,6 +126,175 @@ def test_gfx950_physical_vgpr_pool_is_512():
 
 
 # ---------------------------------------------------------------------------
+# gfx11 (RDNA3) PhysicalMaxVgprCU – per-SIMD VGPR file size
+# ---------------------------------------------------------------------------
+
+# PhysicalMaxVgprCU is the total VGPR budget per CU: 2 SIMDs * <VGPRs/SIMD> * 32
+# wave32 lanes.  gfx1100, gfx1101 and gfx1151 ship a 1536-VGPR file per SIMD;
+# every other gfx11 part has 1024.
+_GFX11_PHYSICAL_VGPR_PER_SIMD = [
+    ((11, 0, 0), 1536),  # gfx1100 (Navi 31)
+    ((11, 0, 1), 1536),  # gfx1101 (Navi 32)
+    ((11, 0, 2), 1024),  # gfx1102 (Navi 33)
+    ((11, 0, 3), 1024),  # gfx1103 (Phoenix APU)
+    ((11, 5, 0), 1024),  # gfx1150
+    ((11, 5, 1), 1536),  # gfx1151 (Strix Halo)
+    ((11, 5, 2), 1024),  # gfx1152
+    ((11, 5, 3), 1024),  # gfx1153
+]
+
+
+@pytest.mark.parametrize(
+    "isa,vgpr_per_simd",
+    _GFX11_PHYSICAL_VGPR_PER_SIMD,
+    ids=[f"gfx{a}{b}{c}" for (a, b, c), _ in _GFX11_PHYSICAL_VGPR_PER_SIMD],
+)
+def test_gfx11_physical_max_vgpr_cu(isa, vgpr_per_simd):
+    """gfx11 PhysicalMaxVgprCU = 2 SIMDs * VGPRs/SIMD * 32 lanes.
+
+    Only gfx1100/gfx1101/gfx1151 have the larger 1536-VGPR file; all other
+    gfx11 parts (gfx1102/gfx1103/gfx1150/gfx1152/gfx1153) have 1024.  Before
+    the fix gfx1103 fell through to a catch-all that returned 1536, and gfx1102
+    omitted the two-SIMDs-per-CU factor entirely.
+    """
+    ri = _init_rocisa(isa)
+    expected = 2 * vgpr_per_simd * 32
+    assert ri.getRegCaps()["PhysicalMaxVgprCU"] == expected
+
+
+@pytest.mark.parametrize(
+    "isa",
+    [(11, 0, 0), (11, 0, 1), (11, 5, 1)],
+    ids=["gfx1100", "gfx1101", "gfx1151"],
+)
+def test_gfx11_1536_vgpr_parts(isa):
+    """The three 1536-VGPR/SIMD gfx11 parts report 2 * 1536 * 32 = 98304."""
+    ri = _init_rocisa(isa)
+    assert ri.getRegCaps()["PhysicalMaxVgprCU"] == 2 * 1536 * 32
+
+
+@pytest.mark.parametrize(
+    "isa",
+    [(11, 0, 2), (11, 0, 3), (11, 5, 0), (11, 5, 2), (11, 5, 3)],
+    ids=["gfx1102", "gfx1103", "gfx1150", "gfx1152", "gfx1153"],
+)
+def test_gfx11_1024_vgpr_parts(isa):
+    """Every other gfx11 part reports 2 * 1024 * 32 = 65536.
+
+    gfx1103 in particular must NOT inherit the 1536 catch-all value it got
+    before the fix, and gfx1102 must include the two-SIMDs-per-CU factor.
+    """
+    ri = _init_rocisa(isa)
+    assert ri.getRegCaps()["PhysicalMaxVgprCU"] == 2 * 1024 * 32
+
+
+# ---------------------------------------------------------------------------
+# gfx11 (RDNA3) PhysicalMaxSgpr – SGPRs must not limit occupancy
+# ---------------------------------------------------------------------------
+
+# RDNA allocates a fixed SGPR block per wave, so the SGPR file never limits
+# occupancy (LLVM models this as isSGPROccupancyLimited() == false for GFX10+).
+# PhysicalMaxSgpr was a flat 800, which made getSgprOccupancy() report
+# 800 // sgprs -- e.g. 12 waves at 66 SGPRs -- below the 16-wave slot cap.
+
+@pytest.mark.parametrize(
+    "isa",
+    [isa for isa, _ in _GFX11_PHYSICAL_VGPR_PER_SIMD],
+    ids=[f"gfx{a}{b}{c}" for (a, b, c), _ in _GFX11_PHYSICAL_VGPR_PER_SIMD],
+)
+def test_gfx11_sgpr_occupancy_never_binds(isa):
+    """On gfx11 the SGPR term cannot fall below the wave-slot cap.
+
+    getSgprOccupancy() is PhysicalMaxSgpr // sgprs and sgprs is clamped to
+    MaxSgpr, so the worst case is PhysicalMaxSgpr // MaxSgpr; that must still
+    be >= MaxWavesPerSimd for the term to be inert in getOccupancy()'s min().
+    """
+    ri = _init_rocisa(isa)
+    regCaps, archCaps = ri.getRegCaps(), ri.getArchCaps()
+    worst_case = regCaps["PhysicalMaxSgpr"] // regCaps["MaxSgpr"]
+    assert worst_case >= archCaps["MaxWavesPerSimd"]
+
+
+@pytest.mark.parametrize(
+    "isa",
+    [(9, 0, 8), (9, 4, 2), (9, 5, 0), (10, 3, 0), (12, 0, 0), (12, 5, 0)],
+    ids=["gfx908", "gfx942", "gfx950", "gfx1030", "gfx1200", "gfx1250"],
+)
+def test_non_gfx11_physical_max_sgpr_unchanged(isa):
+    """Only gfx11 is retargeted; every other arch keeps the legacy 800."""
+    assert _init_rocisa(isa).getRegCaps()["PhysicalMaxSgpr"] == 800
+
+
+def test_gfx11_low_vgpr_kernel_reaches_wave_cap():
+    """A low-VGPR, low-LDS gfx11 kernel is capped by wave slots, not SGPRs.
+
+    8 VGPRs -> 256 // 8 = 32 waves and no LDS, so only MaxWavesPerSimd (16)
+    should bind.  With the old PhysicalMaxSgpr=800 the 66-SGPR kernel was
+    reported as 800 // 66 = 12 waves instead.
+    """
+    kw = _make_writer(_init_rocisa((11, 5, 1)))
+    assert kw.states.archCaps["MaxWavesPerSimd"] == 16
+    occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
+               sgprs=66, ldsBytes=0, doubleVgpr=False)
+    assert occ == 16
+
+
+def test_gfx11_max_sgpr_kernel_still_reaches_wave_cap():
+    """Even a kernel using every allocatable SGPR is not SGPR-limited."""
+    ri = _init_rocisa((11, 5, 1))
+    kw = _make_writer(ri)
+    occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
+               sgprs=ri.getRegCaps()["MaxSgpr"], ldsBytes=0, doubleVgpr=False)
+    assert occ == kw.states.archCaps["MaxWavesPerSimd"]
+
+
+# ---------------------------------------------------------------------------
+# MaxSgpr – the addressable SGPR ceiling
+# ---------------------------------------------------------------------------
+
+# MaxSgpr is the highest SGPR index a kernel may allocate, plus one.  It was a
+# flat 102 -- the gfx8/gfx9 number, s0-s101 -- for every arch but gfx1250.
+# Every RDNA target addresses s0-s105, so 102 left four registers permanently
+# unusable on gfx10, gfx11 and gfx12.
+
+# (isa, target, expected MaxSgpr).  Restricted to ISAs this file already
+# initializes elsewhere: _init_rocisa on a fresh ISA costs ~2.3s of assembler
+# probing, so pulling in the remaining SUPPORTED_ISA entries (gfx803, gfx900,
+# gfx906, gfx1010-gfx1012) would add ~14s for no branch this list does not
+# already cover.
+_MAX_SGPR_BY_ISA = [
+    ((9, 0, 8), "gfx908", 102),
+    ((9, 0, 10), "gfx90a", 102),
+    ((9, 4, 2), "gfx942", 102),
+    ((9, 5, 0), "gfx950", 102),
+    ((10, 3, 0), "gfx1030", 106),
+    ((11, 0, 0), "gfx1100", 106),
+    ((11, 0, 1), "gfx1101", 106),
+    ((11, 0, 2), "gfx1102", 106),
+    ((11, 0, 3), "gfx1103", 106),
+    ((11, 5, 0), "gfx1150", 106),
+    ((11, 5, 1), "gfx1151", 106),
+    ((11, 5, 2), "gfx1152", 106),
+    ((11, 5, 3), "gfx1153", 106),
+    ((12, 0, 0), "gfx1200", 106),
+    ((12, 0, 1), "gfx1201", 106),
+    ((12, 5, 0), "gfx1250", 106),
+]
+
+_MAX_SGPR_IDS = [t for _, t, _ in _MAX_SGPR_BY_ISA]
+
+
+@pytest.mark.parametrize(
+    "isa,expected",
+    [(isa, n) for isa, _, n in _MAX_SGPR_BY_ISA],
+    ids=_MAX_SGPR_IDS,
+)
+def test_max_sgpr_per_arch(isa, expected):
+    """gfx9 addresses s0-s101; every RDNA target addresses s0-s105."""
+    assert _init_rocisa(isa).getRegCaps()["MaxSgpr"] == expected
+
+
+# ---------------------------------------------------------------------------
 # getLdsLimitedOccupancy – gfx950 LDS boundary conditions
 # ---------------------------------------------------------------------------
 
@@ -142,7 +316,7 @@ def test_gfx950_physical_vgpr_pool_is_512():
 )
 def test_lds_limited_occupancy_gfx950(lds_bytes, expected_occ):
     """getLdsLimitedOccupancy on gfx950 with 163840-byte device LDS."""
-    occ = KernelWriterAssembly.getLdsLimitedOccupancy(163840, lds_bytes)
+    occ = KernelWriterAssembly.getLdsLimitedOccupancy(163840, lds_bytes, 256)
     assert occ == expected_occ, (
         f"LDS={lds_bytes} B: expected {expected_occ} blocks/CU, got {occ}"
     )
@@ -271,7 +445,7 @@ def test_lds_limited_occupancy_matches_hip_oracle(desc, numRegs, staticLDS,
     2 — matching HIP — but the code-gen VGPR pool over-estimate produces stored occ=1.
     """
     device_lds = 163840  # gfx950 160 KB
-    lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS)
+    lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS, 256)
 
     if staticLDS > device_lds // 2:
         # LDS-limited: the LDS formula alone reproduces the HIP result.

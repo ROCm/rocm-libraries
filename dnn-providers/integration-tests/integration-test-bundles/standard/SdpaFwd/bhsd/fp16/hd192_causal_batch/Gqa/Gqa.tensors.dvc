@@ -1,0 +1,21 @@
+outs:
+- path: Gqa.tensor0.bin
+  remote: golden-data
+  md5: c0d67c88308d79e1db3b34222fecc75f
+  size: 786432
+  hash: md5
+- path: Gqa.tensor1.bin
+  remote: golden-data
+  md5: fb17480c4493320c34c971ec88b1f4f9
+  size: 196608
+  hash: md5
+- path: Gqa.tensor2.bin
+  remote: golden-data
+  md5: a1e1363238873c08472af3130c889b47
+  size: 131072
+  hash: md5
+- path: Gqa.tensor3.bin
+  remote: golden-data
+  md5: 6de34e851bd541237a86324274cf00fd
+  size: 524288
+  hash: md5

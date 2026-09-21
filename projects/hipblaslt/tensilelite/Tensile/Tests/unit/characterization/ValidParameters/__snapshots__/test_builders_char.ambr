@@ -1376,7 +1376,7 @@
     'ClusterLocalRead',
     'CompactLoopStore',
     'ConvertAfterDS',
-    'CustomKernelName',
+    'CustomKernel',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1406,6 +1406,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
@@ -1438,6 +1439,7 @@
     'NonTemporalC',
     'NonTemporalD',
     'NonTemporalE',
+    'NonTemporalGate',
     'NonTemporalMXSA',
     'NonTemporalMXSB',
     'NonTemporalMetadata',
@@ -1448,6 +1450,7 @@
     'NonVolatileC',
     'NonVolatileD',
     'NonVolatileE',
+    'NonVolatileGate',
     'NonVolatileMXSA',
     'NonVolatileMXSB',
     'NonVolatileMetadata',
@@ -1459,8 +1462,11 @@
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
+    'PrefetchGlobalReadA',
+    'PrefetchGlobalReadB',
     'PrefetchLocalRead',
     'PreloadKernArgs',
+    'ReuseAcrossPersistent',
     'SFCWGM',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
@@ -1480,12 +1486,16 @@
     'StreamKAtomic',
     'StreamKFixupTreeReduction',
     'StreamKForceDPOnly',
+    'StreamKWorkStealing',
     'StreamKXCCMapping',
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
+    'TDMLoadWaveSync',
+    'TDMPlusLdsBuf',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -1494,6 +1504,7 @@
     'TemporalHintC',
     'TemporalHintD',
     'TemporalHintE',
+    'TemporalHintGate',
     'TemporalHintMXSA',
     'TemporalHintMXSB',
     'TemporalHintMetadata',
@@ -1505,6 +1516,7 @@
     'Use64bShadowLimit',
     'Use64bShadowLimitMX',
     'UseCustomMainLoopSchedule',
+    'UseDualFMAC',
     'UseInstOffsetForGRO',
     'UsePLRPack',
     'UseSgprForGRO',
@@ -1595,7 +1607,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertFree1ElementMultiple': dict({
@@ -1604,7 +1616,7 @@
         2,
         4,
       ]),
-      'len': 6,
+      'len': 9,
       'type': 'list',
     }),
     'AssertSummationElementMultiple': dict({
@@ -1613,7 +1625,7 @@
         2,
         4,
       ]),
-      'len': 8,
+      'len': 9,
       'type': 'list',
     }),
     'BufferLoad': dict({
@@ -1674,7 +1686,7 @@
       'len': 2,
       'type': 'list',
     }),
-    'CustomKernelName': dict({
+    'CustomKernel': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -1936,6 +1948,15 @@
       'len': 1,
       'type': 'list',
     }),
+    'LDSSegmentInterleave': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'LDSTrInst': dict({
       'head': list([
         False,
@@ -2142,7 +2163,7 @@
         2,
         3,
       ]),
-      'len': 40,
+      'len': 64,
       'type': 'list',
     }),
     'MbskPrefetchMethod': dict({
@@ -2217,6 +2238,15 @@
       'type': 'list',
     }),
     'NonTemporalE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalGate': dict({
       'head': list([
         0,
         1,
@@ -2303,6 +2333,14 @@
       'type': 'list',
     }),
     'NonVolatileE': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileGate': dict({
       'head': list([
         0,
         1,
@@ -2404,6 +2442,24 @@
       'len': 17,
       'type': 'list',
     }),
+    'PrefetchGlobalReadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
+    'PrefetchGlobalReadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
     'PrefetchLocalRead': dict({
       'head': list([
         0,
@@ -2417,6 +2473,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ReuseAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
       ]),
       'len': 2,
       'type': 'list',
@@ -2545,10 +2609,10 @@
     'StreamK': dict({
       'head': list([
         0,
-        1,
-        2,
+        3,
+        4,
       ]),
-      'len': 6,
+      'len': 4,
       'type': 'list',
     }),
     'StreamKAtomic': dict({
@@ -2575,6 +2639,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'StreamKWorkStealing': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'StreamKXCCMapping': dict({
       'head': list([
         0,
@@ -2594,10 +2666,11 @@
     }),
     'SwInstructionPrefetch': dict({
       'head': list([
-        False,
-        True,
+        -1,
+        0,
+        1,
       ]),
-      'len': 2,
+      'len': 6,
       'type': 'list',
     }),
     'SwapGlobalReadOrder': dict({
@@ -2606,6 +2679,15 @@
         1,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TDMFuse': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
       'type': 'list',
     }),
     'TDMInst': dict({
@@ -2624,6 +2706,23 @@
         1,
       ]),
       'len': 5,
+      'type': 'list',
+    }),
+    'TDMLoadWaveSync': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMPlusLdsBuf': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'TDMSplit': dict({
@@ -2688,6 +2787,15 @@
       'type': 'list',
     }),
     'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintGate': dict({
       'head': list([
         0,
         1,
@@ -2799,6 +2907,14 @@
         1,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'UseDualFMAC': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'UseInstOffsetForGRO': dict({

@@ -191,7 +191,7 @@ def test_384x256_bf16_partition_2x1():
     """Exact check of emit dependency order for 384x256 BF16, 2x1 partition."""
     cfg = make_384x256_bf16()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_384x256_BF16_2x1, (
         f"Emit dependency order mismatch.\n"
@@ -204,7 +204,7 @@ def test_256x256_bf16_partition_1x1():
     """Exact check of emit dependency order for 256x256 BF16, 1x1 partition."""
     cfg = make_256x256_bf16()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_1x1, (
         f"Emit dependency order mismatch.\n"
@@ -279,7 +279,7 @@ def test_256x256_bf16_gfx1250_tdm_partition_1x1():
     """
     cfg = make_256x256_bf16_gfx1250_tdm()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_GFX1250_TDM, (
         f"Emit dependency order mismatch.\n"
@@ -414,7 +414,7 @@ def test_320x320_bf16_partition_1x5():
     """Exact check of emit dependency order for 320x320 BF16, 1x5 partition."""
     cfg = make_320x320_bf16()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_320x320_BF16_1x5, (
         f"Emit dependency order mismatch.\n"
@@ -539,7 +539,7 @@ def test_320x320_bf16_gfx1250_tdm_partition_1x5():
     """Exact check of emit dep order for 320x320 BF16 gfx1250+TDM, 1x5 partition."""
     cfg = make_320x320_bf16_gfx1250_tdm()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_320x320_BF16_GFX1250_TDM_1x5, (
         f"Emit dependency order mismatch.\n"
@@ -594,7 +594,7 @@ def test_256x256_bf16_pgr0():
     """Exact check of emit dependency order for 256x256 BF16, PGR0."""
     cfg = make_256x256_bf16_pgr0()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR0, (
         f"Emit dependency order mismatch.\n"
@@ -652,7 +652,7 @@ def test_256x256_bf16_pgr1():
     """Exact check of emit dependency order for 256x256 BF16, PGR1."""
     cfg = make_256x256_bf16_pgr1()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_BF16_PGR1, (
         f"Emit dependency order mismatch.\n"
@@ -726,7 +726,7 @@ def test_256x256_fp4_partition_1x1():
     """Exact check of emit dependency order for 256x256 FP4, 1x1 partition."""
     cfg = make_256x256_fp4()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP4_1x1, (
         f"Emit dependency order mismatch.\n"
@@ -816,7 +816,7 @@ def test_256x256_fp8_partition_1x1_pgr1():
     """
     cfg = make_256x256_fp8(pgr=1)
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR1, (
         f"Emit dependency order mismatch.\n"
@@ -835,7 +835,7 @@ def test_256x256_fp8_partition_1x1_pgr2():
     """
     cfg = make_256x256_fp8(pgr=2)
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR2, (
         f"Emit dependency order mismatch.\n"
@@ -915,7 +915,7 @@ def test_128x128_bf16_partition_1x1():
     """Exact check of emit dependency order for 128x128 BF16, 1x1 partition."""
     cfg = make_128x128_bf16()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x128_BF16_1x1, (
         f"Emit dependency order mismatch.\n"
@@ -1013,7 +1013,7 @@ def test_128x128_fp4_partition_1x1():
     """Exact check of emit dependency order for 128x128 FP4, 1x1 partition."""
     cfg = make_128x128_fp4()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x128_FP4_1x1, (
         f"Emit dependency order mismatch.\n"
@@ -1082,7 +1082,7 @@ def test_256x256_fp4_pgr0():
     """Exact check of emit dependency order for 256x256 FP4, PGR0."""
     cfg = make_256x256_fp4_pgr0()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP4_PGR0, (
         f"Emit dependency order mismatch.\n"
@@ -1154,7 +1154,7 @@ def test_256x256_fp4_pgr1():
     """Exact check of emit dependency order for 256x256 FP4, PGR1."""
     cfg = make_256x256_fp4_pgr1()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP4_PGR1, (
         f"Emit dependency order mismatch.\n"
@@ -1232,7 +1232,7 @@ def test_128x128_bf16_pgr1():
     """Exact check of emit dependency order for 128x128 BF16, DU=128, PGR1."""
     cfg = make_128x128_bf16_pgr1()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x128_BF16_PGR1, (
         f"Emit dependency order mismatch.\n"
@@ -1331,7 +1331,7 @@ def test_128x96_bf16_pgr1_wg4x1():
     """
     cfg = make_128x96_bf16_pgr1_wg4x1()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x96_BF16_PGR1_WG4x1, (
         f"Emit dependency order mismatch.\n"
@@ -1425,7 +1425,7 @@ def test_128x128_fp4_pgr1():
     """Exact check of emit dependency order for 128x128 FP4, DU=512, PGR1."""
     cfg = make_128x128_fp4_pgr1()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_128x128_FP4_PGR1, (
         f"Emit dependency order mismatch.\n"
@@ -1446,18 +1446,19 @@ MAINLOOP:
       [ 5] gr_inc     gr_inc(B)
       [ 6] gr_inc     gr_inc(SA)
       [ 7] gr_inc     gr_inc(SB)
-      [ 8] wait_gr    wait_gr(0)
-      [ 9] sync       sync
-      [10] lr         LR A  (MT n, subIterK [0]) [0-7]
-      [11] lr         LR B  (MT n, subIterK [0]) [0-7]
-      [12] lr         LR SA (MT n, subIterK [0,1]) [0-7]
-      [13] lr         LR SB (MT n, subIterK [0,1]) [0-7]
-      [14] skip       skip(LE:1:NLL)
-      [15] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
-      [16] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
-      [17] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
-      [18] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
-      [19] skip       skip(LE:2:NGLL)
+      [ 8] inline     inline(initC_overlap)
+      [ 9] wait_gr    wait_gr(0)
+      [10] sync       sync
+      [11] lr         LR A  (MT n, subIterK [0]) [0-7]
+      [12] lr         LR B  (MT n, subIterK [0]) [0-7]
+      [13] lr         LR SA (MT n, subIterK [0,1]) [0-7]
+      [14] lr         LR SB (MT n, subIterK [0,1]) [0-7]
+      [15] skip       skip(LE:1:NLL)
+      [16] gr         GR A (MT n+1, subIterK [0,1]) ids [0-7]
+      [17] gr         GR B (MT n+1, subIterK [0,1]) ids [0-7]
+      [18] gr         GR SA (MT n+1, subIterK [0,1]) ids [0-7]
+      [19] gr         GR SB (MT n+1, subIterK [0,1]) ids [0-7]
+      [20] skip       skip(LE:2:NGLL)
 """
 
 
@@ -1465,7 +1466,7 @@ def test_256x256_fp4_preloop_1x1():
     """Exact check of preloop for 256x256 FP4, 1x1 partition."""
     cfg = make_256x256_fp4()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     preloop = sched.build_preloop()
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_256x256_FP4_1x1, (
@@ -1483,13 +1484,14 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-7]
       [ 2] gr         GR SA (MT n, subIterK [0,1]) ids [0-7]
       [ 3] gr         GR SB (MT n, subIterK [0,1]) ids [0-7]
-      [ 4] wait_gr    wait_gr(0)
-      [ 5] sync       sync
-      [ 6] lr         LR A  (MT n, subIterK [0]) [0-7]
-      [ 7] lr         LR B  (MT n, subIterK [0]) [0-7]
-      [ 8] lr         LR SA (MT n, subIterK [0,1]) [0-7]
-      [ 9] lr         LR SB (MT n, subIterK [0,1]) [0-7]
-      [10] skip       skip(LE:1:NLL)
+      [ 4] inline     inline(initC_overlap)
+      [ 5] wait_gr    wait_gr(0)
+      [ 6] sync       sync
+      [ 7] lr         LR A  (MT n, subIterK [0]) [0-7]
+      [ 8] lr         LR B  (MT n, subIterK [0]) [0-7]
+      [ 9] lr         LR SA (MT n, subIterK [0,1]) [0-7]
+      [10] lr         LR SB (MT n, subIterK [0,1]) [0-7]
+      [11] skip       skip(LE:1:NLL)
 """
 
 
@@ -1498,7 +1500,7 @@ def test_256x256_fp4_preloop_pgr1_1x1():
     PGR1 preloop: GR(MT0) + wait + sync + LR + skip(NLL). No MT1 GRs."""
     cfg = make_256x256_fp4_pgr1()
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     preloop = sched.build_preloop()
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_256x256_FP4_PGR1_1x1, (
@@ -1516,14 +1518,15 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-9]
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
-      [ 4] wait_gr    wait_gr(0)
-      [ 5] sync       sync
-      [ 6] lr         LR A  (MT n, subIterK [0]) [0-9]
-      [ 7] lr         LR B  (MT n, subIterK [0]) [0-1]
-      [ 8] skip       skip(LE:1:NLL)
-      [ 9] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [11] skip       skip(LE:2:NGLL)
+      [ 4] inline     inline(initC_overlap)
+      [ 5] wait_gr    wait_gr(0)
+      [ 6] sync       sync
+      [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
+      [ 8] lr         LR B  (MT n, subIterK [0]) [0-1]
+      [ 9] skip       skip(LE:1:NLL)
+      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [12] skip       skip(LE:2:NGLL)
 """
 
 EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL = """\
@@ -1534,18 +1537,19 @@ MAINLOOP:
       [ 1] gr         GR B (MT n, subIterK [0,1]) ids [0-9]
       [ 2] gr_inc     gr_inc(A)
       [ 3] gr_inc     gr_inc(B)
-      [ 4] wait_gr    wait_gr(0)
-      [ 5] sync       sync
-      [ 6] lr         LR A  (MT n, subIterK [0]) [0-9]
-      [ 7] lr         LR B  (MT n, subIterK [0]) [0-1]
-      [ 8] skip       skip(LE:1:NLL)
-      [ 9] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
-      [10] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
-      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
-      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
-      [13] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
-      [14] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
-      [15] skip       skip(LE:2:NGLL)
+      [ 4] inline     inline(initC_overlap)
+      [ 5] wait_gr    wait_gr(0)
+      [ 6] sync       sync
+      [ 7] lr         LR A  (MT n, subIterK [0]) [0-9]
+      [ 8] lr         LR B  (MT n, subIterK [0]) [0-1]
+      [ 9] skip       skip(LE:1:NLL)
+      [10] gr         GR A (MT n+1, subIterK [0,1]) ids [0-9]
+      [11] gr         GR B (MT n+1, subIterK [0,1]) ids [0-1]
+      [12] gr         GR B (MT n+1, subIterK [0,1]) ids [2-3]
+      [13] gr         GR B (MT n+1, subIterK [0,1]) ids [4-5]
+      [14] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7]
+      [15] gr         GR B (MT n+1, subIterK [0,1]) ids [8-9]
+      [16] skip       skip(LE:2:NGLL)
 """
 
 
@@ -1554,7 +1558,7 @@ def test_320x320_bf16_preloop_1x5_offset1():
     cfg = make_320x320_bf16()
     cfg.offsetPartition = 1
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     preloop = sched.build_preloop()
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET1, (
@@ -1570,7 +1574,7 @@ def test_320x320_bf16_preloop_1x5_offset_all():
     # Forcing offsetPartition for testing. Not exposed yet.
     cfg.offsetPartition = cfg.numPartitions
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     preloop = sched.build_preloop()
     actual = sched.print_emit(preloop)
     assert actual == EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL, (
@@ -1688,7 +1692,7 @@ def test_256x256_mxfp8_multi_du_1x1():
     assert cfg.numSubIterK == 4
     assert cfg.numUnroll['A'] == 2 and cfg.numUnroll['B'] == 2
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_1x1, (
         f"Emit dependency order mismatch.\n"
@@ -1815,7 +1819,7 @@ def test_256x256_mxfp8_multi_du_partition_remainder():
     assert cfg.partitionSizesN == [6, 2]
     assert cfg.numUnroll['A'] == 2 and cfg.numUnroll['B'] == 2
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    sched.build()
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_PARTN, (
         f"Emit dependency order mismatch.\n"

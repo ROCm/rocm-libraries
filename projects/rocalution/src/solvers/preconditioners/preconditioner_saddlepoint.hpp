@@ -36,20 +36,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class DiagJacobiSaddlePointPrecond
-  * \brief Diagonal Preconditioner for Saddle-Point Problems
-  * \details
-  * Consider the following saddle-point problem
-  * \f[
-  *   A = \begin{pmatrix} K & F \\ E & 0 \end{pmatrix}.
-  * \f]
-  * For such problems we can construct a diagonal Jacobi-type preconditioner of type
-  * \f[
-  *   P = \begin{pmatrix} K & 0 \\ 0 & S \end{pmatrix},
-  * \f]
-  * with \f$S=ED^{-1}F\f$, where \f$D\f$ are the diagonal elements of \f$K\f$. The matrix
-  * \f$S\f$ is fully constructed (via sparse matrix-matrix multiplication). The
-  * preconditioner needs to be initialized with two external solvers/preconditioners -
-  * one for the matrix \f$K\f$ and one for the matrix \f$S\f$.
+  * \brief Diagonal Jacobi preconditioner for saddle-point problems.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

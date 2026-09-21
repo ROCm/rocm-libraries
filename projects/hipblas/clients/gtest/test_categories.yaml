@@ -2,11 +2,30 @@
 # Aligned with rocJenkins job types (precheckin, extended, weekly) and Test Filter Standardization POC.
 
 test_categories:
+  ffm-quick:
+    description: "FFM NPI simulation tests for PR pipelines (target: < 2 hours on FFM runner) - quick level-1 tests only"
+    test_patterns:
+      - "*blas2*pre_checkin*"
+    exclude:
+      - "*batched*"
+      - "*known_bug*"
+    labels:
+      - "ffm-quick"
+
+  ffm-full:
+    description: "FFM NPI nightly tests (initially the same as ffm-quick; expand as capacity grows)"
+    test_patterns:
+      - "*blas1*pre_checkin*"
+    exclude:
+      - "*strided*"
+      - "*known_bug*"
+    labels:
+      - "ffm-full"
+
   quick:
     description: "Smoke - same as Jenkins smoke (timeout: 5 mins)"
     test_patterns:
-      # TODO use different yaml not different filter
-      - "*quick*"
+      - "*pre_checkin*"
     exclude:
       - "*known_bug*"
     labels:
@@ -60,7 +79,9 @@ execution_settings:
   default_timeout: 900
   timeout_multiplier: 1
   category_timeouts:
-    quick: 900    # 15 mins
-    standard: 3600    # 1 hours
-    comprehensive: 3600   # 1 hours
-    full: 7200       # 2 hours
+    ffm-quick: 7200      # 2 hours — hard FFM PR budget
+    ffm-full: 7200       # 2 hours — initially same as ffm-quick (expand as capacity grows)
+    quick: 900           # 15 mins
+    standard: 3600       # 1 hours
+    comprehensive: 3600  # 1 hours
+    full: 7200           # 2 hours

@@ -8,9 +8,9 @@ Exercises the uncovered branches of ``Tensile/Components/StreamK.py``
 (methodology-A missing ranges: 202, 316, 326-409, 464+ and others)
 by emitting SGEMM kernels that sweep the StreamK knob family:
 
-  StreamK=[1, 2, 3] x StreamKAtomic=[0, 1] x StreamKXCCMapping=[0]
+  StreamK=[3, 4, 5] x StreamKAtomic=[0, 1] x StreamKXCCMapping=[0]
 
-StreamK splits the K-loop across workgroups (modes 1/2/3 vary the
+StreamK splits the K-loop across workgroups (modes 3/4/5 vary the
 scheduling/fixup strategy). StreamKAtomic=1 triggers the atomic
 reduction path (non-zero kernel["StreamKAtomic"]). Both paths
 exercise heavily-missed code in StreamK.py.

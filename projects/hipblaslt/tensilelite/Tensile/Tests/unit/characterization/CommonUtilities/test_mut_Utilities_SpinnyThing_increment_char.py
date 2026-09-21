@@ -13,6 +13,7 @@ step backward (``index - 1``) or step by two (``index + 2``).
 """
 
 import importlib
+import inspect
 
 import pytest
 
@@ -22,6 +23,9 @@ pytestmark = pytest.mark.unit
 
 
 def test_increment_advances_index_forward_by_one():
+    sig = inspect.signature(U.SpinnyThing.increment)
+    assert sig.parameters["value"].default == 1
+
     # Fresh instance: index starts at 0, chars has length 4.
     spinner = U.SpinnyThing()
     assert spinner.index == 0

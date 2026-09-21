@@ -168,9 +168,29 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # projects/miopen as a sibling component, the MIOpen target is already in the
 # build graph and find_package would either fail or pull in a stale installed
 # copy.
-if(NOT TARGET MIOpen)
+if(NOT TARGET MIOpen AND NOT TARGET MIOpen_private)
     find_package(miopen CONFIG REQUIRED)
 endif()
+
+# Select which MIOpen library the provider links against.
+#
+# With the hipDNN public/private split enabled (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON in
+# the MIOpen build) MIOpen ships a private implementation library MIOpen_private
+# that exports the internal C API under _impl names. The provider links it directly
+# and, via the force-included MiopenApiPrivateRename.hpp (below), its public C API
+# calls are renamed to those _impl entry points — linking the public
+# wrapper would fail to load, since libMIOpen.so exports only the public names. We
+# detect that build by the presence of the MIOpen_private target.
+#
+# When the split is OFF (the default) there is no MIOpen_private target: the
+# provider links the single public MIOpen library and its sources call the public
+# C API unchanged, exactly as before the split.
+if(TARGET MIOpen_private)
+    set(MIOPEN_PROVIDER_MIOPEN_LIB MIOpen_private)
+else()
+    set(MIOPEN_PROVIDER_MIOPEN_LIB MIOpen)
+endif()
+message(STATUS "miopen-provider: linking MIOpen library target '${MIOPEN_PROVIDER_MIOPEN_LIB}'")
 
 # Treat MIOpen headers as system headers so neither the compiler nor
 # clang-tidy emits diagnostics for code we do not own. MIOpen's exported
@@ -178,15 +198,15 @@ endif()
 # does not mark its include dirs SYSTEM, so we promote them here.
 # Requires CMake 3.25+ (SYSTEM target property); enforced by
 # cmake_minimum_required above.
-set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
+set_target_properties(${MIOPEN_PROVIDER_MIOPEN_LIB} PROPERTIES SYSTEM TRUE)
 
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
+    engines/plans/MiopenUnaryActivationPlan.cpp
+    engines/plans/MiopenUnaryActivationChecks.cpp
+    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
-    engines/plans/MiopenReluApplicabilityChecks.cpp
-    engines/plans/MiopenReluPlan.cpp
-    engines/plans/MiopenReluPlanBuilder.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
@@ -209,9 +229,32 @@ add_library(
 )
 
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
+# When linking the private implementation library, force-include the symbol-rename
+# header so the provider's public C API calls bind the _impl entry points exported
+# by libMIOpen_private.so. This mirrors how MIOpen_private itself is built (a
+# force-included src/private/miopen_private_rename.h) and keeps the provider sources
+# free of _impl spellings. PUBLIC so the force-include also reaches the unit-test
+# targets, which compile the provider headers. With the split OFF nothing is
+# force-included and the provider calls the public C API unchanged.
+#
+# The header is named without a directory: it resolves through the PUBLIC include
+# directory set above, which keeps the build-machine path -- and any space in it --
+# out of a flag that SHELL: splits on spaces. Force-include is spelled -include by
+# GNU-style drivers and /FI by MSVC-style ones (cl, clang-cl), and both accept the
+# filename as a separate argument.
+if(TARGET MIOpen_private)
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        set(miopen_provider_force_include "/FI")
+    else()
+        set(miopen_provider_force_include "-include")
+    endif()
+    target_compile_options(miopen_plugin_impl PUBLIC
+        "SHELL:${miopen_provider_force_include} MiopenApiPrivateRename.hpp")
+    unset(miopen_provider_force_include)
+endif()
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 set_target_properties(miopen_plugin_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
@@ -224,17 +267,17 @@ set_target_properties(miopen_plugin_impl PROPERTIES
 # reports an unsupported version), which lacks ROCm's device-library bitcode
 # and errors with "cannot find ROCm device library". The objects are host-only
 # (no kernels, no embedded device code), so tell tidy to skip the device path.
-list(APPEND CLANG_TIDY_EXTRA_ARGS --extra-arg=-nogpulib)
+list(APPEND CLANG_TIDY_EXTRA_ARGS -extra-arg=-nogpulib)
 clang_tidy_check(miopen_plugin_impl)
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Link to miopen_plugin_impl to inherit its PUBLIC properties
-target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
+target_link_libraries(miopen_plugin_private PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
 
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin PRIVATE ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 if(NOT WIN32)
     target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
@@ -266,8 +309,41 @@ set_target_properties(miopen_plugin PROPERTIES
 dnn_provider_generate_version_header(miopen_provider miopen_plugin_impl ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
+    set(MIOPENPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    set(MIOPENPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+    set(MIOPENPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_integration.yaml")
+    set(MIOPENPROVIDER_CTEST_INSTALL_FILE "")
+    set(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
+    if(EXISTS "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
+       AND EXISTS "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${MIOPENPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}")
+        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
+            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
+            "${MIOPENPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+            "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
+        )
+        set(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
+        message(STATUS "miopen-provider: YAML-based CTest categorization enabled")
+    else()
+        message(STATUS "miopen-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
+    endif()
+
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
+
+    if(NOT TARGET hipdnn_integration_tests)
+        find_package(hipdnn_integration_tests CONFIG QUIET)
+    endif()
+
+    set(DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin_tests miopen_plugin_integration_tests)
+    if(TARGET hipdnn_integration_tests)
+        list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
+    endif()
+    set(DNN_PROVIDER_CHECK_EXCLUDE_LABELS ex_gpu_gfx110X)
+
 
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -278,16 +354,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         finalize_test_targets("${PROJECT_NAME}")
     endif()
 
-    # Optional: YAML-driven CTest test categorization for TheRock CI's test_runner.py.
-    # Skipped when shared/ctest is not present (e.g. standalone miopen-provider or sparse
-    # checkout that doesn't include rocm-libraries/shared/), in which case we fall back to
-    # the project's own install_provider_ctest_files() below.
-    set(MIOPENPROVIDER_CTEST_INSTALL_FILE "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
         enable_testing()
-        message(STATUS "miopen-provider: YAML-based test categorization")
         file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
         # Install-time CTestTestfile uses relative paths so `ctest` can run from the
         # installed location (bin/miopen_plugin/) and reach ../miopen_plugin_tests etc.
@@ -298,29 +366,48 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
 # Tests are defined with relative paths to work in the installed location.
 ]=]
         )
-        # The YAML applies to both test binaries; each call appends its category suites
+        # On ASAN builds, HIPDNN_TEST_MIOPEN_CACHE_DIR is set (see Sanitizers.cmake) and the generated
+        # suites must require the cache-clearing fixture; empty otherwise.
+        set(_miopen_cache_fixture "")
+        if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
+            set(_miopen_cache_fixture hipdnn_clear_miopen_test_cache)
+        endif()
+        # The GTest YAML applies to both test binaries; each call appends its category suites
         # (e.g. miopen_plugin_tests_quick_suite, miopen_plugin_integration_tests_quick_suite)
-        # to the same install-time CTestTestfile.cmake.
+        # to the same install-time CTestTestfile.cmake. ENVIRONMENT forwards the CMake-side
+        # TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE, set by
+        # dnn-providers/cmake/Sanitizers.cmake / _build_test_environment_list_internal) to
+        # every generated suite; without it those suites run unsanitized/uninstrumented.
         apply_test_category_labels(
             miopen_plugin_tests
-            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
         apply_test_category_labels(
             miopen_plugin_integration_tests
-            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
-    else()
-        message(STATUS "miopen-provider: shared/ctest or test_categories.yaml not found, skipping YAML-based CTest categories")
     endif()
 
-    # Must run before the CTestTestfile install below so the staged snippet
-    # can be folded into the labeled file and labeled there.
-    if(NOT TARGET hipdnn_integration_tests)
-        find_package(hipdnn_integration_tests CONFIG QUIET)
+    set(_external_category_args "")
+    if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
+        list(APPEND _external_category_args
+            TEST_CATEGORIES_YAML "${MIOPENPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
+            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            FIXTURES_REQUIRED ${_miopen_cache_fixture}
+        )
     endif()
 
     if(TARGET hipdnn_integration_tests)
@@ -330,52 +417,52 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
 
         # This is a pre-registered CTest test (not a GTest binary), so it is
         # labeled via apply_ctest_category_labels()/test_categories_external.yaml.
-        if(MIOPENPROVIDER_CTEST_INSTALL_FILE)
-            # Fold the staged add_test() into the labeled file before labeling;
-            # apply_ctest_category_labels() scans the file's add_test() names.
-            get_property(_external_staging GLOBAL
-                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_miopen_plugin"
-            )
-            if(_external_staging)
-                file(APPEND "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
-                     "\n# External integration test (cross-provider suite)\n${_external_staging}"
+        if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            if(MIOPENPROVIDER_CTEST_INSTALL_FILE)
+                # Fold the staged add_test() into the labeled file before labeling;
+                # apply_ctest_category_labels() scans the file's add_test() names.
+                get_property(_external_staging GLOBAL
+                    PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_miopen_plugin"
                 )
-            endif()
-            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+                if(_external_staging)
+                    file(APPEND "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+                         "\n# External integration test (cross-provider suite)\n${_external_staging}"
+                    )
+                endif()
                 # Install tree.
                 apply_ctest_category_labels(
-                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml"
+                    "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                     "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
                 )
-                # Build tree (so a local `ctest -L <tier>` selects it too).
-                apply_ctest_category_labels(
-                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml"
-                )
             endif()
+            # Build tree.
+            apply_ctest_category_labels(
+                "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
+                EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+            )
         endif()
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 
-    # For standalone builds we need to install the ctest files.
-    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
-    # to bin/miopen_plugin/ so TheRock CI's test_runner.py can drive `ctest -L quick`
-    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
-    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(MIOPENPROVIDER_CTEST_INSTALL_FILE)
-            install(FILES "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
-                    DESTINATION "${CMAKE_INSTALL_BINDIR}/miopen_plugin"
-                    RENAME "CTestTestfile.cmake"
-            )
-        else()
-            install_provider_ctest_files("miopen_plugin")
-        endif()
+    # Install the ctest files. When YAML-based categorization is active, install the
+    # generated install_CTestTestfile.cmake to bin/miopen_plugin/ so TheRock CI's
+    # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
+    # Otherwise, fall back to the project's own install_provider_ctest_files() which
+    # emits an unlabeled CTestTestfile.cmake.
+    if(MIOPENPROVIDER_CTEST_INSTALL_FILE)
+        install(FILES "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/miopen_plugin"
+                RENAME "CTestTestfile.cmake"
+        )
+    else()
+        install_provider_ctest_files("miopen_plugin")
     endif()
 endif()
 

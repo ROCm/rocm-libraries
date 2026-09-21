@@ -198,7 +198,7 @@ struct GroupedGemmKernel
         const auto kernel     = kentry<1, Kernel, ConstantPointer, index_t>;
         int occupancy;
         HIP_CHECK_ERROR(
-            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, kBlockSize, 0));
+            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, BlockSize().x, 0));
         // TODO: the below is a temporary fix which is due to kernel metadata
         // .workgroup_processor_mode isn't used correctly in clr for gfx1250. Will removed when clr
         // and compiler team fix this.
@@ -380,13 +380,17 @@ struct GroupedGemmKernel
                                  const index_t block_idx_m,
                                  const index_t block_idx_n)
     {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
+        // Create block windows using specialized methods.
+        // Copy the block windows out of the temporary tuple to avoid dangling references.
+        const auto a_block_window =
             Base::MakeABlockWindows({a_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_m)
                 .at(Base::I0);
-        const auto& b_block_window =
+        const auto b_block_window =
             Base::MakeBBlockWindows({b_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_n)
                 .at(Base::I0);
+        static_assert(!std::is_reference_v<decltype(a_block_window)> &&
+                          !std::is_reference_v<decltype(b_block_window)>,
+                      "block windows must be copies, not references into the temporary tuple");
         const auto& d_block_window =
             Base::MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 
@@ -441,13 +445,17 @@ struct GroupedGemmKernel
                                      const index_t block_idx_m,
                                      const index_t block_idx_n)
     {
-        // Create block windows using specialized methods
-        const auto& a_block_window =
+        // Create block windows using specialized methods.
+        // Copy the block windows out of the temporary tuple to avoid dangling references.
+        const auto a_block_window =
             Base::MakeABlockWindows({a_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_m)
                 .at(Base::I0);
-        const auto& b_block_window =
+        const auto b_block_window =
             Base::MakeBBlockWindows({b_ptr}, kargs, splitk_batch_offset.splitted_k, block_idx_n)
                 .at(Base::I0);
+        static_assert(!std::is_reference_v<decltype(a_block_window)> &&
+                          !std::is_reference_v<decltype(b_block_window)>,
+                      "block windows must be copies, not references into the temporary tuple");
         const auto& d_block_window =
             Base::MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 

@@ -31,10 +31,8 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <iostream>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -76,9 +74,9 @@ namespace TensileLite
 
                     for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
                     {
-                        int index = mappingIndices[local_index];
-                        auto slnIter = ctx->solutions->find(index);
-                        if(slnIter == ctx->solutions->end())
+                        int  index    = mappingIndices[local_index];
+                        auto solution = resolveContextSolution(ctx, index);
+                        if(!solution)
                         {
                             iot::setError(
                                 io,
@@ -87,7 +85,10 @@ namespace TensileLite
                         }
                         else
                         {
-                            auto solution = slnIter->second;
+                            // origami_config_list below is built from this
+                            // solution's sizeMapping and must stay index-aligned
+                            // with solution_list, so both are filled here rather
+                            // than deferred.
                             lib.solution_list.emplace_back(index, solution);
 
                             origami::dim3_t origami_mi;
@@ -127,10 +128,11 @@ namespace TensileLite
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .cache_hints_a             = solution->sizeMapping.cacheHintA(),
+                                .cache_hints_b             = solution->sizeMapping.cacheHintB(),
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
                             };
 
@@ -144,4 +146,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

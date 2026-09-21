@@ -6,8 +6,10 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "SdpaFwdParams.hpp"
-#include "SdpaKernelUtils.hpp"
+#include "SdpaModuleCache.hpp"
 #include "core/Handle.hpp"
+
+#include <memory>
 
 namespace asm_sdpa_engine
 {
@@ -21,7 +23,7 @@ public:
     /**
      * @brief Construct a plan with kernel module and precomputed metadata.
      */
-    SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params);
+    SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params);
 
     ~SdpaFwdPlan() override = default;
 
@@ -41,7 +43,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    HipModuleGuard _kernel;
+    CachedModule _kernel;
     SdpaFwdParams _params;
 };
 

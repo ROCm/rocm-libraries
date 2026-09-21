@@ -27,6 +27,9 @@
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_enum.hpp"
 #include "rocsparse_importer_format_t.hpp"
+
+#include <algorithm>
+
 rocsparse_arguments_config::rocsparse_arguments_config()
 {
     //
@@ -69,7 +72,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->beta            = static_cast<double>(0);
         this->betai           = static_cast<double>(0);
         this->threshold       = static_cast<double>(0);
-        this->percentage      = static_cast<double>(0);
+        this->percentage      = static_cast<double>(50);
         this->transA          = static_cast<rocsparse_operation>(0);
         this->transB          = static_cast<rocsparse_operation>(0);
         this->baseA           = static_cast<rocsparse_index_base>(0);
@@ -267,7 +270,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<double>(&this->threshold)->default_value(1.0), "specifies the scalar threshold")
 
     ("percentage",
-     value<double>(&this->percentage)->default_value(0.0), "specifies the scalar percentage")
+     value<double>(&this->percentage)->default_value(50.0), "specifies the scalar percentage")
 
     ("transposeA",
      value<char>(&this->b_transA)->default_value('N'),
@@ -331,8 +334,8 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<std::string>(&this->function_name)->default_value("axpyi"),
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
-     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csrsv, csritsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
-     "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, coosm, gemmi, sddmm\n"
+     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csritsv, csrsv, cscsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
+     "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, cscsm, coosm, gemmi, sddmm, sddmm_batched_csr, sddmm_batched_csc, sddmm_batched_coo, sddmm_batched_coo_aos, sddmm_batched_ell, \n"
      "  Extra: bsrgeam, bsrgemm, csrgeam, csrgemm, csrgemm_reuse\n"
      "  Preconditioner: bsric0, bsrilu0, csric0, csrilu0, csritilu0, gtsv, gtsv_no_pivot, gtsv_no_pivot_strided_batch, gtsv_interleaved_batch, gpsv_interleaved_batch\n"
      "  Conversion: csr2coo, csr2csc, gebsr2gebsc, csr2ell, csr2hyb, csr2bsr, csr2gebsr\n"
@@ -471,6 +474,9 @@ int rocsparse_arguments_config::parse(int& argc, char**& argv, options_descripti
         std::cout << desc << std::endl;
         return -2;
     }
+
+    // Percentage represents a value in the range [0, 100], so clamp it.
+    this->percentage = std::max(0.0, std::min(this->percentage, 100.0));
 
     if(this->b_dir != rocsparse_direction_row && this->b_dir != rocsparse_direction_column)
     {
