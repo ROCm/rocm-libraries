@@ -290,9 +290,21 @@ test_categories:
       - "comprehensive"
       - "nightly"
 
-  full:
-    description: "Complete test suite - (target: hours+)"
-    test_patterns: *positive_patterns
+  exhaustive:
+    description: >-
+      Complete test suite - Jenkins CI parity (POC: matches the full miopen_gtest
+      population run by projects/miopen/Jenkinsfile's Full Tests stage --
+      -DMIOPEN_TEST_ALL=On, no ctest-label/gtest-filter restriction beyond the
+      same negative exclusions Jenkins itself always applies). test_patterns is
+      deliberately "*" (match everything) instead of the shared positive_patterns
+      anchor, since that anchor is missing ~117 suite families present in the
+      binary (see ALMIOPEN sharding investigation). exclude below is Jenkins'
+      own MIOPEN_GTEST_FILTER negative list byte-for-byte (test/CMakeLists.txt
+      add_gtest_negative_filter calls + Jenkinsfile), not the old standard/full
+      curated exclusions. Named "exhaustive" (not "full") to avoid confusion
+      with the pre-existing curated "full" tier used elsewhere.
+    test_patterns:
+      - "*"
 
     test_files:
       # All test files in the suite
@@ -300,44 +312,59 @@ test_categories:
       - "gtest/*.cpp"
 
     exclude:
-      # Excluding slower tests for faster PR validation
+      # Exactly Jenkins' MIOPEN_GTEST_FILTER negative list (gfx942 Full Tests
+      # stage): DBSync/DeepBench/MIOpenTestConv are off by default there too,
+      # LstmMSRnn/1095 is a known-flaky gfx94X exclusion, LargeStride OOMs when
+      # shards share a GPU. HipGraphExist is excluded here too, matching
+      # Jenkins' own exclusion of it from the concurrent-shard pool (LLVM JIT
+      # OOM under GPU memory pressure); it instead runs via the dedicated
+      # "exhaustive_hipgraph_serial" category below, invoked as its own
+      # serial (non-concurrent) step on exactly one runner -- see
+      # test_component.yml's "Test" step.
+      - "*DBSync*"
       - "*DeepBench*"
       - "*MIOpenTestConv*"
-      - "Full/GPU_Reduce_FP64*"
-      - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
-      - "Full/GPU_Lrn_FP32*"
-      - "Full/GPU_Lrn_FP16*"
-      - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
-      - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLBWDLarge2D_BFP16*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP32*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
-      - "Full/GPU_ConvGrpActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer_FP32*"
-      - "Full/GPU_ConvGrpActivInfer_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "Full/GPU_MIOpenDriverConv2dTransTest*"
-      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      # Only exclude explicitly disabled tests
+      - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
+      - "*UnitTestConvSolver*LargeStride*"
+      - "*HipGraphExist*"
+      # Datatype parity: Jenkins' 4 gfx942 gtest jobs only cover BFP16, FP16,
+      # FP32, TF32 (+ NONE, which always runs). "*" positively selects every
+      # suite, so without these, this category also picks up I8/I16/I32/I64/
+      # FP8/BFP8/FP64-suffixed suites that no Jenkins job on gfx942 has ever
+      # exercised (verified empirically: diffed the actual test population of
+      # a live run against Jenkins' logged BF16/FP16/FP32/TF32 job output --
+      # every one of the ~10,900 "extra" tests was one of these 7 suffixes,
+      # e.g. GPU_TensorReorder_I8/_FP64, GPU_Bfp8Conversion_BFP8,
+      # GPU_HipBLASLtGEMMTest_FP8/_BFP8/_I64, GPU_binaryTensorOps_cast_*_I32).
+      - "*_I8.*"
+      - "*_I16.*"
+      - "*_I32.*"
+      - "*_I64.*"
+      - "*_FP8.*"
+      - "*_BFP8.*"
+      - "*_FP64.*"
+      # gtest already skips DISABLED_-prefixed tests by default; kept for
+      # clarity, not required for Jenkins parity.
       - "*DISABLED*"
 
     labels:
-      - "full"
+      - "exhaustive"
       - "weekly"
       - "all"
+
+  # POC (ALMIOPEN sharding investigation): HipGraphExist runs identically to
+  # Jenkins' own separate RUN_SERIAL rerun of it -- excluded from the main
+  # "exhaustive" concurrent-shard pool above, invoked here as its own ctest
+  # category on exactly one runner, sequentially (no other sub-shard running
+  # at the same time), matching the contention profile Jenkins avoids.
+  exhaustive_hipgraph_serial:
+    description: "HipGraphExist, run serially -- Jenkins CI parity companion to 'exhaustive'"
+    test_patterns:
+      - "*HipGraphExist*"
+
+    labels:
+      - "exhaustive_hipgraph_serial"
+
 
   ffm-quick:
     description: "FFM Quick Tests - Quick tests for NPI PRs"
@@ -527,6 +554,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
@@ -540,6 +568,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx110X"
 
   exclude_gpu_gfx115X:
@@ -551,6 +580,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx115X"
 
   exclude_gpu_gfx950:
@@ -561,6 +591,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx950"
 
 execution_settings:
@@ -572,4 +603,5 @@ execution_settings:
     comprehensive: 7200 # 2 hours
     ffm-quick:  7200    # 2 hours
     ffm-full:  7200     # 2 hours
-    full: 14400         # 4 hours
+    exhaustive: 14400   # 4 hours
+    exhaustive_hipgraph_serial: 300  # 5 minutes
