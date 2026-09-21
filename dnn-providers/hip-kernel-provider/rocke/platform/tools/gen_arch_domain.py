@@ -76,12 +76,13 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import json
-import os
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from _hostcaps import available_cpus
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
@@ -545,59 +546,6 @@ def _flavor_of_clang(identity: str) -> str | None:
     return f"llvm{m.group(1)}" if m else None
 
 
-def _available_cpus(cgroup_root: Path = Path("/sys/fs/cgroup")) -> int:
-    """CPUs this process may actually use, not the CPUs the host has.
-
-    `os.cpu_count()` reports the machine. Inside a container it is the wrong
-    number by a wide margin -- a sweep launched in a two-CPU container on a
-    large host sized itself for the host and ran six clang processes against
-    two cores. That is not merely slow: the probes are already near the
-    resource limits this cap exists to stay under (see the call site), and
-    oversubscription is how a `probe_error` starts depending on load.
-
-    Three sources, narrowest first. Affinity covers cpuset pinning, `cpu.max`
-    covers a CFS quota (cgroup v2, then v1) -- a quota is a *rate*, so a
-    fractional share rounds up to one whole worker rather than to zero.
-
-    `cgroup_root` is a parameter so the quota branch is reachable from a test.
-    Neither this host nor the probe containers impose a quota, so left
-    hardcoded it would be the one path nothing ever executes.
-    """
-    counts = []
-
-    getaffinity = getattr(os, "sched_getaffinity", None)
-    if getaffinity is not None:
-        try:
-            counts.append(len(getaffinity(0)))
-        except OSError:
-            pass
-
-    for quota_path, period_path in (
-        (cgroup_root / "cpu.max", None),
-        (
-            cgroup_root / "cpu" / "cpu.cfs_quota_us",
-            cgroup_root / "cpu" / "cpu.cfs_period_us",
-        ),
-    ):
-        try:
-            if period_path is None:
-                quota_s, period_s = quota_path.read_text().split()[:2]
-            else:
-                quota_s = quota_path.read_text().strip()
-                period_s = period_path.read_text().strip()
-            # "max" (v2) and a negative quota (v1) both mean unlimited.
-            if quota_s == "max":
-                continue
-            quota, period = int(quota_s), int(period_s)
-            if quota > 0 and period > 0:
-                counts.append(max(1, -(-quota // period)))
-        except (OSError, ValueError):
-            continue
-
-    counts.append(os.cpu_count() or 4)
-    return max(1, min(counts))
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -770,7 +718,7 @@ def main() -> int:
     # clang's own thread pool. Those surface as probe_error, and a probe_error
     # that depends on machine load would make the artifact nondeterministic and
     # `--check` flaky. Staying cheap is worth more here than being fast.
-    jobs = args.jobs or min(8, _available_cpus())
+    jobs = args.jobs or min(8, available_cpus())
     results: dict[str, dict[str, dict[str, str]]] = {k: {} for k in keys}
 
     def record(key: str, arch: str, status: str, evidence: str) -> None:

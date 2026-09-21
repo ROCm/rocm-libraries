@@ -53,9 +53,14 @@ _DATA = _ROCKE / "python" / "rocke" / "core" / "arch" / "data"
 # gate cannot disagree with the tool about what "the decl table for a flavor"
 # means. Re-deriving the merge here would just create a second place to forget
 # a rung when flavor resolution gains one.
+#
+# `_hostcaps` rides along on the same path entry. It is shared with
+# `tools/check_byte_identity.py`, so the pool-sizing test below is covering
+# both callers, not just this one.
 if str(_ROCKE / "tools") not in sys.path:
     sys.path.insert(0, str(_ROCKE / "tools"))
 import gen_arch_domain as G
+from _hostcaps import available_cpus
 
 _STATUSES = {
     G.STATUS_OK,
@@ -230,13 +235,13 @@ class AvailableCpusTest(unittest.TestCase):
             ),
         ):
             with self.subTest(cgroup=label):
-                self.assertLessEqual(G._available_cpus(self._root(files)), 1)
+                self.assertLessEqual(available_cpus(self._root(files)), 1)
 
     def test_a_fractional_quota_still_leaves_one_worker(self):
         """Half a CPU is a *rate*, not half a process. Rounding down gives a
         zero-worker pool, which is a hang rather than a slow sweep."""
         root = self._root({"cpu.max": "50000 100000"})
-        self.assertEqual(G._available_cpus(root), 1)
+        self.assertEqual(available_cpus(root), 1)
 
     def test_no_quota_does_not_lower_the_answer(self):
         """`max` and a negative v1 quota both mean unlimited -- neither is a
@@ -251,14 +256,12 @@ class AvailableCpusTest(unittest.TestCase):
         ):
             with self.subTest(cgroup=label):
                 root = self._root(files)
-                self.assertEqual(
-                    G._available_cpus(root), G._available_cpus(root / "nope")
-                )
+                self.assertEqual(available_cpus(root), available_cpus(root / "nope"))
 
     def test_the_answer_is_always_a_usable_worker_count(self):
         for files in ({}, {"cpu.max": "garbage"}, {"cpu.max": "0 0"}):
             with self.subTest(files=sorted(files)):
-                self.assertGreaterEqual(G._available_cpus(self._root(files)), 1)
+                self.assertGreaterEqual(available_cpus(self._root(files)), 1)
 
 
 class ArchDomainRegenerationTest(unittest.TestCase):
