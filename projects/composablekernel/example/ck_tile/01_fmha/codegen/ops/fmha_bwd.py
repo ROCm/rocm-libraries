@@ -336,6 +336,13 @@ class FmhaBwdDQDKDVTileSize:
     # QrQtrDor path is only worth generating where its dispatch has been
     # measured, and the gfx950 decode tiles have not been.
     allow_mask: bool = False
+    # Emit only the unmasked variants of this tile -- the inverse of
+    # allow_mask. For a geometry that wins on nomask and loses on causal:
+    # measured on gfx1250 bf16, kM0=64/kN0=128 at hdim 32/64 is 19.7-42.8%
+    # faster than the shipped kM0=32/kN0=64 on every nomask shape, but loses on
+    # causal (hdim 64 on all three, hdim 32 at seqlen_q 32768). Masked falls
+    # through to the next tile, which is the shipped one.
+    nomask_only: bool = False
     # Hold the dK/dV accumulators in LDS rather than registers. Frees
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
@@ -601,7 +608,9 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         if dtype in ["fp16", "bf16"]:
             return [
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
+                FmhaBwdDQDKDVTileSize( 64, 128,  32,  64,  32,  64,  32,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1, nomask_only=True),
                 FmhaBwdDQDKDVTileSize( 32,  64,  32,  32,  32,  32,  64,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 32,  16, 16, 32, -1),
+                FmhaBwdDQDKDVTileSize( 64, 128,  64,  64,  64,  64,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, nomask_only=True),
                 FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
                 #FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  64,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1),
                 # headdim >= 128: the two fp32 dK/dV accumulators are 64 VGPRs
@@ -611,12 +620,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 # idle -- gives back 420 VGPRs / occ 2 / zero spill for +1.3%
                 # instructions. hdim 32/64 already reach occupancy 2, so they
                 # keep the register accumulators and pay no LDS traffic.
-                # The Q/dO ring depth is a compile-time unroll factor, so the
-                # short- and long-q cases need separate instances. Depth 3
-                # costs +19.4% at seqlen_q 1024 and +9.5% at 2048, breaks even
-                # near 4096, then pays -15.3% at 8192 and -23.2% at 32768:
-                # the unroll only amortises once the Q loop is long.
-                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True, qdo_slots=2, dispatch_max_seq_q=4096),
+                # Ring depth 2 below seqlen_q 2048, depth 3 above. The bound
+                # used to be 4096, which put seqlen_q 4096 on depth 2 and cost
+                # it 1.6% of throughput (492.5 -> 500.2 TFLOPS to move it to
+                # depth 3). Lowering the bound rather than deleting it: at 2048
+                # depth 2 is still ahead by 5.1%, measured on this base with
+                # separated ranges, so the crossover sits between the two.
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True, qdo_slots=2, dispatch_max_seq_q=2048),
                 FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
                 # A short q sequence leaves most of the 64-row M tile idle, and
                 # a 128-wide N tile is not paid for either: at seqlen_q <= 32
@@ -1194,6 +1204,8 @@ def get_bwd_blobs(
             if (mode == "group") and (spad1d == "f"):
                 continue
             if ("no" not in mask) and tile.seq_q_limit != 0 and not tile.allow_mask:
+                continue
+            if ("no" not in mask) and tile.nomask_only:
                 continue
             if (bias == "no" or bias == "alibi") and dbias == "t":
                 continue

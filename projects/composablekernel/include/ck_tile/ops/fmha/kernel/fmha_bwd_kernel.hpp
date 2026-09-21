@@ -57,6 +57,20 @@
 #ifndef CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV
 #define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
 #endif
+
+// Upper bound on the same gate. Pairing exists to fix the causal load
+// imbalance, and that imbalance only bites while the grid is roughly one pass
+// over the CUs -- once there are several passes the scheduler averages it out
+// by itself and all that is left is the cost of the doubled body. Measured
+// gain from *disabling* pairing at d128 causal, paired_wg / 256 CUs:
+//   1.0x +32.8%   1.5x -0.9%   2.0x +14.4%   3.0x +6.9%
+//   4.0x  +2.3%   6.0x -4.2%   8.0x -12.1%
+// Monotone apart from the 1.5x point, crossing zero between 4x and 6x, so pair
+// up to 4x and stop. Worth -12.1% at seqlen_q 32768, which the lower bound
+// alone never reached.
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_CU_MUL
+#define CK_TILE_FMHA_BWD_PAIRING_MAX_CU_MUL 4
+#endif
 namespace ck_tile {
 
 // The dQ static stride is only profitable next to a deep Q/dO ring (see the
@@ -1291,8 +1305,11 @@ struct FmhaBwdDQDKDVKernel
             const index_t paired_wg = paired_x * nhead_ * batch_size_;
             const index_t min_wg    = static_cast<index_t>(get_num_cus()) /
                                       CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV;
-            return (paired_wg > min_wg) ? dim3(paired_x, nhead_, batch_size_)
-                                        : dim3(jobs_per_head, nhead_, batch_size_);
+            const index_t max_wg    = static_cast<index_t>(get_num_cus()) *
+                                      CK_TILE_FMHA_BWD_PAIRING_MAX_CU_MUL;
+            return (paired_wg > min_wg && paired_wg <= max_wg)
+                       ? dim3(paired_x, nhead_, batch_size_)
+                       : dim3(jobs_per_head, nhead_, batch_size_);
         }
         else
             return dim3(jobs_per_head, nhead_, batch_size_);

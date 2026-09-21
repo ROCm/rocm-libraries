@@ -16,6 +16,14 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_V_NONRESIDENT 1
 #endif
 
+// kM0 floor for the V-in-LDS choice above. The kM0 >= 64 gate it defaults to is
+// inherited from kDVInReg, whose comment justifies it for the dV accumulator --
+// V itself has never been measured below kM0 64. Set to 0 to put V in LDS on
+// the kM0 16/32 tiles too.
+#ifndef CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0
+#define CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0 64
+#endif
+
 // Sink the next iteration's Q/LSE loads past gemm_4, so their live ranges do
 // not span it. dO/D are already loaded after gemm_4; Q/LSE were the odd ones
 // out. Safe: gemm_4 touches neither, and nothing between gemm_4 and the dO/D
@@ -37,10 +45,30 @@ namespace ck_tile {
 #define CK_TILE_FMHA_BWD_SCHED_DROP_MODE 2
 #endif
 
+// Bitmask of GemmStagedScheduler prescriptions to KEEP even when
+// CK_TILE_FMHA_BWD_SCHED_DROP_MODE would drop them; bit N selects scheduler N.
+// Dropping all of them is right for the shipped V-in-LDS config, but with V
+// register-resident the <4> prescription is what stops the 64 dQ atomic
+// addresses collapsing into a serial recurrence through one register (60
+// add->lshl pairs, s_clause 0, +135 s_wait_alu). This lets that one come back
+// without paying for the rest.
+#ifndef CK_TILE_FMHA_BWD_SCHED_KEEP_MASK
+#define CK_TILE_FMHA_BWD_SCHED_KEEP_MASK 0
+#endif
+
 // Keep only dV in registers, leave dK in LDS. Halves the extra register cost
 // versus the fully register-resident pipeline (128 VGPR instead of 256).
 #ifndef CK_TILE_FMHA_BWD_DV_IN_REG
 #define CK_TILE_FMHA_BWD_DV_IN_REG 1
+#endif
+
+// kM0 floor for the dV-in-registers choice above. The kM0 >= 64 gate it
+// defaults to ties dV-in-reg to evicting V to LDS as a package, and the package
+// was only measured as a package. Set to 0 to keep dV in registers on the
+// kM0 16/32 tiles as well, so the kM0 and the V-placement variables can be
+// separated.
+#ifndef CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0
+#define CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0 64
 #endif
 
 // ABLATION ONLY -- PRODUCES WRONG RESULTS. Drops the D (row-sum of dO*O) TDM
@@ -213,8 +241,10 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     // kM0 = 64. The dV accumulator is kN0 x headdim and does not shrink with
     // kM0, so at kM0 = 32 the same work does twice the dV LDS round trips --
     // measured -8.2% on d=256 causal, whose tile is kM0=32.
-    static constexpr bool kDVInReg      = CK_TILE_FMHA_BWD_DV_IN_REG && (kM0 >= 64);
-    static constexpr bool kVNonResident = CK_TILE_FMHA_BWD_V_NONRESIDENT && (kM0 >= 64);
+    static constexpr bool kDVInReg =
+        CK_TILE_FMHA_BWD_DV_IN_REG && (kM0 >= CK_TILE_FMHA_BWD_DV_IN_REG_MIN_M0);
+    static constexpr bool kVNonResident =
+        CK_TILE_FMHA_BWD_V_NONRESIDENT && (kM0 >= CK_TILE_FMHA_BWD_V_NONRESIDENT_MIN_M0);
     static constexpr index_t kN0        = BlockFmhaShape::kN0;
     static constexpr index_t kK0        = BlockFmhaShape::kK0;
     static constexpr index_t kK1        = BlockFmhaShape::kK1;
@@ -1099,7 +1129,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 
             auto dot_reg_tensor = load_tile_transpose(dot_rd_cur);
 
-            if constexpr(!kDropStagedSched)
+            if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 0)))
             {
                 HotLoopScheduler::template GemmStagedScheduler<0>();
                 __builtin_amdgcn_sched_barrier(0);
@@ -1340,7 +1370,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             q_reg_tensor = load_tile(q_rd_dst);
             lse          = load_tile(lse_rd_dst);
 
-            if constexpr(!kDropStagedSched)
+            if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 3)))
             {
                 HotLoopScheduler::template GemmStagedScheduler<3>();
                 __builtin_amdgcn_sched_barrier(0);
@@ -1364,7 +1394,7 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
             do_reg_tensor = load_tile(do_rd_dst);
             d             = load_tile(d_rd_dst);
 
-            if constexpr(!kDropStagedSched)
+            if constexpr(!kDropStagedSched || (CK_TILE_FMHA_BWD_SCHED_KEEP_MASK & (1 << 4)))
             {
                 HotLoopScheduler::template GemmStagedScheduler<4>();
             }
