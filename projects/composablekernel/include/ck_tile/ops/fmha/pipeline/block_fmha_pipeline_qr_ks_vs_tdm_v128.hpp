@@ -72,6 +72,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
+    static constexpr bool kUsesLdsArena                = false;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)

@@ -330,8 +330,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
             else
                 return FmhaN128PreparedKProbe::Address{};
         }();
-        constexpr bool kLeadFirstLoad =
-            Geometry::kHeadDimQK == 128 && (Stage == 0 || Stage == 3);
+        constexpr bool kLeadFirstLoad = Geometry::kHeadDimQK == 128 && (Stage == 0 || Stage == 3);
         if constexpr(kLeadFirstLoad)
         {
             if constexpr(Stage == 0)
@@ -394,13 +393,14 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
               typename BBlockTensor,
               typename NextBBlockTensor,
               typename BTileWindow>
-    CK_TILE_DEVICE static void RunQkScheduledStage(const BlockGemm& block_gemm,
-                                                   CBlockTensor& c_block_tensor,
-                                                   const ABlockTensor& a_block_tensor,
-                                                   const BBlockTensor& b_block_tensor,
-                                                   NextBBlockTensor& next_b_block_tensor,
-                                                   const BTileWindow& b_lds_window,
-                                                   const FmhaN128PreparedKProbe::Address* prepared_stage0 = nullptr)
+    CK_TILE_DEVICE static void
+    RunQkScheduledStage(const BlockGemm& block_gemm,
+                        CBlockTensor& c_block_tensor,
+                        const ABlockTensor& a_block_tensor,
+                        const BBlockTensor& b_block_tensor,
+                        NextBBlockTensor& next_b_block_tensor,
+                        const BTileWindow& b_lds_window,
+                        const FmhaN128PreparedKProbe::Address* prepared_stage0 = nullptr)
     {
         auto emit_no_softmax = [](auto, auto) {};
         RunQkScheduledStageWithSoftmax<Stage>(block_gemm,
@@ -538,8 +538,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
 
         FmhaN128PreparedKProbe::Address affine_k0{};
         FmhaN128PreparedKProbe::Address prepared_v1{};
-        constexpr bool kLeadFirstLoad =
-            Geometry::kHeadDimQK == 128 && (Stage == 0 || Stage == 3);
+        constexpr bool kLeadFirstLoad = Geometry::kHeadDimQK == 128 && (Stage == 0 || Stage == 3);
         if constexpr(kLeadFirstLoad)
         {
             if constexpr(Stage == 0)
@@ -577,7 +576,7 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                         next_b_block_tensor, b_lds_window, affine_k0);
                 else
                     KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
-                                                                            b_lds_window);
+                                                                             b_lds_window);
             }
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
@@ -598,13 +597,14 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
                 // Access0 was issued before WMMA0; do not issue it twice.
             }
             else if constexpr(Geometry::kHeadDimQK == 128 && Stage == 0 &&
-                         decltype(kind)::value == Kind::VRead && decltype(access)::value == 1)
+                              decltype(kind)::value == Kind::VRead && decltype(access)::value == 1)
                 FmhaN128PreparedVProbe::Load<1>(next_b_block_tensor, b_lds_window, prepared_v1);
             else
                 emit_token(kind, access);
         };
 
-        Executor::template ExecutePvStage<Stage>(emit_prepared_wmma, emit_prepared_token, emit_point);
+        Executor::template ExecutePvStage<Stage>(
+            emit_prepared_wmma, emit_prepared_token, emit_point);
         WaitPvStageTail<Stage>();
     }
 
@@ -1133,6 +1133,13 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
     }
 
     template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
+    {
+        static_assert(IsSupportedProblem<Problem>(), "V128 policy received an invalid problem");
+        return make_tuple(number<false>{}, number<0>{}, number<0>{});
+    }
+
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
     {
         static_assert(IsSupportedProblem<Problem>(),
@@ -1150,23 +1157,23 @@ struct BlockFmhaPipelineQRKSVSTdmV128Policy : BlockFmhaPipelineQRKSVSTdmDefaultP
 };
 
 template <typename Geometry>
-using FmhaTdmV128DefaultTuning = std::conditional_t<
-    std::is_same_v<Geometry, LegacyD192Geometry>,
-    LegacyD192Tuning,
-    FmhaTdmV128Tuning<1,
-                      1,
-                      sequence<Geometry::kKSuLoadCount,
-                               Geometry::kKSuLoadCount,
-                               Geometry::kKSuLoadCount,
-                               Geometry::kVStageLoadCount>,
-                      sequence<Geometry::kVStageLoadCount,
-                               Geometry::kVStageLoadCount,
-                               Geometry::kVStageLoadCount,
-                               Geometry::kKSuLoadCount>,
-                      true,
-                      true,
-                      1,
-                      Geometry>>;
+using FmhaTdmV128DefaultTuning =
+    std::conditional_t<std::is_same_v<Geometry, LegacyD192Geometry>,
+                       LegacyD192Tuning,
+                       FmhaTdmV128Tuning<1,
+                                         1,
+                                         sequence<Geometry::kKSuLoadCount,
+                                                  Geometry::kKSuLoadCount,
+                                                  Geometry::kKSuLoadCount,
+                                                  Geometry::kVStageLoadCount>,
+                                         sequence<Geometry::kVStageLoadCount,
+                                                  Geometry::kVStageLoadCount,
+                                                  Geometry::kVStageLoadCount,
+                                                  Geometry::kKSuLoadCount>,
+                                         true,
+                                         true,
+                                         1,
+                                         Geometry>>;
 
 template <typename Problem>
 using FmhaTdmV128PolicyFor =

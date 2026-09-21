@@ -57,35 +57,35 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertEqual(actual, expected)
 
     def test_dimension_partition_preserves_legacy_inventory(self):
-        # Frozen pre-partition ordered filename/source digests, not the current
-        # generator projected against itself. Update only for reviewed legacy changes.
+        # Frozen develop 65fd1593 filename/source digests, independently compared
+        # with upstream after excluding the dedicated D192 replacement family.
         legacy_digests = {
-            (1, 0): "7158cd5605f78ad75e1e0221bb7c639bebaa0c8b949bee24a90b9440655f87c0",
+            (1, 0): "af274e8c73c48a399e7cae5cce748422d79c6d4d4784c00f87de49c9c46584cc",
             (
                 1,
                 100,
-            ): "529f7ea66bdc4773f3de8bd7111703697ccdc62a695613d35798151a9f2016e5",
+            ): "2f53a67227f0e951312a893274695b22b5eb23111ce2b3ea5ebca4dda4d1bb60",
             (
                 1,
                 200,
-            ): "423b7e4c0846097eabfcffe7a7d9062874afcd2de275f1e89245c2c74d82c5d3",
+            ): "2064a1a568df00c00fd2cf6b1ba5f2d22dee8272b054eb161e6aa7b63555fa78",
             (
                 1,
                 600,
-            ): "b12d4b5c4a13b8316dc0124d6d607bc4a8f8c568cf18dfe5a17a458b1ee20e00",
-            (3, 0): "1ccebca6192b755f67784ea4efd3398bac98894f7eda4f6fe2ccbf9b939d95e2",
+            ): "c915baf46ea406342a8a37d27589a93e816646a0794e412f4f12a45a5c6550c5",
+            (3, 0): "bf7fa1bbdd75222aec195c368011f2d38449d3cdc4fff06fe41679be0b2c52f5",
             (
                 3,
                 100,
-            ): "8a9acd4dc22c024483d842d0ee5765f41f43f8e4e81e87314970295a17c04299",
+            ): "82ef7eeb9b55e6d66de7a0bb98709f930e3cfb3558c286e7b27c3f7a01150c5a",
             (
                 3,
                 200,
-            ): "80db25c09ba6eb403527262755a07d4476cdf1d98782dd9915302bc0e9e13ad7",
+            ): "cf9a3d1f405a30c708c26952a8b7b802739e71a2b685bb4d1cfe11b7b6c36014",
             (
                 3,
                 600,
-            ): "5a39b98d251bd64b0467d6a0b44a8981c467ac04239df9f7ce4b158dd6d23edc",
+            ): "077c94304c9971d856669abafc9baf7372999df04676ece95cd96e5b7e3ea490",
         }
         for targets in (["gfx1250"], ["gfx942", "gfx950", "gfx1250"]):
             for receipt in (0, 100, 200, 600):
@@ -162,9 +162,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                             == candidate.api_trait().gfx125_d192_feature_key
                         }
                         expected_tags = (
-                            {"qr", "qr_tdm"}
-                            if (candidate.F_hdim == 128 and candidate.F_mode == "batch")
-                            else {"qr"}
+                            {"qr", "qr_tdm"} if candidate.F_hdim == 128 else {"qr"}
                         )
                         self.assertEqual(fallback_tags, expected_tags)
                     for kernel in kernels:
@@ -233,7 +231,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     }
                     self.assertEqual(
                         fallbacks,
-                        {"qr", "qr_tdm"} if kernel.F_mode == "batch" else {"qr"},
+                        {"qr", "qr_tdm"},
                     )
                 api = pool.render("test")
                 self.assertLess(
@@ -467,8 +465,9 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                             fallback_fields = dict(
                                 hdim=128 if dim == 128 else 256,
                                 bm0=64,
-                                pipeline="qr_tdm" if dim == 128 and not group else "qr",
-                                dpad="t" if dim == 192 or group else "f",
+                                pipeline="qr_tdm" if dim == 128 else "qr",
+                                spad="t" if dim == 192 or group else "f",
+                                dpad="t" if dim == 192 else "f",
                                 **features,
                             )
                             if dim == 192:
@@ -525,8 +524,8 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                     fallback = dispatch.expected_id(
                         hdim=128 if dim == 128 else 256,
                         bm0=64,
-                        pipeline="qr",
-                        dpad="t",
+                        pipeline="qr_tdm" if dim == 128 else "qr",
+                        dpad="f" if dim == 128 else "t",
                         spad="t",
                         **features,
                     )
@@ -591,8 +590,9 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                             )
                             fallback_fields = dict(
                                 hdim=128 if dim == 128 else 256,
-                                pipeline="qr_tdm" if dim == 128 and not group else "qr",
-                                dpad="t" if dim == 192 or group else "f",
+                                pipeline="qr_tdm" if dim == 128 else "qr",
+                                spad="t" if dim == 192 or group else "f",
+                                dpad="t" if dim == 192 else "f",
                                 **features,
                             )
                             if dim == 128:
@@ -694,9 +694,10 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                     candidate = dispatch.expected_id(pipeline="qr_tdm_v128", **features)
                     for size in (1, 127, 128, 129, 2047, 2048, 32768):
                         fallback = dispatch.expected_id(
-                            pipeline="qr" if group else "qr_tdm",
+                            pipeline="qr_tdm",
+                            spad="t" if group else "f",
                             bm0=64 if size < 2048 else 128,
-                            dpad="t" if group else "f",
+                            dpad="f",
                             **features,
                         )
                         args = dict(
@@ -754,11 +755,12 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
                 mode=mode,
                 hdim=128,
                 bm0=64,
-                pipeline="qr" if group else "qr_tdm",
+                pipeline="qr_tdm",
+                spad="t" if group else "f",
                 mask="s_no",
                 lse="f",
                 sink="f",
-                dpad="t" if group else "f",
+                dpad="f",
             )
             self.assertEqual(dispatch.run(group=group, hdim_q=128), [fallback])
             self.assertEqual(

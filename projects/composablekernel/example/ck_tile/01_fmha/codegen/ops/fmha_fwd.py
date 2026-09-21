@@ -538,7 +538,12 @@ class FmhaFwdApiTrait:
                 return "true"
             else:
                 return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
-        elif self.pipeline_tag in ["qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128", "qr_tdm_v128"]:
+        elif self.pipeline_tag in [
+            "qr_async_trload",
+            "qr_async_trload_v3",
+            "qr_tdm_d192_v128",
+            "qr_tdm_v128",
+        ]:
             if self.skpad == "t":
                 return "true"
             else:
@@ -557,7 +562,15 @@ class FmhaFwdApiTrait:
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
-        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128", "qr_tdm_v128"]:
+        elif self.pipeline_tag in [
+            "qr",
+            "qs",
+            "qr_async",
+            "qr_async_trload",
+            "qr_async_trload_v3",
+            "qr_tdm_d192_v128",
+            "qr_tdm_v128",
+        ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
                 return f"true /*a.hdim_q % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -577,7 +590,15 @@ class FmhaFwdApiTrait:
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
-        elif self.pipeline_tag in ["qr", "qs", "qr_async", "qr_async_trload", "qr_async_trload_v3", "qr_tdm_d192_v128", "qr_tdm_v128"]:
+        elif self.pipeline_tag in [
+            "qr",
+            "qs",
+            "qr_async",
+            "qr_async_trload",
+            "qr_async_trload_v3",
+            "qr_tdm_d192_v128",
+            "qr_tdm_v128",
+        ]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
                 return f"true /*a.hdim_v % {bk0submax} != 0*/"  # TODO: order of get_pipelines() matters! (ugly)
@@ -1667,7 +1688,17 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 and kernel_ctx.pipeline.F_dvpad == "t"
             )
 
-        rules.append(check_tdm_v128_tile_pipeline)
+        def check_gemm0_k(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32:
+                return True
+            k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
+            if kernel_ctx.pipeline.tag == "qr_tdm":
+                return k0_loops == 1
+            return k0_loops >= 2
+
+        rules.extend([check_gemm0_k, check_tdm_v128_tile_pipeline])
         return rules
 
     @classmethod
@@ -1703,21 +1734,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             }  # fmt: skip
         else:
             raise ValueError(f"unsupported dtype={dtype}")
-
-    @classmethod
-    def get_rules(cls) -> List[CompatibilityRule]:
-        def check_gemm0_k(
-            problem_ctx: ProblemContext, kernel_ctx: KernelContext
-        ) -> bool:
-            # qr's k0 prefetch needs >= 2 loops; qr_tdm has none and takes the 1-loop tile.
-            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32:
-                return True
-            k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
-            if kernel_ctx.pipeline.tag == "qr_tdm":
-                return k0_loops == 1
-            return k0_loops >= 2
-
-        return [*super().get_rules(), check_gemm0_k]
 
     @classmethod
     def get_pipelines(
@@ -1869,7 +1885,9 @@ def _tune_config_pick_base(target: str):
     raise Exception(f"Unsupported device target {target} in tune config")
 
 
-def _parse_tune_config_tiles(tiles_by_dtype_json: dict) -> Dict[str, Dict[Tuple[int, int], List[FmhaFwdTileSize]]]:
+def _parse_tune_config_tiles(
+    tiles_by_dtype_json: dict,
+) -> Dict[str, Dict[Tuple[int, int], List[FmhaFwdTileSize]]]:
     result: Dict[str, Dict[Tuple[int, int], List[FmhaFwdTileSize]]] = {}
     for dtype, hkey_map in tiles_by_dtype_json.items():
         by_hkey: Dict[Tuple[int, int], List[FmhaFwdTileSize]] = {}
@@ -1890,30 +1908,33 @@ def _parse_tune_config_tiles(tiles_by_dtype_json: dict) -> Dict[str, Dict[Tuple[
                 # Missing/empty -> keep default CppConstraint (== "true").
                 _cc = td.get("cpp_constraint")
                 _cc_str = str(_cc).strip() if _cc is not None else ""
-                _constraint = (CppConstraint(bool_expr=_cc_str) if _cc_str
-                               else CppConstraint())
-                tiles.append(FmhaFwdTileSize(
-                    F_bm0=int(td["F_bm0"]),
-                    F_bn0=int(td["F_bn0"]),
-                    F_bk0=int(td["F_bk0"]),
-                    F_bn1=int(td["F_bn1"]),
-                    F_bk1=int(td["F_bk1"]),
-                    F_bk0max=int(td["F_bk0max"]),
-                    F_rm0=int(td["F_rm0"]),
-                    F_rn0=int(td["F_rn0"]),
-                    F_rk0=int(td["F_rk0"]),
-                    F_rm1=int(td["F_rm1"]),
-                    F_rn1=int(td["F_rn1"]),
-                    F_rk1=int(td["F_rk1"]),
-                    F_wm0=int(td["F_wm0"]),
-                    F_wn0=int(td["F_wn0"]),
-                    F_wk0=int(td["F_wk0"]),
-                    F_wm1=int(td["F_wm1"]),
-                    F_wn1=int(td["F_wn1"]),
-                    F_wk1=int(td["F_wk1"]),
-                    F_occupancy=int(td["F_occupancy"]),
-                    F_constraint=_constraint,
-                ))
+                _constraint = (
+                    CppConstraint(bool_expr=_cc_str) if _cc_str else CppConstraint()
+                )
+                tiles.append(
+                    FmhaFwdTileSize(
+                        F_bm0=int(td["F_bm0"]),
+                        F_bn0=int(td["F_bn0"]),
+                        F_bk0=int(td["F_bk0"]),
+                        F_bn1=int(td["F_bn1"]),
+                        F_bk1=int(td["F_bk1"]),
+                        F_bk0max=int(td["F_bk0max"]),
+                        F_rm0=int(td["F_rm0"]),
+                        F_rn0=int(td["F_rn0"]),
+                        F_rk0=int(td["F_rk0"]),
+                        F_rm1=int(td["F_rm1"]),
+                        F_rn1=int(td["F_rn1"]),
+                        F_rk1=int(td["F_rk1"]),
+                        F_wm0=int(td["F_wm0"]),
+                        F_wn0=int(td["F_wn0"]),
+                        F_wk0=int(td["F_wk0"]),
+                        F_wm1=int(td["F_wm1"]),
+                        F_wn1=int(td["F_wn1"]),
+                        F_wk1=int(td["F_wk1"]),
+                        F_occupancy=int(td["F_occupancy"]),
+                        F_constraint=_constraint,
+                    )
+                )
             by_hkey[(hdim, hdim_v)] = tiles
         result[dtype] = by_hkey
     return result
@@ -1923,39 +1944,54 @@ def _make_tune_filter_rule(filters: dict):
     if not filters:
         return None
 
-    allowed_mode    = set(filters.get("mode", []))    or None
-    allowed_mask    = set(filters.get("mask", []))    or None
-    allowed_bias    = set(filters.get("bias", []))    or None
-    allowed_lse     = set(filters.get("lse", []))     or None
+    allowed_mode = set(filters.get("mode", [])) or None
+    allowed_mask = set(filters.get("mask", [])) or None
+    allowed_bias = set(filters.get("bias", [])) or None
+    allowed_lse = set(filters.get("lse", [])) or None
     allowed_dropout = set(filters.get("dropout", [])) or None
-    allowed_logits  = set(filters.get("logits", []))  or None
-    allowed_qscale  = set(filters.get("qscale", []))  or None
+    allowed_logits = set(filters.get("logits", [])) or None
+    allowed_qscale = set(filters.get("qscale", [])) or None
     allowed_vlayout = set(filters.get("vlayout", [])) or None
-    allowed_skip    = set(filters.get("skip", []))    or None
-    allowed_sink    = set(filters.get("sink", []))    or None
-    allowed_trload  = set(filters.get("trload", []))  or None
-    allowed_spad    = set(filters.get("spad", []))    or None
-    allowed_skpad   = set(filters.get("skpad", []))   or None
-    allowed_dpad    = set(filters.get("dpad", []))    or None
-    allowed_dvpad   = set(filters.get("dvpad", []))   or None
+    allowed_skip = set(filters.get("skip", [])) or None
+    allowed_sink = set(filters.get("sink", [])) or None
+    allowed_trload = set(filters.get("trload", [])) or None
+    allowed_spad = set(filters.get("spad", [])) or None
+    allowed_skpad = set(filters.get("skpad", [])) or None
+    allowed_dpad = set(filters.get("dpad", [])) or None
+    allowed_dvpad = set(filters.get("dvpad", [])) or None
 
     def tune_filter(problem_ctx: "ProblemContext", kernel_ctx: "KernelContext") -> bool:
         p = kernel_ctx.pipeline
-        if allowed_mode    is not None and problem_ctx.mode not in allowed_mode:    return False
-        if allowed_mask    is not None and p.F_mask     not in allowed_mask:    return False
-        if allowed_bias    is not None and p.F_bias     not in allowed_bias:    return False
-        if allowed_lse     is not None and p.F_lse      not in allowed_lse:     return False
-        if allowed_dropout is not None and p.F_dropout  not in allowed_dropout: return False
-        if allowed_logits  is not None and p.F_logits   not in allowed_logits:  return False
-        if allowed_qscale  is not None and p.F_qscale   not in allowed_qscale:  return False
-        if allowed_vlayout is not None and p.F_vlayout  not in allowed_vlayout: return False
-        if allowed_skip    is not None and p.F_skip     not in allowed_skip:    return False
-        if allowed_sink    is not None and p.F_sink     not in allowed_sink:    return False
-        if allowed_trload  is not None and p.F_trload   not in allowed_trload:  return False
-        if allowed_spad    is not None and p.F_spad     not in allowed_spad:    return False
-        if allowed_skpad   is not None and p.F_skpad    not in allowed_skpad:   return False
-        if allowed_dpad    is not None and p.F_dpad     not in allowed_dpad:    return False
-        if allowed_dvpad   is not None and p.F_dvpad    not in allowed_dvpad:   return False
+        if allowed_mode is not None and problem_ctx.mode not in allowed_mode:
+            return False
+        if allowed_mask is not None and p.F_mask not in allowed_mask:
+            return False
+        if allowed_bias is not None and p.F_bias not in allowed_bias:
+            return False
+        if allowed_lse is not None and p.F_lse not in allowed_lse:
+            return False
+        if allowed_dropout is not None and p.F_dropout not in allowed_dropout:
+            return False
+        if allowed_logits is not None and p.F_logits not in allowed_logits:
+            return False
+        if allowed_qscale is not None and p.F_qscale not in allowed_qscale:
+            return False
+        if allowed_vlayout is not None and p.F_vlayout not in allowed_vlayout:
+            return False
+        if allowed_skip is not None and p.F_skip not in allowed_skip:
+            return False
+        if allowed_sink is not None and p.F_sink not in allowed_sink:
+            return False
+        if allowed_trload is not None and p.F_trload not in allowed_trload:
+            return False
+        if allowed_spad is not None and p.F_spad not in allowed_spad:
+            return False
+        if allowed_skpad is not None and p.F_skpad not in allowed_skpad:
+            return False
+        if allowed_dpad is not None and p.F_dpad not in allowed_dpad:
+            return False
+        if allowed_dvpad is not None and p.F_dvpad not in allowed_dvpad:
+            return False
         return True
 
     return tune_filter

@@ -76,6 +76,7 @@ _HOST_FMHA_STUB = """#pragma once
 #include <cstdlib>
 #include <string>
 namespace ck_tile {
+using index_t = int;
 struct stream_config {};
 struct gfx125_t {};
 inline std::string get_device_name() {
@@ -91,8 +92,9 @@ enum class mask_enum { no_mask, mask_top_left, mask_bottom_right, window_generic
 enum class bias_enum { no_bias, elementwise_bias, alibi };
 enum class quant_scale_enum { no_scale, pertensor, blockscale, kv_blockscale, mx };
 struct FmhaFwdBf16 {};
+inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
 template <int, typename, bool, int, int, int, int, int, int, bool, auto, bool,
-          typename, auto, bool, bool, auto, bool...>
+          typename, auto, bool, bool, auto, bool, bool, bool, bool, bool, bool, bool, int = -1>
 struct fmha_fwd_traits_ {};
 struct fmha_fwd_traits {
     int hdim_q = 192, hdim_v = 128;
@@ -449,20 +451,21 @@ endforeach()
 
     def test_d128_keeps_the_existing_qr_tdm_pipeline(self):
         expected_inventory = {
-            100: Counter({("batch", "qr"): 8, ("batch", "qr_tdm"): 8}),
-            200: Counter({("group", "qr"): 4}),
+            100: Counter({("batch", "qr"): 8, ("batch", "qr_tdm"): 16}),
+            200: Counter({("group", "qr"): 4, ("group", "qr_tdm"): 8}),
             600: Counter(
                 {
                     ("batch", "qr"): 8,
-                    ("batch", "qr_tdm"): 8,
+                    ("batch", "qr_tdm"): 16,
                     ("group", "qr"): 4,
+                    ("group", "qr_tdm"): 8,
                 }
             ),
         }
         expected_name_digests = {
-            100: "f6dcb11ad4779f1bc52edbacd4fd24597d3a523a9d3ef795b6c62a2f67cba515",
-            200: "404347bedbd8332ddb9d2eea46d6b0bb6327265d18e3a1f8e4fa0c9f060f4c57",
-            600: "2188afcf6c4c104ce3d7d476694e09e540dcbe7fa0a99d96dd8fba24944b26bc",
+            100: "999a673328eab8ccbc069002fe3e6e9997304dce30daf87763e8ef5df7005072",
+            200: "6bde6006a611b82f9ce93a50357e72d29a2ac962203ba4da90ec5bd78e1695d4",
+            600: "729e4a358f382817d167f36c0c876555e0b8a3b525bb0b4c62cb3726889674b0",
         }
 
         for receipt, expected in expected_inventory.items():
@@ -498,7 +501,7 @@ endforeach()
         )
         self.assertEqual(
             hashlib.sha256(representative.render().encode()).hexdigest(),
-            "bb08faae2f17aedee9e76bba2c3a493d673e32703f3ed2c60b2634f756f39c29",
+            "3306beb9a5d0a371ee3d6b4ac4a60baf4a14f41bf08a5168dc83f78c7259bc3c",
         )
 
     def test_generated_api_places_exact_candidate_before_legacy_buckets(self):
@@ -724,17 +727,18 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                 if kernel.F_hdim == 128 and _is_family_kernel(kernel)
             ]
         )
-        for mode, group, pipeline in (("batch", 0, "qr_tdm"), ("group", 1, "qr")):
+        for mode, group, pipeline in (("batch", 0, "qr_tdm"), ("group", 1, "qr_tdm")):
             for length, bm0 in ((1, 64), (127, 64), (128, 64), (2047, 64), (2048, 128)):
                 expected = dispatch.expected_id(
                     mode=mode,
                     hdim=128,
                     pipeline=pipeline,
                     bm0=bm0,
+                    spad="t" if group else "f",
                     mask="s_no",
                     lse="f",
                     sink="f",
-                    dpad="t" if group else "f",
+                    dpad="f",
                 )
                 for env in (None, "1"):
                     selected = expected
