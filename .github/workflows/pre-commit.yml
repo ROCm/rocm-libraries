@@ -51,22 +51,28 @@ jobs:
           python .github/scripts/pre_commit_helper.py \
           --from-ref $FROM_REF \
           --default-ref $DEFAULT_REF \
-          --pushed-branch-name $CURRENT_BRANCH
+          --pushed-branch-name $CURRENT_BRANCH \
+          --changed-files-file "$RUNNER_TEMP/pre-commit-changed-files.txt"
 
       - name: Detect project changes
         id: changes
         env:
-          CHANGED_FILES: ${{ steps.prep.outputs.changed_files }}
+          CHANGED_FILES_FILE: ${{ steps.prep.outputs.changed_files_file }}
           # Add project names here (one per line) to enable conditional dependency installation
           PROJECTS_WITH_OPTIONAL_DEPS: >-
             hipdnn
         run: |
           # Check each project for changes
           for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
-            if echo "$CHANGED_FILES" | grep -qE "^(projects|shared)/$project/"; then
-              echo "${project}_changed=true" >> $GITHUB_OUTPUT
+            if grep -qE "^(projects|shared)/$project/" "$CHANGED_FILES_FILE"; then
+              echo "${project}_changed=true" >> "$GITHUB_OUTPUT"
             else
-              echo "${project}_changed=false" >> $GITHUB_OUTPUT
+              # grep exits 1 for "no match" (fine) vs >1 for a real error (e.g. unreadable file).
+              grep_status=$?
+              if [ "$grep_status" -ne 1 ]; then
+                exit "$grep_status"
+              fi
+              echo "${project}_changed=false" >> "$GITHUB_OUTPUT"
             fi
           done
 
