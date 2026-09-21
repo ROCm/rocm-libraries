@@ -112,9 +112,9 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t ScaleKPerWarp = 1;
 #else
     // Preshuffle only supports this case as checked by static asserts
-    static constexpr index_t MXdlPackEff = MXdlPack;
-    static constexpr index_t NXdlPackEff = NXdlPack;
-    static constexpr index_t KXdlPackEff = KXdlPack;
+    static constexpr index_t MXdlPackEff   = MXdlPack;
+    static constexpr index_t NXdlPackEff   = NXdlPack;
+    static constexpr index_t KXdlPackEff   = KXdlPack;
     static constexpr index_t ScaleKPerWarp = WaveSize / WarpGemm::kM;
 #endif
 

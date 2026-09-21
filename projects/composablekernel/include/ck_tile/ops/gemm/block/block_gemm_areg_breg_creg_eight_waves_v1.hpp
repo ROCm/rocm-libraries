@@ -399,7 +399,7 @@ struct BlockGemmARegBRegCRegEightWavesV1
                         merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                    // warp GEMM with MX scaling
+                // warp GEMM with MX scaling
 #if defined(CK_USE_GFX1250) && CK_TILE_USE_WMMA
                     WarpGemm{}
                         .template operator()<

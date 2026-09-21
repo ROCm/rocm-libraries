@@ -13,16 +13,16 @@ bool supports_split_k(ck_tile::index_t split_k)
     using Row         = ck_tile::tensor_layout::gemm::RowMajor;
     using Col         = ck_tile::tensor_layout::gemm::ColumnMajor;
     using Shape       = ck_tile::TileGemmShape<ck_tile::sequence<128, 128, 128>,
-                                         ck_tile::sequence<2, 2, 1>,
-                                         ck_tile::sequence<16, 16, 128>>;
+                                               ck_tile::sequence<2, 2, 1>,
+                                               ck_tile::sequence<16, 16, 128>>;
     using Partitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 4>;
     using Problem     = ck_tile::MxGemmPipelineProblem<
-        ck_tile::fp8_t,
-        ck_tile::fp8_t,
-        float,
-        Shape,
-        ck_tile::TileGemmUniversalTraits<true, true, false, true, Row, Col, Row, true>,
-        ck_tile::GemmPipelineScheduler::Intrawave>;
+            ck_tile::fp8_t,
+            ck_tile::fp8_t,
+            float,
+            Shape,
+            ck_tile::TileGemmUniversalTraits<true, true, false, true, Row, Col, Row, true>,
+            ck_tile::GemmPipelineScheduler::Intrawave>;
     using Pipeline        = ck_tile::GemmPipelineAgBgCrCompAsync<Problem>;
     using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ck_tile::fp8_t,
                                                              ck_tile::fp8_t,
