@@ -377,6 +377,43 @@ def test_rap_never_derives_fewer_ktiles_than_the_section_count(
     assert sol["_RAPNumResidentKTiles"] == sol["PrefetchGlobalRead"] + 1
 
 
+def test_rap_free_predicates_admit_whole_tiles_in_both_free_dims(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    """M and N are both "a whole number of tiles", nothing narrower.
+
+    M used to be SizeEqual: one M-tile, which made WorkGroup0 constant and the
+    resident A trivially the same for every tile a workgroup visited. The entry
+    guard now carries that instead, comparing the pending tile's M-tile as well
+    as its batch, so any multiple of MacroTile0 is sound. What the multiple costs
+    is a separate question -- with skGrid not a multiple of NumWorkGroups0 the
+    guard fires every tile and RAP reloads as often as it would without it --
+    but that is throughput, not correctness, and no predicate can express it
+    (skGrid is a launch property, not a problem size).
+
+    Still SizeMultiple rather than nothing: a partial tile in either dim takes
+    the edge store path, which the resident k-tile count is not budgeted against.
+    """
+    import Tensile.Contractions as C
+
+    sol, out = _derive(gfx1250_iim, assembler, capsys)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+
+    problemType = C.ProblemType.FromOriginalState(sol["ProblemType"])
+    preds = C.ProblemPredicate.CompoundPredicates(sol, problemType)
+    freePreds = {(p.index, p.tag, p.value) for p in preds if p.index in (0, 1)}
+
+    assert freePreds == {
+        (0, "SizeMultiple", sol["MacroTile0"]),
+        (1, "SizeMultiple", sol["MacroTile1"]),
+    }
+
+    # The distinction the tags alone do not show: SizeEqual would have refused
+    # every M above one tile, and those are the sizes this stage exists for.
+    mt0 = sol["MacroTile0"]
+    assert mt0 * 3 % mt0 == 0, "a multiple of MacroTile0 now satisfies the M predicate"
+
+
 def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
     _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch
 ):
@@ -517,6 +554,138 @@ def test_rap_turns_the_runtime_stagger_path_off(
     assert sol["ReuseAcrossPersistent"] == 1
     assert (sol["StaggerU"], sol["StaggerUMapping"], sol["StaggerUStride"]) == (0, 0, 0)
     assert sol["InternalSupportParams"]["SupportCustomStaggerU"] is False
+
+
+# ---------------------------------------------------------------------------
+# WorkGroupMapping. The entry guard recomputes this tile's M index from
+# StreamKIter as tileIdx % NumWorkGroups0, while A's address is built from
+# WorkGroup0 *after* DefaultWGM has remapped it. That remap folds WorkGroup1 --
+# which moves every persistent iteration -- into WorkGroup0, so with it live the
+# two disagree and the guard can pass a tile whose A has changed. This is the
+# invariant the M predicate rests on: with more than one M-tile the guard's
+# recomputation has to be the WorkGroup0 A's address was built from, and it is
+# only because no remap is emitted.
+#
+# Rejecting a non-1 WorkGroupMapping would not be enough, for the same reason it
+# was not enough for StaggerU: 0 means "the host predicts it at runtime" and
+# TENSILE_FIXED_WGM overrides whatever the solution asked for. RAP therefore
+# clears the capability flag, which stops the host packing the field at all.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"WorkGroupMapping": 8}, id="asked_for_the_library_default"),
+        pytest.param(
+            # 0 is "predicted at runtime", so the value the kernel sees is never
+            # in the solution at all. Legal on StreamK, which RAP requires.
+            {"WorkGroupMapping": 0},
+            id="asked_for_the_runtime_prediction",
+        ),
+        pytest.param(
+            # Already 1 at compile time: the case a reject could not have caught,
+            # because there is nothing to reject and the runtime field still wins.
+            {"WorkGroupMapping": 1},
+            id="already_one_at_compile_time",
+        ),
+    ],
+)
+def test_rap_turns_the_runtime_wgm_path_off(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys, overrides
+):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **overrides)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["ReuseAcrossPersistent"] == 1
+    assert sol["WorkGroupMapping"] == 1
+    assert sol["InternalSupportParams"]["SupportCustomWGM"] is False
+
+
+def test_non_rap_keeps_the_runtime_wgm_path(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    # The opt-out has to be RAP's, not something every StreamK kernel now pays.
+    sol, out = _derive(
+        gfx1250_iim, assembler, capsys, ReuseAcrossPersistent=0, WorkGroupMapping=8
+    )
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["WorkGroupMapping"] == 8
+    assert sol["InternalSupportParams"]["SupportCustomWGM"] is True
+
+
+def test_rap_is_rejected_with_space_filling_algo(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    # SpaceFillingCurveWalk is DefaultWGM's sibling, chosen at codegen, so the
+    # SupportCustomWGM opt-out inside DefaultWGM never runs for it. Rejecting the
+    # compile-time list is enough here where rejecting StaggerU was not: which
+    # algorithm gets emitted is baked into the assembly, only the WGM *value*
+    # arrives from a runtime field.
+    sol, out = _derive(gfx1250_iim, assembler, capsys, SpaceFillingAlgo=[0])
+    assert sol.get("Valid") is not True, "expected reject"
+    assert "SpaceFillingAlgo" in out
+
+
+def _wgm_writer():
+    """Minimal writer for DefaultWGM: pools, labels and the tmp-sgpr context."""
+    from Tensile.Common.RegisterPool import RegisterPool, RegisterType
+    from contextlib import contextmanager
+
+    next_tmp = [200]
+
+    @contextmanager
+    def _alloc_tmp_sgpr_list(nums, alignmentList=None, tag=""):
+        out = []
+        for size in nums:
+            out.append(SimpleNamespace(idx=next_tmp[0], size=size))
+            next_tmp[0] += size
+        yield out
+
+    return SimpleNamespace(
+        sgprPool=RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False),
+        vgprPool=RegisterPool(0, RegisterType.Vgpr, defaultPreventOverflow=False, printRP=False),
+        labels=SimpleNamespace(getNameInc=lambda name: name),
+        allocTmpSgprList=_alloc_tmp_sgpr_list,
+        states=SimpleNamespace(WGMTransformLevels=-1),
+    )
+
+
+def _wgm_kernel(supportCustomWGM):
+    return {
+        "InternalSupportParams": {"SupportCustomWGM": supportCustomWGM},
+        "WorkGroupMappingXCC": 1,
+        "ClusterDim": [1, 1],
+        "WavefrontSize": 32,
+    }
+
+
+@pytest.mark.parametrize(
+    "supported, want_instructions",
+    [
+        pytest.param(False, False, id="capability_off_emits_nothing"),
+        pytest.param(True, True, id="capability_on_still_emits"),
+    ],
+)
+def test_default_wgm_honours_the_capability_flag(supported, want_instructions):
+    """The device half of the opt-out.
+
+    Clearing SupportCustomWGM stops the host packing the field, which would
+    already leave the kernel reading a zero and taking the identity branch. The
+    kernel is made to carry no remap at all so the invariant can be checked by
+    reading this kernel rather than by trusting what the host sent -- the same
+    two-sided arrangement SupportCustomStaggerU has.
+    """
+    from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM
+
+    module = DefaultWGM(_wgm_writer(), _wgm_kernel(supported), "WGM")
+    # Comments are not instructions; count what the wave would actually execute.
+    text = str(module)
+    emitted = [
+        line for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("/*")
+    ]
+    if want_instructions:
+        assert emitted, "expected DefaultWGM to emit the remap"
+    else:
+        assert not emitted, f"expected no remap, got:\n{text}"
 
 
 # ---------------------------------------------------------------------------
