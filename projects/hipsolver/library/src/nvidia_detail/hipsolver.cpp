@@ -4439,7 +4439,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
@@ -4468,7 +4470,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
@@ -4497,7 +4501,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
@@ -4526,7 +4532,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+    if(trans != HIPSOLVER_OP_N && trans != HIPSOLVER_OP_T && trans != HIPSOLVER_OP_C)
+        return HIPSOLVER_STATUS_INVALID_ENUM;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n || batch_count < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;

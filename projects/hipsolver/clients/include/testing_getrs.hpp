@@ -731,7 +731,7 @@ void testing_getrs(Arguments& argus)
     {
         if constexpr(BATCHED)
         {
-            host_strided_batch_vector<int> hInfo(1, 1, 1, bc);
+            host_strided_batch_vector<int> hInfo(1, 1, 1, 1);
             EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
                                                   NPVT,
                                                   handle,

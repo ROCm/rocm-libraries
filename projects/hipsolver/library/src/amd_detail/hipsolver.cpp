@@ -7373,26 +7373,13 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
-        = hipsolver::rocblas2hip_status(rocsolver_sgetrs((rocblas_handle)handle,
-                                                         hipsolver::hip2rocblas_operation(trans),
-                                                         n,
-                                                         nrhs,
-                                                         nullptr,
-                                                         lda,
-                                                         nullptr,
-                                                         nullptr,
-                                                         ldb));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_sgetrs_npvt((rocblas_handle)handle,
-                              hipsolver::hip2rocblas_operation(trans),
-                              n,
-                              nrhs,
-                              nullptr,
-                              lda,
-                              nullptr,
-                              ldb));
+    hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_sgetrs(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_sgetrs_npvt(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7430,26 +7417,13 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
-        = hipsolver::rocblas2hip_status(rocsolver_dgetrs((rocblas_handle)handle,
-                                                         hipsolver::hip2rocblas_operation(trans),
-                                                         n,
-                                                         nrhs,
-                                                         nullptr,
-                                                         lda,
-                                                         nullptr,
-                                                         nullptr,
-                                                         ldb));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_dgetrs_npvt((rocblas_handle)handle,
-                              hipsolver::hip2rocblas_operation(trans),
-                              n,
-                              nrhs,
-                              nullptr,
-                              lda,
-                              nullptr,
-                              ldb));
+    hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_dgetrs(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_dgetrs_npvt(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7487,26 +7461,13 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
-        = hipsolver::rocblas2hip_status(rocsolver_cgetrs((rocblas_handle)handle,
-                                                         hipsolver::hip2rocblas_operation(trans),
-                                                         n,
-                                                         nrhs,
-                                                         nullptr,
-                                                         lda,
-                                                         nullptr,
-                                                         nullptr,
-                                                         ldb));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_cgetrs_npvt((rocblas_handle)handle,
-                              hipsolver::hip2rocblas_operation(trans),
-                              n,
-                              nrhs,
-                              nullptr,
-                              lda,
-                              nullptr,
-                              ldb));
+    hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_cgetrs(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_cgetrs_npvt(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7544,26 +7505,13 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status
-        = hipsolver::rocblas2hip_status(rocsolver_zgetrs((rocblas_handle)handle,
-                                                         hipsolver::hip2rocblas_operation(trans),
-                                                         n,
-                                                         nrhs,
-                                                         nullptr,
-                                                         lda,
-                                                         nullptr,
-                                                         nullptr,
-                                                         ldb));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_zgetrs_npvt((rocblas_handle)handle,
-                              hipsolver::hip2rocblas_operation(trans),
-                              n,
-                              nrhs,
-                              nullptr,
-                              lda,
-                              nullptr,
-                              ldb));
+    hipsolverStatus_t status      = hipsolver::rocblas2hip_status(rocsolver_zgetrs(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, nullptr, ldb));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_zgetrs_npvt(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7812,29 +7760,23 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status = hipsolver::rocblas2hip_status(
-        rocsolver_sgetrs_batched((rocblas_handle)handle,
-                                 hipsolver::hip2rocblas_operation(trans),
-                                 n,
-                                 nrhs,
-                                 nullptr,
-                                 lda,
-                                 nullptr,
-                                 strideP,
-                                 nullptr,
-                                 ldb,
-                                 batch_count));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_sgetrs_npvt_batched((rocblas_handle)handle,
-                                      hipsolver::hip2rocblas_operation(trans),
-                                      n,
-                                      nrhs,
-                                      nullptr,
-                                      lda,
-                                      nullptr,
-                                      ldb,
-                                      batch_count));
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_sgetrs_batched((rocblas_handle)handle,
+                                                                 roc_trans,
+                                                                 n,
+                                                                 nrhs,
+                                                                 nullptr,
+                                                                 lda,
+                                                                 nullptr,
+                                                                 strideP,
+                                                                 nullptr,
+                                                                 ldb,
+                                                                 batch_count));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_sgetrs_npvt_batched(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7874,29 +7816,23 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status = hipsolver::rocblas2hip_status(
-        rocsolver_dgetrs_batched((rocblas_handle)handle,
-                                 hipsolver::hip2rocblas_operation(trans),
-                                 n,
-                                 nrhs,
-                                 nullptr,
-                                 lda,
-                                 nullptr,
-                                 strideP,
-                                 nullptr,
-                                 ldb,
-                                 batch_count));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_dgetrs_npvt_batched((rocblas_handle)handle,
-                                      hipsolver::hip2rocblas_operation(trans),
-                                      n,
-                                      nrhs,
-                                      nullptr,
-                                      lda,
-                                      nullptr,
-                                      ldb,
-                                      batch_count));
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_dgetrs_batched((rocblas_handle)handle,
+                                                                 roc_trans,
+                                                                 n,
+                                                                 nrhs,
+                                                                 nullptr,
+                                                                 lda,
+                                                                 nullptr,
+                                                                 strideP,
+                                                                 nullptr,
+                                                                 ldb,
+                                                                 batch_count));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_dgetrs_npvt_batched(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7936,29 +7872,23 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status = hipsolver::rocblas2hip_status(
-        rocsolver_cgetrs_batched((rocblas_handle)handle,
-                                 hipsolver::hip2rocblas_operation(trans),
-                                 n,
-                                 nrhs,
-                                 nullptr,
-                                 lda,
-                                 nullptr,
-                                 strideP,
-                                 nullptr,
-                                 ldb,
-                                 batch_count));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_cgetrs_npvt_batched((rocblas_handle)handle,
-                                      hipsolver::hip2rocblas_operation(trans),
-                                      n,
-                                      nrhs,
-                                      nullptr,
-                                      lda,
-                                      nullptr,
-                                      ldb,
-                                      batch_count));
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_cgetrs_batched((rocblas_handle)handle,
+                                                                 roc_trans,
+                                                                 n,
+                                                                 nrhs,
+                                                                 nullptr,
+                                                                 lda,
+                                                                 nullptr,
+                                                                 strideP,
+                                                                 nullptr,
+                                                                 ldb,
+                                                                 batch_count));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_cgetrs_npvt_batched(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
@@ -7998,29 +7928,23 @@ try
     *lwork = 0;
     size_t sz;
 
+    rocblas_operation roc_trans = hipsolver::hip2rocblas_operation(trans);
+
     rocblas_start_device_memory_size_query((rocblas_handle)handle);
-    hipsolverStatus_t status = hipsolver::rocblas2hip_status(
-        rocsolver_zgetrs_batched((rocblas_handle)handle,
-                                 hipsolver::hip2rocblas_operation(trans),
-                                 n,
-                                 nrhs,
-                                 nullptr,
-                                 lda,
-                                 nullptr,
-                                 strideP,
-                                 nullptr,
-                                 ldb,
-                                 batch_count));
-    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(
-        rocsolver_zgetrs_npvt_batched((rocblas_handle)handle,
-                                      hipsolver::hip2rocblas_operation(trans),
-                                      n,
-                                      nrhs,
-                                      nullptr,
-                                      lda,
-                                      nullptr,
-                                      ldb,
-                                      batch_count));
+    hipsolverStatus_t status
+        = hipsolver::rocblas2hip_status(rocsolver_zgetrs_batched((rocblas_handle)handle,
+                                                                 roc_trans,
+                                                                 n,
+                                                                 nrhs,
+                                                                 nullptr,
+                                                                 lda,
+                                                                 nullptr,
+                                                                 strideP,
+                                                                 nullptr,
+                                                                 ldb,
+                                                                 batch_count));
+    hipsolverStatus_t npvt_status = hipsolver::rocblas2hip_status(rocsolver_zgetrs_npvt_batched(
+        (rocblas_handle)handle, roc_trans, n, nrhs, nullptr, lda, nullptr, ldb, batch_count));
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, &sz);
 
     if(status != HIPSOLVER_STATUS_SUCCESS)
