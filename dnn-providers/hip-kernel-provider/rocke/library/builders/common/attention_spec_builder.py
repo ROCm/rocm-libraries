@@ -334,9 +334,13 @@ def _tiled_spec_from_problem(
     # (kept as the fallback for SW edge cases the 4-warp excludes), so guard both flash
     # branches against the 4-warp cohort here -- otherwise the flash fields (num_warps=2,
     # single-buffer) build a spec the __post_init__ validator rejects for fp16 bs16/32.
-    if _enable_gfx942_bf16_flash(problem, arch) and not _kau._gfx942_4warp_fast(problem, arch):
+    if _enable_gfx942_bf16_flash(problem, arch) and not _kau._gfx942_4warp_fast(
+        problem, arch
+    ):
         return _spec_gfx942_bf16_flash(problem, arch)
-    if _enable_gfx942_fp16_flash(problem, arch) and not _kau._gfx942_4warp_fast(problem, arch):
+    if _enable_gfx942_fp16_flash(problem, arch) and not _kau._gfx942_4warp_fast(
+        problem, arch
+    ):
         return _spec_gfx942_fp16_flash(problem, arch)
     # Generic (non-flash) fallthrough, split by arch. The combo / single-batch
     # schedule / D256 machinery is gfx950-only (its predicates hard-gate to

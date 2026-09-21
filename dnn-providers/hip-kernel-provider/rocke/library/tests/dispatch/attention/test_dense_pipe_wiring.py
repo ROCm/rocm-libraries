@@ -277,7 +277,9 @@ class TestBf16FlashGate(unittest.TestCase):
 
     def test_bf16_flash_on_by_default_long_context(self):
         with _Gfx942Arch():
-            self.assertTrue(au._enable_gfx942_bf16_flash(self._bf16_problem(), "gfx942"))
+            self.assertTrue(
+                au._enable_gfx942_bf16_flash(self._bf16_problem(), "gfx942")
+            )
 
     def test_bf16_flash_short_context_disabled_mha(self):
         # MHA short-context (q=512<=768): small_q_narrow applies -> bf16 flash off.
@@ -391,7 +393,9 @@ class TestFp16FlashGate(unittest.TestCase):
 
     def test_mha_long_context_flash_enabled(self):
         with _Gfx942Arch():
-            self.assertTrue(au._enable_gfx942_fp16_flash(self._fp16_problem(), "gfx942"))
+            self.assertTrue(
+                au._enable_gfx942_fp16_flash(self._fp16_problem(), "gfx942")
+            )
 
     def test_mha_short_context_flash_enabled(self):
         # Key behaviour from the commit: MHA short-context no longer excluded.
@@ -415,7 +419,9 @@ class TestFp16FlashGate(unittest.TestCase):
         old = au._RESOLVED_ATTENTION_ARCH
         au._RESOLVED_ATTENTION_ARCH = "gfx950"
         try:
-            self.assertFalse(au._enable_gfx942_fp16_flash(self._fp16_problem(), "gfx950"))
+            self.assertFalse(
+                au._enable_gfx942_fp16_flash(self._fp16_problem(), "gfx950")
+            )
         finally:
             au._RESOLVED_ATTENTION_ARCH = old
 

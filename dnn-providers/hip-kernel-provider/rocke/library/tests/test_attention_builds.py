@@ -1953,7 +1953,8 @@ class TestAttentionHelpers(unittest.TestCase):
         )
         with _patch_resolved_arch("gfx942"):
             self.assertTrue(
-                au._enable_gfx942_l4(p, "gfx942"), "shape must be in the gfx942 L4 flash region"
+                au._enable_gfx942_l4(p, "gfx942"),
+                "shape must be in the gfx942 L4 flash region",
             )
             self.assertEqual(
                 au._select_2d_num_warps(p, "gfx942"),
@@ -2048,7 +2049,9 @@ class TestAttentionHelpers(unittest.TestCase):
             # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
             # cohort gate must still exclude it.
             self.assertFalse(
-                au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1), "gfx942")
+                au._enable_gfx942_sink_prefill_tuned(
+                    _make_problem(max_seqlen_q=1), "gfx942"
+                )
             )
 
     def test_gfx950_sink_prefill_wpe3_cohort(self):
@@ -2090,11 +2093,15 @@ class TestAttentionHelpers(unittest.TestCase):
                     self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p, "gfx950"))
             # Decode (q==1) routes to 3D; gate must still exclude it.
             self.assertFalse(
-                au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1), "gfx950")
+                au._enable_gfx950_sink_prefill_wpe3(
+                    _make_problem(max_seqlen_q=1), "gfx950"
+                )
             )
             # gfx942 must not hit the gfx950 gate.
             with _patch_resolved_arch("gfx942"):
-                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem(), "gfx942"))
+                self.assertFalse(
+                    au._enable_gfx950_sink_prefill_wpe3(_make_problem(), "gfx942")
+                )
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry

@@ -149,7 +149,9 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         # __post_init__ -> proves overrides= is really applied, not ignored.
         problem = _problem(_d256())
         with self.assertRaises(ValueError):
-            au._tiled_spec_from_problem(problem, "gfx950", overrides={"use_register_pv": True})
+            au._tiled_spec_from_problem(
+                problem, "gfx950", overrides={"use_register_pv": True}
+            )
 
 
 if __name__ == "__main__":

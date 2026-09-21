@@ -1192,7 +1192,9 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
 
         ok_t, _ = supports_native_unified_attention_tiled(problem, "gfx942")
         instance_name = (
-            _tiled_spec_from_problem(problem, "gfx942").kernel_name() if ok_t else "scalar"
+            _tiled_spec_from_problem(problem, "gfx942").kernel_name()
+            if ok_t
+            else "scalar"
         )
     elif run_backend == "3d":
         from kernels import supports_native_unified_attention_3d_tiled

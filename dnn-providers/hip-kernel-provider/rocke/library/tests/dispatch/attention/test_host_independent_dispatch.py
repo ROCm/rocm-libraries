@@ -56,10 +56,14 @@ class TestDispatchDoesNotReadLiveDevice(unittest.TestCase):
 
     def _assert_no_live_arch_call(self, arch: str, **kw):
         req = _make_request(arch, **kw)
-        with patch.object(au, "_resolve_attention_arch", side_effect=AssertionError(
-            f"_resolve_attention_arch() called during dispatch for arch={arch!r} — "
-            "selection path must not read the live device"
-        )):
+        with patch.object(
+            au,
+            "_resolve_attention_arch",
+            side_effect=AssertionError(
+                f"_resolve_attention_arch() called during dispatch for arch={arch!r} — "
+                "selection path must not read the live device"
+            ),
+        ):
             # If _resolve_attention_arch() is called on the selection path the
             # patch raises AssertionError, failing the test.
             result = dispatch_attention(req)
@@ -156,9 +160,13 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
         # lookup raise so the test fails fast if the dispatch path falls through.
         with (
             patch.object(au, "_RESOLVED_ATTENTION_ARCH", None),
-            patch.object(au, "_resolve_attention_arch", side_effect=AssertionError(
-                "live GPU read during dispatch — must not happen on selection path"
-            )),
+            patch.object(
+                au,
+                "_resolve_attention_arch",
+                side_effect=AssertionError(
+                    "live GPU read during dispatch — must not happen on selection path"
+                ),
+            ),
         ):
             for arch in ("gfx942", "gfx950", "gfx1250"):
                 with self.subTest(arch=arch):
@@ -168,33 +176,53 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
 
     def test_bf16_gfx942_dispatch_no_device_read(self):
         """bf16 gfx942 dispatch uses request arch, not live device."""
-        with patch.object(au, "_resolve_attention_arch", side_effect=AssertionError(
-            "live GPU read on selection path"
-        )):
+        with patch.object(
+            au,
+            "_resolve_attention_arch",
+            side_effect=AssertionError("live GPU read on selection path"),
+        ):
             req = _make_request("gfx942", dtype="bf16", seqlen_q=1024, seqlen_k=2048)
             result = dispatch_attention(req)
             self.assertIsNotNone(result.spec)
 
     def test_gfx950_dispatch_no_device_read(self):
         """gfx950 dispatch (combo/transposed path) uses request arch."""
-        with patch.object(au, "_resolve_attention_arch", side_effect=AssertionError(
-            "live GPU read on selection path"
-        )):
+        with patch.object(
+            au,
+            "_resolve_attention_arch",
+            side_effect=AssertionError("live GPU read on selection path"),
+        ):
             req = _make_request(
-                "gfx950", dtype="bf16", batch=2, nhead_q=64, nhead_k=8,
-                seqlen_q=1024, seqlen_k=1024, hdim_q=64, hdim_v=64,
+                "gfx950",
+                dtype="bf16",
+                batch=2,
+                nhead_q=64,
+                nhead_k=8,
+                seqlen_q=1024,
+                seqlen_k=1024,
+                hdim_q=64,
+                hdim_v=64,
             )
             result = dispatch_attention(req)
             self.assertIsNotNone(result.spec)
 
     def test_gfx1250_dispatch_no_device_read(self):
         """gfx1250 dispatch uses request arch, not live device."""
-        with patch.object(au, "_resolve_attention_arch", side_effect=AssertionError(
-            "live GPU read on selection path"
-        )):
+        with patch.object(
+            au,
+            "_resolve_attention_arch",
+            side_effect=AssertionError("live GPU read on selection path"),
+        ):
             req = _make_request(
-                "gfx1250", dtype="fp16", batch=2, nhead_q=16, nhead_k=16,
-                seqlen_q=512, seqlen_k=512, hdim_q=128, hdim_v=128,
+                "gfx1250",
+                dtype="fp16",
+                batch=2,
+                nhead_q=16,
+                nhead_k=16,
+                seqlen_q=512,
+                seqlen_k=512,
+                hdim_q=128,
+                hdim_v=128,
             )
             result = dispatch_attention(req)
             self.assertIsNotNone(result.spec)

@@ -106,7 +106,8 @@ class TestGfx942D128SwRouting(unittest.TestCase):
             for dt in ("bf16", "fp16"):
                 p = _d128_problem(dtype=dt, softcap=30.0)
                 self.assertFalse(
-                    au._gfx942_4warp_fast(p, "gfx942"), msg=f"{dt} softcap must not take 4-warp"
+                    au._gfx942_4warp_fast(p, "gfx942"),
+                    msg=f"{dt} softcap must not take 4-warp",
                 )
 
     def test_sw_spec_is_4warp_discriminator(self):
@@ -212,7 +213,8 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                 for kw in variants:
                     p = _d128_problem(dtype=dt, **kw)
                     self.assertTrue(
-                        au._gfx942_4warp_fast(p, "gfx942"), msg=f"{dt} {kw} must take 4-warp"
+                        au._gfx942_4warp_fast(p, "gfx942"),
+                        msg=f"{dt} {kw} must take 4-warp",
                     )
                     spec = _tiled_spec_from_problem(p, "gfx942")
                     self.assertEqual(spec.num_warps, 1, msg=f"{dt} {kw} num_warps")
@@ -233,7 +235,8 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                         msg=f"{dt} {kw} must not be SW cohort",
                     )
                     self.assertFalse(
-                        au._gfx942_4warp_fast(p, "gfx942"), msg=f"{dt} {kw} must not take 4-warp"
+                        au._gfx942_4warp_fast(p, "gfx942"),
+                        msg=f"{dt} {kw} must not take 4-warp",
                     )
                     # Fallback still produces a buildable spec for configs within the
                     # tiled block_size domain (softcap only excludes the 4-warp cohort,
@@ -273,10 +276,14 @@ class TestGfx942D128SwRouting(unittest.TestCase):
                 self.assertEqual(route.block_dim, (256, 1, 1), msg=tag)
                 # Selectors must read the descriptor (no silent divergence).
                 self.assertEqual(
-                    au._select_2d_num_warps(p, "gfx942"), route.disc["num_warps"], msg=tag
+                    au._select_2d_num_warps(p, "gfx942"),
+                    route.disc["num_warps"],
+                    msg=tag,
                 )
                 self.assertEqual(
-                    au._select_2d_tile_size(p, "gfx942"), route.disc["tile_size"], msg=tag
+                    au._select_2d_tile_size(p, "gfx942"),
+                    route.disc["tile_size"],
+                    msg=tag,
                 )
                 self.assertEqual(
                     au._select_2d_block_m_per_warp(p, "gfx942"),

@@ -118,7 +118,9 @@ class TestGfx942GqaHeadFoldLaunchGrid(unittest.TestCase):
     def _grid(self, problem):
         au._2D_LAUNCH_META.clear()
         with _PinArch("gfx942"):
-            return _get_2d_launch_meta(problem, _tiled_cache_key(problem, "gfx942")).grid
+            return _get_2d_launch_meta(
+                problem, _tiled_cache_key(problem, "gfx942")
+            ).grid
 
     def test_fold_grids_over_kv_heads(self):
         p = _problem(dtype="bf16", block_size=16)  # fold-eligible

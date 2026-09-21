@@ -66,7 +66,9 @@ class TestD256Gfx942FastGate(unittest.TestCase):
 
     def test_gate_accepts_block_size_16(self):
         with _PinArch("gfx942"):
-            self.assertTrue(au._d256_gfx942_fast(_d256_problem(block_size=16), "gfx942"))
+            self.assertTrue(
+                au._d256_gfx942_fast(_d256_problem(block_size=16), "gfx942")
+            )
 
     def test_gate_rejects_non_gfx942_arch(self):
         # Same problem must NOT take the gfx942 fast path on another arch.
@@ -75,21 +77,29 @@ class TestD256Gfx942FastGate(unittest.TestCase):
 
     def test_gate_rejects_non_bf16(self):
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(dtype="fp16"), "gfx942"))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(dtype="fp16"), "gfx942")
+            )
 
     def test_gate_rejects_wrong_head_size(self):
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(head_size=128), "gfx942"))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(head_size=128), "gfx942")
+            )
 
     def test_gate_rejects_block_size_64(self):
         # block_size=64 cleanly falls back to the default builder (tile%block).
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(block_size=64), "gfx942"))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(block_size=64), "gfx942")
+            )
 
     def test_gate_rejects_decode(self):
         # max_seqlen_q == 1 is decode, not prefill.
         with _PinArch("gfx942"):
-            self.assertFalse(au._d256_gfx942_fast(_d256_problem(max_seqlen_q=1), "gfx942"))
+            self.assertFalse(
+                au._d256_gfx942_fast(_d256_problem(max_seqlen_q=1), "gfx942")
+            )
 
     def test_gate_rejects_feature_flags(self):
         with _PinArch("gfx942"):
@@ -173,7 +183,9 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
         the external ``_d256_gfx942_fast`` gate enforces ``window == 0``; this guard
         makes the builder self-protecting if a future D256+SWA routing is wired up."""
         with _PinArch("gfx942"):
-            spec = au._tiled_spec_from_problem(_d256_problem(sliding_window=256), "gfx942")
+            spec = au._tiled_spec_from_problem(
+                _d256_problem(sliding_window=256), "gfx942"
+            )
             with self.assertRaises(NotImplementedError):
                 t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
 
