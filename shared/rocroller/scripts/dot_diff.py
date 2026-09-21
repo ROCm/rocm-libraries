@@ -1,36 +1,12 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
-
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import argparse
 import difflib
-import pathlib
 import subprocess
-from typing import List
+from pathlib import Path
 
 
 def color_node(line: str, is_addition: bool):
@@ -46,7 +22,7 @@ def color_node(line: str, is_addition: bool):
     return line
 
 
-def diff_dots(dots: List[str]) -> List[str]:
+def diff_dots(dots: list[str]) -> list[str]:
     dots_diff = []
     for i, dot in enumerate(dots):
         if i + 1 == len(dots):
@@ -100,11 +76,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dots_in = []
     for fname in args.fnames:
-        dots_in.append(pathlib.Path(fname).read_text())
+        dots_in.append(Path(fname).read_text())
 
     dots = diff_dots(dots_in)
     for i, dot in enumerate(dots):
-        out_fname = pathlib.Path(args.output + f"_{i:04d}")
+        out_fname = Path(args.output + f"_{i:04d}")
         out_fname.with_suffix(".dot").write_text(dot)
         if not args.dot_only:
             with out_fname.with_suffix(".pdf").open("w") as out:

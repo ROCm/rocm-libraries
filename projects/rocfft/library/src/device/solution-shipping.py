@@ -43,17 +43,6 @@ def cjoin(xs):
     return ','.join(str(x) for x in xs)
 
 
-# get gfx___ which is the prefix of the solution map
-def get_local_gpu_gfx(archs):
-    archs_gfx = []
-    for arch in archs:
-        gfx_target = arch.split(':')[0]
-        if gfx_target not in archs_gfx:
-            archs_gfx.append(gfx_target)
-
-    return archs_gfx
-
-
 #
 # Prototype generators
 #
@@ -220,21 +209,11 @@ def generate_solution_map(solutions):
 #
 
 
-def generate_solutions(archs, folder):
+def generate_solutions(solution_files):
     solutions = []
-    path = Path(folder)
-
-    if not path.exists():
-        return solutions
-
-    all_files = [f for f in listdir(folder) if isfile(join(folder, f))]
-    # solution map file
-    target_files = [
-        join(folder, f) for f in all_files if f.split('_')[0] in archs
-    ]
 
     # get solutions part
-    for file in target_files:
+    for file in solution_files:
         solution_map_file = open(file, 'r')
         solution_map_data = json.load(solution_map_file)
 
@@ -281,31 +260,16 @@ def generate_solutions(archs, folder):
 def cli():
     """Command line interface..."""
     parser = argparse.ArgumentParser(prog='solution-shipping')
-    parser.add_argument('--gpu-arch',
+    parser.add_argument('--solution_files',
                         type=str,
-                        help='Solutions of specific gpu arch')
-    parser.add_argument('--data-folder',
-                        type=str,
-                        help='Folder containing the solution map text files.')
+                        nargs='*',
+                        help='Solution map text files.')
 
     args = parser.parse_args()
 
-    print('-- gpu_arch=' + args.gpu_arch)
-    print('-- data-folder=' + args.data_folder)
+    print('-- solution_files=' + str(args.solution_files))
 
-    archs = args.gpu_arch.split(' ')
-    if 'all' in archs:
-        archs = [
-            'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx942', 'gfx1030',
-            'gfx1100', 'gfx1101', 'gfx1102', 'gfx1150', 'gfx1151', 'gfx1152', 'gfx1153',
-            'gfx1200', 'gfx1201'
-        ]
-
-    # remove xnack and sramecc
-    archs = get_local_gpu_gfx(archs)
-    archs.append('any')
-
-    solutions = generate_solutions(archs, args.data_folder)
+    solutions = generate_solutions(args.solution_files)
 
     write('solutions.cpp', generate_solution_map(solutions), format=True)
 

@@ -282,6 +282,7 @@ TEST(PrimitiveMergeTests, TestMergeDevice)
         thrust::raw_pointer_cast(&d_a[0]),
         thrust::raw_pointer_cast(&d_b[0]),
         thrust::raw_pointer_cast(&d_result[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_result, d_result);
     }

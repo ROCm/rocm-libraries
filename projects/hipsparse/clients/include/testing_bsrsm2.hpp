@@ -521,7 +521,7 @@ void testing_bsrsm2(Arguments argus)
     int                    m         = argus.M;
     int                    nrhs      = argus.N;
     int                    block_dim = argus.block_dim;
-    T                      h_alpha   = make_DataType<T>(argus.alpha);
+    T                      h_alpha   = argus.get_alpha<T>();
     hipsparseDirection_t   dir       = argus.dirA;
     hipsparseIndexBase_t   idx_base  = argus.baseA;
     hipsparseOperation_t   transA    = argus.transA;

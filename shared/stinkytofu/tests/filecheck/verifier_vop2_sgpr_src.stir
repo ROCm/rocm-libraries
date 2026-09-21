@@ -1,0 +1,46 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# Verify that VOP2/VOPC instructions accept SGPR source operands without
+# triggering register-type errors.  The base VOP2 encoding restricts src1
+# to vgpr, but VOP3 promotion widens it to accept SGPRs.  The verifier
+# must check promotedFields before rejecting.
+
+#--- v_mul_u32_u24 with SGPR src1
+# CHECK-LABEL: @vop2_sgpr_src1_mul
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: v_mul_u32_u24
+
+st.func @vop2_sgpr_src1_mul() {
+^entry:
+  v1 = "st.v_mul_u32_u24"(v0, s16) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- v_cmp_eq_u32 with SGPR src1
+# CHECK-LABEL: @vopc_sgpr_src1_cmp_eq
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: v_cmp_eq_u32
+
+st.func @vopc_sgpr_src1_cmp_eq() {
+^entry:
+  vcc_lo0 = "st.v_cmp_eq_u32"(v1, s16) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- v_cmp_gt_u32 with SGPR src1
+# CHECK-LABEL: @vopc_sgpr_src1_cmp_gt
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: v_cmp_gt_u32
+
+st.func @vopc_sgpr_src1_cmp_gt() {
+^entry:
+  vcc_lo0 = "st.v_cmp_gt_u32"(v1, s15) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- v_cmp_ge_u32 with SGPR src1
+# CHECK-LABEL: @vopc_sgpr_src1_cmp_ge
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: v_cmp_ge_u32
+
+st.func @vopc_sgpr_src1_cmp_ge() {
+^entry:
+  vcc_lo0 = "st.v_cmp_ge_u32"(v2, s18) { issueCycles = 1, latencyCycles = 5 }
+}

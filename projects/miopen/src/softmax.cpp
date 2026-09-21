@@ -1,28 +1,7 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#include "miopen/execution_context.hpp"
+#include "miopen/softmax/problem_description.hpp"
 #include <miopen/kernel_cache.hpp>
 #include <miopen/softmax.hpp>
 #include <miopen/float_equal.hpp>
@@ -36,6 +15,15 @@
 #include <nlohmann/json.hpp>
 
 namespace miopen {
+
+namespace softmax {
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
+                            const miopen::softmax::ProblemDescriptionTag&)
+{
+    return {
+        DbKinds::PerfDb, context.GetPerfDbPath("softmax"), context.GetUserPerfDbPath("softmax")};
+}
+} // namespace softmax
 
 extern "C" miopenStatus_t miopenCreateSoftmaxDescriptor(miopenSoftmaxDescriptor_t* softmaxDesc)
 {
@@ -75,9 +63,8 @@ extern "C" miopenStatus_t miopenGetSoftmaxDescriptor(const miopenSoftmaxDescript
 
 std::ostream& operator<<(std::ostream& stream, const SoftmaxDescriptor& x)
 {
-    stream << "softmax,"
-           << "alpha" << x.GetAlpha() << ",beta" << x.GetBeta() << ",algorithm" << x.GetAlgorithm()
-           << ",mode" << x.GetMode() << ",";
+    stream << "softmax," << "alpha" << x.GetAlpha() << ",beta" << x.GetBeta() << ",algorithm"
+           << x.GetAlgorithm() << ",mode" << x.GetMode() << ",";
 
     return stream;
 }
@@ -117,12 +104,14 @@ miopenStatus_t SoftmaxForward(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "Null pointer for tensor.");
     }
 
-    const auto problem = softmax::ProblemDescription{alpha, beta, xDesc, yDesc, algorithm, mode};
+    const auto problem =
+        softmax::ProblemDescription{alpha, beta, xDesc, yDesc, algorithm, mode, x_offset, y_offset};
     const auto invoke_params =
-        softmax::InvokeParams{alpha, beta, xDesc, x, yDesc, y, algorithm, mode, x_offset, y_offset};
-    const auto algo = AlgorithmName{"Softmax"};
-    const auto solvers =
-        solver::SolverContainer<solver::softmax::AttnSoftmax, solver::softmax::Softmax>{};
+        softmax::InvokeParams{alpha, beta, xDesc, x, yDesc, y, x_offset, y_offset};
+    const auto algo    = AlgorithmName{"Softmax"};
+    const auto solvers = solver::SolverContainer<solver::softmax::AttnSoftmax,
+                                                 solver::softmax::Softmax,
+                                                 solver::softmax::SoftmaxNoncontiguous>{};
     solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
 
     return miopenStatusSuccess;
@@ -148,23 +137,13 @@ miopenStatus_t SoftmaxBackward(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "Null pointer for tensor.");
     }
 
-    const auto problem =
-        softmax::ProblemDescription{alpha, beta, yDesc, dyDesc, dxDesc, algorithm, mode};
-    const auto invoke_params = softmax::InvokeParams{alpha,
-                                                     beta,
-                                                     yDesc,
-                                                     y,
-                                                     dyDesc,
-                                                     dy,
-                                                     dxDesc,
-                                                     dx,
-                                                     algorithm,
-                                                     mode,
-                                                     y_offset,
-                                                     dy_offset,
-                                                     dx_offset};
-    const auto algo          = AlgorithmName{"Softmax"};
-    const auto solvers       = solver::SolverContainer<solver::softmax::Softmax>{};
+    const auto problem = softmax::ProblemDescription{
+        alpha, beta, yDesc, dyDesc, dxDesc, algorithm, mode, y_offset, dy_offset, dx_offset};
+    const auto invoke_params = softmax::InvokeParams{
+        alpha, beta, yDesc, y, dyDesc, dy, dxDesc, dx, y_offset, dx_offset, dy_offset};
+    const auto algo = AlgorithmName{"Softmax"};
+    const auto solvers =
+        solver::SolverContainer<solver::softmax::Softmax, solver::softmax::SoftmaxNoncontiguous>{};
     solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
 
     return miopenStatusSuccess;

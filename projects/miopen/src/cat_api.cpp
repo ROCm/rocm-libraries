@@ -56,7 +56,7 @@ static void LogCmdCat(const miopenTensorDescriptor_t* xDescs, int32_t xCount, bo
             for(auto dim : dims)
             {
                 batch_sz += std::to_string(dim);
-                batch_sz += ",";
+                batch_sz += ',';
             }
             batch_sz.pop_back();
             ss << " -dims " << batch_sz;

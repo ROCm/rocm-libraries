@@ -43,6 +43,21 @@ extern std::thread::id g_main_thread_id;
 extern thread_local hipblaslt_rng_t t_hipblaslt_rng;
 extern thread_local int             t_hipblaslt_rand_idx;
 
+
+template <typename T>
+constexpr bool is_std_complex_v
+    = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
+
+// Extracts the underlying scalar type: scalar_of_t<float> = float,
+// scalar_of_t<std::complex<double>> = double. Unlike T::value_type,
+// this is safe to use even when T is a non-complex scalar type.
+template <typename T>
+struct scalar_of { using type = T; };
+template <typename T>
+struct scalar_of<std::complex<T>> { using type = T; };
+template <typename T>
+using scalar_of_t = typename scalar_of<T>::type;
+
 // optimized helper
 float hipblaslt_uniform_int_1_10();
 
@@ -202,6 +217,30 @@ public:
         return x.value;
     }
 #endif
+
+    // Single NaN e8...
+    explicit operator hipblaslt_e8()
+    {
+        union
+        {
+            uint8_t      bits;
+            hipblaslt_e8 value;
+        } x;
+        x.bits = 0xff;
+        return x.value;
+    }
+
+    // Single NaN e8...
+    explicit operator hipblaslt_e5m3()
+    {
+        union
+        {
+            uint8_t        bits;
+            hipblaslt_e5m3 value;
+        } x;
+        x.bits = 0xff;
+        return x.value;
+    }
 };
 
 /* ============================================================================================ */
@@ -350,7 +389,15 @@ inline void random_run_generator_small(T* ptr, size_t num)
 {
     for(size_t i = 0; i < num; i++)
     {
-        ptr[i] = random_generator<T>() / 10.f;
+        if constexpr(is_std_complex_v<T>)
+        {
+            using RealT = typename T::value_type;
+            ptr[i] = random_generator<T>() / static_cast<RealT>(10.0);
+        }
+        else
+        {
+            ptr[i] = random_generator<T>() / static_cast<double>(10.0);
+        }
     }
 }
 
@@ -397,6 +444,32 @@ inline hip_bfloat16 random_hpl_generator()
     return hip_bfloat16(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipblaslt_rng));
 }
 
+/*! \brief  generate a random number in [-6.0,6.0] doubles  */
+template <typename T>
+inline T random_low_precision_generator()
+{
+    return static_cast<T>(std::uniform_real_distribution<double>(-6.0, 6.0)(t_hipblaslt_rng));
+}
+
+template <>
+inline int8_t random_low_precision_generator()
+{
+    auto saturate = [](double val) {
+        auto _val = std::nearbyint(val);
+        _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
+        return _val;
+    };
+
+    return static_cast<int8_t>(
+        saturate(std::uniform_real_distribution<double>(-6.0, 6.0)(t_hipblaslt_rng)));
+}
+
+template <>
+inline hip_bfloat16 random_low_precision_generator()
+{
+    return hip_bfloat16(std::uniform_real_distribution<float>(-6.0, 6.0)(t_hipblaslt_rng));
+}
+
 /*! \brief  generate a random ASCII string of up to length n */
 inline std::string random_string(size_t n)
 {
@@ -424,7 +497,7 @@ namespace hipblaslt_norm_dist
     };
 
     // Device function to initialize XORWOW state
-    __device__ void init_xorwow(XorwowState* state, unsigned int seed)
+    __host__ __device__ inline void init_xorwow(XorwowState* state, unsigned int seed)
     {
         unsigned int s = seed;
         for(int i = 0; i < 5; ++i)
@@ -436,7 +509,7 @@ namespace hipblaslt_norm_dist
     }
 
     // Device function for XORWOW RNG
-    __device__ unsigned int xorwow_rand(XorwowState* state)
+    __host__ __device__ inline unsigned int xorwow_rand(XorwowState* state)
     {
         unsigned int t = state->x[4];
         unsigned int s = state->x[0];
@@ -452,13 +525,13 @@ namespace hipblaslt_norm_dist
     }
 
     // Device function for uniform distribution
-    __device__ float xorwow_uniform(XorwowState* state)
+    __host__ __device__ inline float xorwow_uniform(XorwowState* state)
     {
         return xorwow_rand(state) / 4294967296.0f;
     }
 
     // Device function for Box-Muller normal distribution
-    __device__ float box_muller_normal(XorwowState* state)
+    __host__ __device__ inline float box_muller_normal(XorwowState* state)
     {
         float u1 = xorwow_uniform(state);
         float u2 = xorwow_uniform(state);
@@ -468,4 +541,5 @@ namespace hipblaslt_norm_dist
         float theta = 2.0f * 3.1415926535f * u2;
         return r * cosf(theta);
     }
+
 }

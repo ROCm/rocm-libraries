@@ -22403,6 +22403,209 @@ module rocblas
         end function rocblas_zgemm_batched_64
     end interface
 
+    ! gemm_grouped_batched
+    interface
+        function rocblas_sgemm_grouped_batched(handle, transa_array, transb_array, &
+                                               m_array, n_array, k_array, alpha_array, &
+                                               Aarray, lda_array, Barray, ldb_array, &
+                                               beta_array, Carray, ldc_array, group_count, &
+                                               group_size) &
+            bind(c, name='rocblas_sgemm_grouped_batched')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_sgemm_grouped_batched
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transa_array
+            type(c_ptr), value :: transb_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+        end function rocblas_sgemm_grouped_batched
+    end interface
+
+    interface
+        function rocblas_dgemm_grouped_batched(handle, transa_array, transb_array, &
+                                               m_array, n_array, k_array, alpha_array, &
+                                               Aarray, lda_array, Barray, ldb_array, &
+                                               beta_array, Carray, ldc_array, group_count, &
+                                               group_size) &
+            bind(c, name='rocblas_dgemm_grouped_batched')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_dgemm_grouped_batched
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transa_array
+            type(c_ptr), value :: transb_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+        end function rocblas_dgemm_grouped_batched
+    end interface
+
+    ! gemm_grouped_batched_64
+    interface
+        function rocblas_sgemm_grouped_batched_64(handle, transa_array, transb_array, &
+                                                  m_array, n_array, k_array, alpha_array, &
+                                                  Aarray, lda_array, Barray, ldb_array, &
+                                                  beta_array, Carray, ldc_array, group_count, &
+                                                  group_size) &
+            bind(c, name='rocblas_sgemm_grouped_batched_64')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_sgemm_grouped_batched_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transa_array
+            type(c_ptr), value :: transb_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+        end function rocblas_sgemm_grouped_batched_64
+    end interface
+
+    interface
+        function rocblas_dgemm_grouped_batched_64(handle, transa_array, transb_array, &
+                                                  m_array, n_array, k_array, alpha_array, &
+                                                  Aarray, lda_array, Barray, ldb_array, &
+                                                  beta_array, Carray, ldc_array, group_count, &
+                                                  group_size) &
+            bind(c, name='rocblas_dgemm_grouped_batched_64')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_dgemm_grouped_batched_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transa_array
+            type(c_ptr), value :: transb_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            type(c_ptr), value :: ldc_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+        end function rocblas_dgemm_grouped_batched_64
+    end interface
+
+    ! gemm_grouped_batched_ex
+    interface
+        function rocblas_gemm_grouped_batched_ex(handle, transa_array, transb_array, &
+                                                 m_array, n_array, k_array, alpha_array, &
+                                                 Aarray, a_type, lda_array, Barray, b_type, &
+                                                 ldb_array, beta_array, Carray, c_type, ldc_array, &
+                                                 Darray, d_type, ldd_array, group_count, group_size, &
+                                                 compute_type, algo, flags) &
+            bind(c, name='rocblas_gemm_grouped_batched_ex')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_gemm_grouped_batched_ex
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transa_array
+            type(c_ptr), value :: transb_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            integer(kind(rocblas_datatype_f16_r)), value :: a_type
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            integer(kind(rocblas_datatype_f16_r)), value :: b_type
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            integer(kind(rocblas_datatype_f16_r)), value :: c_type
+            type(c_ptr), value :: ldc_array
+            type(c_ptr), value :: Darray
+            integer(kind(rocblas_datatype_f16_r)), value :: d_type
+            type(c_ptr), value :: ldd_array
+            integer(c_int), value :: group_count
+            type(c_ptr), value :: group_size
+            integer(kind(rocblas_datatype_f16_r)), value :: compute_type
+            integer(kind(rocblas_gemm_algo_standard)), value :: algo
+            integer(c_int32_t), value :: flags
+        end function rocblas_gemm_grouped_batched_ex
+    end interface
+
+    interface
+        function rocblas_gemm_grouped_batched_ex_64(handle, transa_array, transb_array, &
+                                                    m_array, n_array, k_array, alpha_array, &
+                                                    Aarray, a_type, lda_array, Barray, b_type, &
+                                                    ldb_array, beta_array, Carray, c_type, ldc_array, &
+                                                    Darray, d_type, ldd_array, group_count, group_size, &
+                                                    compute_type, algo, flags) &
+            bind(c, name='rocblas_gemm_grouped_batched_ex_64')
+            use iso_c_binding
+            use rocblas_enums
+            implicit none
+            integer(kind(rocblas_status_success)) :: rocblas_gemm_grouped_batched_ex_64
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: transa_array
+            type(c_ptr), value :: transb_array
+            type(c_ptr), value :: m_array
+            type(c_ptr), value :: n_array
+            type(c_ptr), value :: k_array
+            type(c_ptr), value :: alpha_array
+            type(c_ptr), value :: Aarray
+            integer(kind(rocblas_datatype_f16_r)), value :: a_type
+            type(c_ptr), value :: lda_array
+            type(c_ptr), value :: Barray
+            integer(kind(rocblas_datatype_f16_r)), value :: b_type
+            type(c_ptr), value :: ldb_array
+            type(c_ptr), value :: beta_array
+            type(c_ptr), value :: Carray
+            integer(kind(rocblas_datatype_f16_r)), value :: c_type
+            type(c_ptr), value :: ldc_array
+            type(c_ptr), value :: Darray
+            integer(kind(rocblas_datatype_f16_r)), value :: d_type
+            type(c_ptr), value :: ldd_array
+            integer(c_int64_t), value :: group_count
+            type(c_ptr), value :: group_size
+            integer(kind(rocblas_datatype_f16_r)), value :: compute_type
+            integer(kind(rocblas_gemm_algo_standard)), value :: algo
+            integer(c_int32_t), value :: flags
+        end function rocblas_gemm_grouped_batched_ex_64
+    end interface
+
     ! gemm_strided_batched
     interface
         function rocblas_hgemm_strided_batched(handle, transA, transB, m, n, k, alpha, &

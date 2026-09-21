@@ -8,6 +8,10 @@
 #include "ck/tensor_operation/gpu/block/blockwise_welford.hpp"
 #include "ck/tensor_operation/gpu/thread/threadwise_welford.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 template <typename DsDataType,
@@ -508,3 +512,6 @@ struct EpilogueWelfordCShuffle
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

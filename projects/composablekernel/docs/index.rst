@@ -10,16 +10,15 @@ Composable Kernel User Guide
 
 The Composable Kernel library provides a programming model for writing performance critical kernels for machine learning workloads across multiple architectures including GPUs and CPUs, through general purpose kernel languages such as `HIP C++ <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_.
 
-The Composable Kernel repository is located at `https://github.com/ROCm/composable_kernel <https://github.com/ROCm/composable_kernel>`_.
+The Composable Kernel project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/composablekernel.
 
 .. grid:: 2
   :gutter: 3
 
   .. grid-item-card:: Install
 
-    * :doc:`Composable Kernel prerequisites <./install/Composable-Kernel-prerequisites>`
-    * :doc:`Build and install Composable Kernel <./install/Composable-Kernel-install>`
-    * :doc:`Build and install Composable Kernel on a Docker image <./install/Composable-Kernel-Docker>`
+    * :doc:`Install Composable Kernel <./install/Composable-Kernel-install>`
+    * :doc:`Build from source <./install/Composable-Kernel-build>`
 
   .. grid-item-card:: Conceptual
 
@@ -34,6 +33,7 @@ The Composable Kernel repository is located at `https://github.com/ROCm/composab
 
   .. grid-item-card:: Reference
 
+    * :doc:`Composable Kernel precision support <./reference/Composable_Kernel_data_type_support>`
     * :doc:`Composable Kernel supported scalar types <./reference/Composable_Kernel_supported_scalar_types>`
     * :doc:`Composable Kernel custom types <./reference/Composable_Kernel_custom_types>`
     * :doc:`Composable Kernel vector utilities <./reference/Composable_Kernel_vector_utilities>`

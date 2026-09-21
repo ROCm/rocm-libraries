@@ -132,7 +132,7 @@ __device__ void t5layernormbwdweightcontiguous(const TI* __restrict__ dy,
                                                uint64_t outer_size,
                                                uint64_t inner_size)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint64_t gid = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     FLOAT_ACCUM sum = static_cast<FLOAT_ACCUM>(0);
     for(uint64_t i = 0; i < outer_size; ++i)
@@ -160,7 +160,7 @@ __device__ void t5layernormbwdweightcontiguousparallel(const TI* __restrict__ dy
                                                        uint64_t inner_size,
                                                        uint64_t parallel_size)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint64_t gid = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     if(gid >= inner_size * parallel_size)
         return;
@@ -192,7 +192,7 @@ __device__ void t5layernormbwdcontiguousreduceSum(const TI* __restrict__ workspa
                                                   uint64_t inner_size,
                                                   uint64_t parallel_size)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint64_t gid = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     if(gid >= inner_size)
         return;

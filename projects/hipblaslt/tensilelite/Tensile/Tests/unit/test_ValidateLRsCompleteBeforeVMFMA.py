@@ -25,13 +25,16 @@
 from typing import Any, Optional
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CMSValidator import verify_lrs_finished_before_vmfma, index_for_force_unroll_sub_iter, lr_needed_by_mfma
+from Tensile.Components.CMSValidator import (
+    add_local_read_constraints,
+    index_for_force_unroll_sub_iter, lr_needed_by_mfma,
+)
 from cms_validation_base import CMSValidationTestBase
 from Tensile.Common import IsaVersion
 
+
 class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_simple_LR0(self):
         """
@@ -53,14 +56,14 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         optSchedule["LRA0"] = [[1, 6]]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 6 is not valid. Needed before index 5, but only guaranteed at index 3."
+            "LRA0 @ idx=6 issued too late, must be guaranteed before MFMA @ idx=5 but only guaranteed @ idx=3."
         )
 
         optSchedule["LRA0"] = [[1, 2]]
         optSchedule["LRB0"] = [[3, 6]]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRB0 at index 3 is not valid. Needed before index 4, but only guaranteed at index 3."
+            "LRB0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=3."
         )
 
     def test_simple_LR0_w_LR1(self):
@@ -152,9 +155,9 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
-    def test_simple_LR1_never_guaranteed(self):
+    def test_simple_LR1_guaranteed_too_late(self):
         """
-        Case where LR1 is finished before the end of loop.
+        Case where LR1 is guaranteed too late.
         """
         assert self.num_vmfma == 8
 
@@ -169,7 +172,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 at index 4 is not valid. Needed before index 0, but only guaranteed at index 1."
+            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=1."
         )
 
     def test_complex_LR1(self):
@@ -196,7 +199,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         optSchedule["LRA1"] = [[4, 5]]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 at index 5 is not valid. Needed before index 1 (of next iteration), but only guaranteed at index 1."
+            "LRA1 @ idx=5 issued too late, must be guaranteed before MFMA @ idx=1 (of next iteration) but only guaranteed @ idx=1."
         )
 
     def test_more_LRs(self):
@@ -243,7 +246,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         # Failure case 1: Don't wait for any LRA0
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 1 is not valid. Needed before index 4, but only guaranteed at index 4."
+            "LRA0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=4."
         )
 
         # Failure case 2: Wait for only 1/4 LRA0 (need at least 2/4 LRA0) to do VMFMA 4.
@@ -251,7 +254,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         syncCode[0].comment = "Wait for LRB0 and 1/4 LRA0"
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 1 is not valid. Needed before index 4, but only guaranteed at index 4."
+            "LRA0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=4."
         )
 
         # Passing case: Correctly SWaitCnt for 2/4 LRA0 (i.e. 1/2 As) in time for VMFMA 4.
@@ -264,7 +267,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         Case where each LR reads more than 1 WaveTile worth of data.
         Even though there are 4 tiles of A and 4 of B there are only 2 LRAs and 2 LRBs, each loading 2 tiles of A and B respectively.
         """
-        self.setUp({
+        self.setup_method(kernel_updates={
             "MIWaveTileA": 4,
             "MIWaveTileB": 4
         })
@@ -288,7 +291,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         optSchedule["SYNC"][0][0] = 8
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRB1 at index 19 is not valid. Needed before index 8 (of next iteration), but only guaranteed at index 8."
+            "LRB1 @ idx=19 issued too late, must be guaranteed before MFMA @ idx=8 (of next iteration) but only guaranteed @ idx=8."
         )
 
     def test_handling_instruction_order(self):
@@ -313,7 +316,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         }
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA0 at index 3 is not valid. Needed before index 4, but only guaranteed at index 7."
+            "LRA0 @ idx=3 issued too late, must be guaranteed before MFMA @ idx=4 but only guaranteed @ idx=7."
         )
 
         # 2. SwaitCnt after LR0s but before LR1s
@@ -327,7 +330,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         }
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 at index 7 is not valid. Needed before index 0, but only guaranteed at index 3."
+            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
         )
 
         # 3. SwaitCnt after all LRs
@@ -356,13 +359,12 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
     LRB3 needed at 12 (0 of next iter)
     LRA3 needed at 12 (0 of next iter)
     """
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
-        super().setUp(kernel_updates)
+        super().setup_method(method, kernel_updates=kernel_updates)
 
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_LR0s_pass(self):
         """
@@ -396,7 +398,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA0 at index 0 is not valid. Needed before index 3, but only guaranteed at index 3.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA0 @ idx=0 issued too late, must be guaranteed before MFMA @ idx=3 but only guaranteed @ idx=3.")
     
     def test_LR0s_fail2(self):
         """
@@ -413,7 +415,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="LRA0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="LRB0"),
         ]
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRB0 at index 1 is not valid. Needed before index 6, but only guaranteed at index 6.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRB0 @ idx=1 issued too late, must be guaranteed before MFMA @ idx=6 but only guaranteed @ idx=6.")
 
     def test_LR3s_pass(self):
         """
@@ -436,8 +438,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
 class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_simple_bf16(self):
         """
@@ -492,10 +493,90 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
 
         self.validate(optSchedule, syncCode, 1, None, None, 0, None, nllZeroDscnt=True, mfmaReorder=mfmaReorder)
 
+    def test_asymmetric_reorder_bf16(self):
+        """
+        Test with asymmetric mfmaReorder that exposes the inverse mapping bug.
+        
+        Uses 3x2 tile configuration (n_tiles_a=3, n_tiles_b=2) for 12 total MFMAs.
+        The reordering groups by A tile within each half, keeping halves separate.
+        This mirrors the pattern used in the 96x256x64 schedule.
+        
+        Default column-major MFMA layout:
+           B0  B1                    B0  B1
+        A0 [ 0   3 ]  1st half    A0 [ 6   9 ]  2nd half
+        A1 [ 1   4 ]              A1 [ 7  10 ]
+        A2 [ 2   5 ]              A2 [ 8  11 ]
+        
+        Reorder: group by A tile within each half (A0s first, then A1s, then A2s)
+        mfmaReorder[new_pos] = original_pos
+        - 1st half: new [0,1,2,3,4,5] get originals [0,3, 1,4, 2,5]
+        - 2nd half: new [6,7,8,9,10,11] get originals [6,9, 7,10, 8,11]
+        
+        Inverse mapping (original -> new_pos) for 1st half:
+        - original 0 -> new 0,  original 3 -> new 1
+        - original 1 -> new 2,  original 4 -> new 3
+        - original 2 -> new 4,  original 5 -> new 5
+        
+        For LRA1 loading A tile 2 (for next iteration, original indices 2, 5):
+        - Correct: inverse[2]=4, inverse[5]=5, min=4
+        - Buggy: mfma_reorder[2]=1, mfma_reorder[5]=5, min=1
+        
+        With buggy logic:
+        - needed_by = 1
+        
+        With correct logic:
+        - needed_by = 4
+        """
+        # Use 3x2 tile configuration
+        self.setup_method(kernel_updates={"MIWaveTileA": 3, "MIWaveTileB": 2})
+        assert self.num_vmfma == 12  # 2 * 3 * 2
+        
+        # Reorder: Reorder to row-major order.
+        # Before reordering (default col-major order), MFMA tiles are multiplied in the following order:
+        #   idx: 0    1    2    3    4    5    | 6    7    8    9    10   11
+        #   mul: A0B0 A1B0 A2B0 A0B1 A1B1 A2B1 | A0B0 A1B0 A2B0 A0B1 A1B1 A2B1
+
+        # After reordering (mfmaReorder), new order of multiplication:
+        #     idx: 0    1    2    3    4    5    | 6    7    8    9    10   11
+        # old idx: 0    3    1    4    2    5    | 6    9    7    10    8   11
+        #     mul: A0B0 A0B1 A1B0 A1B1 A2B0 A2B1 | A0B0 A0B1 A1B0 A1B1 A2B0 A2B1
+        mfmaReorder = [
+            0, 3, 
+            1, 4, 
+            2, 5,
+            
+            6, 9,
+            7, 10,
+            8, 11
+        ]
+        
+        syncTable = [
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LR1s done"),
+            
+            1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
+
+            5, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="All LRB0 and 1/3 LRA0s done"),
+            7, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="2/3 LRA1s done"),
+            9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="3/3 LRA1s done"),
+        ]
+
+        optSchedule = {
+            "SYNC": [syncTable[::2]],
+            # LR0s load data for 2nd half - issue early
+            "LRB0": [[0,0]],
+            "LRA0": [[2, 3, 4]],
+            
+            "LRA1": [[11,11,11]],
+            "LRB1": [[11,11]],
+        }
+        syncCode = syncTable[1::2]
+        
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None, mfmaReorder=mfmaReorder)
+
     def test_tf32(self):
         """
         """
-        self.setUp({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
+        self.setup_method(kernel_updates={"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
         assert self.num_vmfma == 12
         
         # Row-major reordering: swap middle two groups
@@ -527,7 +608,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
     Further, each loop iteration only contains MIWaveTileA * MIWaveTileB MFMAs, instead of 2 * MIWaveTileA * MIWaveTileB MFMAs.
 
     Default is column-major ordering of MFMAs:
-    A v \ B ->
+    A  B ->
     | 0 4  8 12 |
     | 1 5  9 13 |
     | 2 6 10 14 |
@@ -551,14 +632,34 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
     NOTE:   These tests do not include the Pack commands which are REQUIRED for a valid kernel.
             Not including them here in order to test just the LR-VMFMA orderling logic.
     """
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
-        super().setUp({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+        super().setup_method(method, kernel_updates=kernel_updates)
 
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
 
-    def test_bf16(self):
+    def test_bf16_pass(self):
+        assert self.num_vmfma == 16
+
+        optSchedule = {
+            "SYNC": [[3, 15]],
+            "LRA0": [[0, 0]],
+            "LRB0": [[0, 0]],
+            "LRA3": [[7, 7]],
+            "LRB3": [[7, 7]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR3s"),
+        ]
+
+        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+
+    def test_bf16_fail(self):
+        """Same as above, but with the proper SWaitCnt for the LR3s."""
         assert self.num_vmfma == 16
 
         optSchedule = {
@@ -570,10 +671,10 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
         }
 
         syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, None)
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3.")
 
 
 class TestIndexForForceUnrollSubIter:
@@ -622,6 +723,42 @@ class TestLRNeededByMFMA:
 
         for lr_name, expected_indices in expected_results.items():
             actual_indices = [lr_needed_by_mfma(lr_name, lr_idx, num_vmfma, mfma_reorder, n_tiles_a, n_tiles_b, n_local_reads_a, n_local_reads_b, force_unroll_sub_iter, use_f32x_emulation=False) for lr_idx in range(len(expected_indices))]
+            assert actual_indices == expected_indices
+
+    def test_single_sub_iter_bf16(self):
+        """
+        Non-force-unroll case where MFMAs only cover a single sub-iteration.
+        """
+        n_tiles_a, n_tiles_b = 8, 8
+        n_local_reads_a, n_local_reads_b = 8, 8
+        num_vmfma = n_tiles_a * n_tiles_b
+
+        force_unroll_sub_iter = False
+        mfma_reorder = []
+
+        expected_results = {
+            "LRA0": [32, 32, 33, 33, 34, 34, 35, 35],
+            "LRB0": [32, 32, 40, 40, 48, 48, 56, 56],
+            "LRA1": [64, 64, 65, 65, 66, 66, 67, 67],
+            "LRB1": [64, 64, 72, 72, 80, 80, 88, 88],
+        }
+
+        for lr_name, expected_indices in expected_results.items():
+            actual_indices = [
+                lr_needed_by_mfma(
+                    lr_name,
+                    lr_idx,
+                    num_vmfma,
+                    mfma_reorder,
+                    n_tiles_a,
+                    n_tiles_b,
+                    n_local_reads_a,
+                    n_local_reads_b,
+                    force_unroll_sub_iter,
+                    use_f32x_emulation=False,
+                )
+                for lr_idx in range(len(expected_indices))
+            ]
             assert actual_indices == expected_indices
     
     def test_simple_tf32(self):
@@ -813,4 +950,137 @@ class TestLRNeededByMFMA:
                              n_tiles_a, n_tiles_b, n_local_reads_a, n_local_reads_b,
                              force_unroll_sub_iter, use_f32x_emulation=True)
                              for lr_idx in range(len(expected_indices))]
+            assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"
+
+    def test_mfma_reorder_requires_min_across_consumers_bf16(self):
+        """
+        Test that exposes the bug where MFMA reorder causes a later logical consumer
+        to execute before the first logical consumer.
+        
+        LR data is consumed by multiple MFMAs (one per tile in the opposite dimension).
+        Before the fix, the code assumed that the first mfma before the reorder would still be the first mfma after the reorder. 
+        With complex reordering, a different consumer can execute first.
+        
+        This test uses a reorder that swaps columns in the second half:
+        - Column 0 ↔ Column 3
+        - Column 1 ↔ Column 2
+        
+        Second half layout (column-major) before reorder:
+        | 16 20 24 28 |
+        | 17 21 25 29 |
+        | 18 22 26 30 |
+        | 19 23 27 31 |
+        
+        After column swap reorder:
+        | 28 24 20 16 |
+        | 29 25 21 17 |
+        | 30 26 22 18 |
+        | 31 27 23 19 |
+        
+        For LRA0 (A tile 0 in second half):
+        - Logical consumers: 16, 20, 24, 28 (entire row 0)
+        - After reorder: 28, 24, 20, 16
+        - Correct answer: min(28, 24, 20, 16) = 16
+        - Bug (checking only first consumer): mfma_reorder[16] = 28
+        """
+        n_tiles_a, n_tiles_b = 4, 4
+        n_local_reads_a, n_local_reads_b = 4, 4
+        num_vmfma = 2 * n_tiles_a * n_tiles_b
+
+        force_unroll_sub_iter = False
+        
+        # Column swap reorder for second half: col 0↔3, col 1↔2
+        # First half unchanged, second half has columns swapped
+        mfma_reorder = list(range(16)) + [28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19]
+
+        expected_results = {
+            # LRA0: A tiles in second half, consumed by MFMAs in each row
+            # For A tile i, consumers are at columns 0,1,2,3 -> after reorder, column 3 executes first
+            "LRA0": [16, 17, 18, 19],  # min across all B tiles after reorder
+            # LRB0: B tiles in second half, consumed by MFMAs in each column
+            # For B tile j, consumers are at rows 0,1,2,3 (same column) -> reorder within column
+            "LRB0": [28, 24, 20, 16],  # min across all A tiles after reorder
+            # LRA1/LRB1: first half of next iteration (unchanged by this reorder)
+            "LRA1": [32, 33, 34, 35],
+            "LRB1": [32, 36, 40, 44],
+        }
+
+        for lr_name, expected_indices in expected_results.items():
+            actual_indices = [
+                lr_needed_by_mfma(lr_name, lr_idx, num_vmfma, mfma_reorder, n_tiles_a, n_tiles_b,
+                                  n_local_reads_a, n_local_reads_b, force_unroll_sub_iter, use_f32x_emulation=False)
+                for lr_idx in range(len(expected_indices))
+            ]
+            assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"
+
+    def test_mfma_reorder_requires_min_across_consumers_force_unroll_bf16(self):
+        """
+        Test that exposes the bug with ForceUnrollSubIter enabled.
+        
+        ForceUnrollSubIter layout before reorder:
+        |  0  2 |  8 10 |
+        |  1  3 |  9 11 |
+        |-------|-------|
+        |  4  6 | 12 14 |
+        |  5  7 | 13 15 |
+
+        After reorder:
+        |  3  1 |  11 9 |
+        |  2  0 |  10 8 |
+        |-------|-------|
+        |  7  5 |  15 13 |
+        |  6  4 |  14 12 |
+        
+        This test uses a reorder that reverses execution within each quadrant,
+        so the "first" consumer in each quadrant executes last.
+        
+        For LRA0 (A tile 2 = second half of rows, lr_idx=0):
+        - Consumers: (2,0), (2,1), (2,2), (2,3) in original coords
+        - After ForceUnrollSubIter: 4, 6, 12, 14
+        - After reorder (reverse in quadrant): 5, 7, 15, 13
+        - Correct answer: min(5, 7, 15, 13) = 5
+        - Bug (checking only first consumer): mfma_reorder[4] = 5
+        
+        Note: In this particular test, the bug doesn't manifest for LRA0 idx=0
+        because the first consumer happens to still be the minimum after reorder.
+        But it does manifest for other cases where the reorder moves a non-first
+        consumer to an earlier execution slot.
+        """
+        n_tiles_a, n_tiles_b = 4, 4
+        n_local_reads_a, n_local_reads_b = 4, 4
+        num_vmfma = n_tiles_a * n_tiles_b
+
+        force_unroll_sub_iter = True
+        
+        # Reorder that reverses within each quadrant
+        # Quadrant 0: [0,1,2,3] -> [3,2,1,0]
+        # Quadrant 1: [4,5,6,7] -> [7,6,5,4]
+        # Quadrant 2: [8,9,10,11] -> [11,10,9,8]
+        # Quadrant 3: [12,13,14,15] -> [15,14,13,12]
+        mfma_reorder = [3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12]
+
+        expected_results = {
+            # LRA0: A tiles 2-3 (second half)
+            # A tile 2: col-major (2,0),(2,1),(2,2),(2,3) = 2,6,10,14 -> ForceUnroll 4,6,12,14 -> reorder 7,5,15,13 -> min=5
+            # A tile 3: col-major (3,0),(3,1),(3,2),(3,3) = 3,7,11,15 -> ForceUnroll 5,7,13,15 -> reorder 6,4,14,12 -> min=4
+            "LRA0": [5, 5, 4, 4],
+            # LRB0: B tiles 2-3 (second half)
+            # B tile 2: col-major (0,2),(1,2),(2,2),(3,2) = 8,9,10,11 -> ForceUnroll 8,9,12,13 -> reorder 11,10,15,14 -> min=10
+            # B tile 3: col-major (0,3),(1,3),(2,3),(3,3) = 12,13,14,15 -> ForceUnroll 10,11,14,15 -> reorder 9,8,13,12 -> min=8
+            "LRB0": [10, 10, 8, 8],
+            # LRA3/LRB3: first half for next iteration (computed, then + num_vmfma)
+            # A tile 0: col-major (0,0),(0,1),(0,2),(0,3) = 0,4,8,12 -> ForceUnroll 0,2,8,10 -> reorder 3,1,11,9 -> min=1 -> +16=17
+            # A tile 1: col-major (1,0),(1,1),(1,2),(1,3) = 1,5,9,13 -> ForceUnroll 1,3,9,11 -> reorder 2,0,10,8 -> min=0 -> +16=16
+            "LRA3": [17, 17, 16, 16],
+            # B tile 0: col-major (0,0),(1,0),(2,0),(3,0) = 0,1,2,3 -> ForceUnroll 0,1,4,5 -> reorder 3,2,7,6 -> min=2 -> +16=18
+            # B tile 1: col-major (0,1),(1,1),(2,1),(3,1) = 4,5,6,7 -> ForceUnroll 2,3,6,7 -> reorder 1,0,5,4 -> min=0 -> +16=16
+            "LRB3": [18, 18, 16, 16],
+        }
+
+        for lr_name, expected_indices in expected_results.items():
+            actual_indices = [
+                lr_needed_by_mfma(lr_name, lr_idx, num_vmfma, mfma_reorder, n_tiles_a, n_tiles_b,
+                                  n_local_reads_a, n_local_reads_b, force_unroll_sub_iter, use_f32x_emulation=False)
+                for lr_idx in range(len(expected_indices))
+            ]
             assert actual_indices == expected_indices, f"{lr_name}: expected {expected_indices}, got {actual_indices}"

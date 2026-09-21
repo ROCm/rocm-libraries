@@ -87,7 +87,7 @@ struct TestProblemDescription : miopen::ProblemDescriptionBase,
 #endif
 
     template <class TSelf>
-    static void Visit(TSelf&& self, std::function<void(std::string, std::string)> visitor)
+    static void Visit(TSelf&& /*self*/, std::function<void(std::string, std::string)> /*visitor*/)
     {
     }
 
@@ -122,7 +122,7 @@ struct TestPerfConfig : miopen::solver::PerfConfig
 
     TestPerfConfig(std::uint32_t check_value_ = 0) : check_value(check_value_) {}
 
-    void Serialize(std::ostream& stream) const override {}
+    void Serialize(std::ostream& /*stream*/) const override {}
     auto Deserialize(const std::string&) -> bool override { return true; }
 };
 

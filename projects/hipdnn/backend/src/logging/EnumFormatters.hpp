@@ -60,3 +60,14 @@ struct fmt::formatter<hipdnnPluginLoadingMode_ext_t> : fmt::formatter<std::strin
             hipdnn_backend::hipdnnGetPluginLoadingModeString(mode), ctx);
     }
 };
+
+template <>
+struct fmt::formatter<hipdnnPluginUnloadingMode_ext_t> : fmt::formatter<std::string_view>
+{
+    auto format(hipdnnPluginUnloadingMode_ext_t mode,
+                fmt::format_context& ctx) const -> decltype(ctx.out())
+    {
+        return fmt::formatter<std::string_view>::format(
+            hipdnn_backend::hipdnnGetPluginUnloadingModeString(mode), ctx);
+    }
+};

@@ -1,7 +1,8 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   SleepPercent: 50
   NumElementsToValidate: -1
   NumWarmups: 1
@@ -10,13 +11,10 @@ GlobalParameters:
   DataInitTypeB: 13 #13
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   RotatingBufferSize: 512
   KeepBuildTmp: True
   #GenerateSourcesAndExit: True
@@ -33,8 +31,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
 
@@ -56,26 +54,26 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - StreamK: [1,2,3]
+        - StreamK: [3]
         - LdsPadA: [-1] #[-1]
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [2]
         #- StreamKXCCMapping: [8]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [1]
+        - UseCustomMainLoopSchedule: [0]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
@@ -94,26 +92,26 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - StreamK: [1,2,3]
+        - StreamK: [3]
         - LdsPadA: [-1] #[-1]
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [2]
         #- StreamKXCCMapping: [8]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - UseSgprForGRO: [0]
-        - UseCustomMainLoopSchedule: [1]
+        - UseCustomMainLoopSchedule: [0]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
@@ -133,7 +131,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
@@ -144,12 +142,12 @@ BenchmarkProblems:
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [-1,0,1]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:
@@ -168,7 +166,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
@@ -179,12 +177,12 @@ BenchmarkProblems:
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
         - StaggerUStride: [512]
-        - StorePriorityOpt: [1]
+        - StorePriorityOpt: [true]
         - StoreSyncOpt: [4]
         - WorkGroupMapping: [-1,0,1]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - SpaceFillingAlgo: [[],[0,1,2],[2,2,2], [0],[1,0],[2,3]]
         - SFCWGM: [[[5,5],[2,2]], [[8,1],[4,3]]]
       BenchmarkJoinParameters:

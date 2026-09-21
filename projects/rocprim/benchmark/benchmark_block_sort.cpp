@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_block_sort.parallel.hpp"
+#include "benchmark_block_sort.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/block/block_sort.hpp>
     #include <rocprim/types.hpp>
@@ -38,11 +36,9 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, ALG)       \
-    benchmark_utils::executor::queue_sorted_instance<      \
-        block_sort_benchmark<K, V, BS, IPT, ALG, true>>(); \
-    benchmark_utils::executor::queue_sorted_instance<      \
-        block_sort_benchmark<K, V, BS, IPT, ALG, false>>();
+#define CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, ALG)                              \
+    primbench::executor::queue<block_sort_benchmark<K, V, BS, IPT, ALG, true>>(); \
+    primbench::executor::queue<block_sort_benchmark<K, V, BS, IPT, ALG, false>>();
 
 #define CREATE_BENCHMARK_IPT(K, V, BS, IPT)                                                   \
     CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, rocprim::block_sort_algorithm::merge_sort)        \
@@ -55,19 +51,22 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 0);
+    primbench::settings settings;
+    settings.size                 = 512 * primbench::MiB;
+    settings.min_gpu_ms_per_batch = 100;
+    primbench::executor executor(argc, argv, settings);
 
     // Block sizes as large as possible are most relevant
     CREATE_BENCHMARK(float, rocprim::empty_type, 256)
     CREATE_BENCHMARK(double, rocprim::empty_type, 256)
     CREATE_BENCHMARK(rocprim::half, rocprim::empty_type, 256)
     CREATE_BENCHMARK(uint8_t, rocprim::empty_type, 256)
-    CREATE_BENCHMARK(int, rocprim::empty_type, 256)
-    CREATE_BENCHMARK(int, rocprim::empty_type, 512)
+    CREATE_BENCHMARK(int32_t, rocprim::empty_type, 256)
+    CREATE_BENCHMARK(int32_t, rocprim::empty_type, 512)
     CREATE_BENCHMARK(double, rocprim::empty_type, 512)
     CREATE_BENCHMARK(rocprim::int128_t, rocprim::empty_type, 256)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::empty_type, 256)
-    CREATE_BENCHMARK(int, int, 512)
+    CREATE_BENCHMARK(int32_t, int32_t, 512)
     CREATE_BENCHMARK(float, double, 512)
     CREATE_BENCHMARK(double, int64_t, 512)
     CREATE_BENCHMARK(rocprim::half, int16_t, 512)

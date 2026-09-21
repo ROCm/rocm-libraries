@@ -29,6 +29,7 @@
 
 #include <algorithm>
 
+#include "asan_helpers.hpp"
 #include "lapack/roclapack_syevj_heevj.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
@@ -36,7 +37,8 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define STEDCJ_BDIM 512 // Number of threads per thread-block used in main stedc kernels
+#define STEDCJ_BDIM \
+    ROCSOLVER_ASAN_VALUE(256, 512) // Number of threads per thread-block used in main stedc kernels
 #define MAXSWEEPS 20 // Max number of sweeps for Jacobi solver (when used)
 
 // TODO: using macro STEDCJ_EXTERNAL_GEMM = false for now. We can enable the use of

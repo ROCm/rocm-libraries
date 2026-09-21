@@ -132,7 +132,7 @@ namespace hiptensor
         std::tuple<ck::index_t, ck::index_t, ck::index_t> problemDims() const;
 
         // Byte count
-        ck::index_t problemBytes() const;
+        std::size_t problemBytes() const;
 
         // Kernel's name encoding
         std::string kernelName() const;
@@ -148,7 +148,7 @@ namespace hiptensor
 
         // Derived runtime arguments
         ck::index_t mM, mN, mK;
-        ck::index_t mBytes;
+        std::size_t mBytes;
         bool        mValid;
 
         // Kernel Params

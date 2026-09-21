@@ -48,12 +48,26 @@ namespace rocwmma
     using VRegI8x16 = VecT<int8_t, 16>; //
     using VRegI8x32 = VecT<int8_t, 32>; // 32 i8 registers
 
+    using VRegUI8x1  = VecT<uint8_t, 1>; // Single ui8 register
+    using VRegUI8x2  = VecT<uint8_t, 2>; // Two ui8 registers
+    using VRegUI8x4  = VecT<uint8_t, 4>; // ...
+    using VRegUI8x8  = VecT<uint8_t, 8>; //
+    using VRegUI8x16 = VecT<uint8_t, 16>; //
+    using VRegUI8x32 = VecT<uint8_t, 32>; // 32 ui8 registers
+
     using VRegI32x1  = VecT<int32_t, 1>; // Single i32 register
     using VRegI32x2  = VecT<int32_t, 2>; // Two i32 registers
     using VRegI32x4  = VecT<int32_t, 4>; // ...
     using VRegI32x8  = VecT<int32_t, 8>; //
     using VRegI32x16 = VecT<int32_t, 16>; //
     using VRegI32x32 = VecT<int32_t, 32>; // 32 i32 registers
+
+    using VRegUI32x1  = VecT<uint32_t, 1>; // Single ui32 register
+    using VRegUI32x2  = VecT<uint32_t, 2>; // Two ui32 registers
+    using VRegUI32x4  = VecT<uint32_t, 4>; // ...
+    using VRegUI32x8  = VecT<uint32_t, 8>; //
+    using VRegUI32x16 = VecT<uint32_t, 16>; //
+    using VRegUI32x32 = VecT<uint32_t, 32>; // 32 ui32 registers
 
     using VRegI64x1  = VecT<int64_t, 1>; // Single i64 register
     using VRegI64x2  = VecT<int64_t, 2>; // Two i64 registers

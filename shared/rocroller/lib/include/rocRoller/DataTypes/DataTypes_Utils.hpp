@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -60,6 +37,18 @@ namespace rocRoller
     struct PackedTypeOf<E8M0>
     {
         typedef E8M0x4 type;
+    };
+
+    template <>
+    struct PackedTypeOf<E5M3>
+    {
+        typedef E5M3x4 type;
+    };
+
+    template <>
+    struct PackedTypeOf<E4M3>
+    {
+        typedef E4M3x4 type;
     };
 
     template <typename T>
@@ -121,11 +110,18 @@ namespace rocRoller
     bool isF4(DataType type);
     bool isUnpackedF4(DataType type);
     bool isUnpackedF8F6F4(DataType type);
+    bool isE8M0(DataType type);
+    bool isE5M3(DataType type);
+    bool isE4M3(DataType type);
 
     uint packingFactorForDataType(DataType type);
 
     uint8_t floatToScale(DataType scaleType, float value);
     float   scaleToFloat(DataType scaleType, uint8_t scale);
+    bool    isValidDataTypeScaleTypeCombination(DataType A,
+                                                DataType B,
+                                                DataType scaleA,
+                                                DataType scaleB);
 
     inline constexpr bool isScaleType(DataType type)
     {
@@ -133,6 +129,10 @@ namespace rocRoller
         {
         case DataType::E8M0:
         case DataType::E8M0x4:
+        case DataType::E5M3:
+        case DataType::E5M3x4:
+        case DataType::E4M3:
+        case DataType::E4M3x4:
             return true;
         default:
             return false;

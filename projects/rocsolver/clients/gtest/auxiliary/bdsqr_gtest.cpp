@@ -118,7 +118,7 @@ class BDSQR_BASE : public ::TestWithParam<bdsqr_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>

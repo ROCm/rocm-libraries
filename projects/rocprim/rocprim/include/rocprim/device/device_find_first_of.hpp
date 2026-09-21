@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,12 @@
 #include <iostream>
 #include <iterator>
 
+/// \addtogroup devicemodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
 
 namespace detail
 {
@@ -51,7 +56,7 @@ struct find_first_of_impl_kernels
         ordered_bid.reset();
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void find_first_of_kernel_impl(InputIterator1           input,
                                    InputIterator2           keys,
@@ -61,7 +66,7 @@ struct find_first_of_impl_kernels
                                    ordered_block_id<size_t> ordered_bid,
                                    BinaryFunction           compare_function)
     {
-        constexpr find_first_of_config_params params = ArchConfig::params;
+        constexpr find_first_of_config_params params = TargetConfig::params;
 
         constexpr unsigned int block_size       = params.kernel_config.block_size;
         constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -187,13 +192,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     using find_first_of_kernels
         = find_first_of_impl_kernels<InputIterator1, InputIterator2, BinaryFunction>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -236,9 +235,9 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
     if(size > 0 && keys_size > 0)
     {
-        auto kernel = [=](auto arch_config)
+        auto kernel = [=](auto target_config)
         {
-            find_first_of_kernels::template find_first_of_kernel_impl<decltype(arch_config)>(
+            find_first_of_kernels::template find_first_of_kernel_impl<decltype(target_config)>(
                 input,
                 keys,
                 tmp_output,
@@ -281,8 +280,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
 } // namespace detail
 
-/// \addtogroup devicemodule
-/// @{
+#endif // DOXYGEN_DOCUMENTATION_BUILD
 
 /// \brief Searches the range [input, input + size) for any of the elements in the range
 ///   [keys, keys + keys_size).
@@ -331,6 +329,8 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 /// \parblock
 /// In this example a device-level find_first_of is performed where inputs and keys are
 ///   represented by an array of unsigned integers.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_find_first_of.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
@@ -391,9 +391,9 @@ hipError_t find_first_of(void*          temporary_storage,
                                               debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_FIND_FIRST_OF_HPP_

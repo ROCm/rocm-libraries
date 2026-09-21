@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,9 @@
 #ifndef ROCFFT_CATCH_H
 #define ROCFFT_CATCH_H
 
+#include "logging.h"
 #include "rocfft/rocfft.h"
+#include <stdexcept>
 
 static inline rocfft_status rocfft_handle_exception() noexcept
 try
@@ -31,6 +33,14 @@ try
 catch(rocfft_status e)
 {
     return e;
+}
+catch(const std::runtime_error& e)
+{
+    if(LOG_TRACE_ENABLED())
+    {
+        (*LogSingleton::GetInstance().GetTraceOS()) << e.what() << std::endl;
+    }
+    return rocfft_status_failure;
 }
 catch(...)
 {

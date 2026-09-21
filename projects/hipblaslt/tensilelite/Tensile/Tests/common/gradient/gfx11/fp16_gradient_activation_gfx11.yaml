@@ -1,17 +1,17 @@
 #TODO
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: 128
   DataInitTypeE: 16
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   MaxWorkspaceSize: 3355443200
   PrintSolutionRejectionReason: True
@@ -27,13 +27,13 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Gradient: True
       UseE: True
-      UseBias:       False
+      UseBias:       0
       Activation:    True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -51,7 +51,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0,1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -60,8 +60,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         #- GlobalSplitU: [1,2]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0,1]
-        - ActivationFuncCall: [0, 1]
+        - SourceSwap: [false, true]
+        - ActivationFuncCall: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -70,7 +70,7 @@ BenchmarkProblems:
           - Exact: [128,  128,1, 640]
           - Exact: [4608,1408,1, 640]
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]
 
   ########################################
   # TN - standard
@@ -82,13 +82,13 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Gradient: True
       UseE: True
-      UseBias:       False
+      UseBias:       0
       Activation:    True
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -106,7 +106,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0,1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -115,8 +115,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         #- GlobalSplitU: [1,2]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0,1]
-        - ActivationFuncCall: [0, 1]
+        - SourceSwap: [false, true]
+        - ActivationFuncCall: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -125,4 +125,4 @@ BenchmarkProblems:
           - Exact: [128,  128,1, 640]
           - Exact: [4608,1408,1, 640]
         - ActivationArgs:
-          - [Enum: Dgelu]
+          - [Enum: Dgelu, Drelu]

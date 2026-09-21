@@ -508,6 +508,7 @@ TEST(MergeByKeyTests, TestMergeByKeyDevice)
         thrust::raw_pointer_cast(&d_values_b[0]),
         thrust::raw_pointer_cast(&d_keys_result[0]),
         thrust::raw_pointer_cast(&d_values_result[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_keys_result, d_keys_result);
       ASSERT_EQ(h_values_result, d_values_result);

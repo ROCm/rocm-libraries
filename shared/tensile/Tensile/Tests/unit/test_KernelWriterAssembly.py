@@ -23,6 +23,114 @@
 ################################################################################
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from Tensile.AsmRegisterPool import RegisterPool
+from Tensile.KernelWriter import KernelWriter
+from Tensile.Common import globalParameters
+import collections
+import inspect
+from types import SimpleNamespace
+
+class KernelDict(dict):
+    def __getattr__(self, name):
+        return self[name]
+
+def test_gfx12_compatibility_checks_do_not_apply_to_future_isa():
+    kw = KernelWriterAssembly("","")
+    kw.version = (13, 0, 0)
+    kw.bpeCinternal = 4
+    kw.bpr = 4
+
+    assert "s_barrier_signal" not in kw.defineBarrierMacros()
+    assert "s_cmpk_eq_u32" in kw.checkIsBetaZero({"ProblemType": {"UseBeta": True}}, "Label", 0)
+    assert "gfx12 buffer soffset must be SGPR" not in str(
+        kw.chooseGlobalRead(True, 4, 0, "v0", "s[0:3]", 0, 0, "", False))
+    assert "gfx12 buffer atomic soffset must be SGPR" not in kw.chooseAtomicCmpswap(
+        {"BufferStore": True}, SimpleNamespace(globalOffset=0, addrDVgpr=0), 0, 0, 1, "glc")
+
+def test_gfx9_barrier_assembly_stays_plain_s_barrier():
+    kw = KernelWriterAssembly("","")
+    kw.version = (9, 0, 0)
+
+    assert kw.syncStr == "s_barrier"
+    assert kw.defineBarrierMacros() == ""
+
+def test_gfx9_sync_threads_emits_plain_s_barrier():
+    isa = (9, 0, 0)
+    oldArchCaps = globalParameters.get("ArchCaps")
+    globalParameters["ArchCaps"] = {isa: {"SeparateVscnt": False, "Waitcnt0Disabled": False}}
+    kw = KernelWriterAssembly("","")
+    kw.version = isa
+    kw.kernel = {"WavefrontSize": 32}
+    kw.do = {"Sync": True}
+    kw.prefetchAcrossPersistent = False
+    kernel = KernelDict(
+        NumThreads=64,
+        ScheduleIterAlg=0,
+        PrefetchGlobalRead=0,
+        enabledSplitLDS=False,
+    )
+
+    try:
+        assert kw.syncThreads(kernel, "gfx9 sync") == "s_barrier //gfx9 sync\n"
+    finally:
+        if oldArchCaps is None:
+            del globalParameters["ArchCaps"]
+        else:
+            globalParameters["ArchCaps"] = oldArchCaps
+
+def test_kernel_writer_direct_barrier_sites_use_syncstr():
+    source = inspect.getsource(KernelWriter)
+
+    assert source.count('barrier.addInst(self.syncStr,"")') == 2
+    assert "syncCode.addCode(self.syncStr + self.endLine)" in source
+
+def test_gfx12_barrier_assembly_uses_macro():
+    kw = KernelWriterAssembly("","")
+    kw.version = (12, 0, 1)
+
+    barrierMacro = kw.defineBarrierMacros()
+
+    assert kw.syncStr == "_s_barrier"
+    assert "s_barrier_signal" in barrierMacro
+    assert "s_barrier_wait" in barrierMacro
+
+def test_gfx12_atomic_cmpswap_modifier_preserves_extra_modifiers():
+    kw = KernelWriterAssembly("","")
+    kw.version = (12, 0, 1)
+
+    assert kw.gfx12AtomicCmpswapMemoryModifier("glc") == "th:TH_ATOMIC_RT_RETURN"
+    assert kw.gfx12AtomicCmpswapMemoryModifier("glc slc") == "th:TH_ATOMIC_RT_RETURN slc"
+
+def test_gfx12_atomic_cmpswap_modifier_rejects_other_architectures():
+    kw = KernelWriterAssembly("","")
+    kw.version = (13, 0, 0)
+
+    try:
+        kw.gfx12AtomicCmpswapMemoryModifier("glc")
+    except RuntimeError:
+        return
+
+    assert False, "Expected gfx12 atomic modifier helper to reject gfx13"
+
+def test_gfx12_b256_emulation_preserves_outer_module_setup():
+    kw = KernelWriterAssembly("","")
+    kw.version = (12, 0, 1)
+    kw.sgprPool = RegisterPool(8, "s", defaultPreventOverflow=False, printRP=0)
+    kw.sgprPool.add(0, 8, "tmp")
+
+    code = str(kw.chooseGlobalRead(True, 32, 0, "v0", "s[0:3]", 0, 0, "", False))
+
+    assert "gfx12 buffer soffset must be SGPR" in code
+    assert code.count("_buffer_load_b128") == 2
+    assert code.index("gfx12 buffer soffset must be SGPR") < code.index("_buffer_load_b128")
+
+def test_workgroup2_hydration_uses_actual_sgpr_definition():
+    kw = KernelWriterAssembly("","")
+    kw.sgprs = collections.OrderedDict()
+
+    assert not kw.hasWorkGroup2()
+    kw.sgprs["WorkGroup2"] = 4
+    assert kw.hasWorkGroup2()
 
 def test_occupancy():
     kw = KernelWriterAssembly("","")

@@ -68,7 +68,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(
@@ -83,7 +82,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range,
                                         ooffset_range,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 
@@ -99,7 +97,6 @@ INSTANTIATE_TEST_SUITE_P(pow2_3D_half,
                              ioffset_range_zero,
                              ooffset_range_zero,
                              place_range,
-                             false,
                              false)),
                          accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(DISABLED_offset_pow2_3D_half,
@@ -114,7 +111,6 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_offset_pow2_3D_half,
                              ioffset_range,
                              ooffset_range,
                              place_range,
-                             false,
                              false)),
                          accuracy_test::TestName);
 
@@ -130,7 +126,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(
@@ -145,7 +140,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range,
                                         ooffset_range,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 
@@ -161,7 +155,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(
@@ -176,7 +169,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range,
                                         ooffset_range,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 
@@ -192,7 +184,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(
@@ -207,7 +198,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 
@@ -223,7 +213,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 INSTANTIATE_TEST_SUITE_P(
@@ -238,7 +227,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range,
                                         ooffset_range,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 
@@ -258,7 +246,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ioffset_range_zero,
                                         ooffset_range_zero,
                                         place_range,
-                                        false,
                                         false)),
     accuracy_test::TestName);
 
@@ -281,7 +268,6 @@ INSTANTIATE_TEST_SUITE_P(
         ioffset_range_zero,
         ooffset_range_zero,
         place_range,
-        false,
         false)),
     accuracy_test::TestName);
 
@@ -303,6 +289,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         ooffset_range_zero,
                                         place_range,
                                         false,
-                                        false,
+                                        callbacks_none,
                                         fft_auto_allocation_off)),
     accuracy_test::TestName);

@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include <algorithm>
+
 #include "common.hpp"
 #include "data_types.hpp"
 #include "hiptensor_options.hpp"
@@ -76,7 +78,7 @@ namespace hiptensor
     {
         reset();
         // Handle our own outputs
-        hiptensorLoggerOpenFile("/dev/null");
+        hiptensor::test::silenceLogger();
         hiptensorLoggerSetCallback(logMessage);
     }
 
@@ -386,7 +388,11 @@ namespace hiptensor
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(logLevel));
+            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
+                logLevel
+                & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
+                                                     // PERF_TRACE so the CK backend does not run its
+                                                     // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -404,7 +410,7 @@ namespace hiptensor
                                                 &descC,
                                                 nmodeC,
                                                 extentCD.data(),
-                                                stridesCD.data() ? nullptr : stridesCD.data(),
+                                                stridesCD.empty() ? nullptr : stridesCD.data(),
                                                 acDataType,
                                                 0));
 
@@ -414,7 +420,7 @@ namespace hiptensor
                                                 &descD,
                                                 nmodeD,
                                                 extentCD.data(),
-                                                stridesCD.data() ? nullptr : stridesCD.data(),
+                                                stridesCD.empty() ? nullptr : stridesCD.data(),
                                                 acDataType,
                                                 0));
 
@@ -465,21 +471,38 @@ namespace hiptensor
             writeVal(&alphaValue, computeDataType, {computeDataType, alpha});
             writeVal(&betaValue, computeDataType, {computeDataType, beta});
 
+            auto& opts     = HiptensorOptions::instance();
+            int   coldRuns = opts->coldRuns();
+            int   hotRuns  = std::max(1, opts->hotRuns()); // guard hot_runs <= 0
+            // untimed warm-up: ramps clocks, primes plan/caches
+            for(int i = 0; i < coldRuns; ++i)
+                CHECK_HIPTENSOR_ERROR(hiptensorReduce(handle,
+                                                      plan,
+                                                      (const void*)&alphaValue,
+                                                      resource->deviceA().get(),
+                                                      (const void*)&betaValue,
+                                                      resource->deviceC().get(),
+                                                      resource->deviceD().get(),
+                                                      work,
+                                                      worksize,
+                                                      0));
+
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
             CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorReduce(handle,
-                                                  plan,
-                                                  (const void*)&alphaValue,
-                                                  resource->deviceA().get(),
-                                                  (const void*)&betaValue,
-                                                  resource->deviceC().get(),
-                                                  resource->deviceD().get(),
-                                                  work,
-                                                  worksize,
-                                                  0));
+            for(int i = 0; i < hotRuns; ++i) // timed: M clean launches
+                CHECK_HIPTENSOR_ERROR(hiptensorReduce(handle,
+                                                      plan,
+                                                      (const void*)&alphaValue,
+                                                      resource->deviceA().get(),
+                                                      (const void*)&betaValue,
+                                                      resource->deviceC().get(),
+                                                      resource->deviceD().get(),
+                                                      work,
+                                                      worksize,
+                                                      0));
 
             CHECK_HIP_ERROR(hipEventRecord(stopEvent));
             CHECK_HIP_ERROR(hipEventSynchronize(stopEvent))
@@ -497,7 +520,7 @@ namespace hiptensor
                                             hiptensorDataTypeSize(acDataType),
                                             std::multiplies<size_t>());
 
-            mElapsedTimeMs        = float64_t(timeMs);
+            mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
             mTotalGFlops          = sizeA / hiptensorDataTypeSize(acDataType) * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 

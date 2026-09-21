@@ -26,9 +26,10 @@
 
 #pragma once
 
-#include <binary_element_wise_operation.hpp>
+#include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
 #include <hip/hip_complex.h>
-#include <hiptensor_element_wise_operation.hpp>
+
+#include "hiptensor_element_wise_operation.hpp"
 
 namespace ck
 {

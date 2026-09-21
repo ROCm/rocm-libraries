@@ -33,7 +33,7 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/Singleton.hpp>
 
 namespace TensileLite
@@ -56,7 +56,7 @@ namespace TensileLite
  * registered with EmbedData.
  */
     template <typename Object>
-    class TENSILE_API EmbeddedData : public LazySingleton<EmbeddedData<Object>>
+    class TENSILELITEHOST_EXPORT EmbeddedData : public LazySingleton<EmbeddedData<Object>>
     {
     public:
         using Base = LazySingleton<EmbeddedData<Object>>;
@@ -109,7 +109,7 @@ namespace TensileLite
  * @brief Object which registers embedded data when it's instantiated.
  */
     template <typename Object>
-    struct TENSILE_API EmbedData
+    struct TENSILELITEHOST_EXPORT EmbedData
     {
         EmbedData(std::initializer_list<uint8_t> data)
         {
@@ -139,3 +139,4 @@ namespace TensileLite
 #define TENSILE_CONCATENATE_SYMBOLS2(a, b) a##b
 
 #define TENSILE_EMBED_SYMBOL_NAME TENSILE_CONCATENATE_SYMBOLS(TensileEmbeddedData, __LINE__)
+

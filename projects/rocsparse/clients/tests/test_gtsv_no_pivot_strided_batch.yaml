@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -73,7 +73,7 @@ Tests:
   category: pre_checkin
   function: gtsv_no_pivot_strided_batch
   precision: *single_double_precisions_complex_real
-  M: [256, 456]
+  M: [5, 10, 20, 256, 456]
   N: [1, 27]
   denseld: [800, 1600]
   matrix: [rocsparse_matrix_random]
@@ -90,6 +90,15 @@ Tests:
 - name: gtsv_no_pivot_strided_batch
   category: pre_checkin
   function: gtsv_no_pivot_strided_batch
+  precision: *single_double_precisions
+  M: [511, 512, 513, 514, 515, 600, 700, 850, 934, 1023, 1024]
+  N: [32, 45]
+  denseld: [1024]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot_strided_batch
+  category: pre_checkin
+  function: gtsv_no_pivot_strided_batch
   precision: *single_double_precisions_complex_real
   M: [2000]
   N: [25, 34]
@@ -100,7 +109,7 @@ Tests:
   category: pre_checkin
   function: gtsv_no_pivot_strided_batch
   precision: *single_double_precisions_complex_real
-  M: [476, 1725]
+  M: [44, 75, 150, 476, 1725]
   N: [33, 117]
   denseld: [3000]
   matrix: [rocsparse_matrix_random]
@@ -141,4 +150,31 @@ Tests:
   M: [5000]
   N: [1, 3]
   denseld: [200000, 400000, 800000, 2000000]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot_strided_batch
+  category: nightly
+  function: gtsv_no_pivot_strided_batch
+  precision: *single_double_precisions_complex_real
+  M: [200500, 340567, 498120, 670500]
+  N: [1, 2, 3, 4, 5]
+  denseld: [670500]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot_strided_batch
+  category: nightly
+  function: gtsv_no_pivot_strided_batch
+  precision: *single_only_precisions
+  M: [1298376, 1675009, 2109475]
+  N: [6]
+  denseld: [2109475]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_no_pivot_strided_batch
+  category: nightly
+  function: gtsv_no_pivot_strided_batch
+  precision: *single_only_precisions
+  M: [18375512]
+  N: [1]
+  denseld: [18375512]
   matrix: [rocsparse_matrix_random]

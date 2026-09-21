@@ -31,24 +31,24 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup level2_module
 *  \details
-*  \p hipsparseXbsrsv2_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
+*  \p hipsparseXbsrsv2_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT if either a
 *  structural or numerical zero has been found during \ref hipsparseSbsrsv2_analysis
 *  "hipsparseXbsrsv2_analysis()" or \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()"
 *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position,
-*  using same index base as the BSR matrix.
+*  using the same index base as the BSR matrix.
 *
 *  \p position can be in host or device memory. If no zero pivot has been found,
 *  \p position is set to -1 and \ref HIPSPARSE_STATUS_SUCCESS is returned instead.
 *
-*  \note \p hipsparseXbsrsv2_zeroPivot is a blocking function. It might influence
-*  performance negatively.
+*  \note \p hipsparseXbsrsv2_zeroPivot is a blocking function. It might negatively
+*  influence performance.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
 *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  info        structure that holds the information collected during the analysis step.
 *  @param[inout]
@@ -56,7 +56,7 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, or \p position is nullptr.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
 */
@@ -75,7 +75,7 @@ hipsparseStatus_t
 *  be allocated by the user.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  dirA        matrix storage of BSR blocks.
 *  @param[in]
@@ -104,9 +104,9 @@ hipsparseStatus_t
 *              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb or \p blockDim,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -180,7 +180,7 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  allocated by the user.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  dirA        matrix storage of BSR blocks.
 *  @param[in]
@@ -209,9 +209,9 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb or \p blockDim,
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descr, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p info or \p pBufferSizeInBytes is invalid.
+*              \p info, or \p pBufferSizeInBytes is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
@@ -283,11 +283,11 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  If the matrix sparsity pattern changes, the gathered information will become invalid.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  dirA        matrix storage of BSR blocks.
 *  @param[in]
@@ -319,7 +319,7 @@ hipsparseStatus_t hipsparseZbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
-*              \p descrA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info or
+*              \p descrA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p info, or
 *              \p pBuffer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -392,7 +392,7 @@ hipsparseStatus_t hipsparseZbsrsv2_analysis(hipsparseHandle_t         handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup level2_module
-*  \brief Sparse triangular solve using BSR storage format
+*  \brief Sparse triangular solve using the BSR storage format.
 *
 *  \details
 *  \p hipsparseXbsrsv2_solve solves a sparse triangular linear system of a sparse
@@ -412,12 +412,12 @@ hipsparseStatus_t hipsparseZbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \f]
 *
 *  Performing the above operation requires three steps. First, the user calls
-*  \ref hipsparseSbsrsv2_bufferSize "hipsparseXbsrsv2_bufferSize()" which will determine the size of the required
+*  \ref hipsparseSbsrsv2_bufferSize "hipsparseXbsrsv2_bufferSize()", which will determine the size of the required
 *  temporary storage buffer. The user then allocates this buffer and calls
-*  \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" which will perform analysis on the sparse matrix
+*  \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()", which will perform analysis on the sparse matrix
 *  \f$op(A)\f$. Finally, the user completes the computation by calling \p hipsparseXbsrsv2_solve. The buffer size,
-*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$ while the
-*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to
+*  buffer allocation, and analysis only need to be called once for a given sparse matrix \f$op(A)\f$, while the
+*  computation stage can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors. After all calls to
 *  \p hipsparseXbsrsv2_solve are complete, the temporary buffer can be deallocated.
 *
 *  Solving a triangular system involves inverting the diagonal blocks. This means that if the sparse matrix is
@@ -432,24 +432,24 @@ hipsparseStatus_t hipsparseZbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \ref hipsparseDiagType_t == \ref HIPSPARSE_DIAG_TYPE_UNIT, no zero pivot will be reported, even if the diagonal block \f$A_{j,j}\f$
 *  for some \f$j\f$ is not invertible.
 *
-*  The sparse CSR matrix passed to \p hipsparseXbsrsv2_solve does not actually have to be a triangular matrix. Instead the
+*  The sparse CSR matrix passed to \p hipsparseXbsrsv2_solve does not actually have to be a triangular matrix. Instead, the
 *  triangular upper or lower part of the sparse matrix is solved based on \ref hipsparseFillMode_t set on the descriptor
 *  \p descrA. If the fill mode is set to \ref HIPSPARSE_FILL_MODE_LOWER, then the lower triangular matrix is solved. If the
-*  fill mode is set to \ref HIPSPARSE_FILL_MODE_UPPER then the upper triangular matrix is solved.
+*  fill mode is set to \ref HIPSPARSE_FILL_MODE_UPPER, then the upper triangular matrix is solved.
 *
 *  \note
 *  The sparse BSR matrix has to be sorted.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE and
 *  \p transA == \ref HIPSPARSE_OPERATION_TRANSPOSE is supported.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  dirA        matrix storage of BSR blocks.
 *  @param[in]
@@ -487,7 +487,7 @@ hipsparseStatus_t hipsparseZbsrsv2_analysis(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
 *              \p descrA, \p alpha, \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA,
-*              \p f or \p x is invalid.
+*              \p f, or \p x is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED

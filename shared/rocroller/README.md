@@ -457,7 +457,7 @@ The following commands can be used to visualize memory access patterns to png fi
 ```console
 $ cd ${build_dir}
 
-$ ./bin/client/rocRoller_gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --storeLDS_D=False --scheduler=Priority --visualize=True --match_memory_access=False
+$ ./bin/client/rocRoller_gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --store="VGPRToGlobalMemoryWithBuffer" --scheduler=Priority --visualize=True --match_memory_access=False
 
 Visualizing to gemm.vis
 Wrote workitem_A.dat

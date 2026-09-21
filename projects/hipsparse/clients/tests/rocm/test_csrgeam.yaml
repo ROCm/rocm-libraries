@@ -48,7 +48,7 @@ Tests:
 - name: csrgeam
   category: pre_checkin
   function: csrgeam
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   M: 1
   N: 1
   alpha: [1.0]
@@ -65,6 +65,20 @@ Tests:
              nos5,
              nos6,
              nos7]
+
+- name: csrgeam
+  category: pre_checkin
+  function: csrgeam
+  precision: *single_double_precisions_complex
+  M: [534, 876]
+  N: [423, 654]
+  alpha: [1.0]
+  alphai: [-0.75]
+  beta: [2.0]
+  betai: [0.75]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
 - name: csrgeam
   category: pre_checkin

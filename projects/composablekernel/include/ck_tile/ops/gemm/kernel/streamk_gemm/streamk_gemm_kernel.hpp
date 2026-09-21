@@ -6,6 +6,7 @@
 #include "ck_tile/ops/gemm/kernel/gemm_kernel.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/host/concat.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "streamk_gemm_coherency.hpp"
 
 namespace ck_tile {
@@ -75,6 +76,8 @@ struct StreamKKernel
     using TilePartitioner  = TilePartitioner_;
     using GemmPipeline     = GemmPipeline_;
     using EpiloguePipeline = EpiloguePipeline_;
+    using WarpGemm         = typename GemmPipeline::BlockGemm::WarpGemm;
+    using BlockGemmShape   = typename GemmPipeline::BlockGemmShape;
 
     static_assert(
         TilePartitioner::PERSISTENT == PersistentDP,
@@ -117,7 +120,9 @@ struct StreamKKernel
 
     struct StreamKKernelArgs : ck_tile::UniversalGemmKernelArgs<>
     {
-        StreamKKernelArgs(const StreamKHostArgs& host_args, index_t grid)
+        StreamKKernelArgs(const StreamKHostArgs& host_args,
+                          index_t max_active_wgs,
+                          int num_xccs_ = 1)
             : UniversalGemmKernelArgs{host_args.as_ptr,
                                       host_args.bs_ptr,
                                       host_args.ds_ptr,
@@ -133,7 +138,9 @@ struct StreamKKernel
               // The workspace pointer is set to nullptr because we must first
               // instantiate the TilePartitioner to get the necessary size
               workspace_ptr{nullptr},
-              tile_partitioner{TilePartitioner{host_args.M, host_args.N, host_args.K, grid}}
+              tile_partitioner{
+                  TilePartitioner{host_args.M, host_args.N, host_args.K, max_active_wgs}},
+              num_xccs{num_xccs_}
 
         {
         }
@@ -147,16 +154,22 @@ struct StreamKKernel
          * the C tensor.
          */
         TilePartitioner tile_partitioner;
+        /**
+         * @brief  An int for the number of xcds available on a given device for remapping the block
+         * indices to be contiguous.
+         */
+        int num_xccs;
     };
 
     using KernelArgs = StreamKKernelArgs;
     using Kernel     = StreamKKernel<TilePartitioner, GemmPipeline, EpiloguePipeline>;
+    using StreamKOps = StreamKReductionOps<TilePartitioner, GemmPipeline, StreamKKernelArgs>;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
         using P_ = GemmPipeline;
-        using WarpTile = typename P_::BlockGemmShape::WarpTile;
+        using WarpTile = typename BlockGemmShape::WarpTile;
 
         return concat('_', "streamk", gemm_prec_str<ADataType, BDataType>(),
                       concat('x', P_::MPerBlock, P_::NPerBlock, P_::KPerBlock),
@@ -204,9 +217,9 @@ struct StreamKKernel
                                                          int num_cu    = NumCU(),
                                                          int occupancy = Occupancy())
     {
-        const index_t grid = num_cu * occupancy;
-
-        return StreamKKernelArgs{host_args, grid};
+        const index_t max_active_wgs = num_cu * occupancy;
+        const int num_xccs           = get_num_xccs();
+        return StreamKKernelArgs{host_args, max_active_wgs, num_xccs};
     }
 
     template <bool UseDefaultScheduler = true>
@@ -312,166 +325,18 @@ struct StreamKKernel
     }
 
     /**
-     *@brief Signals that the current thread block(CTA) has completed storing its partial
-     * results.
-     * @param kargs Kernel arguments, including the workspace pointer.
-     * @param cta_idx The index of the current thread block (CTA).
-     * @note This function utilizes a scalar store to write to the flags buffer.
-     */
-    CK_TILE_DEVICE void SignalStorePartialDone(const StreamKKernelArgs& kargs,
-                                               index_t cta_idx) const
-    {
-        auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
-        index_t offset     = cta_idx * sizeof(index_t);
-
-        asm volatile("s_mov_b32 m0, %2\n\t"
-                     // Depending on the architecture, the GLC flag will bypass the approproriate
-                     // cache level(s) to ensure the write is visible to other workgroups. See the
-                     // appropriate ISA for details about the GLC modifier.
-                     "s_store_dword %0, %1, %2 glc\n\t"
-                     "s_waitcnt lgkmcnt(0)" // Wait for the store to complete
-                     :
-                     : "s"(1), "s"(sk_flags_ptr), "s"(offset)
-                     : "memory");
-    }
-
-    /**
-     * @brief Waits for the thread block (cta_idx) to complete storing its partial results.
-     * @param kargs Kernel arguments, including the workspace pointer.
-     * @param cta_idx The index of the thread block (CTA).
-     * @note This function utilizes a scalar load to read from the flags
-     * buffer.
-     */
-    CK_TILE_DEVICE void WaitStorePartialDone(const StreamKKernelArgs& kargs, index_t cta_idx) const
-    {
-        auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
-        index_t result;
-        index_t offset = cta_idx * sizeof(index_t);
-
-        do
-        {
-            asm volatile("s_mov_b32 m0, %2\n\t"
-                         // Depending on the architecture, the GLC flag will bypass the
-                         // approproriate cache level(s) to avoid reading stale flags. See the
-                         // appropriate ISA for details about the GLC modifier.
-                         "s_load_dword %0, %1, %2 glc\n\t"
-                         "s_waitcnt lgkmcnt(0)" // Wait for the load to complete
-                         : "=s"(result)
-                         : "s"(sk_flags_ptr), "s"(offset)
-                         : "memory");
-        } while(result != 1);
-    }
-
-    /**
-     * @brief Adds the values of a block tile to an output block tile.
-     * @param in_out_block_tile The output block tile to which values are added.
-     * @param in_block_tile The input block tile whose values are added.
-     * @note This function iterates over the distributed spans of the block tiles and updates
-     * the output block tile with accumulated values.
-     */
-    template <typename OAccTile>
-    CK_TILE_DEVICE void AddBlockTile(OAccTile& in_out_block_tile,
-                                     const OAccTile& in_block_tile) const
-    {
-        using BlockType        = remove_cvref_t<decltype(in_out_block_tile)>;
-        constexpr auto o_spans = BlockType::get_distributed_spans();
-        sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
-            sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
-                constexpr auto idx     = make_tuple(idx0, idx1);
-                in_out_block_tile(idx) = in_out_block_tile[idx] + in_block_tile[idx];
-            });
-        });
-    }
-
-    /**
-     * @brief Loads a partial block tile from the workspace buffer.
-     * @param kargs Kernel arguments, including the workspace pointer.
-     * @param cta_idx The index of the thread block (CTA).
-     * @param c_block_tile_dist The tile distribution for the block.
-     * @return The loaded partial block tile.
-     * @note This function calculates the buffer pointer and uses the tile distribution for
-     * loading the partial block tile.
-     */
-    template <typename DataType, typename OAccTileDist>
-    CK_TILE_DEVICE auto LoadPartial(const StreamKKernelArgs& kargs,
-                                    index_t cta_idx,
-                                    const OAccTileDist& c_block_tile_dist) const
-    {
-        const auto c_block_tile_buffer_size =
-            TilePartitioner::MPerBlock * TilePartitioner::NPerBlock * sizeof(DataType);
-        void* partial_buffer_ptr = static_cast<char*>(kargs.workspace_ptr) +
-                                   kargs.tile_partitioner.get_flags_buffer_size() +
-                                   cta_idx * c_block_tile_buffer_size;
-
-        const auto& partial_tensor_view = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<DataType*>(partial_buffer_ptr),
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            make_tuple(TilePartitioner::NPerBlock, 1),
-            number<GemmPipeline::GetVectorSizeC()>{},
-            number<1>{});
-
-        auto partial_tile_window = make_tile_window(
-            partial_tensor_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            {0, 0},
-            c_block_tile_dist);
-
-        return load_tile(partial_tile_window);
-    }
-
-    /**
-     * @brief Stores a partial block tile to the workspace buffer.
-     * @param kargs Kernel arguments, including the workspace pointer.
-     * @param cta_idx The index of the thread block (CTA).
-     * @param c_block_tile The block tile to be stored.
-     * @note This function calculates the buffer pointer and uses the tile window for storing
-     * the partial block tile.
-     */
-    template <typename OAccTile>
-    CK_TILE_DEVICE void StorePartial(const StreamKKernelArgs& kargs,
-                                     index_t cta_idx,
-                                     const OAccTile& c_block_tile) const
-    {
-        const auto c_block_tile_buffer_size = TilePartitioner::MPerBlock *
-                                              TilePartitioner::NPerBlock *
-                                              sizeof(typename OAccTile::DataType);
-        void* partial_buffer_ptr = static_cast<char*>(kargs.workspace_ptr) +
-                                   kargs.tile_partitioner.get_flags_buffer_size() +
-                                   cta_idx * c_block_tile_buffer_size;
-
-        const auto& partial_tensor_view = make_naive_tensor_view<
-            address_space_enum::global,
-            memory_operation_enum::set,
-            StreamKCoherency<decltype(core::arch::get_compiler_target())>::BUFFER_COHERENCE>(
-            static_cast<typename OAccTile::DataType*>(partial_buffer_ptr),
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            make_tuple(TilePartitioner::NPerBlock, 1),
-            number<GemmPipeline::GetVectorSizeC()>{},
-            number<1>{});
-
-        auto partial_tile_window = make_tile_window(
-            partial_tensor_view,
-            make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
-            {0, 0});
-        store_tile(partial_tile_window, c_block_tile);
-        // Wait for all vector stores for this wavefront to complete
-        s_waitcnt</*vmcnt*/ 0, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
-        // Wait for all wavefronts in this workgroup to arrive here before continuing
-        __builtin_amdgcn_s_barrier();
-    }
-
-    /**
-     * @brief Runs the main Stream - K algorithm.
-     * @param kargs Stream - K kernel arguments.
-     * @param cta_idx The current Stream - K workgroup's index.
+     * @brief Runs the main Stream-K algorithm.
+     * @param kargs Stream-K kernel arguments.
+     * @param cta_idx The current Stream-K workgroup's index.
      * @param smem_ptr_0 Pointer to LDS.
-     * @note It is assumed that the first Stream - K workgroup has a `cta_idx` of zero. If a
+     * @note It is assumed that the first Stream-K workgroup has a `cta_idx` of zero. If a
      * non-persistent data-parallel (DP) section is used, then a Stream-K workgroup's `cta_idx`
      * *should be something like `blockIdx.x` minus number of DP workgroups.
      */
     CK_TILE_DEVICE
     void StreamKGemm(StreamKKernelArgs& kargs, index_t cta_idx, void* smem_ptr_0) const
     {
+        const StreamKOps sk_ops{};
         index_t iter_start, iter_end;
         kargs.tile_partitioner.get_iter_boundaries(iter_start, iter_end, cta_idx);
 
@@ -498,7 +363,8 @@ struct StreamKKernel
 
             // Determine the total size along the K dimension the workgroup is using in this
             // iteration (used to construct tensor views).
-            index_t k_size = num_loop_sk * TilePartitioner::KPerBlock;
+            index_t k_size = amd_wave_read_first_lane(
+                kargs.tile_partitioner.get_k_size(num_loop_sk, local_iter_end));
 
             // Get the K offsets for the A and B tensors
             auto [i_k_a, i_k_b] = GetKOffsets<ALayout, BLayout>(
@@ -508,8 +374,9 @@ struct StreamKKernel
             {
                 BaseGemm(kargs, tile_idx, num_loop_sk, i_k_a, i_k_b, k_size, smem_ptr_0);
             }
-            else if(TilePartitioner::ReductionStrategy == StreamKReductionStrategy::Reduction ||
-                    TilePartitioner::ReductionStrategy == StreamKReductionStrategy::TreeReduction)
+            else if constexpr(TilePartitioner::ReductionStrategy ==
+                                  StreamKReductionStrategy::Linear ||
+                              TilePartitioner::ReductionStrategy == StreamKReductionStrategy::Tree)
             {
                 const auto c_macro_tile_idx =
                     kargs.tile_partitioner.get_output_tile_index(tile_idx);
@@ -548,13 +415,12 @@ struct StreamKKernel
                 auto tile_started = iter_start == tile_iter_start;
                 auto tile_ended   = iter_end >= tile_iter_end;
 
-                if constexpr(TilePartitioner::ReductionStrategy ==
-                             StreamKReductionStrategy::Reduction)
+                if constexpr(TilePartitioner::ReductionStrategy == StreamKReductionStrategy::Linear)
                 {
                     if(!tile_started)
                     {
-                        StorePartial(kargs, cta_idx, c_block_tile);
-                        SignalStorePartialDone(kargs, cta_idx);
+                        sk_ops.StorePartial(kargs, cta_idx, c_block_tile);
+                        sk_ops.SignalStorePartialDone(kargs, cta_idx);
                     }
                     else
                     {
@@ -571,12 +437,12 @@ struct StreamKKernel
 
                             while(accum_iters < iter_per_tile)
                             {
-                                WaitStorePartialDone(kargs, next_cta);
+                                sk_ops.WaitStorePartialDone(kargs, next_cta);
 
                                 using BlockType = remove_cvref_t<decltype(c_block_tile)>;
-                                AddBlockTile(
+                                sk_ops.AddBlockTile(
                                     accum_block_tile,
-                                    LoadPartial<typename BlockType::DataType>(
+                                    sk_ops.template LoadPartial<typename BlockType::DataType>(
                                         kargs, next_cta, c_block_tile.get_tile_distribution()));
 
                                 accum_iters += iter_per_cta + (next_cta < extra_iters);
@@ -592,16 +458,19 @@ struct StreamKKernel
                 }
                 else // Tree Reduction
                 {
-                    auto accum_block_tile = c_block_tile;
-                    index_t tile_local_cta_idx =
-                        kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx);
+                    auto accum_block_tile      = c_block_tile;
+                    index_t tile_local_cta_idx = amd_wave_read_first_lane(
+                        kargs.tile_partitioner.get_tile_local_cta_index(tile_iter_start, cta_idx));
 
-                    for(index_t stride = 1;; stride <<= 1)
+                    index_t stride = amd_wave_read_first_lane(1);
+
+                    for(;; stride <<= 1)
                     {
-                        const index_t partner_cta_idx = cta_idx + stride;
-                        const index_t partner_start_iter =
-                            kargs.tile_partitioner.get_start_iter(partner_cta_idx);
-                        bool partner_in_tile = partner_start_iter < tile_iter_end;
+                        const index_t partner_cta_idx = amd_wave_read_first_lane(cta_idx + stride);
+                        const index_t partner_start_iter = amd_wave_read_first_lane(
+                            kargs.tile_partitioner.get_start_iter(partner_cta_idx));
+                        bool partner_in_tile =
+                            amd_wave_read_first_lane(partner_start_iter < tile_iter_end);
 
                         // If the partner of the workgroup who started the tile is not in this tile,
                         // then the work for this tile is done and results can be stored in the C
@@ -622,13 +491,14 @@ struct StreamKKernel
                             // partials and accumulate results.
                             if(partner_in_tile)
                             {
-                                WaitStorePartialDone(kargs, partner_cta_idx);
+                                sk_ops.WaitStorePartialDone(kargs, partner_cta_idx);
                                 using BlockType = remove_cvref_t<decltype(c_block_tile)>;
-                                AddBlockTile(accum_block_tile,
-                                             LoadPartial<typename BlockType::DataType>(
-                                                 kargs,
-                                                 partner_cta_idx,
-                                                 c_block_tile.get_tile_distribution()));
+                                sk_ops.AddBlockTile(
+                                    accum_block_tile,
+                                    sk_ops.template LoadPartial<typename BlockType::DataType>(
+                                        kargs,
+                                        partner_cta_idx,
+                                        c_block_tile.get_tile_distribution()));
                             }
                         }
                         // Otherwise, it's this workgroup's turn to write to partials. All
@@ -636,8 +506,8 @@ struct StreamKKernel
                         // partials.
                         else
                         {
-                            StorePartial(kargs, cta_idx, accum_block_tile);
-                            SignalStorePartialDone(kargs, cta_idx);
+                            sk_ops.StorePartial(kargs, cta_idx, accum_block_tile);
+                            sk_ops.SignalStorePartialDone(kargs, cta_idx);
                             // Once the workgroup writes to partials, it has no more work to do for
                             // this tile.
                             break;
@@ -648,7 +518,7 @@ struct StreamKKernel
             else
             {
                 static_assert(
-                    "An implementation does not exist for the chosen reduction strategy.");
+                    false, "An implementation does not exist for the chosen reduction strategy.");
             }
 
             // Prepare for next Stream-K loop iteration.
@@ -658,66 +528,31 @@ struct StreamKKernel
     }
 
     /**
-     * @brief Entry point for the Stream-K Kernel with non-persistent DP.
+     * @brief Entry point for the Stream-K kernel.
      *
      * @par Overview
-     *     For the Non-Persistent kernel, each data parallel workgroup will
-     *     compute the results for their assigned macro-tile by calling `BaseGemm()`.
-     *     The Stream-K workgroups will do their assigned work by calling
-     *     `StreamKGemm()`, which calls `BaseGemm()` in the Stream-K loop.
+     *     Uses StreamKDispatch to handle both persistent and non-persistent DP sections.
+     *     Non-persistent: dedicated DP workgroups process full tiles, then dedicated SK
+     *     workgroups share remaining K-iterations.
+     *     Persistent: each workgroup loops over DP tiles (round-robin), then proceeds
+     *     to SK work.
      */
-    template <bool U = PersistentDP>
-    CK_TILE_DEVICE typename std::enable_if_t<!U> operator()(StreamKKernelArgs kargs) const
+    CK_TILE_DEVICE void operator()(StreamKKernelArgs kargs) const
     {
-        // Allocate LDS
         __shared__ char smem_ptr_0[UniversalGemmKernel::GetSmemSize()];
+        index_t block_idx         = ck_tile::get_block_1d_id();
+        index_t grid_size         = kargs.tile_partitioner.grid_size().x;
+        const index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
 
-        index_t block_idx   = ck_tile::get_block_1d_id();
-        index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
-        index_t dp_ctas     = kargs.tile_partitioner.get_dp_ctas();
-        bool is_dp_ctas     = block_idx < kargs.tile_partitioner.get_dp_ctas();
+        block_idx = kargs.tile_partitioner.remap_xcd(block_idx, grid_size, kargs.num_xccs);
 
-        // Check if at the data parallel section
-        if(is_dp_ctas)
-        {
-            BaseGemm(kargs, block_idx, dp_num_loop, 0, 0, kargs.K, smem_ptr_0);
-        }
-        else
-        {
-            // Stream-K
-            StreamKGemm(kargs, block_idx - dp_ctas, smem_ptr_0);
-        }
-    }
-
-    /**
-     * @brief Entry point for the Stream-K Kernel with persistent DP.
-     *
-     * @par Overview
-     *     For the Persistent kernel, each workgroup will first compute their
-     *     assigned data-parallel tiles. Each data parallel tile will be computed
-     *     by calling `BaseGemm()`. Then the workgroups will proceed with the
-     *     Stream-K portion by calling `StreamKGemm()`, which calls `BaseGemm()`
-     *     in the Stream-K loop.
-     */
-    template <bool U = PersistentDP>
-    CK_TILE_DEVICE typename std::enable_if_t<U> operator()(StreamKKernelArgs kargs) const
-    {
-        // Allocate LDS
-        __shared__ char smem_ptr_0[UniversalGemmKernel::GetSmemSize()];
-
-        index_t block_idx   = ck_tile::get_block_1d_id();
-        index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
-
-        // Data-parallel section
-        for(index_t tile_idx = block_idx; tile_idx < kargs.tile_partitioner.get_dp_tiles();
-            tile_idx += kargs.tile_partitioner.get_grid())
-        {
-            BaseGemm(kargs, tile_idx, dp_num_loop, 0, 0, kargs.K, smem_ptr_0);
-            block_sync_lds();
-        }
-
-        // Stream-K section
-        StreamKGemm(kargs, block_idx, smem_ptr_0);
+        StreamKDispatch(
+            kargs.tile_partitioner,
+            [&](index_t tile_idx) {
+                BaseGemm(kargs, tile_idx, dp_num_loop, 0, 0, kargs.K, smem_ptr_0);
+            },
+            [&](index_t sk_cta_idx) { StreamKGemm(kargs, sk_cta_idx, smem_ptr_0); },
+            block_idx);
     }
 
     private:
@@ -785,9 +620,10 @@ struct StreamKKernel
         const auto kernel              = kentry<min_block_per_cu, Kernel, KernelArgs>;
 
         ck_tile::hip_check_error(
-            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, kBlockSize, 0));
+            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, BlockSize().x, 0));
 
         return max(occupancy, 1);
     }
 };
+
 } // namespace ck_tile

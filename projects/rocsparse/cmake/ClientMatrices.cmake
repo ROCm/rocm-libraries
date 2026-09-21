@@ -102,14 +102,10 @@ endif()
 
 if(BUILD_ADDRESS_SANITIZER)
   execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -fsanitize=address -shared-libasan -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe
-    RESULT_VARIABLE STATUS)
+    COMMAND_ERROR_IS_FATAL ANY)
 else()
   execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CONVERT_SOURCE} -O3 -Wl,--build-id=sha1 -o ${PROJECT_BINARY_DIR}/mtx2csr.exe
-    RESULT_VARIABLE STATUS)
-endif()
-
-if(STATUS AND NOT STATUS EQUAL 0)
-  message(FATAL_ERROR "mtx2csr.exe failed to build, aborting.")
+    COMMAND_ERROR_IS_FATAL ANY)
 endif()
 
 list(LENGTH TEST_MATRICES len)
@@ -173,11 +169,8 @@ foreach(i RANGE 0 ${len1})
       endif()
 
       execute_process(COMMAND tar xf ${mat}.tar.gz
-        RESULT_VARIABLE STATUS
-        WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
-      if(STATUS AND NOT STATUS EQUAL 0)
-        message(FATAL_ERROR "uncompressing failed, aborting.")
-      endif()
+        WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
+        COMMAND_ERROR_IS_FATAL ANY)
 
       file(RENAME ${CMAKE_MATRICES_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     else()
@@ -187,14 +180,9 @@ foreach(i RANGE 0 ${len1})
     # Set LD_LIBRARY_PATH for running the executable from build directory
     set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}")
     execute_process(COMMAND ${PROJECT_BINARY_DIR}/mtx2csr.exe ${mat}.mtx ${mat}.csr
-      RESULT_VARIABLE STATUS
-      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
-    if(STATUS AND NOT STATUS EQUAL 0)
-      message(FATAL_ERROR "mtx2csr.exe failed, aborting.")
-    else()
-      message(STATUS "${mat} success.")
-    endif()
-    # TODO: add 'COMMAND_ERROR_IS_FATAL ANY' once cmake supported version is 3.19
+      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
+      COMMAND_ERROR_IS_FATAL ANY)
+    message(STATUS "${mat} success.")
     file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx)
 
   endif()

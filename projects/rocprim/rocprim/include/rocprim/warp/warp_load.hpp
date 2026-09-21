@@ -98,6 +98,8 @@ enum class warp_load_method
 /// In the example a load operation is performed on a warp of 8 threads, using type
 /// \p int and 4 items per thread.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_load.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(int * input, ...)
 /// {

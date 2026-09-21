@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,8 @@
 
 #include <hip/hip_runtime.h>
 
-namespace rocrand_device {
+namespace rocrand_device
+{
 
 template<bool UseSharedVectors>
 struct sobol64_state
@@ -32,11 +33,15 @@ struct sobol64_state
     unsigned long long int i;
     unsigned long long int vectors[64];
 
-    __forceinline__ __device__ __host__ sobol64_state() : d(), i(), vectors() {}
+    __forceinline__ __device__ __host__
+    sobol64_state()
+        : d(), i(), vectors()
+    {}
 
-    __forceinline__ __device__ __host__ sobol64_state(const unsigned long long int  d,
-                                                      const unsigned long long int  i,
-                                                      const unsigned long long int* vectors)
+    __forceinline__ __device__ __host__
+    sobol64_state(const unsigned long long int  d,
+                  const unsigned long long int  i,
+                  const unsigned long long int* vectors)
         : d(d), i(i)
     {
         for(int k = 0; k < 64; k++)
@@ -49,15 +54,19 @@ struct sobol64_state
 template<>
 struct sobol64_state<true>
 {
-    unsigned long long int d;
-    unsigned long long int i;
-    const unsigned long long int * vectors;
+    unsigned long long int        d;
+    unsigned long long int        i;
+    const unsigned long long int* vectors;
 
-    __forceinline__ __device__ __host__ sobol64_state() : d(), i(), vectors() {}
+    __forceinline__ __device__ __host__
+    sobol64_state()
+        : d(), i(), vectors()
+    {}
 
-    __forceinline__ __device__ __host__ sobol64_state(const unsigned long long int  d,
-                                                      const unsigned long long int  i,
-                                                      const unsigned long long int* vectors)
+    __forceinline__ __device__ __host__
+    sobol64_state(const unsigned long long int  d,
+                  const unsigned long long int  i,
+                  const unsigned long long int* vectors)
         : d(d), i(i), vectors(vectors)
     {}
 };
@@ -66,64 +75,73 @@ template<bool UseSharedVectors>
 class sobol64_engine
 {
 public:
-
     typedef struct sobol64_state<UseSharedVectors> sobol64_state;
 
-    __forceinline__ __device__ __host__ sobol64_engine() {}
+    __forceinline__ __device__ __host__
+    sobol64_engine()
+    {}
 
-    __forceinline__ __device__ __host__ sobol64_engine(const unsigned long long int* vectors,
-                                                       const unsigned long long int  offset)
+    __forceinline__ __device__ __host__
+    sobol64_engine(const unsigned long long int* vectors, const unsigned long long int offset)
         : m_state(0, 0, vectors)
     {
         discard_state(offset);
     }
 
     /// Advances the internal state to skip \p offset numbers.
-    __forceinline__ __device__ __host__ void discard(unsigned long long int offset)
+    __forceinline__ __device__ __host__
+    void discard(unsigned long long int offset)
     {
         discard_state(offset);
     }
 
-    __forceinline__ __device__ __host__ void discard()
+    __forceinline__ __device__ __host__
+    void discard()
     {
         discard_state();
     }
 
     /// Advances the internal state by stride times, where stride is power of 2
-    __forceinline__ __device__ __host__ void discard_stride(unsigned long long int stride)
+    __forceinline__ __device__ __host__
+    void discard_stride(unsigned long long int stride)
     {
         discard_state_power2(stride);
     }
 
-    __forceinline__ __device__ __host__ unsigned long long int operator()()
+    __forceinline__ __device__ __host__
+    unsigned long long int operator()()
     {
         return this->next();
     }
 
-    __forceinline__ __device__ __host__ unsigned long long int next()
+    __forceinline__ __device__ __host__
+    unsigned long long int next()
     {
         unsigned long long int p = m_state.d;
         discard_state();
         return p;
     }
 
-    __forceinline__ __device__ __host__ unsigned long long int current() const
+    __forceinline__ __device__ __host__
+    unsigned long long int current() const
     {
         return m_state.d;
     }
 
-    __forceinline__ __device__ __host__ static constexpr bool uses_shared_vectors()
+    __forceinline__ __device__ __host__
+    static constexpr bool uses_shared_vectors()
     {
         return UseSharedVectors;
     }
 
 protected:
     // Advances the internal state by offset times.
-    __forceinline__ __device__ __host__ void discard_state(unsigned long long int offset)
+    __forceinline__ __device__ __host__
+    void discard_state(unsigned long long int offset)
     {
         m_state.i += offset;
         const unsigned long long int g = m_state.i ^ (m_state.i >> 1ull);
-        m_state.d = 0;
+        m_state.d                      = 0;
         for(int i = 0; i < 64; i++)
         {
             m_state.d ^= (g & (1ull << i) ? m_state.vectors[i] : 0ull);
@@ -131,13 +149,15 @@ protected:
     }
 
     // Advances the internal state to the next state
-    __forceinline__ __device__ __host__ void discard_state()
+    __forceinline__ __device__ __host__
+    void discard_state()
     {
         m_state.d ^= m_state.vectors[rightmost_zero_bit(m_state.i)];
         m_state.i++;
     }
 
-    __forceinline__ __device__ __host__ void discard_state_power2(unsigned long long int stride)
+    __forceinline__ __device__ __host__
+    void discard_state_power2(unsigned long long int stride)
     {
         // Leap frog
         //
@@ -159,12 +179,13 @@ protected:
     // Returns the index of the rightmost zero bit in the binary expansion of
     // x (Gray code of the current element's index)
     // NOTE changing unsigned long long int to unit64_t will cause compile failure on device
-    __forceinline__ __device__ __host__ unsigned int rightmost_zero_bit(unsigned long long int x)
+    __forceinline__ __device__ __host__
+    unsigned int rightmost_zero_bit(unsigned long long int x)
     {
-        #if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__)
         unsigned int z = __ffsll(~x);
         return z ? z - 1 : 0;
-        #else
+#else
         if(x == 0)
             return 0;
         unsigned long long int y = x;
@@ -175,7 +196,7 @@ protected:
             z++;
         }
         return z - 1;
-        #endif
+#endif
     }
 
 protected:
@@ -207,7 +228,7 @@ typedef rocrand_device::sobol64_engine<false> rocrand_state_sobol64;
  */
 __forceinline__ __device__ __host__
 void rocrand_init(const unsigned long long int* vectors,
-                  const unsigned int            offset,
+                  const unsigned long long int  offset,
                   rocrand_state_sobol64*        state)
 {
     *state = rocrand_state_sobol64(vectors, offset);

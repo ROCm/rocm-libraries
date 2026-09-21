@@ -26,8 +26,11 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <typename MyProblem, typename MySolution>
     struct SolutionLibrary;
 }
+

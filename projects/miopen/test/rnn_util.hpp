@@ -33,10 +33,10 @@
 #include <set>
 #include <vector>
 #include <cstdlib>
-#include "random.hpp"
 #include <numeric>
 
-#include "../test/gemm.hpp"
+#include "gemm.hpp"
+#include "random.hpp"
 
 #include <miopen/tensor.hpp>
 

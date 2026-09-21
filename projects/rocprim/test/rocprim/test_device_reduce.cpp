@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -396,10 +396,11 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 
             // Generate data
             std::vector<key_value> input(size);
+            const std::vector<T> values = test_utils::get_random_data<T>(size, 1, 100, seed_value);
             for (size_t i = 0; i < size; i++)
             {
                 input[i].key = (int)i;
-                input[i].value = test_utils::get_random_data<T>(1, 1, 100, seed_value)[0];
+                input[i].value = values[i];
             }
 
             common::device_ptr<key_value> d_input(input);
@@ -570,21 +571,17 @@ void testLargeIndices()
 
 TEST(RocprimDeviceReduceTests, LargeIndices)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndices<>();
 }
 
 TEST(RocprimDeviceReduceTests, LargeIndicesWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndices<true>();
 }
 

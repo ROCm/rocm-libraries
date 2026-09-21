@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_getrs.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -43,6 +44,7 @@ rocblas_status rocsolver_getrs_strided_batched_impl(rocblas_handle handle,
                                                     const I ldb,
                                                     const rocblas_stride strideB,
                                                     const I batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("getrs_strided_batched", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda",
                         lda, "--strideA", strideA, "--strideP", strideP, "--ldb", ldb, "--strideB",
@@ -93,6 +95,10 @@ rocblas_status rocsolver_getrs_strided_batched_impl(rocblas_handle handle,
     return rocsolver_getrs_template<false, true, T>(
         handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, ipiv, strideP, B, shiftB, incb, ldb,
         strideB, batch_count, work1, work2, work3, work4, optim_mem, true);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

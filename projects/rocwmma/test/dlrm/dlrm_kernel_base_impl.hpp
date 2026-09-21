@@ -115,7 +115,8 @@ namespace rocwmma
                        || (deviceArch == DeviceInfo::GFX1152)
                        || (deviceArch == DeviceInfo::GFX1153);
 
-        auto isGfx12 = (deviceArch == DeviceInfo::GFX1200) || (deviceArch == DeviceInfo::GFX1201);
+        auto isGfx12 = (deviceArch == DeviceInfo::GFX1200) || (deviceArch == DeviceInfo::GFX1201)
+                       || (deviceArch == DeviceInfo::GFX1250);
 
         // Datatypes
         auto isF64 = std::is_same<DataT, float64_t>::value;
@@ -199,12 +200,12 @@ namespace rocwmma
                       << "MatM, MatK, MatB, "
 #if ROCWMMA_VALIDATION_TESTS
                       << "maxRelativeDiff, "
-                      << "tolerance, "
 #endif // ROCWMMA_VALIDATION_TESTS
                       << "elapsedMs, "
                       << "Problem Size(GFlops), "
                       << "TFlops/s, "
-                      << "Efficiency(%)" << std::endl;
+                      << "Efficiency(%), "
+                      << "Result" << std::endl;
     }
 
     template <uint32_t TileSize, typename DataT>

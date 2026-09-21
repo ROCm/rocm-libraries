@@ -501,6 +501,7 @@ TEST(ScanByKeyInclusiveTests, TestInclusiveScanByKeyDevice)
         thrust::raw_pointer_cast(&d_vals[0]),
         thrust::raw_pointer_cast(&d_keys[0]),
         thrust::raw_pointer_cast(&d_output[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(d_output, h_output);
     }

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,18 +29,6 @@
 #include <math.h>
 using rocsparseio_float_complex  = std::complex<float>;
 using rocsparseio_double_complex = std::complex<double>;
-
-typedef struct
-{
-    uint64_t mean_nnz_per_seq;
-    uint64_t min_nnz_per_seq;
-    uint64_t max_nnz_per_seq;
-    uint64_t median_nnz_per_seq;
-    bool     full_diagonal;
-    bool     symbolic_symetric;
-    bool     numeric_symetric;
-
-} rocsparseio_statistics_csx;
 
 template <typename J, typename T>
 struct transpose_pair_t

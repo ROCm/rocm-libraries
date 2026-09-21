@@ -94,6 +94,9 @@ rocblas_int query_device_property();
 /*  set current device to device_id */
 void set_device(rocblas_int device_id);
 
+/*  print ASAN kernel parameter warning */
+void print_asan_kernel_warning(const char* program_name);
+
 /* ============================================================================================
  */
 template <typename T>

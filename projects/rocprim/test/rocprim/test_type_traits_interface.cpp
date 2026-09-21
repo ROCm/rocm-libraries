@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -138,8 +138,12 @@ class RocprimFloatingPointTests : public ::testing::Test
 public:
     using input_type = Params;
 };
-using FloatingPointTypeTestParams = ::testing::
-    Types<rocprim::half, rocprim::bfloat16, float, double, type_traits_test::custom_float_type>;
+using FloatingPointTypeTestParams = ::testing::Types<rocprim::half,
+                                                     rocprim::bfloat16,
+                                                     float,
+                                                     double,
+                                                     type_traits_test::custom_float_type,
+                                                     __hip_bfloat16>;
 
 template<class Params>
 class RocprimIntegralTests : public ::testing::Test

@@ -343,6 +343,7 @@ TEST(ReduceByKeyTests, TestReduceByKeyDevice)
         thrust::raw_pointer_cast(&d_keys_result[0]),
         thrust::raw_pointer_cast(&d_values_result[0]),
         thrust::raw_pointer_cast(&d_output_sizes[0]));
+      HIP_CHECK(hipGetLastError());
 
       h_keys_result.resize(end_pair.first - h_keys_result.begin());
       h_values_result.resize(end_pair.second - h_values_result.begin());

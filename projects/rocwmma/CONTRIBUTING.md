@@ -82,6 +82,73 @@ All new features and fixes should also tie into the rocWMMA [GitHub Issues](http
 
 Exceptions to these criteria will be handled on a case-by-case basis, and should be discussed via the Issues tab.
 
+## Community Samples ##
+
+rocWMMA welcomes community contributions of sample code that demonstrates advanced techniques or
+specialized use cases. Community samples are subject to reduced review requirements compared to
+library code changes.
+
+### Community Sample Acceptance Criteria ###
+
+Community samples should meet the following criteria:
+
+1. **Demonstrates rocWMMA Usage**: The sample must meaningfully use the rocWMMA API
+2. **Provides Value**: Shows a technique, optimization, or use case not covered in official samples
+3. **Code Quality**: Code should be readable, well-commented, and follow basic C++ best practices
+4. **Builds Successfully**: Must compile with supported ROCm/hipcc versions
+5. **Proper Licensing**: Must include MIT license header and be contributor's original work
+
+### Reduced Requirements for Community Samples ###
+
+Community samples are **NOT** required to provide:
+
+- Unit tests or validation tests
+- Benchmark tests or performance comparisons
+- Support for all data types (int8, f16, f32, f64, bf16, f8, bf8)
+- Support for all GPU architectures (gfx908, gfx90a, gfx942, gfx950, gfx11xx, gfx12xx)
+- Support for all block sizes or fragment parameters
+- API documentation in the API Reference Guide
+- Extensive error handling or edge case coverage
+
+### What to Expect ###
+
+- Community samples are **provided as-is**
+- AMD does not guarantee maintenance or updates
+- Samples may become outdated as rocWMMA evolves
+- Users should adapt samples to their specific needs
+- Issues may be closed if they are low priority
+
+### How to Contribute a Community Sample ###
+
+For detailed contribution instructions, checklist, and best practices, see
+[samples/community/README.md](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/samples/community/README.md).
+
+Quick overview:
+
+1. Use `samples/community/template.cpp` as a starting point for your sample
+
+2. Place your sample in `samples/community/`:
+   - Initially, samples will be directly in this directory (flat structure)
+   - As samples accumulate, maintainers may organize into subdirectories:
+     - `fusion/` - Kernel fusion examples
+     - `ml-models/` - Machine learning specific applications
+     - `optimizations/` - Performance optimization techniques
+     - `advanced/` - Complex use cases combining multiple techniques
+     - `experimental/` - Cutting-edge research techniques
+
+3. Add a clear comment header explaining:
+   - What the sample demonstrates
+   - Any limitations or requirements (GPU architectures, data types, ROCm version)
+   - Author/contributor information (optional)
+
+4. Update `samples/community/CMakeLists.txt` to add your sample using `add_community_sample()`
+
+5. Update `samples/community/README.md` to document your sample
+
+6. Test that your sample builds and runs successfully
+
+7. Create a pull request following the standard PR process
+
 ## Code Structure ##
 
 The organization of the rocWMMA library is explained in detail in the [Programmers Guide](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/docs/conceptual/programmers-guide.rst).

@@ -32,525 +32,737 @@
 
 #include "hiptensor_ck_types.hpp"
 
-namespace ck {
-namespace tensor_operation {
-namespace device {
-namespace instance {
-
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);   
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F16>>>& instances);     
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F16>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F16>>>& instances);   
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F16>>>& instances);  
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           BF16>>>& instances);    
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           BF16>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           BF16>>>& instances);     
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F32,
-                                                           F32,
-                                                           Empty_Tuple,
-                                                           F32,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           BF16>>>& instances);  
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F64>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F64>>>& instances); 
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F64>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F64>>>& instances);   
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);  
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F64,
-                                                           F64,
-                                                           Empty_Tuple,
-                                                           F64,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);  
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F16,
-                                                           F16,
-                                                           Empty_Tuple,
-                                                           F16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F16,
-                                                           F16,
-                                                           Empty_Tuple,
-                                                           F16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F16,
-                                                           F16,
-                                                           Empty_Tuple,
-                                                           F16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           F16,
-                                                           F16,
-                                                           Empty_Tuple,
-                                                           F16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);    
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_kkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           BF16,
-                                                           BF16,
-                                                           Empty_Tuple,
-                                                           BF16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);    
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_knn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           BF16,
-                                                           BF16,
-                                                           Empty_Tuple,
-                                                           BF16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           BF16,
-                                                           BF16,
-                                                           Empty_Tuple,
-                                                           BF16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);
-                                                           
-void add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mnn_instance(
-    std::vector<std::unique_ptr<DeviceContractionMultipleD<6,
-                                                           6,
-                                                           6,
-                                                           BF16,
-                                                           BF16,
-                                                           Empty_Tuple,
-                                                           BF16,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           hiptensor::CkHiptensorUnaryOp,
-                                                           Scale,
-                                                           F32>>>& instances);                                                           
-
-// Contraction + Scale
-template <index_t NumDimM,
-          index_t NumDimN,
-          index_t NumDimK,
-          typename AElementwiseOperation,
-          typename BElementwiseOperation,
-          typename ADataType,
-          typename BDataType,
-          typename EDataType,
-          typename ComputeDataType>
-struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceContractionMultipleD<
-    NumDimM,
-    NumDimN,
-    NumDimK,
-    ADataType,
-    BDataType,
-    ck::Tuple<>,
-    EDataType,
-    AElementwiseOperation,
-    BElementwiseOperation,
-    ck::tensor_operation::element_wise::Scale,
-    ComputeDataType>>
+namespace ck
 {
-    using DeviceOp = DeviceContractionMultipleD<NumDimM,
-                                                NumDimN,
-                                                NumDimK,
-                                                ADataType,
-                                                BDataType,
-                                                ck::Tuple<>,
-                                                EDataType,
-                                                AElementwiseOperation,
-                                                BElementwiseOperation,
-                                                ck::tensor_operation::element_wise::Scale,
-                                                ComputeDataType>;
-
-    static auto GetInstances()
+    namespace tensor_operation
     {
-        std::vector<std::unique_ptr<DeviceOp>> op_ptrs;
-
-        if constexpr(is_same_v<ADataType, float> && is_same_v<BDataType, float> &&
-                     is_same_v<EDataType, float>)
+        namespace device
         {
-            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
+            namespace instance
             {
-                if constexpr(is_same_v<ComputeDataType, float>)
-                {
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_mnn_instance(
-                        op_ptrs);
-                }
-                else if constexpr(is_same_v<ComputeDataType, ck::half_t>)
-                {
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_mnn_instance(
-                        op_ptrs);
-                }
-                else if constexpr(is_same_v<ComputeDataType, ck::bhalf_t>)
-                {
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_mnn_instance(
-                        op_ptrs);
-                }
-            }      
-        }
-        if constexpr(is_same_v<ADataType, double> && is_same_v<BDataType, double> &&
-                     is_same_v<EDataType, double>)
-        {
-            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
-            {
-                if constexpr(is_same_v<ComputeDataType, double>)
-                {
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F32,
+                                                       F32,
+                                                       Empty_Tuple,
+                                                       F32,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F64>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F64>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F64>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_mnn_instance(
-                        op_ptrs);
-                }
-                else if constexpr(is_same_v<ComputeDataType, float>)
-                {
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F64>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_mnn_instance(
-                        op_ptrs);
-                }
-            }
-        }
-        if constexpr(is_same_v<ADataType, ck::half_t> && is_same_v<BDataType, ck::half_t> &&
-                     is_same_v<EDataType, ck::half_t>)
-        {
-            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
-            {
-                if constexpr(is_same_v<ComputeDataType, float>)
-                {
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F64,
+                                                       F64,
+                                                       Empty_Tuple,
+                                                       F64,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mnn_instance(
-                        op_ptrs);
-                }
-            }
-        }
-        if constexpr(is_same_v<ADataType, ck::bhalf_t> && is_same_v<BDataType, ck::bhalf_t> &&
-                     is_same_v<EDataType, ck::bhalf_t>)
-        {
-            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
-            {
-                if constexpr(is_same_v<ComputeDataType, float>)
-                {
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_kkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_knn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance(
-                        op_ptrs);
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
+
+                void
                     add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mnn_instance(
-                        op_ptrs);
-                }
-            }
-        }
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F32>>>& instances);
 
-        return op_ptrs;
-    }
-};
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_kkn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
 
-} // namespace instance
-} // namespace device
-} // namespace tensor_operation
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_knn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_mkn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_mnn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       Empty_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_kkn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_knn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mkn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                void
+                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mnn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       Empty_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       Scale,
+                                                       BF16>>>& instances);
+
+                // Contraction + Scale
+                template <index_t NumDimM,
+                          index_t NumDimN,
+                          index_t NumDimK,
+                          typename AElementwiseOperation,
+                          typename BElementwiseOperation,
+                          typename ADataType,
+                          typename BDataType,
+                          typename EDataType,
+                          typename ComputeDataType>
+                struct DeviceOperationInstanceFactory<
+                    ck::tensor_operation::device::DeviceContractionMultipleD<
+                        NumDimM,
+                        NumDimN,
+                        NumDimK,
+                        ADataType,
+                        BDataType,
+                        ck::Tuple<>,
+                        EDataType,
+                        AElementwiseOperation,
+                        BElementwiseOperation,
+                        ck::tensor_operation::element_wise::Scale,
+                        ComputeDataType>>
+                {
+                    using DeviceOp
+                        = DeviceContractionMultipleD<NumDimM,
+                                                     NumDimN,
+                                                     NumDimK,
+                                                     ADataType,
+                                                     BDataType,
+                                                     ck::Tuple<>,
+                                                     EDataType,
+                                                     AElementwiseOperation,
+                                                     BElementwiseOperation,
+                                                     ck::tensor_operation::element_wise::Scale,
+                                                     ComputeDataType>;
+
+                    static auto GetInstances()
+                    {
+                        std::vector<std::unique_ptr<DeviceOp>> op_ptrs;
+
+                        if constexpr(
+                            is_same_v<
+                                ADataType,
+                                float> && is_same_v<BDataType, float> && is_same_v<EDataType, float>)
+                        {
+                            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
+                            {
+                                if constexpr(is_same_v<ComputeDataType, float>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_mnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, ck::half_t>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_f16_mnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, ck::bhalf_t>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f32_f32_f32_compute_bf16_mnn_instance(
+                                        op_ptrs);
+                                }
+                            }
+                        }
+                        if constexpr(
+                            is_same_v<
+                                ADataType,
+                                double> && is_same_v<BDataType, double> && is_same_v<EDataType, double>)
+                        {
+                            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
+                            {
+                                if constexpr(is_same_v<ComputeDataType, double>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_mnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, float>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f64_f64_f64_compute_f32_mnn_instance(
+                                        op_ptrs);
+                                }
+                            }
+                        }
+                        if constexpr(
+                            is_same_v<
+                                ADataType,
+                                ck::half_t> && is_same_v<BDataType, ck::half_t> && is_same_v<EDataType, ck::half_t>)
+                        {
+                            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
+                            {
+                                if constexpr(is_same_v<ComputeDataType, ck::half_t>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_mnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, float>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_compute_f32_mnn_instance(
+                                        op_ptrs);
+                                }
+                            }
+                        }
+                        if constexpr(
+                            is_same_v<
+                                ADataType,
+                                ck::bhalf_t> && is_same_v<BDataType, ck::bhalf_t> && is_same_v<EDataType, ck::bhalf_t>)
+                        {
+                            if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
+                            {
+                                if constexpr(is_same_v<ComputeDataType, ck::bhalf_t>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_mnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, float>)
+                                {
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_kkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_knn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mkn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_scale_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_compute_f32_mnn_instance(
+                                        op_ptrs);
+                                }
+                            }
+                        }
+
+                        return op_ptrs;
+                    }
+                };
+
+            } // namespace instance
+        } // namespace device
+    } // namespace tensor_operation
 } // namespace ck

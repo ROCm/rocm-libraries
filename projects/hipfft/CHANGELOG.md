@@ -3,7 +3,62 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## (Unreleased) hipFFT 1.0.23
+## (Unreleased) hipFFT 1.0.27
+
+## hipFFT 1.0.26 for ROCm 10.1
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+* `hipfftXtSetWorkArea` API for setting work areas on single-process, multi-device plans.
+
+* Implemented `hipfftXtSetJITCallback` API, to allow for user-defined device functions to be called when loading
+  input or storing output of a transform.  These callback functions are specified after a plan is allocated with
+  `hipfftCreate` but before the plan is initialized with one of the `MakePlan` functions.  The backend FFT library
+  will Just-In-Time (JIT) compile the code into its own kernels.
+
+  On AMD platforms, the device function is provided as SPIR-V.  On CUDA platforms, the device function is provided as
+  LTO-IR fatbin.
+
+  These APIs are not currently compatible with multi-GPU transforms.  This
+  support will be added in a future release of hipFFT.
+
+### Changed
+
+* Modified the rocFFT backend's implementation details of hipFFT so that cuFFT backend's
+  behavior is matched for single-process, multi-device plans configured via
+  `hipfftMakePlan{2,3}d` and `hipfftMakePlanMany`, with respect to data distribution
+  within descriptors. Behaviors are now aligned for unbatched multi-dimensional transforms
+  (in-place only) and all batched transforms (in-place and out-of-place).
+  Multi-device, unbatched one-dimensional transforms remain unimplemented pending
+  further analyses of the exact behavior(s) to be matched.
+
+### Deprecations
+
+* The `hipfftXtSetCallback` and `hipfftXtClearCallback` APIs are now deprecated and will be removed in a future
+  release.  They allow for specifying callbacks as device function pointers at plan execution time, but rocFFT cannot
+  optimize the combined code.  Instead, users should specify JIT callbacks with `hipfftXtSetJITCallback` before
+  initializing the plan.
+
+### Resolved issues
+
+* Fixed a hang when creating a plan with a zero length or zero batch. These now return `HIPFFT_INVALID_SIZE`.
+* `hipfftGetSize*` work area estimates now account for the plan's pre-initialization
+  state (e.g. multi-device configuration) instead of ignoring it.
+
+## hipFFT 1.0.25 for ROCm 10.0
+
+### Changed
+
+* Minor internal changes.
+
+## hipFFT 1.0.24 for ROCm 7.14
+
+### Added
+
+* Support for the gfx1250 architecture.
+
+## hipFFT 1.0.23 for ROCm 7.13
 
 ### Added
 
@@ -32,9 +87,11 @@ Documentation for hipFFT is available at
 
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
+* Callback functions specified as function pointers to hipfftXtSetCallback will be deprecated in a future release.
 
 ### Added
 * Support for gfx1150 architecture.
+* Support for the gfx90c compilation target.
 
 ### Resolved issues
 

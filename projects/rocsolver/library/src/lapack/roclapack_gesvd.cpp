@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gesvd.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -45,6 +46,7 @@ rocblas_status rocsolver_gesvd_impl(rocblas_handle handle,
                                     TT* E,
                                     const rocblas_workmode fast_alg,
                                     rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("gesvd", "--left_svect", left_svect, "--right_svect", right_svect, "-m", m,
                         "-n", n, "--lda", lda, "--ldu", ldu, "--ldv", ldv, "--fast_alg", fast_alg);
@@ -121,6 +123,10 @@ rocblas_status rocsolver_gesvd_impl(rocblas_handle handle,
         V, ldv, strideV, E, strideE, fast_alg, info, batch_count, (T*)scalars, work_workArr,
         (T*)Abyx_norms_tmptr, (T*)Abyx_norms_trfact_X, (T*)diag_tmptr_Y, (T*)tau_splits,
         (T*)tempArrayT, (T*)tempArrayC, (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

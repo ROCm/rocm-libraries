@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,12 +52,14 @@ namespace rocsparse_clients
     private:
         stream_redirector           m_redirector;
         testing::TestEventListener* m_eventListener;
+        const testing::TestInfo*    m_pendingTestInfo; // Buffer test info to defer output
 
     public:
         bool showTestCases; // Show the names of each test case.
         bool showTestNames; // Show the names of each test.
         bool showSuccesses; // Show each success.
         bool showInlineFailures; // Show each failure as it occurs.
+        bool showSkipped; // Show skipped tests.
         bool showEnvironment; // Show the setup of the global environment.
         bool redirectOutput; // Redirect output to a stringstream.
 

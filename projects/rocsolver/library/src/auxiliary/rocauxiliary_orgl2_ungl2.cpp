@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_orgl2_ungl2.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -37,6 +38,7 @@ rocblas_status rocsolver_orgl2_ungl2_impl(rocblas_handle handle,
                                           T* A,
                                           const rocblas_int lda,
                                           T* ipiv)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "orgl2" : "ungl2");
     ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "-k", k, "--lda", lda);
@@ -85,6 +87,10 @@ rocblas_status rocsolver_orgl2_ungl2_impl(rocblas_handle handle,
     // execution
     return rocsolver_orgl2_ungl2_template<T>(handle, m, n, k, A, shiftA, lda, strideA, ipiv, strideP,
                                              batch_count, (T*)scalars, (T*)Abyx, (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

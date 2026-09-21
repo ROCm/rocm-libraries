@@ -310,7 +310,7 @@ namespace rocwmma
             InputTypesTest
             = (bool)TestTraits::InputType::IsInt8 || (bool)TestTraits::InputType::IsFloat16
               || (bool)TestTraits::InputType::IsBFloat16 || (bool)TestTraits::InputType::IsFloat8
-              || (bool)TestTraits::InputType::IsBFloat8,
+              || (bool)TestTraits::InputType::IsBFloat8 || (bool)TestTraits::InputType::IsUInt8,
 
             // General int8_t block size
             // BlockM/N = 16; Block K >= 16

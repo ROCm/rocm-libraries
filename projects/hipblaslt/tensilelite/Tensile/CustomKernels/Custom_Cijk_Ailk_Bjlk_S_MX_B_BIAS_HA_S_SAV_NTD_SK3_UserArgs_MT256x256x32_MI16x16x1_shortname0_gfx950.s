@@ -54,8 +54,8 @@ custom.config:
       DestDataType: s
       F32XdlMathOp: X
       HighPrecisionAccumulate: False
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -74,9 +74,9 @@ custom.config:
   EnableMatrixInstruction: True
   MIWaveGroup: [2, 2]
   MIWaveTile: [8, 8]
-  MIInputPerThread: 32
-  MIInputPerThreadA: 32
-  MIInputPerThreadB: 32
+  MIInputPerThread: 8
+  MIInputPerThreadA: 8
+  MIInputPerThreadB: 8
   DepthU: 32
   DirectToLds: 1
   LocalReadVectorWidth: 4

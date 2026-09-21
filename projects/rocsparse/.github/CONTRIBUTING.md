@@ -8,7 +8,7 @@
 
 AMD welcomes contributions to rocSPARSE from the community. Whether those contributions are bug reports, bug fixes, documentation additions, performance notes, or other improvements, we value collaboration with our users. We can build better solutions together. Please follow these details to help ensure your contributions will be successfully accepted.
 
-Our code contriubtion guidelines closely follow the model of [GitHub pull-requests](https://help.github.com/articles/using-pull-requests/).  This repository follows the [git flow](http://nvie.com/posts/a-successful-git-branching-model/) workflow, which dictates a /master branch where releases are cut, and a /develop branch which serves as an integration branch for new code.
+Our code contribution guidelines closely follow the model of [GitHub pull-requests](https://help.github.com/articles/using-pull-requests/).  This repository follows the [git flow](http://nvie.com/posts/a-successful-git-branching-model/) workflow, which dictates a /master branch where releases are cut, and a /develop branch which serves as an integration branch for new code.
 
 ## Issue Discussion ##
 
@@ -57,7 +57,7 @@ Some of the routines in rocSPARSE allow users to choose between multiple differe
 * Some algorithms may perform better or worse depending on whether a user intends to perform the computation only once or many times.
 * Some algorithms may exist to allow for reproducibility between runs, for example by not using atomic operations.
 * Some algorithms may exist because they do not require any additional memory allocation or analysis phase.
-* Some algorithms may handle different ranges in sparse matrix size, i.e number of rows or number of non-zeros.
+* Some algorithms may handle different ranges in sparse matrix size, i.e. number of rows or number of non-zeros.
 
 An opportunity exists here for contributors to add different algorithms that optimize for important user requirements and performance considerations. We encourage contributors to leverage the GitHub "Issues" tab to discuss possible additions they would like to add.
 
@@ -108,7 +108,7 @@ Also, githooks can be installed to format the code per-commit:
 
 When you create a pull request, you should target the default branch. Our current default branch is the **develop** branch, which serves as our integration branch.
 
-By submitting a pull request, you acknowlege and agree with the CLA below:
+By submitting a pull request, you acknowledge and agree with the CLA below:
 
 Contribution License Agreement
 1. The code I am contributing is mine, and I have the right to license it.
@@ -153,7 +153,7 @@ and adjust the date to the current year. When simply modifying a file, the date 
 
 See existing tests for guidance when adding your own.
 
-3. When modifiying an existing routine, add appropriate testing to test_<routine_name>.yaml file in directory `clients/tests/`.
+3. When modifying an existing routine, add appropriate testing to test_<routine_name>.yaml file in directory `clients/tests/`.
 
 4. Tests must have good code coverage.
 
@@ -172,9 +172,9 @@ So when adding a new routine that uses data/compute values please support at lea
 
 ### Process ###
 
-When a PR is raised targetting the develop branch in rocSPARSE, CI will be automatically triggered. This will:
+When a PR is raised targeting the develop branch in rocSPARSE, CI will be automatically triggered. This will:
 
-* Test that the PR passes static analysis (i.e ensure clang formatting rules have been followed).
+* Test that the PR passes static analysis (i.e. ensure clang formatting rules have been followed).
 * Test that the documentation can be properly built
 * Ensure that the PR compiles on different OS and GPU device architecture combinations
 * Ensure that all tests pass on different OS and GPU device architecture combinations

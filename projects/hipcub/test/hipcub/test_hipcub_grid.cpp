@@ -103,6 +103,7 @@ TEST(HipcubGridTests, GridBarrier)
     HIP_CHECK(global_barrier.Setup(grid_size));
 
     KernelGridBarrier<<<grid_size, block_size>>>(global_barrier, iterations);
+    HIP_CHECK(hipGetLastError());
 }
 
 template<
@@ -191,6 +192,7 @@ TEST(HipcubGridTests, GridEvenShare)
                 (device_output,
                  device_output_reductions,
                  even_share);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -309,6 +311,7 @@ TEST(HipcubGridTests, GridQueue)
         hipcub::GridQueue<OffsetT> tile_queue(queue_allocations);
 
         KernelGridQueueInit<OffsetT><<<1, 1>>>(tile_queue);
+        HIP_CHECK(hipGetLastError());
 
         KernelGridQueue<block_size, T, OffsetT>
             <<<grid_size, block_size>>>
@@ -316,6 +319,7 @@ TEST(HipcubGridTests, GridQueue)
                  device_output_reductions,
                  113,
                  tile_queue);
+        HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(
             hipMemcpy(

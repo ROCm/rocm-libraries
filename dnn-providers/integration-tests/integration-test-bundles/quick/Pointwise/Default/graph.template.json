@@ -1,0 +1,48 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "PointwiseReluForwardTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 1,
+        "in_1_tensor_uid": null,
+        "in_2_tensor_uid": null,
+        "operation": "relu_fwd",
+        "relu_lower_clip": null,
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": null,
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_0",
+      "outputs": {
+        "out_0_tensor_uid": 0
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_0::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    }
+  ]
+}

@@ -55,8 +55,8 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_axpby supports the following uniform precision data types for the sparse and dense vectors x and
-*  y and compute types for the scalars \f$\alpha\f$ and \f$\beta\f$.
+*  \p rocsparse_axpby supports the following uniform-precision data types for the sparse and dense vectors \p x and
+*  \p y and compute types for the scalars \f$\alpha\f$ and \f$\beta\f$.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -68,7 +68,7 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="axpby_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y                     <th>compute_type
@@ -77,8 +77,8 @@ extern "C" {
 *  </table>
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
@@ -87,7 +87,7 @@ extern "C" {
 *  This routine does not support batched computation.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  alpha       scalar \f$\alpha\f$.
 *  @param[in]
@@ -99,7 +99,7 @@ extern "C" {
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha, \p x, \p beta or \p y pointer is
+*  \retval rocsparse_status_invalid_pointer \p alpha, \p x, \p beta, or \p y pointer is
 *          invalid.
 *
 *  \par Example

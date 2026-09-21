@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -57,5 +57,89 @@ INSTANTIATE_GEMM(double, int64_t, double* const*, double*, double*);
 INSTANTIATE_GEMM(double, int64_t, double*, double* const*, double*);
 INSTANTIATE_GEMM(double, int64_t, double*, double*, double* const*);
 #endif /* HAVE_ROCBLAS_64 */
+
+/*************************************************************
+    Export methods for testing
+*************************************************************/
+
+extern "C" {
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgemm(rocblas_handle handle,
+                                                rocblas_operation transA,
+                                                rocblas_operation transB,
+                                                rocblas_int m,
+                                                rocblas_int n,
+                                                rocblas_int k,
+                                                const double* alpha,
+                                                double* A,
+                                                rocblas_int inca,
+                                                rocblas_int lda,
+                                                double* B,
+                                                rocblas_int incb,
+                                                rocblas_int ldb,
+                                                const double* beta,
+                                                double* C,
+                                                rocblas_int incc,
+                                                rocblas_int ldc)
+{
+    rocblas_int batch_count = 1;
+    double** work = nullptr;
+    return rocsolver_gemm<double>(handle, transA, transB, m, n, k, alpha, A, 0, inca, lda, 0, B, 0,
+                                  incb, ldb, 0, beta, C, 0, incc, ldc, 0, batch_count, work);
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgemm_batched(rocblas_handle handle,
+                                                        rocblas_operation transA,
+                                                        rocblas_operation transB,
+                                                        rocblas_int m,
+                                                        rocblas_int n,
+                                                        rocblas_int k,
+                                                        const double* alpha,
+                                                        double* const* A,
+                                                        rocblas_int inca,
+                                                        rocblas_int lda,
+                                                        double* const* B,
+                                                        rocblas_int incb,
+                                                        rocblas_int ldb,
+                                                        const double* beta,
+                                                        double* const* C,
+                                                        rocblas_int incc,
+                                                        rocblas_int ldc,
+                                                        rocblas_int batch_count)
+{
+    double** work = nullptr;
+    return rocsolver_gemm<double>(handle, transA, transB, m, n, k, alpha, A, 0, inca, lda, 0, B, 0,
+                                  incb, ldb, 0, beta, C, 0, incc, ldc, 0, batch_count, work);
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgemm_strided_batched(rocblas_handle handle,
+                                                                rocblas_operation transA,
+                                                                rocblas_operation transB,
+                                                                rocblas_int m,
+                                                                rocblas_int n,
+                                                                rocblas_int k,
+                                                                const double* alpha,
+                                                                double* A,
+                                                                rocblas_int inca,
+                                                                rocblas_int lda,
+                                                                rocblas_stride strideA,
+                                                                double* B,
+                                                                rocblas_int incb,
+                                                                rocblas_int ldb,
+                                                                rocblas_stride strideB,
+                                                                const double* beta,
+                                                                double* C,
+                                                                rocblas_int incc,
+                                                                rocblas_int ldc,
+                                                                rocblas_stride strideC,
+                                                                rocblas_int batch_count)
+{
+    double** work = nullptr;
+    return rocsolver_gemm<double>(handle, transA, transB, m, n, k, alpha, A, 0, inca, lda, strideA,
+                                  B, 0, incb, ldb, strideB, beta, C, 0, incc, ldc, strideC,
+                                  batch_count, work);
+}
+
+} // extern C
 
 ROCSOLVER_END_NAMESPACE

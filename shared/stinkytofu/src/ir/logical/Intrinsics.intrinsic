@@ -1,0 +1,162 @@
+//===----------------------------------------------------------------------===//
+// StinkyTofu Intrinsic Definitions (High-Level IR)
+//===----------------------------------------------------------------------===//
+//
+// This file defines intrinsics using high-level IR operations.
+// These will be compiled to optimized .st.bc bitcode by intrinsic-compiler.
+//
+// Syntax:
+//   intrinsic <Name> {
+//     arguments {
+//       <name>: vgpr
+//       ...
+//     }
+//     body {
+//       <register> = <operation>(<operands>)
+//       ...
+//     }
+//     comment "<description>"
+//     python_binding <true|false>
+//   }
+//
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// Activation Functions
+//===----------------------------------------------------------------------===//
+
+intrinsic ReluF32 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+  }
+
+  body {
+    dest = v_max_f32(src, 0.0)
+  }
+
+  comment "ReLU F32 activation: max(x, 0)"
+  python_binding true
+}
+
+intrinsic ReluF16 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+    temp: vgpr
+  }
+
+  body {
+    temp = v_cmp_gt_f16(src, 0.0)
+    dest = v_select_f16(temp, src, 0.0)
+  }
+
+  comment "ReLU F16 activation: max(x, 0)"
+  python_binding true
+}
+
+//===----------------------------------------------------------------------===//
+// Range Operations
+//===----------------------------------------------------------------------===//
+
+intrinsic ClampF32 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+    min_val: vgpr
+    max_val: vgpr
+    temp: vgpr
+  }
+
+  body {
+    temp = v_max_f32(src, min_val)
+    dest = v_min_f32(temp, max_val)
+  }
+
+  comment "Clamp F32 to range [min, max]"
+  python_binding true
+}
+
+intrinsic ClampF16 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+    min_val: vgpr
+    max_val: vgpr
+    temp: vgpr
+  }
+
+  body {
+    temp = v_max_f16(src, min_val)
+    dest = v_min_f16(temp, max_val)
+  }
+
+  comment "Clamp F16 to range [min, max]"
+  python_binding true
+}
+
+//===----------------------------------------------------------------------===//
+// Sigmoid: 1 / (1 + exp(-x))
+//===----------------------------------------------------------------------===//
+
+intrinsic SigmoidF32 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+    temp1: vgpr
+    temp2: vgpr
+  }
+
+  body {
+    temp1 = v_mul_f32(src, -1.0)
+    temp1 = v_exp_f32(temp1)
+    temp2 = v_add_f32(temp1, 1.0)
+    dest = v_rcp_f32(temp2)
+  }
+
+  comment "Sigmoid activation: 1/(1+exp(-x))"
+  python_binding true
+}
+
+//===----------------------------------------------------------------------===//
+// Composable Intrinsics (for testing inlining)
+//===----------------------------------------------------------------------===//
+
+intrinsic ClampedReluF32 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+    min_val: vgpr
+    max_val: vgpr
+    temp1: vgpr
+    temp2: vgpr
+  }
+
+  body {
+    call ReluF32(dest=temp1, src=src)
+    call ClampF32(dest=dest, src=temp1, min_val=min_val, max_val=max_val, temp=temp2)
+  }
+
+  comment "ReLU followed by clamping: clamp(max(x, 0), min, max)"
+  python_binding true
+}
+
+//===----------------------------------------------------------------------===//
+// Test intrinsic with hex literal (for exp approximation)
+//===----------------------------------------------------------------------===//
+
+intrinsic ExpF32 {
+  arguments {
+    dest: vgpr
+    src: vgpr
+    temp: vgpr
+  }
+
+  body {
+    temp = v_mul_f32(src, 0x40ec7326)
+    dest = v_exp_f32(temp)
+  }
+
+  comment "Exp approximation using magic constant 0x40ec7326"
+  python_binding false
+}

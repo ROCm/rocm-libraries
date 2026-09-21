@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_larf.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_larf_impl(rocblas_handle handle,
                                    const T* alpha,
                                    T* A,
                                    const I lda)
+try
 {
     ROCSOLVER_ENTER_TOP("larf", "--side", side, "-m", m, "-n", n, "--incx", incx, "--lda", lda);
 
@@ -89,6 +91,10 @@ rocblas_status rocsolver_larf_impl(rocblas_handle handle,
     return rocsolver_larf_template<T>(handle, side, m, n, x, shiftx, incx, stridex, alpha, stridep,
                                       A, shiftA, lda, stridea, batch_count, (T*)scalars, (T*)Abyx,
                                       (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

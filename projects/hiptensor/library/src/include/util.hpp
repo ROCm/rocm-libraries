@@ -34,9 +34,11 @@
 
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/tuple.hpp>
-#include <hiptensor/hiptensor.h>
-#include <hiptensor/internal/types.hpp>
-#include <logger.hpp>
+
+#include "data_types.hpp"
+#include "hiptensor/internal/types.hpp"
+#include "logger.hpp"
+#include "platform.hpp"
 
 namespace hiptensor
 {
@@ -136,6 +138,27 @@ namespace hiptensor
                  hiptensorGetErrorString(errorCode));
         logger.logError("hiptensorPermute", msg);
     };
+
+    // Read and environment variable and check if it's value evaluates to true or false.
+    // "ON", "on" and "1" evaluates to true, any other value or the absense of the value
+    // evaluates to false.
+    inline bool checkEnvironmentVariableEnabled(const char* name)
+    {
+        auto var = getEnvironmentVariable(name);
+        if(!var.has_value())
+        {
+            return false;
+        }
+
+        std::string upper = var.value();
+        std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+        if((upper.compare("ON") == 0) || (upper.compare("1") == 0))
+        {
+            return true;
+        }
+
+        return false;
+    }
 
     /** @name static_for
      *  @{
@@ -269,6 +292,15 @@ namespace hiptensor
     {                                                             \
         printErrorMessage(logger, errorCode, #paramName);         \
         checkResult = errorCode;                                  \
+    }
+
+// A rank-0 tensor carries no modes, so a null mode array is only an error when its
+// descriptor declares at least one. `descName` must already be known to be non-null.
+#define CheckApiModes(checkResult, logger, errorCode, descName, modeName) \
+    if(!descName->mLengths.empty() && !modeName)                          \
+    {                                                                     \
+        printErrorMessage(logger, errorCode, #modeName);                  \
+        checkResult = errorCode;                                          \
     }
 
 } // namespace hiptensor

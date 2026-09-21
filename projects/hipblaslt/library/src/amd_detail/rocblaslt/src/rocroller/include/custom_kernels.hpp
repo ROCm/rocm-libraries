@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include "gemm.hpp"
@@ -6,5 +9,3 @@
 #include "rocblaslt.h"
 
 void preloadCustomKernels(SolutionCache& cache);
-
-rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel> gemm, const RocblasltContractionProblem& prob);

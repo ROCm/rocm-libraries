@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -61,8 +61,7 @@ int main()
     std::cout << std::endl;
 
     double*    x;
-    hipError_t hip_rt;
-    hip_rt = hipMalloc(&x, rdata.size() * sizeof(decltype(rdata)::value_type));
+    hipError_t hip_rt = hipMalloc(&x, rdata.size() * sizeof(decltype(rdata)::value_type));
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -71,17 +70,15 @@ int main()
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMemcpy failed");
 
-    // Create plan:
+    // Create plan (hipfftPlan2d internally allocates the handle)
     hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
+    hipfftResult hipfft_rt
+        = hipfftPlan2d(&plan, // plan handle
+                       Nx, // transform length
+                       Ny, // transform length
+                       HIPFFT_D2Z); // transform type (HIPFFT_R2C for single-precision)
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to create plan");
-    hipfft_rt = hipfftPlan2d(&plan, // plan handle
-                             Nx, // transform length
-                             Ny, // transform length
-                             HIPFFT_D2Z); // transform type (HIPFFT_R2C for single-precision)
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftPlandd failed");
+        throw std::runtime_error("hipfftPlan2d failed");
 
     // Execute plan:
     // hipfftExecD2Z: double precision.  hipfftExecR2C: single-precision
@@ -108,7 +105,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(plan);
+    if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(x);
     if(hip_rt != hipSuccess)

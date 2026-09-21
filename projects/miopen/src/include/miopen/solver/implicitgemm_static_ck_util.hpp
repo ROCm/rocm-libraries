@@ -186,7 +186,7 @@ inline static auto GetPerformanceConfigBase(const ExecutionContext& ctx,
     PerformanceImplicitGemm_t pp;
     pp.HeuristicInit(ctx, problem);
     MIOPEN_LOG_I(pp.ToString());
-    return pp;
+    return std::move(pp);
 }
 
 static inline bool use_amd_inline_asm(const ExecutionContext& ctx,

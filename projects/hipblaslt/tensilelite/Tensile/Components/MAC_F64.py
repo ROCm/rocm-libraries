@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,8 @@ class FMA_F64_Plain(MAC):
     Plain MAC instruction implementation
     """
     asmCaps = {"v_fma_f64": True}
-    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Double)}}
+    kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Double),
+                              "MacDataTypeB": DataType(DataTypeEnum.Double)}}
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel

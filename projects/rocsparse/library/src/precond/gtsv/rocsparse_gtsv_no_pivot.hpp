@@ -37,7 +37,7 @@ namespace rocsparse
                                                         const T*         d,
                                                         const T*         du,
                                                         const T*         B,
-                                                        rocsparse_int    ldb,
+                                                        int64_t          ldb,
                                                         size_t*          buffer_size);
 
     template <typename T>
@@ -48,6 +48,6 @@ namespace rocsparse
                                             const T*         d,
                                             const T*         du,
                                             T*               B,
-                                            rocsparse_int    ldb,
+                                            int64_t          ldb,
                                             void*            temp_buffer);
 }

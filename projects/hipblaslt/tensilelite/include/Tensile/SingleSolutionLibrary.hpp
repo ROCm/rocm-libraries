@@ -28,6 +28,9 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionLibrary.hpp>
+
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -157,7 +160,27 @@ namespace TensileLite
                     Task task(hardware, problem, *(solution));
                     problem.setWorkspaceSizeGroupedGemm(ws);
                     problem.setGroupedGemmCount(problems.size());
-                    if(!(*solution->problemPredicate)(problem) || !(*solution->taskPredicate)(task))
+                    // With uniform summation order off, the filter stays
+                    // problemPredicate && taskPredicate. setGroupedGemm(true) is load-bearing for
+                    // uniformSummationOrderSupported(), but it also re-aims GroupedGemmEqual /
+                    // SynchronizerSizeCheck / LeadingFree1SizesGreaterOrEqual on this local
+                    // problem copy, so it stays behind the USO check with softwarePredicate().
+                    bool swMatch;
+                    if(problem.getParams().uniformSummationOrder())
+                    {
+                        problem.setGroupedGemm(true);
+                        swMatch = softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                    task,
+                                                    hardware,
+                                                    (*solution),
+                                                    problem);
+                    }
+                    else
+                    {
+                        swMatch = (*solution->problemPredicate)(problem)
+                                  && (*solution->taskPredicate)(task);
+                    }
+                    if(!swMatch)
                     {
                         if(debug)
                             PredicateDebugger::printFooter(std::cout, false);
@@ -251,8 +274,22 @@ namespace TensileLite
                         Task task(hardware, problem, (*solution));
                         problem.setWorkspaceSizeGroupedGemm(ws);
                         problem.setGroupedGemmCount(problems.size());
-                        if(!(*solution->problemPredicate)(problem)
-                           || !(*solution->taskPredicate)(task))
+                        // See findBestSolution(): setGroupedGemm(true) and the
+                        // softwarePredicate() widening stay behind the USO check, so with USO off
+                        // this stays the problemPredicate && taskPredicate filter.
+                        bool swMatch;
+                        if(problem.getParams().uniformSummationOrder())
+                        {
+                            problem.setGroupedGemm(true);
+                            swMatch
+                                = softwarePredicate(searchType, task, hardware, (*solution), problem);
+                        }
+                        else
+                        {
+                            swMatch = (*solution->problemPredicate)(problem)
+                                      && (*solution->taskPredicate)(task);
+                        }
+                        if(!swMatch)
                             useSolution = false;
                     }
                 }
@@ -295,3 +332,4 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
+

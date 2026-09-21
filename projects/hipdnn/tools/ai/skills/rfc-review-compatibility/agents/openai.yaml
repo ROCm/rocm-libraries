@@ -1,0 +1,4 @@
+interface:
+  display_name: "RFC Review: Compatibility"
+  short_description: "Change-management review of an RFC"
+  default_prompt: "Use $rfc-review-compatibility to review a technical RFC through the change-management lens — API/ABI/wire/on-disk compatibility, version skew, migration, rollout, reversibility, and consumer impact — and write a focused review report."

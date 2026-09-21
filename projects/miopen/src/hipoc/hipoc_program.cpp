@@ -50,16 +50,7 @@
 #endif
 
 /// 0 or undef or wrong - auto-detect
-/// 1 - <blank> / "-Xclang -target-feature -Xclang +code-object-v3"
-/// 2 - "-Xclang -target-feature -Xclang -code-object-v3" /
-///     "-Xclang -target-feature -Xclang +code-object-v3"
-/// 3 - "-mnocode-object-v3" / "-mcode-object-v3"
-/// 4 - "-mcode-object-version=2/3/4"
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_OPTION)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEVICE_ARCH)
-
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP)
 
 #if MIOPEN_USE_COMGR
 #define MIOPEN_WORKAROUND_ROCM_COMPILER_SUPPORT_ISSUE_27 1
@@ -69,83 +60,6 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP)
 #define MIOPEN_WORKAROUND_COMPILER_CHANGE 1
 
 namespace miopen {
-
-#if !MIOPEN_USE_COMGR
-namespace {
-
-int DetectCodeObjectOptionSyntax()
-{
-    auto syntax = env::value(MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_OPTION);
-    if(syntax > 4)
-    {
-        MIOPEN_LOG_E("Bad MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_OPTION, using default");
-        syntax = 0;
-    }
-
-    if(syntax == 0)
-    {
-        return 4;
-    }
-    MIOPEN_LOG_I("MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_OPTION=" << syntax);
-    return syntax;
-}
-
-int DetectCodeObjectVersion()
-{
-    auto co_version = env::value(MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION);
-    // Very basic syntax check:
-    if(co_version == 1 || co_version > 4)
-    {
-        MIOPEN_LOG_E("Bad MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION, using default");
-        co_version = 0;
-    }
-
-    if(co_version == 0)
-    {
-        return 4;
-    }
-    MIOPEN_LOG_I("MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION=" << co_version);
-    return co_version;
-}
-
-std::string GetCodeObjectVersionOptionImpl()
-{
-    const auto co_version = DetectCodeObjectVersion();
-    const auto syntax     = DetectCodeObjectOptionSyntax();
-
-    if(syntax == 4)
-    {
-        return std::string("-mcode-object-version=") + std::to_string(co_version);
-    }
-    else if(syntax == 3)
-    {
-        switch(co_version)
-        {
-        case 2: return {"-mnocode-object-v3"};
-        default: // Fall through.
-        case 3: return {"-mcode-object-v3"};
-        }
-    }
-    else // syntax == 1 or 2
-    {
-        switch(co_version)
-        {
-        // These options are Ok for ROCm for a long time (since 2.5 or so):
-        case 2: return {(syntax == 1) ? "" : "-Xclang -target-feature -Xclang -code-object-v3"};
-        default: // Fall through.
-        case 3: return {"-Xclang -target-feature -Xclang +code-object-v3"};
-        }
-    }
-}
-
-inline std::string GetCodeObjectVersionOption()
-{
-    static const auto option = GetCodeObjectVersionOptionImpl();
-    return option;
-}
-
-} // namespace
-#endif
 
 static hipModulePtr CreateModule(const fs::path& hsaco_file)
 {
@@ -175,22 +89,22 @@ HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const fs::path&
 }
 
 HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const std::vector<char>& blob)
-    : program(program_name) ///, module(CreateModuleInMem(blob))
+    : program(program_name), binary(blob) // Store the binary data to prevent use-after-free
 {
     const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
         return;
-    module = CreateModuleInMem(blob);
+    module = CreateModuleInMem(binary); // Use stored binary instead of parameter
 }
 
-HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name,
-                                   const std::vector<uint8_t>& blob)
-    : program(program_name) ///, module(CreateModuleInMem(blob))
+HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name, const std::vector<uint8_t>& blob)
+    : program(program_name),
+      binary(blob.begin(), blob.end()) // Store the binary data to prevent use-after-free
 {
     const auto& arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
         return;
-    module = CreateModuleInMem(blob);
+    module = CreateModuleInMem(binary); // Use stored binary instead of parameter
 }
 
 HIPOCProgramImpl::HIPOCProgramImpl(const fs::path& program_name,
@@ -245,16 +159,7 @@ void HIPOCProgramImpl::BuildCodeObjectInFile(std::string& params,
 #endif
     else
     {
-        params += " " + GetCodeObjectVersionOption();
-        if(env::enabled(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP))
-            params += " -mwavefrontsize64 -mcumode";
-        WriteFile(src, dir.value() / filename);
-        params += " -target amdgcn-amd-amdhsa -x cl -D__AMD__=1  -O3";
-        params += " -cl-kernel-arg-info -cl-denorms-are-zero";
-        params += " -cl-std=CL2.0 -mllvm -amdgpu-early-inline-all";
-        params += " -mllvm -amdgpu-internalize-symbols ";
-        params += " " + filename + " -o " + hsaco_file;
-        std::ignore = dir->Execute(HIP_OC_COMPILER, params);
+        MIOPEN_THROW("Unsupported file extension: " + filename.extension().string());
     }
     if(!fs::exists(hsaco_file))
         MIOPEN_THROW("Cant find file: " + hsaco_file);
@@ -292,7 +197,7 @@ void HIPOCProgramImpl::BuildCodeObjectInMemory(const std::string& params,
 #endif
         else
         {
-            comgr::BuildOcl(filename.string(), src, params, target, binary);
+            MIOPEN_THROW("Unsupported file extension: " + filename.extension().string());
         }
     }
     if(binary.empty())
@@ -315,12 +220,8 @@ void HIPOCProgramImpl::BuildCodeObject(std::string params, const std::string& ke
     {
         params += " -Werror" + HipKernelWarningsString();
     }
-    else if(program.extension() == ".cl")
-    {
-        params += " -Werror" + OclKernelWarningsString();
-    }
 #else
-    if(program.extension() == ".cpp" || program.extension() == ".cl")
+    if(program.extension() == ".cpp")
         params += " -Wno-everything";
 #endif
 

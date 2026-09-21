@@ -28,6 +28,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | Matmul | FP16, BFP16, FP32 | NCHW, NCDHW | CPU Reference |  |
 | Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
 | Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
+| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
@@ -58,9 +59,12 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD |
-| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | None Supported Yet |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, MAX, MIN, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
+
+`CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
+pointwise output inference otherwise uses the graph's intermediate data type.
 
 ## Legend
 
@@ -75,15 +79,21 @@ The following table lists all operations currently supported in the CPU Referenc
 - **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
 - **NDHWC**: Batch, Depth, Height, Width, Channels (3D, channel-last)
 
+> **Note:** The layout names (NCHW, NHWC, etc.) describe the **memory layout** controlled by
+> strides. Dimension ordering is operation-specific: convolution and batch normalization use
+> `(N, C, H, W)` / `(N, C, D, H, W)` ordering, matmul uses `(...batch, M, K)` ordering,
+> and pointwise operations are dimension-agnostic. See the
+> [Porting Guide](./PortingGuide.md#tensor-dimensions-and-layouts) for details.
+
 ### Implementation
 - **CPU Reference**: CPU-based reference implementation for validation
 
 ## Extension Guidelines
 
-For detailed information on adding new operations or datatypes to the CPU Reference Implementation, please refer to the [Extension Guidelines](./CpuGraphExecutorDesign.md#extension-guidelines) section in the CPU Graph Executor Design document.
+For detailed information on adding new operations or datatypes to the CPU Reference Implementation, please refer to the [Extension Guidelines](./rfcs/0001_CpuGraphExecutorDesign.md#extension-guidelines) section in the CPU Graph Executor Design document.
 
 ## Related Documentation
 
 - [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
-- [CPU Graph Executor Design](./CpuGraphExecutorDesign.md) - Detailed architecture documentation
+- [CPU Graph Executor Design](./rfcs/0001_CpuGraphExecutorDesign.md) - Detailed architecture documentation
 - [Testing Plan](./testing/TestPlan.md) - Testing strategy and procedures

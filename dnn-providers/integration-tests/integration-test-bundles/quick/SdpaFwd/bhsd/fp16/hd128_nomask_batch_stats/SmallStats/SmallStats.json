@@ -1,0 +1,152 @@
+{
+    "nodes": [
+        {
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "name": "",
+            "inputs": {
+                "q_tensor_uid": 0,
+                "k_tensor_uid": 1,
+                "v_tensor_uid": 2,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": null,
+                "page_table_v_tensor_uid": null,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": null,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 3,
+                "stats_tensor_uid": 4,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": true,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.08838834764831843,
+                "left_bound": null,
+                "right_bound": null,
+                "max_seq_len_kv": null,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "float",
+                "implementation": "AUTO"
+            }
+        }
+    ],
+    "tensors": [
+        {
+            "uid": 0,
+            "name": "Q",
+            "dims": [
+                2,
+                4,
+                256,
+                128
+            ],
+            "strides": [
+                131072,
+                32768,
+                128,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 1,
+            "name": "K",
+            "dims": [
+                2,
+                4,
+                256,
+                128
+            ],
+            "strides": [
+                131072,
+                32768,
+                128,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "V",
+            "dims": [
+                2,
+                4,
+                256,
+                128
+            ],
+            "strides": [
+                131072,
+                32768,
+                128,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "O",
+            "dims": [
+                2,
+                4,
+                256,
+                128
+            ],
+            "strides": [
+                131072,
+                32768,
+                128,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "LSE",
+            "dims": [
+                2,
+                4,
+                256,
+                1
+            ],
+            "strides": [
+                1024,
+                256,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "io_data_type": "half",
+    "compute_data_type": "float",
+    "intermediate_data_type": "float",
+    "name": ""
+}

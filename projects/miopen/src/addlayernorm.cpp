@@ -78,6 +78,8 @@ miopenStatus_t AddLayerNormForward(const Handle& handle,
         tmp.epsilon        = epsilon;
         tmp.normalized_dim = normalized_dim;
         tmp.mode           = mode;
+        tmp.outer_size     = problem.outer_size;
+        tmp.inner_size     = problem.inner_size;
         return tmp;
     }();
 

@@ -521,6 +521,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
                                    0,
                                    device_data,
                                    src_offset);
+                HIP_CHECK(hipGetLastError());
             }
             else if(logical_warp_size == logical_warp_size_64)
             {
@@ -631,6 +632,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
                                    0,
                                    device_data,
                                    src_offset);
+                HIP_CHECK(hipGetLastError());
             }
             else if(logical_warp_size == logical_warp_size_64)
             {

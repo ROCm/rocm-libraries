@@ -9,7 +9,9 @@ doesn't incur additional overhead costs of linking to external runtime libraries
 separate kernels.
 
 rocWMMA includes sample projects to validate and demonstrate API usage. These include simple GEMMs,
-performant GEMMs, DLRM, GEMV and hipRTC integration.
+performant GEMMs, DLRM, GEMV and hipRTC integration. Community-contributed samples demonstrating
+advanced techniques and specialized use cases are available in samples/community/ (opt-in via
+ROCWMMA_BUILD_COMMUNITY_SAMPLES=ON).
 
 The test suite includes validation and benchmarking projects that focus on unit testing, GEMMs and DLRM.
 
@@ -53,9 +55,11 @@ For more detailed information, please refer to the [rocWMMA installation guide](
 |AMDGPU_TARGETS|(Deprecated) Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201|
 |ROCWMMA_BUILD_TESTS|Build Tests|ON|
 |ROCWMMA_BUILD_SAMPLES|Build Samples|ON|
+|ROCWMMA_BUILD_COMMUNITY_SAMPLES|Build community-contributed samples|OFF|
 |ROCWMMA_BUILD_DOCS|Build doxygen documentation from code|OFF|
 |ROCWMMA_BUILD_ASSEMBLY|Generate assembly files|OFF|
 |ROCWMMA_BUILD_VALIDATION_TESTS|Build validation tests |ON (requires ROCWMMA_BUILD_TESTS=ON)|
+|ROCWMMA_BUILD_REGRESSION_TESTS|Build regression testing coverage |ON (requires ROCWMMA_BUILD_TESTS=ON)|
 |ROCWMMA_BUILD_BENCHMARK_TESTS|Build benchmark tests |OFF (requires ROCWMMA_BUILD_TESTS=ON)|
 |ROCWMMA_BUILD_EXTENDED_TESTS|Build extended testing coverage |OFF (requires ROCWMMA_BUILD_TESTS=ON)|
 |ROCWMMA_VALIDATE_WITH_ROCBLAS|Use rocBLAS for validation tests|ON (requires ROCWMMA_BUILD_VALIDATION_TESTS=ON)|

@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     June 2017
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -124,7 +124,13 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
     __shared__ rocblas_int imax;
 
     if(tid == 0)
+    {
+        absakk = 0;
+        colmax = 0;
+        rowmax = 0;
+        imax = 0;
         _info = 0;
+    }
 
     kw = nb + k - n;
     while(k >= 0 && (k > n - nb || nb == n))
@@ -183,6 +189,8 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
                 iamax<MAX_THDS>(tid, k - imax, W + (imax + 1) + (kw - 1) * ldw, 1, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
+
+                __syncthreads();
 
                 if(imax > 0)
                 {
@@ -275,7 +283,9 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
         if(tid == 0)
         {
             if(kstep == 1)
+            {
                 ipiv[k] = kp + 1;
+            }
             else
             {
                 ipiv[k] = -(kp + 1);
@@ -285,7 +295,9 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
 
         k -= kstep;
         kw = nb + k - n;
-    }
+    } // end while
+
+    __syncthreads();
 
     if(tid == 0)
     {
@@ -360,7 +372,13 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
     __shared__ rocblas_int imax;
 
     if(tid == 0)
+    {
+        absakk = 0;
+        colmax = 0;
+        rowmax = 0;
+        imax = 0;
         _info = 0;
+    }
 
     while(k < n && (k < nb - 1 || nb == n))
     {
@@ -393,8 +411,10 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         else
         {
             if(absakk >= alpha * colmax)
+            {
                 // no interchange (1-by-1 block)
                 kp = k;
+            }
             else
             {
                 // copy column imax of A to column k+1 of W and update
@@ -410,19 +430,27 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
                 // find max off-diagonal entry in row imax
                 iamax<MAX_THDS>(tid, imax - k, W + k + (k + 1) * ldw, 1, sval, sidx);
                 if(tid == 0)
+                {
                     rowmax = sval[0];
+                }
+
+                __syncthreads();
 
                 if(imax < n - 1)
                 {
                     iamax<MAX_THDS>(tid, n - imax - 1, W + (imax + 1) + (k + 1) * ldw, 1, sval, sidx);
                     if(tid == 0)
+                    {
                         rowmax = std::max(rowmax, sval[0]);
+                    }
                 }
                 __syncthreads();
 
                 if(absakk >= alpha * colmax * (colmax / rowmax))
+                {
                     // no interchange (1-by-1 block)
                     kp = k;
+                }
                 else if(aabs<S>(W[imax + (k + 1) * ldw]) >= alpha * rowmax)
                 {
                     // interchange rows and columns kk = k and kp = imax (1-by-1 block)
@@ -502,7 +530,9 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         if(tid == 0)
         {
             if(kstep == 1)
+            {
                 ipiv[k] = kp + 1;
+            }
             else
             {
                 ipiv[k] = -(kp + 1);
@@ -511,7 +541,9 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
         }
 
         k += kstep;
-    }
+    } // end while
+
+    __syncthreads();
 
     if(tid == 0)
     {

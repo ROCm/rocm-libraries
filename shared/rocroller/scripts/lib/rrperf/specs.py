@@ -1,30 +1,9 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2021-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Get host/gpu specs."""
 
+import json
 import os
 import re
 import shutil
@@ -114,8 +93,7 @@ class MachineSpecs(yaml.YAMLObject):
         )
 
     def pretty_string(self):
-        return dedent(
-            f"""\
+        return dedent(f"""\
         Host info:
             hostname:       {self.hostname}
             cpu info:       {self.cpu}
@@ -130,13 +108,7 @@ class MachineSpecs(yaml.YAMLObject):
             performance level: {self.perflevel}
             system clock:      {self.sclk}
             memory clock:      {self.mclk}
-        """
-        )
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return p.stdout.decode("ascii")
+        """)
 
 
 def search(pattern, string):
@@ -144,6 +116,105 @@ def search(pattern, string):
     if m is not None:
         return m.group(1)
     return None
+
+
+def _run_amdsmi_json(cmd: list):
+    """Run an amd-smi command that emits JSON and return the parsed object."""
+    try:
+        completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if completed.returncode != 0:
+            return None
+        return json.loads(completed.stdout.decode("utf-8", errors="replace"))
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _gpu_entry(payload, devicenum: int):
+    """Return the gpu_data entry for devicenum, if present."""
+    if not payload:
+        return None
+    gpu_data = payload.get("gpu_data")
+    if not gpu_data:
+        return None
+    for entry in gpu_data:
+        if entry.get("gpu") == devicenum:
+            return entry
+    return gpu_data[0]
+
+
+def _clock_mhz(clock_entry):
+    """Extract a clock string from an amd-smi clock block."""
+    if not isinstance(clock_entry, dict):
+        return None
+    clk = clock_entry.get("clk")
+    if isinstance(clk, dict):
+        value = clk.get("value")
+        if value is not None:
+            return f"{value}Mhz"
+    elif isinstance(clk, (int, float)):
+        return f"{clk}Mhz"
+    elif isinstance(clk, str) and clk not in ("", "N/A"):
+        return clk
+    return None
+
+
+def get_amdsmi_specs(devicenum: int = 0, amd_smi_path: str = "amd-smi") -> dict:
+    """
+    Collect per-device GPU specs using amd-smi structured JSON output.
+
+    Any field that cannot be resolved is returned as None.
+    """
+    g = str(devicenum)
+    static = _run_amdsmi_json(
+        [amd_smi_path, "static", "-g", g, "--asic", "--vbios", "--json"]
+    )
+    metric = _run_amdsmi_json(
+        [
+            amd_smi_path,
+            "metric",
+            "-g",
+            g,
+            "--mem-usage",
+            "--clock",
+            "--perf-level",
+            "--json",
+        ]
+    )
+
+    result = {
+        "vbios_version": None,
+        "gpuid": None,
+        "market_name": None,
+        "vram": None,
+        "performance_level": None,
+        "memory_clk": None,
+        "system_clk": None,
+    }
+
+    if static:
+        d = _gpu_entry(static, devicenum)
+        if d:
+            result["gpuid"] = d.get("asic", {}).get("device_id")
+            result["market_name"] = d.get("asic", {}).get("market_name")
+            vbios = d.get("ifwi") or d.get("vbios") or {}
+            result["vbios_version"] = vbios.get("part_number")
+
+    if metric:
+        d = _gpu_entry(metric, devicenum)
+        if d:
+            total = d.get("mem_usage", {}).get("total_vram", {}).get("value")
+            if total is not None:
+                result["vram"] = int(total) * 1024 * 1024
+
+            perf = d.get("perf_level")
+            if isinstance(perf, str):
+                result["performance_level"] = perf.split("_")[-1].lower()
+
+            clock = d.get("clock", {})
+            result["system_clk"] = _clock_mhz(clock.get("gfx_0"))
+            result["memory_clk"] = _clock_mhz(clock.get("mem_0"))
+
+    return result
 
 
 def load_machine_specs(path):
@@ -154,7 +225,11 @@ def load_machine_specs(path):
     return MachineSpecs()
 
 
-def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
+def _gpu_spec_text(value, missing="no amd-smi"):
+    return missing if value is None else value
+
+
+def get_machine_specs(devicenum, amd_smi_path="amd-smi"):
     cpuinfo = path("/proc/cpuinfo").read_text()
     meminfo = path("/proc/meminfo").read_text()
     version = path("/proc/version").read_text()
@@ -166,24 +241,10 @@ def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
     else:
         rocm_info = "rocm info not available"
 
-    rocm_smi_found = shutil.which(rocm_smi_path) is not None
-    if rocm_smi_found:
-        rocm_smi = run(
-            [
-                rocm_smi_path,
-                "--showvbios",
-                "--showid",
-                "--showproductname",
-                "--showperflevel",
-                "--showclocks",
-                "--showmeminfo",
-                "vram",
-            ]
-        )
-    else:
-        rocm_smi = ""
+    amd_smi_available = shutil.which(amd_smi_path) is not None
+    amdsmi = get_amdsmi_specs(devicenum, amd_smi_path) if amd_smi_available else {}
 
-    device = rf"^GPU\[{devicenum}\]\s*: "
+    missing = "no amd-smi"
 
     # Use the NODE_NAME env var in CI.
     hostname = os.environ.get("NODE_NAME")
@@ -194,33 +255,13 @@ def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
     ram = search(r"MemTotal:\s*(\S*)", meminfo)
     distro = search(r'PRETTY_NAME="(.*?)"', os_release)
     rocmversion = rocm_info.strip()
-    vbios = (
-        search(device + r"VBIOS version: (.*?)$", rocm_smi)
-        if rocm_smi_found
-        else "no rocm-smi"
-    )
-    gpuid = (
-        search(device + r"GPU ID: (.*?)$", rocm_smi)
-        if rocm_smi_found
-        else "no rocm-smi"
-    )
-    deviceinfo = (
-        search(device + r"Card series:\s*(.*?)$", rocm_smi)
-        if rocm_smi_found
-        else "no rocm-smi"
-    )
-    vram = (
-        search(device + r".... Total Memory .B.: (\d+)$", rocm_smi)
-        if rocm_smi_found
-        else 0
-    )
-    perflevel = (
-        search(device + r"Performance Level: (.*?)$", rocm_smi)
-        if rocm_smi_found
-        else "no rocm-smi"
-    )
-    mclk = search(device + r"mclk.*\((.*?)\)$", rocm_smi) if rocm_smi_found else 0
-    sclk = search(device + r"sclk.*\((.*?)\)$", rocm_smi) if rocm_smi_found else 0
+    vbios = _gpu_spec_text(amdsmi.get("vbios_version"), missing) if amd_smi_available else missing
+    gpuid = _gpu_spec_text(amdsmi.get("gpuid"), missing) if amd_smi_available else missing
+    deviceinfo = _gpu_spec_text(amdsmi.get("market_name"), missing) if amd_smi_available else missing
+    vram = amdsmi.get("vram") if amd_smi_available else 0
+    perflevel = _gpu_spec_text(amdsmi.get("performance_level"), missing) if amd_smi_available else missing
+    mclk = _gpu_spec_text(amdsmi.get("memory_clk"), "") if amd_smi_available else ""
+    sclk = _gpu_spec_text(amdsmi.get("system_clk"), "") if amd_smi_available else ""
 
     if ram is not None:
         ram = "{:.2f} GiB".format(float(ram) / 1024**2)

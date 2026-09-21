@@ -30,6 +30,8 @@
 #include <cmath>
 #include <iostream>
 
+#include <tensilelitehost/export.h>
+
 #define TENSILE_USE_BF16
 
 #ifndef __BYTE_ORDER__
@@ -267,6 +269,11 @@ namespace TensileLite
         return a;
     }
 
+    inline BFloat16 operator-(BFloat16& a)
+    {
+        return BFloat16(0) - a;
+    }
+
     inline BFloat16 operator++(BFloat16& a)
     {
         a += BFloat16(1);
@@ -317,3 +324,4 @@ namespace std
         return std::to_string(static_cast<float>(a));
     }
 } // namespace std
+

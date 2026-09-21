@@ -17,6 +17,7 @@ using namespace hipdnn_backend;
 namespace
 {
 
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
 const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto LIBRARY_PATH = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
@@ -30,6 +31,7 @@ const auto WRONG_SYMBOL_NAME = std::string("wrong_symbol_name");
 const auto FULL_LIBRARY_PATH
     = (hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
        / TEST_PLUGIN_DIR / hipdnn_data_sdk::utilities::getLibraryName(TEST_PLUGIN1_NAME));
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 }
 
@@ -49,7 +51,7 @@ TEST(TestSharedLibrary, LoadLibraryWithLibExt)
 
 TEST(TestSharedLibrary, LoadLibraryCtor)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 }
 
 TEST(TestSharedLibrary, LoadLibraryWrongPath)
@@ -67,27 +69,27 @@ TEST(TestSharedLibrary, LoadLibraryCtorWrongPath)
 
 TEST(TestSharedLibrary, GetSymbol)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 
     ASSERT_NO_THROW(library.getSymbol(SYMBOL_NAME));
 }
 
 TEST(TestSharedLibrary, GetSymbolUninitialized)
 {
-    plugin::SharedLibrary library;
+    const plugin::SharedLibrary library;
     ASSERT_THROW_HIPDNN_STATUS(library.getSymbol(SYMBOL_NAME), HIPDNN_STATUS_INTERNAL_ERROR);
 }
 
 TEST(TestSharedLibrary, GetSymbolWrongName)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 
     ASSERT_THROW_HIPDNN_STATUS(library.getSymbol(WRONG_SYMBOL_NAME), HIPDNN_STATUS_PLUGIN_ERROR);
 }
 
 TEST(TestSharedLibrary, CallFunction)
 {
-    plugin::SharedLibrary library(LIBRARY_PATH);
+    const plugin::SharedLibrary library(LIBRARY_PATH);
 
     // Get the function pointer
     using FuncType = hipdnnPluginStatus_t (*)(const char**);

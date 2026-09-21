@@ -6,8 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <limits>
@@ -15,10 +14,25 @@
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::helpers;
+using namespace hipdnn_data_sdk::types;
 
 TEST(TestCpuFpReferenceMiopenRmsValidation, NegativeToleranceThrows)
 {
-    EXPECT_THROW(CpuFpReferenceMiopenRmsValidation<float> refValidation(-1e-5f),
+    EXPECT_THROW(const CpuFpReferenceMiopenRmsValidation<float> refValidation(-1e-5f),
+                 std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceMiopenRmsValidation, NaNToleranceThrows)
+{
+    EXPECT_THROW(const CpuFpReferenceMiopenRmsValidation<float> refValidation(
+                     std::numeric_limits<float>::quiet_NaN()),
+                 std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceMiopenRmsValidation, InfToleranceThrows)
+{
+    EXPECT_THROW(const CpuFpReferenceMiopenRmsValidation<float> refValidation(
+                     std::numeric_limits<float>::infinity()),
                  std::invalid_argument);
 }
 
@@ -26,7 +40,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidation, NegativeToleranceThrows)
 TEST(TestCpuFpReferenceMiopenRmsValidation, MiopenRmsCalculation)
 {
     // Test that RMS error is calculated correctly
-    CpuFpReferenceMiopenRmsValidation<double> refValidation(0.1);
+    const CpuFpReferenceMiopenRmsValidation<double> refValidation(0.1);
 
     Tensor<double> tensor1({4});
     Tensor<double> tensor2({4});
@@ -53,7 +67,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidation, MiopenRmsCalculation)
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2)); // 0.0244 < 0.1
 
     // Now with tighter tolerance it should fail
-    CpuFpReferenceMiopenRmsValidation<double> refValidationTight(0.02);
+    const CpuFpReferenceMiopenRmsValidation<double> refValidationTight(0.02);
     EXPECT_FALSE(refValidationTight.allClose(tensor1, tensor2)); // 0.0244 > 0.02
 }
 
@@ -63,12 +77,12 @@ TEST(TestCpuFpReferenceMiopenRmsValidation, MiopenRmsCalculation)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorBfp16, BasicUsage)
 {
-    CpuFpReferenceMiopenRmsValidation<hip_bfloat16> validator;
+    const CpuFpReferenceMiopenRmsValidation<bfloat16> validator;
 
-    Tensor<hip_bfloat16> tensor1({2, 3, 4});
+    Tensor<bfloat16> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0_bf);
 
-    Tensor<hip_bfloat16> tensor2({2, 3, 4});
+    Tensor<bfloat16> tensor2({2, 3, 4});
     tensor2.fillWithValue(1.0_bf);
 
     EXPECT_TRUE(validator.allClose(tensor1, tensor2));
@@ -76,7 +90,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorBfp16, BasicUsage)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp16, BasicUsage)
 {
-    CpuFpReferenceMiopenRmsValidation<half> validator;
+    const CpuFpReferenceMiopenRmsValidation<half> validator;
 
     Tensor<half> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0_h);
@@ -89,7 +103,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp16, BasicUsage)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp32, BasicUsage)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0f);
@@ -102,7 +116,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp32, BasicUsage)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp64, BasicUsage)
 {
-    CpuFpReferenceMiopenRmsValidation<double> validator;
+    const CpuFpReferenceMiopenRmsValidation<double> validator;
 
     Tensor<double> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0);
@@ -119,12 +133,12 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp64, BasicUsage)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorBfp16, NotComparable)
 {
-    CpuFpReferenceMiopenRmsValidation<hip_bfloat16> validator;
+    const CpuFpReferenceMiopenRmsValidation<bfloat16> validator;
 
-    Tensor<hip_bfloat16> tensor1({2, 3, 4});
+    Tensor<bfloat16> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0_bf);
 
-    Tensor<hip_bfloat16> tensor2({2, 3, 4});
+    Tensor<bfloat16> tensor2({2, 3, 4});
     tensor2.fillWithValue(2.0_bf);
 
     EXPECT_FALSE(validator.allClose(tensor1, tensor2));
@@ -132,7 +146,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorBfp16, NotComparable)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp16, NotComparable)
 {
-    CpuFpReferenceMiopenRmsValidation<half> validator;
+    const CpuFpReferenceMiopenRmsValidation<half> validator;
 
     Tensor<half> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0_h);
@@ -145,7 +159,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp16, NotComparable)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp32, NotComparable)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0f);
@@ -158,7 +172,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp32, NotComparable)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp64, NotComparable)
 {
-    CpuFpReferenceMiopenRmsValidation<double> validator;
+    const CpuFpReferenceMiopenRmsValidation<double> validator;
 
     Tensor<double> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0);
@@ -175,7 +189,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensorFp64, NotComparable)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, NchwLayout)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 3, 4, 5}, TensorLayout::NCHW);
     tensor1.fillWithValue(1.5f);
@@ -188,7 +202,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, NchwLayout)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, NhwcLayout)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 3, 4, 5}, TensorLayout::NHWC);
     tensor1.fillWithValue(1.5f);
@@ -201,7 +215,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, NhwcLayout)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DifferentLayoutsSameLogicalValues)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     // Create two tensors with different layouts but same logical values
     Tensor<float> tensorNchw({2, 3, 4, 5}, TensorLayout::NCHW);
@@ -233,7 +247,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DifferentLayoutsSameLogicalVa
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, OneDimensional)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({100});
     tensor1.fillWithValue(2.5f);
@@ -246,7 +260,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, OneDimensional)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, ThreeDimensional)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({3, 4, 5});
     tensor1.fillWithValue(1.0f);
@@ -259,7 +273,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, ThreeDimensional)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, FourDimensional)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 3, 4, 5});
     tensor1.fillWithValue(1.0f);
@@ -272,7 +286,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, FourDimensional)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, FiveDimensional)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 2, 3, 4, 5}, TensorLayout::NCDHW);
     tensor1.fillWithValue(1.0f);
@@ -289,7 +303,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, FiveDimensional)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DifferentSizeTensors)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({2, 3, 4});
     tensor1.fillWithValue(1.0f);
@@ -302,11 +316,11 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DifferentSizeTensors)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, SparseTensor)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     // Create sparse tensors with custom strides
-    std::vector<int64_t> dims = {2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8};
+    const std::vector<int64_t> dims = {2, 2, 2};
+    const std::vector<int64_t> strides = {2, 4, 8};
 
     Tensor<float> tensor1(dims, strides);
     Tensor<float> tensor2(dims, strides);
@@ -330,7 +344,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, SparseTensor)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, SingleElement)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({1});
     tensor1.fillWithValue(42.0f);
@@ -347,8 +361,8 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, SingleElement)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, ToleranceComparison)
 {
-    CpuFpReferenceMiopenRmsValidation<double> validatorLowTolerance(1e-7);
-    CpuFpReferenceMiopenRmsValidation<double> validatorHighTolerance(1e-3);
+    const CpuFpReferenceMiopenRmsValidation<double> validatorLowTolerance(1e-7);
+    const CpuFpReferenceMiopenRmsValidation<double> validatorHighTolerance(1e-3);
 
     Tensor<double> tensor1({10, 10});
     Tensor<double> tensor2({10, 10});
@@ -365,7 +379,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, ToleranceComparison)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DefaultTolerance)
 {
-    CpuFpReferenceMiopenRmsValidation<float> validator;
+    const CpuFpReferenceMiopenRmsValidation<float> validator;
 
     Tensor<float> tensor1({1});
     Tensor<float> tensor2({1});
@@ -378,7 +392,7 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, DefaultTolerance)
 
 TEST(TestCpuFpReferenceMiopenRmsValidationITensor, TensorSameElementCountDifferentDims)
 {
-    CpuFpReferenceMiopenRmsValidation<float> refValidation;
+    const CpuFpReferenceMiopenRmsValidation<float> refValidation;
 
     Tensor<float> tensor1({2, 50}); // 100 elements
     Tensor<float> tensor2({10, 10}); // 100 elements
@@ -388,4 +402,116 @@ TEST(TestCpuFpReferenceMiopenRmsValidationITensor, TensorSameElementCountDiffere
     // Should return false because dimensions don't match
     // even though element counts are the same
     EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+/* ======== NaN/Inf detection tests (TYPED_TEST across fp types) ======== */
+
+template <typename T>
+class CpuFpReferenceMiopenRmsValidationNanInf : public ::testing::Test
+{
+};
+
+using RmsFpValidationTypes = ::testing::Types<float, double, half, bfloat16>;
+TYPED_TEST_SUITE(CpuFpReferenceMiopenRmsValidationNanInf, RmsFpValidationTypes, );
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, FailsWhenReferenceHasNaN)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, FailsWhenImplementationHasNaN)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, FailsWhenBothHaveNaN)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillWithSentinelValue();
+    tensor2.fillWithSentinelValue();
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, FailsWhenReferenceHasInf)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, FailsWhenImplementationHasNegativeInf)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor2.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, FailsWhenBothHaveInf)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(refValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceMiopenRmsValidationNanInf, PassesForFiniteValues)
+{
+    const CpuFpReferenceMiopenRmsValidation<TypeParam> refValidation(TypeParam(1.0f));
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
 }

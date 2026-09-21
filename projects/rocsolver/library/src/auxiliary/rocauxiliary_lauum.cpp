@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_lauum.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -35,6 +36,7 @@ rocblas_status rocsolver_lauum_impl(rocblas_handle handle,
                                     const rocblas_int n,
                                     U* A,
                                     const rocblas_int lda)
+try
 {
     ROCSOLVER_ENTER_TOP("lauum", "--uplo", uplo, "-n", n, "--lda", lda);
 
@@ -70,6 +72,10 @@ rocblas_status rocsolver_lauum_impl(rocblas_handle handle,
     // execution
     return rocsolver_lauum_template<T>(handle, uplo, n, A, shiftA, lda, strideA, batch_count,
                                        (T*)work);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

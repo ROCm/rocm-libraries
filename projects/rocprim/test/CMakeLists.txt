@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ set(COMMON_TEST_HEADER_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
 set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 
-function(add_relative_test test_name test_target)
+function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
         set(EXE_PATH ".")
@@ -57,6 +57,11 @@ function(add_relative_test test_name test_target)
       )
     endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
+    # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
+    # Record this (test_target, resource_group) pair so the test-categories pass can later attach gtest-filter
+    # labels to each test while inheriting the same RESOURCE_GROUPS pinning.
+    set_property(GLOBAL APPEND PROPERTY ROCPRIM_TEST_TARGET_RESOURCE_PAIRS "${test_target}|${resource_group}")
 endfunction()
 
 function(add_hip_test TEST_NAME TEST_SOURCES)
@@ -116,7 +121,7 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
   )
 
-  add_relative_test(${TEST_NAME} ${TEST_TARGET})
+  add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
     set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
@@ -149,6 +154,35 @@ add_subdirectory(rocprim)
 add_hip_test("hipgraph.basic" hipgraph/test_hipgraph_basic.cpp)
 add_hip_test("hipgraph.algs" hipgraph/test_hipgraph_algs.cpp)
 
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    message(STATUS "Applying test categories for rocprim")
+    get_property(_rp_pairs GLOBAL PROPERTY ROCPRIM_TEST_TARGET_RESOURCE_PAIRS)
+    list(REMOVE_DUPLICATES _rp_pairs)
+    foreach(_rp_pair IN LISTS _rp_pairs)
+        string(REPLACE "|" ";" _rp_parts "${_rp_pair}")
+        list(GET _rp_parts 0 _rp_t)
+        list(GET _rp_parts 1 _rp_rg)
+        get_target_property(_rp_dir ${_rp_t} RUNTIME_OUTPUT_DIRECTORY)
+        apply_test_category_labels(${_rp_t}
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${_rp_dir}" "${INSTALL_TEST_FILE}" "${_rp_rg}")
+    endforeach()
+
+else()
+    message(
+        STATUS
+        "Shared CTest categories not found at "
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestCategories.cmake - "
+        "skipping rocprim test category labels"
+    )
+endif()
+
 if (ROCPRIM_INSTALL)
   rocm_install(
       FILES "${INSTALL_TEST_FILE}"
@@ -157,3 +191,21 @@ if (ROCPRIM_INSTALL)
       RENAME "CTestTestfile.cmake"
   )
 endif()
+
+# Build the executable used for generating the resource spec file.
+add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+target_link_libraries(generate_resource_spec PRIVATE hip::host)
+# This test may still get the offload-compress flag passed. Since it does not include any kernel
+# code it will give an unused-command-line-argument warning.
+target_compile_options(generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
+
+# Install the executable using the standard install command instead of rocm_install
+# since we want to put it in a custom DESTINATION (rocm_install does not support
+# the DESTINATION option for TARGETS).
+set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+install(
+    TARGETS generate_resource_spec
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
+)

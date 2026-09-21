@@ -1066,9 +1066,10 @@ RNNDescriptor::convertRNNBaseLayout(miopenRNNBaseLayout_t layout)
     case miopenRNNDataSeqMajorNotPadded: return {std::vector<unsigned int>{1, 0, 2}, false};
     case miopenRNNDataSeqMajorPadded: return {std::vector<unsigned int>{1, 0, 2}, true};
 
-    case miopenRNNDataUnknownLayout:
-    default: MIOPEN_THROW(miopenStatusBadParm, "error: Unknown miopenRNNBaseLayout_t "); break;
+    case miopenRNNDataUnknownLayout: break;
     }
+
+    MIOPEN_THROW(miopenStatusBadParm, "error: Unknown miopenRNNBaseLayout_t ");
 }
 
 miopenRNNBaseLayout_t RNNDescriptor::getBaseLayoutFromDataTensor(const SeqTensorDescriptor& desc)

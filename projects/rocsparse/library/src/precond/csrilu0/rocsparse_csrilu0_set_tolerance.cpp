@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,8 @@ try
     ROCSPARSE_CHECKARG(2, tol, (tol < 0), rocsparse_status_invalid_value);
 
     auto csrilu0_info = info->get_csrilu0_info();
-    csrilu0_info->set_singular_tol(tol);
+    auto numeric_near = csrilu0_info->get_singularity_numeric_near();
+    numeric_near->set_tolerance_legacy(tol);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

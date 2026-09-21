@@ -45,6 +45,20 @@ def pytest_addoption(parser):
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
+    parser.addoption("--gpu-targets", default=None,
+        help="Semicolon-separated GPU targets (e.g. gfx942). "
+             "Overrides hardware auto-detection.")
+    parser.addoption("--build-only", action="store_true", default=False,
+        help="Run only the build phase (no benchmarking). "
+             "Requires --artifact-dir.")
+    parser.addoption("--use-cache", action="store_true", default=False,
+        help="Run using previously built cache. "
+             "Requires --artifact-dir.")
+    parser.addoption("--artifact-dir", default=None,
+        help="Directory for cross-machine test artifacts. "
+             "With --build-only: compressed build outputs are written here. "
+             "With --use-cache: previously built artifacts are read from here. "
+             "Required when either --build-only or --use-cache is set.")
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
@@ -79,7 +93,69 @@ def worker_lock_path(tmp_path_factory, worker_id):
     if not worker_id:
         return None
 
-    return tmp_path_factory.getbasetemp().parent / "client_execution.lock"
+    # Under FFM each worker gets its own emulator instance, so there is
+    # no GPU contention — give each worker a private lock so client
+    # invocations can run in parallel across workers.
+    # On real hardware, assign_gpu_to_worker() assigns separate GPUs to
+    # each worker, so there is also no GPU contention — use per-worker locks.
+    if os.environ.get("HSA_MODEL_MEMFILE"):
+      return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+
+    return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
+
+@pytest.fixture(scope="session", autouse=True)
+def assign_gpu_to_worker(worker_id):
+    """
+    Assigns a GPU to each pytest-xdist worker using modulo arithmetic.
+    Worker IDs are in format 'gw0', 'gw1', 'gw2', etc.
+    Sets HIP_VISIBLE_DEVICES to isolate GPU access per worker.
+
+    If you have N GPUs and M workers:
+    - Worker 0 -> GPU 0, Worker 1 -> GPU 1, ..., Worker N-1 -> GPU N-1
+    - Worker N -> GPU 0, Worker N+1 -> GPU 1, etc. (wraps around)
+    """
+    if not worker_id or worker_id == "master":
+        # Single worker or master process - use all GPUs
+        return
+
+    import re
+    from Tensile.ParallelExecution import detectAvailableGpus
+
+    base_memfile = os.environ.get("HSA_MODEL_MEMFILE", "")
+    if base_memfile:
+        os.environ["HSA_MODEL_MEMFILE"] = f"{base_memfile}_{worker_id}"
+        print(f"Worker {worker_id}: HSA_MODEL_MEMFILE={os.environ['HSA_MODEL_MEMFILE']}")
+        return
+
+    num_gpus = detectAvailableGpus()
+    # Extract numeric ID from worker_id (e.g., 'gw0' -> 0, 'gw1' -> 1)
+    match = re.search(r'\d+', worker_id)
+    if match:
+        worker_num = int(match.group())
+        gpu_id = worker_num % num_gpus  # Use modulo to wrap around available GPUs
+        os.environ['HIP_VISIBLE_DEVICES'] = str(gpu_id)
+        print(f"Worker {worker_id} assigned to GPU {gpu_id} (total GPUs: {num_gpus})")
+    else:
+        print(f"Warning: Could not parse worker_id '{worker_id}' for GPU assignment")
+
+@pytest.fixture(autouse=True)
+def clear_ffm_memfile_per_test():
+   """
+   Unlinks the worker's HSA_MODEL_MEMFILE after each test so the next
+   tensilelite-client subprocess starts with a fresh FFM emulator backing.
+   Helps isolate flakiness caused by residual state in the shared memfile
+   between consecutive tests on the same worker.
+   """
+   yield
+   memfile = os.environ.get("HSA_MODEL_MEMFILE")
+   if not memfile:
+     return
+   try:
+     os.unlink(memfile)
+   except FileNotFoundError:
+     pass
+   except OSError as e:
+     print(f"warn: could not unlink {memfile}: {e}", file=sys.stderr)
 
 @pytest.fixture
 def tensile_script_path():
@@ -108,20 +184,66 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         if pytestconfig.getoption("--prebuilt-client"):
             rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
 
+    # Forward --gpu-targets to Tensile. Do NOT forward --build-only or
+    # --use-cache here — those are hardcoded in each test function's args.
+    if pytestconfig.getoption("--gpu-targets"):
+        rv += ["--gpu-targets", pytestconfig.getoption("--gpu-targets")]
+
     return rv
 
-def pytest_collection_modifyitems(items):
+def visibleDeviceCount():
+    """
+    Number of devices HIP will expose to this process.
+
+    detectAvailableGpus() reports the physical count and ignores both variables.
+    """
+    counts = [
+        len([d for d in value.split(",") if d.strip()])
+        for value in (os.environ.get("ROCR_VISIBLE_DEVICES"),
+                      os.environ.get("HIP_VISIBLE_DEVICES"))
+        if value is not None
+    ]
+    if counts:
+        return min(counts)
+
+    from Tensile.ParallelExecution import detectAvailableGpus
+    return detectAvailableGpus()
+
+def commSkipMark(config):
+    """Mark to apply to `comm` tests, or None when they can run here."""
+    if config.getoption("--build-only", default=False):
+        return None
+
+    if hasattr(config, "workerinput"):
+        return pytest.mark.skip(
+            reason="comm tests need 2+ devices; assign_gpu_to_worker pins each "
+                   "xdist worker to one")
+
+    count = visibleDeviceCount()
+    if count < 2:
+        return pytest.mark.skip(
+            reason=f"comm tests need 2+ visible HIP devices, found {count}")
+    return None
+
+def pytest_collection_modifyitems(config, items):
     """
     Mainly for tests that aren't simple YAML files (including unit tests).
     Adds a mark for the root directory name to each test.
+
+    Also skips `comm` tests unless this process can reach two devices.
     """
+    commSkip = commSkipMark(config)
+
     for item in items:
-        
+
         relpath = item.fspath.relto(testdir)
         components = relpath.split(os.path.sep)
         # print(f"Items: {item}, Testdir: {testdir}, Components: {components}")
         if len(components) > 0 and len(components[0]) > 0:
             item.add_marker(getattr(pytest.mark, components[0]))
+
+        if commSkip is not None and item.get_closest_marker("comm"):
+            item.add_marker(commSkip)
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):

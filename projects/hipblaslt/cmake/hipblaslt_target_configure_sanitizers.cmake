@@ -22,16 +22,32 @@
 # ########################################################################
 
 function(hipblaslt_target_configure_sanitizers hipblaslt_target linkage)
-    # Add asan flags to hipblas_target
-    target_compile_options(${hipblaslt_target}
-        ${linkage}
-            -fsanitize=address
-            -shared-libasan
-    )
-    target_link_options(${hipblaslt_target}
-        ${linkage}
-            -fsanitize=address
-            -shared-libasan
-            -fuse-ld=lld
-    )
+    if(DEFINED THEROCK_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "")
+        return()
+    endif()
+    if(HIPBLASLT_ENABLE_ASAN)
+        target_compile_options(${hipblaslt_target}
+            ${linkage}
+                -fsanitize=address
+                -shared-libasan
+        )
+        target_link_options(${hipblaslt_target}
+            ${linkage}
+                -fsanitize=address
+                -shared-libasan
+                -fuse-ld=lld
+        )
+    elseif(HIPBLASLT_ENABLE_TSAN)
+        target_compile_options(${hipblaslt_target}
+            ${linkage}
+                -fsanitize=thread
+                -shared-libtsan
+        )
+        target_link_options(${hipblaslt_target}
+            ${linkage}
+                -fsanitize=thread
+                -shared-libtsan
+                -fuse-ld=lld
+        )
+    endif()
 endfunction()

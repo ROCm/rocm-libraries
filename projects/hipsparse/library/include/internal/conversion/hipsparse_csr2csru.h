@@ -31,7 +31,7 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
 *  \brief
-*  This function converts sorted CSR format to unsorted CSR format. The required
+*  This function converts the sorted CSR format to the unsorted CSR format. The required
 *  temporary storage has to be allocated by the user.
 */
 /**@{*/

@@ -26,14 +26,16 @@
 
 #include <gtest/gtest.h>
 
+#include <any>
 #include <tuple>
 
 #include <DataInitializationTyped.hpp>
+#include <ProgramOptions.hpp>
 
 using namespace Tensile;
 using namespace Tensile::Client;
 
-namespace po = boost::program_options;
+namespace po = Tensile::Client::po;
 
 template <typename TypedInputs>
 class DataInitializationTest : public ::testing::Test
@@ -69,12 +71,12 @@ public:
     {
         po::variables_map rv;
 
-        rv.insert({"a-type", val(TypeInfo<AType>::Enum, false)});
-        rv.insert({"b-type", val(TypeInfo<BType>::Enum, false)});
-        rv.insert({"c-type", val(TypeInfo<CType>::Enum, false)});
-        rv.insert({"d-type", val(TypeInfo<DType>::Enum, false)});
-        rv.insert({"alpha-type", val(TypeInfo<AlphaType>::Enum, false)});
-        rv.insert({"beta-type", val(TypeInfo<BetaType>::Enum, false)});
+        rv.insert({"a-type", val(std::any(TypeInfo<AType>::Enum))});
+        rv.insert({"b-type", val(std::any(TypeInfo<BType>::Enum))});
+        rv.insert({"c-type", val(std::any(TypeInfo<CType>::Enum))});
+        rv.insert({"d-type", val(std::any(TypeInfo<DType>::Enum))});
+        rv.insert({"alpha-type", val(std::any(TypeInfo<AlphaType>::Enum))});
+        rv.insert({"beta-type", val(std::any(TypeInfo<BetaType>::Enum))});
 
         return rv;
     }
@@ -85,21 +87,21 @@ public:
 
         po::variables_map args = this->DataTypeArgs();
 
-        args.insert({"init-a", val(InitMode::Zero, false)});
-        args.insert({"init-b", val(InitMode::Zero, false)});
-        args.insert({"init-c", val(InitMode::Zero, false)});
-        args.insert({"init-d", val(InitMode::Zero, false)});
-        args.insert({"init-alpha", val(InitMode::Zero, false)});
-        args.insert({"init-beta", val(InitMode::Zero, false)});
-        args.insert({"c-equal-d", val(cEqualD, false)});
-        args.insert({"pristine-on-gpu", val(pristineGPU, false)});
-        args.insert({"bounds-check", val(boundsCheck, false)});
-        args.insert({"num-elements-to-validate", val(1, false)});
-        args.insert({"offset-a", val((size_t)0, false)});
-        args.insert({"offset-b", val((size_t)0, false)});
-        args.insert({"offset-c", val((size_t)0, false)});
-        args.insert({"offset-d", val((size_t)0, false)});
-        args.insert({"strided-batched", val(false, false)});
+        args.insert({"init-a", val(std::any(InitMode::Zero))});
+        args.insert({"init-b", val(std::any(InitMode::Zero))});
+        args.insert({"init-c", val(std::any(InitMode::Zero))});
+        args.insert({"init-d", val(std::any(InitMode::Zero))});
+        args.insert({"init-alpha", val(std::any(InitMode::Zero))});
+        args.insert({"init-beta", val(std::any(InitMode::Zero))});
+        args.insert({"c-equal-d", val(std::any(cEqualD))});
+        args.insert({"pristine-on-gpu", val(std::any(pristineGPU))});
+        args.insert({"bounds-check", val(std::any(boundsCheck))});
+        args.insert({"num-elements-to-validate", val(std::any(1))});
+        args.insert({"offset-a", val(std::any((size_t)0))});
+        args.insert({"offset-b", val(std::any((size_t)0))});
+        args.insert({"offset-c", val(std::any((size_t)0))});
+        args.insert({"offset-d", val(std::any((size_t)0))});
+        args.insert({"strided-batched", val(std::any(false))});
 
         TensorDescriptor a(TypeInfo<typename TypedInputs::AType>::Enum, {10, 10, 1});
         TensorDescriptor b(TypeInfo<typename TypedInputs::BType>::Enum, {10, 10, 1});

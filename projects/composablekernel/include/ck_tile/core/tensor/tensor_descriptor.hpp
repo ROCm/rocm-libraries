@@ -77,6 +77,20 @@ struct tensor_descriptor : public tensor_adaptor<Transforms,
     {
     }
 
+    template <coord_transform_enum TargetTransformType>
+    CK_TILE_HOST_DEVICE static constexpr bool has_transform()
+    {
+        bool found = false;
+        static_for<0, ntransform_, 1>{}([&](auto i) {
+            using TransformType = remove_cvref_t<decltype(Transforms{}.at(i))>;
+            if constexpr(TransformType::get_type_enum() == TargetTransformType)
+            {
+                found = true;
+            }
+        });
+        return found;
+    }
+
     CK_TILE_HOST_DEVICE static constexpr index_t get_num_of_dimension()
     {
         return Base::get_num_of_top_dimension();
@@ -236,12 +250,13 @@ transform_tensor_descriptor(const OldTensorDescriptor& old_tensor_desc,
 namespace detail {
 
 template <typename Lengths, typename Strides, index_t I, typename AccOld>
-CK_TILE_HOST_DEVICE constexpr auto calculate_element_space_size_impl(const Lengths& lengths,
-                                                                     const Strides& strides,
-                                                                     number<I> i,
-                                                                     AccOld acc_old)
+CK_TILE_HOST_DEVICE constexpr long_index_t calculate_element_space_size_impl(const Lengths& lengths,
+                                                                             const Strides& strides,
+                                                                             number<I> i,
+                                                                             AccOld acc_old)
 {
-    auto acc_new = acc_old + (lengths[i] - number<1>{}) * strides[i];
+    long_index_t acc_new = acc_old + static_cast<long_index_t>(lengths[i] - number<1>{}) *
+                                         static_cast<long_index_t>(strides[i]);
 
     if constexpr(i.value < Lengths::size() - 1)
     {
@@ -287,8 +302,12 @@ make_naive_tensor_descriptor(const tuple<Lengths...>& lengths,
 
     constexpr auto visible_dim_hidden_ids = typename arithmetic_sequence_gen<1, N + 1, 1>::type{};
 
-    const auto element_space_size =
+    const long_index_t element_space_size_long =
         detail::calculate_element_space_size_impl(lengths, strides, number<0>{}, long_number<1>{});
+    constexpr long_index_t element_space_size_clamp_value =
+        static_cast<long_index_t>(std::numeric_limits<index_t>::max());
+    const index_t element_space_size =
+        static_cast<index_t>(std::min(element_space_size_long, element_space_size_clamp_value));
 
     using GuaranteedVectorLengths =
         typename sequence_merge<typename uniform_sequence_gen<N, -1>::type,
@@ -323,8 +342,12 @@ make_naive_tensor_descriptor_with_offset(const tuple<Lengths...>& lengths,
                                          number<GuaranteedLastDimensionVectorStride> = number<-1>{})
 {
     const auto desc_0 = [&]() {
-        const auto element_space_size = detail::calculate_element_space_size_impl(
+        const auto element_space_size_long = detail::calculate_element_space_size_impl(
             lengths, strides, number<0>{}, long_number<1>{});
+        constexpr long_index_t element_space_size_clamp_value =
+            static_cast<long_index_t>(std::numeric_limits<index_t>::max());
+        const index_t element_space_size =
+            static_cast<index_t>(std::min(element_space_size_long, element_space_size_clamp_value));
 
         const auto transforms = make_tuple(make_offset_transform(element_space_size, os));
 

@@ -53,6 +53,8 @@ namespace TensileLite
             return "Tanh";
         case ActivationType::DGelu:
             return "Dgelu";
+        case ActivationType::DRelu:
+            return "Drelu";
         case ActivationType::Silu:
             return "Silu";
         case ActivationType::Swish:
@@ -119,6 +121,10 @@ namespace TensileLite
         {
             t = ActivationType::DGelu;
         }
+        else if(strValue == ToString(ActivationType::DRelu))
+        {
+            t = ActivationType::DRelu;
+        }
         else if(strValue == ToString(ActivationType::Silu))
         {
             t = ActivationType::Silu;
@@ -145,7 +151,7 @@ namespace TensileLite
         }
         else
         {
-            throw std::runtime_error(concatenate("Invalid data type: ", strValue));
+            throw std::runtime_error(concatenate("Invalid activations type: ", strValue));
         }
         return stream;
     }

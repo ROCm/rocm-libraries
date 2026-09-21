@@ -30,6 +30,8 @@
 #include <cmath>
 #include <iostream>
 
+#include <tensilelitehost/export.h>
+
 #define TENSILE_USE_XF32
 
 #ifndef __BYTE_ORDER__
@@ -234,3 +236,4 @@ namespace std
         return static_cast<TensileLite::XFloat32>(std::cos(static_cast<float>(a)));
     }
 } // namespace std
+

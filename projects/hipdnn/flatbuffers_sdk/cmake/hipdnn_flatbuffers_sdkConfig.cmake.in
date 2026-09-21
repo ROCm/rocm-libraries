@@ -1,0 +1,66 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(hipdnn_data_sdk @HIPDNN_FLATBUFFERS_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
+
+find_dependency(flatbuffers REQUIRED)
+
+# Validate the consumer's FlatBuffers matches the version hipDNN was built
+# against. The imported target's compile definitions and any inline
+# FlatBuffers code are baked against this version, so a mismatch is unsafe.
+# Comparison + messaging are shared with the build-time guard in
+# flatbuffers_sdk/CMakeLists.txt via this helper module.
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_flatbuffers_version_check.cmake")
+hipdnn_check_flatbuffers_version(
+    EXPECTED "@HIPDNN_FLATBUFFERS_VERSION@"
+    CONTEXT  "hipDNN Flatbuffers SDK"
+)
+
+# Reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB @HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB@)
+
+# nlohmann_json is optional based on HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_flatbuffers_sdkTargets.cmake")
+
+message(STATUS "hipDNN Flatbuffers SDK: Using imported FlatBuffers ${flatbuffers_VERSION} headers")
+
+function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
+    set(options "")
+    set(oneValueArgs "")
+    set(multiValueArgs COMPILE_DEFINITIONS)
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(NOT TARGET ${TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Target '${TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    if(NOT TARGET ${HEADER_LIB_TARGET_NAME})
+        message(FATAL_ERROR "hipdnn_add_dependency_includes: Header library target '${HEADER_LIB_TARGET_NAME}' does not exist")
+        return()
+    endif()
+
+    get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_dep_includes)
+        message(VERBOSE "${TARGET_NAME} adding includes from ${HEADER_LIB_TARGET_NAME}: ${_dep_includes}")
+        target_include_directories(${TARGET_NAME} SYSTEM INTERFACE ${_dep_includes})
+    endif()
+
+    if(ARG_COMPILE_DEFINITIONS)
+        target_compile_definitions(${TARGET_NAME} INTERFACE ${ARG_COMPILE_DEFINITIONS})
+    endif()
+endfunction()
+
+hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk flatbuffers::flatbuffers)
+if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
+    hipdnn_add_dependency_includes(hipdnn_flatbuffers_sdk nlohmann_json::nlohmann_json)
+endif()

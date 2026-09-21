@@ -39,20 +39,20 @@ extern "C" {
 *  type. The gathered analysis meta data is stored in the \ref rocsparse_mat_info object and can be cleared by
 *  \ref rocsparse_bsrmv_clear().
 *
-*  If the matrix sparsity pattern changes, the gathered information will become invalid. In order to perform another
-*  sparse matrix multiplication with a matrix having a different sparsity pattern, the user would need to either destroy
-*  the old \p info object and create a new one or the user would need to clear the existing \p info object using
+*  If the matrix sparsity pattern changes, the gathered information will become invalid. To perform another
+*  sparse matrix multiplication with a matrix having a different sparsity pattern, either destroy
+*  the old \p info object and create a new one or clear the existing \p info object using
 *  \ref rocsparse_bsrmv_clear(). In both cases, the analysis will need to be called again.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of BSR blocks.
 *  @param[in]
@@ -81,9 +81,9 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb, \p nb or \p nnzb is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, or \p nnzb is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val, \p bsr_row_ptr,
-*              \p bsr_col_ind or \p info pointer is invalid.
+*              \p bsr_col_ind, or \p info pointer is invalid.
 *  \retval     rocsparse_status_memory_error the buffer for the gathered information
 *              could not be allocated.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
@@ -150,7 +150,7 @@ rocsparse_status rocsparse_zbsrmv_analysis(rocsparse_handle                handl
 /**@}*/
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using BSR storage format
+*  \brief Sparse matrix vector multiplication using the BSR storage format.
 *
 *  \details
 *  \p rocsparse_bsrmv multiplies the scalar \f$\alpha\f$ with a sparse
@@ -169,30 +169,30 @@ rocsparse_status rocsparse_zbsrmv_analysis(rocsparse_handle                handl
 *  \f]
 *  and where \f$m = mb \times block\_dim\f$ and \f$n= nb \times block\_dim\f$.
 *
-*  Performing the above operation can be done with or without analysis. Running with analysis may result in better performance
+*  The operation above can be done with or without analysis. Running with analysis might result in better performance
 *  when computing the matrix vector product but will also incur a performance cost attributed to the additional analysis step.
 *  For this reason, running with analysis makes sense when a user plans on computing the matrix vector product many times and
 *  therefore can amortize the analysis cost.
 *
-*  To run without analysis, performing the above operation involves simply calling the \p rocsparse_bsrmv routine while passing
+*  To run the operation above without analysis, call the \p rocsparse_bsrmv routine while passing
 *  \p NULL for the \p info parameter.
 *
-*  To run with analysis, performing the above operation involves two steps. First, the user creates a \ref rocsparse_mat_info object
-*  by calling \ref rocsparse_create_mat_info and then passes this to \ref rocsparse_sbsrmv_analysis "rocsparse_Xbsrmv_analysis()"
-*  which will perform analysis on the sparsity pattern of the matrix \f$op(A)\f$. The user then completes the operation by
+*  Running the operation with analysis involves two steps. First, create a \ref rocsparse_mat_info object
+*  by calling \ref rocsparse_create_mat_info and then pass this to \ref rocsparse_sbsrmv_analysis "rocsparse_Xbsrmv_analysis()",
+*  which will perform analysis on the sparsity pattern of the matrix \f$op(A)\f$. Then complete the operation by
 *  calling \p rocsparse_bsrmv. The creation of the \p info object and the call to the analysis routine only need to be performed
-*  once for a given sparsity pattern while the computation can be performed repeatedly as long as the sparsity pattern has
-*  not changed. Once all calls to \p rocsparse_bsrmv have been made, the \p info object can be destroyed with a call to
+*  once for a given sparsity pattern, while the computation can be performed repeatedly as long as the sparsity pattern has
+*  not changed. After all calls to \p rocsparse_bsrmv have been made, the \p info object can be destroyed with a call to
 *  \ref rocsparse_destroy_mat_info.
 *
-*  When running with analysis, a user may find themselves in the situation where they wish to perform multiple sparse matrix
-*  multiplications with each sparse matrix having a different sparsity pattern. Instead of creating and destroying multiple
+*  When running with analysis, users might want to perform multiple sparse matrix
+*  multiplications, with each sparse matrix having a different sparsity pattern. Instead of creating and destroying multiple
 *  \ref rocsparse_mat_info objects for each unique sparsity pattern, the user can instead create the \p info object once and
-*  then call \ref rocsparse_bsrmv_clear followed by re-running the analysis in between each sparse matrix multiplication.
+*  then call \ref rocsparse_bsrmv_clear, followed by re-running the analysis in between each sparse matrix multiplication.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  Currently, only \p trans == \ref rocsparse_operation_none is supported.
@@ -201,7 +201,7 @@ rocsparse_status rocsparse_zbsrmv_analysis(rocsparse_handle                handl
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of BSR blocks.
 *  @param[in]
@@ -240,10 +240,10 @@ rocsparse_status rocsparse_zbsrmv_analysis(rocsparse_handle                handl
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb or \p block_dim is
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, or \p block_dim is
 *              invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p bsr_val,
-*              \p bsr_row_ind, \p bsr_col_ind, \p x, \p beta or \p y pointer is invalid.
+*              \p bsr_row_ind, \p bsr_col_ind, \p x, \p beta, or \p y pointer is invalid.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_not_implemented
 *              \p trans != \ref rocsparse_operation_none or
@@ -332,17 +332,17 @@ rocsparse_status rocsparse_zbsrmv(rocsparse_handle                handle,
 *  \p rocsparse_bsrmv_clear deallocates all memory that was allocated by
 *  \ref rocsparse_sbsrmv_analysis "rocsparse_Xbsrmv_analysis()". This is especially useful
 *  if memory is an issue and the analysis data is not required anymore for further computation,
-*  e.g. when switching to another sparse matrix format.
+*  for example, when switching to another sparse matrix format.
 *
 *  Calling \p rocsparse_bsrmv_clear is optional. All allocated resources will be
-*  cleared, when the opaque \ref rocsparse_mat_info object is destroyed using
+*  cleared when the opaque \ref rocsparse_mat_info object is destroyed using
 *  \ref rocsparse_destroy_mat_info().
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[inout]
 *  info        structure that holds the information collected during analysis step.
 *

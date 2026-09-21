@@ -3,6 +3,7 @@
 
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
+
 // NOLINTNEXTLINE
 thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
@@ -19,6 +20,12 @@ public:
     {
         return "1.0.0";
     }
+
+    const char* getPluginApiVersion() const override
+    {
+        return apiVersionWithoutTweak();
+    }
+
     int64_t getEngineId() const override
     {
         return hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
@@ -39,5 +46,6 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<GoodPlugin>());
 }
 
-// Register all API functions
+// The optional engine-name entry point is omitted and `getEngineName()` is left at
+// its `nullptr` default, making this the fixture for host-side name fallback.
 REGISTER_TEST_PLUGIN_API()

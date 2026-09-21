@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level3_module
- *  \brief Sparse matrix dense matrix multiplication using BSR storage format
+ *  \brief Sparse matrix dense matrix multiplication using the BSR storage format.
  *
  *  \details
  *  \p rocsparse_bsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
@@ -63,8 +63,8 @@ extern "C" {
  *  and where \f$k = block\_dim \times kb\f$ and \f$m = block\_dim \times mb\f$.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
@@ -73,7 +73,7 @@ extern "C" {
  *  This routine supports execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
  *  dir         the storage format of the blocks. Can be \ref rocsparse_direction_row or \ref rocsparse_direction_column.
  *  @param[in]
@@ -120,14 +120,14 @@ extern "C" {
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_size \p mb, \p n, \p kb, \p nnzb, \p ldb or \p ldc
+ *  \retval     rocsparse_status_invalid_size \p mb, \p n, \p kb, \p nnzb, \p ldb, or \p ldc
  *              is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p bsr_val,
- *              \p bsr_row_ptr, \p bsr_col_ind, \p B, \p beta or \p C pointer is invalid.
+ *              \p bsr_row_ptr, \p bsr_col_ind, \p B, \p beta, or \p C pointer is invalid.
  *  \retval     rocsparse_status_arch_mismatch the device is not supported.
  *  \retval     rocsparse_status_not_implemented
- *              \p trans_A != \ref rocsparse_operation_none or
- *              \p trans_B == \ref rocsparse_operation_conjugate_transpose or
+ *              \p trans_A != \ref rocsparse_operation_none,
+ *              \p trans_B == \ref rocsparse_operation_conjugate_transpose, or
  *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
  *
  *  \par Example

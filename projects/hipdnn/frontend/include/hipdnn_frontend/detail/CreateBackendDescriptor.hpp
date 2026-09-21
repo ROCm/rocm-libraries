@@ -19,7 +19,7 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
                                              HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              1,
-                                             &graphDesc),
+                                             static_cast<const void*>(&graphDesc)),
         "Failed to set operation graph on the engine descriptor.");
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -36,7 +36,8 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
-                                            std::vector<HeuristicMode> const& modes)
+                                            const std::vector<HeuristicMode>& modes,
+                                            bool findFirst = false)
 {
     engineHeuristicDesc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
 
@@ -45,13 +46,13 @@ inline Error
                                              HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              1,
-                                             &graphDesc),
+                                             static_cast<const void*>(&graphDesc)),
         "Failed to set operation graph on the engine heuristic descriptor.");
 
-    // TODO
-    // Currently we only handle the first mode in the vector.  Once we add heuristics we will need
-    // to handle using all modes that are passed in.  We currently only have 1 mode so there
-    // is only 1 possibility.
+    // Only the first mode in the vector is forwarded to the backend today.
+    // When multiple heuristic modes are supported (e.g. HIPDNN_HEUR_MODE_A
+    // combined with a fallback mode), this loop should set all modes on the
+    // descriptor rather than just backendModes.data()[0].
     std::vector<hipdnnBackendHeurMode_t> backendModes;
     backendModes.reserve(modes.size());
     for(const auto& mode : modes)
@@ -66,6 +67,18 @@ inline Error
                                              1,
                                              backendModes.data()),
         "Failed to set mode on the engine heuristic descriptor.");
+
+    if(findFirst)
+    {
+        bool findFirstValue = true;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
+                                                 HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT,
+                                                 HIPDNN_TYPE_BOOLEAN,
+                                                 1,
+                                                 &findFirstValue),
+            "Failed to set find first on the engine heuristic descriptor.");
+    }
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineHeuristicDesc.get()),
                                      "Failed to finalize engine heuristic descriptor");

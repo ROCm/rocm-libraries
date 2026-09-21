@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Run rocroller tests in parallel shards.
 
-Usage: run-tests-sharded [BUILD_DIR] [GPU_FILTER]
+Usage: run-tests-sharded PROFILE [BUILD_DIR]
 
 Number of shards is auto-detected as ncores/2.
 """
@@ -9,13 +12,17 @@ Number of shards is auto-detected as ncores/2.
 import argparse
 import os
 import pty
+import random
 import select
 import subprocess
 import sys
 import time
-import yaml
 from dataclasses import dataclass
 from pathlib import Path
+
+# Add lib directory to path for rrtest import
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+from rrtest import get_test_commands
 
 
 @dataclass
@@ -27,6 +34,7 @@ class ShardInfo:
     shard_tag: str
     shard_index: int
     test_type: str
+    executable: str
     output_buffer: str = ""
     start_time: float = 0.0
 
@@ -67,135 +75,116 @@ def get_available_cpus():
     return os.cpu_count() or 4
 
 
-def load_test_profile(profile_name):
-    """Load test profile configuration from YAML file."""
-    # Look for test-profiles.yaml in rocroller root (parent of scripts)
-    script_dir = Path(__file__).parent
-    yaml_path = script_dir.parent / "test-profiles.yaml"
+def get_shuffle_seed():
+    """Return one random seed for all shards (gtest and catch2).
 
-    if not yaml_path.exists():
-        raise FileNotFoundError(f"Test profiles file not found: {yaml_path}")
+    Uses TEST_SHUFFLE_SEED env var if set (for reproducibility);
+    otherwise picks a random seed.
 
-    with open(yaml_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    if "profiles" not in config or profile_name not in config["profiles"]:
-        available = ", ".join(config.get("profiles", {}).keys())
-        raise ValueError(f"Profile '{profile_name}' not found. Available: {available}")
-
-    return config["profiles"][profile_name]
-
-
-def build_gtest_filter(profile_config):
-    """Build gtest filter string from profile config include/exclude lists.
-
-    Format: --gtest_filter=include1:include2-exclude1:exclude2:exclude3
-    The negative sign appears once before the first exclude pattern.
+    Returns:
+        (seed, from_env): seed is an int in [1, 2**31-1]; from_env is True if
+        the seed came from TEST_SHUFFLE_SEED.
     """
-    if not profile_config or "gtest" not in profile_config:
-        return None
-
-    gtest = profile_config["gtest"]
-    includes = gtest.get("include", [])
-    excludes = gtest.get("exclude", [])
-
-    if not includes and not excludes:
-        return None
-
-    # Build filter string with proper gtest format
-    parts = []
-    if includes:
-        parts.append(":".join(includes))
-    if excludes:
-        # Negative sign goes before the first exclude, then join rest with ':'
-        parts.append("-" + ":".join(excludes))
-
-    return "".join(parts)
-
-
-def build_catch2_filter(profile_config):
-    """Build catch2 filter string from profile config include/exclude lists.
-
-    Format: include patterns as-is, exclude patterns with ~ prefix
-    """
-    if not profile_config or "catch2" not in profile_config:
-        return None
-
-    catch2 = profile_config["catch2"]
-    includes = catch2.get("include", [])
-    excludes = catch2.get("exclude", [])
-
-    if not includes and not excludes:
-        return None
-
-    # Catch2 uses ~pattern for exclusion
-    filter_parts = []
-    filter_parts.extend(includes)
-    filter_parts.extend([f"~{pattern}" for pattern in excludes])
-
-    # Join with commas or as separate arguments depending on catch2 version
-    return ",".join(filter_parts) if filter_parts else None
+    master = os.environ.get("TEST_SHUFFLE_SEED")
+    if master is not None:
+        return int(master), True
+    return random.SystemRandom().randint(1, 2**31 - 1), False
 
 
 def start_shard(
     shard_index,
-    test_exe,
+    base_cmd,
     test_type,
     num_shards,
-    gpu_filter,
     build_dir,
-    profile_config=None,
+    shard_seed=None,
 ):
-    """Start a shard of tests and return process info."""
-    test_prefix = "G" if test_type == "gtest" else "C"
+    """Start a shard of tests and return process info.
+
+    Args:
+        shard_index: Index of this shard (0-based)
+        base_cmd: Base command list from get_test_commands (includes executable and filters)
+        test_type: Framework name (e.g., "gtest", "catch2", "ctest")
+        num_shards: Total number of shards
+        build_dir: Build directory path
+        shard_seed: Optional pre-computed random seed for this shard (used for gtest/catch2).
+    """
+    # Extract executable name from command
+    executable = base_cmd[0]
+
+    # Generate shard tag prefix from framework name (first letter uppercase)
+    test_prefix = test_type[0].upper()
     shard_tag = f"[{test_prefix}{shard_index:02d}]"
     print(f"{shard_tag} Starting shard", flush=True)
 
     # Set environment variables
     env = os.environ.copy()
+
+    # Parallelization
     env["OPENBLAS_NUM_THREADS"] = "2"
     env["OMP_NUM_THREADS"] = "2"
 
-    # Build command based on test type
+    # Debug logging for failed kernel generation
+    env["AMD_COMGR_REDIRECT_LOGS"] = "stdout"
+
+    # Start with base command from profile and add framework-specific sharding arguments
+    cmd = base_cmd.copy()
+
     if test_type == "gtest":
+        if shard_seed is None:
+            raise ValueError("shard_seed is required for gtest")
         env["GTEST_TOTAL_SHARDS"] = str(num_shards)
         env["GTEST_SHARD_INDEX"] = str(shard_index)
-
-        cmd = [test_exe]
-        cmd.append("--gtest_shuffle")
-
-        # Apply profile filter if provided, otherwise use gpu_filter
-        profile_filter = build_gtest_filter(profile_config)
-        if profile_filter:
-            cmd.append(f"--gtest_filter={profile_filter}")
-            print(f"{shard_tag} Applying gtest filter from profile", flush=True)
-        elif gpu_filter:
-            cmd.append(gpu_filter)
-
         cmd.extend(
-            ["--gtest_output=xml:test_report/gtest_shard_{}.xml".format(shard_index)]
+            [
+                "--gtest_shuffle",
+                f"--gtest_random_seed={shard_seed}",
+                f"--gtest_output=xml:test_report/gtest_shard_{shard_index}.xml",
+            ]
         )
-    else:
-        cmd = [
-            test_exe,
-            "--order",
-            "rand",
-            "--shard-count",
-            str(num_shards),
-            "--shard-index",
-            str(shard_index),
-            "-r",
-            "junit",
-            "-o",
-            "test_report/catch2_shard_{}.xml".format(shard_index),
-        ]
+    elif test_type == "catch2":
+        if shard_seed is None:
+            raise ValueError("shard_seed is required for catch2")
+        cmd.extend(
+            [
+                "--order",
+                "rand",
+                "--shard-count",
+                str(num_shards),
+                "--shard-index",
+                str(shard_index),
+                "--rng-seed",
+                str(shard_seed),
+                "--reporter",
+                f"junit::out=test_report/catch2_shard_{shard_index}.xml",
+                "--reporter",
+                "console::out=-::colour-mode=ansi",
+            ]
+        )
+    elif test_type == "ctest":
+        # CTest doesn't have built-in sharding.  Let CTest use threads instead.
+        num_threads = 4
+        cmd.extend(
+            [
+                "--parallel",
+                str(num_threads),
+                "--output-on-failure",
+                "--output-junit",
+                f"test_report/ctest_shard_{shard_index}.xml",
+            ]
+        )
 
-        # Apply catch2 filter from profile if provided
-        profile_filter = build_catch2_filter(profile_config)
-        if profile_filter:
-            # Catch2 filter goes as a positional argument at the end
-            cmd.append(profile_filter)
-            print(f"{shard_tag} Applying catch2 filter from profile", flush=True)
+    # Log environment variables we set (added or overridden)
+    orig_env = os.environ
+    set_vars = [
+        (k, env[k])
+        for k in sorted(env.keys())
+        if k not in orig_env or orig_env.get(k) != env[k]
+    ]
+    if set_vars:
+        print(f"{shard_tag} Environment:", flush=True)
+        for k, v in set_vars:
+            print(f"{shard_tag}   {k}={v}", flush=True)
 
     # Log the command being executed
     cmd_str = " ".join(cmd)
@@ -223,6 +212,7 @@ def start_shard(
         shard_tag=shard_tag,
         shard_index=shard_index,
         test_type=test_type,
+        executable=executable,
         output_buffer="",
         start_time=time.time(),
     )
@@ -233,7 +223,7 @@ def run_shards(shard_infos):
 
     Returns: (failed_shards, timing_info)
         failed_shards: list of (shard_index, test_type, exit_code) tuples
-        timing_info: list of (shard_index, test_type, elapsed_seconds) tuples
+        timing_info: list of (shard_index, test_type, executable, elapsed_seconds) tuples
     """
     active_shards = {info.master_fd: info for info in shard_infos}
     failed_shards = []
@@ -297,7 +287,9 @@ def run_shards(shard_infos):
             elapsed_time = time.time() - info.start_time
 
             # Record timing information
-            timing_info.append((info.shard_index, info.test_type, elapsed_time))
+            timing_info.append(
+                (info.shard_index, info.test_type, info.executable, elapsed_time)
+            )
 
             if return_code == 0:
                 print(
@@ -322,26 +314,19 @@ def main():
         description="Run rocroller tests in parallel shards"
     )
     parser.add_argument(
+        "profile",
+        help="Test profile to use from test-profiles.yaml (e.g., precheckin, codecov, smoke)",
+    )
+    parser.add_argument(
         "build_dir",
         nargs="?",
         default="build",
         help="Path to build directory (default: build)",
     )
     parser.add_argument(
-        "gpu_filter",
-        nargs="?",
-        default="",
-        help="GPU filter for Google Test (e.g., --gtest_filter=-*GPU*)",
-    )
-    parser.add_argument(
-        "--profile",
-        default=None,
-        help="Test profile to use from test-profiles.yaml (e.g., precheckin, codecov)",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="List tests that would run with the given profile/filters, but don't execute them",
+        help="List tests that would run with the given profile, but don't execute them",
     )
 
     args = parser.parse_args()
@@ -368,37 +353,31 @@ def main():
         print(f"ERROR: Build directory does not exist: {build_dir}")
         sys.exit(1)
 
-    # Check test executables exist
-    gtest_exe = build_dir / "test" / "rocroller-tests"
-    catch2_exe = build_dir / "test" / "rocroller-tests-catch"
-
-    if not gtest_exe.exists():
-        print(f"ERROR: Google Test executable not found: {gtest_exe}")
-        sys.exit(1)
-
-    if not catch2_exe.exists():
-        print(f"ERROR: Catch2 executable not found: {catch2_exe}")
-        sys.exit(1)
-
-    # Load profile configuration if specified
-    profile_config = None
-    if args.profile:
-        profile_config = load_test_profile(args.profile)
+    # Get test commands from profile using rrtest library
+    try:
+        commands = get_test_commands(args.profile)
         print(f"Using test profile: {args.profile}")
-        if profile_config.get("description"):
-            print(f"  {profile_config['description']}")
+        print(f"Frameworks: {', '.join(commands.keys())}")
+    except Exception as e:
+        print(f"ERROR: Failed to load test profile '{args.profile}': {e}")
+        sys.exit(1)
 
     print("=" * 50)
     print("Running sharded tests" + (" [DRY RUN]" if args.dry_run else ""))
     print(f"Build directory: {build_dir}")
+    print(f"Test profile: {args.profile}")
     print(f"Available cores: {num_cores}")
     if gpu_arch:
         print(f"GPU architecture: {gpu_arch}")
     if not args.dry_run:
         print(f"Number of shards: {num_shards} (auto-detected)")
-    print(f"GPU filter: {args.gpu_filter if args.gpu_filter else 'none'}")
-    if args.profile:
-        print(f"Test profile: {args.profile}")
+        shuffle_seed, from_env = get_shuffle_seed()
+        if from_env:
+            print(
+                f"Shuffle seed: {shuffle_seed} (from TEST_SHUFFLE_SEED, reproducible)"
+            )
+        else:
+            print(f"Shuffle seed: {shuffle_seed} (set TEST_SHUFFLE_SEED to reproduce)")
     if args.dry_run:
         print("Mode: DRY RUN - listing tests only")
     print("=" * 50)
@@ -411,89 +390,66 @@ def main():
     if args.dry_run:
         print("\n=== DRY RUN MODE: Listing tests that would be executed ===\n")
 
-        # List Google Test tests
-        print("--- Google Test Suite ---")
-        gtest_cmd = [str(gtest_exe), "--gtest_list_tests"]
-        profile_filter = build_gtest_filter(profile_config)
-        if profile_filter:
-            gtest_cmd.append(f"--gtest_filter={profile_filter}")
-            print(f"Applied gtest filter: {profile_filter}\n")
-        elif args.gpu_filter:
-            gtest_cmd.append(args.gpu_filter)
-            print(f"Applied gtest filter: {args.gpu_filter}\n")
+        for framework, cmd_list in commands.items():
+            for cmd in cmd_list:
+                print(f"--- {framework.upper()} Test Suite ---")
+                list_cmd = cmd.copy()
 
-        result = subprocess.run(gtest_cmd, cwd=build_dir)
-        if result.returncode != 0:
-            print(f"ERROR: Failed to list gtest tests (exit code {result.returncode})")
-            sys.exit(1)
+                # Add framework-specific list arguments
+                if framework == "gtest":
+                    list_cmd.append("--gtest_list_tests")
+                elif framework == "catch2":
+                    list_cmd.append("--list-tests")
+                elif framework == "ctest":
+                    list_cmd.extend(["--show-only=json-v1"])
 
-        # List Catch2 tests
-        print("\n--- Catch2 Test Suite ---")
-        catch2_cmd = [str(catch2_exe), "--list-tests"]
-        profile_filter = build_catch2_filter(profile_config)
-        if profile_filter:
-            catch2_cmd.append(profile_filter)
-            print(f"Applied catch2 filter: {profile_filter}\n")
+                result = subprocess.run(list_cmd, cwd=build_dir)
+                if result.returncode != 0:
+                    print(
+                        f"ERROR: Failed to list {framework} tests (exit code {result.returncode})"
+                    )
+                    sys.exit(1)
+                print()
 
-        result = subprocess.run(catch2_cmd, cwd=build_dir)
-        if result.returncode != 0:
-            print(f"ERROR: Failed to list catch2 tests (exit code {result.returncode})")
-            sys.exit(1)
-
-        print("\n=== DRY RUN COMPLETE ===")
+        print("=== DRY RUN COMPLETE ===")
         sys.exit(0)
 
-    # Run all shards
+    # Run all shards for each framework
     failed_shards = []
     all_timing_info = []
 
-    # Run Google Test shards first
-    print("\n--- Running Google Test shards ---")
-    gtest_infos = []
-    for i in range(num_shards):
-        try:
-            info = start_shard(
-                i,
-                str(gtest_exe),
-                "gtest",
-                num_shards,
-                args.gpu_filter,
-                build_dir,
-                profile_config,
-            )
-            gtest_infos.append(info)
-        except Exception as e:
-            print(f"ERROR: Failed to start gtest shard {i}: {e}", flush=True)
-            failed_shards.append((i, "gtest", 1))
+    # Process each framework in order
+    for framework, cmd_list in commands.items():
+        for cmd in cmd_list:
+            # Determine number of shards based on framework
+            # CTest runs tests in parallel internally, so only run 1 "shard"
+            framework_num_shards = 1 if framework == "ctest" else num_shards
 
-    # Run all gtest shards and wait for completion
-    gtest_failures, gtest_timing = run_shards(gtest_infos)
-    failed_shards.extend(gtest_failures)
-    all_timing_info.extend(gtest_timing)
+            print(f"\n--- Running {framework.upper()} shards ---")
+            shard_infos = []
 
-    # Run Catch2 shards after Google Test completes
-    print("\n--- Running Catch2 shards ---")
-    catch2_infos = []
-    for i in range(num_shards):
-        try:
-            info = start_shard(
-                i,
-                str(catch2_exe),
-                "catch2",
-                num_shards,
-                args.gpu_filter,
-                build_dir,
-                profile_config,
-            )
-            catch2_infos.append(info)
-        except Exception as e:
-            print(f"ERROR: Failed to start catch2 shard {i}: {e}", flush=True)
-            failed_shards.append((i, "catch2", 1))
+            for i in range(framework_num_shards):
+                try:
+                    seed = shuffle_seed if framework in ("gtest", "catch2") else None
+                    info = start_shard(
+                        i,
+                        cmd,
+                        framework,
+                        framework_num_shards,
+                        build_dir,
+                        shard_seed=seed,
+                    )
+                    shard_infos.append(info)
+                except Exception as e:
+                    print(
+                        f"ERROR: Failed to start {framework} shard {i}: {e}", flush=True
+                    )
+                    failed_shards.append((i, framework, 1))
 
-    # Run all catch2 shards and wait for completion
-    catch2_failures, catch2_timing = run_shards(catch2_infos)
-    failed_shards.extend(catch2_failures)
-    all_timing_info.extend(catch2_timing)
+            # Run all shards for this framework and wait for completion
+            framework_failures, framework_timing = run_shards(shard_infos)
+            failed_shards.extend(framework_failures)
+            all_timing_info.extend(framework_timing)
 
     print()
 
@@ -503,36 +459,30 @@ def main():
         print("TIMING SUMMARY")
         print("=" * 50)
 
-        # Separate gtest and catch2 timings
-        gtest_timings = [
-            (idx, t) for idx, test_type, t in all_timing_info if test_type == "gtest"
-        ]
-        catch2_timings = [
-            (idx, t) for idx, test_type, t in all_timing_info if test_type == "catch2"
-        ]
+        # Group timings by executable
+        executable_timings = {}
+        for idx, test_type, executable, elapsed in all_timing_info:
+            if executable not in executable_timings:
+                executable_timings[executable] = {"framework": test_type, "timings": []}
+            executable_timings[executable]["timings"].append((idx, elapsed))
 
-        if gtest_timings:
-            print("\nGoogle Test shards:")
-            for idx, elapsed in sorted(gtest_timings):
-                print(f"  [G{idx:02d}] {elapsed:6.1f}s")
-            gtest_total = sum(t for _, t in gtest_timings)
-            gtest_avg = gtest_total / len(gtest_timings)
-            gtest_min = min(t for _, t in gtest_timings)
-            gtest_max = max(t for _, t in gtest_timings)
-            print(
-                f"  Total: {gtest_total:.1f}s, Avg: {gtest_avg:.1f}s, Min: {gtest_min:.1f}s, Max: {gtest_max:.1f}s"
-            )
+        # Print timings for each executable
+        for executable in sorted(executable_timings.keys()):
+            data = executable_timings[executable]
+            timings = data["timings"]
+            framework = data["framework"]
+            prefix = framework[0].upper()
 
-        if catch2_timings:
-            print("\nCatch2 shards:")
-            for idx, elapsed in sorted(catch2_timings):
-                print(f"  [C{idx:02d}] {elapsed:6.1f}s")
-            catch2_total = sum(t for _, t in catch2_timings)
-            catch2_avg = catch2_total / len(catch2_timings)
-            catch2_min = min(t for _, t in catch2_timings)
-            catch2_max = max(t for _, t in catch2_timings)
+            print(f"\n{executable} ({framework}):")
+            for idx, elapsed in sorted(timings):
+                print(f"  [{prefix}{idx:02d}] {elapsed:6.1f}s")
+
+            total = sum(t for _, t in timings)
+            avg = total / len(timings)
+            min_time = min(t for _, t in timings)
+            max_time = max(t for _, t in timings)
             print(
-                f"  Total: {catch2_total:.1f}s, Avg: {catch2_avg:.1f}s, Min: {catch2_min:.1f}s, Max: {catch2_max:.1f}s"
+                f"  Total: {total:.1f}s, Avg: {avg:.1f}s, Min: {min_time:.1f}s, Max: {max_time:.1f}s"
             )
 
         print("=" * 50)

@@ -39,14 +39,14 @@ extern "C" {
 *  buffer must be allocated by the user.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  descr           descriptor of the sparse HYB matrix. Currently, only
 *                  \ref rocsparse_matrix_type_general is supported.
@@ -61,7 +61,7 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_pointer \p descr, \p hyb, \p csr_row_ptr or
+*  \retval     rocsparse_status_invalid_pointer \p descr, \p hyb, \p csr_row_ptr, or
 *              \p buffer_size pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
@@ -75,27 +75,27 @@ rocsparse_status rocsparse_hyb2csr_buffer_size(rocsparse_handle          handle,
                                                size_t*                   buffer_size);
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse HYB matrix into a sparse CSR matrix
+*  \brief Convert a sparse HYB matrix into a sparse CSR matrix.
 *
 *  \details
 *  \p rocsparse_hyb2csr converts a HYB matrix into a CSR matrix. This requires a HYB input structure,
 *  \ref rocsparse_hyb_mat, which is created using \ref rocsparse_create_hyb_mat and is filled with data
 *  using the conversion routine \ref rocsparse_scsr2hyb "rocsparse_Xcsr2hyb()".
 *
-*  Converting back to a sparse CSR matrix from a sparse HYB matrix requires two steps. First, the user calls
-*  \ref rocsparse_hyb2csr_buffer_size in order to determine the size of the required temporary
-*  storage buffer. Once this is determined, the user allocates this buffer. Finally, the user calls
+*  Converting back to a sparse CSR matrix from a sparse HYB matrix requires two steps. First, call
+*  \ref rocsparse_hyb2csr_buffer_size to determine the size of the required temporary
+*  storage buffer. After this is determined, allocate this buffer. Finally, call
 *  \ref rocsparse_shyb2csr "rocsparse_Xhyb2csr()" to complete the conversion.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  descr           descriptor of the sparse HYB matrix. Currently, only
 *                  \ref rocsparse_matrix_type_general is supported.
@@ -109,13 +109,13 @@ rocsparse_status rocsparse_hyb2csr_buffer_size(rocsparse_handle          handle,
 *  @param[out]
 *  csr_col_ind     array containing the column indices of the sparse CSR matrix.
 *  @param[in]
-*  temp_buffer     temporary storage buffer allocated by the user, size is returned by
+*  temp_buffer     temporary storage buffer allocated by the user. The size is returned by
 *                  \ref rocsparse_hyb2csr_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p hyb, \p csr_val,
-*              \p csr_row_ptr, \p csr_col_ind or \p temp_buffer pointer is invalid.
+*              \p csr_row_ptr, \p csr_col_ind, or \p temp_buffer pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.

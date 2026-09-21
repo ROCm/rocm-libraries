@@ -1,0 +1,26 @@
+# serializer version: 1
+# name: test_component_path_and_comment_header
+  dict({
+    'comment': 'Component._CharBase._CharImplCap',
+    'path': list([
+      'Component',
+      '_CharBase',
+      '_CharImplCap',
+    ]),
+  })
+# ---
+# name: test_find_debug
+  1
+# ---
+# name: test_find_single
+  dict({
+    'instance_call': 'cap',
+    'num_found': 1,
+  })
+# ---
+# name: test_findall_recurses_into_abstract
+  dict({
+    'leaf_call': 'leaf',
+    'num_found': 1,
+  })
+# ---

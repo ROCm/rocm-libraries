@@ -1,84 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <mutex>
-#include <sstream>
 #include <string>
-#include <vector>
 
+#include <hipdnn_data_sdk/logging/CallbackTypes.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
-class TestSdkLogging : public ::testing::Test
+// Test SDK logging works in frontend context using SharedLogRecorder
+
+TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
 {
-protected:
-    // Thread-safe log message storage
-    static std::mutex sLogMutex;
-    static std::vector<std::pair<hipdnnSeverity_t, std::string>> sLogMessages;
-
-    static void testLogCallback(hipdnnSeverity_t severity, const char* message)
-    {
-        std::lock_guard<std::mutex> lock(sLogMutex);
-        sLogMessages.emplace_back(severity, std::string(message));
-    }
-
-public:
-    void SetUp() override
-    {
-        // Reset logging state and clear messages
-        hipdnn_data_sdk::logging::resetLogging();
-        {
-            std::lock_guard<std::mutex> lock(sLogMutex);
-            sLogMessages.clear();
-        }
-
-        // Register our test callback
-        hipdnn_data_sdk::logging::registerLoggingCallback(testLogCallback);
-
-        // Start with logging off - tests will enable as needed
-        hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_OFF);
-    }
-
-    void TearDown() override
-    {
-        hipdnn_data_sdk::logging::unregisterLoggingCallback();
-        hipdnn_data_sdk::logging::resetLogging();
-    }
-
-    static std::string getLogContent()
-    {
-        std::lock_guard<std::mutex> lock(sLogMutex);
-        std::ostringstream oss;
-        for(const auto& [severity, message] : sLogMessages)
-        {
-            oss << message << "\n";
-        }
-        return oss.str();
-    }
-
-    static bool hasLogMessage(const std::string& substring)
-    {
-        std::lock_guard<std::mutex> lock(sLogMutex);
-        for(const auto& [severity, message] : sLogMessages)
-        {
-            if(message.find(substring) != std::string::npos)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-
-// Static member definitions
-std::mutex TestSdkLogging::sLogMutex;
-std::vector<std::pair<hipdnnSeverity_t, std::string>> TestSdkLogging::sLogMessages;
-
-TEST_F(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
-{
-    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     // Initialize frontend logging via component-specific macro
     HIPDNN_FE_LOG_INFO("Frontend initialized");
@@ -86,30 +23,45 @@ TEST_F(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
     // Now SDK logging should work
     HIPDNN_SDK_LOG_INFO("SDK info test message");
 
-    std::string logContent = getLogContent();
+    // Verify we got exactly two logs
+    ASSERT_EQ(recorder.getRecordedLogCount(), 2) << "Expected 2 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
-    EXPECT_THAT(logContent, ::testing::HasSubstr("Frontend initialized"));
-    EXPECT_THAT(logContent, ::testing::HasSubstr("SDK info test message"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Frontend initialized"))
+        << "Expected log containing: \"Frontend initialized\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "SDK info test message"))
+        << "Expected log containing: \"SDK info test message\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogContainsComponentName)
+TEST(TestSdkLogging, SdkLogContainsComponentName)
 {
-    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");
     HIPDNN_SDK_LOG_INFO("Component name check");
 
-    std::string logContent = getLogContent();
+    // Verify we got exactly two logs
+    ASSERT_EQ(recorder.getRecordedLogCount(), 2) << "Expected 2 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
     // SDK logs should contain the "hipdnn_frontend" component name
-    EXPECT_THAT(logContent, ::testing::HasSubstr("hipdnn_frontend"))
-        << "Log message did not contain expected component name.\n"
-        << "Actual log: " << logContent;
+    const std::string expectedComponentName = "[hipdnn_frontend]";
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedComponentName))
+        << "Expected log containing: \"" << expectedComponentName << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogAllSeverityLevels)
+TEST(TestSdkLogging, SdkLogAllSeverityLevels)
 {
-    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");
 
@@ -118,17 +70,32 @@ TEST_F(TestSdkLogging, SdkLogAllSeverityLevels)
     HIPDNN_SDK_LOG_ERROR("SDK error message");
     HIPDNN_SDK_LOG_FATAL("SDK fatal message");
 
-    std::string logContent = getLogContent();
+    // Verify we got exactly five logs
+    ASSERT_EQ(recorder.getRecordedLogCount(), 5) << "Expected 5 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
-    EXPECT_THAT(logContent, ::testing::HasSubstr("SDK info message"));
-    EXPECT_THAT(logContent, ::testing::HasSubstr("SDK warn message"));
-    EXPECT_THAT(logContent, ::testing::HasSubstr("SDK error message"));
-    EXPECT_THAT(logContent, ::testing::HasSubstr("SDK fatal message"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "SDK info message"))
+        << "Expected info log containing: \"SDK info message\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "SDK warn message"))
+        << "Expected warning log containing: \"SDK warn message\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "SDK error message"))
+        << "Expected error log containing: \"SDK error message\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_FATAL, "SDK fatal message"))
+        << "Expected fatal log containing: \"SDK fatal message\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogRespectsLogLevel)
+TEST(TestSdkLogging, SdkLogRespectsLogLevel)
 {
-    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_ERROR);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     HIPDNN_FE_LOG_ERROR("Frontend initialized");
 
@@ -137,24 +104,46 @@ TEST_F(TestSdkLogging, SdkLogRespectsLogLevel)
     HIPDNN_SDK_LOG_ERROR("Error should appear");
     HIPDNN_SDK_LOG_FATAL("Fatal should appear");
 
-    std::string logContent = getLogContent();
+    // Verify we got exactly three logs (FE error + SDK error + SDK fatal)
+    ASSERT_EQ(recorder.getRecordedLogCount(), 3) << "Expected 3 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
-    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr("Should not appear")));
-    EXPECT_THAT(logContent, ::testing::HasSubstr("Error should appear"));
-    EXPECT_THAT(logContent, ::testing::HasSubstr("Fatal should appear"));
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Should not appear"))
+        << "Did NOT expect info log containing: \"Should not appear\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "Should not appear"))
+        << "Did NOT expect warning log containing: \"Should not appear\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "Error should appear"))
+        << "Expected error log containing: \"Error should appear\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_FATAL, "Fatal should appear"))
+        << "Expected fatal log containing: \"Fatal should appear\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
-TEST_F(TestSdkLogging, SdkLogStreamFormatting)
+TEST(TestSdkLogging, SdkLogStreamFormatting)
 {
-    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_INFO);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");
 
-    int value = 42;
-    std::string text = "formatted";
+    const int value = 42;
+    const std::string text = "formatted";
     HIPDNN_SDK_LOG_INFO("SDK " << text << " message with value " << value);
 
-    std::string logContent = getLogContent();
+    // Verify we got exactly two logs
+    ASSERT_EQ(recorder.getRecordedLogCount(), 2) << "Expected 2 logs, but captured:\n"
+                                                 << recorder.getRecordedLogsAsString();
 
-    EXPECT_THAT(logContent, ::testing::HasSubstr("SDK formatted message with value 42"));
+    const std::string expectedMessage = "SDK formatted message with value 42";
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedMessage))
+        << "Expected log containing: \"" << expectedMessage << "\"\n"
+        << "But captured:\n"
+        << recorder.getRecordedLogsAsString();
 }

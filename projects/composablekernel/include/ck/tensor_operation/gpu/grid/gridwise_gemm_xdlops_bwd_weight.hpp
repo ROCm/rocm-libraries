@@ -17,9 +17,10 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #include "ck/tensor_operation/gpu/device/device_base.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // Implementation of "Merge" transformation primitive that uses division and mod. It is supposed to
@@ -177,7 +178,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 {
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx11__) || \
     defined(__gfx12__)
-    if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
+    if constexpr(GridwiseGemm::IsValidCompilationParameter())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
@@ -606,11 +607,9 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_bwd_weight
                          c_block_size * sizeof(FloatC));
     }
 
-    template <
-        InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
     __device__ static bool constexpr IsValidCompilationParameter()
     {
-        return ck::tensor_operation::device::IsValidGemmCompilationParameter<
+        constexpr bool valid = ck::tensor_operation::device::IsValidGemmCompilationParameter<
             BlockSize,
             MPerBlock,
             NPerBlock,
@@ -619,7 +618,20 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_bwd_weight
             MRepeat,
             NRepeat,
             FloatC,
-            CGlobalMemoryDataOperation_>();
+            CGlobalMemoryDataOperation>();
+        if constexpr(!valid)
+        {
+            return false;
+        }
+
+        if constexpr((K0PerBlock * K1Value) %
+                         MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, true>::
+                             GetKPerXdlops() !=
+                     0)
+        {
+            return false;
+        }
+        return true;
     }
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     template <typename Block2CTileMap>
@@ -1135,4 +1147,6 @@ struct GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_bwd_weight
 }; // namespace ck
 
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

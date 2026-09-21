@@ -233,6 +233,7 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_output
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -390,6 +391,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
                 dim3(grid_size), dim3(block_size_ws32), 0, 0,
                 device_input, device_output, valid
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -585,6 +587,7 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
                 dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_flags, device_output
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {
@@ -806,6 +809,7 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
                 dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_flags, device_output
             );
+            HIP_CHECK(hipGetLastError());
         }
         else if (current_device_warp_size == ws64)
         {

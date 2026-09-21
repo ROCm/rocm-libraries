@@ -58,6 +58,8 @@ LAPACK main functions
     :ref:`hipsolverXpotrfBatched <potrf_batched>`, x, x, x, x
     :ref:`hipsolverXgetrf_bufferSize <getrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgetrf <getrf>`, x, x, x, x
+    :ref:`hipsolverXgetrfBatched_bufferSize <getrfBatched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgetrfBatched <getrfBatched>`, x, x, x, x
     :ref:`hipsolverXsytrf_bufferSize <sytrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXsytrf <sytrf>`, x, x, x, x
 
@@ -159,6 +161,28 @@ These wrappers are supported in rocSOLVER, but are provided by equivalent functi
 that use different algorithmic approaches or by functionality that is not fully exposed in the public API.
 For these reasons, the corresponding wrappers are not provided in the regular hipSOLVER API.
 
+Householder reflections
+------------------------------
+
+The following Householder reflector methods are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
+
+.. csv-table:: Householder reflections
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXlarft_bufferSize <dense_larft_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXlarft <dense_larft>`, x, x, x, x
+
+Linear-system solvers
+------------------------------
+
+The following linear-system solvers are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
+
+.. csv-table:: Linear-system solvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXsytrs_bufferSize <dense_sytrs_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXsytrs <dense_sytrs>`, x, x, x, x
+
 Partial SVD functions
 ------------------------------
 
@@ -169,6 +193,17 @@ Partial SVD has been implemented in rocSOLVER, but it does not use an approximat
 
     :ref:`hipsolverDnXgesvdaStridedBatched_bufferSize <dense_gesvda_strided_batched_bufferSize>`, x, x, x, x
     :ref:`hipsolverDnXgesvdaStridedBatched <dense_gesvda_strided_batched>`, x, x, x, x
+
+General eigensolvers
+------------------------------
+
+General eigensolvers are not yet implemented in rocSOLVER. The rocSOLVER backend will instead call into a CPU implementation of LAPACK.
+
+.. csv-table:: General eigensolvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXgeev_bufferSize <dense_geev_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXgeev <dense_geev>`, x, x, x, x
 
 Sparse matrix routines
 ------------------------------

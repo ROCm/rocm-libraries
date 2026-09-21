@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2025 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -59,11 +59,11 @@ int main()
     if(verbose)
     {
         std::cout << "Input:\n";
-        for(int i = 0; i < Nx; i++)
+        for(size_t i = 0; i < Nx; i++)
         {
-            for(int j = 0; j < Ny; j++)
+            for(size_t j = 0; j < Ny; j++)
             {
-                int pos = i * Ny + j;
+                size_t pos = i * Ny + j;
                 std::cout << cinput[pos] << " ";
             }
             std::cout << "\n";
@@ -74,8 +74,16 @@ int main()
     // Define list of GPUs to use
     std::vector<int> gpus = {0, 1};
 
+    // Validate requested GPU ids
+    int nDevices = 0;
+    if(hipGetDeviceCount(&nDevices) != hipSuccess)
+        throw std::runtime_error("hipGetDeviceCount failed.");
+    for(const auto g : gpus)
+        if(g < 0 || g >= nDevices)
+            throw std::runtime_error("requested GPU ID is out of range");
+
     // Create the multi-gpu plan
-    hipLibXtDesc* desc; // input descriptor
+    hipLibXtDesc* desc = nullptr;
 
     hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
@@ -89,7 +97,7 @@ int main()
         throw std::runtime_error("hipfftSetStream failed.");
 
     // Assign GPUs to the plan
-    hipfftResult hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+    hipfftResult hipfft_rt = hipfftXtSetGPUs(plan, static_cast<int>(gpus.size()), gpus.data());
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtSetGPUs failed.");
 
@@ -115,7 +123,7 @@ int main()
     // Execute the plan
     hipfft_rt = hipfftXtExecDescriptor(plan, desc, desc, direction);
     if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtMemcpy failed.");
+        throw std::runtime_error("hipfftXtExecDescriptor failed.");
 
     // Print output
     if(verbose)
@@ -140,6 +148,10 @@ int main()
         }
         std::cout << std::endl;
     }
+
+    // Wait for any outstanding work on the FFT stream before tearing things down
+    if(hipStreamSynchronize(stream) != hipSuccess)
+        throw std::runtime_error("hipStreamSynchronize failed.");
 
     // Clean up
     if(hipfftXtFree(desc) != HIPFFT_SUCCESS)

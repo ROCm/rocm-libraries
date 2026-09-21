@@ -33,6 +33,8 @@
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -226,3 +228,4 @@ namespace TensileLite
  * @brief Individual Property classes
  */
 } // namespace TensileLite
+

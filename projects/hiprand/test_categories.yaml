@@ -1,0 +1,26 @@
+# hipRAND Test Categories Configuration (CTest)
+# hipRAND has got only a few tests which are executed in all categories.
+
+test_categories:
+  quick:
+    description: "hipRAND quick tests"
+    test_patterns:
+      - ".*"
+    exclude:
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+  ffm-quick:
+    description: "hipRAND FFM quick tests"
+    # test_hiprand_api and test_hiprand_cpp_wrapper are omitted: their
+    # mt19937 generator is very slow on the FFM simulator (taking hours).
+    test_patterns:
+      - "test_hiprand_kernel"
+      - "test_hiprand_linkage"
+    exclude:
+    labels:
+      - "ffm-quick"
+      - "ffm-full"

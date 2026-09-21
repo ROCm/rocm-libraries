@@ -22,7 +22,7 @@ TEST(TestPluginLastErrorManager, SetAndGetLastErrorString)
 
 TEST(TestPluginLastErrorManager, SetLastErrorWithStdString)
 {
-    std::string msg = "std::string error";
+    const std::string msg = "std::string error";
     PluginLastErrorManager::setLastError(HIPDNN_PLUGIN_STATUS_BAD_PARAM, msg);
     EXPECT_STREQ(PluginLastErrorManager::getLastError(), msg.c_str());
 }

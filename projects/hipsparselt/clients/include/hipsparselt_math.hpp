@@ -30,7 +30,6 @@
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hipsparselt/hipsparselt.h>
-#include <immintrin.h>
 #include <type_traits>
 
 /* ============================================================================================ */
@@ -86,6 +85,22 @@ inline hipsparselt_fp8_e4m3 negate(hipsparselt_fp8_e4m3 x)
 
 template <>
 inline hipsparselt_fp8_e5m2 negate(hipsparselt_fp8_e5m2 x)
+{
+    x.__x ^= 0x80;
+    return x;
+}
+#endif
+
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+template <>
+inline hipsparselt_fp8_e4m3_fnuz negate(hipsparselt_fp8_e4m3_fnuz x)
+{
+    x.__x ^= 0x80;
+    return x;
+}
+
+template <>
+inline hipsparselt_fp8_e5m2_fnuz negate(hipsparselt_fp8_e5m2_fnuz x)
 {
     x.__x ^= 0x80;
     return x;

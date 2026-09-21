@@ -631,7 +631,11 @@ struct GridwiseGemmMultipleD_xdl_splitk_cshuffle
               lcm_AK1_BK1 <= 4) ||
              (is_same<AComputeType, int8_t>::value && lcm_AK1_BK1 <= 8) ||
              ((is_same<AComputeType, f8_t>::value || is_same<AComputeType, bf8_t>::value) &&
+#if defined(__gfx125__)
+              lcm_AK1_BK1 < 128))
+#else
               lcm_AK1_BK1 < 32))
+#endif
                 ? true
                 : false;
         constexpr auto is_scale_mfma = false;
@@ -775,8 +779,8 @@ struct GridwiseGemmMultipleD_xdl_splitk_cshuffle
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
             e_grid_desc_mblock_mperblock_nblock_nperblock,
             c_thread_buf,
-            block_work_idx[I0],
             block_work_idx[I1],
+            block_work_idx[I2],
             p_shared,
             p_ds_grid,
             p_e_grid,

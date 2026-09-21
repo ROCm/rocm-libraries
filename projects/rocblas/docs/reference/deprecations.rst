@@ -10,6 +10,14 @@ rocBLAS deprecations by version
 
 The following sections list the features deprecation by release version.
 
+Announced in rocBLAS 5.6.0
+==========================
+
+ROCBLAS_USE_HIPBLASLT_BATCHED environment variable deprecated
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+``ROCBLAS_USE_HIPBLASLT_BATCHED`` is deprecated and will be removed in a future release. This variable should no longer be required for supported hipBLASLt batched GEMM dispatch.
+
 Removed in rocBLAS 5.0
 =========================
 

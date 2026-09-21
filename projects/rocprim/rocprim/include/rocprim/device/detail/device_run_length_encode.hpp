@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,12 +47,14 @@ template<typename OffsetType, typename CountType>
 using offset_count_pair_type_t = ::rocprim::tuple<OffsetType, CountType>;
 
 template<typename InputType,
-         unsigned int      BlockSize,
-         unsigned int      ItemsPerThread,
-         block_load_method load_input_method>
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         block_load_method       load_input_method,
+         arch::wavefront::target TargetWaveSize>
 struct load_helper
 {
-    using block_load_input = block_load<InputType, BlockSize, ItemsPerThread, load_input_method>;
+    using block_load_input
+        = block_load<InputType, BlockSize, ItemsPerThread, load_input_method, 1, 1, TargetWaveSize>;
     union storage_type
     {
         typename block_load_input::storage_type input;
@@ -125,8 +127,7 @@ struct discontinuity_helper
         }
         else
         {
-            auto not_equal
-                = ::rocprim::detail::inequality_wrapper<CompareFunction>(CompareFunction());
+            auto not_equal = ::rocprim::inequality_wrapper<CompareFunction>(CompareFunction());
 
             constexpr unsigned int block_size      = BlockSize * ItemsPerThread;
             const InputType        block_successor = block_input[block_size];
@@ -432,8 +433,8 @@ private:
     using prefix_op_factory = detail::offset_lookback_scan_factory<OffsetCountPairType>;
 
     // Helper class for loading input values.
-    using load_type
-        = run_length_encode::load_helper<InputType, BlockSize, ItemsPerThread, load_input_method>;
+    using load_type = run_length_encode::
+        load_helper<InputType, BlockSize, ItemsPerThread, load_input_method, TargetWaveSize>;
     // Helper class for flagging the heads and tails of the input values.
     using discontinuity_type
         = run_length_encode::discontinuity_helper<InputType, equal_op, BlockSize>;
@@ -819,7 +820,7 @@ public:
     }
 };
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
@@ -841,7 +842,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
@@ -860,7 +861,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             BlockIdWrapper                ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr non_trivial_runs_config_params params     = ArchConfig::params;
+    static constexpr non_trivial_runs_config_params params     = TargetConfig::params;
     static constexpr unsigned int                   block_size = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread  = params.kernel_config.items_per_thread;
     static constexpr block_load_method    load_input_method = params.load_input_method;

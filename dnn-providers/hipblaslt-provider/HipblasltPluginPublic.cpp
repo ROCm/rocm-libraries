@@ -33,6 +33,11 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
     return hipdnnPluginSetLoggingCallbackImpl(callback);
 }
 
+hipdnnPluginStatus_t hipdnnPluginSetLogLevel(hipdnnSeverity_t level)
+{
+    return hipdnnPluginSetLogLevelImpl(level);
+}
+
 hipdnnPluginStatus_t
     hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
 {

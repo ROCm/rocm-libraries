@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -94,7 +94,7 @@ auto single_scan_block_scan(T (&input)[ItemsPerThread],
     }
 }
 
-template<class ArchConfig,
+template<class TargetConfig,
          lookback_scan_determinism Determinism,
          bool                      Exclusive,
          bool UseInitialValue,
@@ -121,7 +121,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto lookback_scan_kernel_impl(InputIterator
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<class ArchConfig,
+template<class TargetConfig,
          lookback_scan_determinism Determinism,
          bool                      Exclusive,
          bool UseInitialValue,
@@ -148,17 +148,28 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
 {
     static_assert(std::is_same<AccType, typename LookbackScanState::value_type>::value,
                   "value_type of LookbackScanState must be result_type");
-    static constexpr scan_config_params params = ArchConfig::params;
+    static constexpr scan_config_params params = TargetConfig::params;
 
     constexpr auto         block_size       = params.kernel_config.block_size;
     constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
     constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
-    using block_load_type
-        = ::rocprim::block_load<AccType, block_size, items_per_thread, params.block_load_method>;
-    using block_store_type
-        = ::rocprim::block_store<AccType, block_size, items_per_thread, params.block_store_method>;
-    using block_scan_type = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
+    using block_load_type  = ::rocprim::block_load<AccType,
+                                                   block_size,
+                                                   items_per_thread,
+                                                   params.block_load_method,
+                                                   1,
+                                                   1,
+                                                   TargetConfig::wavefront>;
+    using block_store_type = ::rocprim::block_store<AccType,
+                                                    block_size,
+                                                    items_per_thread,
+                                                    params.block_store_method,
+                                                    1,
+                                                    1,
+                                                    TargetConfig::wavefront>;
+    using block_scan_type  = ::rocprim::
+        block_scan<AccType, block_size, params.block_scan_method, 1, 1, TargetConfig::wavefront>;
 
     using lookback_scan_prefix_op_type
         = lookback_scan_prefix_op<AccType, BinaryFunction, LookbackScanState, Determinism>;

@@ -66,6 +66,7 @@ void Run2dDriver(miopenDataType_t prec)
     case miopenHalf:
         params = GPU_Conv2d_conv_igemm_dynamic_xdlops_nhwc_nchw_FP16::GetParam();
         break;
+
     case miopenInt8:
     case miopenBFloat16:
     case miopenInt32:
@@ -73,7 +74,6 @@ void Run2dDriver(miopenDataType_t prec)
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
-    default:
         FAIL() << "miopenInt8, miopenBFloat16, miopenInt32, "
                   "miopenDouble, miopenFloat8_fnuz, miopenBFloat8_fnuz "
                   "data type not supported by conv_igemm_dynamic_xdlops_nhwc_nchw test";
@@ -126,7 +126,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     const std::string out_nhwc      = " --out_layout NHWC";
     const std::string args_nhwc_wrw = dis_fwd + dis_bk_data + in_nhwc + fil_nhwc + out_nhwc;
 
-    const std::vector<std::string> test_cases = {
+    return {
         // clang-format off
     //nhwc_fwd
     {flags + "  --input  64 256  7  7 --weights 128 256 1 1 --pads_strides_dilations 0 0 1 1 1 1" + dis_bk_data + dis_bk_wei + in_nhwc + fil_nhwc + out_nhwc},
@@ -237,6 +237,8 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + "  --input  1 1 8 8 --weights 1 1 2 2 --pads_strides_dilations 0 0 1 1 2 2" + args_nhwc_wrw},
     {flags + "  --input  1 128 56 56 --weights 1 128 5 5 --pads_strides_dilations 0 0 2 2 1 1" + args_nhwc_wrw},
     {flags + "  --input  2 64 19 19 --weights 510 64 3 3 --pads_strides_dilations 1 1 1 1 1 1" + args_nhwc_wrw},
+    // tensor larger than 4GB
+    {flags + "  --input 2048  1 512 1024 --weights 1  1 1 1 --pads_strides_dilations 0 0 1 1 1 1" + args_nhwc_wrw},
     // ho=wo=1 stride=2
     {flags + "  --input  256 2048 2 2 --weights 1024  2048  1 1 --pads_strides_dilations 0 0 2 2 1 1" + args_nhwc_wrw},
 
@@ -265,7 +267,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + "  --input  2 64 19 19 --weights 510 64 3 3 --pads_strides_dilations 1 1 1 1 1 1" + dis_fwd + dis_bk_data}
         // clang-format on
     };
-    return test_cases;
 }
 
 } // namespace conv_igemm_dynamic_xdlops_nhwc_nchw

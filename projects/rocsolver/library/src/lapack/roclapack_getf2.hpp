@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "auxiliary/rocauxiliary_laswp.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
@@ -40,8 +41,7 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-// number of threads for the iamax reduction kernel
-#define IAMAX_THDS 1024
+#define IAMAX_THDS ROCSOLVER_ASAN_VALUE(256, 1024)
 
 /** this kernel initializes the permutation array
     which is instrumental for parallel row permutations in GETRF **/
@@ -622,9 +622,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
 #endif
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // prepare kernels
     I singular_thds = getf2_get_checksingularity_blksize(n);
@@ -684,7 +682,6 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

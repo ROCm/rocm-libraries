@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,9 @@ namespace rocsparse
                             T*                   workspace,
                             rocsparse_index_base idx_base)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         int tid = hipThreadIdx_x;
         I   gid = BLOCKSIZE * hipBlockIdx_x + tid;
 
@@ -64,6 +67,9 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void dotci_kernel_part2(T* workspace, T* result)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         int tid = hipThreadIdx_x;
 
         __shared__ T sdata[BLOCKSIZE];

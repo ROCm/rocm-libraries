@@ -38,10 +38,10 @@ extern "C" {
 *  \details
 *  \p rocsparse_csrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity pattern of the
 *  matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph such that no two adjacent nodes
-*  are of the same color. The \p fraction_to_color is a parameter to only color a given percentage of the graph nodes, the
+*  are of the same color. The \p fraction_to_color is a parameter to only color a given percentage of the graph nodes, while the
 *  remaining uncolored nodes receive distinct new colors. The optional \p reordering array is a permutation array such that
 *  unknowns of the same color are grouped. The matrix \f$A\f$ must be stored as a general matrix with a symmetric sparsity pattern,
-*  and if the matrix \f$A\f$ is non-symmetric then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
+*  and if the matrix \f$A\f$ is non-symmetric, then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -50,7 +50,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of sparse matrix \f$A\f$.
 *  @param[in]
@@ -66,7 +66,7 @@ extern "C" {
 *  csr_col_ind array of \p nnz elements containing the column indices of the sparse
 *              CSR matrix.
 *  @param[in]
-*  fraction_to_color  fraction of nodes to be colored, which should be in the interval [0.0,1.0], for example 0.8 implies that 80 percent of nodes will be colored.
+*  fraction_to_color  fraction of nodes to be colored, which should be in the interval [0.0,1.0], for example, 0.8 implies that 80 percent of nodes will be colored.
 *  @param[out]
 *  ncolors      resulting number of distinct colors.
 *  @param[out]
@@ -79,7 +79,7 @@ extern "C" {
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_size \p m or \p nnz is invalid.
-*  \retval rocsparse_status_invalid_pointer \p descr, \p csr_val, \p csr_row_ptr, \p csr_col_ind, \p fraction_to_color, \p ncolors, \p coloring or \p info pointer is invalid.
+*  \retval rocsparse_status_invalid_pointer \p descr, \p csr_val, \p csr_row_ptr, \p csr_col_ind, \p fraction_to_color, \p ncolors, \p coloring, or \p info pointer is invalid.
 */
 /**@{*/
 ROCSPARSE_EXPORT

@@ -9,19 +9,19 @@
 
 namespace ck {
 
-template <index_t N>
-using MultiIndex = StaticallyIndexedArray<index_t, N>;
+template <index_t N, typename T = index_t>
+using MultiIndex = StaticallyIndexedArray<T, N>;
 
-template <typename... Xs>
+template <typename IdxType = index_t, typename... Xs>
 __host__ __device__ constexpr auto make_multi_index(Xs&&... xs)
 {
-    return make_statically_indexed_array<index_t>(index_t{xs}...);
+    return make_statically_indexed_array<IdxType>(IdxType{xs}...);
 }
 
-template <index_t NSize>
+template <index_t NSize, typename IdxType = index_t>
 __host__ __device__ constexpr auto make_zero_multi_index()
 {
-    return unpack([](auto... xs) { return make_multi_index(xs...); },
+    return unpack([](auto... xs) { return make_multi_index<IdxType>(xs...); },
                   typename uniform_sequence_gen<NSize, 0>::type{});
 }
 
@@ -148,7 +148,7 @@ __host__ __device__ void print_multi_index(const Tuple<Xs...>& x)
 {
     printf("{");
     printf("MultiIndex, ");
-    printf("size %d,", index_t{sizeof...(Xs)});
+    printf("size %d, ", index_t{sizeof...(Xs)});
     static_for<0, sizeof...(Xs), 1>{}(
         [&](auto i) { printf("%d ", static_cast<index_t>(x.At(i))); });
     printf("}");

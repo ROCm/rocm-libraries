@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,12 +27,15 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
+
 /*! \file
     \brief ideal_sizes.hpp gathers all constants that can be tuned for performance.
  *********************************************************************************/
 
 #define BS1 256 // generic 1 dimensional thread-block size used to call common kernels
-#define BS2 32 // generic 2 dimensional thread-block size used to call common kernels
+#define BS2 \
+    ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used to call common kernels
 
 /******************************* larf ****************************************
 *******************************************************************************/
@@ -246,6 +249,27 @@
 #define xxTD2_SSKER_MAX_N 192
 #endif
 
+/***************** gehrd **********************************************
+*******************************************************************************/
+/*! \brief Determines the size of the leading block reduced at each step of the
+    blocked Hessenberg reduction algorithm (GEHRD). Also applies to the
+    corresponding batched and strided-batched routines.*/
+#ifndef GEHRD_BLOCKSIZE
+#define GEHRD_BLOCKSIZE 64
+#endif
+
+/*! \brief Determines the size at which rocSOLVER switches from the blocked
+    to the unblocked algorithm when executing GEHRD. Also applies to the
+    corresponding batched and strided-batched routines.
+
+    \details GEHRD will use LAHR2 to reduce blocks of GEHRD_BLOCKSIZE columns
+    at a time until the rest of the matrix has no more than GEHRD_GEHD2_SWITCHSIZE
+    rows or columns; at this point the remainder is reduced with the unblocked
+    algorithm (GEHD2).*/
+#ifndef GEHRD_GEHD2_SWITCHSIZE
+#define GEHRD_GEHD2_SWITCHSIZE 512
+#endif
+
 /***************** sygs2/sygst and hegs2/hegst ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the leading block that is reduced to standard form at each step
@@ -256,7 +280,7 @@
     SYGST/HEGST will directly call the unblocked routines (SYGS2/HEGS2). However, when n is not a
     multiple of xxGST_BLOCKSIZE, the last block reduced in the blocked process is allowed to be smaller than xxGST_BLOCKSIZE.*/
 #ifndef xxGST_BLOCKSIZE
-#define xxGST_BLOCKSIZE 64
+#define xxGST_BLOCKSIZE 256
 #endif
 
 /****************************** stedc ******************************************
@@ -278,31 +302,24 @@
 
 /************************** potf2/potrf ***************************************
 *******************************************************************************/
-/*! \brief Determines the size of the leading block that is factorized at each step
-    when using the blocked algorithm (POTRF). It also applies to the
-    corresponding batched and strided-batched routines.*/
-#ifndef POTRF_BLOCKSIZE
-#define POTRF_BLOCKSIZE(T) ((sizeof(T) == 4) ? 180 : (sizeof(T) == 8) ? 127 : 90)
+/*! \brief Determines the maximum size at which rocSOLVER can use POTF2 small-size kernel.
+    \details
+    POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
+    within the LDS shared memory using compact storage.
+    The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
+#ifndef POTF2_MAX_SMALL_SIZE
+#define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 16) ? 128 : 256)
 #endif
 
 /*! \brief Determines the size at which rocSOLVER switches from
     the unblocked to the blocked algorithm when executing POTRF. It also applies to the
     corresponding batched and strided-batched routines.
 
-    \details POTRF will factorize blocks of POTRF_BLOCKSIZE columns at a time until
+    \details POTRF will factorize blocks of columns at a time until
     the rest of the matrix has no more than POTRF_POTF2_SWITCHSIZE columns; at this point the last block,
     if any, will be factorized with the unblocked algorithm (POTF2).*/
 #ifndef POTRF_POTF2_SWITCHSIZE
-#define POTRF_POTF2_SWITCHSIZE(T) POTRF_BLOCKSIZE(T)
-#endif
-
-/*! \brief Determines the maximum size at which rocSOLVER can use POTF2
-    \details
-    POTF2 will attempt to factorize a small symmetric matrix that can fit entirely
-    within the LDS share memory using compact storage.
-    The amount of LDS shared memory is assumed to be at least (64 * 1024) bytes. */
-#ifndef POTF2_MAX_SMALL_SIZE
-#define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 4) ? 180 : (sizeof(T) == 8) ? 127 : 90)
+#define POTRF_POTF2_SWITCHSIZE(T) ((sizeof(T) == 4) ? 256 : 128)
 #endif
 
 /************************** syevj/heevj ***************************************
@@ -315,6 +332,27 @@
     and eigenvectors will be computed with a single kernel call. */
 #ifndef SYEVJ_BLOCKED_SWITCH
 #define SYEVJ_BLOCKED_SWITCH 58
+#endif
+
+/************************** syevd/heevd 2-stage *******************************
+*******************************************************************************/
+/*! \brief Determines the size threshold above which rocSOLVER uses the 2-stage
+    algorithm (he2hb + hb2st) instead of the 1-stage algorithm (hetrd) when
+    executing SYEVD/HEEVD. */
+// Tuned for single/double with vectors on MI300.
+#ifndef SYEVD_2STAGE_SWITCHSIZE
+#define SYEVD_2STAGE_SWITCHSIZE 11000
+#endif
+
+/*! \brief Bandwidth kd used by the 2-stage algorithm in SYEVD/HEEVD. */
+#ifndef SYEVD_2STAGE_KD
+#define SYEVD_2STAGE_KD 32
+#endif
+
+/*! \brief Block size nb used by he2hb in the 2-stage algorithm in SYEVD/HEEVD.
+    Must satisfy nb >= kd and nb % kd == 0. */
+#ifndef SYEVD_2STAGE_NB
+#define SYEVD_2STAGE_NB SYEVD_2STAGE_KD
 #endif
 
 /*************************** sytf2/sytrf **************************************
@@ -366,7 +404,7 @@
 #define GETF2_SPKER_MAX_N 256 //always <= 256
 #endif
 #ifndef GETF2_SSKER_MAX_M
-#define GETF2_SSKER_MAX_M 512 //always <= 512 and <= GETF2_SPKER_MAX_M
+#define GETF2_SSKER_MAX_M ROCSOLVER_ASAN_VALUE(256, 512) //always <= 512 and <= GETF2_SPKER_MAX_M
 #endif
 #ifndef GETF2_SSKER_MAX_N
 #define GETF2_SSKER_MAX_N 64 //always <= wavefront and <= GETF2_SPKER_MAX_N

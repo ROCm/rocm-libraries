@@ -187,12 +187,12 @@ void testing_sddmm_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_sddmm_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
-    T                    h_beta   = make_DataType<T>(argus.beta);
+    T                    h_alpha  = argus.get_alpha<T>();
+    T                    h_beta   = argus.get_beta<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderA   = argus.orderA;

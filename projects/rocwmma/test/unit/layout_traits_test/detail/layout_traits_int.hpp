@@ -94,7 +94,7 @@ namespace rocwmma
         waveSize, CASE_IMPL_ASSIGN2, HipDevice::Wave32, HipDevice::Wave64, ARCH_ID)
 
 #define DISPATCH_GUARD_BODY                           \
-    ROCWMMA_SWITCH_BODY14_ARG1(deviceArch,            \
+    ROCWMMA_SWITCH_BODY15_ARG1(deviceArch,            \
                                SWITCH_BODY_WAVE_SIZE, \
                                HipDevice::GFX908,     \
                                HipDevice::GFX90A,     \
@@ -109,7 +109,8 @@ namespace rocwmma
                                HipDevice::GFX1152,    \
                                HipDevice::GFX1153,    \
                                HipDevice::GFX1200,    \
-                               HipDevice::GFX1201)
+                               HipDevice::GFX1201,    \
+                               HipDevice::GFX1250)
 
                 DISPATCH_GUARD_BODY
 
@@ -152,13 +153,13 @@ namespace rocwmma
             // Map GTest params to Kernel params
             using TestParamsT = std::tuple<Ts...>;
             using KernelT     = LayoutTraitsIntKernel<
-                    std::tuple_element_t<BlockM, TestParamsT>::value, // BlockM
-                    std::tuple_element_t<BlockN, TestParamsT>::value, // BlockN
-                    std::tuple_element_t<DataT, TestParamsT>, // DataT
-                    std::tuple_element_t<DataLayoutT, TestParamsT>, // DataLayout
-                    std::tuple_element_t<MmaDim, TestParamsT>::value, // MmaDim
-                    std::tuple_element_t<SplitK, TestParamsT>::value // SplitK
-                    >;
+                std::tuple_element_t<BlockM, TestParamsT>::value, // BlockM
+                std::tuple_element_t<BlockN, TestParamsT>::value, // BlockN
+                std::tuple_element_t<DataT, TestParamsT>, // DataT
+                std::tuple_element_t<DataLayoutT, TestParamsT>, // DataLayout
+                std::tuple_element_t<MmaDim, TestParamsT>::value, // MmaDim
+                std::tuple_element_t<SplitK, TestParamsT>::value // SplitK
+                >;
 
             return std::make_shared<KernelT>();
         }

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,20 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROCPRIM_BENCHMARK_DEVICE_MERGE_SORT_PARALLEL_HPP_
-#define ROCPRIM_BENCHMARK_DEVICE_MERGE_SORT_PARALLEL_HPP_
+#pragma once
+
+#include "primbench.hpp"
 
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #include <rocprim/device/device_merge_sort.hpp>
 
 #include <cstddef>
@@ -42,184 +38,161 @@
 #include <type_traits>
 #include <vector>
 
-namespace rp = rocprim;
-
-template<typename Key = int, typename Value = rp::empty_type, typename Config = rp::default_config>
-struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
+template<typename Key    = int,
+         typename Value  = rocprim::empty_type,
+         typename Config = rocprim::default_config>
+struct device_merge_sort_benchmark : public primbench::benchmark_interface
 {
-    std::string name() const override
+    primbench::json meta() const override
     {
-        return bench_naming::format_name(
-            "{lvl:device,algo:merge_sort,key_type:" + std::string(Traits<Key>::name())
-            + ",value_type:" + std::string(Traits<Value>::name()) + ",cfg:default_config}");
+        return primbench::json{}
+            .add("lvl", "device")
+            .add("algo", "device_merge_sort")
+            .add("key_type", primbench::name<Key>())
+            .add("value_type", primbench::name<Value>())
+            .add("cfg", "default");
     }
 
-    // keys benchmark
-    template<typename val = Value>
-    auto do_run(benchmark_utils::state&& state) const ->
-        typename std::enable_if<std::is_same<val, ::rp::empty_type>::value, void>::type
+    void run(primbench::state& state) override
     {
-        const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
-        const auto& seed   = state.seed;
-
-        using key_type = Key;
-
-        // Calculate the number of elements
-        size_t size = bytes / sizeof(key_type);
-        // Generate data
-        std::vector<key_type> keys_input
-            = get_random_data<key_type>(size,
-                                        common::generate_limits<key_type>::min(),
-                                        common::generate_limits<key_type>::max(),
-                                        seed.get_0());
-
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-
-        ::rp::less<key_type> lesser_op;
-
-        void*  d_temporary_storage     = nullptr;
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
-                                         temporary_storage_bytes,
-                                         d_keys_input,
-                                         d_keys_output,
-                                         size,
-                                         lesser_op,
-                                         stream,
-                                         false));
-
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        state.run(
-            [&]
-            {
-                HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
-                                                 temporary_storage_bytes,
-                                                 d_keys_input,
-                                                 d_keys_output,
-                                                 size,
-                                                 lesser_op,
-                                                 stream,
-                                                 false));
-            });
-
-        state.set_throughput(size, sizeof(key_type));
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
+        do_run(std::forward<primbench::state>(state));
     }
 
-    // pairs benchmark
+private:
     template<typename val = Value>
-    auto do_run(benchmark_utils::state&& state) const ->
-        typename std::enable_if<!std::is_same<val, ::rp::empty_type>::value, void>::type
+    auto do_run(primbench::state&& state) const
     {
         const auto& stream = state.stream;
-        const auto& bytes  = state.bytes;
+        const auto& bytes  = state.size;
         const auto& seed   = state.seed;
 
         using key_type   = Key;
         using value_type = Value;
 
-        // Calculate the number of elements
-        size_t size = bytes / sizeof(key_type);
+        size_t items = bytes / sizeof(key_type);
+
         // Generate data
         std::vector<key_type> keys_input
-            = get_random_data<key_type>(size,
+            = get_random_data<key_type>(items,
                                         common::generate_limits<key_type>::min(),
                                         common::generate_limits<key_type>::max(),
-                                        seed.get_0());
+                                        seed);
+        std::vector<value_type> values_input;
+        value_type*             d_values_input;
+        value_type*             d_values_output;
 
-        std::vector<value_type> values_input(size);
-
-        if constexpr(common::is_custom_type_copyable<value_type>::value)
+        if constexpr(!std::is_same<val, rocprim::empty_type>::value)
         {
-            for(size_t i = 0; i < size; i++)
+            values_input = std::vector<value_type>(items);
+
+            if constexpr(common::is_custom_type_copyable<value_type>::value)
             {
-                value_type value;
-                value.x         = static_cast<typename value_type::first_type>(i);
-                value.y         = static_cast<typename value_type::second_type>(i);
-                values_input[i] = value;
+                for(size_t i = 0; i < items; i++)
+                {
+                    value_type value;
+                    value.x         = static_cast<typename value_type::first_type>(i);
+                    value.y         = static_cast<typename value_type::second_type>(i);
+                    values_input[i] = value;
+                }
             }
-        }
-        else
-        {
-            std::iota(values_input.begin(), values_input.end(), 0);
+            else
+            {
+                std::iota(values_input.begin(), values_input.end(), 0);
+            }
+
+            HIP_CHECK(
+                hipMalloc(reinterpret_cast<void**>(&d_values_input), items * sizeof(value_type)));
+            HIP_CHECK(
+                hipMalloc(reinterpret_cast<void**>(&d_values_output), items * sizeof(value_type)));
+            HIP_CHECK(hipMemcpy(d_values_input,
+                                values_input.data(),
+                                items * sizeof(value_type),
+                                hipMemcpyHostToDevice));
         }
 
         key_type* d_keys_input;
         key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), items * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), items * sizeof(key_type)));
         HIP_CHECK(hipMemcpy(d_keys_input,
                             keys_input.data(),
-                            size * sizeof(key_type),
+                            items * sizeof(key_type),
                             hipMemcpyHostToDevice));
 
-        value_type* d_values_input;
-        value_type* d_values_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
-
-        ::rp::less<key_type> lesser_op;
+        ::rocprim::less<key_type> lesser_op;
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
-                                         temporary_storage_bytes,
-                                         d_keys_input,
-                                         d_keys_output,
-                                         d_values_input,
-                                         d_values_output,
-                                         size,
-                                         lesser_op,
-                                         stream,
-                                         false));
+        if constexpr(!std::is_same<val, rocprim::empty_type>::value)
+        {
+            HIP_CHECK(rocprim::merge_sort<Config>(d_temporary_storage,
+                                                  temporary_storage_bytes,
+                                                  d_keys_input,
+                                                  d_keys_output,
+                                                  d_values_input,
+                                                  d_values_output,
+                                                  items,
+                                                  lesser_op,
+                                                  stream,
+                                                  false));
+        }
+        else
+        {
+            HIP_CHECK(rocprim::merge_sort<Config>(d_temporary_storage,
+                                                  temporary_storage_bytes,
+                                                  d_keys_input,
+                                                  d_keys_output,
+                                                  items,
+                                                  lesser_op,
+                                                  stream,
+                                                  false));
+        }
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(
-            [&]
-            {
-                HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
-                                                 temporary_storage_bytes,
-                                                 d_keys_input,
-                                                 d_keys_output,
-                                                 d_values_input,
-                                                 d_values_output,
-                                                 size,
-                                                 lesser_op,
-                                                 stream,
-                                                 false));
-            });
+        state.set_items(items);
+        state.add_reads<key_type>(items);
 
-        state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
+        if constexpr(!std::is_same<val, rocprim::empty_type>::value)
+        {
+            state.add_reads<value_type>(items);
+
+            state.run(
+                [&]
+                {
+                    HIP_CHECK(rocprim::merge_sort<Config>(d_temporary_storage,
+                                                          temporary_storage_bytes,
+                                                          d_keys_input,
+                                                          d_keys_output,
+                                                          d_values_input,
+                                                          d_values_output,
+                                                          items,
+                                                          lesser_op,
+                                                          stream,
+                                                          false));
+                });
+
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_values_output));
+        }
+        else
+        {
+            state.run(
+                [&]
+                {
+                    HIP_CHECK(rocprim::merge_sort<Config>(d_temporary_storage,
+                                                          temporary_storage_bytes,
+                                                          d_keys_input,
+                                                          d_keys_output,
+                                                          items,
+                                                          lesser_op,
+                                                          stream,
+                                                          false));
+                });
+        }
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_values_output));
-    }
-
-    void run(benchmark_utils::state&& state) override
-    {
-        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
-
-#endif // ROCPRIM_BENCHMARK_DEVICE_MERGE_SORT_PARALLEL_HPP_

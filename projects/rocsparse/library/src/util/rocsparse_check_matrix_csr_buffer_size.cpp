@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,7 @@ rocsparse_status rocsparse::check_matrix_csr_buffer_size_core(rocsparse_handle  
         *buffer_size += ((rocprim_buffer_size - 1) / 256 + 1) * 256;
 
         // offset buffer
-        *buffer_size += ((sizeof(I) * m) / 256 + 1) * 256;
+        *buffer_size += ((sizeof(I) * (m + 1)) / 256 + 1) * 256;
 
         // columns buffer
         *buffer_size += ((sizeof(J) * nnz - 1) / 256 + 1) * 256;

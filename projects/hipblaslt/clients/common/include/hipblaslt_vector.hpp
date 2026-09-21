@@ -157,6 +157,14 @@ inline void hipblaslt_init_hpl(std::vector<T>& that, bool seedReset = false)
 }
 
 template <typename T>
+inline void hipblaslt_init_low_precision(std::vector<T>& that, bool seedReset = false)
+{
+    if(seedReset)
+        hipblaslt_seedrand();
+    hipblaslt_init_low_precision(that.data(), that.size(), 1, 1);
+}
+
+template <typename T>
 inline void hipblaslt_init_alt_impl_big(std::vector<T>& that, bool seedReset = false)
 {
     if(seedReset)

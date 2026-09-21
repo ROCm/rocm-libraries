@@ -50,6 +50,8 @@ hipsparse_arguments_config::hipsparse_arguments_config()
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
         this->compute_type = HIP_R_32F;
+        this->x_type       = HIP_R_32F;
+        this->y_type       = HIP_R_32F;
 
         this->alpha      = 0.0;
         this->alphai     = 0.0;

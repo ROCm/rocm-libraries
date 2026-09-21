@@ -34,7 +34,7 @@
 namespace ck {
 namespace detail {
 
-static inline __device__ bool isnan(half_t x) { return __hisnan(x); };
+static inline __device__ bool isnan(half_t x) { return ::isnan(static_cast<float>(x)); };
 
 template <NanPropagation_t nanPropaOpt, typename opReduce, typename compType>
 struct binop_with_nan_check;

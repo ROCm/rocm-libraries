@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 typedef struct _rocsparse_nnzsplit_info
 {
 
@@ -34,4 +36,14 @@ typedef struct _rocsparse_nnzsplit_info
     void* starting_ids{};
     void* starting_block_ids{};
 
+    // Launch tuning chosen at analysis time and replayed verbatim at compute
+    // time so the two phases always agree (the block layout of starting_ids /
+    // starting_block_ids depends on both).
+    uint32_t block_size{}; // threads per block (wavefront-relative)
+    uint32_t nnz_per_thread{}; // nnz-per-thread granularity (1 / 4 / 8)
+    int64_t  max_row_nnz{}; // longest row length (row-skew signal)
+
+public:
+    ~_rocsparse_nnzsplit_info();
+    void clear();
 } * rocsparse_nnzsplit_info;
