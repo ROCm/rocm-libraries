@@ -27,6 +27,7 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 from .binding import gemm_rcr_binding
 from .common import (
@@ -34,7 +35,6 @@ from .common import (
     GemmRequest,
     apply_split_k,
     rcr_request_errors,
-    selector_matches,
 )
 from .support import (
     gemm_config_supported,
