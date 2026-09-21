@@ -245,6 +245,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
     # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
     # defaulted, so the required set is empty on this arch too.
     "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
@@ -283,6 +284,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectConv16cSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConv32cSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectDepthwiseSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseSpatialSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvSpec": ("problem",),
     "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
     "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
