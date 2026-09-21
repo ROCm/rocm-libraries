@@ -295,7 +295,23 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    if(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0)
+                    // The sink logit must enter the combined softmax denominator
+                    // exactly once. Split 0 owns it only while no split has work of
+                    // its own: any split with work seeds m/l with the sink itself,
+                    // and publishing a sink-bearing lse_acc here as well would count
+                    // exp(sink) twice.
+                    bool keeps_sink = (__builtin_isinf_sign(sink_v) >= 0) && i_split == 0;
+                    if(keeps_sink && 1 < num_splits)
+                    {
+                        // Ask for the ordinary range over the whole key axis.
+                        // GetSinkTileRangeAlongX folds the sink prefix into that
+                        // range, which would make an empty range look occupied.
+                        auto [full_start, full_end] = mask.GetTileRangeAlongX(
+                            q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
+                        // Keep the sink here only when no split at all has work.
+                        keeps_sink = (full_end <= full_start);
+                    }
+                    if(keeps_sink)
                     {
                         set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                     }
