@@ -12,8 +12,11 @@
 #include <gtest/gtest.h>
 
 #include "ulp.hpp"
+#include "unit.hpp"
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace
@@ -276,6 +279,69 @@ namespace
 
         EXPECT_DOUBLE_EQ(r.max_ulp, 1.0);
         EXPECT_EQ(r.count, 2u);
+    }
+
+    TEST(UnitCheckIdentical, compares_dense_strided_batches)
+    {
+        constexpr int64_t  M = 2, N = 3, stride = M * N, batches = 2;
+        std::vector<float> cpu(stride * batches);
+        for(size_t i = 0; i < cpu.size(); ++i)
+            cpu[i] = static_cast<float>(i);
+        std::vector<float> gpu = cpu;
+
+        EXPECT_TRUE(unit_check_storage_identical(M, N, M, stride, cpu.data(), gpu.data(), batches));
+        gpu.back() += 1.0f;
+        EXPECT_FALSE(
+            unit_check_storage_identical(M, N, M, stride, cpu.data(), gpu.data(), batches));
+    }
+
+    TEST(UnitCheckIdentical, ignores_column_padding_and_batch_gaps)
+    {
+        constexpr int64_t  M = 2, N = 2, lda = 3, stride = 8, batches = 2;
+        std::vector<float> cpu(stride * batches, 1.0f);
+        std::vector<float> gpu = cpu;
+        for(int64_t batch = 0; batch < batches; ++batch)
+        {
+            gpu[batch * stride + 2] = 2.0f;
+            gpu[batch * stride + 5] = 3.0f;
+            gpu[batch * stride + 6] = 4.0f;
+            gpu[batch * stride + 7] = 5.0f;
+        }
+
+        EXPECT_TRUE(
+            unit_check_storage_identical(M, N, lda, stride, cpu.data(), gpu.data(), batches));
+        gpu[stride + lda] = 6.0f;
+        EXPECT_FALSE(
+            unit_check_storage_identical(M, N, lda, stride, cpu.data(), gpu.data(), batches));
+    }
+
+    TEST(UnitCheckIdentical, falls_back_for_numerically_equal_encodings)
+    {
+        const std::vector<float> cpu{
+            0.0f,
+            std::bit_cast<float>(uint32_t{0x7fc00001}),
+        };
+        const std::vector<float> gpu{
+            -0.0f,
+            std::bit_cast<float>(uint32_t{0x7fc00002}),
+        };
+
+        EXPECT_FALSE(unit_check_storage_identical(1, 2, 1, 0, cpu.data(), gpu.data(), 1));
+        EXPECT_NO_FATAL_FAILURE(unit_check_general<float>(1, 2, 1, 0, cpu.data(), gpu.data(), 1));
+    }
+
+    TEST(UnitCheckIdentical, supports_pointer_array_batches)
+    {
+        const std::vector<float> cpu0{1.0f, 2.0f};
+        const std::vector<float> cpu1{3.0f, 4.0f};
+        std::vector<float>       gpu0  = cpu0;
+        std::vector<float>       gpu1  = cpu1;
+        const float*             cpu[] = {cpu0.data(), cpu1.data()};
+        const float*             gpu[] = {gpu0.data(), gpu1.data()};
+
+        EXPECT_TRUE(unit_check_batched_storage_identical(2, 1, 2, cpu, gpu, 2));
+        gpu1[1] += 1.0f;
+        EXPECT_FALSE(unit_check_batched_storage_identical(2, 1, 2, cpu, gpu, 2));
     }
 
     TEST(UlpCheckGeneral, half_and_bfloat16_dispatch_identical)
