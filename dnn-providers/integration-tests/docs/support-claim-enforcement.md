@@ -8,9 +8,15 @@ This document covers what a claim asserts, how one graph's claims are checked,
 and the lifecycle inside `TestBody()` that decides when a claim is checked and when
 it is published.
 
-> Enforcement is **off** by default and requires `--test-engine`. A run with
-> `--enforce-support-claims` and no engine named exits 1 rather than degrading to
-> "enforced nothing, exit 0".
+> **Under `ctest`, enforcement is on.** Every lane registered by
+> `add_external_integration_test_target()` passes `--enforce-support-claims`.
+> Reconfigure with `-DHIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF` to turn
+> those lanes down to `--report-support-claims`, which asks the same questions and
+> prints the same summary but never fails a test.
+>
+> Running the binary by hand, neither flag is on unless you pass it. Enforcement
+> requires `--test-engine`: a run with `--enforce-support-claims` and no engine named
+> exits 1 rather than degrading to "enforced nothing, exit 0".
 
 ---
 
@@ -318,9 +324,17 @@ Three detail sections follow the counters when non-empty:
 
 ## Run-level guard
 
-After `RUN_ALL_TESTS()`, a run with enforcement on where claim-bearing graphs were
-discovered but **not one** was ever queried exits 1. Enforcement that passes having
+After `RUN_ALL_TESTS()`, a run with enforcement on where claim-bearing graphs
+**ran** and **not one** was ever queried exits 1. Enforcement that passes having
 verified nothing is a lie, not a pass.
+
+The numerator is seeded by the test bodies that ran, not by what registration
+discovered, and that is what makes the guard usable on a filtered lane: a run that
+never reached a claim-bearing bundle cannot trip it, only one that reached them and
+asked nothing. The cost is a blind spot the guard shares with the counters above —
+a bundle skipped in `SetUp()` (arch guard, TOML skip-list, no device) never reaches
+the query, so a skip-list broad enough to cover every claim-bearing bundle enforces
+nothing and exits 0 without tripping this.
 
 The per-graph invariant above covers the finer-grained case the run-level guard
 cannot see.
@@ -342,7 +356,26 @@ cannot see.
     --test-engine MIOPEN_ENGINE \
     --enforce-support-claims \
     --gtest_filter='quick_*'
+
+# Same queries, same verdicts, same summary -- but a broken claim prints instead of
+# failing. --report-support-claims never changes the exit code.
+./bin/hipdnn_integration_tests \
+    --test-article /path/to/libmiopen_plugin.so \
+    --test-engine MIOPEN_ENGINE \
+    --report-support-claims \
+    --gtest_filter='quick_*'
 ```
+
+The `ctest` lanes pass `--enforce-support-claims`. To run them in report mode
+instead, reconfigure the build:
+
+```bash
+cmake -S . -B build -DHIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF
+```
+
+That swaps the flag on every lane the helper registers. It is a deliberate
+reconfigure and no environment variable can flip it behind your back; running the
+binary by hand, as above, is the other local route and needs no reconfigure.
 
 > Golden `.bin` blobs are DVC-managed. A tree that has not run `dvc pull` in
 > `integration-test-bundles/` registers zero validation tests and says so.
@@ -351,7 +384,7 @@ cannot see.
 |---|---|
 | `--enforce-support-claims requires --test-engine` | No engine named; there is nothing to check claims against |
 | `support claims exist for X but were never queried` | A code path short-circuited above the query — a harness bug, not a data problem |
-| `FATAL: … not one of them was ever queried` | Claim-bearing graphs were discovered but none ran; usually the filter selected only graphs without claims |
+| `FATAL: … not one of them was ever queried` | Claim-bearing graphs ran and none was queried: the GPU or the engine plugin failed to load, or every one of them failed to open (already red on its own account). A filter that selected only unclaimed graphs is *not* a cause |
 | `CLAIM_BROKEN … not in ranked list` | The engine dropped support for a graph the sidecar promises. Fix the engine, or update the sidecar |
 | `Engine 'X' is not loaded` | `--test-engine` named an engine this build does not have; startup exits 1 before any test runs |
 | `verification-mode 'golden-check' has been retired` | Run the `hipdnn_golden_data_tests` binary instead, and unset `HIPDNN_TEST_VERIFICATION_MODE` |
