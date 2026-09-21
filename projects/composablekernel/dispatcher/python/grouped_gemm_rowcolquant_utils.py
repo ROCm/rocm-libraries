@@ -57,11 +57,6 @@ from codegen_common import (  # noqa: E402
     make_rowcolquant_kernel_name,
 )
 
-_python_dir = str(Path(__file__).parent)
-if _python_dir not in sys.path:
-    sys.path.insert(0, _python_dir)
-from dispatcher_common import arch_feature_defines  # noqa: E402
-
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -601,7 +596,11 @@ def _compile_rowcolquant_kernel(
 
     obj_path = so_path.with_suffix(".o")
 
-    arch_defines = arch_feature_defines(gfx_arch)
+    arch_defines = []
+    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    if "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
     # Match top-level CK policy in both host and device compilation.
     if gfx_arch == "gfx1250":
         arch_defines.append("-DUSE_NEW_UNIFIED_FRAMEWORK=0")

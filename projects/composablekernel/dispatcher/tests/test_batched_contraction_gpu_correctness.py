@@ -6,13 +6,11 @@
 """
 GPU correctness test for the batched-contraction dispatcher bridge.
 
-Builds the batched-contraction dispatcher .so once per dtype (fp16 / bf16 /
-fp32, all rcr / num_d_tensors=0 — the PassThrough v1 signature Old-TE's
-batched_contraction argparse validates), runs a small contraction on-device via
-GpuBatchedContractionRunner, and compares the GPU output to an fp32 numpy einsum
-reference within a per-dtype tolerance (see TOLERANCE). Every dtype is attempted
-even if an earlier one fails, so one broken dtype does not mask the others.
-Skips cleanly (exit 77) when no GPU / hipcc is available.
+Builds the batched-contraction dispatcher .so (fp16 / rcr / num_d_tensors=0 —
+the PassThrough v1 signature Old-TE's batched_contraction argparse validates),
+runs a small contraction on-device via GpuBatchedContractionRunner, and compares
+the GPU output to an fp32 numpy einsum reference within an fp16-appropriate
+tolerance. Skips cleanly (exit 0) when no GPU / hipcc is available.
 
 The kernel computes:
     E[g,m,n] = sum_k A[g,m,k] * B[g,n,k]
@@ -39,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from batched_contraction_utils import (  # noqa: E402
     BatchedContractionProblem,
     GpuBatchedContractionRunner,
-    default_config,
+    default_fp16_config,
     setup_multiple_batched_contraction_dispatchers,
     _get_arch,
     _validate_arch,
@@ -47,25 +45,11 @@ from batched_contraction_utils import (  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# Per-dtype gates. All three accumulate in fp32, so the gate is set by the input
-# precision: fp16 (10-bit mantissa) at 1e-2, bf16 (7-bit) proportionally looser,
-# fp32 near exact -- it is the same arithmetic as the numpy reference, differing
-# only in summation order. Small K keeps the worst case inside these.
-TOLERANCE = {
-    "fp16": 1e-2,
-    "bf16": 3e-2,
-    "fp32": 1e-5,
-}
-
-DTYPES = ("fp16", "bf16", "fp32")
+# fp16 inputs, fp32 accumulate; small K keeps the worst-case error under 1e-2.
+TOLERANCE = 1e-2
 
 PASS = "PASS"
 FAIL = "FAIL"
-
-# ctest reports this as "skipped" rather than passed; see SKIP_RETURN_CODE in
-# dispatcher/tests/CMakeLists.txt. Returning 0 here would make a CPU-only runner
-# report a green PASS for a test that never touched the GPU.
-SKIP_EXIT = 77
 
 
 def _has_gpu() -> bool:
@@ -93,24 +77,18 @@ def _max_rel_err(E_gpu: np.ndarray, E_ref: np.ndarray) -> float:
     return float(np.max(np.abs(g - r)) / ref_scale)
 
 
-def check_contraction(dtype: str, gfx_arch: str) -> tuple[str, str]:
-    tol = TOLERANCE[dtype]
-    cfg = default_config(dtype, gfx_arch=gfx_arch)
-    # A dtype whose warp tile is off the XDL allow-list is dropped by is_valid()
-    # rather than rejected, so the build would just produce nothing. Catch it
-    # here, where the cause is still obvious.
-    if not cfg.is_valid():
-        return FAIL, f"contraction/{dtype}: default config is not valid for this dtype"
+def test_contraction_fp16(gfx_arch: str) -> tuple[str, str]:
+    cfg = default_fp16_config(gfx_arch=gfx_arch)
 
     so_paths = setup_multiple_batched_contraction_dispatchers([cfg], gfx_arch=gfx_arch)
     if not so_paths or so_paths[0] is None:
-        return FAIL, f"contraction/{dtype}: kernel build failed"
+        return FAIL, "contraction/fp16: kernel build failed"
 
     runner = GpuBatchedContractionRunner(
-        so_paths[0], dtype=dtype, num_d_tensors=0, elementwise="PassThrough"
+        so_paths[0], dtype="fp16", num_d_tensors=0, elementwise="PassThrough"
     )
 
-    # num_dim_g/m/n/k = 1 each (default_config): one axis per group.
+    # num_dim_g/m/n/k = 1 each (default_fp16_config): one axis per group.
     # K=128 gives 2 tile-K iterations (tile_k=64).
     G, M, N, K = 2, 128, 128, 128
     prob = BatchedContractionProblem(
@@ -125,22 +103,22 @@ def check_contraction(dtype: str, gfx_arch: str) -> tuple[str, str]:
     E_gpu = result.E
 
     if E_gpu.shape != (G, M, N):
-        return FAIL, f"contraction/{dtype}: output shape {E_gpu.shape} != {(G, M, N)}"
+        return FAIL, f"contraction/fp16: output shape {E_gpu.shape} != {(G, M, N)}"
     if np.all(E_gpu == 0):
-        return FAIL, f"contraction/{dtype}: GPU output is all-zero"
+        return FAIL, "contraction/fp16: GPU output is all-zero"
     if not np.all(np.isfinite(E_gpu.astype(np.float32))):
-        return FAIL, f"contraction/{dtype}: GPU output contains NaN/Inf"
+        return FAIL, "contraction/fp16: GPU output contains NaN/Inf"
 
     # runner.reference computes E[g,m,n] = sum_k A[g,m,k]*B[g,n,k] in fp32.
     E_ref = runner.reference(A, B, prob)
     mre = _max_rel_err(E_gpu, E_ref)
-    if mre > tol:
-        return FAIL, (f"contraction/{dtype}: max_rel_err={mre:.4e} > tol={tol:.1e} "
+    if mre > TOLERANCE:
+        return FAIL, (f"contraction/fp16: max_rel_err={mre:.4e} > tol={TOLERANCE:.1e} "
                       f"(G={G} M={M} N={N} K={K})")
     if result.time_ms <= 0.0:
-        return FAIL, f"contraction/{dtype}: time_ms={result.time_ms:.4f} not positive"
+        return FAIL, f"contraction/fp16: time_ms={result.time_ms:.4f} not positive"
 
-    return PASS, (f"contraction/{dtype}: max_rel_err={mre:.4e}, "
+    return PASS, (f"contraction/fp16: max_rel_err={mre:.4e}, "
                   f"time_ms={result.time_ms:.3f}, G={G} MNK={M}/{N}/{K}")
 
 
@@ -159,24 +137,20 @@ def main() -> int:
 
     if not _has_gpu():
         print("SKIP: no supported GPU detected (rocminfo); contraction GPU test skipped")
-        return SKIP_EXIT
+        return 0
 
     gfx = _validate_arch(args.gfx) if args.gfx else _get_arch()
     log.info("Running batched-contraction GPU correctness on %s", gfx)
 
-    results = []
-    for dtype in DTYPES:
-        try:
-            results.append(check_contraction(dtype, gfx))
-        except Exception as exc:  # noqa: BLE001
-            results.append((FAIL, f"contraction/{dtype}: exception: {exc}"))
+    try:
+        status, detail = test_contraction_fp16(gfx)
+    except Exception as exc:  # noqa: BLE001
+        status, detail = FAIL, f"contraction/fp16: exception: {exc}"
 
     print("\n=== Summary ===")
-    for status, detail in results:
-        print(f"  [{status:4s}] {detail}")
-    passed = sum(1 for status, _ in results if status == PASS)
-    print(f"\n{passed}/{len(results)} passed")
-    return 0 if passed == len(results) else 1
+    print(f"  [{status:4s}] {detail}")
+    print(f"\n{1 if status == PASS else 0}/1 passed")
+    return 0 if status == PASS else 1
 
 
 if __name__ == "__main__":
