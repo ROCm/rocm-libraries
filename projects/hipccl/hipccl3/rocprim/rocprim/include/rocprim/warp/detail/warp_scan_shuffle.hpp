@@ -353,6 +353,32 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, inclusive_output, valid_items, scan_op);
+        to_exclusive(inclusive_output, exclusive_output, valid_items, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T   input,
+                      T&  inclusive_output,
+                      T&  exclusive_output,
+                      int valid_items,
+                      T   init,
+                      storage_type& /*storage*/,
+                      BinaryFunction scan_op)
+    {
+        partial_scan(input, inclusive_output, exclusive_output, valid_items, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T              input,
               T&             inclusive_output,
               T&             exclusive_output,
@@ -367,6 +393,19 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T   input,
+                      T&  inclusive_output,
+                      T&  exclusive_output,
+                      int valid_items,
+                      storage_type& /*storage*/,
+                      BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, inclusive_output, valid_items, scan_op);
+        to_exclusive(inclusive_output, exclusive_output, valid_items);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T              input,
               T&             inclusive_output,
               T&             exclusive_output,
@@ -374,10 +413,7 @@ public:
               T&             reduction,
               BinaryFunction scan_op)
     {
-        inclusive_scan(input, inclusive_output, scan_op);
-        // Broadcast value from the last thread in the warp
-        reduction = warp_shuffle(inclusive_output, VirtualWaveSize - 1, VirtualWaveSize);
-        // Convert inclusive scan result to exclusive
+        inclusive_scan(input, inclusive_output, reduction, scan_op);
         to_exclusive(inclusive_output, exclusive_output, init, scan_op);
     }
 
@@ -393,6 +429,40 @@ public:
     {
         (void)storage;
         scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      T&             reduction,
+                      BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, inclusive_output, valid_items, reduction, scan_op);
+        to_exclusive(inclusive_output, exclusive_output, valid_items, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T   input,
+                      T&  inclusive_output,
+                      T&  exclusive_output,
+                      int valid_items,
+                      T   init,
+                      T&  reduction,
+                      storage_type& /*storage*/,
+                      BinaryFunction scan_op)
+    {
+        partial_scan(input,
+                     inclusive_output,
+                     exclusive_output,
+                     valid_items,
+                     init,
+                     reduction,
+                     scan_op);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -449,10 +519,17 @@ private:
     {
         const unsigned int id = detail::logical_lane_id<VirtualWaveSize>();
         include_init(inclusive_input, exclusive_output, valid_items, scan_op, init);
-        to_exclusive(exclusive_output, exclusive_output, valid_items);
-        if((id == 0) && (valid_items > 0))
+        T me = warp_shuffle_up(exclusive_output, 1, VirtualWaveSize);
+        if(static_cast<int>(id) < valid_items)
         {
-            exclusive_output = init;
+            if(id != 0)
+            {
+                exclusive_output = me;
+            }
+            else
+            {
+                exclusive_output = init;
+            }
         }
     }
 

@@ -353,6 +353,40 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      BinaryFunction scan_op)
+    {
+        dispatch(
+            [&](auto impl) {
+                impl.partial_scan(input,
+                                  inclusive_output,
+                                  exclusive_output,
+                                  valid_items,
+                                  init,
+                                  scan_op);
+            });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      storage_type&  storage,
+                      BinaryFunction scan_op)
+    {
+        (void)storage;
+        partial_scan(input, inclusive_output, exclusive_output, valid_items, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T              input,
               T&             inclusive_output,
               T&             exclusive_output,
@@ -362,6 +396,27 @@ public:
         (void)storage;
         dispatch([&](auto impl)
                  { impl.scan(input, inclusive_output, exclusive_output, storage, scan_op); });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      storage_type&  storage,
+                      BinaryFunction scan_op)
+    {
+        (void)storage;
+        dispatch(
+            [&](auto impl) {
+                impl.partial_scan(input,
+                                  inclusive_output,
+                                  exclusive_output,
+                                  valid_items,
+                                  storage,
+                                  scan_op);
+            });
     }
 
     template<class BinaryFunction>
@@ -380,6 +435,29 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      T&             reduction,
+                      BinaryFunction scan_op)
+    {
+        dispatch(
+            [&](auto impl)
+            {
+                impl.partial_scan(input,
+                                  inclusive_output,
+                                  exclusive_output,
+                                  valid_items,
+                                  init,
+                                  reduction,
+                                  scan_op);
+            });
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T              input,
               T&             inclusive_output,
               T&             exclusive_output,
@@ -390,6 +468,26 @@ public:
     {
         (void)storage;
         scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T   input,
+                      T&  inclusive_output,
+                      T&  exclusive_output,
+                      int valid_items,
+                      T   init,
+                      T&  reduction,
+                      storage_type& /*storage*/,
+                      BinaryFunction scan_op)
+    {
+        partial_scan(input,
+                     inclusive_output,
+                     exclusive_output,
+                     valid_items,
+                     init,
+                     reduction,
+                     scan_op);
     }
 
     // Broadcast
