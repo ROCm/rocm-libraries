@@ -19,6 +19,7 @@ add_executable(
     utilities/TestComparisonReport.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
+    utilities/TestCpuFpReferenceBlockScaleQuantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
     utilities/TestCpuFpReferenceResampleFwd.cpp
     utilities/TestCpuFpReferenceResampleBwd.cpp
