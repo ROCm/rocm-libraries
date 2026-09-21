@@ -109,7 +109,8 @@ codecs, the CI configuration, and exact generated-header parity with Tile Engine
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_bridge.py -v
 ```
 
-The GPU suite builds all 16 gfx1250 TDM CI configurations and six configurations
+The GPU suite builds all 16 gfx1250 TDM CI configurations, four larger TDM
+configurations whose LDS allocation exceeds 64 KiB, and six configurations
 covering async, eight-wave async, and weight preshuffle in FP4 and FP8. It tests
 partial tiles and one through five and eight K-loop iterations with two seeds,
 varies scales across rows and K blocks, and repeats eight-wave launches to catch
@@ -142,10 +143,11 @@ build `benchmark_mx_gemm_all`. The MX operation selects
 provided. It uses both `comp_tdm` and `comp_tdm_v2` with the TDM epilogue,
 intrawave scheduling, `2 x 2 x 1` warps,
 a `16 x 16 x 128` warp tile, and no padding or persistent execution. Block M/N
-range from 64 to 256 in steps of 64; block K is 128 or 256. The existing
-datatype-specific LDS checks filter this search space to 22 FP4 and 7 FP8
-kernels per pipeline, for 58 kernels total.
-This conservative default set contains TDM kernels. The three CShuffle pipelines
+range from 64 to 256 in steps of 64; block K is 128 or 256. All 32 block shapes
+fit gfx1250's 320 KiB LDS capacity with both FP4 and FP8, including TDM descriptor
+padding and both staging buffers: 64 kernels per pipeline, for 128 kernels total.
+Both the bridge and Tile Engine use this architecture-aware capacity check.
+This default set contains TDM kernels. The three CShuffle pipelines
 are available through explicit configuration or the Python helpers above.
 
 For the smaller 16-kernel CI set covering both TDM pipelines, pass

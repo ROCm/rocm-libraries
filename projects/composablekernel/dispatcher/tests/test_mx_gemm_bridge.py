@@ -528,14 +528,14 @@ class TestMxArchitectureKernels(unittest.TestCase):
             / "tile_engine/ops/gemm/mx_gemm/configs/default_config_gfx1250.json"
         )
         with tempfile.TemporaryDirectory() as tmp:
-            for dtype, count in (("fp4", 22), ("fp8", 7)):
+            for dtype in ("fp4", "fp8"):
                 builder = _load_mx_builder()(
                     "mx_gemm", Path(tmp), "gfx1250", dtype, "rcr", str(config)
                 )
                 kernels = builder._get_sampled_kernel_list()
                 self.assertEqual(
                     Counter(k["trait_combo"][0] for k in kernels),
-                    {"comp_tdm": count, "comp_tdm_v2": count},
+                    {"comp_tdm": 32, "comp_tdm_v2": 32},
                 )
 
     def test_benchmark_metadata_preserves_pipeline_names(self):
@@ -574,6 +574,146 @@ class TestMxArchitectureKernels(unittest.TestCase):
                             if pipeline in ("comp_tdm", "comp_tdm_v2")
                             else "cshuffle",
                         )
+
+
+class TestMxLdsCapacity(unittest.TestCase):
+    def test_tile_engine_capacity_matches_dispatcher(self):
+        from unified_mx_gemm_codegen import _load_mx_builder
+        from arch_specs_generated import LDS_TOTAL_CAPACITY_BY_ARCH
+
+        _load_mx_builder()
+        from gemm_validation_utils import LDS_SIZE_MAP
+
+        self.assertEqual(LDS_SIZE_MAP["gfx1250"], 320 * 1024)
+        for arch, capacity in LDS_SIZE_MAP.items():
+            with self.subTest(arch=arch):
+                self.assertEqual(capacity, LDS_TOTAL_CAPACITY_BY_ARCH[arch])
+
+    def test_all_mx_pipelines_use_gfx1250_capacity(self):
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _validate
+        from gemm_validation_utils import is_tile_config_valid, validate_lds_capacity
+
+        # Each tile needs more than 64 KiB but fits in gfx1250's 320 KiB,
+        # including both buffers and async descriptor padding.
+        for pipeline in (
+            "comp_tdm",
+            "comp_tdm_v2",
+            "comp_async",
+            "comp_async_eight_waves",
+            "weight_preshuffle",
+        ):
+            for make_config in (default_fp4_config, default_fp8_config):
+                cfg = replace(
+                    make_config("gfx1250", pipeline),
+                    tile_m=256,
+                    tile_n=512 if pipeline == "weight_preshuffle" else 256,
+                    tile_k=512 if make_config == default_fp4_config else 256,
+                )
+                for factor, expected in ((1, True), (4, False)):
+                    candidate = replace(cfg, tile_k=cfg.tile_k * factor)
+                    with self.subTest(
+                        pipeline=pipeline, dtype=cfg.datatype, factor=factor
+                    ):
+                        self.assertEqual(candidate.is_valid(), expected)
+                        if expected:
+                            _validate(candidate.to_codegen_config())
+                        else:
+                            with self.assertRaises(ValueError):
+                                _validate(candidate.to_codegen_config())
+                        for arch in ("gfx1250", "gfx1250:xnack-"):
+                            valid, error = validate_lds_capacity(
+                                candidate.tile_m,
+                                candidate.tile_n,
+                                candidate.tile_k,
+                                cfg.datatype,
+                                cfg.datatype,
+                                pipeline,
+                                arch,
+                            )
+                            self.assertEqual(valid, expected, error)
+                            self.assertEqual(
+                                is_tile_config_valid(
+                                    candidate.tile_m,
+                                    candidate.tile_n,
+                                    candidate.tile_k,
+                                    cfg.warp_m,
+                                    cfg.warp_n,
+                                    cfg.warp_k,
+                                    16,
+                                    16,
+                                    128,
+                                    cfg.datatype,
+                                    cfg.datatype,
+                                    "fp16",
+                                    pipeline,
+                                    "rcr",
+                                    arch,
+                                    "mx_gemm",
+                                ),
+                                expected,
+                            )
+
+    def test_tdm_padding_is_included_at_capacity_boundary(self):
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _validate
+        from gemm_validation_utils import validate_lds_capacity
+
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            for make_config in (default_fp4_config, default_fp8_config):
+                for n, expected in ((320, True), (352, False)):
+                    cfg = replace(
+                        make_config("gfx1250", pipeline),
+                        tile_m=256,
+                        tile_n=n,
+                        tile_k=512 if make_config == default_fp4_config else 256,
+                    )
+                    with self.subTest(pipeline=pipeline, dtype=cfg.datatype, n=n):
+                        # Both raw tiles fit. With padding, the two buffers
+                        # need 313280 bytes for N=320 and 330688 for N=352.
+                        self.assertEqual(cfg.is_valid(), expected)
+                        if expected:
+                            _validate(cfg.to_codegen_config())
+                        else:
+                            with self.assertRaises(ValueError):
+                                _validate(cfg.to_codegen_config())
+                        for arch in ("gfx1250", "gfx1250:xnack-"):
+                            valid, error = validate_lds_capacity(
+                                cfg.tile_m,
+                                cfg.tile_n,
+                                cfg.tile_k,
+                                cfg.datatype,
+                                cfg.datatype,
+                                pipeline,
+                                arch,
+                            )
+                            self.assertEqual(valid, expected, error)
+
+    def test_other_arch_double_buffer_boundary_and_unknown_arch(self):
+        from unified_mx_gemm_codegen import _load_mx_builder
+
+        _load_mx_builder()
+        from gemm_validation_utils import validate_lds_capacity
+
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            for arch, single_buffer_bytes in (
+                ("gfx950", 80 * 1024),
+                ("gfx942", 32 * 1024),
+                ("unknown", 32 * 1024),
+            ):
+                for extra, expected in ((0, True), (1, False)):
+                    with self.subTest(pipeline=pipeline, arch=arch, extra=extra):
+                        # FP8: (M + N) * K bytes per buffer, two buffers.
+                        valid, error = validate_lds_capacity(
+                            64,
+                            single_buffer_bytes // 256 - 64 + extra,
+                            256,
+                            "fp8",
+                            "fp8",
+                            pipeline,
+                            arch,
+                        )
+                        self.assertEqual(valid, expected, error)
 
 
 if __name__ == "__main__":

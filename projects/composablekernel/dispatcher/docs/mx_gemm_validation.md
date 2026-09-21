@@ -5,7 +5,52 @@ the dispatcher bridge and old Tile Engine. These results cover RCR, FP4 E2M1
 and FP8 OCP E4M3 inputs, E8M0 scales per 32 K elements, FP32 accumulation and
 FP16 output. Each pipeline uses its own native implementation.
 
-## Final gfx1250 matrix
+## LDS capacity review correction
+
+PR #12173 corrected the dispatcher's `ArchFilter` capacity table. MX GEMM uses
+Tile Engine's separate `gemm_validation_utils.py`, which still lacked gfx1250.
+An override covered the three CShuffle pipelines, but TDM V1/V2 remained on the
+64 KiB fallback. The shared Tile Engine table now records gfx1250's 320 KiB
+capacity, and both staging and CShuffle epilogue checks use that table.
+
+The TDM staging calculation includes descriptor padding and both buffers.
+For example, an FP8 256x352x256 tile needs 311296 raw staging bytes, but 330688
+bytes with padding, so it is rejected. The neighboring 256x320x256 tile needs
+313280 bytes including padding and is accepted. Native device compilation
+verified **136 allocation assertions**: all 128 default pipeline/datatype/tile
+combinations and eight boundary cases match `GetSmemSize()` exactly.
+
+The corrected default enumeration contains **128 TDM configurations** instead
+of 58. The 70 additional configurations passed the same bridge and Tile Engine
+matrix described below:
+
+| Pipeline | Additional configurations | Bridge builds | Tile Engine builds | Bridge reference comparisons | Tile Engine reference comparisons |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `comp_tdm` | 35 | 35/35 | 35/35 | 1400/1400 | 420/420 |
+| `comp_tdm_v2` | 35 | 35/35 | 35/35 | 1400/1400 | 420/420 |
+| **Total** | **70** | **70/70** | **70/70** | **2800/2800** | **840/840** |
+
+All **140 additional bridge rejection checks** passed. The local CPU regression
+passed **293 tests and 641 subtests**; the five compiler-dependent skips passed
+in the remote **21/21 LDS suite**. The MX CPU suite passed **46/46** remotely.
+Regression coverage checks capacity consistency between Tile Engine and the
+dispatcher, all five MX pipelines, architecture suffixes, unknown-target
+fallbacks, and padding at the capacity boundary.
+
+The updated checked-in GPU suite passed **428 comparisons across 26
+configurations**, including four 256x256x256 TDM configurations whose LDS
+allocation exceeds 64 KiB. It covers all five native pipelines with both input
+types, varied scales, partial tiles, K-loop cases, and repeated eight-wave launches.
+
+The 16 gfx1250 CI kernels and 344 gfx950 default kernels are unchanged. All
+122 previously validated gfx1250 generated headers and 16 sampled non-MX
+headers are unchanged, and this correction changes no C++ kernel source.
+Together, the two matrices cover **192 configurations** and **9888 numerical
+comparisons** through both host paths.
+
+## Original native pipeline matrix
+
+This matrix was run at `d67e7e80e7`, before the LDS capacity correction above.
 
 | Pipeline | Configurations | Bridge builds | Tile Engine builds | Bridge reference comparisons | Tile Engine reference comparisons |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -16,10 +61,10 @@ FP16 output. Each pipeline uses its own native implementation.
 | `weight_preshuffle` | 12 | 12/12 | 12/12 | 384/384 | 144/144 |
 | **Total** | **122** | **122/122** | **122/122** | **4784/4784** | **1464/1464** |
 
-The matrix contains all 58 gfx1250 default configurations plus 64 explicit
-CShuffle configurations:
+The matrix contains the then-enumerated 58 gfx1250 default configurations plus
+64 explicit CShuffle configurations:
 
-- TDM V1/V2: the complete `default_config_gfx1250.json` enumeration.
+- TDM V1/V2: the `default_config_gfx1250.json` enumeration before the LDS correction.
 - Async: block M/N in {64, 128, 256}, K in {128, 256}, for both input types.
 - Eight-wave async: block M/N in {128, 256}, K in {128, 256}, for both types.
 - Weight preshuffle: M in {32, 64, 128}, K=256; FP4 N=512 and
@@ -48,7 +93,7 @@ The maximum bridge normalized error was **0.000956772943**, below the unchanged
 **256 Tile Engine rejection checks passed**, covering
 unsupported K, split-K, and weight-preshuffle N alignment.
 
-## Additional regression checks
+## Original implementation regression checks
 
 - The checked-in GPU regression suite passed **364 numerical comparisons** across
   22 gfx1250 configurations: 16 TDM CI configurations and six native CShuffle
@@ -81,13 +126,13 @@ The gfx1250 tests used ROCm 10.0.0a20260729 / HIP 7.15.26306. gfx950 used
 ROCm 7.2.1. The gfx1250 runtime emitted rocjitsu translation warnings; these
 results make no performance claim.
 
-The 122 configurations are a finite validation matrix, not every possible
+The 192 configurations across both matrices are a finite set, not every possible
 native configuration. MXFlatMM, other layouts/output types, cluster launch,
 and a full rocm-libraries build are outside this validation. The gfx1250 bridge
 rejects split-K, K padding and persistent execution. Weight preshuffle requires
 problem N divisible by 16.
 
-The architecture default JSON deliberately retains its 58 TDM configurations;
+The architecture default JSON now enumerates 128 TDM configurations;
 all five pipelines are available through explicit selection. See the
 [MX bridge guide](mx_gemm.md) for pipeline helpers, input formats and commands
 to run the checked-in CPU, GPU and native regression tests.

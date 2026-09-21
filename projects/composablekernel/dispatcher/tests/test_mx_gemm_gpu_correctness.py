@@ -110,6 +110,14 @@ class TestMxGemmGpu(unittest.TestCase):
                 for pipeline in ("comp_tdm", "comp_tdm_v2")
                 for m, n in ((64, 64), (64, 128), (128, 64), (128, 128))
             ]
+            # Exceeds the old 64 KiB LDS fallback with both FP4 and FP8.
+            configs += [
+                MxGemmKernelConfig(
+                    datatype=dtype, gpu_target=self.ARCH, pipeline=pipeline,
+                    tile_m=256, tile_n=256, tile_k=256,
+                )
+                for pipeline in ("comp_tdm", "comp_tdm_v2")
+            ]
         so_paths = setup_multiple_mx_gemm_dispatchers(
             configs,
             output_dir=Path(build_dir.name),

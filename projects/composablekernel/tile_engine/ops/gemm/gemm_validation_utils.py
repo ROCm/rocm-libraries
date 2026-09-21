@@ -461,11 +461,14 @@ def validate_dimension_alignment(
     return len(alignment_issues) == 0, alignment_issues
 
 
+# Hardware capacity from ck_tile::get_lds_size() in core/arch/arch.hpp.
+# Dispatcher ArchFilter has a separate generated table; keep these in sync.
 LDS_SIZE_MAP = {
     "gfx90a": 2**16,  # 64KB
     "gfx942": 2**16,  # 64KB
     "gfx950": 160 * 1024,  # 160KB
     "gfx1201": 2**16,  # 64KB
+    "gfx1250": 320 * 1024,  # 320KB
 }
 
 DEFAULT_LDS_SIZE = 2**16  # 64KB
@@ -479,7 +482,6 @@ def validate_lds_capacity(
     b_datatype: str,
     pipeline: str,
     gpu_target: str = "",
-    lds_capacity_bytes: int = None,
 ) -> Tuple[bool, str]:
     """Validate LDS capacity requirements."""
     matrix_a_size = (tile_m * tile_k) * element_size(a_datatype)
@@ -487,6 +489,17 @@ def validate_lds_capacity(
     if pipeline == "weight_preshuffle":
         # This MX pipeline reads preshuffled B directly into registers.
         matrix_b_size = 0
+    elif (
+        pipeline in ("comp_tdm", "comp_tdm_v2")
+        and _base_gfx_arch(gpu_target) == "gfx1250"
+    ):
+        # MX RCR uses TDM's non-transposed LDS descriptors. Each group of
+        # rows spanning at least 256 bytes is separated by 16 padding bytes.
+        # GetSmemSizeA/B round to 16 bytes; valid MX K tiles are already aligned.
+        a_lds_layer = max(1, 256 // (tile_k * element_size(a_datatype)))
+        b_lds_layer = max(1, 256 // (tile_k * element_size(b_datatype)))
+        matrix_a_size += max(0, tile_m // a_lds_layer - 1) * 16
+        matrix_b_size += max(0, tile_n // b_lds_layer - 1) * 16
     elif pipeline == "comp_async":
         # The 16x16x128 FP8 XOR-swizzled descriptor has two outer groups
         # separated by 16 bytes. Packed FP4 has one group and no padding.
@@ -503,9 +516,7 @@ def validate_lds_capacity(
     total_tile_in_lds = matrix_a_size + matrix_b_size
 
     base_gpu_target = _base_gfx_arch(gpu_target)
-    hw_lds_size = lds_capacity_bytes or LDS_SIZE_MAP.get(
-        base_gpu_target, DEFAULT_LDS_SIZE
-    )
+    hw_lds_size = LDS_SIZE_MAP.get(base_gpu_target, DEFAULT_LDS_SIZE)
     double_buffer = pipeline in [
         "preshufflev2",
         "compv4",
@@ -738,16 +749,6 @@ def is_tile_config_valid(
         b_datatype,
         pipeline,
         gpu_target,
-        # Native gfx1250 async paths use the 320 KiB capacity in get_lds_size().
-        # Keep the existing default TDM search space and non-MX validation stable.
-        lds_capacity_bytes=(
-            320 * 1024
-            if kernel_name_prefix == "mx_gemm"
-            and _base_gfx_arch(gpu_target) == "gfx1250"
-            and pipeline
-            in ("comp_async", "comp_async_eight_waves", "weight_preshuffle")
-            else None
-        ),
     )
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")
@@ -1376,7 +1377,7 @@ def validate_gemm_mx(
         epilogue_bytes = rows * row_bytes + (rows - 1) * pad_bytes
         if arch == "gfx1250":
             epilogue_bytes = tile_m * tile_n * 2 + (tile_m - 1) * 2
-        if epilogue_bytes > (320 * 1024 if arch == "gfx1250" else LDS_SIZE_MAP[arch]):
+        if epilogue_bytes > LDS_SIZE_MAP[arch]:
             return (
                 False,
                 "MX packed CShuffle epilogue exceeds the architecture LDS capacity",
