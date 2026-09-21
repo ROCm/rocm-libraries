@@ -48,6 +48,7 @@ from config_harness import (
     assert_split_multicast_masks,
     emit_kernels_from_config,
     golden_digest,
+    with_symbol_names,
 )
 
 pytestmark = pytest.mark.unit
@@ -115,6 +116,7 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
     assert_real_gfx1250_kernels(results)
     for base, src, _err in results:
         assert_assembles(src, base)
+        src = with_symbol_names(src)
         # One work-group per tile: the HW coords are folded into the linear index.
         assert "DP fold: WorkGroup1 * nWG0 (N-tile row)" in src, (
             f"Kernel {base!r} missing the N-tile-row fold (WorkGroup1*nWG0)"

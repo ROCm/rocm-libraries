@@ -163,7 +163,7 @@ def _emit_with_reg_state(config_path, arch, limit):
             results.append(
                 {
                     "base": base,
-                    "src": src or "",
+                    "src": _cfgh.with_symbol_names(src or ""),
                     "variant": _variant_key(lambda param: kernel[param]),
                     "waveSeparated": bool(
                         kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
