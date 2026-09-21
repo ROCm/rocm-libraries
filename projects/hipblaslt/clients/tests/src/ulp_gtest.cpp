@@ -9,14 +9,16 @@
 // declared in clients/common/include/ulp.hpp. These exercise the pure math /
 // dispatch logic and do not require a GPU.
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include "ulp.hpp"
 #include "unit.hpp"
 
-#include <bit>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <vector>
 
 namespace
@@ -25,6 +27,14 @@ namespace
     inline double p2(int exp)
     {
         return std::ldexp(1.0, exp);
+    }
+
+    float float_from_bits(uint32_t bits)
+    {
+        static_assert(sizeof(float) == sizeof(bits));
+        float value;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
     }
 
     // ------------------------------------------------------------------
@@ -319,11 +329,11 @@ namespace
     {
         const std::vector<float> cpu{
             0.0f,
-            std::bit_cast<float>(uint32_t{0x7fc00001}),
+            float_from_bits(0x7fc00001),
         };
         const std::vector<float> gpu{
             -0.0f,
-            std::bit_cast<float>(uint32_t{0x7fc00002}),
+            float_from_bits(0x7fc00002),
         };
 
         EXPECT_FALSE(unit_check_storage_identical(1, 2, 1, 0, cpu.data(), gpu.data(), 1));
@@ -342,6 +352,44 @@ namespace
         EXPECT_TRUE(unit_check_batched_storage_identical(2, 1, 2, cpu, gpu, 2));
         gpu1[1] += 1.0f;
         EXPECT_FALSE(unit_check_batched_storage_identical(2, 1, 2, cpu, gpu, 2));
+    }
+
+    void run_unit_check_mismatch()
+    {
+        const float cpu = 1.0f;
+        const float gpu = 2.0f;
+        unit_check_general<float>(1, 1, 1, 0, &cpu, &gpu, 1);
+    }
+
+    TEST(UnitCheckIdentical, public_unit_check_rejects_mismatch)
+    {
+        EXPECT_FATAL_FAILURE(run_unit_check_mismatch(), "Expected equality");
+    }
+
+    void run_batched_unit_check_mismatch()
+    {
+        const float  cpu_value   = 1.0f;
+        const float  gpu_value   = 2.0f;
+        const float* cpu_batch[] = {&cpu_value};
+        const float* gpu_batch[] = {&gpu_value};
+        unit_check_general<float>(1, 1, 1, cpu_batch, gpu_batch, 1);
+    }
+
+    TEST(UnitCheckIdentical, public_batched_unit_check_rejects_mismatch)
+    {
+        EXPECT_FATAL_FAILURE(run_batched_unit_check_mismatch(), "Expected equality");
+    }
+
+    void run_special_value_mismatch()
+    {
+        float cpu = 1.0f;
+        float gpu = std::numeric_limits<float>::infinity();
+        check_special_value_consistency(1, 1, 1, 0, &cpu, &gpu, 1, HIP_R_32F);
+    }
+
+    TEST(UnitCheckIdentical, special_value_check_rejects_mismatch)
+    {
+        EXPECT_FATAL_FAILURE(run_special_value_mismatch(), "Special value mismatch");
     }
 
     TEST(UlpCheckGeneral, half_and_bfloat16_dispatch_identical)
