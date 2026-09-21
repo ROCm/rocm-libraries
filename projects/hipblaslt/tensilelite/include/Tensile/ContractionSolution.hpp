@@ -356,13 +356,13 @@ namespace TensileLite
         bool sourceKernel = false;
 
         int    globalAccumulation       = 0;
-        // GlobalSplitUAlgorithm AtomicDest: the slices accumulate straight into the
-        // BF16 D with buffer_atomic_pk_add_bf16. There is no fp32 staging workspace
-        // and no post-GSU conversion kernel, which is why globalAccumulation is 0
-        // here; only the beta pre-pass still runs. Kept as its own flag because the
-        // reference validator widens its tolerance by the number of BF16 atomic adds
-        // that land on one element.
-        bool   gsuAtomicDestBF16        = false;
+        // GlobalSplitUAlgorithm AtomicDest: the slices accumulate straight into D in
+        // the dest precision, so there is no fp32 staging workspace and no post-GSU
+        // conversion kernel, which is why globalAccumulation is 0 here; only the beta
+        // pre-pass still runs. Kept as its own flag because the reference validator
+        // has to widen its tolerance by the number of atomic adds per element. Only
+        // BF16 is wired up today (buffer_atomic_pk_add_bf16).
+        bool   gsuAtomicDest            = false;
         int    adaptiveGemmGSUA         = 0;
         size_t workspaceSizePerElemC    = 0;
         size_t workspaceSizePerElemBias = 0;

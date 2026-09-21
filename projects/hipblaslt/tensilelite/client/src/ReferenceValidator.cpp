@@ -134,17 +134,17 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
-            m_bf16AtomicSplits  = 0;
+            m_atomicDestSplits  = 0;
 
-            if(m_enabled && solution != nullptr && solution->sizeMapping.gsuAtomicDestBF16)
+            if(m_enabled && solution != nullptr && solution->sizeMapping.gsuAtomicDest)
             {
-                // How many BF16 atomic adds land on one output element. Read it
+                // How many atomic adds land on one output element. Read it
                 // the way solve() does rather than from sizeMapping.globalSplitU,
                 // which is the -1 "auto" sentinel until the hardware resolves it.
                 if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
                     auto hardware = hip::GetCurrentDevice();
-                    m_bf16AtomicSplits
+                    m_atomicDestSplits
                         = gemm->getParams().gsu() > 0
                               ? gemm->getParams().gsu()
                               : (int)solution->calculateAutoGSU(*gemm, hardware.get());
@@ -460,7 +460,7 @@ namespace TensileLite
                 return 0.0;
 
             double rms = std::sqrt(sumSq / samples);
-            return m_bf16AtomicSplits * bf16Ulp(rms);
+            return m_atomicDestSplits * bf16Ulp(rms);
         }
 
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
@@ -491,7 +491,7 @@ namespace TensileLite
             // Unlike the TF32 thresholds above this one is an absolute allowance
             // and only BFloat16 comparisons read it that way, so it is applied to
             // D alone rather than to every output tensor.
-            double thresholdD = m_bf16AtomicSplits > 1 && threshold < 0.0
+            double thresholdD = m_atomicDestSplits > 1 && threshold < 0.0
                                     ? bf16AtomicAbsTolerance(problem, reference)
                                     : threshold;
 
