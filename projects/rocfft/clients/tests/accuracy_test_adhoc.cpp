@@ -669,8 +669,29 @@ INSTANTIATE_TEST_SUITE_P(adhoc_kint_index_boundary,
 // Test cases for 64-bit index kernels that require large twiddle arrays.
 const auto adhoc_64_bit_idx_twiddle_large_tokens = {
     // clang-format off
-    // CS_L1D_TRTRT 
+    // CS_L1D_TRTRT
     "complex_forward_len_8589934592_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8589934592_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // Bluestein PAD_MUL / FFT_MUL count boundary. count = lengthBlue * batch,
+    // lengthBlue = 524288, so batch 8192 => count = 2^32 (last U32 case) and
+    // batch 8193 => count = 4295491584 (first U64 case).
+    "complex_forward_len_196597_single_ip_batch_8192_istride_1_CI_ostride_1_CI_idist_196597_odist_196597_ioffset_0_0_ooffset_0_0", // ~76 GiB VRAM
+    "complex_forward_len_196597_single_ip_batch_8193_istride_1_CI_ostride_1_CI_idist_196597_odist_196597_ioffset_0_0_ooffset_0_0", // ~76 GiB VRAM
+    // Bluestein chirp large-twiddle step count. chirp large1D = 2 * length,
+    // so the twl tier boundaries land at length 128, 32768, 8388608, 2^31.
+    // twl 1
+    "complex_forward_len_19_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_19_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_19_odist_19_ioffset_0_0_ooffset_0_0",
+    // twl 2
+    "complex_forward_len_2053_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2053_odist_2053_ioffset_0_0_ooffset_0_0",
+    // twl 1 + twl 2, both forced non-fused by the 2D parent
+    "complex_forward_len_19_2053_single_ip_batch_1_istride_2053_1_CI_ostride_2053_1_CI_idist_39007_odist_39007_ioffset_0_0_ooffset_0_0",
+    // twl 3
+    "complex_forward_len_196597_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_196597_odist_196597_ioffset_0_0_ooffset_0_0",
+    // twl 3 / twl 4 boundary: large1D 16777186 vs 16777234, either side of 2^24
+    "complex_forward_len_8388593_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8388593_odist_8388593_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_8388617_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8388617_odist_8388617_ioffset_0_0_ooffset_0_0",
+    // twl 4
+    "complex_forward_len_25165813_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_25165813_odist_25165813_ioffset_0_0_ooffset_0_0",
     // clang-format on
 };
 INSTANTIATE_TEST_SUITE_P(
