@@ -3291,6 +3291,14 @@ namespace TensileLite
                             : problem.a().dataType() == rocisa::DataType::Double
                                 ? DataTypeInfo::Get(rocisa::DataType::Double).abbrev
                                 : DataTypeInfo::Get(rocisa::DataType::Float).abbrev;
+        // A narrow workspace makes the slot above wrong, and the wide and narrow
+        // kernels would otherwise share a name. Only override in that case so the
+        // names of every existing kernel stay byte-identical. Solution.py only
+        // ever narrows to the destination type, so this mirrors its choice.
+        if(sizeMapping.workspaceSizePerElemC > 0
+           && sizeMapping.workspaceSizePerElemC
+                  < DataTypeInfo::Get(problem.computeType()).elementSize)
+            inputTypeStr = DataTypeInfo::Get(problem.d().dataType()).abbrev;
 
         std::string name = concatenate("C",
                                        problem.cNames(),

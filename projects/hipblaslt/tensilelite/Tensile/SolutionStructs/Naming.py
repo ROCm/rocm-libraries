@@ -214,6 +214,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # The narrow GSU workspace changes the generated assembly, so it has to be part
+  # of the name when enabled. Tag it only then, otherwise every pre-existing
+  # kernel name would shift and the tuned logic files would stop matching.
+  if not state.get("NarrowGSUWorkspace", False):
+    requiredParametersTemp.discard("NarrowGSUWorkspace")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue

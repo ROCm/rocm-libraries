@@ -83,6 +83,7 @@ def getRequiredParametersMin() -> set:
         'LocalWritePerMfma',
         'MIArchVgpr',
         'MaxOccupancy',
+        'NarrowGSUWorkspace',
         'NonTemporal',
         'NonTemporalA',
         'NonTemporalB',
