@@ -1306,7 +1306,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
 
-        s_wait_tensorcnt_barrier<0>();
+        s_wait_tensorcnt_barrier<2>();
         auto k_tile = load_tile(k_lds_read_window);
 
         __builtin_amdgcn_sched_barrier(0);
