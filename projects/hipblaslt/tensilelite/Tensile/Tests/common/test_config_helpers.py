@@ -26,10 +26,14 @@ _FFM_FAIL_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "tdm_multicast_gfx
 _PLAIN_GFX1250_CONFIG = os.path.join(
     _COMMON_DIR, "streamk", "gfx1250", "core", "sk_mxf4_force_dp_only.yaml"
 )
-# A config tagged ``xfail-gfx1250``.
-_XFAIL_GFX1250_CONFIG = os.path.join(
-    _COMMON_DIR, "streamk", "gfx1250", "sk_mxf4gemm_tdm_pap_ext.yaml"
+# A config tagged ``xfail-gfx1250`` (base arch).
+_XFAIL_GFX1250_CONFIG = os.path.join(_COMMON_DIR, "sparse", "gfx1250", "spmm_gate.yaml")
+# A config tagged ``skip-gfx1250v0``.
+_SKIP_GFX1250V0_CONFIG = os.path.join(
+    _COMMON_DIR, "streamk", "gfx1250", "sk_mxf4gemm_tdm_ext.yaml"
 )
+# A config tagged ``skip-gfx1250`` (base arch).
+_SKIP_GFX1250_CONFIG = os.path.join(_COMMON_DIR, "comm", "gfx950", "fused_a2a.yaml")
 
 _FFM_MEMFILE = "/dev/shm/hsakmt_model_root_test"
 
@@ -67,11 +71,35 @@ def test_unmarked_config_never_xfails_under_ffm(monkeypatch):
     assert pytest.mark.xfail not in marks
 
 
-def test_find_available_archs_strips_version_suffix():
-    """A versioned target (e.g. a trailing vN) normalizes to the base gfx arch."""
-    assert findAvailableArchs("gfx1250v0") == ["gfx1250"]
+def test_find_available_archs_expands_versioned_target():
+    """A versioned target yields BOTH the versioned string and its base arch, so
+    configMarks matches gfx1250v0 marks AND base gfx1250 marks. A plain arch is
+    returned unchanged."""
+    assert findAvailableArchs("gfx1250v0") == ["gfx1250v0", "gfx1250"]
     assert findAvailableArchs("gfx942") == ["gfx942"]
-    assert findAvailableArchs("gfx1250v0;gfx942") == ["gfx1250", "gfx942"]
+    assert findAvailableArchs("gfx1250v0;gfx942") == ["gfx1250v0", "gfx1250", "gfx942"]
+
+
+def test_skip_gfx1250v0_fires_on_v0_target():
+    """A skip-gfx1250v0 config is skipped on a gfx1250v0 target."""
+    archs = findAvailableArchs("gfx1250v0")  # -> ["gfx1250v0", "gfx1250"]
+    marks = configMarks(_SKIP_GFX1250V0_CONFIG, _TESTS_ROOT, archs)
+    assert pytest.mark.skip in marks
+
+
+def test_skip_gfx1250v0_inert_on_base_target():
+    """A skip-gfx1250v0 config runs on a base gfx1250 target — the gfx1250v0 skip stays inert."""
+    archs = findAvailableArchs("gfx1250")  # -> ["gfx1250"]
+    marks = configMarks(_SKIP_GFX1250V0_CONFIG, _TESTS_ROOT, archs)
+    assert pytest.mark.skip not in marks
+
+
+def test_base_skip_gfx1250_fires_on_v0_target():
+    """A base skip-gfx1250 config is still skipped on a gfx1250v0 target — base marks
+    must fire on a versioned target too."""
+    archs = findAvailableArchs("gfx1250v0")  # -> ["gfx1250v0", "gfx1250"]
+    marks = configMarks(_SKIP_GFX1250_CONFIG, _TESTS_ROOT, archs)
+    assert pytest.mark.skip in marks
 
 
 def test_xfail_gfx1250_fires_on_versioned_target(monkeypatch):
