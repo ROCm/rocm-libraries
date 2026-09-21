@@ -31,7 +31,8 @@ public:
     IVerificationReporter& operator=(IVerificationReporter&&) = delete;
 
     /// Applies one graph's coverage update to the run counters. `missedQuery` is
-    /// not published here: it is a harness bug and becomes a GTest failure instead.
+    /// not published here: it is a harness bug, and the caller raises it as a GTest
+    /// failure under enforcement and a warning under report mode instead.
     virtual void recordCoverage(const CoverageUpdate& update) = 0;
     virtual void recordVerdict(const SupportResult& record) = 0;
     virtual void recordUnverifiable(const std::string& bundlePath, const std::string& reason) = 0;
