@@ -34,6 +34,14 @@ Evaluation is fail-open: if the API cannot be reached or a PR cannot be
 evaluated, we post ``success`` and say so. A required status that never reports
 blocks its PR forever, so a broken freshness job must never wedge the repo.
 
+The one case that is not fail-open is the rate-limit reserve. The token's
+hourly allowance is shared with every other workflow in the repository, so a
+sweep stops rather than exhaust it, and the PRs it did not reach get no status
+from that run. Their PR-event status (if any) stands. Before enforcement is
+enabled, confirm from the job summary that a full sweep finishes inside the
+allowance; a sweep that routinely hits the reserve would leave PRs with no
+status at all, which a required check would turn into a permanent block.
+
 Usage:
   python pr_base_freshness.py --pr 1234
   python pr_base_freshness.py --all-open
@@ -43,6 +51,7 @@ import argparse
 import concurrent.futures
 import os
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
@@ -58,15 +67,32 @@ MAX_DESCRIPTION_LENGTH = 140
 # GITHUB_TOKEN rate limit is shared across everything running in this repo.
 MAX_WORKERS = 8
 
+# Requests a PR costs before the optional dating call: one ancestry compare
+# plus the status post. A PR is not started unless both can still be paid for,
+# so we never evaluate a PR and then fail to publish the answer.
+REQUESTS_PER_PR = 2
+
+# The dating call that turns "over the limit" into "6.0 days" is cosmetic, so
+# it is only spent when there is this much slack left. Under pressure the
+# human-readable day count is the first thing dropped, never the verdict.
+COSMETIC_SLACK = 50
+
 
 class GitHubError(RuntimeError):
     """Raised when the GitHub API returns an unusable response."""
 
 
 class GitHub:
-    """Minimal REST client scoped to one repository."""
+    """Minimal REST client scoped to one repository, with a rate-limit guard.
 
-    def __init__(self, repo: str, token: str) -> None:
+    The token's hourly allowance is shared with every other workflow running in
+    this repository, so the client refuses to spend past ``reserve`` remaining.
+    The ceiling is read from the live ``x-ratelimit-remaining`` header rather
+    than assumed, because the allowance differs between a plain ``GITHUB_TOKEN``
+    and an Enterprise Cloud one.
+    """
+
+    def __init__(self, repo: str, token: str, reserve: int = 0) -> None:
         self.repo = repo
         self.session = requests.Session()
         self.session.headers.update(
@@ -76,26 +102,59 @@ class GitHub:
                 "X-GitHub-Api-Version": "2022-11-28",
             }
         )
+        self.reserve = reserve
         self.request_count = 0
-        self.rate_limit_remaining: Optional[str] = None
+        self.rate_limit_limit: Optional[int] = None
+        self.rate_limit_remaining: Optional[int] = None
+        # The per-PR work runs on a thread pool, so the counters it reads to
+        # make budget decisions need to be consistent.
+        self._lock = threading.Lock()
+
+    def has_budget(self, cost: int = 1) -> bool:
+        """Whether ``cost`` more requests can be spent without hitting reserve."""
+        with self._lock:
+            if self.rate_limit_remaining is None:
+                # Nothing observed yet; the first request establishes the floor.
+                return True
+            return self.rate_limit_remaining - cost >= self.reserve
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        response = self.session.request(
-            method, f"{API_ROOT}/repos/{self.repo}/{path}", timeout=60, **kwargs
-        )
-        self.request_count += 1
-        self.rate_limit_remaining = response.headers.get("x-ratelimit-remaining")
+        with self._lock:
+            self.request_count += 1
+        try:
+            response = self.session.request(
+                method, f"{API_ROOT}/repos/{self.repo}/{path}", timeout=60, **kwargs
+            )
+        except requests.RequestException as e:
+            # A timeout or connection reset has to look like every other API
+            # failure. Callers only handle GitHubError, and an exception that
+            # escapes them aborts the whole run before any status is posted,
+            # which is exactly what the fail-open contract forbids.
+            raise GitHubError(f"{method} {path} -> {e}") from e
+        with self._lock:
+            self.rate_limit_limit = _header_int(response, "x-ratelimit-limit")
+            self.rate_limit_remaining = _header_int(response, "x-ratelimit-remaining")
         if not response.ok:
             raise GitHubError(
                 f"{method} {path} -> {response.status_code} {response.text[:200]}"
             )
-        return response.json() if response.content else None
+        try:
+            return response.json() if response.content else None
+        except ValueError as e:
+            raise GitHubError(f"{method} {path} -> malformed response body") from e
 
     def get(self, path: str, **params: Any) -> Any:
         return self._request("GET", path, params=params)
 
     def post(self, path: str, payload: dict) -> Any:
         return self._request("POST", path, json=payload)
+
+
+def _header_int(response: "requests.Response", name: str) -> Optional[int]:
+    try:
+        return int(response.headers[name])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -117,6 +176,10 @@ class Verdict:
     # computed for stale PRs, where it is the number a human wants to see.
     stale_days: Optional[float] = None
     error: Optional[str] = None
+    # Set when the rate-limit reserve stopped us before this PR was looked at.
+    # A skipped PR gets no status at all, since posting one would itself cost
+    # the request we just declined to spend.
+    skipped: bool = False
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -139,6 +202,10 @@ def evaluate(
     gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str, now: datetime
 ) -> Verdict:
     """Decides whether ``pr`` contains the cutoff commit."""
+    # Only start a PR we can also publish the answer for.
+    if not gh.has_budget(REQUESTS_PER_PR):
+        return Verdict(fresh=True, skipped=True)
+
     try:
         comparison = gh.get(f"compare/{cutoff_sha}...{pr.head_sha}", per_page=1)
     except GitHubError as e:
@@ -150,17 +217,20 @@ def evaluate(
 
     missing = comparison["behind_by"]
     stale_days = None
-    try:
-        # Only stale PRs pay for this second call. The merge base of the cutoff
-        # and the head is also the merge base of develop and the head, since a
-        # stale PR by definition diverged before the cutoff.
-        merge_base = comparison["merge_base_commit"]["sha"]
-        since_merge_base = gh.get(f"compare/{merge_base}...{base_branch}", per_page=1)
-        oldest_missing = since_merge_base["commits"][0]["commit"]["committer"]["date"]
-        stale_days = (now - parse_timestamp(oldest_missing)).total_seconds() / 86400
-    except (GitHubError, KeyError, IndexError):
-        # The headline verdict stands; we just cannot put a number on it.
-        pass
+    if gh.has_budget(COSMETIC_SLACK):
+        try:
+            # Only stale PRs pay for this second call. The merge base of the
+            # cutoff and the head is also the merge base of develop and the
+            # head, since a stale PR by definition diverged before the cutoff.
+            merge_base = comparison["merge_base_commit"]["sha"]
+            since_merge_base = gh.get(
+                f"compare/{merge_base}...{base_branch}", per_page=1
+            )
+            oldest = since_merge_base["commits"][0]["commit"]["committer"]["date"]
+            stale_days = (now - parse_timestamp(oldest)).total_seconds() / 86400
+        except (GitHubError, KeyError, IndexError):
+            # The headline verdict stands; we just cannot put a number on it.
+            pass
 
     return Verdict(fresh=False, missing_commits=missing, stale_days=stale_days)
 
@@ -198,7 +268,14 @@ def status_state(verdict: Verdict, enforcing: bool) -> str:
 def list_open_prs(
     gh: GitHub, base_branch: str, include_drafts: bool, limit: int
 ) -> list[PullRequest]:
-    """Lists open PRs targeting ``base_branch``, newest activity first."""
+    """Lists open PRs targeting ``base_branch``, least recent activity first.
+
+    Ordering matters when the reserve cuts a sweep short. The PR-event trigger
+    already posts a status on every open and push, so a PR touched minutes ago
+    has an accurate one. The PRs whose statuses are most likely to be wrong are
+    the ones nothing has touched in days, so they go first and the freshly
+    evaluated ones are what gets dropped.
+    """
     prs: list[PullRequest] = []
     page = 1
     while len(prs) < limit:
@@ -207,7 +284,7 @@ def list_open_prs(
             state="open",
             base=base_branch,
             sort="updated",
-            direction="desc",
+            direction="asc",
             per_page=100,
             page=page,
         )
@@ -257,6 +334,12 @@ def main() -> int:
         "--max-prs", type=int, default=400, help="Safety cap on PRs evaluated per run"
     )
     parser.add_argument(
+        "--rate-limit-reserve",
+        type=int,
+        default=200,
+        help="Stop the sweep rather than drive the shared hourly limit below this",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Print verdicts, post nothing"
     )
     args = parser.parse_args()
@@ -269,7 +352,10 @@ def main() -> int:
 
     enforcing = args.mode == "enforce"
     now = datetime.now(timezone.utc)
-    gh = GitHub(args.repo, token)
+    # A single PR triggered by its own event is worth spending reserve on; only
+    # the sweep can plausibly exhaust the shared allowance.
+    reserve = 0 if args.pr else args.rate_limit_reserve
+    gh = GitHub(args.repo, token, reserve=reserve)
 
     try:
         cutoff_sha = find_cutoff_commit(gh, args.base_branch, args.max_age_days, now)
@@ -279,14 +365,19 @@ def main() -> int:
         print(f"::warning::could not determine freshness cutoff, skipping run: {e}")
         return 0
 
-    if args.pr:
-        # Single-PR mode evaluates drafts too, so the status is already present
-        # if the PR is marked ready and merged before the next scheduled run.
-        prs = [fetch_pr(gh, args.pr)]
-    else:
-        prs = list_open_prs(
-            gh, args.base_branch, include_drafts=False, limit=args.max_prs
-        )
+    try:
+        if args.pr:
+            # Single-PR mode evaluates drafts too, so the status is already
+            # present if the PR is marked ready and merged before the next
+            # scheduled run.
+            prs = [fetch_pr(gh, args.pr)]
+        else:
+            prs = list_open_prs(
+                gh, args.base_branch, include_drafts=False, limit=args.max_prs
+            )
+    except GitHubError as e:
+        print(f"::warning::could not list pull requests, skipping run: {e}")
+        return 0
 
     target_url = None
     server, run_id = os.environ.get("GITHUB_SERVER_URL"), os.environ.get(
@@ -303,7 +394,11 @@ def main() -> int:
         )
 
     stale = []
+    skipped = []
     for pr, verdict in zip(prs, verdicts):
+        if verdict.skipped:
+            skipped.append(pr)
+            continue
         state = status_state(verdict, enforcing)
         description = describe(verdict, args.base_branch, args.max_age_days, enforcing)
         print(f"PR #{pr.number}: {state} - {description}")
@@ -319,13 +414,24 @@ def main() -> int:
         except GitHubError as e:
             print(f"::warning::could not post status for #{pr.number}: {e}")
 
+    if skipped:
+        # Loud on purpose. Before enforcement is switched on, a sweep that
+        # cannot finish within the shared allowance is a blocker, since a PR
+        # with no status at all would be stuck behind a required check.
+        print(
+            f"::warning::rate-limit reserve reached; {len(skipped)} of {len(prs)} "
+            f"PRs were not evaluated and have no status from this run"
+        )
+
+    evaluated = len(prs) - len(skipped)
     summary = [
         f"## Base freshness ({args.mode} mode)",
         "",
         f"Cutoff commit (`{args.base_branch}` tip {args.max_age_days} days ago): "
         f"`{cutoff_sha[:12]}`",
         "",
-        f"{len(stale)} of {len(prs)} evaluated PRs are stale.",
+        f"{len(stale)} of {evaluated} evaluated PRs are stale."
+        + (f" {len(skipped)} skipped for rate-limit reserve." if skipped else ""),
         "",
     ]
     if stale:
@@ -335,8 +441,9 @@ def main() -> int:
             summary.append(f"| #{pr.number} | {days} | {verdict.missing_commits} |")
         summary.append("")
     summary.append(
-        f"_{gh.request_count} API requests; rate limit remaining: "
-        f"{gh.rate_limit_remaining}_"
+        f"_{gh.request_count} API requests; rate limit "
+        f"{gh.rate_limit_remaining}/{gh.rate_limit_limit} remaining "
+        f"(reserve {gh.reserve})_"
     )
     write_summary(summary)
 

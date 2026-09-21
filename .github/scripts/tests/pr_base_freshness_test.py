@@ -7,6 +7,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import pr_base_freshness as pbf
 from pr_base_freshness import PullRequest, Verdict
@@ -24,10 +26,14 @@ def iso(days_ago: float) -> str:
 class FakeGitHub:
     """In-memory stand-in for the REST client, keyed by request path prefix."""
 
-    def __init__(self, responses: dict, failures: tuple = ()):
+    def __init__(self, responses: dict, failures: tuple = (), budget: int = 10_000):
         self._responses = responses
         self._failures = failures
+        self._budget = budget
         self.paths: list[str] = []
+
+    def has_budget(self, cost: int = 1) -> bool:
+        return self._budget >= cost
 
     def get(self, path: str, **params):
         self.paths.append(path)
@@ -85,6 +91,50 @@ class EvaluateTest(unittest.TestCase):
         verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
         self.assertTrue(verdict.fresh)
         self.assertIsNotNone(verdict.error)
+
+
+class BudgetTest(unittest.TestCase):
+    def test_pr_is_not_started_without_budget_to_publish_it(self):
+        gh = FakeGitHub({f"compare/{CUTOFF}": comparison("ahead")}, budget=1)
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        self.assertTrue(verdict.skipped)
+        self.assertEqual(gh.paths, [])
+
+    def test_cosmetic_dating_call_is_dropped_first(self):
+        # Enough budget to answer the question, not enough for the day count.
+        gh = FakeGitHub(
+            {f"compare/{CUTOFF}": comparison("diverged", behind_by=7)},
+            budget=pbf.REQUESTS_PER_PR,
+        )
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        self.assertFalse(verdict.skipped)
+        self.assertFalse(verdict.fresh)
+        self.assertEqual(verdict.missing_commits, 7)
+        self.assertIsNone(verdict.stale_days)
+        self.assertEqual(len(gh.paths), 1)
+
+    def test_reserve_governs_has_budget(self):
+        gh = pbf.GitHub("o/r", "t", reserve=200)
+        # Nothing observed yet, so the first request is always allowed.
+        self.assertTrue(gh.has_budget(50))
+        gh.rate_limit_remaining = 260
+        self.assertTrue(gh.has_budget(50))
+        self.assertFalse(gh.has_budget(61))
+
+    def test_request_exceptions_become_github_errors(self):
+        gh = pbf.GitHub("o/r", "t")
+
+        class ExplodingSession:
+            def request(self, *args, **kwargs):
+                raise requests.ConnectTimeout("connection timed out")
+
+        gh.session = ExplodingSession()
+        # A bare RequestException here would escape evaluate() and abort the
+        # whole run, so it must arrive as GitHubError with the cause kept.
+        with self.assertRaises(pbf.GitHubError) as caught:
+            gh.get("compare/a...b")
+        self.assertIsInstance(caught.exception.__cause__, requests.RequestException)
+        self.assertEqual(gh.request_count, 1)
 
 
 class ReportingTest(unittest.TestCase):
