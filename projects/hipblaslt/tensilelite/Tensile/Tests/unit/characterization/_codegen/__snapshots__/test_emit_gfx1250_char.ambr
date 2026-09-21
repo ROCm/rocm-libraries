@@ -20,6 +20,15 @@
       ]),
     }),
     dict({
+      'file': 'F4_MX_DecouplePGR_TDMFuse.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAbxPR5xpMTP865qDbOVLm5X1l1PwK97REDIyeUlymYNc=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
       'file': 'HHS.yaml',
       'kernels': list([
         dict({
