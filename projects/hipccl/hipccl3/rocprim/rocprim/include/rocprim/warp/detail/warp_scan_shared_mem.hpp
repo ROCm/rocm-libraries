@@ -117,7 +117,6 @@ public:
         T input, T& output, T& reduction, storage_type& storage, BinaryFunction scan_op, T init)
     {
         inclusive_scan(input, output, storage, scan_op, init);
-        ::rocprim::wave_barrier();
         compute_reduction(reduction, storage);
     }
 
@@ -132,7 +131,6 @@ public:
                                 T              init)
     {
         partial_inclusive_scan(input, output, valid_items, storage, scan_op, init);
-        ::rocprim::wave_barrier();
         compute_reduction(valid_items, reduction, storage);
     }
 
