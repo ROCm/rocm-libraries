@@ -7,8 +7,11 @@ Covers MaxWavesPerSimd cap enforcement and post-rocIsaPass VGPR-scan corrections
 for ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
 """
 
+import ast
+import inspect
 import os
 import shutil
+import textwrap
 from math import ceil
 from types import SimpleNamespace
 
@@ -19,6 +22,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from Tensile.SolutionStructs import Solution
 from rocisa import rocIsa
 
 
@@ -144,6 +148,107 @@ def test_gfx11_lds_limited_occupancy_uses_wgp_pool(lds_bytes, expected_occ):
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
                sgprs=66, ldsBytes=lds_bytes, doubleVgpr=False)
     assert occ == expected_occ
+
+
+# ---------------------------------------------------------------------------
+# The MaxOccupancy LDS floor divides the same pool as getOccupancy
+# ---------------------------------------------------------------------------
+
+# MaxOccupancy limits residency by padding a kernel's LDS up to
+# pool // MaxOccupancy, so the two must divide the same pool or the parameter's
+# unit disagrees with the quantity it controls.  It counts workgroups per CU
+# (CDNA) / per WGP (RDNA).
+
+def _extract_lds_occupancy_floor():
+    """Compile the MaxOccupancy floor out of Solution.depthUIteration into a
+    standalone callable, so the real arithmetic is exercised instead of a copy
+    of it that could silently drift."""
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(Solution.depthUIteration))
+    )
+
+    def _assigns(stmt, name):
+        return isinstance(stmt, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in stmt.targets
+        )
+
+    picked = None
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list):
+            continue
+        start = next((i for i, s in enumerate(body)
+                      if _assigns(s, "ldsPoolOccupancy")), None)
+        if start is None:
+            continue
+        end = next(i for i in range(start, len(body))
+                   if _assigns(body[i], "ldsSizeOccupancy"))
+        picked = body[start:end + 1]
+        break
+    assert picked is not None, "could not find the MaxOccupancy LDS floor"
+
+    picked.append(ast.Return(value=ast.Name(id="ldsSizeOccupancy", ctx=ast.Load())))
+    func = ast.FunctionDef(
+        name="_floor",
+        args=ast.arguments(
+            posonlyargs=[],
+            args=[ast.arg("state"), ast.arg("isa"), ast.arg("isaInfoMap")],
+            vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[],
+        ),
+        body=picked, decorator_list=[], returns=None, type_params=[],
+    )
+    mod = ast.Module(body=[func], type_ignores=[])
+    ast.fix_missing_locations(mod)
+    ns: dict = {}
+    exec(compile(mod, "<lds-occupancy-floor>", "exec"), ns)
+    return ns["_floor"]
+
+
+def _floor_for(isa, max_occupancy):
+    ri = _init_rocisa(isa)
+    isaInfoMap = {tuple(isa): SimpleNamespace(archCaps=ri.getArchCaps())}
+    return _extract_lds_occupancy_floor()(
+        {"MaxOccupancy": max_occupancy}, tuple(isa), isaInfoMap
+    )
+
+
+@pytest.mark.parametrize(
+    "isa,pool_multiplier",
+    [
+        ((11, 0, 0), 2),  # gfx1100 -- WGP pool
+        ((11, 5, 1), 2),  # gfx1151 -- WGP pool
+        ((9, 5, 0), 1),   # gfx950  -- per-CU, unchanged
+        ((9, 0, 8), 1),   # gfx908  -- per-CU, unchanged
+        ((12, 0, 0), 1),  # gfx12 keeps the legacy pool pending its own check
+    ],
+    ids=["gfx1100", "gfx1151", "gfx950", "gfx908", "gfx1200"],
+)
+def test_max_occupancy_floor_divides_the_arch_pool(isa, pool_multiplier):
+    """The floor is pool // MaxOccupancy, and gfx11's pool is 2 * DeviceLDS."""
+    device_lds = _init_rocisa(isa).getArchCaps()["DeviceLDS"]
+    assert _floor_for(isa, 40) == pool_multiplier * device_lds // 40
+
+
+@pytest.mark.parametrize("max_occupancy", [2, 4, 8, 16])
+def test_gfx11_floor_round_trips_through_getoccupancy(max_occupancy):
+    """A kernel padded to the floor reaches exactly MaxOccupancy workgroups.
+
+    This is the coupling that matters: getOccupancy divides the 128 KB WGP pool,
+    so the floor has to as well.  Powers of two are used because the 1024-byte
+    LDS granule rounds the floor up, which lands non-aligned values one
+    workgroup below their nominal target.
+
+    Stops at 16: getVgprOccupancy caps at MaxWavesPerSimd // multiplier, and its
+    multiplier still uses a hardcoded wave64 divisor, so no workgroup shape can
+    reach the 32/64 the LDS term would allow.  Lifting that is the separate
+    wave-size-multiplier fix.
+    """
+    isa = (11, 5, 1)
+    kw = _make_writer(_init_rocisa(isa), isa)
+    lds = _floor_for(isa, max_occupancy)
+    occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
+               sgprs=66, ldsBytes=lds, doubleVgpr=False)
+    assert occ == max_occupancy
 
 
 # ---------------------------------------------------------------------------
