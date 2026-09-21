@@ -136,11 +136,6 @@ TEST_P(ResizeTest, Correctness) {
 // up: enlarge the source ROI. down: shrink it (from the partial ROI this is scale 1, a verbatim
 // resize). Each exercised with nearest-neighbour and bilinear sampling.
 // Same-layout cases plus both directions of the fused output-layout conversion.
-//
-// oddratio_37x53 at 2x36x48 ties exactly on column 18 ((18.5) * 48/37 == 24.0), and the kernel
-// resolves that tie inconsistently with itself: HOST's scalar tail gives 24 and its _mm_fmadd_ps
-// body 23, HIP's roundf 23. No golden can match both, so those cases are skip-listed. 2x36x55 has
-// no column tie; the row tie at j = 26 agrees because 36/53 rounds up in float.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeTest,
     ::testing::ValuesIn(with_params<ResizeParams>(
