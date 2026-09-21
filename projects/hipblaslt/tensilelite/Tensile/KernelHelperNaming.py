@@ -188,6 +188,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
           state["GlobalSplitU"] = globalSplitU
           state["UnrollOnly"] = unrollOnly
           state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
+          state["_WorkspaceDataType"] = solution["_WorkspaceDataType"]
           state["ActivationFused"] = solution["ActivationFused"]
           appendConversionKernel(state, vw)
         for btype in typeList:
@@ -201,6 +202,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
           state["GlobalSplitU"] = globalSplitU
           state["UnrollOnly"] = unrollOnly
           state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
+          state["_WorkspaceDataType"] = solution["_WorkspaceDataType"]
           state["ActivationFused"] = solution["ActivationFused"]
           appendConversionKernel(state, vw)
       else:
@@ -212,6 +214,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
         state["GlobalSplitU"] = globalSplitU
         state["UnrollOnly"] = unrollOnly
         state["_GlobalAccumulation"] = solution["_GlobalAccumulation"]
+        state["_WorkspaceDataType"] = solution["_WorkspaceDataType"]
         state["ActivationFused"] = solution["ActivationFused"]
         appendConversionKernel(state, vw)
   return conversionKernelObjects

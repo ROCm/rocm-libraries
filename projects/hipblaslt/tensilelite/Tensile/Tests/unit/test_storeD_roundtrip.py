@@ -367,6 +367,7 @@ def _build_kwa(kernel, writer, use_bf16=False):
     kw.states.bpeCexternal    = bpeDest  # 2 for bf16, 4 for f32
     kw.states.bpeCinternal    = 4        # always fp32 accumulators
     kw.states.bpeCexternalGSU1 = bpeDest
+    kw.states.bpeCworkspace   = 4        # GSU workspace defaults to the compute width
     kw.states.bpeE            = 4   # E matrix bytes per element (UseE=False, so unused)
     kw.states.maxLimitAgprs   = 256  # gfx950 supports 256 agprs
     kw.states.useBias         = kw.states.useBias  # already DataDirection.NONE

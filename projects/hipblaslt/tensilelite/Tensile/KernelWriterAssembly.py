@@ -15671,7 +15671,7 @@ class KernelWriterAssembly(KernelWriter):
       if gsuLimit > 1:
         betas = betasBackup
         if gsuLimitIdx == 0:
-          self.states.bpeCexternal = self.states.bpeCinternal
+          self.states.bpeCexternal = self.states.bpeCworkspace
           if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
             self.states.useBias = self.states.useBias if self.states.useBias == DataDirection.WRITE else DataDirection.NONE
           if self.states.useBias == DataDirection.WRITE and kernel["ProblemType"]["BiasSrc"] == "D":

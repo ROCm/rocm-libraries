@@ -239,15 +239,20 @@ class GlobalWriteBatchWriter:
     Check if accumulation values need to be converted to destination type:
     1. HighPrecisionAccumulate is enabled (accumulator precision > output precision)
        e.g., F32 accumulator -> FP16/BF16/FP8/BF8/I32/I8 output
-    2. _GlobalAccumulation is not 'MultipleBuffer'
+    2. _GlobalAccumulation is not 'MultipleBuffer', or MultipleBuffer is storing
+       its partials narrower than the accumulator
 
     When True, the pack/convert module will be generated to perform:
     - F32 -> FP16/BF16 packing
     - F32 -> FP8/BF8 conversion (with optional stochastic rounding)
     - F32 -> I32/I8 conversion and packing
     """
+    computeDataType = self.kernel["ProblemType"]["ComputeDataType"]
+    # Solution.py only ever narrows the workspace to DestDataType, so the pack
+    # module below can keep branching on DestDataType.
+    narrowWorkspace = self.kernel.get("_WorkspaceDataType", computeDataType) != computeDataType
     return self.kernel["ProblemType"]["HighPrecisionAccumulate"] and \
-           (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer')
+           (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer' or narrowWorkspace)
 
   @property
   def skipRearrangement(self) -> bool:

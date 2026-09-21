@@ -7789,9 +7789,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.bpeCinternal = int(self.states.bpr * kernel["ProblemType"]["ComputeDataType"].numRegisters())
 
     self.states.bpeCexternalGSU1 = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
+
+    # Width of one element in the GSU partial-sum workspace. Every site that
+    # addresses the workspace must scale by this rather than by bpeCinternal,
+    # otherwise the GEMM write and the reduction read disagree on the layout.
+    workspaceDataType = kernel.get("_WorkspaceDataType", kernel["ProblemType"]["ComputeDataType"])
+    self.states.bpeCworkspace = int(self.states.bpr * workspaceDataType.numRegisters())
+
     self.states.bpeCexternal = self.states.bpeCexternalGSU1
     if kernel["GlobalSplitU"] > 0 and kernel["_GlobalAccumulation"] and kernel["_GlobalAccumulation"] != 'PartialsBuffer':
-      self.states.bpeCexternal = self.states.bpeCinternal
+      self.states.bpeCexternal = self.states.bpeCworkspace
 
 
     # special case for wmma h and b
