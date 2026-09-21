@@ -23,7 +23,7 @@ PROFILE=/absolute/path/to/authoring.profile.yaml
 SHAPES=/absolute/path/to/request-shapes.json
 CORPUS_DIR=/absolute/path/to/graph-corpora
 ARCH=gfx942
-ENGINE=hipkernel:Gfx942AttentionDense
+ENGINE=hipkernel:Gfx942AttentionDense   # illustrative: your own bundle's engine name
 ```
 
 Use [generator setup](../../../IngestorGenerator/README.md#setup). Authoring/mining
@@ -287,15 +287,19 @@ selection is per-UKD on `kernel_source.kind`, so one root feeds every producer.
 
 Production packaging is wired on exactly one condition — the root named by
 `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` holds at least one **non-hidden
-`*.kdp.json`**. This branch supplies it in tree:
-`$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx942_attention_dense/`,
-a six-file bundle — KDP, KMD, UED, UDD, UHD and one shared UMD — whose KDP declares
-four kernels of kind `rocke`. Standalone UKDs, kernel sources and READMEs do not
-by themselves make a pack, because a KDP is what arch pruning consumes.
+`*.kdp.json`**. Standalone UKDs, kernel sources and READMEs do not by themselves make
+a pack, because a KDP is what arch pruning consumes.
+
+That root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`, and it holds
+no bundle, so a default configure leaves production packaging dormant. **Supply your
+own bundle under it** — or point the cache variable at a root that has one — before
+expecting any of the production-pack steps below to produce output, and substitute your
+bundle's own name wherever a bundle path appears below. `descriptors/README.md` carries
+the authoring rules that root enforces, including the native pack whose symbols a
+bundle's UKDs must name before it serves.
 
 With no KDP under the root, production packaging is **dormant**, any stale product
-tree from an earlier configure is removed, and neither is an error — a consumer sees
-that path only by overriding the cache variable at an empty directory. A KDP that
+tree from an earlier configure is removed, and neither is an error. A KDP that
 *is* present but is pruned on every arch remains a **hard failure** for a root this
 build NAMED, since naming a root asserts it ships here: the gate separates "nothing to
 ship" from "something to ship that did not". The built-in default root goes **dormant**
@@ -518,17 +522,20 @@ A missing/invisible installation fails even if early feasibility passed. Use
 
 Do not accept the helper's first provider-prefixed command as exact-engine proof.
 The provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`**,
-not `$INSTALL`; substitute the configured bindir if customized. For gfx942 dense:
+not `$INSTALL`; substitute the configured bindir if customized. The gfx942 dense
+names below are illustrative — the production descriptor root ships no bundle, so
+no such target is registered; substitute your own bundle's target and engine ID:
 
 ```bash
 CTEST_ROOT="$INSTALL/bin/hip_kernel_provider"
-DEVICE_TEST=hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests
+DEVICE_TEST=hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests   # illustrative: your own bundle's CTest target
 ctest --test-dir "$CTEST_ROOT" -N -V -R "^${DEVICE_TEST}$"
 ```
 
-Require exactly that registration. Inspect its command/config for
-`hipkernel:Gfx942AttentionDense`, installed executable/plugin/config paths and the
-intended quick/standard selection. Then execute:
+Require exactly your bundle's registration. Inspect its command/config for that
+bundle's engine ID — `hipkernel:Gfx942AttentionDense` in the illustration —
+installed executable/plugin/config paths and the intended quick/standard
+selection. Then execute:
 
 ```bash
 ctest --test-dir "$CTEST_ROOT" --no-tests=error -V -R "^${DEVICE_TEST}$"

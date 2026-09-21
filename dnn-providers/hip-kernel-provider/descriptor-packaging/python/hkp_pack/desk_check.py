@@ -109,11 +109,30 @@ class DeskCheckNoSpecFound(RuntimeError):
     wrong", which is a dead check."""
 
 
+def _selected(kdp_path: Path, matches: list):
+    """The one indexed KDP the caller's path names.
+
+    A path matching nothing is a mistyped or nonexistent argument, which is a
+    reportable finding about the artifact rather than a fault in this tool --
+    so it raises `HkpPackError` naming the path instead of escaping as a
+    `StopIteration` traceback out of a gate.
+    """
+    if not matches:
+        raise HkpPackError(
+            f"{kdp_path}: the descriptor index under {kdp_path.parent} holds no "
+            f"KDP at this path -- the argument must name an existing "
+            f"`.kdp.json` file."
+        )
+    return matches[0]
+
+
 def _resolve(kdp_path: Path) -> tuple[dict, list[descriptor_context.Entry]]:
     """One `.kdp.json`'s own document and its resolved entries."""
     kdp_path = Path(kdp_path).resolve()
     index = descriptor_context.Index(str(kdp_path.parent))
-    kdp = next(d for d in index.of_type("kdp") if Path(d.path) == kdp_path)
+    kdp = _selected(
+        kdp_path, [d for d in index.of_type("kdp") if Path(d.path) == kdp_path]
+    )
     return kdp.doc, descriptor_context.resolve_entries(index, kdp)
 
 
@@ -261,7 +280,7 @@ def compiled_agreement(
     index = descriptor_context.Index(str(kdp_path.parent))
     schemas = index.schemas()
     bundles = descriptor_context.resolve_bundles(index)
-    bundle = next(b for b in bundles if Path(b.kdp_path) == kdp_path)
+    bundle = _selected(kdp_path, [b for b in bundles if Path(b.kdp_path) == kdp_path])
     doc, engine, kmd = bundle.kdp_doc, bundle.engine, bundle.kmd
     arches = doc.get("arch") or []
     if len(arches) != 1:

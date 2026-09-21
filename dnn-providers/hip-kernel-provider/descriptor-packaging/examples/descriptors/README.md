@@ -5,13 +5,11 @@ exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE hal
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
 This is a **test fixture** tree, not a production one. It is read by the packaging
-suite's real-bundle regressions and is no longer wired as a production source root.
+suite's real-bundle regressions and is not wired as a production source root.
 The shipped root is `src/engines/kernel_ingestor_engine/descriptors/`, the default of
-the `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` cache variable, and it is populated:
-production packaging is wired whenever that root holds at least one non-hidden
-`*.kdp.json`. A consumer meets the dormant path only by overriding the variable at a
-root holding none, where the pack step ships nothing, removes any stale product tree
-and reports neither as an error.
+the `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` cache variable, and it holds no bundle,
+so a default configure packs no product at all. That root's README states the gate and
+the rules a bundle authored there has to meet.
 
 ## Disposition
 
@@ -20,12 +18,10 @@ and reports neither as an error.
 | `hip/pointwise_add/` | not shipped — CI production-path exercise, and layout fixture |
 | `rocKE/gfx942_tiled_attention/` | not shipped — CI production-path exercise, and layout fixture |
 
-Neither set reaches a product build: `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` is empty by
-default, so nothing points at this tree and no install rule copies it. Two things do use it.
-`hipdnn-superbuild-ci.yml` points the production source root here in the Linux lane, which is
-the only place the production packaging path runs end to end. `test_hkp_pack_layout.py` packs
-the tree directly, which is what makes its layout assertion strict: changing anything here
-changes what those tests pin.
+Neither set reaches a product build: no CMake rule packs this tree and no install rule
+copies it. `test_hkp_pack_layout.py` packs the tree directly, which is what makes its
+layout assertion strict, and `test_desk_check_invariants.py` reads its bundles as real
+authored input: changing anything here changes what those tests pin.
 
 ## Layout
 
@@ -93,16 +89,11 @@ for every nested one.
 ## Why this rocKE builder
 
 `build_unified_attention_2d_tiled` rather than `build_attention_dense`. **Both are
-accepted.** `build_attention_dense` was once this corpus's one genuine refusal — it
-took a keyword-only `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` that no descriptor
-could set, so packing it would have silently frozen a performance knob — but PR
-#11237 folded that parameter into the spec dataclass, and it now satisfies
-`(spec, *, arch)` like every other builder. The gate itself has not weakened:
-`tests/test_hkp_pack_producer_guards.py` still covers all four rejection shapes
-synthetically (a keyword-only extra, a `**kwargs`, a second positional, and the
-accepting case).
+accepted.** No builder in this corpus is refused, so the packer's rejection shapes are
+covered synthetically instead — `tests/test_hkp_pack_producer_guards.py` exercises a
+keyword-only extra, a `**kwargs`, a second positional, and the accepting case.
 
-So both carry the `(spec, *, arch)` signature the packer requires, and each has a
+Both carry the `(spec, *, arch)` signature the packer requires, and each has a
 regression test holding it there (`test_real_gfx942_tiled_2d_is_accepted`,
 `test_real_gfx942_attention_dense_is_accepted`), which makes the choice here about
 which one models a shipped descriptor. The tiled builder's spec is compile-time
@@ -119,8 +110,7 @@ registered, and today that is `hipkernel.pointwise.*` and `hipkernel.conv.*` —
 is no rocKE/attention pack. So this tree proves the **packaging** path for rocKE:
 authored descriptor → comgr-lowered kernel → kpack archive → install layout, with the
 per-UKD `kind` dispatch exercised for real. It does **not** prove a rocKE-specific
-runtime dispatch; that needs a native pack nobody has written yet. Writing one is the
-next step toward a true rocKE end-to-end.
+runtime dispatch; that needs a native pack nobody has written yet.
 
 The descriptors here are authored against the schema the C++ loader enforces,
 modelled on `src/engines/kernel_ingestor_engine/test_descriptors/`.

@@ -39,9 +39,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[5]
 #: describes -- so any of the three serves, and accepting all three is what stops a
 #: reader who set `test_launch_surface.py`'s per-arch pair from being silently
 #: skipped by this module. gfx942 precedes gfx950 because `_EXPECT_ENGINE`'s default
-#: names the gfx942 bundle this branch ships; with both set, that is the one more
-#: likely to match the build under test. The chosen profile and `_EXPECT_ENGINE` must
-#: name the same pack.
+#: names a gfx942 engine; with both set, that is the one more likely to match the
+#: build under test. The chosen profile and `_EXPECT_ENGINE` must name the same pack.
 _PROFILE_VARS = (
     "HIPDNN_INGESTOR_PROFILE",
     "HIPDNN_INGESTOR_PROFILE_GFX942",
@@ -50,13 +49,15 @@ _PROFILE_VARS = (
 
 #: The engine name the packed tree under test must expose. Overridable for the same
 #: reason the profile is: it identifies a specific pack, not a property of the tool.
-#: The default is the engine the provider's shipped production bundle declares
-#: (`src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx942_attention_dense/`),
-#: because `_find_build_artifacts` below probes a PACKED tree and that bundle is what
-#: a build of this branch packs into one. A generator config under `configs/` is an
-#: author's input that no build wires, so naming an engine only a config mentions
-#: would reject every build dir and turn this class into a skip no machine can
-#: satisfy.
+#: The default names a rocKE gfx942 attention-dense engine -- the shape an author
+#: bundles under the provider's production root
+#: (`src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>/`), which is
+#: the only place a bundle reaches the PACKED tree `_find_build_artifacts` probes.
+#: That root ships empty, so an author running this gate points
+#: `HIPDNN_INGESTOR_ENGINE` at the engine their own bundle declares. A generator
+#: config under `configs/` is an author's input that no build wires, so naming an
+#: engine only a config mentions would reject every build dir and turn this class
+#: into a skip no machine can satisfy.
 _EXPECT_ENGINE = os.environ.get(
     "HIPDNN_INGESTOR_ENGINE", "hipkernel:Gfx942AttentionDense"
 )

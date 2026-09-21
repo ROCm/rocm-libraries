@@ -49,10 +49,10 @@ class TestFragmentsAgreeWithEachOther:
     ):
         """A kpack engine owns a module cache and MUST drop it.
 
-        `TestIngestorPacksModuleCacheOwnership` asserts only
-        `ownsModuleCache == (resetModuleCache != nullptr)`, which `false, nullptr`
-        satisfies -- so a packaged engine left at the default passes there while
-        never dropping its cache.
+        The reset sweep branches on `resetModuleCache != nullptr` alone, and a
+        `nullptr` row reads as a pack with no archive to drop -- so a packaged
+        engine left at the default is well-formed everywhere while never dropping
+        its cache.
         """
         config = gfx950_attention_dense_config
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
@@ -64,7 +64,7 @@ class TestFragmentsAgreeWithEachOther:
             "fragments/ingestor_packs_hpp.j2", config, ids=ids
         )
         row = next(line for line in cpp.splitlines() if line.strip().startswith('{"'))
-        assert "true" in row and "nullptr" not in row, (
+        assert "nullptr" not in row, (
             f"packaged engine emitted a non-owning row: {row!r} -- a kpack engine "
             "that never drops its module cache passes every existing test"
         )
@@ -122,9 +122,11 @@ class TestFragmentsAgreeWithEachOther:
             if rel.endswith(".cpp"):
                 assert "ModuleCache" not in (tmp_path / rel).read_text(), rel
 
-    def test_a_direct_load_engine_stays_non_owning(self, generator, scale_add_config):
+    def test_a_direct_load_engine_keeps_a_null_reset_pointer(
+        self, generator, scale_add_config
+    ):
         """Without this, the test above passes trivially against a template that
-        emits `true` unconditionally."""
+        emits a reset pointer unconditionally."""
         assert not scale_add_config.is_packaged
         cpp = generator._render_template(
             "fragments/ingestor_packs_cpp.j2",
@@ -132,7 +134,7 @@ class TestFragmentsAgreeWithEachOther:
             ids=mint_ids(scale_add_config),
         )
         row = next(line for line in cpp.splitlines() if line.strip().startswith('{"'))
-        assert "false" in row and "nullptr" in row, row
+        assert "nullptr" in row, row
 
     def test_cmake_test_sources_names_files_this_generator_actually_writes(
         self, generator, scale_add_config, tmp_path

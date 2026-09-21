@@ -226,6 +226,15 @@ def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
             declaration = agreement.select_declaration(
                 entry.ukd, bundle.engine, bundle.kmd, schemas, enclosing
             )
+            if "id" not in entry.ukd:
+                # Only an INLINE entry can arrive without one: a standalone UKD
+                # is reached through `by_id`, which indexes nothing id-less.
+                raise DescriptorContextError(
+                    f"{os.path.basename(bundle.kdp_path)}: inline kernel "
+                    f"descriptor {entry.ukd.get('name')!r} declares no 'id', so "
+                    f"its consumer records cannot be keyed and nothing here can "
+                    f"say which kernel a producing-build record belongs to."
+                )
             collected.setdefault(entry.ukd["id"], []).append(
                 agreement.consumer_record(
                     entry.ukd, bundle.engine, bundle.kmd, header, arch, declaration

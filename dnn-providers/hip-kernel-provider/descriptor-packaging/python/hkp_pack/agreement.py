@@ -261,15 +261,27 @@ class OriginObserver:
     def __init__(self):
         self.files = {}
 
+    def _record(self, path, sha):
+        """The one way a file identity enters `files`; `path` is already resolved.
+
+        A second SHA for a path already recorded means the defining file was
+        edited between two observations, which is the condition this observer
+        exists to catch. Every entry goes through here -- assigning into
+        `files` elsewhere, or folding another observer in with `dict.update`,
+        would overwrite the earlier SHA with the later one and retire the check
+        exactly where it matters.
+        """
+        if path in self.files and self.files[path] != sha:
+            raise HkpPackError(f"producer changed during compilation: {path}")
+        self.files[path] = sha
+
     def identity(self, obj):
         obj = getattr(obj, "__func__", obj)
         try:
             path = Path(inspect.getsourcefile(obj)).resolve(strict=True)
             content = path.read_bytes()
             sha = hashlib.sha256(content).hexdigest()
-            if path in self.files and self.files[path] != sha:
-                raise HkpPackError(f"producer changed during compilation: {path}")
-            self.files[path] = sha
+            self._record(path, sha)
             return {
                 "module": obj.__module__,
                 "qualname": obj.__qualname__,
@@ -277,6 +289,31 @@ class OriginObserver:
             }
         except (TypeError, OSError, AttributeError) as exc:
             raise HkpPackError(f"unresolvable producer origin: {obj!r}: {exc}") from exc
+
+    def exported(self):
+        """This observer's identities as a plain, picklable mapping.
+
+        `str` keys rather than `Path`: the map crosses a process boundary, and
+        a plain string is the one spelling both sides can build for a file
+        without either having to agree on a path flavour. `absorb` resolves
+        them back.
+        """
+        return {str(path): sha for path, sha in self.files.items()}
+
+    def absorb(self, exported):
+        """Fold in identities observed elsewhere, typically a worker process.
+
+        A variant compiled in a pool observes its producer against a fresh
+        observer, so the cross-variant property -- one stable producing
+        invocation behind every variant in a pack -- exists only once those
+        observations reach the one observer that spans the arch.
+
+        Each key resolves here so a worker's string and this process's `Path`
+        land on one entry; two spellings file one file twice and let a real SHA
+        disagreement pass as two unrelated producers.
+        """
+        for path, sha in exported.items():
+            self._record(Path(path).resolve(), sha)
 
     def stable(self):
         for path, sha in self.files.items():

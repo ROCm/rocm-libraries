@@ -365,11 +365,10 @@ per-shape with a named knob set. See below.
 
 ## Generated variant sets: `variants`
 
-A generated set is written one YAML block per kernel. The largest shipped gfx942
-attention_dense config was **89,265 lines for 2,710 kernels**, committed compressed
-because that was the only way it fit. Compression is not the fix: the file is
-unreadable either way, and it is the ONE file worth reviewing in a descriptor PR,
-because the descriptors are its deterministic output.
+A generated set is written one YAML block per kernel. Enumerated, a gfx942
+attention_dense set runs to **89,265 lines for 2,710 kernels**, and it is the ONE file
+worth reviewing in a descriptor change, because the descriptors are its deterministic
+output. Compressing it is not the fix — it is unreadable either way.
 
 `variants` states what the enumeration stands for -- **about 1,150 lines for the same
 2,710 kernels**, generating byte-identical descriptors:
@@ -550,7 +549,8 @@ templates. Missing prerequisites produce an explicit skip, not compiler proof.
 Contracts between the fragments this generator emits, checked against each other.
 `IngestorPacks.hpp` and the `IngestorPacks.cpp` `s_packs` row must name the same
 register function; a packaged engine must carry a real reset pointer whose symbol is
-defined somewhere, and a direct-load engine must define none and stay non-owning;
+defined somewhere, and a direct-load engine must define none and leave that pointer
+null;
 `cmake_test_sources.txt` must name files this generator's own run actually wrote.
 The census case pin must be exactly the case set the emitted suite renders, must
 follow the suite's conditional arms, and must survive the wire to the binary. The

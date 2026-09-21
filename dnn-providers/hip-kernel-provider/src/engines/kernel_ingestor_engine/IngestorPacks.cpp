@@ -13,16 +13,17 @@ const std::vector<IngestorPack>& ingestorPacks()
     // Function-local static: entries are plain function pointers, so this cannot fail
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
-        {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, true, &resetConvFwdModuleCache},
+        {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
     };
     return s_packs;
 }
 
 void resetIngestorModuleCachesForTesting()
 {
-    // Driven off the same table as registration, so a pack that gains a kpack cache
-    // cannot be left out of the reset by someone who only edited its own file.
+    // Walks the registration table rather than a list of its own, so the sweep and the
+    // inventory cannot drift apart as two lists. A pack that acquires a kpack cache but
+    // leaves resetModuleCache null is still skipped, silently.
     for(const auto& pack : ingestorPacks())
     {
         if(pack.resetModuleCache != nullptr)

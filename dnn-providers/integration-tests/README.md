@@ -243,11 +243,14 @@ compute something wrong, each plan declines the graph up front:
 | Graph feature | Attribute | Declined at |
 |---|---|---|
 | paged KV | `page_table_k/v_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp`, `SdpaFwdPlan.hpp` |
-| varlen sequence lengths | `seq_len_q/kv_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp` |
+| varlen sequence lengths | `seq_len_q/kv_tensor_uid` (node) | both |
 | ragged tensors | `ragged_offset_tensor_uid` (**tensor**) | `PlanUtils.hpp`, `CHECK_NO_RAGGED_TENSORS` |
 | block-sparse | `block_mask_tensor_uid` (node) | both |
 | sinks | `sink_token_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp`, `SdpaFwdPlan.hpp` |
-| dropout, FP8 descale, softmax stats | assorted | both |
+| dropout | `dropout_probability`, `seed/offset/dropout_mask/dropout_scale/rng_dump_tensor_uid` (node) | both |
+| max / running-sum softmax stats | `max_tensor_uid`, `sum_exp_tensor_uid` (node) | both |
+| softmax/output (de)quantization | `descale_s/scale_s/scale_o/amax_s/amax_o_tensor_uid` (node) | both |
+| FP8 q/k/v descale | `descale_q/k/v_tensor_uid` (node) | `GpuSdpaFwdSignatureKey.hpp` (no FP8 plan registered) |
 
 **A sink-bearing graph requires a sink-capable numerical reference.** A sink is an
 extra per-head logit in the softmax denominator, but neither the current CPU
@@ -257,6 +260,28 @@ Use an actually capable, independently verified reference with evidence covering
 the graph's sink semantics, or record the workflow as **BLOCKED**. Unverified
 expected output, including a golden tensor without a capable reference behind it,
 does not satisfy this requirement.
+
+**Log-sum-exp stats are supported; the other softmax stats are not.** Both plans accept
+`stats_tensor_uid` as a FLOAT log-sum-exp output, so a stats-bearing graph is verified
+rather than skipped — the `hd128_nomask_batch_stats/SmallStats` bundles under
+`integration-test-bundles/quick/SdpaFwd/bhsd/{bf16,fp16}` exercise exactly that. The two
+plans disagree on its rank: `GpuSdpaFwdPlan` squeezes a trailing unit dim
+(`squeezeTrailingUnitDim`) because `GpuFpReferenceSdpa::fprop` takes rank-3 `[B, H, Sq]`,
+while `SdpaFwdPlan` passes the tensor through unchanged because
+`CpuFpReferenceSdpa::forward` requires the graph-conventional rank-4 `[B, H, Sq, 1]`. A
+rank-4 stats tensor satisfies both; a rank-3 one passes both `isApplicable` checks and
+then throws inside the CPU reference.
+
+**FP8 q/k/v descaling is a GPU-reference gap, not a shared one.** The CPU plan
+(`SdpaFwdPlan.hpp`) models q/k/v descales: an FP8 q/k/v graph must supply all three of
+`descale_q/k/v_tensor_uid` and a non-FP8 graph must supply none. The GPU reference
+registers no FP8 plan (`GpuSdpaFwdSignatureKey.hpp`), so in `auto` mode an FP8 graph
+falls through to the CPU reference rather than skipping — but only if it matches the
+single FP8 signature in the CPU registry, `FP8_E4M3` q/k/v with a `BFLOAT16` output
+(`SdpaFwdSignatureKey.hpp`), and carries no separately declined feature. Any other FP8
+combination is a CPU capability miss, and the checked-in `bhsd/fp8/hd128_causal_group`
+bundles match the signature but also carry `seq_len_q/kv_tensor_uid`, so both plans
+decline them.
 
 In `auto` mode a declined graph falls through golden → GPU → CPU → **skip**, so a bundle
 for an unsupported feature reports as skipped rather than failing. A skip is not

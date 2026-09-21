@@ -1392,9 +1392,34 @@ function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
         NAME "${_name}"
         COMMAND "$<TARGET_FILE:${_target}>"
                 "--gtest_filter=${_filter}")
+    # TEST_ENVIRONMENT (ASAN symbolizer path, HSA_XNACK, the MIOpen cache redirect) goes
+    # FIRST and the census-specific entries LAST: CTest resolves a repeated variable to
+    # its last occurrence, so a census value wins any collision with an ambient one.
+    set(_merged_environment "")
+    if(DEFINED TEST_ENVIRONMENT)
+        list(APPEND _merged_environment ${TEST_ENVIRONMENT})
+    endif()
+    list(APPEND _merged_environment ${_environment})
+
+    # A census run is one host-only process -- one shard's packs loaded once, then one
+    # suite filtered to itself, no device and no compile -- so it lands in seconds. 300
+    # absorbs the order-of-magnitude slowdown a sanitizer build adds and still fails at a
+    # fifth of ctest's 1500 s default.
     set_tests_properties("${_name}" PROPERTIES
-        ENVIRONMENT "${_environment}"
-        LABELS "unit_test;hip-kernel-provider;host")
+        ENVIRONMENT "${_merged_environment}"
+        LABELS "unit_test;hip-kernel-provider;host"
+        TIMEOUT 300)
+
+    # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs) go through
+    # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced, which
+    # a literal PATH= entry in ENVIRONMENT cannot do. It needs a guard of its own: it is
+    # Windows-only and only under BUILD_ADDRESS_SANITIZER, while TEST_ENVIRONMENT is also
+    # defined for both THEROCK_SANITIZER ASAN flavours.
+    if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+        set_tests_properties("${_name}" PROPERTIES
+            ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+    endif()
+
     if(_pass_regex)
         set_tests_properties("${_name}" PROPERTIES
             PASS_REGULAR_EXPRESSION "${_pass_regex}")
@@ -1414,7 +1439,16 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(_hkp_add_census_entry _target _suite _arch _shard _cases)
     set(_name "hip-kernel-provider-hkp-census-${_arch}-${_suite}")
-    set(_common "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_arch}")
+    # HIPDNN_DESCRIPTOR_RUNTIME_DIR is pinned empty because descriptorSearchDirectories()
+    # APPENDS it to the explicit root rather than being overridden by one: left ambient,
+    # an export at a multi-arch tree hands every entry below a second shard and draws a
+    # refusal that the root spans shards -- about a root that is fine. Empty is what the
+    # loader already treats as absent, so this clears the append rather than naming a path.
+    #
+    # Split at the expected arch so the control that varies only that value rebuilds the
+    # rest from the same string rather than keeping a copy that can drift.
+    set(_env_without_arch "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_DESCRIPTOR_RUNTIME_DIR=")
+    set(_common "${_env_without_arch};HIPDNN_TEST_EXPECTED_ARCH=${_arch}")
     set(_pin "")
     if(_cases)
         set(_pin ";HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases}")
@@ -1444,6 +1478,18 @@ function(_hkp_add_census_entry _target _suite _arch _shard _cases)
     _hkp_add_census_test("${_name}-control-absent-root" "${_target}" "${_suite}.*"
                          "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}-hkp-census-control-absent${_pin}"
                          "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing explicit HIPDNN_DESCRIPTOR_DIR")
+
+    # Control: the loaded packs carry a stamp other than the expected one. Identical to
+    # the entry but for the expected arch, which no build can pack: 'gfxhkpcensuscontrol'
+    # fails hkp_selected_arches()'s ^gfx[0-9a-f]+$ filter, the only path by which an arch
+    # reaches a shard name, so no future GPU_TARGETS value can quietly make it pass. A
+    # foreign shard would reach the same branch but only where a second arch is
+    # configured; this registers unconditionally. The regex is the stamp comparison's own
+    # wording -- no other refusal reports the stamps it found -- so the leading clause
+    # -control-absent-root shares cannot satisfy it.
+    _hkp_add_census_test("${_name}-control-unexpected-stamp" "${_target}" "${_suite}.*"
+                         "${_env_without_arch};HIPDNN_TEST_EXPECTED_ARCH=gfxhkpcensuscontrol;HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}"
+                         "packs loaded from this root carry the stamps")
 
     # Control: the pin expects a case the suite does not register. Identical to the
     # entry but for one extra name, so every real case still passes and the name
@@ -1612,4 +1658,20 @@ function(hkp_register_census_tests)
                                   "${_census_expected_cases}")
         endforeach()
     endforeach()
+
+    # The loop above add_test()'d every entry in THIS directory scope -- a CMake
+    # function opens none of its own -- so the YAML's regex patterns reach them
+    # through the parser's directory-property enumeration; see hkp_register_tests()
+    # above for why EXPLICIT_TESTS is not used. The tiers a category expands to are
+    # the parser's to compute, which is why _hkp_add_census_test()'s literal LABELS
+    # string cannot carry them. The call sits after the loop because every return
+    # above it registers nothing.
+    #
+    # The same YAML hkp_register_tests() applies: one block per tier covering both
+    # families this file pre-registers, so a tier added for one cannot drift from
+    # the other.
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    endif()
 endfunction()

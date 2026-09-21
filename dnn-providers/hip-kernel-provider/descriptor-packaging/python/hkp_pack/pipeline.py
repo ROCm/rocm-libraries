@@ -530,16 +530,22 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
 def _compile_one_variant(job):
     """Compile one variant in a worker process, returning a result tuple.
 
-    `(vk, co_path, symbol, None, observations)` on success,
-    `(vk, None, None, "Name: text", None)` on any failure. Failures are
+    `(vk, co_path, symbol, None, observations, origins)` on success,
+    `(vk, None, None, "Name: text", None, {})` on any failure. Failures are
     returned rather than raised: rocke and comgr
     exceptions are not guaranteed picklable, and an exception that cannot cross
     the process boundary takes the diagnosis with it.
+
+    `origins` is this variant's producer file identities in picklable form. A
+    worker cannot share the parent's observer, so returning them is the only
+    route by which a pooled variant reaches the cross-variant producer check
+    (`agreement.OriginObserver.absorb`).
 
     No key is computed here. `job.vk` was computed in the parent, under
     whatever key functions were in force there; a key recomputed in the child
     would resolve the real functions and disagree with the walk.
     """
+    origins = agreement.OriginObserver()
     try:
         observations = {}
         ks = job.ukd["kernel_source"]
@@ -564,6 +570,7 @@ def _compile_one_variant(job):
                 job.arch,
                 job.out_dir,
                 job.requests,
+                origins,
             )
         else:
             # Unreachable while `_variant_key_for` keys only these two kinds. A
@@ -574,8 +581,8 @@ def _compile_one_variant(job):
                 f"no variant compiler for kernel source kind '{job.kind}'"
             )
     except Exception as exc:
-        return job.vk, None, None, f"{type(exc).__name__}: {exc}", None
-    return job.vk, str(co_path), symbol, None, observations
+        return job.vk, None, None, f"{type(exc).__name__}: {exc}", None, {}
+    return job.vk, str(co_path), symbol, None, observations, origins.exported()
 
 
 def _cgroup_v2_cpu_quota():
@@ -741,7 +748,12 @@ def _prewarm_variants(
 
     The walk then finds each key already present and skips the expensive call.
     Records, symbols and doc rewriting stay entirely the walk's: this only
-    populates two dicts.
+    populates the variant caches.
+
+    Returns one producer-origin map per compiled variant, as its worker
+    observed it. The caller must fold these into the observer spanning the
+    arch: a prewarmed variant is read out of the cache by the walk and
+    observed nowhere else.
 
     Fails fast, matching the serial path: the first failing variant in walk
     order raises and the queued jobs are cancelled, so a broken builder costs
@@ -756,7 +768,9 @@ def _prewarm_variants(
 
     workers = _pack_jobs()
     if len(jobs) < 2 or workers < 2:
-        return
+        # Nothing was compiled here, so the walk observes every producer
+        # against the caller's own observer.
+        return []
     workers = min(workers, len(jobs))
     log(f"hkp_pack: compiling {len(jobs)} variants for {arch} on {workers} workers")
 
@@ -810,10 +824,13 @@ def _prewarm_variants(
             f"{failure[3]}"
         )
 
-    for vk, co_path, symbol, _err, observations in results:
+    origins = []
+    for vk, co_path, symbol, _err, observations, variant_origins in results:
         variant_co[vk] = Path(co_path)
         variant_symbol[vk] = symbol
         variant_observations[vk] = observations
+        origins.append(variant_origins)
+    return origins
 
 
 def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
@@ -843,7 +860,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
     passthrough_standalone_ukds = {}
     ukd_by_id = flat.ukd_by_id()
 
-    _prewarm_variants(
+    prewarmed_origins = _prewarm_variants(
         flat,
         source_root,
         arch,
@@ -855,6 +872,8 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
         observation_requests,
         log,
     )
+    for variant_origins in prewarmed_origins:
+        origins.absorb(variant_origins)
 
     for kdp in flat.kdps():
         doc = kdp.doc

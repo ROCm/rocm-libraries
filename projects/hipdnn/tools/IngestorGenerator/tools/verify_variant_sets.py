@@ -81,7 +81,7 @@ class Profile:
 
     A profile is a small JSON/YAML document beside the generator config::
 
-        bundle: gfx942_attention_dense
+        bundle: <bundle-folder-name>
         vocabulary:
           dtype: [BF16, FP16]
 

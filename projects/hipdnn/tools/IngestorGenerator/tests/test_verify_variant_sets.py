@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -35,6 +36,7 @@ import verify_variant_sets as gate_module  # noqa: E402
 sys.path.insert(0, str(gate_module._agreement_python_root()))
 
 from hkp_pack import agreement  # noqa: E402
+from hkp_pack.kpack_resolver import load_kpack  # noqa: E402
 
 _KMD_ID = "11111111-1111-1111-1111-111111111111"
 _UED_ID = "22222222-2222-2222-2222-222222222222"
@@ -1068,12 +1070,29 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
         assert "COMPILED SPECIALIZATION AGREEMENT" in capsys.readouterr().out
 
 
+# TestRealArchiveSelectedConsumer is the one class that builds a real kpack archive:
+# the single exception to the no-producer property the module docstring states. It is
+# carried as a skip rather than a hard failure, so a checkout without rocm_kpack keeps
+# that property.
+_NO_ROCM_KPACK = (
+    "rocm_kpack is not installed and HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset; set it "
+    "to the rocm-kpack 'python' directory to run this class"
+)
+
+
 @pytest.fixture
 def real_archive():
     """Real rocm-kpack serialization; the payload is deliberately non-executable."""
-    from hkp_pack.kpack_resolver import load_kpack
-
     python_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
+
+    # Only a genuinely absent dependency skips. find_spec answers exactly that without
+    # executing the package, so a broken rocm_kpack -- a missing msgpack or zstandard, a
+    # renamed submodule after a version bump -- still reaches load_kpack and fails. An
+    # operator who set the directory has asked for this class to run, so their value goes
+    # to load_kpack unexamined and a stale path fails loudly there.
+    if python_dir is None and importlib.util.find_spec("rocm_kpack") is None:
+        pytest.skip(_NO_ROCM_KPACK)
+
     kpack, compression = load_kpack(python_dir)
 
     def write(root):

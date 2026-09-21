@@ -18,7 +18,6 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -430,13 +429,6 @@ protected:
         auto graph = buildPointwiseAddGraph();
         ASSERT_NO_FATAL_FAILURE(buildAndCompilePacked(*graph));
 
-        // The frontend's route into the engine's getMaxWorkspaceSize().
-        int64_t workspaceSize = 0;
-        auto result = graph->get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
         // Inside the helper, so every stream variant that routes through it inherits
         // identical verification semantics rather than one case verifying more than
         // the other three.
@@ -657,10 +649,6 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Routing to the surviving engine is not enough: it must still compute the right answer.
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    ASSERT_GE(workspaceSize, 0);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
     GraphVerificationContext context(*graph);
     registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(context, /*seed=*/0);

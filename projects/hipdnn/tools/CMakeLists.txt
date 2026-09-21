@@ -251,5 +251,93 @@ endif()
         endif()
 
         _apply_hipdnn_test_category_labels(hipdnn_validate_descriptors_smoke)
+
+        # The IngestorGenerator pytest suite: the unit coverage of the generator itself.
+        #
+        # WORKING_DIRECTORY is required, not cosmetic: conftest.py imports `codegen` and
+        # `tests.helpers` as top-level packages, and IngestorGenerator/pyproject.toml
+        # carries the pytest rootdir configuration the suite is written against.
+        #
+        # Nothing is appended to CHECK_DEPENDS_GLOBAL: the one built artifact this suite
+        # runs, hipdnn_validate_descriptors, is already there from the smoke test above.
+        # Like that test this entry is build-tree only, so CHECK_EXECUTABLE_PATHS_GLOBAL
+        # and HIPDNN_TEST_TARGETS are left alone.
+
+        # Configuration fails rather than silently registering nothing: a suite that
+        # quietly disappears when its interpreter or pytest is missing reports green
+        # without having run. Python3 is found without REQUIRED (cmake/Tests.cmake), so
+        # the interpreter is checked on its own first -- an empty Python3_EXECUTABLE would
+        # otherwise make the probe below run an empty command and blame pytest.
+        if(NOT Python3_EXECUTABLE)
+            message(FATAL_ERROR
+                    "hipdnn: no Python 3 interpreter was found, so the IngestorGenerator "
+                    "tests cannot run. Install Python 3 or pass -DPython3_EXECUTABLE, or "
+                    "configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF."
+            )
+        endif()
+
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -c "import pytest"
+            RESULT_VARIABLE HIPDNN_INGESTOR_PYTEST_RESULT
+            OUTPUT_QUIET ERROR_QUIET
+        )
+        if(NOT HIPDNN_INGESTOR_PYTEST_RESULT EQUAL 0)
+            message(FATAL_ERROR
+                    "hipdnn: pytest is not importable by ${Python3_EXECUTABLE}, so the "
+                    "IngestorGenerator tests cannot run. Install pytest for that interpreter, "
+                    "or configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF."
+            )
+        endif()
+
+        add_test(
+            NAME hipdnn_ingestor_generator_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest tests -v
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator"
+        )
+
+        # The suite runs in roughly 68 s; 600 leaves an order of magnitude of headroom for
+        # slower machines while still failing well inside ctest's 1500 s default.
+        set_tests_properties(hipdnn_ingestor_generator_tests PROPERTIES TIMEOUT 600)
+
+        # The suite's opt-in tiers are each keyed to an environment variable and SKIPPED
+        # when it is absent, so what stays unset here is what this entry does not prove.
+        #
+        # ON -- HIPDNN_VALIDATE_DESCRIPTORS, without which all seven cases of
+        # tests/test_round_trip.py skip, leaving this entry green about the one tier only
+        # a build tree can run: the generate-to-validate loop and its mutation fixtures.
+        #
+        # OFF -- HIPKERNELPROVIDER_ROCM_KPACK_DIR, which tests/test_verify_variant_sets.py
+        # needs to write a real kpack archive. rocm_kpack is resolved by the
+        # hip-kernel-provider, which a hipDNN-only build need not configure, so that class
+        # skips by design and this entry passing is NOT evidence about it.
+        #
+        # OFF -- HIPDNN_INGESTOR_PROFILE / _GFX942 / _GFX950 and HIPDNN_INGESTOR_ENGINE:
+        # tests/test_coverage_gate.py needs an authoring profile this repo does not ship.
+        # tests/test_launch_surface.py reads the same per-arch names but falls back to its
+        # committed fixtures, so leaving them unset runs that module rather than skipping it.
+        set(HIPDNN_INGESTOR_GENERATOR_TESTS_ENVIRONMENT
+            "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
+        )
+        if(DEFINED TEST_ENVIRONMENT)
+            list(APPEND HIPDNN_INGESTOR_GENERATOR_TESTS_ENVIRONMENT ${TEST_ENVIRONMENT})
+        endif()
+        set_tests_properties(
+            hipdnn_ingestor_generator_tests
+            PROPERTIES ENVIRONMENT "${HIPDNN_INGESTOR_GENERATOR_TESTS_ENVIRONMENT}"
+        )
+
+        # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs) go through
+        # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced.
+        if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
+            set_tests_properties(
+                hipdnn_ingestor_generator_tests
+                PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}"
+            )
+        endif()
+
+        # No FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache, matching
+        # hipdnn_validate_descriptors_smoke above: the suite is pure Python and loads no
+        # MIOpen, so there is no cache entry to clear.
+        _apply_hipdnn_test_category_labels(hipdnn_ingestor_generator_tests)
     endif()
 endif()

@@ -3,6 +3,7 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier: MIT
 */
 
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -19,7 +20,12 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
 #include "TestDescriptorRoot.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
+// Every census diagnostic in this file is matched as text by the CTest entries in
+// descriptor-packaging/cmake/HkpPackaging.cmake: each control keys on one refusal's
+// wording, and the census entry itself fails on the "Census: " prefix. Reword that prefix
+// and a run that refuses still reads as a clean census.
 namespace
 {
 
@@ -160,18 +166,20 @@ int main(int argc, char** argv)
 
     std::unique_ptr<CensusExecutionListener> census;
     const auto censusSuite = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_SUITE");
+    // The caller's own values, captured and validated ahead of the default-root block
+    // below, which can write HIPDNN_DESCRIPTOR_DIR itself: the shard a census is verdicted
+    // against, and the root its diagnostics name, are never ones this binary chose.
+    const auto censusArch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
+    const auto censusRoot = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
     if(!censusSuite.empty())
     {
-        // Validate the caller's explicit shard before default-root setup can supply
-        // another tree.
-        const auto arch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
-        const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
         std::error_code error;
-        if(arch.empty() || root.empty() || !std::filesystem::is_directory(root, error))
+        if(censusArch.empty() || censusRoot.empty()
+           || !std::filesystem::is_directory(censusRoot, error))
         {
             std::cerr << "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing "
                          "explicit HIPDNN_DESCRIPTOR_DIR; arch='"
-                      << arch << "', root='" << root << "'.\n";
+                      << censusArch << "', root='" << censusRoot << "'.\n";
             return 1;
         }
 
@@ -191,7 +199,6 @@ int main(int argc, char** argv)
             std::cerr << "Census suite '" << censusSuite << "' is absent or empty.\n";
             return 1;
         }
-        // Optional; unset leaves the execution guard alone in effect.
         // The registration comparison happens here, before RUN_ALL_TESTS, because it
         // reads the static registration rather than any result -- and because a suite
         // that shrank should say so even if the surviving cases all pass.
@@ -212,9 +219,8 @@ int main(int argc, char** argv)
     // runs standalone, and so nothing machine-specific reaches the install-time CTest
     // file, which is generated from that same environment.
     //
-    // Never overrides a value the caller set. Fail the process when the resolved root
-    // holds no descriptor, which is otherwise indistinguishable from a run on a device
-    // the descriptors do not cover.
+    // Failing on a resolved root that holds no descriptor is deliberate: it is otherwise
+    // indistinguishable from a run on a device the descriptors do not cover.
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
     {
         const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
@@ -244,10 +250,81 @@ int main(int argc, char** argv)
     hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
                                                           recordingCallback);
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    if(!censusSuite.empty())
+    {
+        // What HIPDNN_TEST_EXPECTED_ARCH is for. The packer stamps every emitted copy of
+        // a pack with the architecture of the shard it writes that copy into, so the
+        // stamps the loaded packs carry are what say which shard actually arrived. Left
+        // uncompared, the entry declared for one architecture passes identically on
+        // another's shard, because every case in the suite reads its architecture out of
+        // the descriptors it was handed.
+        //
+        // Below the logging setup because this is the call that loads and its result is
+        // memoized for the process: every loader diagnostic is dispatched exactly once,
+        // and discarded outright when no callback is registered yet, so raising
+        // HIPDNN_LOG_LEVEL cannot bring back what a load above the setup dropped. The
+        // shard is still the caller's -- the preflight proved HIPDNN_DESCRIPTOR_DIR
+        // nonempty, which makes the default-root block in between a no-op.
+        //
+        // A second stamp means the root spans shards -- the shared stage tree a per-arch
+        // entry exists to avoid. A pack may legitimately declare no architecture (the
+        // arch-independent form), but one still cannot demonstrate which shard arrived,
+        // so it is refused too.
+        std::size_t loadedSets = 0;
+        std::size_t loadedPacks = 0;
+        std::set<std::string> stamped;
+        for(const auto& descriptorSet :
+            hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets())
+        {
+            ++loadedSets;
+            loadedPacks += descriptorSet.packs.size();
+            for(const auto& pack : descriptorSet.packs)
+            {
+                stamped.insert(pack.arch.begin(), pack.arch.end());
+            }
+        }
+        if(stamped.size() != 1 || *stamped.begin() != censusArch)
+        {
+            std::string detail;
+            if(loadedSets == 0)
+            {
+                detail = "no descriptor set loaded from this root";
+            }
+            else if(loadedPacks == 0)
+            {
+                detail = std::to_string(loadedSets)
+                         + " descriptor sets loaded from this root, holding no pack";
+            }
+            else if(stamped.empty())
+            {
+                detail = std::to_string(loadedPacks)
+                         + " packs loaded from this root, none of them architecture-stamped";
+            }
+            else
+            {
+                std::string found;
+                for(const auto& stamp : stamped)
+                {
+                    found += (found.empty() ? "'" : ", '") + stamp + "'";
+                }
+                detail = std::to_string(loadedPacks)
+                         + " packs loaded from this root carry the stamps " + found;
+            }
+            std::cerr << "Census requires every loaded pack to be stamped for the expected "
+                         "architecture; arch='"
+                      << censusArch << "', root='" << censusRoot << "'; " << detail << ".\n";
+            return 1;
+        }
+    }
+#endif
+
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     auto hipErrorHandler = std::make_unique<hipdnn_test_sdk::utilities::HipErrorHandler>();
     listeners.Append(hipErrorHandler.release());
+    // Append takes ownership: gtest deletes its listeners only when the UnitTest singleton
+    // is torn down at static destruction, so this pointer stays valid past the release.
     const auto* censusResult = census.get();
     if(census)
     {

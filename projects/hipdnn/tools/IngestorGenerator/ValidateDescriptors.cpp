@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -252,6 +253,8 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
     return harvested;
 }
 
+StubDispatchHandler stubDispatchHandler;
+
 /// Registers a no-op stub per unique harvested name into each registry. Names are
 /// pre-deduped into `std::set`s by `harvestSymbols`, which is required: two descriptor
 /// sets may legally share a symbol name (e.g. two engines' matchers), and
@@ -259,8 +262,6 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
 /// must never reach here -- it is not a validator failure mode -- so registering from a
 /// `std::set` rather than a raw harvested list keeps the registration itself well-formed
 /// regardless of what the descriptors name.
-StubDispatchHandler stubDispatchHandler;
-
 void registerStubs(const HarvestedSymbols& harvested)
 {
     for(const auto& symbol : harvested.graphMatch)
@@ -372,10 +373,26 @@ try
 
     const std::vector<std::filesystem::path> roots(options->roots.begin(), options->roots.end());
 
-    // Installed for the whole run, before the first load: the loader never throws, so
-    // without this sink every rejection is invisible and the tool would report nothing
-    // more useful than a bare engine count.
-    const LogSinkGuard logSinkGuard;
+    // A root that is not a directory reaches the loader as an INFO -- "no descriptor
+    // directory at ..." -- which the ERROR/FATAL filter below never escalates. Rejected
+    // here so the failure names the mistyped path rather than surfacing as the empty-set
+    // verdict below. Every root is reported, in the wording `describeUnusableDescriptorRoot`
+    // uses, so a bad root reads the same here and in the provider's test main.
+    bool rootsUsable = true;
+    for(const auto& root : roots)
+    {
+        std::error_code failed;
+        if(!std::filesystem::is_directory(root, failed))
+        {
+            std::cerr << "Error: the descriptor root '" << root.string()
+                      << "' is not a directory\n";
+            rootsUsable = false;
+        }
+    }
+    if(!rootsUsable)
+    {
+        return 1;
+    }
 
     // Pass 1: harvest every symbol name the descriptors reference. Neither
     // loadDescriptorCatalog nor resolveDescriptorSets checks symbol registration, so
@@ -383,10 +400,14 @@ try
     const auto unresolvedSets = resolveDescriptorSets(loadDescriptorCatalog(roots));
     const auto harvested = harvestSymbols(unresolvedSets);
 
-    // Register a no-op stub per unique name. Duplicate names across sets are legal and
-    // already deduped by harvestSymbols' std::set members; registerStubs must never
-    // observe NativeRegistry::registerSymbol's duplicate-throw on well-formed input.
     registerStubs(harvested);
+
+    // Installed between the passes, not before both: pass 2 opens by repeating pass 1's
+    // parse and resolve verbatim, so a sink spanning both records every diagnostic twice.
+    // Nothing is lost -- with no callback registered the logger drops pass 1's messages
+    // outright, whatever HIPDNN_LOG_LEVEL says, and pass 2 re-emits every one. The sink
+    // itself is mandatory: the loader never throws, so without it every rejection is silent.
+    const LogSinkGuard logSinkGuard;
 
     // Pass 2: the real verdict. Every rejection this call makes reaches DiagnosticSink
     // as an ERROR, which is what actually drives this tool's exit code.
@@ -418,7 +439,24 @@ try
         }
     }
 
-    const bool success = errorMessages.empty() && missingEngines.empty();
+    // An empty validated set is a failure in its own right: a root that exists but was
+    // never staged emits no ERROR and names no missing engine, so without this term the
+    // tool reports the same green verdict for a bundle it proved and for a bundle it
+    // never saw. `--expect-engine` constrains one call site; this constrains every one.
+    const bool success = errorMessages.empty() && missingEngines.empty() && !validatedSets.empty();
+
+    // Built once for both reports: the empty set is the one verdict no loader diagnostic
+    // explains, so a consumer reading `success` and `diagnostics` would otherwise be handed
+    // a false with nothing in it saying why.
+    std::string emptySetViolation;
+    if(validatedSets.empty())
+    {
+        emptySetViolation = "no descriptor set validated under:";
+        for(const auto& root : options->roots)
+        {
+            emptySetViolation += " '" + root + "'";
+        }
+    }
 
     if(options->json)
     {
@@ -434,6 +472,11 @@ try
         {
             diagnosticsJson.push_back(
                 {{"severity", severityName(diagnostic.severity)}, {"message", diagnostic.message}});
+        }
+        if(!emptySetViolation.empty())
+        {
+            diagnosticsJson.push_back(
+                {{"severity", severityName(HIPDNN_SEV_ERROR)}, {"message", emptySetViolation}});
         }
 
         std::cout << report.dump(2) << "\n";
@@ -470,6 +513,14 @@ try
         {
             std::cerr << "VIOLATION: " << message << "\n";
         }
+    }
+
+    // stderr in both modes: stdout carries the JSON report alone on every path that gets
+    // far enough to produce one, and the argument and root failures above exit before one
+    // exists.
+    if(!emptySetViolation.empty())
+    {
+        std::cerr << "VIOLATION: " << emptySetViolation << "\n";
     }
 
     return success ? 0 : 1;

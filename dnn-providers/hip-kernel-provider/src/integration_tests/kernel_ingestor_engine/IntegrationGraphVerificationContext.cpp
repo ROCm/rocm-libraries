@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <gtest/gtest-spi.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
@@ -127,6 +129,8 @@ TEST_F(IntegrationGraphVerificationContext, NewGraphCannotBorrowPreviousRegistra
     auto currentOutput = makePointwise(current, DataType::FLOAT);
     GraphVerificationContext currentContext(current);
     expectVerificationFailure([&] { verifyGraph(currentContext, 0); });
+    // Two per verification call, and initializeBundle's cpu parity above holds only while
+    // verifyBuiltGraph seeds the GPU bundle before the CPU one.
     EXPECT_EQ(_initializations, 4);
 
     registerValidator(currentContext, currentOutput, 0.0f);
@@ -251,3 +255,5 @@ TEST_F(IntegrationGraphVerificationOutputs, CurrentStatsRequiresItsOwnRegistrati
 
 } // namespace
 } // namespace hip_kernel_provider::test_utilities
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

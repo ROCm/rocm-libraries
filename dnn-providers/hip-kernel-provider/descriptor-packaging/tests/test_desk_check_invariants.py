@@ -39,8 +39,10 @@ import pytest
 
 from hkp_pack.desk_check import (
     DEFAULT_MATCHER_FIELDS,
+    MODES,
     DeskCheckNoSpecFound,
     DeskCheckReport,
+    compiled_agreement,
     duplicate_matcher_tuples,
     load_kernels,
     load_variant_set,
@@ -49,6 +51,7 @@ from hkp_pack.desk_check import (
     symbol_distinctness,
     toc_key_uniqueness,
 )
+from hkp_pack.errors import HkpPackError
 from hkp_pack.pipeline import run_pipeline
 
 ARCH = "gfx950"
@@ -417,12 +420,18 @@ class TestCliEndToEnd:
 # repository carries -- no pack, no hipcc, no GPU, so they run everywhere the
 # suite does.
 #
-# There are two such roots and both are read. `examples/descriptors` is the
+# Two such roots are wired and both are read. `examples/descriptors` is the
 # documented sample tree; the root under the engine is what a consumer
 # actually loads. The two differ in where the specialization contract is
 # declared, how many kernels a shard carries, and which dtype spellings
 # appear -- so a check that reads only one of them covers half the bundles
-# that exist.
+# that can exist.
+#
+# The engine root ships no bundle, so `examples/descriptors` is the only root
+# supplying anything to check and every `kernel_ingestor_engine`
+# parametrization below skips -- the half-coverage warning above is this suite
+# as it stands. Authoring a bundle under the engine root closes that with no
+# change here: the roots are globbed, not enumerated per bundle.
 # ---------------------------------------------------------------------------
 _PACKAGING = Path(__file__).resolve().parent.parent
 _EXAMPLES = [
@@ -904,10 +913,10 @@ class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
     def test_the_generic_fallback_would_also_miss_this_field(self, tmp_path):
         """`DEFAULT_MATCHER_FIELDS` is independent of the artifact, which is the
         property the declared list lacks -- but it is a fixed attention-shaped
-        guess, and `block_m` is not in it. The shipped gfx942_attention_dense
-        bundle carries five such fields (block_m, waves_per_eu, persistent,
-        num_persistent, use_exp2_fast), every one of them specialized and every
-        one of them outside that list. Independence alone is not width.
+        guess, and `block_m` is not in it. A real dense-attention bundle
+        specializes on fields like block_m, waves_per_eu, persistent,
+        num_persistent and use_exp2_fast, none of them in that list.
+        Independence alone is not width.
 
         Breaking mutation: `DeskCheckReport.__init__`'s
         `drift_comparable_fields(kernels)` -> `DEFAULT_MATCHER_FIELDS`."""
@@ -1007,3 +1016,169 @@ class TestStructuralDescriptorContext:
         result = _run_cli(str(kdp), "--field", "head_size")
         assert result.returncode == 1, result.stdout + result.stderr
         assert kernel["id"] in result.stderr and str(root) in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# A shard the FULL mode can walk. Full mode resolves every KDP under the root
+# to its engine and the KMD that governs it before either path lookup runs, so
+# the minimal structural fixtures above -- a lone KDP with no `engine` -- fail
+# on that hop and never reach the code these last two classes cover.
+# ---------------------------------------------------------------------------
+def _bundle_root(root, ukd):
+    """One resolvable shard holding `ukd` inline: a KDP walking by id to a UED
+    and to the KMD that governs it. Returns the KDP's path."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "shard.kdp.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "kdp-shard",
+                "name": "shard",
+                "arch": [ARCH],
+                "engine": "ued-shard",
+                "kernelDescriptors": [ukd],
+            }
+        )
+    )
+    (root / "shard.ued.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "ued-shard",
+                "name": "shard",
+                "metadata": "kmd-shard",
+            }
+        )
+    )
+    (root / "shard.kmd.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0",
+                "id": "kmd-shard",
+                "name": "shard",
+                "fields": [
+                    {"name": "block_size", "type": "int", "default_value": 16},
+                    {"name": "dtype", "type": "string"},
+                ],
+            }
+        )
+    )
+    return root / "shard.kdp.json"
+
+
+def _inline_ukd():
+    """One inline rocKE kernel whose contract exhausts `_bundle_root`'s KMD."""
+    return {
+        "version": "1.0",
+        "id": "ukd-shard",
+        "name": "shard kernel",
+        "arch": [ARCH],
+        "kernel_source": {
+            "kind": "rocke",
+            "source": "k.py",
+            "builder": "b",
+            "spec": {"block_size": 16, "dtype": "bf16"},
+        },
+        "metadata": {"block_size": 16, "dtype": "BF16"},
+        "priority": 0,
+        "provenance": {
+            "specialization_contract": {
+                "schema_version": 1,
+                "consumers": [
+                    {
+                        "engine_id": "ued-shard",
+                        "kmd_id": "kmd-shard",
+                        "metadata_fields": ["block_size", "dtype"],
+                        "matcher_only_fields": [],
+                        "bindings": {
+                            "block_size": {"field": "block_size"},
+                            "dtype": {"field": "dtype"},
+                        },
+                        "vocabulary": {"dtype": {"bf16": "BF16"}},
+                    }
+                ],
+            }
+        },
+    }
+
+
+@pytest.mark.quick
+class TestAKdpPathMatchingNothingIsReportedNotRaised:
+    """A `kdp` argument naming no indexed descriptor is a mistyped or stale
+    path -- a finding about what the caller pointed at, and one only the failing
+    path itself can name.
+
+    Both entry points look the file up in an index built from its parent
+    directory, and a lookup that answered with a bare `StopIteration` escaped the
+    CLI's `HkpPackError` handlers entirely: a traceback out of a gate reads as a
+    broken tool rather than as a broken artifact, which is the substitution
+    `hkp_desk_check.main` exists to prevent.
+
+    The two modes reach two different lookups -- structural drives `_resolve`,
+    full reaches `compiled_agreement`'s bundle selection first and never gets to
+    the other -- so each is covered on its own.
+    """
+
+    def _typo_beside_a_real_shard(self, tmp_path):
+        """A populated index and a path that matches nothing in it, which is the
+        mistyped-filename case rather than an empty directory."""
+        _bundle_root(tmp_path / "shard", _inline_ukd())
+        return tmp_path / "shard" / "typo.kdp.json"
+
+    def test_structural_lookup_raises_a_named_finding(self, tmp_path):
+        typo = self._typo_beside_a_real_shard(tmp_path)
+        with pytest.raises(HkpPackError, match="typo.kdp.json"):
+            load_variant_set(typo)
+
+    def test_full_mode_lookup_raises_a_named_finding(self, tmp_path):
+        typo = self._typo_beside_a_real_shard(tmp_path)
+        with pytest.raises(HkpPackError, match="typo.kdp.json"):
+            compiled_agreement(typo)
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_the_cli_prints_the_finding_rather_than_a_traceback(self, tmp_path, mode):
+        typo = self._typo_beside_a_real_shard(tmp_path)
+        proc = _run_cli(str(typo), mode=mode)
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "Traceback" not in proc.stderr, proc.stderr
+        assert "StopIteration" not in proc.stderr, proc.stderr
+        assert str(typo) in proc.stdout + proc.stderr
+
+    def test_the_real_shard_in_the_same_directory_still_resolves(self, tmp_path):
+        """The control: the refusal is of the path that matches nothing, not of
+        every lookup the same index serves."""
+        kdp = _bundle_root(tmp_path / "shard", _inline_ukd())
+        kernels, _declared = load_variant_set(kdp)
+        assert [k["name"] for k in kernels] == ["shard kernel"]
+
+
+@pytest.mark.quick
+class TestAnIdLessInlineKernelIsReportedNotAKeyError:
+    """Full mode keys every consumer record on the UKD id, and nothing on the
+    READ path requires one: `descriptors.py`'s `_require(ukd, ["id", ...])` runs
+    in the packing pipeline, while `descriptor_context.Index` only parses JSON
+    and `resolve_entries` takes an inline `kernelDescriptors` object as it
+    stands. An inline entry is the whole of the hole -- a standalone UKD is
+    reached through `by_id`, which indexes nothing id-less -- and it reached
+    `consumer_records` as a bare `KeyError: 'id'` with no descriptor named.
+    """
+
+    def test_an_id_less_inline_kernel_names_itself_in_the_failure(self, tmp_path):
+        ukd = _inline_ukd()
+        del ukd["id"]
+        kdp = _bundle_root(tmp_path / "shard", ukd)
+        proc = _run_cli(str(kdp), mode="full")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "KeyError" not in proc.stderr, proc.stderr
+        assert "declares no 'id'" in proc.stdout
+        assert "shard kernel" in proc.stdout
+
+    def test_the_same_bundle_carrying_an_id_gets_past_the_keying(self, tmp_path):
+        """The control: an id is what the record keying is missing, not the
+        bundle. Carrying one, the run reaches the pre-pack refusal full mode owes
+        an unpacked rocKE tree."""
+        kdp = _bundle_root(tmp_path / "shard", _inline_ukd())
+        proc = _run_cli(str(kdp), mode="full")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "declares no 'id'" not in proc.stdout
+        assert "packed dialect" in proc.stdout
