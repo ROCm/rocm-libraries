@@ -37,7 +37,7 @@ Flag the change if any of these are missing for a new or substantially extended 
 
 1. `clients/include/.../testing_<fn>.hpp` harness (`Arguments`, host reference, host and device pointer modes, `UNIT_CHECK` / `NEAR_CHECK`).
 2. `clients/gtest/<fn>_gtest.cpp` using `RocBLAS_Test<>`, `type_filter()` via `type_filter_functor` (not `return true`), and `INSTANTIATE_TEST_CATEGORIES`.
-3. `clients/gtest/<fn>_gtest.yaml` parameter matrix with a `category` (`quick`, `pre_checkin`, `nightly`, `stress`, or `known_bug`).
+3. `clients/gtest/<fn>_gtest.yaml` parameter matrix with a `category` (`quick`, `pre_checkin`, `nightly`, `HMM`, `multi_gpu`, `stress`, or `known_bug`).
 4. YAML included from `clients/gtest/rocblas_gtest.yaml` and listed in `clients/gtest/CMakeLists.txt` so `rocblas_gtest.data` regenerates.
 5. The `.cpp` added to the `rocblas-test` source list in CMake.
 
