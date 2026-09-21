@@ -361,17 +361,12 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // HSA_OVERRIDE_GFX_VERSION rewrites the gcnArchName that
-        // hipGetDeviceProperties reports, and that string is the only thing the
-        // harness knows about the device (DeviceQuery.hpp). An MI200 with 9.4.2
-        // set introduces itself as gfx942 to every layer below this point, so
-        // claims get filed under, or checked against, an arch the silicon is not.
-        //
-        // A read-only run only mislabels its own output, so it is warned and
-        // allowed. A write lands that wrong arch in a checked-in sidecar, where
-        // it becomes a claim no enforcement run on real hardware can ever match
-        // or clear -- the defect class SupportClaimWriter.cpp already rejects for
-        // an empty arch. That one is refused.
+        // HSA_OVERRIDE_GFX_VERSION rewrites the gcnArchName hipGetDeviceProperties
+        // reports, and that string is all the harness knows about the device
+        // (DeviceQuery.hpp). A read-only run only mislabels its own output, so it
+        // is warned; a write lands the wrong arch in a checked-in sidecar no run on
+        // real hardware can match or clear -- the class SupportClaimWriter.cpp
+        // already rejects for an empty arch -- so that one is refused.
         const std::string archOverride
             = hipdnn_data_sdk::utilities::getEnv("HSA_OVERRIDE_GFX_VERSION");
         if(!archOverride.empty())
