@@ -89,8 +89,9 @@ def parse_miopen_cmd_direct(cmd: str):
 
     Only 2-D NHWC forward convolutions are supported (no 3-D, no dgrad/wgrad).
     Raises ``ValueError`` for unsupported cases.
-    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
-    ``"fp32"``.
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
+    ``"bf16"``, or ``"fp32"`` and ``forw`` is the integer ``-F`` flag
+    (bit 0 = forward pass).
 
     Note: ``DirectConvProblem`` requires ``cpg == kpg`` and cpg must be either
     1 (depthwise) or a positive multiple of 4 (grouped).
@@ -173,9 +174,6 @@ def parse_miopen_cmd_direct(cmd: str):
         )
 
     sH = miopen_args.sH
-    if cpg == 1 and sH != 1:
-        raise ValueError(f"depthwise kernel requires stride=1 (got sH={sH})")
-
     if miopen_args.sH != miopen_args.sW:
         print(
             f"[warn] sH={miopen_args.sH} != sW={miopen_args.sW}; using sH={miopen_args.sH}",
@@ -201,7 +199,7 @@ def parse_miopen_cmd_direct(cmd: str):
         PAD=miopen_args.pH,
         stride=sH,
     )
-    return problem, dtype
+    return problem, dtype, miopen_args.forw
 
 
 def _sample_combos(combos: list, frac: float, seed: int) -> list:
@@ -417,23 +415,36 @@ def _run_depthwise_sweep(
     from rocke.helpers.manifest import conv_args_signature
     from kernels.common.conv_direct_grouped import (
         DirectDepthwiseSpec,
+        DirectDepthwiseSpatialSpec,
         build_direct_depthwise,
+        build_direct_depthwise_spatial,
         is_valid_depthwise_spec,
+        is_valid_depthwise_spatial_spec,
     )
     from rocke.runtime.hip_module import HipError
 
     p = problem
+    # Use spatial kernel when groups fit in one wave (better thread utilisation).
+    # Derive wave_size from the spec default so this stays correct on wave32 targets
+    # (groups == wave_size would leave zero W-positions per wave — not valid).
+    _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
+    _use_spatial = p.groups < _wave_size
 
     torch.manual_seed(42)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
     B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
-    D_t = torch.empty(p.N, p.H, p.W, p.total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
     sig = conv_args_signature("fp16")
 
-    combos = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
+    # For the spatial layout block_w is derived from block_waves internally,
+    # so sweeping block_w would produce duplicate kernels; use a dummy value.
+    if _use_spatial:
+        combos = [(None, bw) for bw in _DW_BLOCK_WAVES]
+    else:
+        combos = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
 
     if args.sample is not None:
         total = len(combos)
@@ -453,18 +464,29 @@ def _run_depthwise_sweep(
     pending = []
     for combo in combos:
         block_w, block_waves = combo
-        spec = DirectDepthwiseSpec(
-            problem=p,
-            name="rocke_bench_direct_depthwise",
-            block_w=block_w,
-            block_waves=block_waves,
-        )
-        ok, _ = is_valid_depthwise_spec(spec, arch=arch)
+        if _use_spatial:
+            spec = DirectDepthwiseSpatialSpec(
+                problem=p,
+                name="rocke_bench_direct_depthwise_spatial",
+                block_waves=block_waves,
+            )
+            ok, _ = is_valid_depthwise_spatial_spec(spec, arch=arch)
+        else:
+            spec = DirectDepthwiseSpec(
+                problem=p,
+                name="rocke_bench_direct_depthwise",
+                block_w=block_w,
+                block_waves=block_waves,
+            )
+            ok, _ = is_valid_depthwise_spec(spec, arch=arch)
         if not ok:
             n_skipped += 1
             continue
         try:
-            kernel = build_direct_depthwise(spec, arch=arch)
+            if _use_spatial:
+                kernel = build_direct_depthwise_spatial(spec, arch=arch)
+            else:
+                kernel = build_direct_depthwise(spec, arch=arch)
         except ValueError:
             n_skipped += 1
             continue
@@ -513,8 +535,12 @@ def _run_depthwise_sweep(
             )
             continue
 
-        q_tiles = math.ceil(p.W / block_w)
-        g_tiles = math.ceil(p.groups / spec.block_ch)
+        if _use_spatial:
+            q_tiles = math.ceil(p.Wo / spec.block_w)
+            g_tiles = 1  # all channels handled within each wavefront
+        else:
+            q_tiles = math.ceil(p.Wo / block_w)
+            g_tiles = math.ceil(p.groups / spec.block_ch)
         grid = (q_tiles, g_tiles, p.N)
         block = (spec.threads_per_block, 1, 1)
         stream = 0
@@ -626,7 +652,7 @@ def _run_sweep(
     B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float16).uniform_(
         -1.0, 1.0
     )
-    D_t = torch.empty(p.N, p.H, p.W, p.total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
@@ -717,7 +743,7 @@ def _run_sweep(
             )
             continue
 
-        q_tiles = (p.W + block_q - 1) // block_q
+        q_tiles = (p.Wo + block_q - 1) // block_q
         g_tiles = p.groups // block_groups
         grid = (q_tiles, g_tiles, p.N)
         block = (spec.threads_per_block, 1, 1)
@@ -936,8 +962,15 @@ def main() -> int:
             if not line or line.startswith("#"):
                 continue
             try:
-                prob, dt = parse_miopen_cmd_direct(line)
-                cases.append((prob, dt))
+                prob, dt, forw = parse_miopen_cmd_direct(line)
+                if forw == 0 or (forw & 1):
+                    cases.append((prob, dt))
+                else:
+                    print(
+                        f"[skip] {path}:{lineno}: -F={forw} is not forward (fwd); "
+                        f"wgrad/dgrad are not supported — skipping",
+                        file=sys.stderr,
+                    )
             except ValueError as e:
                 print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
         if not cases:
@@ -945,9 +978,16 @@ def main() -> int:
             return 2
     elif args.miopen_cmd is not None:
         try:
-            prob, dt = parse_miopen_cmd_direct(args.miopen_cmd)
+            prob, dt, forw = parse_miopen_cmd_direct(args.miopen_cmd)
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
+            return 2
+        if forw != 0 and not (forw & 1):
+            print(
+                f"error: --miopen-cmd: -F={forw} is not forward (fwd); "
+                f"wgrad/dgrad are not supported",
+                file=sys.stderr,
+            )
             return 2
         cases = [(prob, dt)]
     else:
@@ -978,13 +1018,6 @@ def main() -> int:
             print(
                 f"error: cpg={cpg} (C/groups={args.C}/{args.groups}) must be 1 (depthwise) "
                 f"or a positive multiple of 4 (grouped)",
-                file=sys.stderr,
-            )
-            return 2
-
-        if cpg == 1 and args.sH != 1:
-            print(
-                f"error: depthwise kernel requires stride=1 (got sH={args.sH})",
                 file=sys.stderr,
             )
             return 2

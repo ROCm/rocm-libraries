@@ -100,13 +100,25 @@ def test_copy_static_files_preflights_all_resources(tmp_path, monkeypatch):
 
 def test_custom_kernel_names_filters_suffixes_and_sorts_deterministically(monkeypatch):
     class Resource:
-        def __init__(self, name, is_file=True):
+        def __init__(self, name, is_file=True, children=None):
             self.name = name
             self._is_file = is_file
+            self._children = children or []
 
         def is_file(self):
             return self._is_file
 
+        def is_dir(self):
+            return not self._is_file
+
+        def iterdir(self):
+            return iter(self._children)
+
+    nested = Resource(
+        "tensile",
+        is_file=False,
+        children=[Resource("z.s"), Resource("skip.txt")],
+    )
     first_order = [
         Resource("b.s"),
         Resource("a.s"),
@@ -114,6 +126,7 @@ def test_custom_kernel_names_filters_suffixes_and_sorts_deterministically(monkey
         Resource(".hidden.s"),
         Resource("note.txt"),
         Resource("directory.s", is_file=False),
+        nested,
     ]
     orders = [first_order, list(reversed(first_order))]
 
@@ -123,7 +136,7 @@ def test_custom_kernel_names_filters_suffixes_and_sorts_deterministically(monkey
 
     monkeypatch.setattr(resources, "_custom_kernels", lambda: ResourceDir())
 
-    expected = [".hidden", "a", "b", "foo.bar"]
+    expected = [".hidden", "a", "b", "foo.bar", "z"]
     assert resources.custom_kernel_names() == expected
     assert resources.custom_kernel_names() == expected
 
@@ -131,8 +144,12 @@ def test_custom_kernel_names_filters_suffixes_and_sorts_deterministically(monkey
 def test_custom_kernel_text_uses_resource_root(tmp_path, monkeypatch):
     root = _fake_resource_tree(tmp_path, monkeypatch)
     (root / "CustomKernels" / "kernel.s").write_text("s_nop 0\n", encoding="utf-8")
+    nested = root / "CustomKernels" / "aiter"
+    nested.mkdir()
+    (nested / "nested.s").write_text("s_nop 1\n", encoding="utf-8")
 
     assert resources.custom_kernel_text("kernel") == "s_nop 0\n"
+    assert resources.custom_kernel_text("nested") == "s_nop 1\n"
 
 
 def test_custom_kernel_text_raises_for_missing_resource(tmp_path, monkeypatch):
@@ -199,6 +216,7 @@ def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
             )
         zip_file.writestr(f"{package}/CustomKernels/b.s", "kernel b\n")
         zip_file.writestr(f"{package}/CustomKernels/a.s", "kernel a\n")
+        zip_file.writestr(f"{package}/CustomKernels/tensile/nested.s", "kernel nested\n")
         zip_file.writestr(f"{package}/CustomKernels/readme.txt", "not a kernel\n")
         zip_file.writestr(
             f"{package}/TensileLogic/known_bugs.yaml", known_bugs
@@ -212,8 +230,9 @@ def test_resource_helpers_work_from_zip_package(tmp_path, monkeypatch):
     try:
         assert zip_resources.__file__.startswith(f"{archive}/")
         assert isinstance(zip_resources._root(), ZipPath)
-        assert zip_resources.custom_kernel_names() == ["a", "b"]
+        assert zip_resources.custom_kernel_names() == ["a", "b", "nested"]
         assert zip_resources.custom_kernel_text("a") == "kernel a\n"
+        assert zip_resources.custom_kernel_text("nested") == "kernel nested\n"
         assert zip_resources.known_bugs_text() == known_bugs
         assert zip_resources.ductile_defaults_text() == defaults
 
