@@ -186,10 +186,10 @@ endmacro()
 
 # Fetches GoogleTest
 function(_fetch_gtest VERSION HASH)
-    if(VERSION AND VERSION STREQUAL 1.16.0)
-        set(GIT_TAG v1.16.0)
+    if(VERSION AND VERSION STREQUAL 1.17.0)
+        set(GIT_TAG v1.17.0)
     else()
-        _determine_git_tag(v v1.16.0)
+        _determine_git_tag(v v1.17.0)
     endif()
     if(HASH)
         set(HASH_ARG HASH ${HASH})

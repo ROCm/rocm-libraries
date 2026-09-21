@@ -6,7 +6,7 @@ option(ALLOW_FETCH_DEPS
        OFF
 )
 
-set(EXAMPLE_PROVIDER_GTEST_VERSION "1.16.0" CACHE STRING
+set(EXAMPLE_PROVIDER_GTEST_VERSION "1.17.0" CACHE STRING
     "GoogleTest version fetched when no GTest package is available"
 )
 
@@ -15,7 +15,10 @@ set(EXAMPLE_PROVIDER_GTEST_VERSION "1.16.0" CACHE STRING
 find_package(GTest CONFIG QUIET)
 
 if(NOT GTest_FOUND)
-    if(NOT ALLOW_FETCH_DEPS)
+    # An explicitly supplied source tree needs no acquisition.
+    if(NOT ALLOW_FETCH_DEPS AND
+       (NOT FETCHCONTENT_SOURCE_DIR_GOOGLETEST OR
+        NOT IS_DIRECTORY "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}"))
         message(FATAL_ERROR
             "GTest was not found, and ${PROJECT_NAME} does not fetch "
             "third-party dependencies. They are provided by the build "

@@ -560,11 +560,12 @@ ExternalProject_Add(example_engine_plugin
     CMAKE_ARGS
         # Clear any cached nlohmann_json_DIR so find_package re-resolves it.
         "-Unlohmann_json_DIR"
-        # Same for the GoogleTest hand-off: both entries are conditional, so a
+        # Same for the GoogleTest hand-off: these entries are conditional, so a
         # value that stops being forwarded must not linger in the sub-build's
         # cache and quietly keep resolving.
         "-UGTest_DIR"
         "-UFETCHCONTENT_SOURCE_DIR_GOOGLETEST"
+        "-UEXAMPLE_PROVIDER_GTEST_VERSION"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
     DEPENDS ${_example_plugin_depends}
     INSTALL_COMMAND ""

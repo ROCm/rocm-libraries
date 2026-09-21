@@ -38,7 +38,7 @@ function(fetch_gtest_dependency)
     message(STATUS "Fetching GTest for standalone ${PROJECT_NAME} build")
 
     fetchcontent_declare(
-        googletest URL https://github.com/google/googletest/archive/refs/tags/v1.16.0.zip
+        googletest URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.zip
                        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
 
