@@ -42,6 +42,9 @@ set( hipblas_benchmark_common
 
 if(BUILD_FORTRAN_CLIENTS)
   add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} $<TARGET_OBJECTS:hipblas_fortran_client>)
+  # The shims' objects alone no longer carry the hipblas module: it is built by
+  # ../../fortran and reaches this link only through hipblas_fortran_client.
+  target_link_libraries( hipblas-bench PRIVATE hipblas_fortran_client )
 else()
   add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} )
 endif()

@@ -122,6 +122,21 @@ if(NOT SKIP_LIBRARY)
   add_subdirectory(library)
 endif()
 
+# Fortran bindings for hipBLAS, generated from the public headers and committed
+# under fortran/. Self-contained: a Fortran binding declares bind(C) interfaces
+# only, so it compiles against neither the hipBLAS headers nor libhipblas, and
+# this is safe to add unconditionally. The directory does its own guarding and
+# returns quietly when BUILD_FORTRAN_BINDINGS is off or no Fortran compiler was
+# found. It reports back through HIPBLAS_HAVE_FORTRAN_BINDINGS, FALSE in both
+# those cases and TRUE only when the target was really created.
+#
+# Outside the SKIP_LIBRARY guard above on purpose. That guard controls whether
+# libhipblas is built in this tree; the bindings do not need it built, only
+# linked, and libhipblas resolves from the prefix path when the in-tree target
+# is absent. Inheriting the guard would make -DSKIP_LIBRARY=ON silently drop
+# bindings that the build could perfectly well produce and install.
+add_subdirectory(fortran)
+
 include( clients/cmake/build-options.cmake )
 
 # Build clients of the library

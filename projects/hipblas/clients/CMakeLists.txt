@@ -173,26 +173,53 @@ if( BUILD_FORTRAN_CLIENTS )
     set(hipblas_f90_source_clients_solver
       include/hipblas_fortran_module.f90
     )
-
-    set (hipblas_f90_source
-      ../library/src/hipblas_module.f90
-    )
 endif()
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES )
-  # Create hipBLAS Fortran module
   if( BUILD_FORTRAN_CLIENTS )
       # Set Fortran module output directory
       set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/hipblas)
-      add_library(hipblas_fortran OBJECT ${hipblas_f90_source})
-  endif()
 
-  if( BUILD_FORTRAN_CLIENTS )
-    if( BUILD_WITH_SOLVER )
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} $<TARGET_OBJECTS:hipblas_fortran>)
-    else()
-      add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver} $<TARGET_OBJECTS:hipblas_fortran>)
-    endif()
+      # The hipblas module is no longer built here from the hand-written
+      # ../library/src/hipblas_module.f90: it is generated from the C headers and
+      # built by ../fortran, which exports roc::hipblas_fortran. Building it twice
+      # would also collide, since both targets carry the same name.
+      if( NOT TARGET hipblas_fortran )
+        message(FATAL_ERROR
+          "BUILD_FORTRAN_CLIENTS is ON but the hipblas_fortran target is missing. "
+          "It is built by projects/hipblas/fortran; enable BUILD_FORTRAN_BINDINGS.")
+      endif()
+
+      # Linking rather than absorbing $<TARGET_OBJECTS:hipblas_fortran>: the
+      # binding is a real library now, with its own .mod directory and link
+      # interface, and hipblas_fortran_client only needs to compile against it and
+      # carry it forward.
+      # TEMPORARY, remove when ROCm/rocm-systems#11923 lands.
+      #
+      # The shims declare their datatype arguments as integer(kind(HIP_R_16F)),
+      # a hipDataType enumerator that the removed hipblas_enums module used to
+      # re-export. The generated hipblas module does not re-export it: a
+      # hipDataType is HIP's, not hipBLAS's, so 57 scopes across
+      # hipblas_fortran_blas{,_64}.f90 now say `use hip` and need a module to
+      # resolve it against. ROCm does not ship a HIP Fortran binding yet, so one
+      # is compiled here from a stub carrying only the sixteen enumerators those
+      # scopes reference.
+      #
+      # Build-only on purpose: added as a SOURCE of this archive, never
+      # installed, exported or packaged, so no second hip.mod can reach an
+      # installed prefix and collide with the real binding.
+      #
+      # To remove: delete the stub from the source list below and from
+      # ../fortran, then find_package(hip-fortran) and add hip::hip_fortran to
+      # the target_link_libraries() call. The `use hip` lines do not change.
+      set(hipblas_hip_stub ${CMAKE_CURRENT_SOURCE_DIR}/../fortran/hip_datatypes_stub.F90)
+
+      if( BUILD_WITH_SOLVER )
+        add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_solver} ${hipblas_hip_stub})
+      else()
+        add_library(hipblas_fortran_client STATIC ${hipblas_f90_source_clients_no_solver} ${hipblas_hip_stub})
+      endif()
+      target_link_libraries(hipblas_fortran_client PUBLIC roc::hipblas_fortran)
   endif()
 
   if(SKIP_LIBRARY)

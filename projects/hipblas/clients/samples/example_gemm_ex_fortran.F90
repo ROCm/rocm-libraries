@@ -51,7 +51,6 @@ end subroutine HIPBLAS_CHECK
 program example_fortran_gemm_ex
     use iso_c_binding
     use hipblas
-    use hipblas_enums
 
     implicit none
 

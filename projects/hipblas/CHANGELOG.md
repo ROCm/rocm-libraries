@@ -5,6 +5,24 @@ Documentation for hipBLAS is available at
 
 ## hipBLAS 3.8.0
 
+### Added
+
+* Generated Fortran bindings, as a single self-contained `hipblas` module (`use hipblas`,
+  link `roc::hipblas_fortran`). Built by default when a Fortran compiler is available;
+  controlled by `BUILD_FORTRAN_BINDINGS`, with `BUILD_FORTRAN_TESTS` and the tri-state
+  `FORTRAN_ARRAY_INTERFACES`. Found with `find_package(hipblas-fortran)`, installed per
+  compiler under `lib/fortran/<compiler>` and `include/fortran/<compiler>`.
+
+### Changed
+
+* The Fortran binding is now generated from the hipBLAS headers instead of hand-written.
+  `library/src/hipblas_module.f90` is removed and is no longer installed into
+  `include/hipblas`. It defined two modules, `hipblas` and `hipblas_enums`; the generated
+  binding defines only `hipblas`, with the enum constants folded in. `use hipblas` is
+  unchanged, but `use hipblas_enums` should become `use hipblas`. Rather than shipping a
+  `.f90` source to compile yourself, a compiled archive and `.mod` are installed; link
+  `roc::hipblas_fortran`.
+
 ## hipBLAS 3.7.0
 
 ### Added
