@@ -32,7 +32,7 @@ endif()
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_bench_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_multiprocess_gtest.cpp
     )
 endif()
 
