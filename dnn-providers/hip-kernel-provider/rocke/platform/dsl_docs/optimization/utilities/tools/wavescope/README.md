@@ -98,11 +98,26 @@ python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py
   --per-dispatch -- python3 /path/to/bench.py
 ```
 
+To build one WaveScope-ready folder after ATT capture, set `TRACE_DIR` to the
+reported `ui_output_*_dispatch_*` directory and keep the complete PMC bundle beside
+the ATT capture tree:
+
+```bash
+RUN_DIR="$(dirname "$TRACE_DIR")"
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py \
+  --output-dir "$RUN_DIR/pmc_bundle" --trace-dir "$TRACE_DIR" \
+  --arch gfx950 --op gemm --shape '{"M":512,"N":512,"K":512}' \
+  --kernel-name my_gemm --match-kernel my_gemm --repeats 3 --warmup 5 \
+  --per-dispatch -- python3 /path/to/bench.py
+```
+
 Choose the actual operation (attention, convolution, GEMM, etc.), shape, target,
 kernel and warmup count. The launcher runs in your current working directory.
 The adjacent perf package is added to the child `PYTHONPATH`; existing entries
 are preserved. Add the rocKE `library` path yourself if your launcher needs it.
-The output directory must be new. No prior capture or ATT files are modified.
+Every bundle output directory must be new. `--trace-dir` must name an existing
+WaveScope ATT dispatch folder containing `code.json`, `filenames.json` and
+`occupancy.json`; existing counter sidecars are never overwritten.
 
 **A successful PMC capture produces this CSV and JSON bundle:**
 
@@ -118,15 +133,20 @@ gemm-pmc-before/
   samples/0001/...
 ```
 
-To import counters into **WaveScope**, open the ATT dispatch, select
-**Bottlenecks**, and upload a recommended CSV from a successful profiler sample.
-Each upload replaces the previous one. With the full CDNA selection, `pmc_1`
-contains the LDS, L2, VALU and MFMA rule inputs; `pmc_2` contains LDS instructions
-and wait cycles. Check `profile_capture.counter_groups` for the actual selection.
-For folder import, copy relevant files from one repeat directly beside `code.json`
-with distinct names ending in `_counter_collection.csv`; the viewer does not scan
-nested pass directories. Preserve the original bundle. Keep repeats separate.
-Raw files retain warmup and other-kernel dispatches; JSON medians select the target
+With `--trace-dir`, the utility selects the first successful profiler repeat and
+copies each replay-pass CSV beside `code.json` using distinct
+`rocke_pmc_*_counter_collection.csv` names. WaveScope discovers and merges those
+top-level sidecars automatically when it opens the trace folder. Keep the complete
+bundle as a sibling of the ATT capture tree; nesting it below `TRACE_DIR` would let
+the browser folder picker recursively load retained repeats in addition to the
+published sidecars. The bundle preserves every repeat, JSON record and hash.
+
+Without `--trace-dir`, open the ATT dispatch, select **Bottlenecks**, and manually
+upload a recommended CSV printed by the utility. Each manual upload replaces the
+previous one. With the full CDNA selection, `pmc_1` contains the LDS, L2, VALU and
+MFMA rule inputs; `pmc_2` contains LDS instructions and wait cycles. Check
+`profile_capture.counter_groups` for the actual selection. Keep repeats separate.
+Raw CSVs retain warmup and other-kernel dispatches; JSON medians select the target
 and exclude warmup. Ratios of raw sums and ratios of medians can differ.
 
 To consume the **JSON contract**, retain the entire bundle and read
@@ -136,6 +156,9 @@ See the [artifact contract](../../../../../python/rocke/benchmark/perf/README.md
 for selection, repeat identity, SHA-256 inventory and timing-source semantics.
 The bundle layout contains original profiler artifacts and versioned measurements;
 each consumer reads the corresponding entries in the manifest.
+WaveScope's Bottlenecks visualizer derives PMC state from counter CSVs, not from
+rocKE `measurement.json`. Keep JSON for agents and other schema-aware consumers;
+publish the selected CSV sidecars for WaveScope.
 
 The utility defaults to **export-only** (no history writes). Add `--store-history`
 to compare later captures against stored baselines; `--cache`, `--threshold`,

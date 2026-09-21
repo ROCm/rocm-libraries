@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Python-native CK DSL manifest runner.
+"""Python-native rocKE manifest runner.
 
 This replaces the C++ `example/ck_tile/dsl/common/launcher.cpp` path
-for day-to-day DSL development. The flow:
+for day-to-day rocKE development. The flow:
 
   1. `gen.py` emits a HSACO blob + `manifest.json`.
   2. Python loads the code object with `hipModuleLoadData`.

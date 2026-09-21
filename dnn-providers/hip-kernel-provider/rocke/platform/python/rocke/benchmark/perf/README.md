@@ -175,23 +175,28 @@ Failed exports must not be consumed as finalized baselines. A regression still
 exports a complete bundle and exits 1. `--no-store` suppresses history writes,
 not an explicitly requested bundle. Without the flag, behavior is unchanged.
 
-**WaveScope CSV import:** open the ATT trace and upload a CSV recommended by the
-utility from a successful profiler sample. Each upload replaces the previous one.
-With the full CDNA selection, `pmc_1` holds all inputs for the three PMC rules,
-including the MFMA guard; `pmc_2` holds `SQ_INSTS_LDS` and `SQ_WAIT_ANY`.
-Use `profile_capture.counter_groups` to check the actual selection on your GPU.
-For folder import, place copies of the relevant files from one repeat directly
-beside `code.json`, preserving distinct names ending in `_counter_collection.csv`.
-The viewer does not recursively scan the bundle's pass directories. Keep the
-original bundle intact and do not combine repeats into one PMC import.
-Confirm workload, GPU and binary before correlating separate PMC and ATT captures;
-the bundle records their association as UNBOUND.
+**WaveScope CSV import:** pass an existing ATT dispatch folder to the utility with
+`--trace-dir` and keep `--output-dir` as its sibling (for example,
+`$(dirname "$TRACE_DIR")/pmc_bundle`). The utility copies every replay-pass CSV
+from the first successful repeat beside `code.json` using distinct names ending in
+`_counter_collection.csv`. WaveScope discovers and merges those top-level files
+when it opens the trace folder. Keeping the bundle outside the dispatch directory
+prevents browser folder import from counting retained repeats a second time.
+Existing sidecars are never overwritten.
+
+Without `--trace-dir`, manually upload a recommended CSV printed by the utility.
+Each upload replaces the previous one. Keep repeats separate. Confirm workload,
+GPU and binary before correlating separate PMC and ATT captures; the bundle records
+their association as UNBOUND.
 
 **JSON readers:** consume `measurement.json` using its existing schema, the sample
 records and the manifest. They retain normalized counter medians, sample count,
 spread, correctness and separate `wall`/`profiled` timing with `timing_source`.
 `--per-dispatch` adds samples with repeat and counter-pass identity. Consumers use
 the versioned manifest and measurement schemas to interpret the bundle.
+WaveScope's Bottlenecks visualizer does not derive PMC state from this JSON; it
+uses the colocated or manually uploaded counter CSVs. The JSON remains the
+machine-readable measurement and verdict contract for agents and other consumers.
 
 **Do not equate CSV and JSON totals.** Raw CSVs retain all profiler dispatches,
 including warmup and other kernels. JSON counter medians select one target and

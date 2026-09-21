@@ -1,14 +1,14 @@
 ---
 name: capture-kernel-trace-rocke
 description: >
-  Capture WaveScope evidence for CK DSL kernels with ATT instruction traces,
+  Capture WaveScope evidence for rocKE kernels with ATT instruction traces,
   PMC counter bundles, or both. ATT locates source-level stalls; PMC supplies
   dispatch-wide bottleneck rules and repeatable before/after verdicts.
   Usage: /capture-kernel-trace-rocke <kernel_script.py> [kernel_name_pattern]
 tools: Bash,Read,Write,Edit,Grep,Glob
 ---
 
-# Capture WaveScope Evidence (CK DSL)
+# Capture WaveScope Evidence (rocKE)
 
 ATT and PMC answer different questions and can be used independently or together:
 
@@ -44,22 +44,27 @@ python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py
   -- python3 bench.py
 ```
 
-**Combined — recommended for optimization:** run both commands with the same
-launcher, shape, GPU and binary. Open the reported ATT dispatch in WaveScope, then
-upload a CSV path printed by the PMC utility in **Bottlenecks**. The two captures
-are separate executions and remain `UNBOUND`; matching identifiers are evidence to
-check, not proof that the workload or binary was identical.
+**Combined — recommended for optimization:** run ATT first and use its reported
+dispatch folder as `TRACE_DIR`. Put the PMC bundle beside the ATT capture tree and
+run PMC with `--trace-dir "$TRACE_DIR"`. The utility copies one successful
+repeat's replay CSVs beside `code.json`, so WaveScope discovers and merges them
+when it opens that one folder. Keeping the bundle outside `TRACE_DIR` prevents the
+browser folder picker from recursively loading retained repeats a second time.
+The ATT and PMC captures are separate executions and remain `UNBOUND`; matching
+identifiers are evidence to check, not proof that the workload or binary was
+identical.
 
-Each ATT invocation writes a fresh `capture-<trace-id>` generation below its output
-directory. The PMC output directory must also be new and contains original profiler
-CSVs plus versioned measurement JSON. The manual ATT steps below remain the reference
-for remote/Docker captures and for anything the wrapper does not cover.
+Each ATT invocation writes a fresh `capture-<trace-id>` generation. A combined
+capture keeps the complete PMC bundle and ATT generation under one common run
+root, while publishing only WaveScope-readable CSV sidecars in the dispatch folder.
+The manual ATT steps below remain the reference for remote/Docker captures and for
+anything the wrapper does not cover.
 
 ## Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<kernel_script>` | Yes | Python script that compiles/runs CK DSL kernel, e.g. `bench_conv.py` |
+| `<kernel_script>` | Yes | Python script that compiles/runs a rocKE kernel, e.g. `bench_conv.py` |
 | `[kernel_pattern]` | No | Kernel name regex. If omitted, discover via `--stats` first |
 
 If no kernel script is provided, ask the user.
@@ -69,7 +74,7 @@ If no kernel script is provided, ask the user.
 **Check MEMORY.md for the user's current remote access configuration.** If not found, ask the user for:
 - SSH host and user
 - Docker container name (if applicable)
-- CK DSL install path on remote (e.g. `<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python`)
+- rocKE Python package path on remote (for example, `<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python`)
 
 SSH command pattern (adjust per environment):
 ```bash
@@ -110,7 +115,7 @@ scp $KERNEL_SCRIPT $USER@$HOST:/tmp/
 ssh $USER@$HOST "docker cp /tmp/$KERNEL_SCRIPT $CONTAINER:/tmp/"
 ```
 
-If the kernel script is already on the remote (e.g., in CK DSL examples), skip this step.
+If the kernel script is already on the remote (for example, in rocKE examples), skip this step.
 
 ---
 
@@ -135,13 +140,13 @@ Parse output to find kernel names:
 cat /tmp/discover_kernel_stats.csv
 ```
 
-**CK DSL Kernel Naming**:
+**rocKE Kernel Naming**:
 - Compiled kernels typically have names like: `conv_implicit_gemm_v4r1_nhwc_kc_gemmm_gemmn_gemmk_<config>`
 - Look for mangled LLVM function names in the CSV
-- May contain config details like tile sizes in the name
+- Names may contain configuration details such as tile sizes
 
-Present the kernel list and let the user pick, or auto-select the CK DSL kernel
-(typically the longest name with config details).
+Present the kernel list and let the user pick, or auto-select the rocKE kernel
+(typically the longest name with configuration details).
 
 ---
 
@@ -178,7 +183,7 @@ Key configuration:
 
 **NOTE**: `compile_kernel()` has no `debug=` parameter, but source mapping *is* available — set
 `ROCKE_DEBUG_LOC=1` on the process that builds the kernel. See
-[Debug Info in CK DSL](#debug-info-in-ck-dsl) below for what it does and why it is opt-in. Without
+[Debug Info in rocKE](#debug-info-in-rocke) below for what it does and why it is opt-in. Without
 it there is no DWARF and the `Source` column stays empty.
 
 **For ISA-level analysis** (which works either way), you can extract and disassemble the HSACO after
@@ -281,7 +286,7 @@ remote filesystem and streams it into the webview, so nothing is copied to the c
 
 Then run **WaveScope: Open Trace Folder...** and pick the dispatch folder. The Source tab appears
 only when the kernel was built with `ROCKE_DEBUG_LOC=1` (see
-[Debug Info in CK DSL](#debug-info-in-ck-dsl) below); everything else works either way.
+[Debug Info in rocKE](#debug-info-in-rocke) below); everything else works either way.
 
 ### Closing the loop with an agent
 
@@ -310,7 +315,7 @@ After capture, report:
 1. **Trace location**: Local path to the downloaded trace directory
 2. **Kernel info**: Name, VGPR/AGPR counts, grid size, duration (from out_kernel_trace.csv)
 3. **Source mapping**: % of instructions with source annotations (high with `ROCKE_DEBUG_LOC=1`, 0%
-   without it — see [Debug Info in CK DSL](#debug-info-in-ck-dsl) below)
+   without it — see [Debug Info in rocKE](#debug-info-in-rocke) below)
 4. **Instruction count**: Total instructions in code.json
 5. **Next step**: Open the folder in WaveScope (Step 6), or run `/kernel-trace-analysis` for a
    text-only bottleneck report
@@ -362,12 +367,12 @@ export ARCH='<arch>'
 export OP='<operation>'
 export SHAPE_JSON='<shape-json>'
 export KERNEL_NAME='<kernel-name>'
-```
+export TRACE_DIR='<reported-att-dispatch-folder>'
+export RUN_DIR="$(dirname "$TRACE_DIR")"
 
-```bash
 python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py \
-  --output-dir ./pmc-before --store-history \
-  --cache /tmp/rocke-perf-history \
+  --output-dir "$RUN_DIR/pmc_bundle" --trace-dir "$TRACE_DIR" \
+  --store-history --cache /tmp/rocke-perf-history \
   --arch "$ARCH" --op "$OP" --shape "$SHAPE_JSON" \
   --kernel-name "$KERNEL_NAME" --match-kernel "$KERNEL_NAME" \
   --repeats 3 --warmup 5 --per-dispatch \
@@ -382,26 +387,30 @@ status recorded in `manifest.json` rather than assuming a fixed layout.
 
 For the complete agent optimization loop:
 
-1. **Establish a baseline.** Run the PMC command above. The first stored run reports
-   `no_baseline` and preserves the raw evidence.
-2. **Locate the bottleneck.** Capture ATT with the same launcher and inspect the
-   WaveScope timeline, ISA/source attribution and dependency waits. Upload the
-   successful CSV recommended by the PMC utility (`pmc_1` for the tested full
-   CDNA selection) to add counter-backed rules.
-3. **Make one kernel change.** Keep launch shape, GPU and binary inputs controlled.
-4. **Verify the change.** Capture to a new output directory with the same PMC
-   identity and history cache. Accept `improved`; treat `within_noise` as no proven
-   change; stop on `regressed` (the CLI exits 1).
-5. **Re-capture ATT when needed.** Use it to confirm the original bottleneck moved
-   or to select the next change. Do not infer per-instruction attribution from a
-   dispatch-wide PMC counter.
+1. **Capture ATT.** Run the ATT quick path with the baseline launcher, then set
+   `TRACE_DIR` to the reported `ui_output_*_dispatch_*` folder.
+2. **Establish a PMC baseline.** Run the PMC command above. It stores the complete
+   bundle beside the ATT dispatch tree and publishes one successful repeat's
+   replay CSVs beside `code.json`. The first stored run reports `no_baseline`.
+3. **Locate the bottleneck.** Open `TRACE_DIR` in WaveScope. It automatically
+   merges the top-level `*_counter_collection.csv` sidecars with ATT evidence;
+   no manual CSV upload is needed.
+4. **Make one kernel change.** Keep launch shape, GPU and binary inputs controlled.
+5. **Verify the change.** Run PMC into a new output directory with the same identity
+   and history cache. Accept `improved`; treat `within_noise` as no proven change;
+   stop on `regressed` (the CLI exits 1).
+6. **Re-capture ATT when needed.** To inspect the changed kernel, create a new ATT
+   folder and publish that run's PMC sidecars into it. Do not infer per-instruction
+   attribution from a dispatch-wide PMC counter.
 
-WaveScope reads one uploaded CSV at a time. Use one successful sample and one replay
-pass; never merge repeats. The utility also writes versioned JSON for agents and
-other consumers, including medians, spread, normalized counters and the verdict.
+The complete PMC bundle remains beside the ATT capture tree with its manifest,
+JSON, hash inventory and all repeats. Only one successful repeat's replay CSVs are
+copied to the dispatch-folder top level, where WaveScope discovers and merges them.
+Existing sidecars are never overwritten.
 
-PMC capture does not need WaveScope or the ATT decoder. Viewing the CSV beside an
-ATT trace does require WaveScope and does not bind the two separate executions.
+PMC capture does not need WaveScope or the ATT decoder. Opening colocated PMC and
+ATT artifacts does not bind their separate executions; verify workload, GPU, shape
+and binary identity before correlating them.
 
 ## Error Handling
 
@@ -415,13 +424,13 @@ ATT trace does require WaveScope and does not bind the two separate executions.
 | Trace truncated (missing instructions) | Increase `att_buffer_size` to `0xC000000` (192MB) |
 | SSH timeout | Increase timeout, check host connectivity |
 | `kernel_iteration_range` mismatch | Test runs fewer iterations than expected -- use `"[0, [1-2]]"` |
-| `ModuleNotFoundError: rocke` | Set PYTHONPATH to CK DSL root: `export PYTHONPATH=/path/to/composablekernel/python` |
+| `ModuleNotFoundError: rocke` | Set `PYTHONPATH` to the rocKE package root: `export PYTHONPATH=<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python` |
 
 ---
 
-## CK DSL-Specific Notes
+## rocKE-Specific Notes
 
-### Debug Info in CK DSL
+### Debug Info in rocKE
 
 **Source mapping is opt-in, via `ROCKE_DEBUG_LOC=1`.** Set it on the process that *builds*
 the kernel — it is read when `IRBuilder` constructs the kernel, not at compile time:
@@ -462,16 +471,16 @@ needing source.
 
 ### Kernel Naming Convention
 
-CK DSL kernel names include configuration details:
+rocKE kernel names include configuration details:
 - Format: `<base_name>_<layout>_<variant>_<tile_config>_<pipeline>_<scheduler>`
 - Example: `conv_implicit_gemm_v4r1_nhwc_kc_gemmm_gemmn_gemmk_64x128x64_mem_intrawave`
 - The name is set via `ImplicitGemmConvSpec.name` parameter
 
 Use the full kernel name (or regex matching it) in `kernel_include_regex`.
 
-### Running CK DSL Kernels
+### Running rocKE Kernels
 
-CK DSL kernels can be run via:
+rocKE kernels can be run via:
 
 1. **run_manifest API** (recommended for benchmarking):
 ```python
@@ -494,7 +503,7 @@ For profiling, ensure the kernel is actually launched (not just compiled).
 
 ```python
 #!/usr/bin/env python3
-"""CK DSL Conv2D for profiling with rocprofv3."""
+"""rocKE Conv2D for profiling with rocprofv3."""
 import sys
 from pathlib import Path
 sys.path.insert(0, '<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python')
@@ -554,5 +563,5 @@ Save this as `bench_conv_profile.py` and use it with rocprofv3.
 - `tools/wavescope/capture_wavescope_trace.py` - Source-correlated ATT capture
 - `tools/wavescope/capture_wavescope_pmc.py` - PMC capture, artifact export and verification
 - `/kernel-trace-analysis` - Analyze captured ATT traces
-- `src/stage3_extract_isa/extract_isa.py` - Extract ISA from CK DSL HSACO
+- `src/stage3_extract_isa/extract_isa.py` - Extract ISA from a rocKE HSACO
 - `.claude/OPTIMIZATION_RUNBOOK.md` Section 10 - Profiling methodology

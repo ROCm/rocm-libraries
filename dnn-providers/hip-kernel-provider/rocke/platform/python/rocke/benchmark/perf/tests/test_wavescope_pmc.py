@@ -34,6 +34,10 @@ class TestWaveScopePmc(unittest.TestCase):
         self.root = Path(tmp.name)
         self.cwd = self.root / "launch directory"
         self.cwd.mkdir()
+        self.trace = self.root / "trace"
+        self.trace.mkdir()
+        for name in ("code.json", "filenames.json", "occupancy.json"):
+            (self.trace / name).write_text("{}\n")
         self.cache = self.root / "history"
         self.launch_log = self.root / "launches.jsonl"
         self.profiler_log = self.root / "profiler.jsonl"
@@ -93,6 +97,10 @@ class TestWaveScopePmc(unittest.TestCase):
             csv = output / "pmc_1/results_counter_collection.csv"
             csv.parent.mkdir(parents=True)
             csv.write_bytes(Path(os.environ["CAPTURE_RAW"]).read_bytes())
+            if os.environ.get("CAPTURE_SECOND_PASS"):
+                csv2 = output / "pmc_2/results_counter_collection.csv"
+                csv2.parent.mkdir(parents=True)
+                csv2.write_bytes(Path(os.environ["CAPTURE_RAW"]).read_bytes())
             sample = next(part for part in output.parts if part.isdigit())
             if sample in os.environ.get("CAPTURE_FAIL_SAMPLES", "").split(","):
                 raise SystemExit(7)
@@ -233,6 +241,73 @@ class TestWaveScopePmc(unittest.TestCase):
         self.assertEqual((destination / csvs[0]["path"]).read_bytes(), RAW)
         self.assertFalse((self.cache / "history.jsonl").exists())
 
+    def test_trace_dir_publishes_one_repeat_all_replay_passes(self):
+        self.env["CAPTURE_SECOND_PASS"] = "1"
+        destination = self.root / "pmc-bundle"
+        result = self.capture(
+            destination,
+            "--trace-dir",
+            str(self.trace),
+            "--repeats",
+            "2",
+            "--json",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sidecars = sorted(self.trace.glob("rocke_pmc_*_counter_collection.csv"))
+        self.assertEqual(
+            [path.name for path in sidecars],
+            [
+                "rocke_pmc_1_counter_collection.csv",
+                "rocke_pmc_2_counter_collection.csv",
+            ],
+        )
+        self.assertTrue(all(path.read_bytes() == RAW for path in sidecars))
+        manifest = self.read_json(destination / "manifest.json")
+        self.assertEqual(
+            len([item for item in manifest["files"] if item["kind"] == "pmc_csv"]),
+            4,
+        )
+        self.assertIn(f"WaveScope-ready trace folder: {self.trace}", result.stderr)
+        self.assertNotIn("then upload these CSVs", result.stderr)
+
+    def test_trace_dir_refuses_existing_sidecar_without_overwrite(self):
+        sidecar = self.trace / "rocke_pmc_1_counter_collection.csv"
+        sidecar.write_bytes(b"keep me")
+        result = self.capture(
+            self.root / "collision-bundle",
+            "--trace-dir",
+            str(self.trace),
+            "--json",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse((self.root / "collision-bundle").exists())
+        self.assertEqual(sidecar.read_bytes(), b"keep me")
+        self.assertIn("already contains PMC sidecars", result.stderr)
+
+    def test_trace_dir_refuses_nested_bundle(self):
+        destination = self.trace / "pmc_bundle"
+        result = self.capture(
+            destination,
+            "--trace-dir",
+            str(self.trace),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(destination.exists())
+        self.assertIn("must be separate sibling trees", result.stderr)
+
+    def test_trace_dir_requires_wavescope_dispatch_files(self):
+        not_a_trace = self.root / "not-a-trace"
+        not_a_trace.mkdir()
+        destination = self.root / "invalid-trace-bundle"
+        result = self.capture(
+            destination,
+            "--trace-dir",
+            str(not_a_trace),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(destination.exists())
+        self.assertIn("not a WaveScope dispatch folder", result.stderr)
+
     def test_failed_profiler_csv_is_retained_without_upload_guidance(self):
         self.env["CAPTURE_FAIL_SAMPLES"] = "0000"
         destination = self.root / "failed-profiler"
@@ -269,7 +344,7 @@ class TestWaveScopePmc(unittest.TestCase):
                 self.assertNotIn(csv_path, result.stderr)
             else:
                 self.assertIn(csv_path, result.stderr)
-        self.assertIn("upload a CSV", result.stderr)
+        self.assertIn("upload these CSVs", result.stderr)
 
     def test_wall_only_export_has_no_csv_upload_guidance(self):
         self.env["CAPTURE_NO_CSV"] = "1"
