@@ -250,18 +250,18 @@ private:
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
-    // The single definition of "this graph's claims must be looked at": a sidecar
-    // exists, claim checking is on in either mode, and an engine was named to check
-    // against. Checked in the same order everywhere so a harness with no injected
-    // engine never asks about the sidecar.
+    // The single definition of "this graph's claims must be looked at": claim
+    // checking is on in either mode, an engine was named to check against, and a
+    // sidecar exists. Ordered cheapest-first on purpose -- carriesSidecar() stats the
+    // filesystem once per test body, and a run that passed neither flag must not pay.
     //
     // Separate from shouldEnforceClaims() because observing and failing are two
-    // decisions, not one. Folding them together is what made report mode
-    // impossible: the query never ran, so the summary had nothing to print.
+    // decisions. Folding them together is what made report mode impossible: the
+    // query never ran, so the summary had nothing to print.
     bool shouldObserveClaims() const
     {
-        return carriesSidecar() && _engineUnderTest.has_value()
-               && (_deps.policy.reportSupportClaims || _deps.policy.enforceSupportClaims);
+        return _deps.policy.claims >= ClaimMode::REPORT && _engineUnderTest.has_value()
+               && carriesSidecar();
     }
 
     // "There is a sidecar here", and nothing more -- no engine, no mode. The run's
@@ -277,12 +277,11 @@ private:
     }
 
     // ...and the definition of "a broken claim must fail this test". Strictly
-    // narrower: everything enforcement needs, plus the enforcement flag. Report
-    // mode observes the identical facts and returns false here, which is the whole
-    // reason it leaves the exit code alone.
+    // narrower: everything observation needs, plus the mode being ENFORCE. Report
+    // mode observes the identical facts and returns false here.
     bool shouldEnforceClaims() const
     {
-        return shouldObserveClaims() && _deps.policy.enforceSupportClaims;
+        return shouldObserveClaims() && _deps.policy.claims == ClaimMode::ENFORCE;
     }
 
     VerificationDepth bundleRequiredDepth() const

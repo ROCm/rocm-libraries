@@ -44,8 +44,11 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
     const HarnessPolicy policy = productionPolicy(TensorPlacement::DEVICE);
 
     EXPECT_EQ(policy.mode, TestConfig::get().getVerificationMode());
-    EXPECT_EQ(policy.enforceSupportClaims, TestConfig::get().enforceSupportClaims());
-    EXPECT_EQ(policy.reportSupportClaims, TestConfig::get().reportSupportClaims());
+    // Not a mirror like the rest: two flags collapse into one field. Pinned as the
+    // questions the mode must answer, not as a copy of claimMode()'s if-chain, so a
+    // flipped precedence fails here.
+    EXPECT_EQ(policy.claims == ClaimMode::ENFORCE, TestConfig::get().enforceSupportClaims());
+    EXPECT_EQ(policy.claims >= ClaimMode::REPORT, TestConfig::get().reportSupportClaims());
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
     EXPECT_EQ(policy.deviceVramMb, TestConfig::get().getCurrentDeviceVramMb());

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "harness/TestConfig.hpp"
@@ -23,23 +24,29 @@ enum class TensorPlacement
     DEVICE,
 };
 
+/// What this run does with support claims.
+///
+/// One ordered value rather than a report bool and an enforce bool: those two carry
+/// a rule -- enforcing without querying is nothing to enforce -- and so have a fourth
+/// state no caller should be able to construct. All three of these are legal, and
+/// "at least observing" is a `>=` rather than a second predicate.
+enum class ClaimMode : std::uint8_t
+{
+    OFF, ///< never open a sidecar
+    REPORT, ///< query and publish; a broken claim is counted and printed, never failed
+    ENFORCE, ///< query and publish; a broken claim fails the test
+};
+
 /// Everything about the run the harness needs and cannot work out for itself.
 ///
 /// A value, not an interface. Every field is a plain answer that cannot change
 /// during a test, so a struct beats a mock: a test states the environment it wants
 /// by filling one in, and nothing downstream has to be told how to answer. The one
-/// place TestConfig is consulted is productionPolicy() in HarnessDependencies.hpp.
+/// place TestConfig is consulted is productionPolicy() in ProductionPolicy.hpp.
 struct HarnessPolicy
 {
     VerificationMode mode = VerificationMode::AUTO;
-
-    /// Query the sidecar and publish the verdicts. Observation only -- on its own
-    /// a broken claim is counted and printed, never failed.
-    bool reportSupportClaims = false;
-
-    /// Turn a broken claim into a test failure. Implies reportSupportClaims: there
-    /// is nothing to enforce without the query that reports does.
-    bool enforceSupportClaims = false;
+    ClaimMode claims = ClaimMode::OFF;
     TensorPlacement placement = TensorPlacement::DEVICE;
 
     /// Full arch token as detected, e.g. "gfx942:sramecc+:xnack-". Empty when

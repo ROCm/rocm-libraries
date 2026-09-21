@@ -80,7 +80,7 @@ TEST_F(TestUnpinnedRunEnforcement, RunWithNoNamedEngineNeverQueriesClaimsOrRecor
     // should fail on its own account, so any failure recorded below has to be a
     // symptom of the engine-less run trying to enforce something it should not.
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(
-        testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)));
+        testing_support::hostPolicy(VerificationMode::GOLDEN, ClaimMode::ENFORCE)));
     harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
                       "test/bundle",
                       makeLocator());

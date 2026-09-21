@@ -164,7 +164,7 @@ protected:
                                                      : fixtures::K_OUTPUT_VALUE + 100.0f);
 
         IntegrationBundleVerificationHarness harness(
-            _mocks.dependencies(testing_support::hostPolicy(mode, /*enforceSupportClaims=*/true)),
+            _mocks.dependencies(testing_support::hostPolicy(mode, ClaimMode::ENFORCE)),
             makeEngineUnderTest());
         drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
     }
@@ -189,9 +189,7 @@ protected:
                                                      : fixtures::K_OUTPUT_VALUE + 100.0f);
 
         IntegrationBundleVerificationHarness harness(
-            _mocks.dependencies(testing_support::hostPolicy(mode,
-                                                            /*enforceSupportClaims=*/false,
-                                                            /*reportSupportClaims=*/true)),
+            _mocks.dependencies(testing_support::hostPolicy(mode, ClaimMode::REPORT)),
             makeEngineUnderTest());
         drive(harness, loadBundle("Bundle", includeGoldenOutput), results);
     }
@@ -258,10 +256,9 @@ TEST_F(TestSupportClaimEnforcement, NonFullBundleStillQueriesClaims)
     ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
         .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::APPLICABILITY;
     drive(harness, bundle, &results);
@@ -415,10 +412,9 @@ TEST_F(TestSupportClaimEnforcement, ExecutedWithoutAnOracleStaysAccepted)
     setRefBehavior(RefBehavior::CAPABILITY_MISS);
     EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(1);
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
 
     EXPECT_FALSE(testing_support::anyFailed(results));
@@ -446,8 +442,7 @@ TEST_F(TestSupportClaimEnforcement, ReferenceErrorDoesNotDemoteTheClaim)
     setRefBehavior(RefBehavior::ERRORS);
 
     IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::CPU, /*enforceSupportClaims=*/true)),
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU, ClaimMode::ENFORCE)),
         makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/false), &results);
 
@@ -482,10 +477,9 @@ TEST_F(TestSupportClaimEnforcement, BuildableBundleConfirmsAtItsOwnDepth)
     ON_CALL(_mocks.engineRunner, buildPlans(_, _))
         .WillByDefault(Return(EngineOpResult::succeeded()));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
     drive(harness, bundle, &results);
@@ -514,10 +508,9 @@ TEST_F(TestSupportClaimEnforcement, UnreachedEnforcementRungStaysAccepted)
             return testing_support::declinedSession();
         });
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
     bundle->metadata.enforcementLevel = EnforcementLevel::BUILDABLE;
     drive(harness, bundle, &results);
@@ -619,10 +612,9 @@ TEST_F(TestSupportClaimEnforcement, EngineFailureAfterPlansBuiltKeepsTheDepthItR
                                              /*plansBuilt=*/true,
                                              "stub: died executing compiled plans"}));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::GOLDEN, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(verdicts.size(), 1u);
@@ -647,10 +639,9 @@ TEST_F(TestSupportClaimEnforcement, EngineFailureBeforePlansBuiltReachedNothing)
     ON_CALL(_mocks.engineRunner, execute(_, _, _))
         .WillByDefault(Return(EngineOpResult::failed("stub: died compiling plans")));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::GOLDEN, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(verdicts.size(), 1u);
@@ -681,10 +672,9 @@ TEST_F(TestSupportClaimEnforcement, UnreadableGraphIsNotReportedAsAnUnqueriedSid
             return testing_support::buildErrorSession("stub: truncated graph buffer");
         });
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::AUTO, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(coverage.size(), 1u);
@@ -735,10 +725,9 @@ TEST_F(TestSupportClaimEnforcement, AThrowOnTheWayToTheCommitStillPublishesTheVe
     ON_CALL(_mocks.engineRunner, execute(_, _, _))
         .WillByDefault(Throw(std::runtime_error("stub: harness bug mid-run")));
 
-    IntegrationBundleVerificationHarness harness(
-        _mocks.dependencies(
-            testing_support::hostPolicy(VerificationMode::GOLDEN, /*enforceSupportClaims=*/true)),
-        makeEngineUnderTest());
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::GOLDEN, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 
     ASSERT_EQ(verdicts.size(), 1u);

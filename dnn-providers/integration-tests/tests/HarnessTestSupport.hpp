@@ -40,13 +40,11 @@ inline void ensureTestConfigInitialized()
 /// A policy for a deviceless run: host pointers, so the mocked engine can write
 /// straight into the variant pack and no ITensor ever hipMallocs.
 inline HarnessPolicy hostPolicy(VerificationMode mode = VerificationMode::AUTO,
-                                bool enforceSupportClaims = false,
-                                bool reportSupportClaims = false)
+                                ClaimMode claims = ClaimMode::OFF)
 {
     HarnessPolicy policy;
     policy.mode = mode;
-    policy.enforceSupportClaims = enforceSupportClaims;
-    policy.reportSupportClaims = reportSupportClaims;
+    policy.claims = claims;
     policy.placement = TensorPlacement::HOST;
     policy.arch = "gfx942";
     policy.platform = "linux";
