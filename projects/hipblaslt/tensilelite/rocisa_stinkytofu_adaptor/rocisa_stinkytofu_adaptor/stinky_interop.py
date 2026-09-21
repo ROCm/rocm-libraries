@@ -89,6 +89,37 @@ class StinkyAsmModuleWithAdapterSignature:
         return self._inner
 
 
+def _apply_optimization_config(signature: Any, options: Any) -> None:
+    """Fill the signature the way C++ ``toStinkyTofuModule`` does.
+
+    Native conversion does not copy ``descriptionTopic`` / ``descriptionList``.
+    It calls ``setOptimizationConfig`` from ModuleOptions; the descriptor then
+    prints the Optimizations block as raw text. Drop the TextBlock copies so
+    they cannot print a second copy when comments are enabled.
+    """
+    setter = getattr(signature, "setOptimizationConfig", None)
+    if setter is None or not options:
+        return
+    gro = options.get("UseSgprForGRO", 0)
+    setter(
+        (int(options.get("TileA0", 0)), int(options.get("TileB0", 0))),
+        (int(options.get("SubGroup0", 0)), int(options.get("SubGroup1", 0))),
+        (int(options.get("WaveGroup0", 0)), int(options.get("WaveGroup1", 0))),
+        int(options.get("VectorWidthA", 0)),
+        int(options.get("VectorWidthB", 0)),
+        int(options.get("GlobalReadVectorWidthA", 0)),
+        int(options.get("GlobalReadVectorWidthB", 0)),
+        bool(options.get("DirectToLdsA", False)),
+        bool(options.get("DirectToLdsB", False)),
+        int(gro),
+    )
+    if hasattr(signature, "descriptionTopic"):
+        signature.descriptionTopic = _code.TextBlock("")
+    clearer = getattr(signature, "clearDescription", None)
+    if clearer is not None:
+        clearer()
+
+
 def _convert_options(options: Any) -> dict:
     """Convert adaptor options dict to stinkytofu-binding-compatible dict.
 
@@ -142,4 +173,5 @@ def toStinkyTofuModule(
     inner = module.to_stinky_asm(arch_list, logical_name=logical_name, options=st_options)
     if signature is None:
         return inner
+    _apply_optimization_config(signature, options)
     return StinkyAsmModuleWithAdapterSignature(inner, signature)
