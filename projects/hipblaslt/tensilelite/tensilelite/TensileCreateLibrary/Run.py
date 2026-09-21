@@ -348,7 +348,7 @@ def _applyCustomKernelDefToSol(sol, result):
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
         sol.originalSolution._state["CustomKernel"] = ckDef
-        from Tensile.Contractions import CustomKernel as CK
+        from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):

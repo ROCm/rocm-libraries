@@ -42,7 +42,7 @@ import argparse
 import os
 import sys
 
-from Tensile.CustomKernels import iterCustomKernelFiles, validateCustomKernelMetadata
+from .CustomKernels import iterCustomKernelFiles, validateCustomKernelMetadata
 
 
 def validate_all(root, strict=False):
