@@ -42,7 +42,7 @@
 #include <stdexcept>
 #include <stdlib.h>
 
-#include "Utility.hpp"
+#include "include/Utility.hpp"
 
 #include <Tensile/hip/HipHardware.hpp>
 
