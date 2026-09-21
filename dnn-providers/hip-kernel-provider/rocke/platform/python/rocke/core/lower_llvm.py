@@ -3800,6 +3800,26 @@ class _Lowerer:
             f"i32 {dpp_ctrl}, i32 15, i32 15, i1 true)"
         )
 
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        ``ctrl`` packs four two-bit lane selectors
+        (``p0 | p1 << 2 | p2 << 4 | p3 << 6``), so every value in
+        ``0..255`` is legal and anything outside it is malformed IR.
+        Reject rather than mask: truncation would turn an out-of-range
+        control into a different, silently valid permutation.
+        """
+        (data,) = op.operands
+        self._need("update.dpp.i32")
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {ctrl}, i32 15, i32 15, i1 true)"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
 
