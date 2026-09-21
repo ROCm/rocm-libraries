@@ -108,29 +108,15 @@ lane_mask_type match_any(unsigned int label, unsigned int label_bits, bool valid
     // Obtain a mask with the threads which are currently active.
     lane_mask_type peer_mask = ballot(valid);
 
-    // Compute the final value iteratively by testing each bit separately.
-    for(unsigned int bit = 0; bit < label_bits; ++bit)
-    {
-        static constexpr int lane_width = std::numeric_limits<lane_mask_type>::digits;
-        using lane_mask_type_s          = std::make_signed_t<lane_mask_type>;
-        const auto label_signed         = static_cast<lane_mask_type_s>(label);
+    // Zero out all bits above label_bits so that __match_any effectively
+    // compares only the low label_bits of the label, grouping lanes that
+    // share the same least significant bits.
+    const unsigned int bit_mask   = (label_bits >= 32) ? ~0u : ((1u << label_bits) - 1);
+    const unsigned int masked_lbl = label & bit_mask;
 
-        // Get all zeros or all ones depending on label's i-th bit.
-        // Moves the bit into the sign position by left shifting, then shifts it into all the bits
-        // by (arithmetic) right shift which does sign-extension.
-        const lane_mask_type_s bit_set
-            = (label_signed << (lane_width - 1 - bit)) >> (lane_width - 1);
-
-        // Remove all lanes from the mask with a bit that differs from ours
-        // - if we have the bit set we keep the lanes that do too so we mask with the result
-        //   of the ballot
-        // - if we don't have it, then we keep the lanes that also don't, so we flip all bits
-        //   in the mask before and-ing.
-        // since bit_set is all ones if we have the bit and all zeros if not, the flipping is
-        // the same as xor-ing with its inverse
-        const lane_mask_type bit_set_mask = ballot(bit_set);
-        peer_mask &= bit_set_mask ^ ~bit_set;
-    }
+    // Query the hardware for all lanes with the same masked label,
+    // then intersect with the active lanes to exclude any that opted out.
+    peer_mask &= static_cast<lane_mask_type>(__match_any(masked_lbl));
 
     return -lane_mask_type{valid} & peer_mask;
 }
