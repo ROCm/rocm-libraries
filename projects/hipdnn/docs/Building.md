@@ -65,6 +65,8 @@ The build environment provides them: TheRock's third-party tree, or an install p
 
 To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. The superbuild sets it for you, so this only applies to a standalone configure against a prefix that does not supply everything.
 
+This policy also applies to standalone samples and the example engine plugin's GoogleTest dependency. Samples forward `ALLOW_FETCH_DEPS` to the plugin's separate CMake build; an explicit `OFF` is preserved. In TheRock, `hipDNN_samples` must declare its GoogleTest build dependency even when the lookup uses `QUIET`.
+
 ```bash
 cmake -S . -B build -DALLOW_FETCH_DEPS=ON
 ```

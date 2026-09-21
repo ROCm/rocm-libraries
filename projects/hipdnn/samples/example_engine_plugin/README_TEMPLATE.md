@@ -14,6 +14,7 @@
 | C++17 compiler | GCC/G++ or MSVC | |
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | Required at runtime |
 | hipDNN | Plugin SDK, data SDK | SDK packages from ROCm install or built from source |
+| GoogleTest | Unit testing framework | Provide its CMake package or opt in to fetching with `-DALLOW_FETCH_DEPS=ON` |
 | {Additional dependencies specific to your plugin} | | |
 
 ## Building
@@ -33,6 +34,7 @@ To build the plugin standalone, first install hipDNN and any required dependenci
 |---|---|---|
 | `{PLUGINNAME}_BUILD_UNIT_TESTS` | `ON` | Build unit tests |
 | `{PLUGINNAME}_BUILD_SAMPLE` | `ON` | Build sample application |
+| `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable |
 
 ## Architecture
 

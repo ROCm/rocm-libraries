@@ -12,6 +12,11 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES C CXX)
 include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 
+option(ALLOW_FETCH_DEPS
+       "Allow fetching third-party dependencies the build environment does not provide"
+       OFF
+)
+
 # Sanitizer support - inherit from parent build when BUILD_ADDRESS_SANITIZER is set
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
@@ -540,6 +545,7 @@ ExternalProject_Add(example_engine_plugin
         "-DCMAKE_RC_COMPILER:FILEPATH=${CMAKE_RC_COMPILER}"
         "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
         "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
+        "-DALLOW_FETCH_DEPS:BOOL=${ALLOW_FETCH_DEPS}"
         "-DEXAMPLEPROVIDER_BUILD_UNIT_TESTS:BOOL=ON"
         "-DEXAMPLEPROVIDER_BUILD_SAMPLE:BOOL=ON"
         "-DHIP_PLATFORM:STRING=${HIP_PLATFORM}"

@@ -1,15 +1,31 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+option(ALLOW_FETCH_DEPS
+       "Allow fetching third-party dependencies the build environment does not provide"
+       OFF
+)
+
 set(EXAMPLE_PROVIDER_GTEST_VERSION "1.16.0" CACHE STRING
     "GoogleTest version fetched when no GTest package is available"
 )
 
-# The build environment is expected to provide GTest. The fetch below is a
-# fallback for a standalone configure against a prefix that has none.
+# The build environment is expected to provide GTest. Fetching is an opt-in
+# fallback when no package is available.
 find_package(GTest CONFIG QUIET)
 
 if(NOT GTest_FOUND)
+    if(NOT ALLOW_FETCH_DEPS)
+        message(FATAL_ERROR
+            "GTest was not found, and ${PROJECT_NAME} does not fetch "
+            "third-party dependencies. They are provided by the build "
+            "environment: TheRock's third-party tree, or an install prefix on "
+            "CMAKE_PREFIX_PATH. Provide GTest, disable this project's tests, "
+            "or configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
+            "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
+        )
+    endif()
+
     include(FetchContent)
 
     FetchContent_Declare(

@@ -20,7 +20,7 @@ Runtime Compilation):
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
 | hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
-| Internet access | GTest is downloaded via CMake `FetchContent` | Only needed for the first build |
+| GoogleTest | Unit testing framework | Provide its CMake package via `CMAKE_PREFIX_PATH` or `GTest_DIR`; fetching requires `-DALLOW_FETCH_DEPS=ON` |
 
 ## Directory Structure
 
@@ -182,6 +182,7 @@ The tests and sample can also be run directly:
 |---|---|---|
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
+| `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable; inherited from the samples parent build |
 
 To build only the plugin library (no tests or sample):
 
