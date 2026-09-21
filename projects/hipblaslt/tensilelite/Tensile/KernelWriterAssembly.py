@@ -17715,7 +17715,8 @@ class KernelWriterAssembly(KernelWriter):
         miwt = kernel.get("MIWaveTile", [0, 0])
         maxVgpr = self.states.regCaps["MaxVgpr"]
         foldFits = (self.vgprPool.size() + 9) <= maxVgpr
-        isSubtileFold = (kernel.get("UseSubtileImpl")
+        isSubtileFold = (kernel.get("DPPStoreFold")
+                         and kernel.get("UseSubtileImpl")
                          and len(miwt) >= 2 and miwt[0] >= 4
                          and (miwt[0] == 8 or foldFits))
         numCvtVgprs = 9 if isSubtileFold else (7 if kernel.get("UseSubtileImpl") else 4)

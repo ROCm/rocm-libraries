@@ -744,6 +744,13 @@ validParameters = { # we need to make sure this matches develop
     # The emitted code falls back to DefaultWGM at runtime for any other grid, so
     # enabling it never miscomputes other problem sizes.
     "WGMBitSwizzle": [False, True],
+    # When True, enable the DPP store-repack fold on the 16-bit subtile (PLSIN-weave)
+    # store path: batchB's packed dwords + blended store data reuse batchA's dead
+    # ValuC slots and the store is repacked through permlane16/DPP instead of a
+    # second cvt block. Only takes effect when UseSubtileImpl is set and the tile is
+    # eligible (MIWaveTile[0] >= 4 and it fits the VGPR budget); a no-op otherwise, so
+    # enabling it never changes ineligible kernels. False reproduces the pre-fold store.
+    "DPPStoreFold": [False, True],
     # 0: WorkGroupMapping is predicted at runtime.
     # 1: No mapping
     "WorkGroupMappingXCC": [
