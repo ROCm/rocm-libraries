@@ -144,6 +144,8 @@ private:
             return detail::GpuLayernormBwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::PointwiseAttributes:
             return detail::GpuPointwiseSignatureKey(node, tensorMap, node.compute_data_type());
+        case NodeAttrs::ReductionAttributes:
+            return detail::GpuReductionSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormAttributes:
             return detail::GpuRMSNormFwdSignatureKey(node, tensorMap, node.compute_data_type());
         case NodeAttrs::RMSNormBackwardAttributes:

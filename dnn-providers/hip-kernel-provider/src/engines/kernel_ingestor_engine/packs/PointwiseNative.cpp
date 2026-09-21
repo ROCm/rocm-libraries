@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -531,18 +532,17 @@ PointwiseBinding pointwiseBinding(const BoundTokens& bound)
 class PreparedPointwise : public PreparedDispatch
 {
 public:
-    PreparedPointwise(std::unique_ptr<compilation::ICompiledProgram> program,
-                      std::unique_ptr<compilation::IRunnableKernel> kernel,
-                      PointwiseBinding binding)
-        : _program(std::move(program))
-        , _kernel(std::move(kernel))
+    PreparedPointwise(IngestorKernelCode code, PointwiseBinding binding)
+        : _code(std::move(code))
         , _binding(binding)
     {
     }
 
-    const compilation::IRunnableKernel& kernel() const
+    /// The kernel for the device this dispatch is running on. Resolved here rather than
+    /// at prepare() because a plan outlives the handle it was built from.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
-        return *_kernel;
+        return _code.kernelForStream(stream);
     }
 
     const PointwiseBinding& binding() const
@@ -551,10 +551,9 @@ public:
     }
 
 private:
-    // Runnable kernel is a view into its program's module; both are held for the
-    // plan's lifetime.
-    std::unique_ptr<compilation::ICompiledProgram> _program;
-    std::unique_ptr<compilation::IRunnableKernel> _kernel;
+    // Owns each device's program alongside the kernel viewing into it, so a module
+    // outlives every function resolved from it for the plan's lifetime.
+    IngestorKernelCode _code;
     PointwiseBinding _binding;
 };
 
@@ -587,6 +586,21 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
             "matched pointwise graph has no tensor for uid " + std::to_string(binding.inputA));
     }
     return *it->second;
+}
+
+/// The argument list this pack marshals: three device pointers, in operand order, matching
+/// the launch() below one for one. It sits here rather than in the adapter that consumes it
+/// so that it is edited alongside that launch -- a stale copy rejects the correct kernel
+/// rather than the drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& pointwiseKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer, s_buffer, s_buffer};
+    return s_signature;
 }
 
 /**
@@ -635,14 +649,13 @@ public:
         options.add("HIP_PLUGIN_POINTWISE_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_BLOCK_SIZE", blockSize);
 
-        auto code
-            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, pointwiseKernelSignature());
 
-        code.kernel->setBlockSize(blockSize, 1, 1);
-        code.kernel->setGridSize(1, 1, 1);
+        code.setBlockSize(blockSize, 1, 1);
+        code.setGridSize(1, 1, 1);
 
-        return std::make_unique<PreparedPointwise>(
-            std::move(code.program), std::move(code.kernel), binding);
+        return std::make_unique<PreparedPointwise>(std::move(code), binding);
     }
 
     void launch(const Handle& handle,
@@ -661,7 +674,9 @@ public:
         const auto output
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.output, deviceBuffers, numDeviceBuffers);
 
-        preparedPointwise.kernel().launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
+        // Changing this argument list means changing pointwiseKernelSignature() with it.
+        preparedPointwise.kernelForStream(handle.getStream())
+            .launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
     }
 
 private:
