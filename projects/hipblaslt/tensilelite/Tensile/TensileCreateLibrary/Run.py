@@ -171,6 +171,7 @@ class KernelCodeGenResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+    customKernelDef: Optional[dict] = None
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -258,6 +259,7 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
+    customKernelDef = kernel._state.get("CustomKernel", None)
     cuocc = kernel["CUOccupancy"]
     if cuocc <= 0 and getVerbosity() >= 2:
         print2(
@@ -267,7 +269,8 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
         kernel["WavefrontSize"], cuocc, \
-        pgr, kernel["MathClocksUnrolledLoop"]
+        pgr, kernel["MathClocksUnrolledLoop"], \
+        customKernelDef
     )
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
@@ -335,6 +338,18 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            if result.customKernelDef is not None:
+                solution._state["CustomKernel"] = result.customKernelDef
+
+def _applyCustomKernelDefToSol(sol, result):
+    """Copy codegen-emitted CustomKernel definition from a KernelCodeGenResult to a
+    Contractions.Solution, updating both the originalSolution state and the
+    Contractions-level customKernel attribute."""
+    ckDef = getattr(result, 'customKernelDef', None)
+    if ckDef is not None:
+        sol.originalSolution._state["CustomKernel"] = ckDef
+        from Tensile.Contractions import CustomKernel as CK
+        sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
@@ -360,6 +375,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                     sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                     sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                    _applyCustomKernelDefToSol(sol, result)
                 except KeyError:
                     print(f"\n{'='*80}")
                     print(f"ERROR: KeyError in masterLibrary.solutions")
@@ -390,6 +406,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                         sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                         sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                        _applyCustomKernelDefToSol(sol, result)
                     except KeyError:
                         print(f"\n{'='*80}")
                         print(f"ERROR: KeyError in lazyLibrary")
@@ -935,6 +952,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # replace the global collector with this clean aggregate so
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
+    skippedGemmA2AFusion = 0
     # Every library pulled out of the generator below is retained for the rest
     # of the run, which makes the cyclic collector the dominant cost of this
     # phase (5x) if left running. See deferCyclicGC.
@@ -943,7 +961,12 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
         )
         for library in parsedLibraries:
-            scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
+            scheduleName, architectureName, problemType, _, _, newLibrary, typeMismatches = library
+            if not _includeGemmA2AFusionProblemType(
+                problemType, args.get("EnableGemmA2AFusion", False)
+            ):
+                skippedGemmA2AFusion += 1
+                continue
             mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
             if architectureName == "":
@@ -971,6 +994,9 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             else:
                 masterLibraries[architectureName] = newLibrary
                 masterLibraries[architectureName].version = args["CodeObjectVersion"]
+
+    if skippedGemmA2AFusion:
+        print1(f"# GEMM+A2A fusion: disabled; filtered {skippedGemmA2AFusion} logic files")
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
@@ -1049,6 +1075,17 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of unique solutions: {len(solutions)}")
 
     return solutions, masterLibraries, codeObjectFilesIndex
+
+
+def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
+    """Return whether this build admits one library logic's GEMM+A2A solutions.
+
+    Only an explicit True excludes one: a missing key, or no problem type at all,
+    names a logic file that is not fused. Erring this way keeps a problem type that
+    cannot answer the question from emptying the library, which fails far more
+    quietly than building the solutions the gate meant to skip.
+    """
+    return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
 
 
 ################################################################################
