@@ -1292,28 +1292,41 @@ def test_rap_silences_a_unconditionally_for_the_reuse_copy_own_loads():
     """Every in-loop load in the reuse copy serves the tile A is resident for."""
     rendered = _rap_null_tdm(in_pap_next_tile_prefetch=False)
     assert "s[sgprtdmAGroup0+0]" in rendered
-    for batchState in ("sgprRAPResidentBatch", "sgprWorkGroup2"):
-        assert batchState not in rendered, (
-            "an in-loop load consulted %s; the tile it serves cannot have changed "
-            "batch mid-iteration" % batchState
+    for residentState in (
+        "sgprRAPResidentBatch", "sgprWorkGroup2",
+        "sgprRAPResidentMTile", "sgprWorkGroup0",
+    ):
+        assert residentState not in rendered, (
+            "an in-loop load consulted %s; the tile it serves cannot have needed "
+            "a different A mid-iteration" % residentState
         )
 
 
-def test_rap_lets_the_next_tile_prefetch_fetch_a_when_the_batch_changes():
+def test_rap_lets_the_next_tile_prefetch_fetch_a_when_a_changes():
     """The last load in the reuse copy is PAP's, and it feeds the next tile.
 
     Silencing A there is only right while that tile goes on reusing the resident
-    registers. When it changes batch the RAP_IterN guard diverts it to the fill
-    copy, which computes from whatever this prefetch left behind -- so A has to be
-    fetched. Silencing it unconditionally is invisible to any MX test (the client
-    generator gives every batch the same A) and to any single-batch test, which is
-    how it survived the first round of this fix.
+    registers. When it needs a different A the RAP_IterN guard diverts it to the
+    fill copy, which computes from whatever this prefetch left behind -- so A has
+    to be fetched. Silencing it unconditionally is invisible to any MX test (the
+    client generator gives every batch the same A) and to any single-batch test,
+    which is how the batch half survived the first round of this fix.
 
-    WorkGroup2 is the next tile's here: prefetchAcrossPersistent raises the flag
+    Both halves of the identity, because the guard refills on either. The M-tile
+    half is not reachable under today's fixed-stride walk -- the M-tile either
+    never turns over or turns over at every tile, and neither gets the reuse copy
+    ahead of a change -- so this assertion is what keeps it from being tidied
+    away. It goes live the moment the stride or the decomposition changes, which
+    is exactly what the candidate fixes for skGrid alignment do, and the guard
+    and this prefetch have to agree on when A is refilled. See
+    rapNullTdmDescriptorForEvenWaves for the arithmetic.
+
+    WorkGroup* is the next tile's here: prefetchAcrossPersistent raises the flag
     only between setupNextTile and papRestoreCurrentTileIdentity.
     """
     rendered = _rap_null_tdm(in_pap_next_tile_prefetch=True)
     assert "s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered
+    assert "s[sgprWorkGroup0], s[sgprRAPResidentMTile]" in rendered
     assert "s[sgprtdmAGroup0+0]" in rendered
 
 

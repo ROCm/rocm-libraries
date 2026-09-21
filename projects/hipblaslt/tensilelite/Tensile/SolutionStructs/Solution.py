@@ -190,6 +190,25 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _disableRuntimeWGM(state):
+  state["WorkGroupMapping"] = 1
+  state["InternalSupportParams"]["SupportCustomWGM"] = False
+
+
+def _disableUnsupportedRuntimeWGM(state):
+  # ReuseAcrossPersistent's entry guard decides whether the resident A is still
+  # this tile's by recomputing the tile's M index as StreamKIter -> tileIdx %
+  # NumWorkGroups0. DefaultWGM mixes WorkGroup1 into WorkGroup0, and WorkGroup1
+  # moves every persistent iteration, so with the remap live that recomputation
+  # is not the WorkGroup0 A's address was built from: the guard can pass a tile
+  # whose A has changed. Compile-time WorkGroupMapping is only half of it -- the
+  # kernel reads its WGM from a runtime field that TENSILE_FIXED_WGM overrides,
+  # and WorkGroupMapping 0 means "host predicts it at runtime" -- so the
+  # capability flag has to go, the way SupportCustomStaggerU does.
+  if state.get("ReuseAcrossPersistent", 0):
+    _disableRuntimeWGM(state)
+
+
 def _disableRuntimeStaggerU(state):
   state["StaggerU"] = 0
   state["StaggerUMapping"] = 0
@@ -5186,6 +5205,7 @@ class Solution(collections.abc.Mapping):
         _disableRuntimeStaggerU(state)
 
     _disableUnsupportedRuntimeStaggerU(state)
+    _disableUnsupportedRuntimeWGM(state)
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
@@ -6972,6 +6992,16 @@ class Solution(collections.abc.Mapping):
         return
       if state.get("UseSubtileImpl", False):
         reject(state, printRejectionReason, "ReuseAcrossPersistent is not implemented for the subtile path")
+        return
+      # SpaceFillingCurveWalk is DefaultWGM's sibling, selected at codegen by
+      # len(SpaceFillingAlgo), so the SupportCustomWGM opt-out in DefaultWGM
+      # never runs for it. It also redefines the field: with SFC the WGM kernarg
+      # carries packed per-level grid dims rather than a WGM value. Rejecting the
+      # compile-time list is enough where rejecting StaggerU was not, because
+      # which algorithm gets emitted is baked into the assembly; only the WGM
+      # *value* arrives from a runtime field.
+      if len(state["SpaceFillingAlgo"]):
+        reject(state, printRejectionReason, "ReuseAcrossPersistent is not supported with SpaceFillingAlgo")
         return
       # The A-side local-read pack buffers are sized from numVgprBufferPackA,
       # which RAP does not grow, so the resident buffer sets would alias each

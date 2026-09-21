@@ -985,22 +985,31 @@ class StreamK(Component):
 
         return module
 
-    def rapTileBatch(self, writer, kernel, dstSgpr):
-        """Batch index of the tile ``StreamKIter`` currently points at, into ``dstSgpr``.
+    def rapTileAIdentity(self, writer, kernel, dstBatchSgpr, dstMTileSgpr):
+        """Which A the tile at ``StreamKIter`` needs: its batch and its M-tile.
 
-        Repeats the arithmetic ``skTileIndex`` and ``skIndexToWG`` perform -- tile
-        index from ``StreamKIter``, then tile index over the tiles per batch -- but
-        writes only ``dstSgpr`` and temporaries. ``skTileIndex`` also resets the
-        local-read offsets and ``skIndexToWG`` claims ``WorkGroup0/1/2``, neither of
-        which may happen at a point that might still branch away.
+        A is indexed by M and by batch, so those two together name the resident
+        copy. Both come out of the same decomposition ``skIndexToWG`` performs --
+        tile index from ``StreamKIter``, then batch and remainder over the tiles
+        per batch, then the M-tile as the remainder over ``NumWorkGroups0`` -- but
+        this writes only its two destinations and temporaries. ``skTileIndex``
+        also resets the local-read offsets and ``skIndexToWG`` claims
+        ``WorkGroup0/1/2``, neither of which may happen at a point that might
+        still branch away.
 
-        Valid only at a persistent-loop entry, where ``StreamKIter`` still names the
-        tile about to be computed; ``graWorkGroup`` advances it past that point.
+        Valid only at a persistent-loop entry, where ``StreamKIter`` still names
+        the tile about to be computed; ``graWorkGroup`` advances it past that
+        point.
+
+        The M-tile read here is the pre-WGM one, which is the WorkGroup0 A's
+        address is built from only because RAP clears SupportCustomWGM and
+        DefaultWGM then emits no remap at all (see _disableRuntimeWGM). Without
+        that this comparison would be against a different tile's A.
 
         ReuseAcrossPersistent calls this at both entries to decide whether the
         resident A belongs to the tile this iteration will compute.
         """
-        module = Module("StreamK rapTileBatch")
+        module = Module("StreamK rapTileAIdentity")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         with writer.allocTmpSgpr(4, 2, "RAPTileBatchTemp") as sTmpRes:
@@ -1019,12 +1028,21 @@ class StreamK(Component):
 
             module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
                                comment="RAP: tiles per batch"))
-            tmpVgpr = writer.vgprPool.checkOut(2, "rapTileBatchDiv")
+            tmpVgpr = writer.vgprPool.checkOut(2, "rapTileAIdentityDiv")
             tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
-            module.add(scalarUInt32DivideAndRemainder(qReg=dstSgpr, dReg=sTmp, divReg=sTmp+1, rReg=sTmp+3,
+            # The remainder is wanted this time: it is the tile's position within
+            # its batch, which the second divide turns into the M-tile.
+            module.add(scalarUInt32DivideAndRemainder(qReg=dstBatchSgpr, dReg=sTmp, divReg=sTmp+1, rReg=sTmp+3,
                                                       tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"],
-                                                      doRemainder=False,
+                                                      doRemainder=True,
                                                       comment="RAP: batch of the tile at StreamKIter"))
+            # M is the fastest-varying component, so it falls out as the
+            # remainder; the quotient is the N-tile, which A does not depend on.
+            module.add(scalarUInt32DivideAndRemainder(qReg=sTmp+2, dReg=sTmp+3, divReg="NumWorkGroups0",
+                                                      rReg=dstMTileSgpr,
+                                                      tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"],
+                                                      doRemainder=True,
+                                                      comment="RAP: M-tile of the tile at StreamKIter"))
             writer.vgprPool.checkIn(tmpVgpr)
 
         return module

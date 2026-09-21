@@ -302,6 +302,20 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
 def DefaultWGM(writer, kernel, sgprWGM):
     module = Module("graWGMCalc")
     module.addComment0("WGM Calculation")
+
+    # The remap below reads sgpr[WGM], which is a runtime field: a solution that
+    # sets WorkGroupMapping 0 has the host predict a value, and TENSILE_FIXED_WGM
+    # overrides whatever the solution asked for. A feature that cannot survive
+    # being remapped therefore clears SupportCustomWGM (see
+    # _disableRuntimeWGM), which stops the host packing the field. Honouring the
+    # flag here as well means the kernel carries no remap at all rather than
+    # relying on the host to have sent a zero -- the same two-sided arrangement
+    # SupportCustomStaggerU has. Returning before the temp checkout keeps the
+    # emission free of dead code; label counters are per-name, so skipping WGM /
+    # WGMPositive renumbers nothing else.
+    if not kernel["InternalSupportParams"]["SupportCustomWGM"]:
+        return module
+
     # Restore WGM
 
     # We allocate a temp sgpr and keep sgpr[WGM] untouched.

@@ -613,9 +613,17 @@ class ProblemPredicate(Properties.Predicate):
             # A lives in VGPRs for the whole persistent loop, so the kernel is only
             # correct for problems where every tile a workgroup visits reads the
             # same A, and where K is a whole number of resident k-tiles.
-            #   M == MacroTile0     - one M-tile only, and no masked store in M. A
-            #                         half-filled tile would take the edge path,
-            #                         which v0 does not budget registers for.
+            #   M % MacroTile0 == 0 - no edge tile in M. A half-filled tile would
+            #                         take the edge path, which the resident
+            #                         k-tile count is not budgeted against. More
+            #                         than one M-tile is fine: A's M-tile joins
+            #                         the batch in the entry guard's comparison,
+            #                         so a tile needing a different one is sent to
+            #                         the fill copy. Whether that costs a reload
+            #                         every tile or none at all is down to
+            #                         skGrid % NumWorkGroups0, which nothing
+            #                         currently arranges -- a throughput question,
+            #                         not a correctness one.
             #   N % MacroTile1 == 0 - no edge tile in N either.
             #
             # K is a range, not a point. The loop shell owns every resident k-tile
@@ -639,7 +647,7 @@ class ProblemPredicate(Properties.Predicate):
             kIdx = state['ProblemType']['NumIndicesC']
             kTiles = state['_RAPNumResidentKTiles']
             floorTiles = 1
-            rv += [cls('SizeEqual', index=0, value=state['MacroTile0'])]
+            rv += [cls('SizeMultiple', index=0, value=state['MacroTile0'])]
             rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
             rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
             rv += [cls('SizeGreaterThan', index=kIdx,

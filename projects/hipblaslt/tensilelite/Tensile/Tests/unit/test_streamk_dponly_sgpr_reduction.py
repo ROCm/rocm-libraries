@@ -604,39 +604,48 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
 
 
 # ---------------------------------------------------------------------------
-# 10. rapTileBatch: the batch of the tile at StreamKIter, with none of the
-#     side effects that would make it unsafe where ReuseAcrossPersistent
-#     needs it.
+# 10. rapTileAIdentity: which A the tile at StreamKIter needs -- its batch and
+#     its M-tile -- with none of the side effects that would make it unsafe
+#     where ReuseAcrossPersistent needs it.
 # ---------------------------------------------------------------------------
-def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
+def test_rap_tile_a_identity_reads_the_pending_tile_without_claiming_it():
     """RAP asks for this before it knows whether it will run the tile here.
 
-    The reuse copy can only serve tiles in the batch its resident A was filled
-    from, so it opens by comparing the pending tile's batch against that one and
-    branching to the fill copy when they differ. The comparison therefore runs at
-    a point that may still jump away, and the two emitters that already compute
-    this batch cannot: ``skTileIndex`` resets the local-read offsets and
-    ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
+    The reuse copy can only serve tiles whose A is the one its resident
+    registers were filled from, so it opens by comparing the pending tile's A
+    identity against that one and branching to the fill copy when they differ.
+    The comparison therefore runs at a point that may still jump away, and the
+    two emitters that already compute this identity cannot: ``skTileIndex``
+    resets the local-read offsets and ``skIndexToWG`` claims WorkGroup0/1/2 for
+    the tile.
 
-    So rapTileBatch repeats their arithmetic and writes only its destination. A
-    later edit that reaches for skIndexToWG instead would leave WorkGroup* set
-    for a tile the fill copy then re-derives, which no build failure would catch.
+    So rapTileAIdentity repeats their arithmetic and writes only its
+    destinations. A later edit that reaches for skIndexToWG instead would leave
+    WorkGroup* set for a tile the fill copy then re-derives, which no build
+    failure would catch.
     """
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only=True)
     kernel["StreamK"] = 3
     kernel["WavefrontSize"] = 32
 
-    rendered = str(_sk().rapTileBatch(writer, kernel, "RAPResidentBatch"))
+    rendered = str(
+        _sk().rapTileAIdentity(writer, kernel, "RAPResidentBatch", "RAPResidentMTile")
+    )
 
     # StreamKIter still names the pending tile here; graWorkGroup advances it.
     assert "s[sgprStreamKIter]" in rendered
     # Tiles per batch, the divisor that turns a tile index into a batch.
     assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
     assert "s[sgprRAPResidentBatch]" in rendered
+    # A is indexed by M as well, so the M-tile has to come out of the same walk.
+    # Without it the guard would pass a tile that shares the batch but needs a
+    # different A -- which is every extra M-tile M > MacroTile0 introduces.
+    assert "s[sgprRAPResidentMTile]" in rendered
+    assert "s[sgprNumWorkGroups0]" in rendered
 
     for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
         assert claimed not in rendered, (
-            "rapTileBatch claimed %s for a tile it may hand back to the fill copy"
+            "rapTileAIdentity claimed %s for a tile it may hand back to the fill copy"
             % claimed
         )
