@@ -16,6 +16,11 @@ import pytest
 
 from config_helpers import configMarks, findAvailableArchs
 
+# These validate the gfx1250 xfail/ffm marking logic in-process, so tag them into the gfx1250 arch suite (-m gfx1250) alongside the
+# auto-added `common` mark, keeping them collected wherever gfx1250 marking is
+# exercised.
+pytestmark = pytest.mark.gfx1250
+
 # configMarks takes rootDir only to compute the config's relpath (for the
 # directory-name marks); the four gfx1250 configs live under Tensile/Tests.
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
