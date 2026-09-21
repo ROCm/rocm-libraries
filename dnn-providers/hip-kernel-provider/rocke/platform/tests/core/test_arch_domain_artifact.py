@@ -323,6 +323,97 @@ class DriftTest(unittest.TestCase):
         self.assertIn("not valid JSON", G._drift("{oops", self._doc()))
 
 
+class ImmargSweepTest(unittest.TestCase):
+    """A negative must survive being asked with a legal operand value.
+
+    The probe passes 0 for every `immarg`, and 0 is not legal everywhere: it is
+    not a transfer size. When it is rejected, ISel says `Cannot select` -- which
+    is also what a genuinely unsupported target says, so the diagnostic cannot
+    separate the two and the generator recorded three CDNA targets as incapable
+    of an instruction that ships in production. Asking again with a different
+    value is the only discriminator.
+
+    Both directions matter. A sweep that only manufactures more `ok` cells has
+    broken the table in the direction that is harder to notice: a false
+    `arch_absent` breaks a build loudly, a false `ok` admits a kernel that
+    cannot run.
+    """
+
+    _IMM_DECL = "declare void @llvm.probe.imm(ptr addrspace(1) nocapture, i32 immarg)"
+
+    def test_an_immarg_defaults_to_zero_and_the_sweep_moves_it(self):
+        base, _ = G._probe_module(self._IMM_DECL, "e-p:64:64-i64:64")
+        self.assertIn("i32 0)", base)
+        for imm in G._IMMARG_PROBE_VALUES:
+            with self.subTest(imm=imm):
+                text, why = G._probe_module(
+                    self._IMM_DECL, "e-p:64:64-i64:64", imm_int=imm
+                )
+                self.assertEqual(why, "")
+                self.assertIn(f"i32 {imm})", text)
+
+    def test_a_declare_with_no_immarg_has_nothing_to_sweep(self):
+        """The generator decides what is sweepable by comparing module text.
+
+        So a declare the sweep cannot vary must produce an identical module --
+        otherwise every key would get four extra probes on every negative, for
+        candidates that change nothing.
+        """
+        decl = "declare i32 @llvm.probe.plain(ptr addrspace(1) nocapture, i32)"
+        base, _ = G._probe_module(decl, "e-p:64:64-i64:64")
+        for imm in G._IMMARG_PROBE_VALUES:
+            text, _ = G._probe_module(decl, "e-p:64:64-i64:64", imm_int=imm)
+            self.assertEqual(text, base, f"imm_int={imm} varied a non-immarg decl")
+
+    def test_a_rescued_cell_says_which_value_answered(self):
+        """Without it, a first-try `ok` and a fourth-candidate `ok` look alike.
+
+        That is not bookkeeping: the value is the evidence that the cell was
+        measured with a legal operand, and re-deriving it by hand is exactly
+        what nobody did for two committed columns.
+        """
+        for flavor, path in _columns():
+            doc = json.loads(path.read_text())
+            for key, row in doc["keys"].items():
+                for arch, cell in row.items():
+                    if "probe_imm" not in cell:
+                        continue
+                    with self.subTest(flavor=flavor, key=key, arch=arch):
+                        self.assertIn(cell["probe_imm"], G._IMMARG_PROBE_VALUES)
+                        # The sweep only ever returns early on a win, so a
+                        # recorded value on a negative cell would mean the
+                        # value is being reported for a probe it did not
+                        # decide.
+                        self.assertEqual(cell["status"], G.STATUS_OK)
+
+    def test_global_load_lds_is_available_on_cdna_and_not_on_rdna(self):
+        """The case that motivated the sweep, pinned in both directions.
+
+        The intrinsic takes a per-lane transfer size, legal at 1/2/4 on CDNA
+        and at 16 additionally on gfx950. It has a builder entry point, a
+        lowering handler in both engines and a production instance, so an
+        all-`arch_absent` row is a false negative on a live path. The RDNA half
+        is the other direction: those targets really cannot lower it, and they
+        must still say so after the full sweep.
+        """
+        for flavor, path in _columns():
+            row = json.loads(path.read_text())["keys"].get("global.load.lds")
+            if row is None:
+                continue
+            for arch, cell in sorted(row.items()):
+                if cell["status"] in (
+                    G.STATUS_TARGET_UNSUPPORTED,
+                    G.STATUS_TOOLCHAIN_CRASH,
+                    G.STATUS_TOOLCHAIN_TIMEOUT,
+                ):
+                    continue  # no data, not an answer
+                expect = (
+                    G.STATUS_OK if arch.startswith("gfx9") else G.STATUS_ARCH_ABSENT
+                )
+                with self.subTest(flavor=flavor, arch=arch):
+                    self.assertEqual(cell["status"], expect)
+
+
 class ArchDomainRegenerationTest(unittest.TestCase):
     """Re-probe this host's flavor and require the committed column to match."""
 

@@ -126,7 +126,8 @@ STATUS_PROBE_ERROR = "probe_error"
 #
 #   1 -- initial, probes at -O3
 #   2 -- probes at -O0, per-probe timeout, provenance recorded
-GENERATOR = 2
+#   3 -- immarg values swept on a negative, winning value recorded
+GENERATOR = 3
 
 # Hoisted out of `_probe` so the artifact can record the flags that actually
 # ran rather than a hand-copied list that drifts from them. `-O0` is the one
@@ -214,6 +215,17 @@ _FAT_PTR = "ptr addrspace(8)"
 # `_probe_module`'s `literal_ints` and `_wants_literals`.
 _LITERAL_PROBE_VALUES = (0, 4)
 
+# Values the `immarg` sweep tries, in order, when the default 0 produced a
+# negative. See `_probe_module`'s `imm_int` and the sweep in `run`.
+#
+# Chosen to cover the operand kinds that actually appear in this decl table
+# rather than to be exhaustive: 1/2/4 are the byte counts a transfer-size
+# operand accepts, and 16 is the wider one gfx950 added. A selector operand
+# (an MFMA cbsz/blgp, say) is legal at 0 and so never reaches the sweep at
+# all. The list is ordered smallest-first so the recorded winner is the least
+# surprising legal value rather than whichever we happened to try first.
+_IMMARG_PROBE_VALUES = (1, 2, 4, 16)
+
 # The two ways LLVM reports "that operand had to be an immediate". llvm22
 # rejects the call in the verifier; llvm20 has no such check and instead dies
 # during type legalisation, which is why the same decl-table gap reads as a
@@ -234,7 +246,10 @@ def _wants_literals(status: str, evidence: str) -> bool:
 
 
 def _probe_module(
-    decl: str, datalayout: str, literal_ints: int | None = None
+    decl: str,
+    datalayout: str,
+    literal_ints: int | None = None,
+    imm_int: int | None = None,
 ) -> tuple[str, str]:
     """Build a minimal module that declares an intrinsic and calls it.
 
@@ -261,6 +276,23 @@ def _probe_module(
     operand has non-immediate parameter". This variant exists to rescue both,
     and only those two diagnostics.
 
+    `imm_int`, when set, is the value given to every `immarg` operand in place
+    of the default 0. A parameter that is already marked `immarg` is never
+    touched by `literal_ints` -- it is a constant either way, so the rescue
+    above has nothing to substitute -- but the *value* can still be illegal,
+    and an illegal immediate is indistinguishable from an unsupported target
+    from the diagnostic alone: both say `Cannot select`. `global.load.lds`
+    takes a per-lane transfer size whose legal values are 1, 2 and 4, so 0
+    recorded every CDNA target as incapable of an instruction they run in
+    production. The only way to tell the two apart is to ask again with a
+    different value.
+
+    All `immarg` operands move together, as `literal_ints` does. A declare
+    whose immediates have disjoint legal domains would need a cross product,
+    and nothing in this table does; if one appears, it reads as `arch_absent`
+    (conservative, and the direction that gets noticed) rather than as a wrong
+    `ok`.
+
     The result is stored `volatile` so the call survives -O3; without it, DCE
     would drop the reference and the link would succeed spuriously.
     """
@@ -280,7 +312,8 @@ def _probe_module(
             # av.* scope lists, which want a real scope node, not an empty one.
             args.append("metadata !0")
         elif is_imm:
-            args.append(f"{ty} {'false' if ty == 'i1' else '0'}")
+            imm = 0 if imm_int is None else imm_int
+            args.append(f"{ty} {('true' if imm else 'false') if ty == 'i1' else imm}")
         elif ty == _FAT_PTR:
             args.append(f"{ty} poison")
         elif literal_ints is not None and re.fullmatch(r"i\d+", ty):
@@ -667,6 +700,7 @@ def main() -> int:
     # for every arch rather than a crash mid-sweep.
     modules: dict[str, tuple[Path | None, str]] = {}
     literal_modules: dict[str, list[Path]] = {}
+    imm_modules: dict[str, list[tuple[int, Path]]] = {}
     for key in keys:
         stem = re.sub(r"[^A-Za-z0-9_.-]", "_", key)
         text, why = _probe_module(decls[key], datalayout)
@@ -690,6 +724,19 @@ def main() -> int:
                 variants.append(lit_path)
         if variants:
             literal_modules[key] = variants
+        # The immarg sweep, built the same way. A declare with no integer
+        # immarg produces a module identical to the base one, so the `!=`
+        # test below is what decides which keys are sweepable -- no separate
+        # signature analysis to keep in step with `_probe_module`.
+        imm_variants = []
+        for imm in _IMMARG_PROBE_VALUES:
+            imm_text, why_imm = _probe_module(decls[key], datalayout, imm_int=imm)
+            if not why_imm and imm_text != text:
+                imm_path = ir_dir / f"{stem}.imm{imm}.ll"
+                imm_path.write_text(imm_text)
+                imm_variants.append((imm, imm_path))
+        if imm_variants:
+            imm_modules[key] = imm_variants
 
     # Stage A -- the flavor axis, once per key. Arch-free, so it costs one
     # `opt` run instead of one link per arch, and it is the only stage that can
@@ -711,11 +758,11 @@ def main() -> int:
     # Stage B -- the arch axis, only for names that exist.
     work = [(k, a) for k in keys if k not in absent for a in arches]
 
-    def run(item: tuple[str, str]) -> tuple[str, str, str, str]:
+    def run(item: tuple[str, str]) -> tuple[str, str, str, str, int | None]:
         key, arch = item
         path, why = modules[key]
         if path is None:
-            return key, arch, STATUS_PROBE_ERROR, why
+            return key, arch, STATUS_PROBE_ERROR, why, None
         out = Path(ir_dir) / f"{path.stem}.{arch}.hsaco"
         status, evidence = _probe(clang, path, arch, out)
         # Rescue a suspected false negative. Both diagnostics below are the
@@ -738,7 +785,7 @@ def main() -> int:
                 lit_out = Path(ir_dir) / f"{path.stem}.lit{i}.{arch}.hsaco"
                 lit_status, lit_evidence = _probe(clang, lit_path, arch, lit_out)
                 if lit_status == STATUS_OK:
-                    return key, arch, STATUS_OK, ""
+                    return key, arch, STATUS_OK, "", None
                 last = (lit_status, lit_evidence)
                 if settled is None and not _wants_literals(lit_status, lit_evidence):
                     settled = last
@@ -752,7 +799,31 @@ def main() -> int:
             if settled is None and last and last[0] == STATUS_ARCH_ABSENT:
                 settled = last
             status, evidence = settled or (status, evidence)
-        return key, arch, status, evidence
+
+        # Sweep the immediates. Runs only on a negative, so the common case
+        # still costs one probe -- and only on the ~1 key in 6 whose declare
+        # has an integer immarg at all.
+        #
+        # `arch_absent` and nothing else. It is the only status this can
+        # explain: a crash, a timeout or an unsupported target say nothing
+        # about the operand value, and re-asking would just pay for the same
+        # answer four more times.
+        #
+        # Any legal value wins, because the question the artifact answers is
+        # "can this target lower this intrinsic", not "can it lower it with
+        # the operand our probe happened to pick". A 0 that is out of range is
+        # our defect, not the target's limit.
+        if status == STATUS_ARCH_ABSENT and key in imm_modules:
+            for imm, imm_path in imm_modules[key]:
+                imm_out = Path(ir_dir) / f"{path.stem}.imm{imm}.{arch}.hsaco"
+                imm_status, _ = _probe(clang, imm_path, arch, imm_out)
+                if imm_status == STATUS_OK:
+                    return key, arch, STATUS_OK, "", imm
+            # Every candidate failed. That is the target speaking, and the
+            # original evidence is kept rather than the last candidate's:
+            # the cell describes the probe as posed by default.
+
+        return key, arch, status, evidence, None
 
     # Threads, not processes: each unit of work is already its own subprocess.
     #
@@ -766,10 +837,20 @@ def main() -> int:
     jobs = args.jobs or min(8, available_cpus())
     results: dict[str, dict[str, dict[str, str]]] = {k: {} for k in keys}
 
-    def record(key: str, arch: str, status: str, evidence: str) -> None:
-        cell: dict[str, str] = {"status": status, "verified_on": flavor}
+    def record(
+        key: str, arch: str, status: str, evidence: str, imm: int | None = None
+    ) -> None:
+        cell: dict[str, object] = {"status": status, "verified_on": flavor}
         if evidence and status != STATUS_OK:
             cell["evidence"] = evidence
+        # Only on a cell the sweep rescued. Its absence therefore means "the
+        # default 0 answered", which is the common case and should not cost a
+        # field on 1100 cells. Present, it says which value made the intrinsic
+        # lower -- without it nobody can tell a first-try `ok` from one that
+        # needed the fourth candidate, and re-deriving that by hand is how the
+        # defect it exists to prevent stayed invisible for two columns.
+        if imm is not None:
+            cell["probe_imm"] = imm
         results[key][arch] = cell
 
     for key in absent:
@@ -777,8 +858,8 @@ def main() -> int:
             record(key, arch, STATUS_NAME_ABSENT, f"not an intrinsic in {flavor}")
 
     with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
-        for key, arch, status, evidence in ex.map(run, work):
-            record(key, arch, status, evidence)
+        for key, arch, status, evidence, imm in ex.map(run, work):
+            record(key, arch, status, evidence, imm)
             if args.verbose and status != STATUS_OK:
                 print(f"     {key:44s} {arch:14s} {status}")
 
@@ -803,8 +884,8 @@ def main() -> int:
     if retry:
         print(f"   retrying {len(retry)} unclassified/crashed probe(s) serially...")
         for key, arch in retry:
-            _k, _a, status, evidence = run((key, arch))
-            record(key, arch, status, evidence)
+            _k, _a, status, evidence, imm = run((key, arch))
+            record(key, arch, status, evidence, imm)
 
     doc = {
         "schema": SCHEMA,
