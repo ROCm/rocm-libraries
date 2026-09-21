@@ -289,8 +289,8 @@ if(ROCKE_INSTALL_TESTS)
 
     # The harness above builds LIBRARY kernels for its attention, attention_dense,
     # attention_d256 and kda_chunkwise families (the one platform -> library
-    # exception), so the `kernels` and `builders` packages must be importable by
-    # both runners. Without them those cases degrade to expected failures and
+    # exception), so the library packages must be importable by both runners.
+    # Without them those cases degrade to expected failures and
     # rocke_golden_static reports drift instead of passing.
     #
     # Destination matters: TheRock's artifact-hipkernelprovider.toml captures the
@@ -304,7 +304,7 @@ if(ROCKE_INSTALL_TESTS)
     # still configures; keep the guard, it is the copy-able contract.
     set(_ROCKE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
     if(EXISTS "${_ROCKE_LIBRARY_DIR}/kernels")
-      foreach(_rocke_lib_pkg kernels builders dispatch)
+      foreach(_rocke_lib_pkg kernels builders dispatch benchmarks)
         install(DIRECTORY "${_ROCKE_LIBRARY_DIR}/${_rocke_lib_pkg}"
                 DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library"
                 PATTERN "__pycache__" EXCLUDE
@@ -375,7 +375,7 @@ if(ROCKE_INSTALL_TESTS)
     # does not need to be listed here: tests/conftest.py probes for it and
     # inserts it on sys.path, covering both the staged and checkout layouts.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore=\"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;quick\"\n"
@@ -383,11 +383,12 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 300)\n")
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).
-    # PYTHONPATH includes both the rocke platform package (.) and the library tree
-    # so kernels.*, builders.*, and dispatch.* are importable. Both the test paths
-    # and that tree are relative to the CTestTestfile's own directory, which sits
-    # one level below the install root in standalone mode -- hence the
-    # ROCKE_TEST_CTEST_REL prefix on each, matching the other installed tests.
+    # The test environment installs the platform wheel. PYTHONPATH puts the staged
+    # library tree first so kernels.*, builders.*, dispatch.*, and benchmarks.* do
+    # not collide with rocke's platform subpackages. Both the test paths and that
+    # tree are relative to the CTestTestfile's own directory, which sits one level
+    # below the install root in standalone mode -- hence the ROCKE_TEST_CTEST_REL
+    # prefix on each, matching the other installed tests.
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -403,7 +404,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=.:${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
     # Library conv GPU numeric suites. These used to live under
@@ -428,7 +429,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_conv_gpu_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;conv\\;gpu\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=.:${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 1800)\n")
   endif()
 

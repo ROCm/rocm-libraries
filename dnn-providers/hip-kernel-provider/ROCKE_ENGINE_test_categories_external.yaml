@@ -32,6 +32,7 @@ test_categories:
       - "rocke_python_import_smoke"
       - "rocke_golden_static"
       - "rocke_pytest"
+      - "rocke_library_conv_pytest"
     labels:
       - "quick"
       - "pre-commit"
