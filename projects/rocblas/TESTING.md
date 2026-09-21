@@ -172,6 +172,7 @@ Each test entry includes a `category`:
 | `quick` | Fast checks and quick return unit testing |
 | `pre_checkin` | PR validation breadth |
 | `nightly` | Extended breadth to larger problems |
+| `HMM` | Heterogeneous / managed-memory cases (`HMM: true`); not in default PR filters |
 | `stress` | Large allocations / edge cases; may need `ROCBLAS_CLIENT_RAM_GB_LIMIT` |
 | `multi_gpu` | Repeat the case across `devices`; requires `RUN_TEST_ON_THREADS_STREAMS` |
 | `HMM` | Managed-memory allocations (`HMM: true`); requires `RUN_TEST_ON_THREADS_STREAMS` plus HMM constructors in `testing_*.hpp` |
@@ -391,9 +392,9 @@ APIs, logging, and bad-argument cases. Results are compared to host reference BL
 **What requires GPU hardware.** Essentially all client integration tests.
 
 **What runs on PRs.** PR pipelines run standard pre-checkin-class sets (via Math CI, or
-TheRock using `rocblas_rtest.py` / CTest `standard`). Comprehensive can be run in Math CI with a label.
-Stress (Math CI) runs weekly, on demand, or via label. Math CI currently exceeds most capabilities
-and flexibility of that offered by TheRock CI runners.
+TheRock using `rocblas_rtest.py` / CTest `standard`). HMM and stress suites are outside that
+default set — apply the GitHub labels in [CI Label Suggestions](#ci-label-suggestions).
+Math CI currently exceeds most capabilities and flexibility of that offered by TheRock CI runners.
 
 **Parallel runner.** `scripts/utilities/run_tests/run_tests.py` splits long runs for simulation or
 recovery scenarios; see [Parallel runner](#parallel-runner-simulation--long-runs).
@@ -450,6 +451,20 @@ protection and may not be fully documented in this repository.
 | **Trusted gate** | Build; standard/pre-checkin client tests on supported PR hardware; formatting |
 | **Quality gate** | Longer comprehensive and stress tiers require Math CI label |
 | **Unstable / flaky** | Should be quarantined in `known_bugs.yaml` or fixed — not an accepted end state |
+
+### CI Label Suggestions
+
+Default PR jobs do not run HMM or stress client tests. Add GitHub PR labels so Math CI
+schedules the matching longer job. Reviewers (including Copilot) should comment when a
+change of this kind lands without the label.
+
+| If these tests change | Add this PR label |
+| --- | --- |
+| HMM (`category: HMM`, `HMM: true`, or `*HMM*` filters) | `ci:extended` |
+| Stress (`category: stress` or `*stress*` filters) | `ci:weekly` |
+
+If both HMM and stress tests change, apply both labels. These labels are Math CI
+controls; TheRock PR lanes do not currently substitute for them.
 
 ### Flaky Test Policy
 

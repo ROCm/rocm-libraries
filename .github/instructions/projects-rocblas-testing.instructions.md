@@ -23,6 +23,8 @@ Consider adding a review comment when any of the following is true:
 - `gpu_arch` / `os_flags` appear in YAML but `type_filter()` does not go through `RocBLAS_Test<>::type_filter_functor`.
 - GEMM / Tensile logic changed with no targeted `*gemm*` / `*_tensile` coverage called out.
 - Performance-sensitive GEMM changed with no `rocblas-bench` spot-check note (there is no automated PR performance gate).
+- Kernel algorithm or HMM tests changed (`category: HMM`, `HMM: true`, or `*HMM*`) and the PR does not have the `ci:extended` label.
+- Stress tests changed (`category: stress` or `*stress*`) and the PR does not have the `ci:weekly` label.
 
 Stay silent for license-header, clang-format, comment-only, and docs-only diffs, unless the change updates test tiers, CTest layout, or quarantine policy without updating `TESTING.md` or the matching `test_categories.yaml` / `rtest.xml`.  Do not nit-pick.
 
@@ -68,6 +70,17 @@ Walkthrough: `projects/rocblas/clients/gtest/README.md`.
 - Do not treat missing automated performance thresholds or missing ASAN-on-every-PR as defects. Those are documented gaps in `TESTING.md`.
 - Prefer fixing a failure over widening filters or adding `known_bug` without a ticket.
 - `*known_bug*` must stay excluded from normal smoke / pre-checkin / nightly runs.
+
+## CI label suggestions
+
+HMM and stress suites are outside default PR CI. Comment when the matching GitHub label from `TESTING.md` is missing:
+
+| Test change | PR label |
+| --- | --- |
+| HMM tests (`category: HMM`, `HMM: true`, `*HMM*`) | `ci:extended` |
+| Stress tests (`category: stress`, `*stress*`) | `ci:weekly` |
+
+If both kinds of tests change, both labels are required. Do not treat these as TheRock PR-lane substitutes.
 
 ## How to phrase comments
 
