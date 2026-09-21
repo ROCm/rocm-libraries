@@ -20,6 +20,7 @@ if _PKG_PARENT not in sys.path:
 
 from rocisa_stinkytofu_adaptor.stinky_interop import (  # noqa: E402
     StinkyAsmModuleWithAdapterSignature,
+    _apply_optimization_config,
 )
 
 
@@ -113,6 +114,55 @@ class TestRefreshSgprCount(unittest.TestCase):
         wrapper = StinkyAsmModuleWithAdapterSignature(module, None)
         self.assertEqual(wrapper.emitAssembly(), "body\n")
         self.assertEqual(module.requiredCalls, [])
+
+
+class TestApplyOptimizationConfig(unittest.TestCase):
+    def test_forwards_module_options_and_drops_textblock_copy(self):
+        class _Sig:
+            def __init__(self):
+                self.args = None
+                self.descriptionTopic = "keep-me"
+                self.cleared = False
+
+            def setOptimizationConfig(self, *args):
+                self.args = args
+
+            def clearDescription(self):
+                self.cleared = True
+
+        sig = _Sig()
+        _apply_optimization_config(
+            sig,
+            {
+                "TileA0": 64,
+                "TileB0": 8,
+                "SubGroup0": 4,
+                "SubGroup1": 32,
+                "WaveGroup0": 2,
+                "WaveGroup1": 1,
+                "VectorWidthA": 1,
+                "VectorWidthB": 1,
+                "GlobalReadVectorWidthA": 2,
+                "GlobalReadVectorWidthB": 2,
+                "DirectToLdsA": False,
+                "DirectToLdsB": False,
+                "UseSgprForGRO": 0,
+            },
+        )
+        self.assertEqual(
+            sig.args,
+            ((64, 8), (4, 32), (2, 1), 1, 1, 2, 2, False, False, 0),
+        )
+        self.assertEqual(sig.descriptionTopic.text, "")
+        self.assertTrue(sig.cleared)
+
+    def test_missing_setter_or_options_is_a_no_op(self):
+        class _Bare:
+            pass
+
+        _apply_optimization_config(_Bare(), {"TileA0": 1})
+        sig = _FakeSignature()
+        _apply_optimization_config(sig, None)
 
 
 if __name__ == "__main__":
