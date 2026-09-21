@@ -53,6 +53,11 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
         )
         assert build.returncode == 0, build.stderr
         wheel = next(wheel_dir.glob(pattern))
+        if mode == "canonical":
+            custom_kernel_root = _SOURCE_ROOT / "tensilelite/CustomKernels"
+            assert any(
+                path.parent != custom_kernel_root for path in custom_kernel_root.rglob("*.s")
+            ), "the release-wheel check must exercise nested custom-kernel resources"
         validation = subprocess.run(
             [
                 sys.executable,
