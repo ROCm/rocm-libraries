@@ -403,7 +403,6 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
-    SKIP_IF_ASAN(); // CK/MIOpen Fwd convolution hangs under ASAN on gfx942 (xnack+)
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
@@ -432,7 +431,7 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableBwd)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+    // Known upstream rocBLAS/Tensile ASAN failure.
     SKIP_IF_ASAN();
     const auto& tc = GetParam();
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);

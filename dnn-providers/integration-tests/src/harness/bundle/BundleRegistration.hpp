@@ -104,6 +104,48 @@ inline void registerFailedBundleLoad(const std::string& suiteName,
         [message]() -> ::testing::Test* { return new FailedBundleLoadTest(message); });
 }
 
+#ifdef ADDRESS_SANITIZER // (SKIP_IF_ASAN())
+// SKIP_IF_ASAN() equivalent for bundle-generated tests, which cannot use the macro.
+class SkippedUnderAsanTest : public ::testing::Test
+{
+public:
+    explicit SkippedUnderAsanTest(std::string message)
+        : _message(std::move(message))
+    {
+    }
+
+    void TestBody() override
+    {
+        // Message prefix must match SKIP_IF_ASAN()'s so log parsers tally it the same.
+        GTEST_SKIP() << "Disable this test when ASAN is Enabled: " << _message;
+    }
+
+private:
+    std::string _message;
+};
+
+inline void registerSkippedUnderAsan(const std::string& suiteName,
+                                     const std::string& testName,
+                                     const std::string& message)
+{
+    ::testing::RegisterTest(
+        suiteName.c_str(),
+        testName.c_str(),
+        nullptr,
+        nullptr,
+        __FILE__,
+        __LINE__,
+        [message]() -> ::testing::Test* { return new SkippedUnderAsanTest(message); });
+}
+
+// Matches backward-data convolution bundles by suite name only; ConvolutionWrw and
+// ConvolutionFwd are deliberately excluded.
+inline bool isConvolutionBwdBundle(const std::string& suiteName)
+{
+    return suiteName.find("ConvolutionBwd") != std::string::npos;
+}
+#endif // ADDRESS_SANITIZER
+
 // A bundle that failed to load, carrying enough information to register a
 // FailedBundleLoadTest in its place: the suite/test name it would have used
 // had it loaded, plus a diagnostic message describing why it didn't.
@@ -183,6 +225,17 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
 {
     for(const auto& bundle : bundles)
     {
+#ifdef ADDRESS_SANITIZER // (SKIP_IF_ASAN())
+        // Known upstream rocBLAS/Tensile ASAN failure.
+        if(isConvolutionBwdBundle(bundle.suiteName))
+        {
+            registerSkippedUnderAsan(bundle.suiteName,
+                                     bundle.testName,
+                                     "Disable this test when ASAN is Enabled: known upstream "
+                                     "rocBLAS/Tensile ASAN failure");
+            continue;
+        }
+#endif
         ::testing::RegisterTest(bundle.suiteName.c_str(),
                                 bundle.testName.c_str(),
                                 nullptr,

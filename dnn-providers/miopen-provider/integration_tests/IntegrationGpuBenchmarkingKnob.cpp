@@ -52,9 +52,8 @@ protected:
 /// Single parameterized test that runs for all operations
 TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    if(GetParam() == OperationType::CONV_FORWARD || GetParam() == OperationType::CONV_BACKWARD_DATA
-       || GetParam() == OperationType::CONV_BACKWARD_WEIGHTS)
+    // Known upstream rocBLAS/Tensile ASAN failure.
+    if(GetParam() == OperationType::CONV_BACKWARD_DATA)
     {
         SKIP_IF_ASAN();
     }
@@ -68,8 +67,6 @@ TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 
 TEST_P(IntegrationGpuBenchmarkingKnobCba, ExecutesSuccessfully)
 {
-    // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
-    SKIP_IF_ASAN();
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;

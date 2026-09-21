@@ -83,7 +83,7 @@ public:
 protected:
     void runGraphTest() override
     {
-        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        // Known upstream rocBLAS/Tensile ASAN failure.
         SKIP_IF_ASAN();
 
         const auto& testCase = this->GetParam();

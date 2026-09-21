@@ -352,28 +352,13 @@ add_hipdnn_sample_test(hipdnn_sample_autotune)
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
 
-# Disable convolution samples under ASAN — known driver-level failures in MIOpen/CK
-# and Tensile that are unrelated to hipDNN can cause test hangs. Re-enable when
-# underlying issues are resolved. (SKIP_IF_ASAN())
+# Disable the backward-data convolution sample under ASAN (SKIP_IF_ASAN() equivalent):
+# known upstream rocBLAS/Tensile ASAN failure.
 if(BUILD_ADDRESS_SANITIZER)
     set_tests_properties(
-        hipdnn_sample_conv_fprop
-        ${HIPDNN_UNKNOWN_ENGINE_NAME_TEST}
         hipdnn_sample_conv_dgrad
-        hipdnn_sample_conv_wgrad
-        hipdnn_sample_serialization_roundtrip
         PROPERTIES DISABLED TRUE
     )
-    # The fused-conv sample tests are only registered on non-Windows (see above),
-    # so only disable them there — otherwise set_tests_properties aborts configure.
-    if(NOT WIN32)
-        set_tests_properties(
-            hipdnn_sample_fused_conv_fprop_activ
-            hipdnn_sample_fused_conv_fprop_bias_activ
-            hipdnn_sample_conv_fprop_deterministic
-            PROPERTIES DISABLED TRUE
-        )
-    endif()
 endif()
 
 # Optional YAML-driven CTest categorization. Guarded so standalone /
