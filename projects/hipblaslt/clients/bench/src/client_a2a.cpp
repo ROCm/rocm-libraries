@@ -3,10 +3,12 @@
 
 #include "a2a_bench.hpp"
 #include "flops.hpp"
+#include "program_options.hpp"
 
 #include <algorithm>
 
 using namespace hipblaslt_bench;
+using namespace roc; // For emulated program_options
 
 int main(int argc, char* argv[])
 try
@@ -15,26 +17,78 @@ try
 
     Arguments arg;
     arg.init();
-    arg.M[0]       = 18432;
-    arg.N[0]       = 2048;
-    arg.K[0]       = 8192;
-    arg.a2a_extent = 10240;
 
+    bool verify = false;
+    bool timing = false;
     // 0 marks "not given on the command line".
-    arg.a2a_world = 0;
+    int a2a_world = 0;
 
-    std::string error;
-    if(!parse_a2a_args(argc, argv, arg, error))
+    options_description desc("hipblaslt-bench-a2a command line options");
+    desc.add_options()
+        // clang-format off
+        ("sizem,m",
+         value<int64_t>(&arg.M[0])->default_value(18432),
+         "Feature extent (free0)")
+
+        ("sizen,n",
+         value<int64_t>(&arg.N[0])->default_value(2048),
+         "Token extent (free1)")
+
+        ("sizek,k",
+         value<int64_t>(&arg.K[0])->default_value(8192),
+         "Bound extent")
+
+        ("a2a_extent",
+         value<int64_t>(&arg.a2a_extent)->default_value(10240),
+         "Features taking the all-to-all path")
+
+        ("a2a_world",
+         value<int>(&a2a_world)->default_value(0),
+         "Checked against WORLD_SIZE, which wins")
+
+        ("timing",
+         value<bool>(&timing)->default_value(false),
+         "Measure latency; otherwise only the configuration is reported")
+
+        ("iters,i",
+         value<int32_t>(&arg.iters)->default_value(10),
+         "Enqueues per sample; also sizes the --verify pass")
+
+        ("cold_iters,j",
+         value<int32_t>(&arg.cold_iters)->default_value(2),
+         "Cold iterations to run before entering the timing loop")
+
+        ("adaptive",
+         value<bool>(&arg.adaptive)->default_value(false),
+         "Self-size the sample count; runs no --cold_iters warmup")
+
+        ("verify,v",
+         value<bool>(&verify)->default_value(false),
+         "Check every launch of a pass run before the timed one")
+
+        ("help,h", "produces this help message");
+    // clang-format on
+
+    variables_map vm;
+    store(parse_command_line(argc, argv, desc), vm);
+    notify(vm);
+
+    if(vm.count("help"))
     {
-        if(error != "help")
-            hipblaslt_cerr << "error: " << error << "\n";
-        print_usage(argv[0]);
-        return error == "help" ? 0 : 1;
+        hipblaslt_cout << desc << "\n"
+                       << "Rank identity comes from RANK / WORLD_SIZE / LOCAL_RANK / MASTER_ADDR"
+                          " / MASTER_PORT. With none set the run is single-rank.\n";
+        return 0;
     }
-    if(arg.a2a_world != 0 && arg.a2a_world != uint8_t(env.world))
+
+    arg.timing = timing ? 1 : 0;
+    if(verify)
+        arg.norm_check = arg.allclose_check = 1;
+
+    if(a2a_world != 0 && a2a_world != int(env.world))
     {
-        hipblaslt_cerr << "error: --a2a_world " << unsigned(arg.a2a_world)
-                       << " disagrees with WORLD_SIZE " << env.world << "\n";
+        hipblaslt_cerr << "error: --a2a_world " << a2a_world << " disagrees with WORLD_SIZE "
+                       << env.world << "\n";
         return 1;
     }
     arg.a2a_world = uint8_t(env.world);

@@ -8,7 +8,7 @@ Starts one process per rank with the RANK / LOCAL_RANK / WORLD_SIZE /
 MASTER_ADDR / MASTER_PORT variables the benchmark reads, and exits non-zero if
 any rank does.
 
-    hipblaslt-bench-a2a-launch --nproc 8 -- --timing 1 --iters 10 --verify 1
+    hipblaslt-bench-a2a-launch --nproc 8 -- --timing --iters 10 --verify
 
 Options must precede `--`; everything after it goes to the benchmark. Rank 0
 writes to this process's stdout, the other ranks to <log-dir>/rank<N>.log. When
@@ -83,7 +83,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=f"Launch {BENCH} across a rank group on one host.",
         epilog="All options must precede `--`; everything after it is passed to the "
-        "benchmark, e.g. hipblaslt-bench-a2a-launch --nproc 8 -- --timing 1 --iters 10",
+        "benchmark, e.g. hipblaslt-bench-a2a-launch --nproc 8 -- --timing --iters 10",
     )
     ap.add_argument(
         "--nproc",

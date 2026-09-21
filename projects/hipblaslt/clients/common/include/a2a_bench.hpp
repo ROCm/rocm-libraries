@@ -21,11 +21,8 @@
 #include <SdmaQueue.hpp>
 
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <exception>
 #include <memory>
-#include <string>
 #include <vector>
 
 namespace hipblaslt_bench
@@ -92,77 +89,6 @@ namespace hipblaslt_bench
                 static_cast<void>(hipStreamDestroy(stream));
         }
     };
-
-    inline void print_usage(const char* program)
-    {
-        hipblaslt_cout
-            << "Usage: " << program << " <options>\n"
-               "\t-h, --help\t\tShow this help message\n"
-               "\t-m, --m\t\t\tFeature extent (free0), default 18432\n"
-               "\t-n, --n\t\t\tToken extent (free1), default 2048\n"
-               "\t-k, --k\t\t\tBound extent, default 8192\n"
-               "\t--a2a_extent\t\tFeatures taking the A2A path, default 10240\n"
-               "\t--a2a_world\t\tChecked against WORLD_SIZE; env wins\n"
-               "\t--timing\t\t1 to measure, default 0\n"
-               "\t--iters\t\t\tEnqueues per sample; also sizes the --verify pass, default 10\n"
-               "\t--cold_iters\t\tWarmup enqueues before the timed batch, default 2\n"
-               "\t--adaptive\t\t1 to self-size the sample count; no --cold_iters warmup\n"
-               "\t--verify\t\t1 to check each launch of a pass run before timing\n"
-               "Rank identity comes from RANK / WORLD_SIZE / LOCAL_RANK /\n"
-               "MASTER_ADDR / MASTER_PORT. With none set the run is single-rank.\n";
-    }
-
-    inline bool match(const char* arg, const char* shortName, const char* longName)
-    {
-        return (shortName && std::strcmp(arg, shortName) == 0)
-               || std::strcmp(arg, longName) == 0;
-    }
-
-    inline bool parse_a2a_args(int argc, char** argv, Arguments& arg, std::string& error)
-    {
-        for(int i = 1; i < argc; ++i)
-        {
-            const char* opt = argv[i];
-            if(match(opt, "-h", "--help"))
-            {
-                error = "help";
-                return false;
-            }
-            if(i + 1 >= argc)
-            {
-                error = std::string("missing value for ") + opt;
-                return false;
-            }
-            const char* value = argv[++i];
-
-            if(match(opt, "-m", "--m"))
-                arg.M[0] = std::strtoll(value, nullptr, 10);
-            else if(match(opt, "-n", "--n"))
-                arg.N[0] = std::strtoll(value, nullptr, 10);
-            else if(match(opt, "-k", "--k"))
-                arg.K[0] = std::strtoll(value, nullptr, 10);
-            else if(match(opt, nullptr, "--a2a_extent"))
-                arg.a2a_extent = std::strtoll(value, nullptr, 10);
-            else if(match(opt, nullptr, "--a2a_world"))
-                arg.a2a_world = uint8_t(std::strtoul(value, nullptr, 10));
-            else if(match(opt, nullptr, "--timing"))
-                arg.timing = int8_t(std::strtol(value, nullptr, 10));
-            else if(match(opt, nullptr, "--iters"))
-                arg.iters = int32_t(std::strtol(value, nullptr, 10));
-            else if(match(opt, nullptr, "--cold_iters"))
-                arg.cold_iters = int32_t(std::strtol(value, nullptr, 10));
-            else if(match(opt, nullptr, "--adaptive"))
-                arg.adaptive = std::strtol(value, nullptr, 10) != 0;
-            else if(match(opt, nullptr, "--verify"))
-                arg.norm_check = arg.allclose_check = int8_t(std::strtol(value, nullptr, 10) != 0);
-            else
-            {
-                error = std::string("unknown option ") + opt;
-                return false;
-            }
-        }
-        return true;
-    }
 
 #define CHECK_HIP_RC(expr)                                                        \
     do                                                                            \

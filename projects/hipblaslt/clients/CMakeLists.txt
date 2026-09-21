@@ -228,8 +228,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         target_include_directories(hipblaslt-test
-            PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench/include"
-                    "${HIPBLASLT_SDMA_QUEUE_INCLUDE_DIR}")
+            PRIVATE "${HIPBLASLT_SDMA_QUEUE_INCLUDE_DIR}")
         target_link_libraries(hipblaslt-test
             PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
     endif()
