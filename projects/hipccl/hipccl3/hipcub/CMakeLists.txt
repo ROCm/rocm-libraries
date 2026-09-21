@@ -36,9 +36,15 @@ endif()
 #
 # Set the library version
 # NOTE(hipccl3): guarded so a unified hipCCL superbuild can force VERSION_STRING
-# via a CACHE variable before add_subdirectory(hipcub); standalone builds keep 4.7.0.
+# via a CACHE variable before add_subdirectory(hipcub). The fallback below is
+# also hipccl-flavored (matching hipccl3's root HIPCCL_VERSION placeholder,
+# currently 0.1.0) rather than hipCUB's own 4.7.0, so a fully standalone
+# build of this copy still reports a hipccl-consistent version. Duplicates
+# the version number in two places (here and hipccl3/CMakeLists.txt's
+# HIPCCL_VERSION) - keep them in sync manually until real unified-versioning
+# infra exists.
 if(NOT DEFINED VERSION_STRING)
-  set(VERSION_STRING "4.7.0")
+  set(VERSION_STRING "0.1.0")
 endif()
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 2)
@@ -52,6 +58,15 @@ set(ROCM_DEP_RELEASE_BRANCH "release/therock-10.0" CACHE STRING "Download branch
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+
+# NOTE(hipccl3): defaults the header install directory to the unified hipccl
+# layout even for a fully standalone build of this copy. Set before
+# project()/GNUInstallDirs claim the cache variable with the plain "include"
+# default, so this wins first - matching the CMAKE_INSTALL_PREFIX pattern
+# above. hipccl3's root CMakeLists.txt also forces this same value
+# (CACHE ... FORCE) before add_subdirectory(hipcub); through the superbuild,
+# that FORCE already claimed it, so this line is a harmless no-op there.
+set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH "Install path for headers, relative to CMAKE_INSTALL_PREFIX")
 
 # hipCUB project
 project(hipcub LANGUAGES CXX)
@@ -311,55 +326,22 @@ if(BUILD_BENCHMARK AND NOT ONLY_INSTALL AND NOT HIPCUB_SWAP_TO_LEGACY_AND_IGNORE
 endif()
 
 # Package
-# NOTE(hipccl3): the rocprim-dev/rocprim-devel cross-dependency below only
-# makes sense when hipcub is packaged standalone. When nested under the
-# hipccl3 superbuild, rocprim's headers are bundled into the same package, so
-# there's no separate rocprim-dev package to depend on - skip it, matching
-# the same CMAKE_CURRENT_SOURCE_DIR/CMAKE_SOURCE_DIR top-level check rocprim's
-# own CMakeLists.txt already uses (ROCPRIM_PROJECT_IS_TOP_LEVEL) for the same
-# purpose.
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  if(HIP_COMPILER STREQUAL "clang")
-    rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
-    rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
-    set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")
-    set(CPACK_RPM_PACKAGE_OBSOLETES "cub-hip")
-  else()
-    rocm_package_add_dependencies(DEPENDS "hip-dev >= 4.4")
-  endif()
-endif()
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
-set(CPACK_RPM_PACKAGE_LICENSE "BSD")
-# if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-#   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-# endif()
-
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
-
-# NOTE(hipccl3): only create this project's own package when built
-# standalone. When nested under the hipccl3 superbuild, hipccl3's root
-# CMakeLists.txt declares one unified rocm_create_package() call covering
-# rocprim+hipcub+rocthrust together instead - calling rocm_create_package()
-# (which triggers include(CPack)) more than once in the same configure isn't
-# well-defined, and rocthrust's own equivalent call further down would
-# otherwise silently win over this one.
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  if(HIP_COMPILER STREQUAL "clang")
-    rocm_create_package(
-      NAME hipcub
-      DESCRIPTION "hipCUB (rocPRIM backend)"
-      MAINTAINER "hipcub-maintainer@amd.com"
-      HEADER_ONLY
-    )
-  else()
-    rocm_create_package(
-      NAME hipcub_nvcc
-      DESCRIPTION "hipCUB (CUB backend)"
-      MAINTAINER "hipcub-maintainer@amd.com"
-      HEADER_ONLY
-    )
-  endif()
-endif()
+# NOTE(hipccl3): standalone packaging (rocm_create_package(), which triggers
+# include(CPack), and the rocprim-dev/rocprim-devel cross-dependency that
+# only makes sense alongside it) is intentionally disabled for this hipccl3
+# copy of hipcub, unconditionally - not just when nested under the hipccl3
+# superbuild. A standalone "hipcub" package built from inside hipccl3/hipcub
+# would be a different, differently-named artifact than the unified "hipccl"
+# package hipccl3's root CMakeLists.txt produces, installable side-by-side by
+# a package manager that has no idea they overlap - risking duplicate/
+# conflicting installs of the same headers. Build through hipccl3's root
+# CMakeLists.txt (which calls rocm_create_package() once, unconditionally) to
+# get a real distributable package; this copy only supports configure/build/
+# `cmake --install`, matching how upstream NVIDIA CCCL's cub/thrust support
+# standalone builds for dev/test purposes only, with no standalone packaging
+# story at all. The original (pre-guard) logic is preserved in git history if
+# ever needed. rocm-libraries' own projects/hipcub and hipccl2's copy are
+# untouched and still package standalone exactly as before.
 
 # Print configuration summary
 include(cmake/Summary.cmake)

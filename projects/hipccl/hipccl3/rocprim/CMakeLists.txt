@@ -26,6 +26,17 @@ cmake_policy(VERSION 3.18...3.25)
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
+# NOTE(hipccl3): defaults the header install directory to the unified hipccl
+# layout even for a fully standalone build of this copy (e.g. configuring
+# directly from inside hipccl3/rocprim, not through hipccl3's root
+# CMakeLists.txt). Set here, before project()/GNUInstallDirs claim the cache
+# variable with the plain "include" default, so this wins first - matching
+# the same pattern CMAKE_INSTALL_PREFIX above already uses. hipccl3's root
+# CMakeLists.txt also forces this same value (CACHE ... FORCE) before
+# add_subdirectory(rocprim); when going through the superbuild, that FORCE
+# already claimed the cache variable, so this line is a harmless no-op there.
+set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH "Install path for headers, relative to CMAKE_INSTALL_PREFIX")
+
 # rocPRIM project
 project(rocprim LANGUAGES CXX)
 
@@ -194,9 +205,15 @@ find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
 # NOTE(hipccl3): guarded so a unified hipCCL superbuild can force VERSION_STRING
-# via a CACHE variable before add_subdirectory(rocprim); standalone builds keep 4.7.0.
+# via a CACHE variable before add_subdirectory(rocprim). The fallback below is
+# also hipccl-flavored (matching hipccl3's root HIPCCL_VERSION placeholder,
+# currently 0.1.0) rather than rocPRIM's own 4.7.0, so a fully standalone
+# build of this copy (not through hipccl3's root) still reports a
+# hipccl-consistent version. This duplicates the version number in two
+# places (here and hipccl3/CMakeLists.txt's HIPCCL_VERSION) - keep them in
+# sync manually until real unified-versioning infra exists.
 if(NOT DEFINED VERSION_STRING)
-  set(VERSION_STRING "4.7.0")
+  set(VERSION_STRING "0.1.0")
 endif()
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
@@ -252,31 +269,21 @@ endif()
 # set BUILD_SHARED_LIBS for packaging
 set(BUILD_SHARED_LIBS ${PKG_BUILD_SHARED_LIBS})
 # Package
-if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
-  # add dependency on HIP runtime
-  set(HIP_RUNTIME_MINIMUM 4.5.0)
-  if(BUILD_ADDRESS_SANITIZER)
-    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
-  else()
-    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
-  endif()
-
-  rocm_package_add_dependencies(SHARED_DEPENDS "${DEPENDS_HIP_RUNTIME} >= ${HIP_RUNTIME_MINIMUM}")
-  rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
-  rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
-
-  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-  set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-
-  set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
-
-  rocm_create_package(
-    NAME rocprim
-    DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives."
-    MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
-    HEADER_ONLY
-  )
-endif()
+# NOTE(hipccl3): standalone packaging (rocm_create_package(), which triggers
+# include(CPack)) is intentionally disabled for this hipccl3 copy of rocprim,
+# regardless of ROCPRIM_PROJECT_IS_TOP_LEVEL - not just when nested. A
+# standalone "rocprim" package built from inside hipccl3/rocprim would be a
+# different, differently-named artifact than the unified "hipccl" package
+# hipccl3's root CMakeLists.txt produces, installable side-by-side by a
+# package manager that has no idea they overlap - risking duplicate/
+# conflicting installs of the same headers. Build through hipccl3's root
+# CMakeLists.txt (which calls rocm_create_package() once, unconditionally) to
+# get a real distributable package; this copy only supports configure/build/
+# `cmake --install`, matching how upstream NVIDIA CCCL's cub/thrust support
+# standalone builds for dev/test purposes only, with no standalone packaging
+# story at all. The original (pre-guard) logic is preserved in git history if
+# ever needed. rocm-libraries' own projects/rocprim and hipccl2's copy are
+# untouched and still package standalone exactly as before.
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocprim INTERFACE
