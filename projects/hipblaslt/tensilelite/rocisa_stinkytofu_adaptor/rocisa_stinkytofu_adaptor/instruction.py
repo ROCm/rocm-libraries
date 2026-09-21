@@ -3661,6 +3661,15 @@ def _mem_issue_latency(latency: int) -> dict:
     }
 
 
+def _mubuf_enum_int(val: Any, default: int = 0) -> int:
+    """Coerce a MUBUF enum field (or already-int value) to the binding's int."""
+    if val is None:
+        return default
+    if isinstance(val, int):
+        return val
+    return int(val)
+
+
 def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for MUBUF load shims: rocisa(dst, vaddr, saddr, soffset, mubuf, comment)."""
     if base is None:
@@ -3704,6 +3713,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
                 scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
                 th=int(getattr(self.mubuf, "th", -1)),
                 is_store=getattr(self.mubuf, "isStore", False),
+                nv=_mubuf_enum_int(getattr(self.mubuf, "nv", 0)),
             )
         return inst
 
@@ -3762,6 +3772,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
                 scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
                 th=int(getattr(self.mubuf, "th", -1)),
                 is_store=getattr(self.mubuf, "isStore", False),
+                nv=_mubuf_enum_int(getattr(self.mubuf, "nv", 0)),
             )
         return inst
 
