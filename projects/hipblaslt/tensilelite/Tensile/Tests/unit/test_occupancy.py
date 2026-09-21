@@ -249,6 +249,52 @@ def test_gfx11_max_sgpr_kernel_still_reaches_wave_cap():
 
 
 # ---------------------------------------------------------------------------
+# MaxSgpr – the addressable SGPR ceiling
+# ---------------------------------------------------------------------------
+
+# MaxSgpr is the highest SGPR index a kernel may allocate, plus one.  It was a
+# flat 102 -- the gfx8/gfx9 number, s0-s101 -- for every arch but gfx1250.
+# Every RDNA target addresses s0-s105, so 102 left four registers permanently
+# unusable on gfx10, gfx11 and gfx12.
+
+# (isa, target, expected MaxSgpr).  Restricted to ISAs this file already
+# initializes elsewhere: _init_rocisa on a fresh ISA costs ~2.3s of assembler
+# probing, so pulling in the remaining SUPPORTED_ISA entries (gfx803, gfx900,
+# gfx906, gfx1010-gfx1012) would add ~14s for no branch this list does not
+# already cover.
+_MAX_SGPR_BY_ISA = [
+    ((9, 0, 8), "gfx908", 102),
+    ((9, 0, 10), "gfx90a", 102),
+    ((9, 4, 2), "gfx942", 102),
+    ((9, 5, 0), "gfx950", 102),
+    ((10, 3, 0), "gfx1030", 106),
+    ((11, 0, 0), "gfx1100", 106),
+    ((11, 0, 1), "gfx1101", 106),
+    ((11, 0, 2), "gfx1102", 106),
+    ((11, 0, 3), "gfx1103", 106),
+    ((11, 5, 0), "gfx1150", 106),
+    ((11, 5, 1), "gfx1151", 106),
+    ((11, 5, 2), "gfx1152", 106),
+    ((11, 5, 3), "gfx1153", 106),
+    ((12, 0, 0), "gfx1200", 106),
+    ((12, 0, 1), "gfx1201", 106),
+    ((12, 5, 0), "gfx1250", 106),
+]
+
+_MAX_SGPR_IDS = [t for _, t, _ in _MAX_SGPR_BY_ISA]
+
+
+@pytest.mark.parametrize(
+    "isa,expected",
+    [(isa, n) for isa, _, n in _MAX_SGPR_BY_ISA],
+    ids=_MAX_SGPR_IDS,
+)
+def test_max_sgpr_per_arch(isa, expected):
+    """gfx9 addresses s0-s101; every RDNA target addresses s0-s105."""
+    assert _init_rocisa(isa).getRegCaps()["MaxSgpr"] == expected
+
+
+# ---------------------------------------------------------------------------
 # getLdsLimitedOccupancy – gfx950 LDS boundary conditions
 # ---------------------------------------------------------------------------
 
