@@ -118,6 +118,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmv_bsr.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp
+    test_spsm_csr_reuse_descr.cpp
     test_spsv_coo.cpp
     test_spsv_csr.cpp
     test_spsv_csr_reuse_descr.cpp
@@ -237,6 +238,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spmv_bsr.yaml
     rocm/test_spsm_coo.yaml
     rocm/test_spsm_csr.yaml
+    rocm/test_spsm_csr_reuse_descr.yaml
     rocm/test_spsm_ex_coo.yaml
     rocm/test_spsm_ex_csr.yaml
     rocm/test_spsv_coo.yaml
