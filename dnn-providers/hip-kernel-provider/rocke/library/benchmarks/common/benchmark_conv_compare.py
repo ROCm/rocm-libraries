@@ -52,26 +52,56 @@ _SCRIPT_DIR = Path(__file__).parent
 _BEST_RE = re.compile(r"Best:\s*([\d.]+)\s*TFLOPS\s*[—\-]\s*(.+)")
 
 
-def _run_script(script: Path, extra_args: list[str]) -> tuple[float | None, str, str]:
+def _run_script(
+    script: Path, extra_args: list[str], timeout: "float | None" = None
+) -> tuple[float | None, str, str]:
     """Run *script* with *extra_args*; return (best_tflops, kernel_name, stdout)."""
     cmd = [sys.executable, str(script)] + extra_args
     print(f"\n{'='*72}", flush=True)
     print(f"Running: {script.name} {' '.join(extra_args)}", flush=True)
     print(f"{'='*72}", flush=True)
 
-    proc = subprocess.run(
-        cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
+    import os
+    import signal
+
+    with subprocess.Popen(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    ) as popen:
+        try:
+            raw_out, raw_err = popen.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raw_out, raw_err = popen.communicate()
+            elapsed = timeout
+            print(
+                f"\n[timeout] {script.name} exceeded {elapsed:.0f}s limit — killed.",
+                file=sys.stderr,
+                flush=True,
+            )
+            if raw_err:
+                print(raw_err, end="", file=sys.stderr, flush=True)
+            print(raw_out, end="", flush=True)
+            m = _BEST_RE.search(raw_out)
+            if m:
+                return float(m.group(1)), m.group(2).strip(), raw_out
+            return None, "", raw_out
 
     # Echo output to the terminal so the user can see the sweep progress.
-    print(proc.stdout, end="", flush=True)
-    if proc.stderr:
-        print(proc.stderr, end="", file=sys.stderr, flush=True)
+    print(raw_out, end="", flush=True)
+    if raw_err:
+        print(raw_err, end="", file=sys.stderr, flush=True)
 
-    m = _BEST_RE.search(proc.stdout)
+    m = _BEST_RE.search(raw_out)
     if m:
-        return float(m.group(1)), m.group(2).strip(), proc.stdout
-    return None, "", proc.stdout
+        return float(m.group(1)), m.group(2).strip(), raw_out
+    return None, "", raw_out
 
 
 def _cpg_valid_for_direct(C: int, K: int, groups: int) -> tuple[bool, str]:
@@ -156,6 +186,16 @@ def _build_miopen_args(args) -> list[str]:
     return a
 
 
+def _append_implicit_gemm_args(args, implicit_args: list[str]) -> None:
+    """Append implicit-GEMM-only args (split-k, sample, seed, split-k-prune)."""
+    implicit_args += ["--split-k", str(args.split_k)]
+    if args.sample is not None:
+        implicit_args += ["--sample", str(args.sample)]
+    implicit_args += ["--seed", str(args.seed)]
+    if args.split_k_prune is not None:
+        implicit_args += ["--split-k-prune", str(args.split_k_prune)]
+
+
 def _print_summary(
     direct: tuple[float | None, str],
     implicit: tuple[float | None, str],
@@ -236,6 +276,44 @@ def main() -> int:
         help="skip the implicit-GEMM benchmark (direct-conv only)",
     )
 
+    implicit_grp = parser.add_argument_group(
+        "Implicit-GEMM options",
+        "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
+    )
+    implicit_grp.add_argument(
+        "--split-k",
+        type=int,
+        default=-1,
+        dest="split_k",
+        metavar="N",
+        help=(
+            "wgrad split-K degree: 0=sweep, 1=disabled, >1=fixed, -1=auto (default: -1)"
+        ),
+    )
+    implicit_grp.add_argument(
+        "--sample",
+        type=float,
+        default=None,
+        metavar="FRAC",
+        help="randomly sample FRAC of candidate combinations before sweeping",
+    )
+    implicit_grp.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="RNG seed used by --sample (default: 0)",
+    )
+    implicit_grp.add_argument(
+        "--split-k-prune",
+        type=float,
+        default=None,
+        dest="split_k_prune",
+        metavar="PCT",
+        help=(
+            "prune split-K sweep when TFLOPS drops by >=PCT%% (only with --split-k 0)"
+        ),
+    )
+
     miopen_grp = parser.add_argument_group(
         "MIOpen input",
         "Load the conv shape from a MIOpenDriver command instead of explicit flags.",
@@ -275,11 +353,13 @@ def main() -> int:
         shared_args = _build_miopen_args(args)
         direct_args = list(shared_args)
         implicit_args = list(shared_args)
+        _append_implicit_gemm_args(args, implicit_args)
     else:
         shared_args = _build_shape_args(args)
         direct_args = list(shared_args)
         # implicit-GEMM needs --dtype (always fp16 for comparison)
         implicit_args = list(shared_args) + ["--dtype", "fp16", "--direction", "fwd"]
+        _append_implicit_gemm_args(args, implicit_args)
 
         # Validate cpg constraints for direct conv up-front so we can skip
         # gracefully rather than propagating errors through the subprocess.
@@ -299,6 +379,7 @@ def main() -> int:
         tflops, name, _ = _run_script(
             _SCRIPT_DIR / "benchmark_direct_conv.py",
             direct_args,
+            timeout=240,
         )
         direct_result = (tflops, name)
 
