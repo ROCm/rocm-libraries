@@ -28,14 +28,14 @@ struct Flash2TestConfig
 {
     std::string name;
     int batch;
-    int num_heads_q;
-    int num_heads_kv;
-    int seq_q;
-    int seq_kv;
-    int head_dim;
+    int numHeadsQ;
+    int numHeadsKv;
+    int seqQ;
+    int seqKv;
+    int headDim;
     bool causal;
     float scale;
-    std::string expected_arch; // B1: all struct fields initialized
+    std::string expectedArch; // B1: all struct fields initialized
 };
 
 class IntegrationGpuHipFlash2Forward
@@ -54,7 +54,7 @@ protected:
 
     void runFlash2Test(float tolerance)
     {
-        const Flash2TestConfig& cfg = this->GetParam();
+        const Flash2TestConfig& cfg = GetParam();
 
         const auto deviceArch = hip_kernel_provider_common::getDeviceString(this->stream());
         if(deviceArch != "gfx942")
@@ -67,30 +67,30 @@ protected:
             .set_compute_data_type(DataType_t::FLOAT)
             .set_intermediate_data_type(DataType_t::FLOAT);
 
-        const std::vector<int64_t> qDims{cfg.batch, cfg.num_heads_q, cfg.seq_q, cfg.head_dim};
-        const std::vector<int64_t> kvDims{cfg.batch, cfg.num_heads_kv, cfg.seq_kv, cfg.head_dim};
-        auto Q = graph->tensor(TensorAttributes()
+        const std::vector<int64_t> qDims{cfg.batch, cfg.numHeadsQ, cfg.seqQ, cfg.headDim};
+        const std::vector<int64_t> kvDims{cfg.batch, cfg.numHeadsKv, cfg.seqKv, cfg.headDim};
+        auto q = Graph::tensor(TensorAttributes()
                                    .set_name("Q")
                                    .set_dim(qDims)
                                    .set_stride(generateStrides(qDims))
                                    .set_data_type(DataType_t::HALF));
-        auto K = graph->tensor(TensorAttributes()
+        auto k = Graph::tensor(TensorAttributes()
                                    .set_name("K")
                                    .set_dim(kvDims)
                                    .set_stride(generateStrides(kvDims))
                                    .set_data_type(DataType_t::HALF));
-        auto V = graph->tensor(TensorAttributes()
+        auto v = Graph::tensor(TensorAttributes()
                                    .set_name("V")
                                    .set_dim(kvDims)
                                    .set_stride(generateStrides(kvDims))
                                    .set_data_type(DataType_t::HALF));
 
         // B1: use SdpaAttributes (not SdpaFwdAttributes which does not exist)
-        SdpaAttributes sdpa_attrs;
-        sdpa_attrs.set_causal_mask(cfg.causal).set_attn_scale(cfg.scale).set_generate_stats(false);
+        SdpaAttributes sdpaAttrs;
+        sdpaAttrs.set_causal_mask(cfg.causal).set_attn_scale(cfg.scale).set_generate_stats(false);
 
         // B1: auto [O, stats] not auto [O, /*stats=*/]
-        auto [O, stats] = graph->sdpa(Q, K, V, sdpa_attrs);
+        auto [O, stats] = graph->sdpa(q, k, v, sdpaAttrs);
         O->set_name("O").set_output(true).set_data_type(DataType_t::HALF);
 
         auto validationResult = graph->validate();

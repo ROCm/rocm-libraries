@@ -99,13 +99,18 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
            + std::to_string(tc.vDims[3]) + "_" + maskStr;
 }
 
-GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config)
+GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
 {
-    return {config, getConfigDescription(config), config.arch};
+    auto tc = GraphTestCase{config, getConfigDescription(config), config.arch};
+    if(withStats)
+    {
+        tc.withStats = true;
+        tc.name += "Stats";
+    }
+    return tc;
 }
 
 std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase)
-
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
@@ -142,7 +147,13 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
 
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
-    attributes.set_name("SdpaFwdKernelConfigTest");
+    attributes.set_name(testCase.withStats ? "SdpaFwdKernelConfigStatsTest"
+                                           : "SdpaFwdKernelConfigTest");
+
+    if(testCase.withStats)
+    {
+        attributes.set_generate_stats(true);
+    }
 
     if(testCase.attnScale.has_value())
     {
@@ -202,6 +213,12 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
 
     o->set_output(true);
     o->set_data_type(dataType);
+
+    if(testCase.withStats)
+    {
+        stats->set_output(true);
+        stats->set_data_type(DataType::FLOAT);
+    }
 
     return graph;
 }
