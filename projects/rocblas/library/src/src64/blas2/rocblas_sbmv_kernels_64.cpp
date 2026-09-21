@@ -64,6 +64,12 @@ rocblas_status rocblas_internal_sbmv_launcher_64(rocblas_handle handle,
         auto    y_ptr       = adjust_ptr_batch(y, b_base, stride_y);
         auto    AB_ptr      = adjust_ptr_batch(AB, b_base, stride_AB);
         int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
+        auto    alpha_ptr   = rocblas_pointer_mode_device == handle->pointer_mode
+                                  ? alpha + b_base * stride_alpha
+                                  : alpha;
+        auto    beta_ptr    = rocblas_pointer_mode_device == handle->pointer_mode
+                                  ? beta + b_base * stride_beta
+                                  : beta;
 
         auto shift_AB = offset_AB;
 
@@ -71,7 +77,7 @@ rocblas_status rocblas_internal_sbmv_launcher_64(rocblas_handle handle,
                                                                   uplo,
                                                                   (rocblas_int)n_64,
                                                                   (rocblas_int)k_64,
-                                                                  alpha,
+                                                                  alpha_ptr,
                                                                   stride_alpha,
                                                                   AB_ptr,
                                                                   shift_AB,
@@ -81,7 +87,7 @@ rocblas_status rocblas_internal_sbmv_launcher_64(rocblas_handle handle,
                                                                   offset_x,
                                                                   incx_64,
                                                                   stride_x,
-                                                                  beta,
+                                                                  beta_ptr,
                                                                   stride_beta,
                                                                   y_ptr,
                                                                   offset_y,

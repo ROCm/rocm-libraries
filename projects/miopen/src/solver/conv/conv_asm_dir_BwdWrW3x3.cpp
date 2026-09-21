@@ -414,6 +414,8 @@ bool ConvAsmBwdWrW3x3::IsApplicable(const ExecutionContext& ctx,
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.isXnackEnabled())
         return false;
+    if(IsGfx9ConsumerApu(target))
+        return false;
 
     if(!problem.IsLayoutDefault())
         return false;

@@ -163,6 +163,15 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       DataType::BFLOAT16,
                                       DataType::FLOAT,
                                       false,
+                                      false,
+                                      true),
+                   "withStats = true"},
+         true},
+        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      DataType::BFLOAT16,
+                                      DataType::FLOAT,
+                                      false,
                                       true,
                                       false,
                                       true),
@@ -418,6 +427,201 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
                                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                       /*withAttnMask=*/false,
                                       /*withScale=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Stats (LSE) output tensor validation
+// =============================================================================
+
+// Build a forward SDPA graph with a custom stats tensor (arbitrary dtype/dims).
+flatbuffers::FlatBufferBuilder
+    createSdpaFwdGraphWithCustomStats(hipdnn_flatbuffers_sdk::data_objects::DataType statsDataType,
+                                      const std::vector<int64_t>& statsDims)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+
+    const auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+    const auto statsUidVal = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUidVal, "stats", statsDataType, &statsStrides, &statsDims));
+
+    const auto sdpaAttributes
+        = CreateSdpaAttributes(builder,
+                               qUid,
+                               kUid,
+                               vUid,
+                               oUid,
+                               flatbuffers::nullopt, // attn_mask_tensor_uid
+                               flatbuffers::nullopt, // scale_tensor_uid
+                               flatbuffers::nullopt, // seq_len_q_tensor_uid
+                               flatbuffers::nullopt, // seq_len_kv_tensor_uid
+                               flatbuffers::nullopt, // seed_tensor_uid
+                               flatbuffers::nullopt, // offset_tensor_uid
+                               flatbuffers::nullopt, // dropout_mask_tensor_uid
+                               flatbuffers::nullopt, // dropout_scale_tensor_uid
+                               flatbuffers::nullopt, // page_table_k_tensor_uid
+                               flatbuffers::nullopt, // page_table_v_tensor_uid
+                               flatbuffers::nullopt, // block_mask_tensor_uid
+                               flatbuffers::nullopt, // sink_token_tensor_uid
+                               flatbuffers::nullopt, // descale_q_tensor_uid
+                               flatbuffers::nullopt, // descale_k_tensor_uid
+                               flatbuffers::nullopt, // descale_v_tensor_uid
+                               flatbuffers::nullopt, // descale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_o_tensor_uid
+                               flatbuffers::Optional<int64_t>(statsUidVal), // stats_tensor_uid
+                               flatbuffers::nullopt, // max_tensor_uid
+                               flatbuffers::nullopt, // sum_exp_tensor_uid
+                               flatbuffers::nullopt, // rng_dump_tensor_uid
+                               flatbuffers::nullopt, // amax_s_tensor_uid
+                               flatbuffers::nullopt, // amax_o_tensor_uid
+                               flatbuffers::Optional<bool>(true), // generate_stats
+                               false, // alibi_mask
+                               false, // padding_mask
+                               false, // causal_mask
+                               false); // causal_mask_bottom_right
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::BFLOAT16,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsStatsWithWrongDataType)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Stats tensor with HALF instead of FLOAT -> rejected
+    auto builder = createSdpaFwdGraphWithCustomStats(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF, {4, 8, 256, 1});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsStatsWithWrongShape)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Stats tensor with wrong batch dimension (3 != 4) -> rejected
+    auto builder = createSdpaFwdGraphWithCustomStats(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, {3, 8, 256, 1});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsStatsWithWrongRank)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Stats tensor with rank 2 -> rejected
+    auto builder = createSdpaFwdGraphWithCustomStats(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, {4, 8});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsStatsRank3)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Stats tensor with rank 3 [B, H, Sq] -> accepted
+    auto builder = createSdpaFwdGraphWithCustomStats(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, {4, 8, 256});
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsStatsRank4)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Stats tensor with rank 4 [B, H, Sq, 1] -> accepted
+    auto builder = createSdpaFwdGraphWithCustomStats(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, {4, 8, 256, 1});
+
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 

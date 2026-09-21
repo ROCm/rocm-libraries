@@ -8,6 +8,7 @@
     'Jobs': '8',
     'KnownBugs': 'kb.yaml',
     'LogicPath': 'logic/dir',
+    'RequireGfx1250v0Overlay': False,
     'StrictKnownBugs': False,
     'Verbose': 2,
   })
@@ -21,6 +22,7 @@
     'Jobs': 48,
     'KnownBugs': None,
     'LogicPath': 'logic/dir',
+    'RequireGfx1250v0Overlay': False,
     'StrictKnownBugs': False,
     'Verbose': 1,
   })
@@ -34,6 +36,7 @@
     'Jobs': 48,
     'KnownBugs': None,
     'LogicPath': 'logic/dir',
+    'RequireGfx1250v0Overlay': False,
     'StrictKnownBugs': False,
     'Verbose': 1,
   })
