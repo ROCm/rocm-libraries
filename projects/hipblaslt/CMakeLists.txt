@@ -914,6 +914,88 @@ if(TARGET tensilelite-host)
             LIBRARY_NAME tensilelite
             PACKAGE_NAME host
         )
+
+        # rocm-cmake's packaging defaults set CPACK_RPM_PACKAGE_AUTOREQPROV to
+        # Off for every ROCm library, so no package currently Provides or
+        # Requires a soname. Re-enable rpmbuild's ELF scanning for this one
+        # component: tensilelite-host then Provides
+        # libtensilelite-host.so.1()(64bit), derived from the binary rather
+        # than hand-written, so the capability tracks SOVERSION automatically.
+        # This is scoped to the component and does not change any other
+        # package's dependency surface.
+        set(CPACK_RPM_TENSILELITE_PACKAGE_AUTOREQPROV "ON")
+
+        # CPack uses CPACK_RPM_<COMPONENT>_PACKAGE_REQUIRES *instead of* the
+        # global CPACK_RPM_PACKAGE_REQUIRES when the component-scoped variable
+        # is defined (CPackRPM.cmake:1098-1106). Defining a runtime-scoped
+        # dependency therefore drops every global one -- hipblaslt's runtime
+        # package silently lost "roctracer >= 1.0.0" and "rocm-core".
+        #
+        # Carry the global list into the component before adding anything, and
+        # add rocm-core explicitly because rocm_package_add_rocm_core_dependency
+        # appends it to the global list from inside rocm_create_package, which
+        # runs after this point.
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        # hipBLASLt's own libhipblaslt.so carries DT_NEEDED on this soname, so
+        # the runtime package must require it. Stated as the soname capability
+        # rather than a package name: the dynamic linker enforces the same
+        # string, and a SOVERSION bump updates both sides together.
+        rocm_package_add_rpm_dependencies(COMPONENT runtime
+            DEPENDS "libtensilelite-host.so.1()(64bit)")
+
+        # Lockstep pin. The soname capability above is the correctness
+        # mechanism; this is the release policy on top of it: hipblaslt,
+        # hipsparselt and tensilelite-host are intended to move together
+        # within one ROCm release, so the dependency is an exact version
+        # rather than a floor.
+        #
+        # CPACK_PACKAGE_VERSION is only computed inside rocm_create_package
+        # (ROCMCreatePackage.cmake:281 and :296), which runs after this point,
+        # so recompute the same value from the same inputs.
+        #
+        # Note this pins VERSION only, not VERSION-RELEASE. Two builds from
+        # different commits share a VERSION and differ only in RELEASE (the
+        # git tag from rocm_get_git_commit_tag), so this does not detect
+        # commit-level ABI drift. Only a SOVERSION bump does -- see D7.
+        rocm_get_patch_version(_tensilelite_rocm_patch)
+        set(_tensilelite_pkg_version
+            "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
+        if(_tensilelite_rocm_patch)
+            set(_tensilelite_pkg_version
+                "${_tensilelite_pkg_version}.${_tensilelite_rocm_patch}")
+        endif()
+
+        # Same component-shadows-global rule applies on the Debian side.
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            if(ENABLE_ASAN_PACKAGING)
+                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core-asan")
+            else()
+                rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+            endif()
+        endif()
+
+        rocm_package_add_rpm_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host = ${_tensilelite_pkg_version}")
+        rocm_package_add_deb_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host (= ${_tensilelite_pkg_version})")
+
+        unset(_tensilelite_rocm_patch)
+        unset(_tensilelite_pkg_version)
     endif()
     unset(_tensilelite_host_type)
 endif()
