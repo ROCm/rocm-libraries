@@ -5,7 +5,11 @@ if(HIPDNN_SKIP_TESTS)
     return()
 endif()
 
-hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION})
+# The version setting controls fetching, not supplied CONFIG packages.
+find_package(GTest CONFIG QUIET)
+if(NOT GTest_FOUND)
+    hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION})
+endif()
 include(GoogleTest)
 include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
