@@ -17817,6 +17817,11 @@ class KernelWriterAssembly(KernelWriter):
       soffset = tmpS01
       globalOffset = 0
       bpeType = self.states.bpeCinternal
+      # Partials stores already force glc+slc (sc0/sc1). Loads must too, or the
+      # StreamK owner can hit a stale per-XCD L2 line after the flag is visible.
+      isGlc, isSlc, isNT, scope, th, nv = forceCoherentNonTemporal(
+          self.states.asmCaps, isNT, _temporalHint(kernel, "WS"),
+          _nonVolatile(kernel, "WS"), scope)
     else:
       if dataType == kernel["ProblemType"]["ComputeDataType"]:
         globalOffset = addrCalc.globalOffsetInternal
@@ -21623,21 +21628,9 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["enableTDMMetadata"]:
       tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
 
-    if not comp.isGSUEnabled(kernel):
-      for tp in tpList:
-        mod.add(comp.setIncrement(self, kernel, tp))
-        mod.add(comp.calculateStartAddr(self, kernel, tp))
-      return mod
-
-    # The GSU chunk starts at the same unroll iteration for every tensor, so derive
-    # it once here and let each tensor scale it by its own per-iteration increment.
-    with self.allocTmpSgpr(3, tag="gl2PrefetchCalcAddr_gsu") as tmpSgprRes:
-      gsuIterSgpr = tmpSgprRes.idx
-      offsetTmp = ContinuousRegister(idx=tmpSgprRes.idx + 1, size=2)
-      mod.add(comp.calculateGSUIterOffset(self, kernel, gsuIterSgpr, offsetTmp))
-      for tp in tpList:
-        mod.add(comp.setIncrement(self, kernel, tp))
-        mod.add(comp.calculateStartAddr(self, kernel, tp, gsuIterSgpr))
+    for tp in tpList:
+      mod.add(comp.setIncrement(self, kernel, tp))
+      mod.add(comp.calculateStartAddr(self, kernel, tp))
     return mod
   
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
