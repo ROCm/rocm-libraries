@@ -1970,9 +1970,6 @@ def runDispatcherTests(def rocmnode, boolean runCorrectness, boolean runPerf, St
         }
     }
     if (branches) {
-        // `parallelsAlwaysFailFast()` in the Jenkinsfile options block only
-        // applies to declarative parallel, so set failFast explicitly here.
-        branches['failFast'] = true
         parallel branches
     }
 }
