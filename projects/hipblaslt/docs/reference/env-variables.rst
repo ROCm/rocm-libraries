@@ -93,7 +93,9 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
 
 .. list-table::
     :header-rows: 1
-    :widths: 70,30
+.. list-table::
+:header-rows: 1
+:widths: 50,50
 
     * - **Environment variable**
       - **Value**
