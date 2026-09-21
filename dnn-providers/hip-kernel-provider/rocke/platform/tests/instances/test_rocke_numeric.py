@@ -14,7 +14,7 @@ breach):
                                              layernorm, rmsnorm, transpose2d,
                                              batched + grouped GEMM  (BOTH arches)
   - rocke.examples.common.universal_gemm_verify : Universal GEMM vs A@B.T (BOTH)
-  - rocke.examples.common.bake_off_implicit_gemm + run_manifest --verify : conv (BOTH)
+  - builders.common.bake_off_implicit_gemm + run_manifest --verify : conv (BOTH)
   - rocke.examples.common.parity_extended_kernels: fmha/attention/sage/sparse/streamk/
                                              mfma/block_scale/mx  (gfx950 today;
                                              see test_extended_parity for the
@@ -113,7 +113,7 @@ class TestNumericVerification(unittest.TestCase):
         d = tempfile.mkdtemp(prefix=f"rocke_conv_{ARCH}_")
         rc, out = self._run(
             "-m",
-            "rocke.examples.common.bake_off_implicit_gemm",
+            "builders.common.bake_off_implicit_gemm",
             "--arch",
             ARCH,
             "--output-dir",
