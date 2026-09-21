@@ -313,7 +313,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -585,7 +584,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -856,7 +854,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -1119,7 +1116,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -1383,7 +1379,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -1655,7 +1650,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -1928,7 +1922,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -2192,7 +2185,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -2456,7 +2448,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -2719,7 +2710,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -2981,7 +2971,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -3245,7 +3234,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -3519,7 +3507,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -3793,7 +3780,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -4058,7 +4044,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -4327,7 +4312,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -4595,7 +4579,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -4858,7 +4841,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -5128,7 +5110,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -5397,7 +5378,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -5667,7 +5647,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -5942,7 +5921,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -6212,7 +6190,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -6476,7 +6453,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -6741,7 +6717,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -7015,7 +6990,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -7289,7 +7263,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -7559,7 +7532,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -7828,7 +7800,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -8099,7 +8070,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -8364,7 +8334,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -8629,7 +8598,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -8894,7 +8862,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -9164,7 +9131,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -9426,7 +9392,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -9690,7 +9655,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -9964,7 +9928,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -10238,7 +10201,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -10503,7 +10465,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -10767,7 +10728,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -11040,7 +11000,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -11304,7 +11263,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -11577,7 +11535,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -11840,7 +11797,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -12111,7 +12067,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -12374,7 +12329,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -12647,7 +12601,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -12916,7 +12869,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -13186,7 +13138,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -13458,7 +13409,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -13723,7 +13673,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -13996,7 +13945,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -14265,7 +14213,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -14535,7 +14482,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -14807,7 +14753,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -15072,7 +15017,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -15344,7 +15288,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -15608,7 +15551,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -15877,7 +15819,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -16147,7 +16088,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -16421,7 +16361,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -16693,7 +16632,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -16964,7 +16902,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -17228,7 +17165,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -17500,7 +17436,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -17770,7 +17705,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -18041,7 +17975,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -18313,7 +18246,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -18575,7 +18507,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -18848,7 +18779,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -19118,7 +19048,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -19382,7 +19311,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -19647,7 +19575,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -19919,7 +19846,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -20191,7 +20117,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -20463,7 +20388,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -20726,7 +20650,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -20997,7 +20920,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -21269,7 +21191,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -21532,7 +21453,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -21806,7 +21726,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -22070,7 +21989,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -22342,7 +22260,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -22606,7 +22523,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -22879,7 +22795,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -23143,7 +23058,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -23415,7 +23329,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -23679,7 +23592,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -23951,7 +23863,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -24224,7 +24135,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -24497,7 +24407,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -24761,7 +24670,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -25035,7 +24943,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -25309,7 +25216,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -25583,7 +25489,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -25856,7 +25761,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -26125,7 +26029,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -26395,7 +26298,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -26669,7 +26571,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -26942,7 +26843,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -27213,7 +27113,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -27484,7 +27383,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -27749,7 +27647,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -28021,7 +27918,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -28294,7 +28190,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -28568,7 +28463,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -28833,7 +28727,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -29105,7 +28998,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -29370,7 +29262,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -29644,7 +29535,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -29917,7 +29807,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -30180,7 +30069,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -30443,7 +30331,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -30715,7 +30602,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -30987,7 +30873,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -31252,7 +31137,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -31523,7 +31407,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -31797,7 +31680,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -32061,7 +31943,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -32332,7 +32213,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -32605,7 +32485,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -32877,7 +32756,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -33148,7 +33026,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -33412,7 +33289,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -33684,7 +33560,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -33957,7 +33832,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -34222,7 +34096,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -34485,7 +34358,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -34748,7 +34620,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -35020,7 +34891,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -35292,7 +35162,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -35555,7 +35424,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -35817,7 +35685,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -36081,7 +35948,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -36346,7 +36212,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -36611,7 +36476,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -36876,7 +36740,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -37139,7 +37002,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -37403,7 +37265,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -37668,7 +37529,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -37931,7 +37791,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -38194,7 +38053,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -38459,7 +38317,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -38723,7 +38580,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -38986,7 +38842,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -39249,7 +39104,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -39514,7 +39368,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -39787,7 +39640,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -40059,7 +39911,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -40330,7 +40181,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -40594,7 +40444,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -40868,7 +40717,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -41141,7 +40989,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -41404,7 +41251,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -41667,7 +41513,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -41941,7 +41786,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -42214,7 +42058,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -42477,7 +42320,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -42739,7 +42581,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -43003,7 +42844,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -43268,7 +43108,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -43533,7 +43372,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -43798,7 +43636,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -44062,7 +43899,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -44327,7 +44163,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -44592,7 +44427,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -44857,7 +44691,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -45121,7 +44954,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -45386,7 +45218,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -45650,7 +45481,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -45913,7 +45743,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -46176,7 +46005,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -46439,7 +46267,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -46702,7 +46529,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -46965,7 +46791,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -47228,7 +47053,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -47491,7 +47315,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -47754,7 +47577,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -48017,7 +47839,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -48280,7 +48101,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -48543,7 +48363,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -48806,7 +48625,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -49069,7 +48887,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -49332,7 +49149,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -49595,7 +49411,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -49867,7 +49682,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -50139,7 +49953,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -50402,7 +50215,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -50665,7 +50477,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -50937,7 +50748,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -51200,7 +51010,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -51463,7 +51272,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -51735,7 +51543,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -52007,7 +51814,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -52270,7 +52076,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -52532,7 +52337,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -52796,7 +52600,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -53061,7 +52864,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -53324,7 +53126,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -53588,7 +53389,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -53853,7 +53653,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -54126,7 +53925,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -54389,7 +54187,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -54652,7 +54449,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -54917,7 +54713,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -55181,7 +54976,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -55444,7 +55238,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -55707,7 +55500,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -55972,7 +55764,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -56236,7 +56027,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -56508,7 +56298,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -56771,7 +56560,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -57043,7 +56831,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -57306,7 +57093,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -57569,7 +57355,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -57832,7 +57617,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -58096,7 +57880,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -58368,7 +58151,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -58641,7 +58423,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -58906,7 +58687,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -59178,7 +58958,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -59451,7 +59230,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -59716,7 +59494,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -59989,7 +59766,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -60258,7 +60034,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -60521,7 +60296,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -60794,7 +60568,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -61065,7 +60838,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -61338,7 +61110,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -61610,7 +61381,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -61882,7 +61652,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -62156,7 +61925,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -62420,7 +62188,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -62692,7 +62459,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -62955,7 +62721,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -63229,7 +62994,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -63493,7 +63257,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -63765,7 +63528,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -64037,7 +63799,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -64300,7 +64061,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -64563,7 +64323,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -64836,7 +64595,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
@@ -65110,7 +64868,6 @@ Solutions:
   ISA: [12, 5, 0]
   InitCIterWmma: 1
   InternalSupportParams:
-    KernArgsVersion: 2
     SupportCustomStaggerU: true
     SupportCustomWGM: true
     SupportUserGSU: false
