@@ -3,6 +3,7 @@
 
 import os
 import sys
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -75,7 +76,7 @@ class EvaluateTest(unittest.TestCase):
         verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
         self.assertFalse(verdict.fresh)
         self.assertEqual(verdict.missing_commits, 7)
-        self.assertAlmostEqual(verdict.stale_days, 5.5, places=2)
+        self.assertAlmostEqual(pbf.stale_days(verdict, NOW), 5.5, places=2)
 
     def test_stale_verdict_survives_a_failed_dating_call(self):
         gh = FakeGitHub(
@@ -84,7 +85,7 @@ class EvaluateTest(unittest.TestCase):
         )
         verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
         self.assertFalse(verdict.fresh)
-        self.assertIsNone(verdict.stale_days)
+        self.assertIsNone(verdict.oldest_missing)
 
     def test_api_failure_fails_open(self):
         gh = FakeGitHub({}, failures=("compare/",))
@@ -110,7 +111,7 @@ class BudgetTest(unittest.TestCase):
         self.assertFalse(verdict.skipped)
         self.assertFalse(verdict.fresh)
         self.assertEqual(verdict.missing_commits, 7)
-        self.assertIsNone(verdict.stale_days)
+        self.assertIsNone(verdict.oldest_missing)
         self.assertEqual(len(gh.paths), 1)
 
     def test_reserve_governs_has_budget(self):
@@ -137,9 +138,77 @@ class BudgetTest(unittest.TestCase):
         self.assertEqual(gh.request_count, 1)
 
 
+class PublishedStatusTest(unittest.TestCase):
+    def test_reads_back_our_own_context(self):
+        gh = FakeGitHub(
+            {
+                "commits/": {
+                    "statuses": [
+                        {"context": "other", "state": "failure", "description": "no"},
+                        {
+                            "context": "base-freshness",
+                            "state": "success",
+                            "description": "Base is within 3 days of develop",
+                        },
+                    ]
+                }
+            }
+        )
+        self.assertEqual(
+            pbf.current_status(gh, "deadbeef", "base-freshness"),
+            ("success", "Base is within 3 days of develop"),
+        )
+
+    def test_absent_context_reads_as_nothing_published(self):
+        gh = FakeGitHub({"commits/": {"statuses": []}})
+        self.assertIsNone(pbf.current_status(gh, "deadbeef", "base-freshness"))
+
+    def test_unreadable_status_does_not_suppress_the_post(self):
+        # Returning None makes the caller post rather than assume it matches.
+        gh = FakeGitHub({}, failures=("commits/",))
+        self.assertIsNone(pbf.current_status(gh, "deadbeef", "base-freshness"))
+
+    def test_skipped_pr_is_not_read_back(self):
+        gh = FakeGitHub({}, budget=0)
+        assessment = pbf.assess(gh, PR, "develop", CUTOFF, NOW, "base-freshness")
+        self.assertTrue(assessment.verdict.skipped)
+        self.assertIsNone(assessment.published)
+        self.assertEqual(gh.paths, [])
+
+
+class PacerTest(unittest.TestCase):
+    def test_first_write_is_not_delayed(self):
+        pacer = pbf.PostPacer(per_minute=60)
+        start = time.monotonic()
+        pacer.wait()
+        self.assertLess(time.monotonic() - start, 0.1)
+
+    def test_subsequent_writes_are_spaced(self):
+        pacer = pbf.PostPacer(per_minute=600)  # 100ms apart
+        pacer.wait()
+        start = time.monotonic()
+        pacer.wait()
+        self.assertGreaterEqual(time.monotonic() - start, 0.05)
+
+    def test_pacing_can_be_disabled(self):
+        pacer = pbf.PostPacer(per_minute=0)
+        pacer.wait()
+        start = time.monotonic()
+        pacer.wait()
+        self.assertLess(time.monotonic() - start, 0.1)
+
+
+def stale_verdict(missing_commits: int = 4, days_ago: float = 6.0) -> Verdict:
+    return Verdict(
+        fresh=False,
+        missing_commits=missing_commits,
+        oldest_missing=NOW - timedelta(days=days_ago),
+    )
+
+
 class ReportingTest(unittest.TestCase):
     def test_report_mode_never_fails(self):
-        stale = Verdict(fresh=False, missing_commits=4, stale_days=6.0)
+        stale = stale_verdict()
         self.assertEqual(pbf.status_state(stale, enforcing=False), "success")
         self.assertEqual(pbf.status_state(stale, enforcing=True), "failure")
 
@@ -148,7 +217,7 @@ class ReportingTest(unittest.TestCase):
         self.assertEqual(pbf.status_state(unknown, enforcing=True), "success")
 
     def test_report_mode_description_is_marked(self):
-        stale = Verdict(fresh=False, missing_commits=4, stale_days=6.0)
+        stale = stale_verdict()
         self.assertTrue(
             pbf.describe(stale, "develop", 3, enforcing=False).startswith("WOULD FAIL:")
         )
@@ -157,11 +226,41 @@ class ReportingTest(unittest.TestCase):
         )
 
     def test_description_fits_githubs_limit(self):
-        stale = Verdict(fresh=False, missing_commits=99999, stale_days=123.456)
+        stale = stale_verdict(missing_commits=99999, days_ago=123.456)
         text = pbf.describe(
             stale, "a-very-long-base-branch-name" * 6, 3, enforcing=False
         )
         self.assertLessEqual(len(text), pbf.MAX_DESCRIPTION_LENGTH)
+
+
+class StableDescriptionTest(unittest.TestCase):
+    """The description must not move unless the PR does; see the write dedupe."""
+
+    def test_stale_description_is_a_date_not_an_age(self):
+        text = pbf.describe(stale_verdict(days_ago=6.0), "develop", 3, enforcing=True)
+        self.assertIn("2026-07-14", text)
+        self.assertNotIn("6.0", text)
+
+    def test_drifting_commit_count_stays_out_of_the_description(self):
+        # behind_by is counted from a cutoff that advances every run, so it
+        # moves even when the PR does not.
+        few = pbf.describe(stale_verdict(missing_commits=82), "develop", 3, True)
+        many = pbf.describe(stale_verdict(missing_commits=97), "develop", 3, True)
+        self.assertEqual(few, many)
+
+    def test_undated_fallback_is_also_stable(self):
+        undated = Verdict(fresh=False, missing_commits=5)
+        self.assertEqual(
+            pbf.describe(undated, "develop", 3, enforcing=True),
+            "Base is more than 3 days behind develop. Merge or rebase develop",
+        )
+
+    def test_fresh_description_carries_no_varying_value(self):
+        fresh = Verdict(fresh=True, missing_commits=0)
+        self.assertEqual(
+            pbf.describe(fresh, "develop", 3, enforcing=True),
+            "Base is within 3 days of develop",
+        )
 
 
 if __name__ == "__main__":

@@ -34,13 +34,19 @@ Evaluation is fail-open: if the API cannot be reached or a PR cannot be
 evaluated, we post ``success`` and say so. A required status that never reports
 blocks its PR forever, so a broken freshness job must never wedge the repo.
 
-The one case that is not fail-open is the rate-limit reserve. The token's
-hourly allowance is shared with every other workflow in the repository, so a
-sweep stops rather than exhaust it, and the PRs it did not reach get no status
-from that run. Their PR-event status (if any) stands. Before enforcement is
-enabled, confirm from the job summary that a full sweep finishes inside the
-allowance; a sweep that routinely hits the reserve would leave PRs with no
-status at all, which a required check would turn into a permanent block.
+Writes, not reads, are the scarce resource. The hourly request allowance is
+generous, but commit statuses count against GitHub's much tighter
+content-generation limit, so a sweep skips any post that would republish an
+identical status and paces the rest. In steady state most of the queue is
+unchanged and costs no write at all.
+
+The one case that is not fail-open is the rate-limit reserve. The allowance is
+shared with every other workflow in the repository, so a sweep stops rather
+than exhaust it, and the PRs it did not reach get no status from that run.
+Their PR-event status (if any) stands. Before enforcement is enabled, confirm
+from the job summary that a full sweep finishes inside the allowance; a sweep
+that routinely hits the reserve would leave PRs with no status at all, which a
+required check would turn into a permanent block.
 
 Usage:
   python pr_base_freshness.py --pr 1234
@@ -52,6 +58,7 @@ import concurrent.futures
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
@@ -63,14 +70,23 @@ API_ROOT = "https://api.github.com"
 # GitHub truncates commit status descriptions past this length.
 MAX_DESCRIPTION_LENGTH = 140
 
-# Concurrency for the per-PR ancestry checks. Kept modest on purpose: the
-# GITHUB_TOKEN rate limit is shared across everything running in this repo.
-MAX_WORKERS = 8
+# Concurrency for the per-PR reads. The hourly allowance is generous enough
+# that reads are not the constraint; this is sized to keep a full sweep to a
+# couple of minutes without leaning on the secondary per-minute limits.
+MAX_WORKERS = 16
 
-# Requests a PR costs before the optional dating call: one ancestry compare
-# plus the status post. A PR is not started unless both can still be paid for,
-# so we never evaluate a PR and then fail to publish the answer.
-REQUESTS_PER_PR = 2
+# Writes are the scarce resource, not reads. Commit statuses count against
+# GitHub's content-generation secondary limit (roughly 80 per minute, 500 per
+# hour), which is far tighter than the hourly request allowance, and it is
+# shared with the statuses the PR-event runs are posting at the same time.
+# Hence both the pacing below and skipping writes that would change nothing.
+POSTS_PER_MINUTE = 70
+
+# Requests a PR costs before the optional dating call: the ancestry compare,
+# the read of its current status, and the status post. A PR is not started
+# unless all three can be paid for, so we never evaluate a PR and then fail to
+# publish the answer.
+REQUESTS_PER_PR = 3
 
 # The dating call that turns "over the limit" into "6.0 days" is cosmetic, so
 # it is only spent when there is this much slack left. Under pressure the
@@ -157,6 +173,23 @@ def _header_int(response: "requests.Response", name: str) -> Optional[int]:
         return None
 
 
+class PostPacer:
+    """Spaces out writes so a sweep stays under the content-generation limit."""
+
+    def __init__(self, per_minute: int) -> None:
+        self._interval = 60.0 / per_minute if per_minute > 0 else 0.0
+        self._last: Optional[float] = None
+
+    def wait(self) -> None:
+        if not self._interval:
+            return
+        if self._last is not None:
+            pause = self._interval - (time.monotonic() - self._last)
+            if pause > 0:
+                time.sleep(pause)
+        self._last = time.monotonic()
+
+
 @dataclass
 class PullRequest:
     number: int
@@ -170,16 +203,27 @@ class Verdict:
 
     fresh: bool
     # Commits on develop older than the cutoff that this PR is missing. None
-    # when the PR could not be evaluated.
+    # when the PR could not be evaluated. Reported in the run summary but
+    # deliberately kept out of the status description: the cutoff advances
+    # every run, so this number drifts even when the PR has not moved.
     missing_commits: Optional[int] = None
-    # Age in days of the oldest develop commit this PR is missing. Only
-    # computed for stale PRs, where it is the number a human wants to see.
-    stale_days: Optional[float] = None
+    # When the oldest develop commit this PR is missing landed. Fixed for a
+    # given head and merge base, unlike an age, which is what lets the status
+    # description stay byte-identical between sweeps and dedupe cleanly.
+    oldest_missing: Optional[datetime] = None
     error: Optional[str] = None
     # Set when the rate-limit reserve stopped us before this PR was looked at.
     # A skipped PR gets no status at all, since posting one would itself cost
     # the request we just declined to spend.
     skipped: bool = False
+
+
+@dataclass
+class Assessment:
+    """A verdict plus whatever status the PR already carries for our context."""
+
+    verdict: Verdict
+    published: Optional[tuple[str, str]] = None
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -216,7 +260,7 @@ def evaluate(
         return Verdict(fresh=True, missing_commits=0)
 
     missing = comparison["behind_by"]
-    stale_days = None
+    oldest_missing = None
     if gh.has_budget(COSMETIC_SLACK):
         try:
             # Only stale PRs pay for this second call. The merge base of the
@@ -227,34 +271,81 @@ def evaluate(
                 f"compare/{merge_base}...{base_branch}", per_page=1
             )
             oldest = since_merge_base["commits"][0]["commit"]["committer"]["date"]
-            stale_days = (now - parse_timestamp(oldest)).total_seconds() / 86400
+            oldest_missing = parse_timestamp(oldest)
         except (GitHubError, KeyError, IndexError):
-            # The headline verdict stands; we just cannot put a number on it.
+            # The headline verdict stands; we just cannot date it. The
+            # description falls back to a form that is equally stable.
             pass
 
-    return Verdict(fresh=False, missing_commits=missing, stale_days=stale_days)
+    return Verdict(fresh=False, missing_commits=missing, oldest_missing=oldest_missing)
+
+
+def current_status(
+    gh: GitHub, head_sha: str, context: str
+) -> Optional[tuple[str, str]]:
+    """Returns the ``(state, description)`` already published for ``context``."""
+    try:
+        combined = gh.get(f"commits/{head_sha}/status", per_page=100)
+    except GitHubError:
+        # Unknown, so assume nothing is published and let the post go ahead.
+        return None
+    for status in combined.get("statuses", []):
+        if status.get("context") == context:
+            return status.get("state", ""), status.get("description") or ""
+    return None
+
+
+def assess(
+    gh: GitHub,
+    pr: PullRequest,
+    base_branch: str,
+    cutoff_sha: str,
+    now: datetime,
+    context: str,
+) -> Assessment:
+    """Evaluates ``pr`` and reads back whatever status it already carries."""
+    verdict = evaluate(gh, pr, base_branch, cutoff_sha, now)
+    if verdict.skipped:
+        return Assessment(verdict)
+    return Assessment(verdict, current_status(gh, pr.head_sha, context))
 
 
 def describe(
     verdict: Verdict, base_branch: str, max_age_days: int, enforcing: bool
 ) -> str:
-    """Builds the one-line commit status description."""
+    """Builds the one-line commit status description.
+
+    Every branch here is worded to be stable for an unchanged PR. A status
+    that says "6.0 days behind" would have to be rewritten on every sweep as
+    that number drifts, which for a queue this size is a lot of writes to say
+    nothing new, so the stale case states when the drift started instead.
+    """
     if verdict.error:
         text = f"Could not evaluate base freshness ({verdict.error})"
     elif verdict.fresh:
         text = f"Base is within {max_age_days} days of {base_branch}"
     else:
-        age = (
-            f"{verdict.stale_days:.1f} days" if verdict.stale_days else "over the limit"
-        )
-        text = (
-            f"Base is {age} behind {base_branch} "
-            f"({verdict.missing_commits} commits older than {max_age_days} days). "
-            f"Merge or rebase {base_branch}"
-        )
+        if verdict.oldest_missing:
+            since = verdict.oldest_missing.date().isoformat()
+            text = (
+                f"Base is missing {base_branch} commits from {since} onward. "
+                f"Merge or rebase {base_branch}"
+            )
+        else:
+            text = (
+                f"Base is more than {max_age_days} days behind {base_branch}. "
+                f"Merge or rebase {base_branch}"
+            )
         if not enforcing:
             text = f"WOULD FAIL: {text}"
     return text[:MAX_DESCRIPTION_LENGTH]
+
+
+def stale_days(verdict: Verdict, now: datetime) -> float:
+    """How long ``verdict`` has been missing commits, for run-summary display."""
+    if not verdict.oldest_missing:
+        return 0.0
+    return (now - verdict.oldest_missing).total_seconds() / 86400
 
 
 def status_state(verdict: Verdict, enforcing: bool) -> str:
@@ -331,13 +422,25 @@ def main() -> int:
         "--all-open", action="store_true", help="Evaluate every open PR"
     )
     parser.add_argument(
-        "--max-prs", type=int, default=400, help="Safety cap on PRs evaluated per run"
+        "--max-prs",
+        type=int,
+        # Sized to cover the whole queue with room to grow rather than to
+        # ration requests: at roughly three per PR even a thousand of them is
+        # a fifth of the hourly allowance.
+        default=1000,
+        help="Safety cap on PRs evaluated per run",
     )
     parser.add_argument(
         "--rate-limit-reserve",
         type=int,
-        default=200,
+        default=2000,
         help="Stop the sweep rather than drive the shared hourly limit below this",
+    )
+    parser.add_argument(
+        "--posts-per-minute",
+        type=int,
+        default=POSTS_PER_MINUTE,
+        help="Throttle status writes to stay under the content-generation limit",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print verdicts, post nothing"
@@ -387,15 +490,22 @@ def main() -> int:
         target_url = f"{server}/{args.repo}/actions/runs/{run_id}"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        verdicts = list(
+        assessments = list(
             pool.map(
-                lambda pr: evaluate(gh, pr, args.base_branch, cutoff_sha, now), prs
+                lambda pr: assess(
+                    gh, pr, args.base_branch, cutoff_sha, now, args.context
+                ),
+                prs,
             )
         )
 
     stale = []
     skipped = []
-    for pr, verdict in zip(prs, verdicts):
+    posted = 0
+    unchanged = 0
+    pacer = PostPacer(args.posts_per_minute)
+    for pr, assessment in zip(prs, assessments):
+        verdict = assessment.verdict
         if verdict.skipped:
             skipped.append(pr)
             continue
@@ -406,11 +516,20 @@ def main() -> int:
             stale.append((pr, verdict))
         if args.dry_run:
             continue
+        if assessment.published == (state, description):
+            # Re-posting an identical status would change nothing on the PR
+            # and spend from the much tighter write budget. In steady state
+            # this is most of the queue, since a fresh PR's description is a
+            # constant string.
+            unchanged += 1
+            continue
         payload = {"state": state, "context": args.context, "description": description}
         if target_url:
             payload["target_url"] = target_url
+        pacer.wait()
         try:
             gh.post(f"statuses/{pr.head_sha}", payload)
+            posted += 1
         except GitHubError as e:
             print(f"::warning::could not post status for #{pr.number}: {e}")
 
@@ -435,13 +554,18 @@ def main() -> int:
         "",
     ]
     if stale:
+        # The age belongs here rather than in the status description: this
+        # table is rebuilt every run anyway, so a drifting number costs
+        # nothing.
         summary += ["| PR | Days behind | Missing commits |", "| --- | --- | --- |"]
-        for pr, verdict in sorted(stale, key=lambda s: -(s[1].stale_days or 0)):
-            days = f"{verdict.stale_days:.1f}" if verdict.stale_days else "?"
-            summary.append(f"| #{pr.number} | {days} | {verdict.missing_commits} |")
+        for pr, verdict in sorted(stale, key=lambda s: -stale_days(s[1], now)):
+            days = stale_days(verdict, now)
+            shown = f"{days:.1f}" if days else "?"
+            summary.append(f"| #{pr.number} | {shown} | {verdict.missing_commits} |")
         summary.append("")
     summary.append(
-        f"_{gh.request_count} API requests; rate limit "
+        f"_{gh.request_count} API requests ({posted} statuses written, "
+        f"{unchanged} already correct); rate limit "
         f"{gh.rate_limit_remaining}/{gh.rate_limit_limit} remaining "
         f"(reserve {gh.reserve})_"
     )
