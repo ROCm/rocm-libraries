@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -33,6 +10,7 @@
 #include <rocRoller/CodeGen/Instruction_fwd.hpp>
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Utilities/EnumArray.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller
@@ -53,23 +31,24 @@ namespace rocRoller
          */
         struct InstructionStatus
         {
-            unsigned int stallCycles = 0;
+            unsigned int stallCycles      = 0;
+            unsigned int additionalCycles = 0;
             WaitCount    waitCount;
             unsigned int nops = 0;
 
             unsigned int reusedOperands = 0;
 
             /// The new length of each of the queues.
-            std::array<int, GPUWaitQueueType::Count> waitLengths;
+            EnumArray<int, GPUWaitQueueType> waitLengths;
 
             /// How many new registers of each type must be allocated?
-            std::array<int, static_cast<size_t>(Register::Type::Count)> allocatedRegisters;
+            EnumArray<int, Register::Type> allocatedRegisters;
 
             /// How many free registers of each type will remain?
-            std::array<int, static_cast<size_t>(Register::Type::Count)> remainingRegisters;
+            EnumArray<int, Register::Type> remainingRegisters;
 
             /// How much does this instruction add to the high water mark of allocated registers?
-            std::array<int, static_cast<size_t>(Register::Type::Count)> highWaterMarkRegistersDelta;
+            EnumArray<int, Register::Type> highWaterMarkRegistersDelta;
 
             /// Will this cause an out-of-registers error?
             EnumBitset<Register::Type> outOfRegisters;
@@ -131,6 +110,17 @@ namespace rocRoller
             //> This observer is required in ctx, determined at runtime.
             {
                 a.runtimeRequired()
+                } -> std::convertible_to<bool>;
+        };
+
+        template <typename T>
+        concept CObserverRuntimeWithContext = requires(T a, ContextPtr const& ctx)
+        {
+            requires CObserver<T>;
+
+            //> This observer requires ctx to determine if it's required at runtime.
+            {
+                a.runtimeRequired(ctx)
                 } -> std::convertible_to<bool>;
         };
 

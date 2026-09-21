@@ -43,3 +43,6 @@
 #include <Tensile/Serialization/Predicates.hpp>
 #include <Tensile/Serialization/Properties.hpp>
 #include <Tensile/Serialization/SolutionLibrary.hpp>
+#include <tensilelitehost/export.h>
+
+

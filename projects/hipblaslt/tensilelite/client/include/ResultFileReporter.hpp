@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
 
@@ -37,7 +37,6 @@ namespace TensileLite
 {
     namespace Client
     {
-        namespace po = boost::program_options;
 
         class ResultFileReporter : public ResultReporter
         {
@@ -82,6 +81,7 @@ namespace TensileLite
             int64_t     m_winnerSolutionIdx       = -1;
             double      m_fastestGflops           = -1.0;
             double      m_fasterTimeUS            = -1.0;
+            double      m_fastestBandwidthGbps    = -1.0;
             double      m_fastestTilesPerCu       = -1.0;
             double      m_fastestTotalGranularity = -1.0;
             // for merge rows

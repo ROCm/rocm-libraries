@@ -63,6 +63,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestLowerBound)
     size_t(d_input.size()),
     thrust::raw_pointer_cast(d_input.data()),
     thrust::raw_pointer_cast(d_output.data()));
+  HIP_CHECK(hipGetLastError());
 
   thrust::host_vector<ptrdiff_t> output = d_output;
   thrust::host_vector<ptrdiff_t> ref{0, 1, 1, 2, 2, 2, 3, 3, 4, 5};
@@ -95,6 +96,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestUpperBound)
     size_t(d_input.size()),
     thrust::raw_pointer_cast(d_input.data()),
     thrust::raw_pointer_cast(d_output.data()));
+  HIP_CHECK(hipGetLastError());
 
   thrust::host_vector<ptrdiff_t> output = d_output;
   thrust::host_vector<ptrdiff_t> ref{1, 1, 2, 2, 2, 3, 3, 4, 5, 5};
@@ -127,6 +129,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestBinarySearch)
     size_t(d_input.size()),
     thrust::raw_pointer_cast(d_input.data()),
     thrust::raw_pointer_cast(d_output.data()));
+  HIP_CHECK(hipGetLastError());
 
   thrust::host_vector<bool> output = d_output;
   thrust::host_vector<bool> ref{true, false, true, false, false, true, false, true, true, false};

@@ -158,11 +158,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
     // keeping DIM_X == DIM_Y for big_batch so DIM_X / DIM_Y = 1
     T sAoff[DIM_X / DIM_Y];
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
-#else
     if(batch < batch_count)
-#endif
     {
 
         // Load pointers for this specific batch
@@ -444,7 +440,7 @@ rocblas_trsv_big_batch_device(rocblas_int    n,
 
         __threadfence();
 
-    } // DEVICE_GRID_YZ_16BIT loop or if
+    } // if
 }
 
 ROCBLAS_KERNEL(1024) rocblas_trsv_init_big_batch(int batch_count, rocblas_int* w_completed_sec)
@@ -493,15 +489,13 @@ rocblas_status rocblas_internal_trsv_substitution_big_batch_template(rocblas_han
 
     offset_x = incx < 0 ? offset_x + incx * (1 - n) : offset_x;
 
-    int batches = handle->getBatchGridDim((int)batch_count);
-
     // Use z-dimension for batch parallelization
     constexpr rocblas_int DIM_Y = 4;
     static_assert(DIM_X == DIM_Y, "Square sub blocks");
     constexpr rocblas_int DIM_Z = 64; // Process 64 batches per thread block
 
     rocblas_int blocks      = (n - 1) / DIM_X + 1;
-    rocblas_int batch_grids = (batches - 1) / DIM_Z + 1;
+    rocblas_int batch_grids = (batch_count - 1) / DIM_Z + 1;
 
     dim3 threads(DIM_X, DIM_Y, DIM_Z);
     dim3 grid(batch_grids, blocks);

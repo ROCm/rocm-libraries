@@ -28,6 +28,9 @@
 #include "na.hpp"
 #include "perf_helper.hpp"
 
+#include <array>
+#include <vector>
+
 template <typename XDataType,
           typename YDataType,
           typename ScaleDataType,
@@ -77,7 +80,7 @@ struct BatchNormInferTester
         estVariance_dev = handle.Write(estVariance.data);
     }
 
-    virtual void RunTestGPU(bool hip_en = true) = 0;
+    virtual void RunTestGPU() = 0;
 
     void RunTestCPU()
     { // Run the CPU implementation
@@ -179,37 +182,81 @@ struct BatchNormInferTester
     PerfHelper perf_helper;
 };
 
-template <typename T>
-std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
+// Build ForwardInference BNTestCase params from a list of {N, C, H, W} shapes.
+inline std::vector<BNTestCase> MakeBNInferConfigs(const std::vector<std::array<int, 4>>& shapes,
+                                                  miopenBatchNormMode_t mode)
 {
-    // create an array of input tensor shapes to test
-    int shapes_to_test[10][4] = {// from resnet50
-                                 {64, 128, 56, 56},
-                                 {64, 2048, 7, 7},
-                                 {64, 256, 14, 14},
-                                 {64, 256, 28, 28},
-                                 {64, 256, 56, 56},
-                                 {64, 512, 14, 14},
-                                 {64, 512, 28, 28},
-                                 {64, 512, 7, 7},
-                                 {64, 64, 112, 112},
-                                 {64, 64, 56, 56}};
-
-    // return a vector of BNTestCase objects created using the above shapes
     std::vector<BNTestCase> test_cases;
-    for(auto& shape : shapes_to_test)
+    test_cases.reserve(shapes.size());
+    for(const auto& s : shapes)
     {
-        test_cases.push_back(BNTestCase{shape[0],
-                                        shape[1],
-                                        shape[2],
-                                        shape[3],
-                                        mode,
-                                        miopen::batchnorm::Direction::ForwardInference,
-                                        0,
-                                        0});
+        test_cases.push_back(BNTestCase{
+            s[0], s[1], s[2], s[3], mode, miopen::batchnorm::Direction::ForwardInference, 0, 0});
     }
-
     return test_cases;
+}
+
+// To avoid running the same shape under more than one tier prefix in a category,
+// the tiers do NOT repeat shapes: Smoke and Standard list their own shapes, and
+// Full lists only the shapes that are NOT already in Standard. The category
+// filters run cumulative tiers -- standard runs Smoke+Standard, comprehensive
+// and full run Smoke+Standard+Full -- so each category's union is the intended
+// set (Smoke / Standard / complete) with no duplicate shapes across tiers.
+// (Smoke uses a single activation+layout, so its two shapes still re-appear once
+// in Standard's fuller activation/layout coverage; that small overlap is kept so
+// those shapes get full coverage.)
+//
+// Shapes are chosen to span the kernel's shape-driven branches: read_unit
+// (vector width 4/2/1) and whether read_len/read_unit exceeds the 256 local-size
+// cap, where read_len is h*w (spatial NCHW), c (spatial NHWC), or c*h*w
+// (per-activation).
+
+// Quick/Smoke (pre-commit): the two smallest shapes that differ in read_unit.
+template <typename T>
+std::vector<BNTestCase> BNInferTestConfigsSmoke(miopenBatchNormMode_t mode)
+{
+    return MakeBNInferConfigs(
+        {
+            {64, 512, 7, 7},   // ~1.6M; h*w=49  -> read_unit=1
+            {64, 256, 14, 14}, // ~3.2M; h*w=196 -> read_unit=4
+        },
+        mode);
+}
+
+// Standard (per-PR): distinct channel counts {64,256,512,2048} (spatial-NHWC
+// read_len=c path) and distinct h*w {49,196,784,3136} (spatial-NCHW read_len=h*w
+// path), covering read_unit=1/4 and both the <=256 and >256 local-size-cap
+// branches.
+template <typename T>
+std::vector<BNTestCase> BNInferTestConfigsStandard(miopenBatchNormMode_t mode)
+{
+    return MakeBNInferConfigs(
+        {
+            {64, 512, 7, 7},
+            {64, 256, 14, 14},
+            {64, 2048, 7, 7},
+            {64, 512, 28, 28},
+            {64, 64, 56, 56},
+        },
+        mode);
+}
+
+// Full tier (comprehensive/nightly): the remaining resnet50 shapes not in
+// Standard. Combined with the Standard tier (also run in comprehensive/full)
+// this covers the complete resnet50 set. Standard and Full use the same
+// activation and layout sets, so listing only the delta here loses no coverage.
+template <typename T>
+std::vector<BNTestCase> BNInferTestConfigsFull(miopenBatchNormMode_t mode)
+{
+    return MakeBNInferConfigs(
+        {
+            {64, 128, 56, 56},
+            {64, 256, 28, 28},
+            {64, 256, 56, 56},
+            {64, 512, 14, 14},
+            {64, 64, 112, 112},
+        },
+        mode);
 }
 
 struct TestNameGenerator

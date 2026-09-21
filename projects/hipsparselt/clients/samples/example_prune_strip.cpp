@@ -544,7 +544,7 @@ void run(int64_t              m,
             hipsparseLtDenseDescriptorInit(&handle, &matA, n, m, n, 16, type, HIPSPARSE_ORDER_COL));
     }
     SMART_DESTROYER<const hipsparseLtMatDescriptor_t, hipsparseStatus_t> smA(
-        &matC, hipsparseLtMatDescriptorDestroy);
+        &matA, hipsparseLtMatDescriptorDestroy);
 
     if(!sparse_b)
     {
@@ -565,7 +565,7 @@ void run(int64_t              m,
                                                 HIPSPARSELT_SPARSITY_50_PERCENT));
     }
     SMART_DESTROYER<const hipsparseLtMatDescriptor_t, hipsparseStatus_t> smB(
-        &matC, hipsparseLtMatDescriptorDestroy);
+        &matB, hipsparseLtMatDescriptorDestroy);
 
     auto tmp_m = (!sparse_b) ? m : n;
 
@@ -577,7 +577,7 @@ void run(int64_t              m,
     CHECK_HIPSPARSELT_ERROR(hipsparseLtDenseDescriptorInit(
         &handle, &matD, tmp_m, tmp_m, tmp_m, 16, type, HIPSPARSE_ORDER_COL));
     SMART_DESTROYER<const hipsparseLtMatDescriptor_t, hipsparseStatus_t> smD(
-        &matC, hipsparseLtMatDescriptorDestroy);
+        &matD, hipsparseLtMatDescriptorDestroy);
 
     CHECK_HIPSPARSELT_ERROR(hipsparseLtMatDescSetAttribute(
         &handle, &matA, HIPSPARSELT_MAT_NUM_BATCHES, &batch_count, sizeof(batch_count)));

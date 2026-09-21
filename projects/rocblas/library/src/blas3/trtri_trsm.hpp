@@ -62,19 +62,14 @@ rocblas_trtri_trsm_kernel(rocblas_fill     uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const T* a_i    = load_ptr_batch(A, batch, offA, stride_A);
         T*       invA_i = load_ptr_batch(invA, batch, offinvA, stride_invA);
 
         rocblas_custom_trtri_device<IB>(uplo, diag, IB, a_i, lda, invA_i, NB);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* ============================================================================================ */

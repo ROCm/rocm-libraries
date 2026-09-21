@@ -60,7 +60,7 @@ if(TENSILE_STATIC_ONLY)
 endif()
 
 if(NOT Tensile_FOUND)
-    find_package(Tensile 4.45.0 EXACT REQUIRED ${TENSILE_COMPONENTS} PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile")
+    find_package(Tensile 4.48.0 EXACT REQUIRED ${TENSILE_COMPONENTS} PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile")
 endif()
 
 if(NOT TENSILE_DISABLE_CTEST)
@@ -79,8 +79,6 @@ add_subdirectory(googletest)
 if(NOT gtest_SOURCE_DIR)
     message(FATAL_ERROR "googletest not found.  Run git submodule update --init")
 endif()
-
-find_package(Boost COMPONENTS filesystem)
 
 #if(TENSILE_USE_HIP AND NOT HIP_DIR)
 if(TENSILE_USE_HIP)
@@ -155,11 +153,21 @@ endif()
 
 if(Client IN_LIST TENSILE_COMPONENTS)
     set(test_sources ${test_sources}
-        client/DataInitialization_test.cpp)
+        client/DataInitialization_test.cpp
+        client/HardwareMonitorType_test.cpp)
 endif()
 
 if(TENSILE_USE_HIP)
     add_subdirectory(hip)
+    # Added the below line to workaround the CI failure issue manifesting from 
+    # amdclang++ v7.2.0 host optimization pass 140079 for the below compilation unit
+    # which was doing a tail call optimization on a gfx942 GPU but the same optimization pass 
+    # comes in pass number 136477 for gfx908 GPU.
+    # As temporary workaround, the optimization for this compilation unit is disabled 
+    # Will be consulting with compiler team to understand the LLVM IR before and 
+    # after the optimization to understand why the failure is occuring.
+    set_source_files_properties(hip/RunGEMMKernel_test.cpp PROPERTIES
+	    COMPILE_OPTIONS "-O0")
 endif()
 
 add_executable(TensileTests ${test_sources})
@@ -172,7 +180,7 @@ if(NOT TENSILE_DISABLE_CTEST)
     endif()
 endif()
 
-target_link_libraries(TensileTests PUBLIC gtest TensileHost TensileTestLib ${Boost_LIBRARIES})
+target_link_libraries(TensileTests PUBLIC gtest TensileHost TensileTestLib)
 
 if(TENSILE_USE_LLVM)
     find_library(LLVMObjectYAML_LIBRARY

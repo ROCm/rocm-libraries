@@ -15,7 +15,6 @@
 *.dll
 
 # Hipdnn Local install
-install/
 
 # Fortran module files
 *.mod
@@ -60,8 +59,6 @@ _build/
 _images/
 _static/
 _templates/
-_toc.yml
-_doxygen/
 
 # JetBrains IDE
 .idea/

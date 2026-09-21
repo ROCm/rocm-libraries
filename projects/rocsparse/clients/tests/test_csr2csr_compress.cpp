@@ -26,4 +26,5 @@
 
 #include "testing_csr2csr_compress.hpp"
 
-TEST_ROUTINE(csr2csr_compress, conversion, arg.M, arg.N, arg.baseA, arg.alpha, arg.matrix);
+TEST_ROUTINE(
+    csr2csr_compress, conversion, arg.M, arg.N, arg.baseA, arg.alpha, arg.alphai, arg.matrix);

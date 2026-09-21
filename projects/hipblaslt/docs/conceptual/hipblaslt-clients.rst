@@ -131,6 +131,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --splitk <value>                   [Tuning parameter] Set split K for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --wgm <value>                      [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --flush                            Flush icache, only works for gemm.
+   --uniform_summation_order <value>  Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. Accepts off|0, on|1 (case-insensitive). When on, the matmul returns HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. When omitted the bench leaves the attribute unset so the library default (off) applies.
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 
@@ -138,13 +139,9 @@ For more information, run the command with the ``--help`` option. The output of 
 Building clients with prebuilt libraries
 ========================================
 
-Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by adding the ``-n``/``--client-only`` option to the install script. For example, ``./install.sh -c -a gfx942 -n`` will build the clients and host code, but will not build Tensile libraries.
+Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build Tensile libraries.
 
-.. note::
-
-   For backwards compatibility, ``--no-tensile`` may be used as an alias for ``-n``/``--client-only``.
-
-Internally, this passes the ``-DTensile_SKIP_BUILD=ON`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through the install script, the same effect can be achieved with the following steps:
+Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through invoke, the same effect can be achieved with the following steps:
 
 .. code-block:: bash
 

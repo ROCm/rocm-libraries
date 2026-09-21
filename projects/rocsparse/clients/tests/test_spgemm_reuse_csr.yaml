@@ -40,59 +40,19 @@ Definitions:
     - { alpha:  -0.5, beta:  -0.2, alphai:  1.0, betai: 1.9 }
 
 Tests:
-- name: spgemm_reuse_csr_bad_arg
-  category: pre_checkin
-  function: spgemm_reuse_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-
-# C = alpha * A * B
+# Quick
 - name: spgemm_reuse_mult_csr
   category: quick
   function: spgemm_reuse_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [62, 300]
-  N: [11, 300]
-  K: [45, 325]
+  M: [265]
+  N: [312]
+  K: [435]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-  spgemm_alg: [rocsparse_spgemm_alg_default]
-
-- name: spgemm_reuse_mult_csr
-  category: pre_checkin
-  function: spgemm_reuse_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-  M: [2000]
-  N: [1846, 2000]
-  K: [3957, 2847]
-  alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  spgemm_alg: [rocsparse_spgemm_alg_default]
-
-- name: spgemm_reuse_mult_csr
-  category: nightly
-  function: spgemm_reuse_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-  M: [63968, 742323]
-  N: [4397, 1292312]
-  K: [309, 563434]
-  alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
@@ -104,7 +64,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [22, 300]
+  N: [471]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -114,10 +74,50 @@ Tests:
   baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   spgemm_alg: [rocsparse_spgemm_alg_default]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos6,
-             scircuit]
+  filename: [nos1,
+             nos5]
+
+- name: spgemm_reuse_mult_csr_file
+  category: quick
+  function: spgemm_reuse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [300]
+  K: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+  filename: [mplate]
+
+# Pre-checkin
+- name: spgemm_reuse_csr_bad_arg
+  category: pre_checkin
+  function: spgemm_reuse_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+
+- name: spgemm_reuse_mult_csr
+  category: pre_checkin
+  function: spgemm_reuse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [2000]
+  N: [1846]
+  K: [3957]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
 
 - name: spgemm_reuse_mult_csr_file
   category: pre_checkin
@@ -142,6 +142,43 @@ Tests:
              nos7]
 
 - name: spgemm_reuse_mult_csr_file
+  category: pre_checkin
+  function: spgemm_reuse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  M: 1
+  N: [2000]
+  K: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+  filename: [qc2534,
+             Chevron2]
+
+# Nightly
+- name: spgemm_reuse_mult_csr
+  category: nightly
+  function: spgemm_reuse_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [63968, 742323]
+  N: [4397, 1292312]
+  K: [309, 563434]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
+- name: spgemm_reuse_mult_csr_file
   category: nightly
   function: spgemm_reuse_csr
   indextype: *i32i32_i64i32_i64i64
@@ -164,44 +201,6 @@ Tests:
              sme3Dc,
              webbase-1M,
              shipsec1]
-
-- name: spgemm_reuse_mult_csr_file
-  category: quick
-  function: spgemm_reuse_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex
-  M: 1
-  N: [54, 300]
-  K: 1
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  spgemm_alg: [rocsparse_spgemm_alg_default]
-  filename: [qc2534,
-             Chevron2]
-
-- name: spgemm_reuse_mult_csr_file
-  category: pre_checkin
-  function: spgemm_reuse_csr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex
-  M: 1
-  N: [2000]
-  K: 1
-  alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  spgemm_alg: [rocsparse_spgemm_alg_default]
-  filename: [mplate,
-             Chevron3]
 
 - name: spgemm_reuse_mult_csr_file
   category: nightly

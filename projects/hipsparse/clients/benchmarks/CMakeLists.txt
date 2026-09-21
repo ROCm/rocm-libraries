@@ -20,6 +20,11 @@ endif()
 
 target_link_libraries(hipsparse-bench PRIVATE hipsparse::clients-common)
 
+# Ensure pthread is linked on Unix platforms
+if(NOT WIN32)
+    target_link_libraries(hipsparse-bench PRIVATE pthread)
+endif()
+
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()

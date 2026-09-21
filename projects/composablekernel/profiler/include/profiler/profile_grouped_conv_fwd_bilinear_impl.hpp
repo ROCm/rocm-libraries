@@ -46,7 +46,8 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     bool time_kernel,
     const ck::utils::conv::ConvParam& conv_param,
     const ck::tensor_operation::element_wise::Bilinear& bilinear_op =
-        ck::tensor_operation::element_wise::Bilinear{})
+        ck::tensor_operation::element_wise::Bilinear{},
+    index_t instance_index = -1)
 {
     using InElementOp      = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp     = ck::tensor_operation::element_wise::PassThrough;
@@ -106,6 +107,27 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     std::cout << "weight: " << weight.mDesc << std::endl;
     std::cout << "d_tensor: " << d_tensor.mDesc << std::endl;
     std::cout << "output: " << host_output.mDesc << std::endl;
+
+    using DeviceOp =
+        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
+                                                                      InLayout,
+                                                                      WeiLayout,
+                                                                      ck::Tuple<DLayout>,
+                                                                      OutLayout,
+                                                                      InDataType,
+                                                                      WeiDataType,
+                                                                      ck::Tuple<DDataType>,
+                                                                      OutDataType,
+                                                                      InElementOp,
+                                                                      WeiElementOp,
+                                                                      OutElementOp,
+                                                                      AComputeType,
+                                                                      BComputeType>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
 
     switch(init_method)
     {
@@ -172,15 +194,16 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     else if(do_verification == 2)
     {
         // GPU reference
-        std::vector<ck::index_t> d_lengths_vec(NDimSpatial + 3);
-        std::vector<ck::index_t> d_strides_vec(NDimSpatial + 3);
+        std::vector<ck::long_index_t> d_lengths_vec(NDimSpatial + 3);
+        std::vector<ck::long_index_t> d_strides_vec(NDimSpatial + 3);
 
         d_lengths_vec[0] = conv_param.G_;
         d_lengths_vec[1] = conv_param.N_;
         d_lengths_vec[2] = conv_param.K_;
         for(ck::index_t i = 0; i < NDimSpatial; ++i)
         {
-            d_lengths_vec[3 + i] = static_cast<ck::index_t>(conv_param.output_spatial_lengths_[i]);
+            d_lengths_vec[3 + i] =
+                static_cast<ck::long_index_t>(conv_param.output_spatial_lengths_[i]);
         }
 
         // D tensor has same layout as output
@@ -188,8 +211,8 @@ bool profile_grouped_conv_fwd_bilinear_impl(
 
         std::array<const DDataType*, 1> d_ptrs = {
             reinterpret_cast<const DDataType*>(d_device_buf.GetDeviceBuffer())};
-        std::array<std::vector<ck::index_t>, 1> d_lengths = {d_lengths_vec};
-        std::array<std::vector<ck::index_t>, 1> d_strides = {d_strides_vec};
+        std::array<std::vector<ck::long_index_t>, 1> d_lengths = {d_lengths_vec};
+        std::array<std::vector<ck::long_index_t>, 1> d_strides = {d_strides_vec};
 
         std::array<const InDataType*, 1> in_ptrs = {
             reinterpret_cast<const InDataType*>(in_device_buf.GetDeviceBuffer())};
@@ -231,29 +254,13 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     float best_gb_per_sec = 0;
     int valids            = 0;
 
-    using DeviceOp =
-        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
-                                                                      InLayout,
-                                                                      WeiLayout,
-                                                                      ck::Tuple<DLayout>,
-                                                                      OutLayout,
-                                                                      InDataType,
-                                                                      WeiDataType,
-                                                                      ck::Tuple<DDataType>,
-                                                                      OutDataType,
-                                                                      InElementOp,
-                                                                      WeiElementOp,
-                                                                      OutElementOp,
-                                                                      AComputeType,
-                                                                      BComputeType>;
-
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
-
     for(std::size_t i = 0; i < op_ptrs.size(); ++i)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
         auto& op_ptr = op_ptrs[i];
 
         auto argument_ptr = op_ptr->MakeArgumentPointer(

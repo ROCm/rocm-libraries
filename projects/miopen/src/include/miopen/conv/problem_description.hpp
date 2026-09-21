@@ -104,10 +104,10 @@ namespace conv {
 MIOPEN_INTERNALS_EXPORT miopenAlphaBetaCase_t ClassifyAlphaBeta(const Scalar& alpha,
                                                                 const Scalar& beta);
 
-struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
+struct ProblemDescription : ProblemDescriptionBase
 #if MIOPEN_ENABLE_SQLITE
     ,
-                                                    SQLiteSerializable<ProblemDescription>
+                            SQLiteSerializable<ProblemDescription>
 #endif
 {
     ProblemDescription() = default;
@@ -222,7 +222,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     bool IsDirectionForward() const { return direction == conv::Direction::Forward; }
     bool IsDirectionBackwardData() const { return direction == conv::Direction::BackwardData; }
     bool IsDirectionBackwardWrW() const { return direction == conv::Direction::BackwardWeights; }
-    std::string GetDirectionStr() const;
+    MIOPEN_INTERNALS_EXPORT std::string GetDirectionStr() const;
 
     const Scalar& GetAlpha() const { return alpha; }
     const Scalar& GetBeta() const { return beta; }
@@ -312,9 +312,9 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
         MIOPEN_THROW("Direction must be known!");
     }
 
-    bool IsLayoutDefault() const;
-    bool IsLayoutNHWC() const;
-    bool IsLayoutNCHWc() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutDefault() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNHWC() const;
+    MIOPEN_INTERNALS_EXPORT bool IsLayoutNCHWc() const;
     bool IsNCHWc_NCHWc() const;
     bool IsNCHWc_CHWNc() const;
 
@@ -340,9 +340,9 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
                out.AllLengthsFitIntoInt();
     }
 
-    void HeuristicUpdateLayouts();
+    MIOPEN_INTERNALS_EXPORT void HeuristicUpdateLayouts();
 
-    void MakeNetworkConfig(std::string& conf_key) const;
+    MIOPEN_INTERNALS_EXPORT void MakeNetworkConfig(std::string& conf_key) const;
 
     NetworkConfig MakeNetworkConfig() const override
     {
@@ -354,7 +354,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
     // Todo: remove after fixing fin
     [[deprecated]] NetworkConfig BuildConfKey() const { return MakeNetworkConfig(); }
 
-    void Serialize(std::ostream& stream) const;
+    MIOPEN_INTERNALS_EXPORT void Serialize(std::ostream& stream) const;
 
     friend std::ostream& operator<<(std::ostream& os, const ProblemDescription& obj)
     {
@@ -409,14 +409,14 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
               [&](std::string value, std::string name) { f(value, name); });
     }
 
-    void SetupFloats(ExecutionContext& ctx) const;
-    void SetupComputeType(const ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;
+    MIOPEN_INTERNALS_EXPORT void SetupComputeType(const ExecutionContext& ctx) const;
 
 private:
     std::string ComputeLayout(const TensorDescriptor& td) const;
-    std::string ComputeInLayout() const;
-    std::string ComputeOutLayout() const;
-    std::string ComputeWeightsLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeInLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeOutLayout() const;
+    MIOPEN_INTERNALS_EXPORT std::string ComputeWeightsLayout() const;
 
     TensorDescriptor in;
     TensorDescriptor weights;
@@ -432,6 +432,122 @@ private:
     miopenAlphaBetaCase_t alpha_beta_case = DEFAULT;
     mutable bool use_tf32                 = false;
 };
+
+// Point-output conv (Ho=Wo=1 or Do=Ho=Wo=1): zero pad, unit dilation, stride equals filter.
+// Matches patch-embedding / projection when stride == kernel size.
+inline bool IsPointOutputStrideEqFilter(const ProblemDescription& problem,
+                                        Direction direction,
+                                        bool require_input_spatial_eq_filter)
+{
+    if(problem.GetDirection() != direction)
+        return false;
+
+    const auto& conv       = problem.GetConv();
+    const auto spatial_dim = conv.GetSpatialDimension();
+    if((spatial_dim != 2 && spatial_dim != 3) || conv.group_count != 1)
+        return false;
+
+    if(spatial_dim == 2 && !problem.IsLayoutDefault() && !problem.IsLayoutNHWC())
+        return false;
+
+    const auto& pads      = conv.GetConvPads();
+    const auto& strides   = conv.GetConvStrides();
+    const auto& dilations = conv.GetConvDilations();
+    if(pads.size() != spatial_dim || strides.size() != spatial_dim ||
+       dilations.size() != spatial_dim)
+        return false;
+
+    for(std::size_t i = 0; i < spatial_dim; ++i)
+    {
+        if(pads[i] != 0 || dilations[i] != 1)
+            return false;
+    }
+
+    if(direction == Direction::BackwardData || direction == Direction::BackwardWeights)
+    {
+        if(spatial_dim == 3 &&
+           (problem.GetInDepth() != 1 || problem.GetInHeight() != 1 || problem.GetInWidth() != 1))
+            return false;
+        if(spatial_dim == 2 && (problem.GetInHeight() != 1 || problem.GetInWidth() != 1))
+            return false;
+    }
+    else
+    {
+        if(spatial_dim == 3 && (problem.GetOutDepth() != 1 || problem.GetOutHeight() != 1 ||
+                                problem.GetOutWidth() != 1))
+            return false;
+        if(spatial_dim == 2 && (problem.GetOutHeight() != 1 || problem.GetOutWidth() != 1))
+            return false;
+    }
+
+    if(spatial_dim == 3)
+    {
+        if(static_cast<int>(problem.GetWeightsDepth()) != strides[0] ||
+           static_cast<int>(problem.GetWeightsHeight()) != strides[1] ||
+           static_cast<int>(problem.GetWeightsWidth()) != strides[2])
+            return false;
+    }
+    else
+    {
+        if(static_cast<int>(problem.GetWeightsHeight()) != strides[0] ||
+           static_cast<int>(problem.GetWeightsWidth()) != strides[1])
+            return false;
+    }
+
+    if(require_input_spatial_eq_filter)
+    {
+        if(direction == Direction::BackwardData || direction == Direction::BackwardWeights)
+        {
+            if(spatial_dim == 3 && (problem.GetOutDepth() != problem.GetWeightsDepth() ||
+                                    problem.GetOutHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetOutWidth() != problem.GetWeightsWidth()))
+                return false;
+            if(spatial_dim == 2 && (problem.GetOutHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetOutWidth() != problem.GetWeightsWidth()))
+                return false;
+        }
+        else
+        {
+            if(spatial_dim == 3 && (problem.GetInDepth() != problem.GetWeightsDepth() ||
+                                    problem.GetInHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetInWidth() != problem.GetWeightsWidth()))
+                return false;
+            if(spatial_dim == 2 && (problem.GetInHeight() != problem.GetWeightsHeight() ||
+                                    problem.GetInWidth() != problem.GetWeightsWidth()))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+inline bool IsBwdDataPointOutputStrideEqFilter(const ProblemDescription& problem)
+{
+    // 3D may have a dx larger than the filter and scatters the GEMM result through Col2Im,
+    // so only 2D, which always writes dx directly, constrains the dx spatial extent.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardData, !problem.Is3d());
+}
+
+inline bool IsBwdDataPointOutputDirectWritable(const ProblemDescription& problem)
+{
+    // When dx spatial equals the filter spatial extent, a per-batch dx slice enumerates its
+    // elements in the same order as a row of w, whatever the layout, so the GEMM can write
+    // dx in place instead of scattering through Col2Im.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardData, true);
+}
+
+inline bool IsFwdDataPointOutputStrideEqFilter(const ProblemDescription& problem)
+{
+    // For direct GEMM without Im2Col, input spatial must equal filter spatial.
+    return IsPointOutputStrideEqFilter(problem, Direction::Forward, true);
+}
+
+inline bool IsWrwPointOutputStrideEqFilter(const ProblemDescription& problem)
+{
+    // The wrw GEMM consumes x as a [N, C*Z*Y*X] matrix without Im2Col, which is only
+    // a valid reinterpretation when input spatial equals filter spatial.
+    return IsPointOutputStrideEqFilter(problem, Direction::BackwardWeights, true);
+}
 
 } // namespace conv
 } // namespace miopen

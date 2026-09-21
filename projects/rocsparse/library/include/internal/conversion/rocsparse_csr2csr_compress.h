@@ -32,19 +32,19 @@
 extern "C" {
 #endif
 /*! \ingroup conv_module
- *  \brief Convert a sparse CSR matrix into a compressed sparse CSR matrix
+ *  \brief Convert a sparse CSR matrix into a compressed sparse CSR matrix.
  *
  *  \details
  *  \p rocsparse_csr2csr_compress converts a CSR matrix into a compressed CSR matrix by
- *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol
+ *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol.
  *
- *  Compressing a CSR matrix involves two steps. First we use
+ *  Compressing a CSR matrix involves two steps. First, use
  *  \ref rocsparse_snnz_compress "rocsparse_Xnnz_compress()" to determine how many entries will
- *  be in the final compressed CSR matrix. Then we call \p rocsparse_csr2csr_compress to finish
+ *  be in the final compressed CSR matrix. Then call \p rocsparse_csr2csr_compress to finish
  *  the compression and fill in the column indices and values arrays of the compressed CSR matrix.
  *
  *  \note
- *  In the case of complex matrices only the magnitude of the real part of \p tol is used.
+ *  In the case of complex matrices, only the magnitude of the real part of \p tol is used.
  *
  *  \note
  *  This function is blocking with respect to the host.
@@ -53,13 +53,13 @@ extern "C" {
  *  This routine does not support execution in a hipGraph context.
  *
  *  @param[in]
- *  handle        handle to the rocsparse library context queue.
+ *  handle        handle to the rocSPARSE library context queue.
  *  @param[in]
  *  m             number of rows of the sparse CSR matrix.
  *  @param[in]
  *  n             number of columns of the sparse CSR matrix.
  *  @param[in]
- *  descr_A       matrix descriptor for the CSR matrix
+ *  descr_A       matrix descriptor for the CSR matrix.
  *  @param[in]
  *  csr_val_A     array of \p nnz_A elements of the sparse CSR matrix.
  *  @param[in]
@@ -83,16 +83,16 @@ extern "C" {
  *  csr_col_ind_C array of \p nnz_C elements containing the row indices of the compressed
  *                sparse CSR matrix.
  *  @param[in]
- *  tol           the non-negative tolerance used for compression. If \p tol is complex then only the magnitude
+ *  tol           the non-negative tolerance used for compression. If \p tol is complex, then only the magnitude
  *                of the real part is used. Entries in the input uncompressed CSR array that are below the tolerance
- *                are removed in output compressed CSR matrix.
+ *                are removed in the output-compressed CSR matrix.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_size \p m, \p n or \p nnz_A is invalid.
+ *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz_A is invalid.
  *  \retval     rocsparse_status_invalid_value \p tol is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p csr_val_A, \p csr_row_ptr_A,
- *              \p csr_col_ind_A, \p csr_val_C, \p csr_row_ptr_C, \p csr_col_ind_C or
+ *              \p csr_col_ind_A, \p csr_val_C, \p csr_row_ptr_C, \p csr_col_ind_C, or
  *              \p nnz_per_row pointer is invalid.
  *
  *  \par Example

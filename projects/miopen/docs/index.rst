@@ -26,10 +26,9 @@ The MIOpen public repository is located at
 
   .. grid-item-card:: Install
 
-    * :doc:`MIOpen prerequisites <./install/prerequisites>`
     * :doc:`Install MIOpen <./install/install>`
-    * :doc:`Build MIOpen from source <./install/build-source>`
-    * :doc:`Build MIOpen for embedded systems <./install/embed>`
+    * :doc:`Build from source <./install/build-source>`
+    * :doc:`Build for embedded systems <./install/embed>`
     * :doc:`Build MIOpen using Docker <./install/docker-build>`
 
 .. grid:: 2
@@ -60,7 +59,7 @@ The MIOpen public repository is located at
     * :doc:`API library <reference/index>`
 
       * :doc:`Modules <./doxygen/html/modules>`
-      * :doc:`Datatypes <./reference/datatypes>`
+      * :doc:`Precision support <./reference/data_type_support>`
       * :doc:`Environment variables <./reference/env_variables>`
 
 For information on contributing to the MIOpen code base, see

@@ -171,7 +171,7 @@ struct verify_tensor_trans
     }
 };
 
-inline auto GenCases()
+inline auto GenCasesFull()
 {
     static const std::vector<std::vector<int>> tensor_src{
         {64, 64, 56, 56},   {64, 64, 56, 56},  {64, 256, 56, 56},  {64, 64, 55, 55},
@@ -191,9 +191,51 @@ inline auto GenCases()
         MakeNamedParameterValues<int>("stride_h", 1, 2));
 }
 
-inline auto GetCases()
+inline auto GetCasesFull()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenCasesFull();
+    return cases;
+}
+
+// Smoke (pre-commit) and Standard (per-CI) shape subsets with a representative
+// spread (small/large channel counts plus non-power-of-two dims). The full
+// 40-shape list stays in GenCasesFull (used by the Full instantiation).
+inline auto GenCasesSmoke()
+{
+    static const std::vector<std::vector<int>> tensor_src{{64, 64, 56, 56}, {64, 2048, 7, 7}};
+
+    return testing::Combine(
+        MakeNamedParameterCollectionValues<std::vector<int>>("src_lens", tensor_src, "x"),
+        MakeNamedParameterValues<bool>("forw", true, false),
+        MakeNamedParameterValues<int>("stride_h", 1, 2));
+}
+
+inline auto GenCasesStandard()
+{
+    static const std::vector<std::vector<int>> tensor_src{{64, 64, 56, 56},
+                                                          {64, 256, 28, 28},
+                                                          {64, 1024, 14, 14},
+                                                          {64, 2048, 7, 7},
+                                                          {128, 127, 28, 28},
+                                                          {256, 255, 14, 14},
+                                                          {511, 511, 7, 7},
+                                                          {64, 63, 56, 28}};
+
+    return testing::Combine(
+        MakeNamedParameterCollectionValues<std::vector<int>>("src_lens", tensor_src, "x"),
+        MakeNamedParameterValues<bool>("forw", true, false),
+        MakeNamedParameterValues<int>("stride_h", 1, 2));
+}
+
+inline auto GetCasesSmoke()
+{
+    static const auto cases = GenCasesSmoke();
+    return cases;
+}
+
+inline auto GetCasesStandard()
+{
+    static const auto cases = GenCasesStandard();
     return cases;
 }
 
@@ -287,6 +329,14 @@ TEST_P(GPU_TensorTrans_I8, TestInt8) { this->Run(); }
 TEST_P(GPU_TensorTrans_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_TensorTrans_FP32, TestFloat32) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_I8, GetCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP16, GetCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP32, GetCases(), TestNameGenerator{});
+// Tiered: Smoke (pre-commit) and Standard (per-CI) run shape subsets; Full
+// (comprehensive/nightly) runs the complete shape list so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_I8, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_I8, GetCasesStandard(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_I8, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP16, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_FP16, GetCasesStandard(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP16, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP32, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_FP32, GetCasesStandard(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP32, GetCasesFull(), TestNameGenerator{});

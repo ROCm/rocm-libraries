@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --CFGBuilderPass --print-output
+#
+# CFGBuilderPass: a mid-block branch splits its home block into a tail piece,
+# named "<base>_<N>". That synthetic name can collide with a real Tensile label
+# of the same spelling: here the tail of ^label_TDMInitA would be named
+# ^label_TDMInitA_1, clashing with the real ^label_TDMInitA_1 that follows.
+# A collision makes two blocks share a name, so buildCFGEdges resolves branches
+# to the wrong block and corrupts the CFG. The pass must give the tail a unique
+# name (^label_TDMInitA_1_1) and keep the fall-through chain correct:
+#   ^label_TDMInitA -> ^label_TDMInitA_1_1 -> ^label_TDMInitA_1 -> ^label_end
+#
+# CHECK-LABEL: ^label_TDMInitA:{{$}}
+# CHECK: Successors: ^label_end, ^label_TDMInitA_1_1{{$}}
+# CHECK-LABEL: ^label_TDMInitA_1_1:{{$}}
+# CHECK: Successors: ^label_TDMInitA_1{{$}}
+# CHECK-LABEL: ^label_TDMInitA_1:{{$}}
+# CHECK: Successors: ^label_end{{$}}
+# CHECK-LABEL: ^label_end:{{$}}
+# CHECK: s_endpgm
+
+label_TDMInitA:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_cbranch_scc1"(label_end, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+label_TDMInitA_1:
+  v4 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+label_end:
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solvers.hpp>
 
@@ -33,10 +10,12 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/util.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
-#include <boost/range/adaptors.hpp>
+#include <ranges>
+#include <set>
 
 namespace miopen {
 namespace solver {
@@ -92,7 +71,8 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardData() && problem.IsLayoutDefault() &&
+    // Layout is asserted by the derived solvers that need it.
+    return problem.IsDirectionBackwardData() &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);
 #else
@@ -108,6 +88,9 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     const auto& wDesc  = problem.GetWeights();
     const auto& dxDesc = problem.GetOut();
 
+    const auto prefer_point_output_shape =
+        miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem);
+
     int n_SetTensor            = 0;
     int n_transpose_NCHW2CNHW  = 0;
     int n_transpose_CNHW2NCHW  = 0;
@@ -118,7 +101,7 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     std::size_t in_n, in_c;
     std::tie(in_n, in_c)    = tie_pick<0, 1>()(dxDesc.GetLengths());
     std::size_t spatial_dim = conv.GetSpatialDimension();
-    auto wei_spatial        = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    auto wei_spatial = wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     // 1x1 does not require col2im
     if(conv.GetSpatialDimension() == 2 &&
@@ -136,14 +119,29 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
             miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
             miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 1; }))
     {
-        n_gemm_strided_batched = in_n;
+        // Channel-last collapses the batch into M, so this is one unbatched GEMM.
+        n_gemm_strided_batched =
+            (problem.IsLayoutNHWC() && conv.group_count == 1) ? 1 : static_cast<int>(in_n);
     }
     // if not 1x1
     else
     {
-        n_gemm_strided_batched = conv.group_count;
-        n_gemm_runs            = in_n;
-        n_Col2ImGPU            = in_n;
+        if(prefer_point_output_shape)
+        {
+            // Keep the WTI model aligned with the execution path: one strided-batched GEMM, plus
+            // one batched Col2Im only when dx cannot be written directly.
+            const auto direct_write = miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
+            n_gemm_strided_batched  = in_n;
+            n_gemm_runs             = 1;
+            n_Col2ImGPU             = direct_write ? 0 : 1;
+        }
+        else
+        {
+            // Preserve the previous non-3D behavior in WTI estimation.
+            n_gemm_strided_batched = conv.group_count;
+            n_gemm_runs            = in_n;
+            n_Col2ImGPU            = in_n;
+        }
     }
 
     auto wti = 1.0;
@@ -169,7 +167,7 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
     const auto in_c = dxDesc.GetLengths()[1];
 
     const auto out_spatial =
-        boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + conv.GetSpatialDimension());
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     const auto dx_t_size = in_n * in_c *
                            std::accumulate(out_spatial.begin(),
@@ -196,6 +194,37 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
+bool GemmBwd1x1_stride2::IsSlow(const ExecutionContext& context,
+                                const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        return false;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Extreme low CPG detection
+        // SWPG < 400k: Moderate spatial-channel work
+        // CPG < 192: Low channels per group (critical discriminator)
+        if(spatial_work_per_group < 400000 && channels_per_group < 192)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -207,9 +236,11 @@ bool GemmBwd1x1_stride2::IsApplicable(const ExecutionContext& context,
     const auto& wDesc = problem.GetWeights();
 
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
-    return conv.GetSpatialDimension() == 2 &&
+    // The CNHW transpose kernels this path relies on are not layout agnostic.
+    return problem.IsLayoutDefault() && conv.GetSpatialDimension() == 2 &&
            miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
            miopen::all_of(conv.GetConvStrides(), [](auto v) { return v == 2; }) &&
@@ -252,13 +283,15 @@ ConvSolution GemmBwd1x1_stride2::GetSolution(const ExecutionContext& context,
     std::size_t in_n, in_c;
     std::tie(in_n, in_c) = tie_pick<0, 1>()(dxDesc.GetLengths());
 
-    const auto wei_k        = wDesc.GetLengths()[0];
-    const auto spatial_dim  = conv.GetSpatialDimension();
-    const auto in_spatial_  = boost::adaptors::slice(dxDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial_ = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto in_spatial   = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-    const auto out_spatial  = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
-    const auto strides      = conv.GetConvStrides();
+    const auto wei_k       = wDesc.GetLengths()[0];
+    const auto spatial_dim = conv.GetSpatialDimension();
+    const auto in_spatial_ =
+        dxDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial_ =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
+    const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
+    const auto strides     = conv.GetConvStrides();
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
 
@@ -397,6 +430,37 @@ size_t GemmBwd1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
     return 0;
 }
 
+bool GemmBwd1x1_stride1::IsSlow(const ExecutionContext& context,
+                                const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        return false;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 200k: Low spatial-channel work (memory-bound)
+        // CPG < 640: Moderate channels (poor reuse)
+        if(spatial_work_per_group < 200000 && channels_per_group < 640)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -407,8 +471,21 @@ bool GemmBwd1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto& conv  = problem.GetConv();
     const auto& wDesc = problem.GetWeights();
 
+    // This solver accepts NHWC only for single-group problems with no cast or f8 types.
+    //
+    // The NHWC branch of GetSolution calls hipBLASLt, whose wrapper dispatches on
+    // gemm_desc.dataType alone and never reads a_cast_type or b_cast_type, and which throws
+    // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
+    // Admitting cast types would also need the pair swapped, since that branch passes dy
+    // first while a_cast_type is filled from w.
+    const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
+                                !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
+    if(!problem.IsLayoutDefault() && !nhwc_supported)
+        return false;
+
     const auto spatial_dim = conv.GetSpatialDimension();
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
            miopen::all_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
@@ -464,9 +541,10 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             const auto in_c  = dxDesc.GetLengths()[1];
             const auto wei_k = wDesc.GetLengths()[0];
 
-            const auto in_spatial = boost::adaptors::slice(dxDesc.GetLengths(), 2, 2 + spatial_dim);
+            const auto in_spatial =
+                dxDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
             const auto out_spatial =
-                boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
+                dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
             std::size_t out_spatial_size = std::accumulate(out_spatial.begin(),
                                                            out_spatial.end(),
@@ -482,6 +560,10 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
             {
                 MIOPEN_LOG_FUNCTION("groupconv, 1x1");
             }
+            else if(problem.IsLayoutNHWC())
+            {
+                MIOPEN_LOG_FUNCTION("convolution, 1x1 channel-last");
+            }
             else
             {
                 MIOPEN_LOG_FUNCTION("convolution, 1x1");
@@ -495,7 +577,31 @@ ConvSolution GemmBwd1x1_stride1::GetSolution(const ExecutionContext&,
                 return tmp;
             }();
 
-            if(group_count > 1)
+            if(problem.IsLayoutNHWC())
+            {
+                // dx[N*spatial, C] = dy[N*spatial, K] * w[K, C].
+                auto desc        = gemm_desc;
+                desc.batch_count = 1;
+                desc.strideA     = 0;
+                desc.strideB     = 0;
+                desc.strideC     = 0;
+                desc.m           = static_cast<int>(in_n * out_spatial_size);
+                desc.n           = static_cast<int>(in_c);
+                desc.transA      = false;
+                desc.transB      = false;
+                desc.lda         = desc.k;
+                desc.ldb         = desc.n;
+                desc.ldc         = desc.n;
+
+                constexpr auto backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+                gemm_status = CallGemm(handle, desc, dy, 0, w, 0, dx, 0, backend);
+            }
+            else if(group_count > 1)
             {
                 float time = 0.f;
                 for(std::size_t i = 0; i < in_n; i++)
@@ -552,21 +658,30 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 
     const auto spatial_dim = conv.GetSpatialDimension();
 
-    const auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
+    const auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     const auto wei_c = wDesc.GetLengths()[1];
+    const auto in_n  = dyDesc.GetLengths()[0];
 
-    const auto gemm_size = wei_c *
-                           std::accumulate(wei_spatial.begin(),
-                                           wei_spatial.end(),
-                                           std::size_t(1),
-                                           std::multiplies<std::size_t>()) *
-                           std::accumulate(out_spatial.begin(),
-                                           out_spatial.end(),
-                                           std::size_t(1),
-                                           std::multiplies<std::size_t>()) *
-                           GetTypeSize(dyDesc.GetType()) * conv.group_count;
+    auto gemm_size = wei_c *
+                     std::accumulate(wei_spatial.begin(),
+                                     wei_spatial.end(),
+                                     std::size_t(1),
+                                     std::multiplies<std::size_t>()) *
+                     std::accumulate(out_spatial.begin(),
+                                     out_spatial.end(),
+                                     std::size_t(1),
+                                     std::multiplies<std::size_t>()) *
+                     GetTypeSize(dyDesc.GetType()) * conv.group_count;
+
+    // Point-output bwd writes dx directly when it can; otherwise Col2Im needs the whole
+    // col buffer for all N.
+    if(miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
+        gemm_size =
+            miopen::conv::IsBwdDataPointOutputDirectWritable(problem) ? 0 : gemm_size * in_n;
 
     if(gemm_size > handle.GetMaxMemoryAllocSize())
     {
@@ -582,11 +697,96 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
+bool GemmBwdRest::IsSlow(const ExecutionContext& context, const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                      = problem.GetBatchSize();
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto spatial_per_batch      = s / b;
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmBwdRest - Multi-metric filtering
+        // Analysis: 51.6% terrible cases - significant filtering benefit
+        //
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 1.6M: Low spatial-channel work
+        // CPG < 360: Low channels
+        if(spatial_work_per_group < 1600000 && channels_per_group < 360)
+            return true;
+
+        // SECONDARY: Batch fragmentation detection
+        // SPB < 0.8: Extreme batch fragmentation
+        if(spatial_per_batch < 0.8)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 3M: Low spatial-channel work
+        // CPG < 112: Very low channels
+        if(spatial_work_per_group < 3000000 && channels_per_group < 112)
+            return true;
+
+        // SECONDARY: Batch fragmentation detection
+        // SPB < 40.0: Each batch item has < 40 pixels of spatial work
+        if(spatial_per_batch < 40.0)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmBwdRest::IsApplicable(const ExecutionContext& context,
                                const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
+    {
+        if(!problem.AllTensorsDimsFitIntoInt())
+            return false;
+        if(problem.HasNonPackedTensors())
+            return false;
+        if(problem.GetGroupCount() != 1)
+            return false;
+        if(!problem.IsDirectionBackwardData())
+            return false;
+        if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
+            return false;
+        // Without a direct write the result goes through Col2Im3d, which addresses dx as
+        // channel-first and so cannot serve a channel-last layout.
+        if(!miopen::conv::IsBwdDataPointOutputDirectWritable(problem) && !problem.IsLayoutDefault())
+            return false;
+
+        const auto& dyDesc = problem.GetIn();
+        const auto& wDesc  = problem.GetWeights();
+        const auto& dxDesc = problem.GetOut();
+        if(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported)
+            return false;
+        if(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported)
+            return false;
+
+        // A direct write needs no workspace.
+        if(miopen::conv::IsBwdDataPointOutputDirectWritable(problem))
+            return true;
+
+        return GetWorkspaceSize(context, problem) > 0;
+    }
+
     if(!GemmBwdBase::IsApplicable(context, problem))
+        return false;
+
+    // Everything below goes through Im2Col/Col2Im, which addresses dx channel-first.
+    if(!problem.IsLayoutDefault())
         return false;
 
     return !GemmBwd1x1_stride2{}.IsApplicable(context, problem) &&
@@ -610,13 +810,16 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
     const auto group_count = conv.group_count;
 
-    const auto spatial_dim  = conv.GetSpatialDimension();
-    const auto in_spatial_  = boost::adaptors::slice(dxDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto wei_spatial_ = boost::adaptors::slice(wDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto out_spatial_ = boost::adaptors::slice(dyDesc.GetLengths(), 2, 2 + spatial_dim);
-    const auto in_spatial   = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
-    const auto wei_spatial  = std::vector<std::size_t>(wei_spatial_.begin(), wei_spatial_.end());
-    const auto out_spatial  = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
+    const auto spatial_dim = conv.GetSpatialDimension();
+    const auto in_spatial_ =
+        dxDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto wei_spatial_ =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto out_spatial_ =
+        dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
+    const auto in_spatial  = std::vector<std::size_t>(in_spatial_.begin(), in_spatial_.end());
+    const auto wei_spatial = std::vector<std::size_t>(wei_spatial_.begin(), wei_spatial_.end());
+    const auto out_spatial = std::vector<std::size_t>(out_spatial_.begin(), out_spatial_.end());
 
     // dx = transpose(w) * dy
     const auto tmp_gemm_desc = [&]() {
@@ -640,13 +843,13 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
     const auto strides      = conv.GetConvStrides();
     const auto dilations    = conv.GetConvDilations();
 
-    const auto in_n  = dxDesc.GetLengths()[0];
-    const auto in_c  = dxDesc.GetLengths()[1];
-    const auto wei_k = wDesc.GetLengths()[0];
-
-    const auto out_spatial_size = std::accumulate(
-        out_spatial.begin(), out_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
-
+    const auto in_n             = problem.GetBatchSize();
+    const auto in_c             = problem.GetOutChannels();
+    const auto wei_k            = problem.GetInChannels();
+    const auto out_spatial_size = static_cast<std::size_t>(
+        problem.GetInDepth() * problem.GetInHeight() * problem.GetInWidth());
+    const auto wei_spatial_size = static_cast<std::size_t>(
+        problem.GetWeightsDepth() * problem.GetWeightsHeight() * problem.GetWeightsWidth());
     const auto in_spatial_size = std::accumulate(
         in_spatial.begin(), in_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
 
@@ -688,6 +891,95 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
             }();
 
             float time_gemm = 0;
+
+            // Point-output bwd: one GEMM over N, dx[N, C*Z*Y*X] = dy[N, K] * w[K, C*Z*Y*X].
+            //
+            // The GEMM writes dx in place whenever dx spatial equals the filter spatial
+            // extent: pad=0, dilation=1 and stride==filter then make a per-batch dx slice
+            // enumerate elements in the same order as a row of w, for channel-first
+            // ((c,z,y,x)) and channel-last ((z,y,x,c)) alike. Only 3D admits a larger dx,
+            // which is scattered out of the workspace with one batched Col2Im instead.
+            if(miopen::conv::IsBwdDataPointOutputStrideEqFilter(problem))
+            {
+                const auto writes_dx_in_place =
+                    miopen::conv::IsBwdDataPointOutputDirectWritable(problem);
+
+                auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.batch_count = 1;
+                single_gemm_desc.strideA     = 0;
+                single_gemm_desc.strideB     = 0;
+                single_gemm_desc.strideC     = 0;
+                single_gemm_desc.m           = static_cast<int>(in_n);
+                single_gemm_desc.n = static_cast<int>(in_c * wei_spatial_size * out_spatial_size);
+                single_gemm_desc.k = static_cast<int>(wei_k);
+                single_gemm_desc.transA = false;
+                single_gemm_desc.transB = false;
+                single_gemm_desc.lda    = static_cast<int>(wei_k);
+                single_gemm_desc.ldb    = single_gemm_desc.n;
+                single_gemm_desc.ldc    = single_gemm_desc.n;
+
+                constexpr auto point_output_backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+
+                const auto gemm_status = CallGemm(handle,
+                                                  single_gemm_desc,
+                                                  dy,
+                                                  0,
+                                                  w,
+                                                  0,
+                                                  writes_dx_in_place ? dx : workspace,
+                                                  0,
+                                                  point_output_backend);
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmBwdRest point-output GEMM execution failure.");
+
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+
+                if(!writes_dx_in_place)
+                {
+                    time_gemm += Col2Im3dGPUBatched(handle,
+                                                    workspace,
+                                                    out_spatial[0],
+                                                    out_spatial[1],
+                                                    out_spatial[2],
+                                                    wei_spatial[0],
+                                                    wei_spatial[1],
+                                                    wei_spatial[2],
+                                                    static_cast<uint32_t>(pads[0]),
+                                                    static_cast<uint32_t>(pads[1]),
+                                                    static_cast<uint32_t>(pads[2]),
+                                                    static_cast<uint32_t>(strides[0]),
+                                                    static_cast<uint32_t>(strides[1]),
+                                                    static_cast<uint32_t>(strides[2]),
+                                                    static_cast<uint32_t>(dilations[0]),
+                                                    static_cast<uint32_t>(dilations[1]),
+                                                    static_cast<uint32_t>(dilations[2]),
+                                                    static_cast<uint32_t>(in_c),
+                                                    static_cast<uint32_t>(in_spatial[0]),
+                                                    static_cast<uint32_t>(in_spatial[1]),
+                                                    static_cast<uint32_t>(in_spatial[2]),
+                                                    static_cast<uint32_t>(in_n),
+                                                    static_cast<uint64_t>(in_c) * wei_spatial_size *
+                                                        out_spatial_size,
+                                                    dx,
+                                                    static_cast<uint64_t>(in_c) * in_spatial_size,
+                                                    0,
+                                                    dyDesc_.GetType());
+                }
+
+                if(handle.IsProfilingEnabled())
+                {
+                    handle.ResetKernelTime();
+                    handle.AccumKernelTime(time_gemm);
+                }
+                return;
+            }
+
             for(std::size_t i = 0; i < in_n; i++)
             {
                 std::size_t out_offset = i * wei_k * out_spatial_size;

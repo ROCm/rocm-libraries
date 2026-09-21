@@ -29,6 +29,7 @@
 #include "data_types.hpp"
 #include "hash.hpp"
 #include "reduction_meta_traits.hpp"
+#include "reduction_solution_params.hpp"
 
 namespace std
 {

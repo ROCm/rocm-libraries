@@ -37,7 +37,7 @@ Definitions:
 
 Tests:
 - name: spmm_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - spmm_bad_arg: *real_precisions_1b
   transA: N
@@ -72,6 +72,33 @@ Tests:
   bias_stride: [0, -1, 256]
   sparse_b: [true, false]
   alpha_vector_scaling: [true, false]
+
+- name: spmm_small
+  category: quick
+  function:
+    spmm: *hpa_e4m3_fnuz_fp32_precision
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  bias_vector: [true, false]
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true, false]
+  gate_residual: [true]
+  gate_type: [f32_r, f8_fnuz_r]
+  gpu_arch: '942'
+
+- name: spmm_small
+  category: quick
+  function:
+    spmm: *hpa_e4m3_fp32_precision_gate
+  matrix_size: *small_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  bias_vector: [true, false]
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true, false]
+  gate_residual: [true]
+  gate_type: [f32_r, f8_r]
 
 - name: spmm_medium
   category: pre_checkin
@@ -463,11 +490,11 @@ Tests:
   activation_arg2 : [-1.0, 0.0, 0.5, 1.0, 3.0]
   sparse_b: [true, false]
 
-- name: spmm_bert_demo_sizes
-  category: pre_checkin
+- name: spmm_bert_sizes
+  category: nightly
   function:
     spmm: *real_precisions_1b
-  matrix_size: *bert_demo_sizes
+  matrix_size: *bert_sizes
   transA_transB: *transA_transB_range
-  sparse_b: [true, false]
+  sparse_b: false
 ...

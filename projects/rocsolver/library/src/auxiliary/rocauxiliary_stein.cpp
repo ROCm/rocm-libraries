@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_stein.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -42,6 +43,7 @@ rocblas_status rocsolver_stein_impl(rocblas_handle handle,
                                     const rocblas_int ldz,
                                     rocblas_int* ifail,
                                     rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("stein", "-n", n, "--ldz", ldz);
 
@@ -92,6 +94,10 @@ rocblas_status rocsolver_stein_impl(rocblas_handle handle,
                                        shiftW, strideW, iblock, strideIblock, isplit, strideIsplit,
                                        Z, shiftZ, ldz, strideZ, ifail, strideIfail, info,
                                        batch_count, (S*)work, (rocblas_int*)iwork);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

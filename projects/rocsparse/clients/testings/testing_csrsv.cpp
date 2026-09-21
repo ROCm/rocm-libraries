@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,6 +120,70 @@ void testing_csrsv_bad_arg(const Arguments& arg)
                             rocsparse_status_invalid_pointer);
 }
 
+// Helper function to setup integer-based manufactured solution for csrsv testing.
+// This creates an integer matrix and computes the corresponding right-hand side
+// for a known solution vector.
+template <typename T>
+static void setup_integer_based_manufactured_solution(host_csr_matrix<T>&   hA,
+                                                      host_dense_matrix<T>& hx,
+                                                      host_dense_matrix<T>& hx_expected,
+                                                      const T&              alpha,
+                                                      rocsparse_fill_mode   uplo,
+                                                      rocsparse_diag_type   diag,
+                                                      rocsparse_index_base  base,
+                                                      rocsparse_int         M)
+{
+    // Initialize matrix values to integers between 1 and 10
+    for(rocsparse_int i = 0; i < hA.nnz; ++i)
+    {
+        hA.val[i] = static_cast<T>(1 + (i % 10));
+    }
+
+    // Set all entries of the expected solution to alpha
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        hx_expected[i] = alpha;
+    }
+
+    // Compute b = A * x / alpha (the right-hand side) using only the triangular part
+    // As we set all entries of x to alpha, this simplifies to: b[i] = sum of row entries
+    host_dense_matrix<T> hb(M, 1);
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        hb[i] = static_cast<T>(0);
+    }
+
+    for(rocsparse_int i = 0; i < M; ++i)
+    {
+        for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
+        {
+            rocsparse_int col = hA.ind[j] - base;
+
+            // Only use entries in the active triangular part
+            bool use_entry = (uplo == rocsparse_fill_mode_lower) ? (col <= i) : (col >= i);
+
+            if(use_entry)
+            {
+                T aval = hA.val[j];
+                // For unit diagonal, use 1 instead of stored diagonal value
+                if(diag == rocsparse_diag_type_unit && col == i)
+                {
+                    aval = static_cast<T>(1);
+                }
+                hb[i] += aval;
+            }
+        }
+    }
+
+    // Verify that hb[i] and hx_expected[i] are integers
+    hb.check_integer();
+    hx_expected.check_integer();
+
+    // Use b as the right-hand side for csrsv testing
+    // We'll solve A*y = b, and y should equal x_expected
+    hx = hb;
+}
+
 template <typename T>
 void testing_csrsv(const Arguments& arg)
 {
@@ -213,7 +277,19 @@ void testing_csrsv(const Arguments& arg)
     }
 
     host_dense_matrix<T> hx(M, 1);
-    rocsparse_matrix_utils::init(hx);
+    host_dense_matrix<T> hx_expected(
+        M, 1); // Store expected integer solution for integer_based_manufactured_solution
+
+    // If integer_based_manufactured_solution is enabled, construct integer matrix and generate corresponding right-hand side
+    if(arg.integer_based_manufactured_solution)
+    {
+        setup_integer_based_manufactured_solution(
+            hA, hx, hx_expected, *h_alpha, uplo, diag, base, M);
+    }
+    else
+    {
+        rocsparse_matrix_utils::init(hx);
+    }
 
     device_csr_matrix<T>       dA(hA);
     device_dense_matrix<T>     dx(hx), dy(M, 1);
@@ -294,6 +370,16 @@ void testing_csrsv(const Arguments& arg)
         if(*h_analysis_pivot == -1 && *h_solve_pivot == -1)
         {
             hy.near_check(dy, tol);
+
+            // If integer_based_manufactured_solution is enabled, verify that the solution has integer values
+            if(arg.integer_based_manufactured_solution)
+            {
+                // Check that the solution matches the expected integer vector
+                hx_expected.near_check(dy, tol);
+
+                // Additionally, verify that each entry in dy is an integer
+                dy.check_integer();
+            }
         }
 
         //

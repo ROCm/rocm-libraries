@@ -35,7 +35,6 @@
 #define PERF_ENABLE 0
 
 #if PERF_ENABLE
-#define COMPARE_WITH_OPENCL 1
 #define NUM_WARMUP_RUNS_TEST 10
 #define NUM_PERF_RUNS_TEST 100
 #endif
@@ -49,24 +48,23 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            ConstData_t x,
                            const miopen::TensorDescriptor& yDesc,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           const miopen::TensorDescriptor& /*bnScaleBiasMeanVarDesc*/,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
                            ConstData_t estimatedVariance,
                            double epsilon,
-                           PerfHelper& perf_helper,
-                           bool use_hip = true)
+                           PerfHelper& perf_helper)
 {
     int n, c, h, w;
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    if(xDesc.GetLayout_t() != yDesc.GetLayout_t())
+    if(xDesc.GetLayoutEnum() != yDesc.GetLayoutEnum())
     {
         throw std::runtime_error("Input and output tensor layout must be the same");
     }
-    bool isLayoutNHWC       = (xDesc.GetLayout_t() == miopenTensorNHWC);
+    const bool isLayoutNHWC = (xDesc.GetLayoutEnum() == miopenTensorNHWC);
     unsigned int in_cstride = h * w;
     size_t max_localsize    = 256;
     size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;
@@ -92,11 +90,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     zgridsize  = 1;
 
     // HIP runtime does not support non-uniform blocks
-    if(use_hip)
-    {
-        xgridsize = AlignUp(xgridsize, xlocalsize);
-        ygridsize = AlignUp(ygridsize, ylocalsize);
-    }
+
+    xgridsize = AlignUp(xgridsize, xlocalsize);
+    ygridsize = AlignUp(ygridsize, ylocalsize);
 
     const std::vector<size_t> vgd{xgridsize, ygridsize, zgridsize};
     const std::vector<size_t> vld{xlocalsize, ylocalsize, zlocalsize};
@@ -105,7 +101,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     bool useFP16            = (xDesc.GetType() == miopenHalf);
     bool useBFP16           = (xDesc.GetType() == miopenBFloat16);
     const auto build_params = miopen::KernelBuildParameters{
-        {use_hip ? "MIOPEN_USE_FP16" : "MIOPEN_USE_FPMIX", static_cast<int>(useFP16)},
+        {"MIOPEN_USE_FP16", static_cast<int>(useFP16)},
         {"MIOPEN_USE_FP32", static_cast<int>(useFP32)},
         {"MIOPEN_USE_BFP16", static_cast<int>(useBFP16)},
         {"MIOPEN_USE_BFPMIX", static_cast<int>(useBFP16)},
@@ -114,6 +110,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIO_BN_GRP2", zlocalsize},
         {"MIO_BN_GFX103X", (miopen::StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
         {"MIO_BN_GFX110X", (miopen::StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
+        {"MIO_BN_GFX115X", (miopen::StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
         {"MIO_BN_GFX120X", (miopen::StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
         {"MIO_LAYOUT_NHWC", static_cast<int>(isLayoutNHWC)},
         {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
@@ -121,21 +118,16 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIO_BN_N", static_cast<unsigned int>(n)},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_mode)}};
 
-    std::string kernel_file =
-        use_hip ? (bn_mode == miopenBNSpatial ? "MIOpenBatchNormFwdInferSpatialHIP.cpp"
-                                              : "MIOpenBatchNormFwdInferPerActHIP.cpp")
-                : (bn_mode == miopenBNSpatial ? "MIOpenBatchNormFwdInferSpatial.cl"
-                                              : "MIOpenBatchNormFwdInferPerAct.cl");
+    std::string kernel_file = bn_mode == miopenBNSpatial ? "MIOpenBatchNormFwdInferSpatial.cpp"
+                                                         : "MIOpenBatchNormFwdInferPerAct.cpp";
     std::string kernel_name = (bn_mode == miopenBNSpatial)
                                   ? "MIOpenBatchNormFwdInferSpatialEst"
                                   : "MIOpenBatchNormFwdInferPerActivationEst";
 
-    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::HIP{})
-                                 : build_params.GenerateFor(miopen::kbp::OpenCL{});
+    std::string params = build_params.GenerateFor(miopen::kbp::HIP{});
 
     // Generate the network config
     std::ostringstream ss;
-    ss << (use_hip ? "hip" : "ocl");
     ss << "fp16" << static_cast<int>(xDesc.GetType() == miopenHalf);
     ss << "fp32" << static_cast<int>(xDesc.GetType() == miopenFloat);
     ss << "mode" << bn_mode;
@@ -156,7 +148,6 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         perf_helper.perfTest(handle,
                              kernel_name,
                              network_config,
-                             use_hip,
                              x,
                              y,
                              estimatedMean,
@@ -214,10 +205,10 @@ struct BatchNormFwdInferTester : public BatchNormInferTester<XDataType,
     }
 #endif
 
-    void RunTestGPU(bool hip_en = true) override
+    void RunTestGPU() override
     {
         auto&& handle    = get_handle();
-        auto& output_ref = hip_en ? this->output.data : this->ref_out.data;
+        auto& output_ref = this->output.data;
         // Clear the output data
         std::fill(
             output_ref.begin(), output_ref.end(), std::numeric_limits<YDataType>::quiet_NaN());
@@ -238,8 +229,7 @@ struct BatchNormFwdInferTester : public BatchNormInferTester<XDataType,
                               this->estMean_dev.get(),
                               this->estVariance_dev.get(),
                               this->epsilon,
-                              this->perf_helper,
-                              hip_en);
+                              this->perf_helper);
         // Read the output
         output_ref = handle.Read<YDataType>(this->out_dev, this->output.data.size());
     }
@@ -289,18 +279,31 @@ std::vector<miopenActivationMode_t> ActivationConfigs(miopenBatchNormMode_t mode
     return activations;
 }
 
+// Activation subsets for the tiered instantiations. The full list stays in
+// ActivationConfigs() (used by the Full instantiations).
+std::vector<miopenActivationMode_t> ActivationConfigsSmoke(miopenBatchNormMode_t /*mode*/)
+{
+    // Quick/Smoke runs a single activation; PASTHRU is the only mode supported
+    // by both the spatial and per-activation kernels.
+    return {miopenActivationPASTHRU};
+}
+
+std::vector<miopenActivationMode_t> ActivationConfigsStandard(miopenBatchNormMode_t mode)
+{
+    // Cover all supported activation modes at PR level (spatial: PASTHRU, RELU,
+    // CLIPPEDRELU, CLAMP; per-activation: PASTHRU only). CLIPPEDRELU and CLAMP
+    // exercise the activ_alpha/activ_beta parameter paths that RELU/PASTHRU do
+    // not. The Standard tier still trims the shape set. Same as ActivationConfigs().
+    return ActivationConfigs(mode);
+}
+
 } // namespace BatchNormFwdInfer
 using namespace BatchNormFwdInfer;
 
 TEST_P(GPU_bn_fwd_infer_spatial_FP32, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -309,13 +312,8 @@ TEST_P(GPU_bn_fwd_infer_spatial_FP32, PortTest)
 
 TEST_P(GPU_bn_fwd_infer_per_act_FP32, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -324,13 +322,8 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP32, PortTest)
 
 TEST_P(GPU_bn_fwd_infer_spatial_FP16, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -339,13 +332,8 @@ TEST_P(GPU_bn_fwd_infer_spatial_FP16, PortTest)
 
 TEST_P(GPU_bn_fwd_infer_per_act_FP16, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -354,13 +342,8 @@ TEST_P(GPU_bn_fwd_infer_per_act_FP16, PortTest)
 
 TEST_P(GPU_bn_fwd_infer_spatial_BFP16, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
@@ -369,58 +352,44 @@ TEST_P(GPU_bn_fwd_infer_spatial_BFP16, PortTest)
 
 TEST_P(GPU_bn_fwd_infer_per_act_BFP16, PortTest)
 {
-#if COMPARE_WITH_OPENCL
-    // Run the OpenCL implementation
-    RunTestGPU(false);
-#else
     // Run the CPU implementation
     RunTestCPU();
-#endif
     // Run the HIP implementation
     RunTestGPU();
     // Compare the outputs
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_spatial_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_spatial_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_spatial_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNSpatial)),
-                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_fwd_infer_per_act_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs(miopenBNPerActivation)),
-                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
+// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
+// representative subsets; Full (comprehensive/nightly) runs the complete
+// activation x shape x layout cross product so no coverage is lost.
+#define BN_FWD_INFER_TIERS(SUITE, T, MODE)                                                         \
+    INSTANTIATE_TEST_SUITE_P(Smoke,                                                                \
+                             SUITE,                                                                \
+                             testing::Combine(testing::ValuesIn(ActivationConfigsSmoke(MODE)),     \
+                                              testing::ValuesIn(BNInferTestConfigsSmoke<T>(MODE)), \
+                                              testing::Values(miopenTensorNCHW)),                  \
+                             TestNameGenerator());                                                 \
+    INSTANTIATE_TEST_SUITE_P(                                                                      \
+        Standard,                                                                                  \
+        SUITE,                                                                                     \
+        testing::Combine(testing::ValuesIn(ActivationConfigsStandard(MODE)),                       \
+                         testing::ValuesIn(BNInferTestConfigsStandard<T>(MODE)),                   \
+                         testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
+        TestNameGenerator());                                                                      \
+    INSTANTIATE_TEST_SUITE_P(                                                                      \
+        Full,                                                                                      \
+        SUITE,                                                                                     \
+        testing::Combine(testing::ValuesIn(ActivationConfigs(MODE)),                               \
+                         testing::ValuesIn(BNInferTestConfigsFull<T>(MODE)),                       \
+                         testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
+        TestNameGenerator());
+
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_spatial_FP32, float, miopenBNSpatial)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_per_act_FP32, float, miopenBNPerActivation)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_spatial_FP16, half_float::half, miopenBNSpatial)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_per_act_FP16, half_float::half, miopenBNPerActivation)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_spatial_BFP16, bfloat16, miopenBNSpatial)
+BN_FWD_INFER_TIERS(GPU_bn_fwd_infer_per_act_BFP16, bfloat16, miopenBNPerActivation)
+
+#undef BN_FWD_INFER_TIERS

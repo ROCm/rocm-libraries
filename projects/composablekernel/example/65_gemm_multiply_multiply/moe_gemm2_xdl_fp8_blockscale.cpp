@@ -94,7 +94,7 @@ void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int 
 {
     int KPack = 16 / sizeof(B0DataType);
     int NLane = NXdl;
-    int KLane = 64 / NLane;
+    int KLane = ck::get_warp_size() / NLane;
 
     int K0 = K / (KLane * KPack);
     // K -> K0 KLane KPack
@@ -261,16 +261,6 @@ int main(int argc, char* argv[])
     Tensor<ck::index_t> max_token_id(HostTensorDescriptor({1}));
 
     max_token_id.mData = {valid_size, 0, 1, 2, 3, 4, 5, 6, 7, 8};
-    // int eids[]         = {0, 1, 3, 3, 3};
-    //  int eids[]         = {0, 1, 2, 3, 4, 5, 6, 7}; //, 3, 3, 3}; // {2, 1, 1, 2, 2, 2, 1, 2}
-    // int eids[] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 3, 3, 3};
-    // int eids[]         = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //                     1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    //                     2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    //                     3, 3, 3, 3, 3, 3, 3, 3, 4, 4,
-    //                     5, 5, 5, 5, 6, 6, 6, 6, 7, 7,
-    //                     7, 7,
-    //                     3, 3, 3};
     for(int i = 0; i < sorted_tile_num; i++)
     {
         expert_ids.mData[i] = i / ck::math::integer_divide_ceil(valid_tile_num, experts);

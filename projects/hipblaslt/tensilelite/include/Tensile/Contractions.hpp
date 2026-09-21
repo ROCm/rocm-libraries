@@ -31,3 +31,6 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorDescriptor.hpp>
+#include <tensilelitehost/export.h>
+
+

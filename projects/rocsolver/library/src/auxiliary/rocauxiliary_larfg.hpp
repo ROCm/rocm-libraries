@@ -276,9 +276,7 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     }
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // compute squared norm of x
     rocblasCall_dot<COMPLEX, T>(handle, n - 1, x, shiftx, incx, stridex, x, shiftx, incx, stridex,
@@ -292,7 +290,6 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     // compute vector v=x*norms
     rocblasCall_scal<T>(handle, n - 1, norms, 1, x, shiftx, incx, stridex, batch_count);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

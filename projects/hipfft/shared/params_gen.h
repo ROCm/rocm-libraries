@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,11 @@ const static std::vector<fft_transform_type> trans_type_range_complex
 const static std::vector<fft_transform_type> trans_type_range_real
     = {fft_transform_type_real_forward};
 
+const static std::vector<fft_callback_type> callbacks_none = {fft_callback_type_none};
+// function pointer callbacks are deprecated
+const static std::vector<fft_callback_type> callbacks_full
+    = {/*fft_callback_type_funcptr, */ fft_callback_type_jit};
+
 // Take a string (in particular the token from a test) and return a uniform random variable in [0,1]
 // using the seed and hash of the string.
 inline double hash_prob(const int seed, const std::string& token)
@@ -62,6 +67,15 @@ inline double hash_prob(const int seed, const std::string& token)
     const double roll = dis(gen);
     return roll;
 }
+
+// Macro to probabilistically skip a unit test based on hash_prob.
+// Uses random_seed and unittest_prob from test_params.h.
+#define PROB_SKIP_UNITTEST()                                                                   \
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name()) \
+       > unittest_prob)                                                                        \
+    {                                                                                          \
+        GTEST_SKIP();                                                                          \
+    }
 
 template <typename T, std::enable_if_t<std::is_arithmetic_v<T>, bool> = true>
 std::vector<T> merge_and_sort_values(const std::vector<std::vector<T>>& set_of_vecs,
@@ -273,8 +287,9 @@ inline auto param_generator_base(const double                             base_p
                                  const std::vector<std::vector<size_t>>&  ioffset_range,
                                  const std::vector<std::vector<size_t>>&  ooffset_range,
                                  const std::vector<fft_result_placement>& place_range,
-                                 const bool                               planar        = true,
-                                 const bool                               run_callbacks = false,
+                                 const bool                               planar = true,
+                                 const std::vector<fft_callback_type>&    callbacks_range
+                                 = callbacks_none,
                                  const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     std::vector<fft_params> params;
@@ -312,65 +327,73 @@ inline auto param_generator_base(const double                             base_p
                                     {
                                         for(const auto& ooffset : ooffset_range)
                                         {
-                                            fft_params param;
-
-                                            param.length         = lengths;
-                                            param.istride        = istride_dist.stride;
-                                            param.ostride        = ostride_dist.stride;
-                                            param.nbatch         = batch;
-                                            param.precision      = precision;
-                                            param.transform_type = std::get<0>(types);
-                                            param.placement      = std::get<1>(types);
-                                            param.idist          = istride_dist.dist;
-                                            param.odist          = ostride_dist.dist;
-                                            param.itype          = std::get<2>(types);
-                                            param.otype          = std::get<3>(types);
-                                            param.ioffset        = ioffset;
-                                            param.ooffset        = ooffset;
-                                            param.auto_allocate  = auto_alloc;
-
-                                            if(run_callbacks)
+                                            for(const auto run_callbacks : callbacks_range)
                                             {
-                                                // add a test if both input and output support callbacks
-                                                if(param.itype != fft_array_type_complex_planar
-                                                   && param.itype != fft_array_type_hermitian_planar
-                                                   && param.otype != fft_array_type_complex_planar
-                                                   && param.otype
-                                                          != fft_array_type_hermitian_planar)
+                                                fft_params param;
+
+                                                param.length         = lengths;
+                                                param.istride        = istride_dist.stride;
+                                                param.ostride        = ostride_dist.stride;
+                                                param.nbatch         = batch;
+                                                param.precision      = precision;
+                                                param.transform_type = std::get<0>(types);
+                                                param.placement      = std::get<1>(types);
+                                                param.idist          = istride_dist.dist;
+                                                param.odist          = ostride_dist.dist;
+                                                param.itype          = std::get<2>(types);
+                                                param.otype          = std::get<3>(types);
+                                                param.ioffset        = ioffset;
+                                                param.ooffset        = ooffset;
+                                                param.auto_allocate  = auto_alloc;
+
+                                                if(run_callbacks != fft_callback_type_none)
                                                 {
-                                                    param.run_callbacks = true;
+                                                    // add a test if both input and output support callbacks
+                                                    if(param.itype != fft_array_type_complex_planar
+                                                       && param.itype
+                                                              != fft_array_type_hermitian_planar
+                                                       && param.otype
+                                                              != fft_array_type_complex_planar
+                                                       && param.otype
+                                                              != fft_array_type_hermitian_planar)
+                                                    {
+                                                        param.run_callbacks = run_callbacks;
+                                                    }
+                                                    else
+                                                    {
+                                                        continue;
+                                                    }
                                                 }
-                                                else
+                                                param.validate();
+
+                                                const double roll
+                                                    = hash_prob(random_seed, param.token());
+                                                const double run_prob
+                                                    = base_prob
+                                                      * (param.is_planar()
+                                                             ? complex_planar_prob_factor
+                                                             : 1.0)
+                                                      * (param.is_interleaved()
+                                                             ? complex_interleaved_prob_factor
+                                                             : 1.0)
+                                                      * (param.is_real() ? real_prob_factor : 1.0)
+                                                      * (run_callbacks != fft_callback_type_none
+                                                             ? callback_prob_factor
+                                                             : 1.0);
+
+                                                if(roll > run_prob)
                                                 {
+                                                    if(verbose > 4)
+                                                    {
+                                                        std::cout << "Test skipped: (roll=" << roll
+                                                                  << " > " << run_prob << ")\n";
+                                                    }
                                                     continue;
                                                 }
-                                            }
-                                            param.validate();
-
-                                            const double roll
-                                                = hash_prob(random_seed, param.token());
-                                            const double run_prob
-                                                = base_prob
-                                                  * (param.is_planar() ? complex_planar_prob_factor
-                                                                       : 1.0)
-                                                  * (param.is_interleaved()
-                                                         ? complex_interleaved_prob_factor
-                                                         : 1.0)
-                                                  * (param.is_real() ? real_prob_factor : 1.0)
-                                                  * (run_callbacks ? callback_prob_factor : 1.0);
-
-                                            if(roll > run_prob)
-                                            {
-                                                if(verbose > 4)
+                                                if(param.valid(0))
                                                 {
-                                                    std::cout << "Test skipped: (roll=" << roll
-                                                              << " > " << run_prob << ")\n";
+                                                    params.push_back(param);
                                                 }
-                                                continue;
-                                            }
-                                            if(param.valid(0))
-                                            {
-                                                params.push_back(param);
                                             }
                                         }
                                     }
@@ -397,7 +420,7 @@ inline auto param_generator(const double                             base_prob,
                             const std::vector<std::vector<size_t>>&  ooffset_range,
                             const std::vector<fft_result_placement>& place_range,
                             const bool                               planar,
-                            const bool                               run_callbacks = false,
+                            const std::vector<fft_callback_type>& callbacks_range = callbacks_none,
                             const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     return param_generator_base(base_prob,
@@ -412,24 +435,24 @@ inline auto param_generator(const double                             base_prob,
                                 ooffset_range,
                                 place_range,
                                 planar,
-                                run_callbacks,
+                                callbacks_range,
                                 auto_alloc);
 }
 
 // Create an array of parameters to pass to gtest.  Only tests complex-type transforms
-inline auto param_generator_complex(const double                             base_prob,
-                                    const std::vector<std::vector<size_t>>&  v_lengths,
-                                    const std::vector<fft_precision>&        precision_range,
-                                    const std::vector<size_t>&               batch_range,
-                                    const stride_generator&                  istride,
-                                    const stride_generator&                  ostride,
-                                    const std::vector<std::vector<size_t>>&  ioffset_range,
-                                    const std::vector<std::vector<size_t>>&  ooffset_range,
-                                    const std::vector<fft_result_placement>& place_range,
-                                    const bool                               planar,
-                                    const bool                               run_callbacks = false,
-                                    const fft_auto_allocation                auto_alloc
-                                    = fft_auto_allocation_default)
+inline auto
+    param_generator_complex(const double                             base_prob,
+                            const std::vector<std::vector<size_t>>&  v_lengths,
+                            const std::vector<fft_precision>&        precision_range,
+                            const std::vector<size_t>&               batch_range,
+                            const stride_generator&                  istride,
+                            const stride_generator&                  ostride,
+                            const std::vector<std::vector<size_t>>&  ioffset_range,
+                            const std::vector<std::vector<size_t>>&  ooffset_range,
+                            const std::vector<fft_result_placement>& place_range,
+                            const bool                               planar,
+                            const std::vector<fft_callback_type>& callbacks_range = callbacks_none,
+                            const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     return param_generator_base(base_prob,
                                 trans_type_range_complex,
@@ -443,7 +466,7 @@ inline auto param_generator_complex(const double                             bas
                                 ooffset_range,
                                 place_range,
                                 planar,
-                                run_callbacks,
+                                callbacks_range,
                                 auto_alloc);
 }
 
@@ -458,7 +481,8 @@ inline auto param_generator_real(const double                             base_p
                                  const std::vector<std::vector<size_t>>&  ooffset_range,
                                  const std::vector<fft_result_placement>& place_range,
                                  const bool                               planar,
-                                 const bool                               run_callbacks = false,
+                                 const std::vector<fft_callback_type>&    callbacks_range
+                                 = callbacks_none,
                                  const fft_auto_allocation auto_alloc = fft_auto_allocation_default)
 {
     return param_generator_base(base_prob,
@@ -473,7 +497,7 @@ inline auto param_generator_real(const double                             base_p
                                 ooffset_range,
                                 place_range,
                                 planar,
-                                run_callbacks,
+                                callbacks_range,
                                 auto_alloc);
 }
 

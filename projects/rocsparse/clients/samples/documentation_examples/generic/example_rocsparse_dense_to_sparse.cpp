@@ -162,6 +162,7 @@ int main()
     HIP_CHECK(hipFree(dcsr_col_ind));
     HIP_CHECK(hipFree(dcsr_val));
     HIP_CHECK(hipFree(ddense));
+    HIP_CHECK(hipFree(temp_buffer));
 
     return 0;
 }

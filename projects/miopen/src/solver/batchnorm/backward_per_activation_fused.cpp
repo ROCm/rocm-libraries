@@ -135,7 +135,9 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
 
         kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
-        unsigned int ldsgcn   = xlocalsize / 64;
+        auto const waveSize = handle.GetWavefrontWidth();
+
+        unsigned int ldsgcn   = xlocalsize / waveSize;
         unsigned int ldsnogcn = xlocalsize;
 
         int variant = 0;
@@ -156,7 +158,7 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
 
         const auto& activ_op =
             dynamic_cast<ActivBwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
-        const auto build_params = KernelBuildParameters{
+        auto build_params = KernelBuildParameters{
             {"MIO_BN_N", static_cast<int>(n)},
             {"MIO_BN_NCHW", static_cast<int>(n * c * h * w)},
             {"MIO_BN_NHW", static_cast<int>(n * h * w)},
@@ -170,23 +172,29 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             {"MIO_BN_VARIANT", static_cast<int>(variant)},
             {"MIO_BN_GFX103X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx103"))},
             {"MIO_BN_GFX110X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx110"))},
-            {"MIO_BN_GFX120X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx120"))},
             {"MIO_BN_GFX115X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx115"))},
+            {"MIO_BN_GFX120X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx120"))},
+            {"MIO_BN_GFX125X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx125"))},
             {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"DATA_TYPE", data_type}};
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
+        if(mode == miopenBNSpatial)
+        {
+            build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
+        }
+
         result.construction_params.push_back(kernel);
     }
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel   = handle_.Run(kernels.front());
-            const auto& invoke_ctx  = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
-            const auto& bot_ocl_buf = invoke_ctx.in;
-            const auto& top_ocl_buf = invoke_ctx.out;
+            decltype(auto) kernel  = handle_.Run(kernels.front());
+            const auto& invoke_ctx = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
+            const auto& bot_buf    = invoke_ctx.in;
+            const auto& top_buf    = invoke_ctx.out;
             const auto& bn_invoke =
                 dynamic_cast<miopen::fusion::BatchNormBwdTrainingOpInvokeParam&>(
                     *invoke_ctx.op_args.params[0]);
@@ -198,8 +206,8 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             std::vector<OpKernelArg> kern_args;
             kern_args.push_back(bn_invoke.x);
             kern_args.push_back(activ_invoker.y);
-            kern_args.push_back(bot_ocl_buf);
-            kern_args.push_back(top_ocl_buf);
+            kern_args.push_back(bot_buf);
+            kern_args.push_back(top_buf);
             if(input_type == miopenFloat)
             {
                 kern_args.push_back(static_cast<float>(activ_beta * activ_gamma));

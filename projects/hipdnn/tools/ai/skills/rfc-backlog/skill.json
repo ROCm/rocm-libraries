@@ -1,0 +1,18 @@
+{
+  "name": "rfc-backlog",
+  "version": "0.1.0",
+  "description": "Turn a technical RFC into an actionable backlog of JIRA stories and tasks, grounded in the affected codebase. Derives unified, independently-shippable work items, presents them for review, then (unless a dry run) collects component/epic/label defaults and creates the tickets in JIRA.",
+  "entrypoint": "prompt.md",
+  "author": "Claude Code",
+  "tags": ["rfc", "backlog", "jira", "planning", "stories"],
+  "usage": {
+    "command": "/rfc-backlog",
+    "description": "Decomposes an RFC into JIRA stories/tasks, reviews them with the user, and creates the tickets (or just displays them with --dry-run).",
+    "examples": [
+      "/rfc-backlog",
+      "/rfc-backlog docs/rfcs/my-rfc.md",
+      "/rfc-backlog --dry-run",
+      "/rfc-backlog docs/rfcs/my-rfc.md --dry-run"
+    ]
+  }
+}

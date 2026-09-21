@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,11 @@ namespace rocsparse
                                                     const Z* const*      z_arrays,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
 
         const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
@@ -120,6 +125,11 @@ namespace rocsparse
                                                     Y*                   y,
                                                     rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int lid = hipThreadIdx_x & (WF_SIZE - 1);
 
         const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
@@ -241,6 +251,11 @@ namespace rocsparse
                                                      const Z* const*      z_arrays,
                                                      rocsparse_index_base idx_base)
     {
+        static_assert(WG_SIZE > 0 && (WG_SIZE & (WG_SIZE - 1)) == 0,
+                      "WG_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WG_SIZE == 0, "BLOCKSIZE must be a multiple of WG_SIZE.");
+
         __shared__ T partialSums[BLOCKSIZE];
 
         const int lid = hipThreadIdx_x;
@@ -288,7 +303,7 @@ namespace rocsparse
             // In a nutshell, the idea is to use all of the threads to stream the matrix
             // values into the local memory in a fast, coalesced manner. After that, the
             // per-row reductions are done out of the local memory, which is designed
-            // to handle non-coalsced accesses.
+            // to handle non-coalesced accesses.
 
             // The best method for reducing the local memory values depends on the number
             // of rows. The SC'14 paper discusses a CSR-Scalar style reduction where
@@ -310,6 +325,15 @@ namespace rocsparse
             // Stream all of this row block's matrix values into local memory.
             // Perform the matvec in parallel with this work.
             const I col = row_offset + lid - idx_base;
+#ifdef ROCSPARSE_WITH_ASAN
+            // Under ASAN, always use bounds-checked path to avoid intentional OOB reads
+            // in the fast path below (which are safe on dGPUs but trigger ASAN errors).
+            for(I i = 0; col + i < csr_row_ptr[stop_row] - idx_base; i += WG_SIZE)
+            {
+                partialSums[lid + i] = alpha * rocsparse::conj_val(csr_val[col + i], conj)
+                                       * x[csr_col_ind[col + i] - idx_base];
+            }
+#else
             if(col + BLOCKSIZE - WG_SIZE < nnz)
             {
                 for(J i = 0; i < BLOCKSIZE; i += WG_SIZE)
@@ -333,6 +357,7 @@ namespace rocsparse
                                            * x[csr_col_ind[col + i] - idx_base];
                 }
             }
+#endif
             __syncthreads();
 
             if(numThreadsForRed > 1)
@@ -348,17 +373,22 @@ namespace rocsparse
                 // numThreadsForRed guaranteed to be a power of two, so the clz code below
                 // avoids an integer divide.
                 // size_t st = lid/numThreadsForRed;
-                const I local_row       = row + (lid >> (31 - __clz(numThreadsForRed)));
-                const J local_first_val = csr_row_ptr[local_row] - row_offset;
-                const J local_last_val  = csr_row_ptr[local_row + 1] - row_offset;
-                const J threadInBlock   = lid & (numThreadsForRed - 1);
+                const I local_row     = row + (lid >> (31 - __clz(numThreadsForRed)));
+                const J threadInBlock = lid & (numThreadsForRed - 1);
 
                 // Not all row blocks are full -- they may have an odd number of rows. As such,
                 // we need to ensure that adjacent-groups only work on real data for this rowBlock.
+                // The csr_row_ptr reads are kept inside the guard: for the last row block
+                // local_row can reach stop_row (== m), so csr_row_ptr[local_row + 1] would read
+                // one past the m+1-length array. Benign on discrete GPUs (padded, zeroed pages)
+                // but faults on unified-memory APUs (e.g. gfx1151).
                 if(local_row < stop_row)
                 {
+                    const J local_first_val = csr_row_ptr[local_row] - row_offset;
+                    const J local_last_val  = csr_row_ptr[local_row + 1] - row_offset;
+
                     // This is dangerous -- will infinite loop if your last value is within
-                    // numThreadsForRed of MAX_UINT. Noticable performance gain to avoid a
+                    // numThreadsForRed of MAX_UINT. Noticeable performance gain to avoid a
                     // long induction variable here, though.
                     for(J local_cur_val = local_first_val + threadInBlock;
                         local_cur_val < local_last_val;
@@ -522,7 +552,7 @@ namespace rocsparse
             // the values still left in y will be added in using the atomic_add.
             //
             // Our solution is to have the first workgroup in one of these long-rows cases
-            // properly initaizlie the output vector. All the other workgroups working on this
+            // properly initialize the output vector. All the other workgroups working on this
             // row will spin-loop until that workgroup finishes its work.
 
             // First, figure out which workgroup you are in the row.
@@ -938,6 +968,11 @@ namespace rocsparse
                                                   const Z* const*      z_arrays,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
 
@@ -1039,7 +1074,7 @@ namespace rocsparse
         // (iterating over the row as needed for rows with length > WG size).
         // This means that we can more easily process everything with Vector that we would otherwise have done
         // with Longrows - which, in turn, means we can guarantee result reproducibility simply by avoiding Longrows
-        // use (-> no non-determinstic atomics), just set the bin threshold for Longrows to "infinity" (or "32").
+        // use (-> no non-deterministic atomics), just set the bin threshold for Longrows to "infinity" (or "32").
         T       temp_sum = static_cast<T>(0);
         const I vecStart = csr_row_ptr[row] - idx_base;
         const I vecEnd   = csr_row_ptr[row + 1] - idx_base;

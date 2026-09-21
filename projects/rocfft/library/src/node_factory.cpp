@@ -419,6 +419,8 @@ std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s, Tre
         return std::unique_ptr<Real2DEvenNode>(new Real2DEvenNode(parent));
     case CS_REAL_3D_EVEN:
         return std::unique_ptr<Real3DEvenNode>(new Real3DEvenNode(parent));
+    case CS_REAL_3D_PP:
+        return std::unique_ptr<Real3DPPNode>(new Real3DPPNode(parent));
     case CS_BLUESTEIN:
         return std::unique_ptr<BluesteinNode>(new BluesteinNode(parent));
     case CS_L1D_TRTRT:
@@ -600,7 +602,7 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
     // both input and output.  Subsequent strides + dist on the real
     // side must all be expressible as complex stride + dist; that
     // is, they must all be even.
-    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
+    if(isEven(realLength[0]) && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
        && std::all_of(realStride.begin() + 1, realStride.end(), isEven) && isEven(realDist))
     {
         switch(nodeData.dimension)
@@ -610,6 +612,10 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
         case 2:
             return CS_REAL_2D_EVEN;
         case 3:
+            // Try 3D partial-pass first
+            if(use_CS_REAL_3D_PP(pool, nodeData))
+                return CS_REAL_3D_PP;
+
             return CS_REAL_3D_EVEN;
         default:
             throw std::runtime_error("Invalid dimension");
@@ -899,7 +905,8 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
                {rocfft_precision_double, {84, 108, 112, 168}}};
         if(childScheme == CS_2D_RC
            && length_excepted(exceptions, nodeData.precision, nodeData.length[1])
-           && nodeData.rootIsC2C)
+           && (nodeData.rootTransformType == rocfft_transform_type_complex_forward
+               || nodeData.rootTransformType == rocfft_transform_type_complex_inverse))
         {
             return CS_3D_TRTRTR;
         }
@@ -915,7 +922,7 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
 }
 
 bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
-                                   NodeMetaData&        nodeData,
+                                   const NodeMetaData&  nodeData,
                                    rocfft_array_type    inArrayType,
                                    rocfft_array_type    outArrayType)
 {
@@ -1057,6 +1064,31 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
     return false;
 }
 
+// Partial pass is currently restricted to unit stride, and non-planar array types.
+auto check_pp_restrictions = [](const NodeMetaData& nodeData) -> bool {
+    size_t checkiDist = 0, checkoDist = 0;
+
+    auto inputLength = nodeData.length;
+
+    // real-to-complex iDist check is in real units,
+    // which is outputLength[0] * 2 * product of other lengths
+    if(nodeData.placement == rocfft_placement_inplace
+       && nodeData.inArrayType == rocfft_array_type_real)
+        inputLength[0] = nodeData.outputLength[0] * 2;
+    checkiDist = product(inputLength.begin(), inputLength.end());
+    checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
+
+    bool distCondition   = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
+    bool strideCondition = (nodeData.inStride.size() && nodeData.inStride[0] == 1)
+                           && (nodeData.outStride.size() && nodeData.outStride[0] == 1);
+    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar)
+                              && (nodeData.inArrayType != rocfft_array_type_hermitian_planar)
+                              && (nodeData.outArrayType != rocfft_array_type_complex_planar)
+                              && (nodeData.outArrayType != rocfft_array_type_hermitian_planar);
+
+    return (distCondition && strideCondition && arrayTypeCondition);
+};
+
 bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
 {
     if(!pool.has_function(
@@ -1065,21 +1097,35 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    nodeData.length[1],
                    nodeData.length[2],
                    nodeData.precision,
-                   CS_3D_PP)))
+                   nodeData.rootTransformType,
+                   CS_3D_PP),
+           nodeData.batch))
         return false;
 
-    // Partial pass is currently restricted to large enough batch sizes,
-    // unite stride, interleaved FFTs.
-    bool batchCondition = (nodeData.batch >= 5);
+    return check_pp_restrictions(nodeData);
+}
 
-    size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
-    bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
+bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
+{
+    const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
 
-    bool strideCondition = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
-                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
+    const bool is_default_contiguous_layout
+        = nodeData.is_using_default_contiguous_layout_for(io_data_label::INPUT)
+          && nodeData.is_using_default_contiguous_layout_for(io_data_label::OUTPUT);
 
-    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar
-                               && nodeData.outArrayType != rocfft_array_type_complex_planar);
+    // First check if we can use 2D_SINGLE + 1D kernel, prefer that over partial-pass
+    if(Real3DEvenNode::use_real_2D_single_SBCC(nodeData, pool, is_default_contiguous_layout))
+        return false;
 
-    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
+    // Now check if we have the kernels for partial-pass
+    if(!pool.has_function(PPFMKey(realLength[0],
+                                  realLength[1],
+                                  realLength[2],
+                                  nodeData.precision,
+                                  nodeData.rootTransformType,
+                                  CS_REAL_3D_PP),
+                          nodeData.batch))
+        return false;
+
+    return check_pp_restrictions(nodeData);
 }

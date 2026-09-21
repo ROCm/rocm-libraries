@@ -91,8 +91,8 @@ void testing_roti(Arguments argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
-    T                    c        = argus.get_alpha<T>();
-    T                    s        = argus.get_beta<T>();
+    T                    c        = make_DataType<T>(argus.c);
+    T                    s        = make_DataType<T>(argus.s);
     hipsparseIndexBase_t idx_base = argus.baseA;
 
     hipsparseLocalHandle_t handle(argus);

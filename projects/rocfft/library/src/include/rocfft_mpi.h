@@ -29,6 +29,7 @@
 
 #include "../../../shared/array_predicate.h"
 #include "rocfft/rocfft.h"
+#include <optional>
 
 class MPI_Comm_wrapper_t
 {
@@ -38,18 +39,30 @@ public:
     static MPI_Comm_wrapper_t from_raw(MPI_Comm raw_comm)
     {
         MPI_Comm_wrapper_t wrap;
-        wrap.mpi_comm = raw_comm;
+        if(raw_comm != MPI_COMM_NULL)
+        {
+            wrap.mpi_comm = std::make_optional<MPI_Comm>(raw_comm);
+        }
         return wrap;
     }
 
     // conversion to unwrapped communicator for passing to MPI APIs
     operator MPI_Comm() const
     {
-        return mpi_comm;
+        return !mpi_comm ? MPI_COMM_NULL : *mpi_comm;
     }
 
     MPI_Comm_wrapper_t(const MPI_Comm_wrapper_t&) = delete;
-    MPI_Comm_wrapper_t& operator=(const MPI_Comm_wrapper_t&) = delete;
+
+    MPI_Comm_wrapper_t& operator=(const MPI_Comm_wrapper_t& other)
+    {
+        if(this != &other)
+        {
+            this->free();
+            this->duplicate(other);
+        }
+        return *this;
+    }
 
     // move communicator
     MPI_Comm_wrapper_t(MPI_Comm_wrapper_t&& other)
@@ -69,32 +82,34 @@ public:
 
     void free()
     {
-        if(mpi_comm != MPI_COMM_NULL)
-            MPI_Comm_free(&mpi_comm);
-        mpi_comm = MPI_COMM_NULL;
+        if(mpi_comm && *mpi_comm != MPI_COMM_NULL)
+            MPI_Comm_free(&(*mpi_comm));
+        mpi_comm.reset();
     }
 
     void duplicate(MPI_Comm in_comm)
     {
         free();
-        if(in_comm != MPI_COMM_NULL && MPI_Comm_dup(in_comm, &mpi_comm) != MPI_SUCCESS)
+        if(in_comm != MPI_COMM_NULL)
         {
-            throw std::runtime_error("failed to duplicate MPI communicator");
+            mpi_comm = std::make_optional<MPI_Comm>();
+            if(MPI_Comm_dup(in_comm, &(*mpi_comm)) != MPI_SUCCESS)
+                throw std::runtime_error("failed to duplicate MPI communicator");
         }
     }
 
     // check if communicator has been initialized
     operator bool() const
     {
-        return mpi_comm != MPI_COMM_NULL;
+        return mpi_comm && *mpi_comm != MPI_COMM_NULL;
     }
     bool operator!() const
     {
-        return mpi_comm == MPI_COMM_NULL;
+        return !mpi_comm || *mpi_comm == MPI_COMM_NULL;
     }
 
 private:
-    MPI_Comm mpi_comm = MPI_COMM_NULL;
+    std::optional<MPI_Comm> mpi_comm;
 };
 
 // RAII wrapper around MPI_Datatypes

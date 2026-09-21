@@ -170,7 +170,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const NetworkConfig& network_config,
                                        const AnyInvokeParams& invoke_ctx,
                                        FindCoreResult& core_result,
-                                       bool force_attach_binary);
+                                       bool force_attach_binary,
+                                       bool& non_naive_succeeded);
 
 FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         const ExecutionContext& ctx,
@@ -181,8 +182,9 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         bool force_attach_binary                  = false);
 
 namespace conv {
-bool MIOPEN_INTERNALS_EXPORT IsAlgorithmDisabled(miopenConvAlgorithm_t algo);
-bool MIOPEN_INTERNALS_EXPORT IsEnoughWorkspace(std::string_view where,
+MIOPEN_INTERNALS_EXPORT bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo,
+                                                 const ProblemDescription& problem);
+MIOPEN_INTERNALS_EXPORT bool IsEnoughWorkspace(std::string_view where,
                                                const miopen::solver::Id& solver_id,
                                                std::size_t required_size,
                                                const miopen::AnyInvokeParams* invokeParams,

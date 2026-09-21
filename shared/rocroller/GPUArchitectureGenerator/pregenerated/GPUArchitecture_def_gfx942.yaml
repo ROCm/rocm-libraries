@@ -28,6 +28,7 @@ Architectures:
       MaxLdsSize: 65536
       MaxLgkmcnt: 15
       MaxVmcnt: 63
+      MaxPreloadedKernargs: 16
       PackedWorkitemIDs: 0
       SupportedISA: 0
       SupportedSource: 0
@@ -46,6 +47,7 @@ Architectures:
       v_pk_fma_f16: 0
     ISAVersion:
       ArchString: gfx942
+      AsicRevisionId: -1
       Sramecc: false
       Xnack: false
     InstructionInfos:

@@ -93,6 +93,75 @@ void ref_axpy<rocblas_half>(
     // cblas_saxpy(n, alpha, x_float, incx, y_float, incy);
 }
 
+#if defined(WIN32) && !defined(BLIS_ENABLE_CBLAS)
+
+template <typename T>
+void ref_axpy(int64_t n, T alpha, T* x, int64_t incx, T* y, int64_t incy)
+{
+    // Handle negative increments
+    x += incx < 0 ? incx * (1 - n) : 0;
+    y += incy < 0 ? incy * (1 - n) : 0;
+
+    for(int64_t i = 0; i < n; i++)
+    {
+        y[i * incy] += alpha * x[i * incx];
+    }
+}
+
+template void
+    ref_axpy<float>(int64_t n, float alpha, float* x, int64_t incx, float* y, int64_t incy);
+
+template void
+    ref_axpy<double>(int64_t n, double alpha, double* x, int64_t incx, double* y, int64_t incy);
+
+template void ref_axpy<rocblas_float_complex>(int64_t                n,
+                                              rocblas_float_complex  alpha,
+                                              rocblas_float_complex* x,
+                                              int64_t                incx,
+                                              rocblas_float_complex* y,
+                                              int64_t                incy);
+
+template void ref_axpy<rocblas_double_complex>(int64_t                 n,
+                                               rocblas_double_complex  alpha,
+                                               rocblas_double_complex* x,
+                                               int64_t                 incx,
+                                               rocblas_double_complex* y,
+                                               int64_t                 incy);
+
+template <>
+void ref_axpy<rocblas_bfloat16>(int64_t           n,
+                                rocblas_bfloat16  alpha,
+                                rocblas_bfloat16* x,
+                                int64_t           incx,
+                                rocblas_bfloat16* y,
+                                int64_t           incy)
+{
+    // Handle negative increments
+    int64_t abs_incx = incx < 0 ? -incx : incx;
+    int64_t abs_incy = incy < 0 ? -incy : incy;
+
+    // Convert to float
+    host_vector<float> x_float(n * abs_incx);
+    host_vector<float> y_float(n * abs_incy);
+
+    for(int64_t i = 0; i < n; i++)
+    {
+        x_float[i * abs_incx] = float(x[i * abs_incx]);
+        y_float[i * abs_incy] = float(y[i * abs_incy]);
+    }
+
+    // Compute in float precision
+    ref_axpy<float>(n, float(alpha), x_float, incx, y_float, incy);
+
+    // Convert back to bfloat16
+    for(int64_t i = 0; i < n; i++)
+    {
+        y[i * abs_incy] = rocblas_bfloat16(y_float[i * abs_incy]);
+    }
+}
+
+#endif
+
 template <>
 void ref_asum<float>(int64_t n, const float* x, int64_t incx, float* result)
 {

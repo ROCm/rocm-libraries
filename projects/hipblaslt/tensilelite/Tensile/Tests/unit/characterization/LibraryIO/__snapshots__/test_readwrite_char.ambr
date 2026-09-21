@@ -1,0 +1,197 @@
+# serializer version: 1
+# name: test_json_roundtrip
+  dict({
+    'Count': 3,
+    'Flag': True,
+    'Name': 'example',
+    'Nested': dict({
+      'x': 1,
+      'y': 0,
+    }),
+    'Ratio': 1.5,
+    'Tags': list([
+      'a',
+      'b',
+    ]),
+  })
+# ---
+# name: test_msgpack_roundtrip
+  list([
+    dict({
+      'Name': 'k0',
+      'SolutionIndex': 0,
+    }),
+    dict({
+      'Name': 'k1',
+      'SolutionIndex': 1,
+    }),
+  ])
+# ---
+# name: test_read_dispatch_customized_loader
+  dict({
+    'a': 1,
+    'b': 0,
+    'c': True,
+  })
+# ---
+# name: test_read_dispatch_json
+  dict({
+    'Count': 3,
+    'Flag': True,
+    'Name': 'example',
+    'Nested': dict({
+      'x': 1,
+      'y': 0,
+    }),
+    'Ratio': 1.5,
+    'Tags': list([
+      'a',
+      'b',
+    ]),
+  })
+# ---
+# name: test_read_dispatch_yaml
+  dict({
+    'Count': 3,
+    'Flag': True,
+    'Name': 'example',
+    'Nested': dict({
+      'x': 1,
+      'y': 0,
+    }),
+    'Ratio': 1.5,
+    'Tags': list([
+      'a',
+      'b',
+    ]),
+  })
+# ---
+# name: test_strict_type_loader_types
+  dict({
+    'a': 'int',
+    'b': 'int',
+    'c': 'bool',
+    'd': 'bool',
+    'e': 'str',
+    'f': 'str',
+  })
+# ---
+# name: test_strict_type_loader_values
+  dict({
+    'a': 1,
+    'b': 0,
+    'c': True,
+    'd': False,
+    'e': True,
+    'f': False,
+    'g': 'yes',
+    'h': 'no',
+    'i': 'hello',
+  })
+# ---
+# name: test_write_dispatch_json
+  '''
+  {
+    "Name": "example",
+    "Count": 3,
+    "Flag": true,
+    "Ratio": 1.5,
+    "Tags": [
+      "a",
+      "b"
+    ],
+    "Nested": {
+      "x": 1,
+      "y": 0
+    }
+  }
+  '''
+# ---
+# name: test_write_dispatch_yaml
+  '''
+  ---
+  Count: 3
+  Flag: true
+  Name: example
+  Nested: {x: 1, y: 0}
+  Ratio: 1.5
+  Tags: [a, b]
+  ...
+  
+  '''
+# ---
+# name: test_write_json_text
+  '''
+  {
+    "Name": "example",
+    "Count": 3,
+    "Flag": true,
+    "Ratio": 1.5,
+    "Tags": [
+      "a",
+      "b"
+    ],
+    "Nested": {
+      "x": 1,
+      "y": 0
+    }
+  }
+  '''
+# ---
+# name: test_write_yaml_flow_style_override
+  '''
+  ---
+  Count: 3
+  Flag: true
+  Name: example
+  Nested:
+    x: 1
+    y: 0
+  Ratio: 1.5
+  Tags:
+  - a
+  - b
+  ...
+  
+  '''
+# ---
+# name: test_write_yaml_kwargs_override
+  '''
+  Count: 3
+  Flag: true
+  Name: example
+  Nested: {x: 1, y: 0}
+  Ratio: 1.5
+  Tags: [a, b]
+  
+  '''
+# ---
+# name: test_write_yaml_text
+  '''
+  ---
+  Count: 3
+  Flag: true
+  Name: example
+  Nested: {x: 1, y: 0}
+  Ratio: 1.5
+  Tags: [a, b]
+  ...
+  
+  '''
+# ---
+# name: test_yaml_roundtrip
+  dict({
+    'Count': 3,
+    'Flag': True,
+    'Name': 'example',
+    'Nested': dict({
+      'x': 1,
+      'y': 0,
+    }),
+    'Ratio': 1.5,
+    'Tags': list([
+      'a',
+      'b',
+    ]),
+  })
+# ---

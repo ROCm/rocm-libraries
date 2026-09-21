@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,11 +58,8 @@ static const TreeNode* FindLastLeaf(const TreeNode* node, OperatingBuffer buf)
     return node->obOut == buf ? node : nullptr;
 }
 
-CallbackType TreeNode::GetCallbackType(bool enable_callbacks) const
+CallbackType TreeNode::GetCallbackType() const
 {
-    if(!enable_callbacks)
-        return CallbackType::NONE;
-
     // We only treat real data as complex for even-length real-complex.
     // That is, we must be:
     //
@@ -84,8 +81,8 @@ CallbackType TreeNode::GetCallbackType(bool enable_callbacks) const
         real_even_node      = real_even_node->parent)
     {
         if(real_even_node->scheme != CS_REAL_TRANSFORM_EVEN
-           && real_even_node->scheme != CS_REAL_2D_EVEN
-           && real_even_node->scheme != CS_REAL_3D_EVEN)
+           && real_even_node->scheme != CS_REAL_2D_EVEN && real_even_node->scheme != CS_REAL_3D_EVEN
+           && real_even_node->scheme != CS_REAL_3D_PP)
             continue;
 
         // if we're here, we must be under CS_REAL_*_EVEN

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,21 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_run_length_encode_non_trivial_runs.parallel.hpp"
-#include "benchmark_utils.hpp"
-
-// CmdParser
-#include "cmdparser.hpp"
+#include "benchmark_device_run_length_encode_non_trivial_runs.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #include <rocprim/types.hpp>
 
 #include <cstddef>
@@ -42,14 +34,16 @@
 #include <string>
 #include <vector>
 
-#define CREATE_NON_TRIVIAL_RUNS_BENCHMARK(T)                              \
-    executor.queue_instance(device_non_trivial_runs_benchmark<T, 16>());  \
-    executor.queue_instance(device_non_trivial_runs_benchmark<T, 256>()); \
-    executor.queue_instance(device_non_trivial_runs_benchmark<T, 4096>());
+#define CREATE_NON_TRIVIAL_RUNS_BENCHMARK(T)                     \
+    executor.queue<device_non_trivial_runs_benchmark<T, 16>>();  \
+    executor.queue<device_non_trivial_runs_benchmark<T, 256>>(); \
+    executor.queue<device_non_trivial_runs_benchmark<T, 4096>>();
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 2 * primbench::GiB;
+    primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -67,11 +61,8 @@ int main(int argc, char* argv[])
     CREATE_NON_TRIVIAL_RUNS_BENCHMARK(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
-    CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_float2)
-    CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_double2)
+    CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_f32_f32)
+    CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_f64_f64)
     #endif
 #endif
 

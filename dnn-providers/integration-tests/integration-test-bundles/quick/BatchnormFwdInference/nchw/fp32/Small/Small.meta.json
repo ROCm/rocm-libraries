@@ -1,0 +1,12 @@
+{
+    "format_version": 1,
+    "operation": "BatchnormFwdInference",
+    "generator": "generate_batchnorm_fwd_golden.py",
+    "generator_version": "1.0.0",
+    "generated_at": "2026-06-18T00:00:00Z",
+    "reference_source": "PyTorch 2.12.0+rocm7.2",
+    "reference_strategy": "pytorch_native_batchnorm",
+    "rocm_version": "7.2",
+    "seed": 42,
+    "notes": "Dummy metadata (placeholder) — nchw fp32 Small batchnorm inference."
+}

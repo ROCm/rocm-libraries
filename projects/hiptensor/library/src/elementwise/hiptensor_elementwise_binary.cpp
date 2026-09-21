@@ -219,7 +219,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
                 // log perf metrics (not name/id)
                 snprintf(msg,
                          sizeof(msg),
-                         "KernelId: %lu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
+                         "KernelId: %zu KernelName: %s, %0.3f ms, %0.3f TFlops/s, %0.3f GB/s",
                          metrics.mKernelUid,
                          metrics.mKernelName.c_str(),
                          metrics.mAvgTimeMs,

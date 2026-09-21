@@ -38,7 +38,7 @@ OS_info = {}
 var_subs = {}
 
 vcpkg_script = ['tdir %IDIR%',
-                'git clone -b 2024.02.14 https://github.com/microsoft/vcpkg %IDIR%', 'cd %IDIR%', 'bootstrap-vcpkg.bat -disableMetrics' ]
+                'git clone -b 2026.06.24 https://github.com/microsoft/vcpkg %IDIR%', 'cd %IDIR%', 'bootstrap-vcpkg.bat -disableMetrics' ]
 
 xml_script = [ '%XML%' ]
 
@@ -78,15 +78,6 @@ def create_dir(dir_path):
         full_path = os.path.join( os.getcwd(), dir_path )
     return pathlib.Path(full_path).mkdir(parents=True, exist_ok=True)
 
-def delete_dir(dir_path) :
-    if (not os.path.exists(dir_path)):
-        return
-    if os.name == "nt":
-        return run_cmd( "RMDIR" , f"/S /Q {dir_path}")
-    else:
-        linux_path = pathlib.Path(dir_path).absolute()
-        return run_cmd( "rm" , f"-rf {linux_path}")
-
 def run_cmd(cmd):
     global args
     if (cmd.startswith('cd ')):
@@ -98,6 +89,14 @@ def run_cmd(cmd):
     proc = subprocess.run(cmdline, check=True, stderr=subprocess.STDOUT, shell=True)
     return proc.returncode
 
+def delete_dir(dir_path) :
+    if (not os.path.exists(dir_path)):
+        return
+    if os.name == "nt":
+        return run_cmd(f'RMDIR /S /Q "{dir_path}"')
+    else:
+        linux_path = pathlib.Path(dir_path).absolute()
+        return run_cmd(f'rm -rf "{linux_path}"')
 
 def install_deps( os_node ):
     global var_subs
@@ -207,6 +206,56 @@ def run_install_script(script, xml):
     else:
         return 0
 
+def install_msgpack_from_source():
+    """Install msgpack-c 3.0.1 from source on Windows (Boost-free, same as Linux)"""
+    build_dir = pathlib.Path.cwd() / "build"
+    msgpack_dir = build_dir / "deps" / "msgpack-c"
+    
+    # Check if already built successfully by verifying the config file exists
+    msgpack_config = msgpack_dir / "install" / "lib" / "cmake" / "msgpack" / "msgpack-config.cmake"
+    if msgpack_config.exists():
+        print(f"msgpack-c already installed at {msgpack_dir}")
+        return 0
+    
+    print("Installing msgpack-c 3.0.1 from source (Boost-free)...")
+    
+    # Create deps directory
+    deps_dir = build_dir / "deps"
+    deps_dir.mkdir(parents=True, exist_ok=True)
+    
+    cwd = pathlib.Path.cwd()
+    
+    try:
+        os.chdir(deps_dir)
+
+        # Clean up any incomplete installation
+        if msgpack_dir.exists():
+            print(f"Removing incomplete msgpack-c directory...")
+            delete_dir(str(msgpack_dir))
+
+        # Clone msgpack-c 3.0.1 (same version as Linux)
+        print("Cloning msgpack-c 3.0.1...")
+        run_cmd("git -c advice.detachedHead=false clone --quiet --depth 1 --branch cpp-3.0.1 https://github.com/msgpack/msgpack-c.git")
+        os.chdir("msgpack-c")
+        
+        # Configure and install msgpack-c (Boost-free C++ package)
+        print("Configuring msgpack-c...")
+        run_cmd("cmake -DMSGPACK_BUILD_TESTS=OFF -DMSGPACK_BUILD_EXAMPLES=OFF -DMSGPACK_USE_BOOST=OFF -DCMAKE_INSTALL_PREFIX=install .")
+        
+        print("Installing msgpack-c...")
+        run_cmd("cmake --build . --config Release --target install")
+        
+        print(f"✓ msgpack-c 3.0.1 installed successfully (Boost-free)")
+        return 0
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR installing msgpack-c (subprocess failed): {e}")
+        return 1
+    except OSError as e:
+        print(f"ERROR installing msgpack-c (OS error): {e}")
+        return 1
+    finally:
+        os.chdir(cwd)
+
 def installation():
     global vcpkg_script
     global xml_script
@@ -229,6 +278,14 @@ def installation():
             #print("Failure in script. ABORTING")
             os.chdir( cwd )
             return 1
+    
+    # Install msgpack from source on Windows (Boost-free)
+    if os.name == "nt":
+        if install_msgpack_from_source():
+            print("Failed to install msgpack-c")
+            os.chdir( cwd )
+            return 1
+    
     os.chdir( cwd )
     return 0
 

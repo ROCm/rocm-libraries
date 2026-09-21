@@ -1,0 +1,123 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_3_1_1_bfp16_nchw",
+          "2_3_1_1_bfp16_nchw_4c4146",
+          "2_3_1_1_bfp16_nhwc",
+          "2_3_1_1_bfp16_nhwc_324764",
+          "2_3_1_1_fp16_nchw",
+          "2_3_1_1_fp16_nchw_4c3bb4",
+          "2_3_1_1_fp16_nhwc",
+          "2_3_1_1_fp16_nhwc_0fab80",
+          "2_3_1_1_fp32_nchw",
+          "2_3_1_1_fp32_nchw_3d8577",
+          "2_3_1_1_fp32_nhwc",
+          "2_3_1_1_fp32_nhwc_63c5c3",
+          "2_3_2_4_4_bfp16_ncdhw",
+          "2_3_2_4_4_bfp16_ncdhw_11ab5e",
+          "2_3_2_4_4_bfp16_ndhwc",
+          "2_3_2_4_4_bfp16_ndhwc_7b25f4",
+          "2_3_2_4_4_fp16_ncdhw",
+          "2_3_2_4_4_fp16_ncdhw_80c9f0",
+          "2_3_2_4_4_fp16_ndhwc",
+          "2_3_2_4_4_fp16_ndhwc_1c8554",
+          "2_3_2_4_4_fp32_ncdhw",
+          "2_3_2_4_4_fp32_ncdhw_248d62",
+          "2_3_2_4_4_fp32_ndhwc",
+          "2_3_2_4_4_fp32_ndhwc_8f5611",
+          "2_3_3_1_1_bfp16_ncdhw",
+          "2_3_3_1_1_bfp16_ncdhw_e03c08",
+          "2_3_3_1_1_bfp16_ndhwc",
+          "2_3_3_1_1_bfp16_ndhwc_5a188a",
+          "2_3_3_1_1_fp16_ncdhw",
+          "2_3_3_1_1_fp16_ncdhw_ca608f",
+          "2_3_3_1_1_fp16_ndhwc",
+          "2_3_3_1_1_fp16_ndhwc_6ea514",
+          "2_3_3_1_1_fp32_ncdhw",
+          "2_3_3_1_1_fp32_ncdhw_532835",
+          "2_3_3_1_1_fp32_ndhwc",
+          "2_3_3_1_1_fp32_ndhwc_1a33c1",
+          "32_3_1_14_bfp16_nchw",
+          "32_3_1_14_bfp16_nchw_ca4d9e",
+          "32_3_1_14_bfp16_nhwc",
+          "32_3_1_14_bfp16_nhwc_1c77c3",
+          "32_3_1_14_fp16_nchw",
+          "32_3_1_14_fp16_nchw_561527",
+          "32_3_1_14_fp16_nhwc",
+          "32_3_1_14_fp16_nhwc_a5a14a",
+          "32_3_1_14_fp32_nchw",
+          "32_3_1_14_fp32_nchw_b2a9a7",
+          "32_3_1_14_fp32_nhwc",
+          "32_3_1_14_fp32_nhwc_52c488"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_14_bfp16_ncl",
+          "1_16_14_bfp16_nlc",
+          "1_16_14_fp16_ncl",
+          "1_16_14_fp16_nlc",
+          "1_16_14_fp32_ncl",
+          "1_16_14_fp32_nlc",
+          "2_3_1_1_bfp16_nchw",
+          "2_3_1_1_bfp16_nhwc",
+          "2_3_1_1_fp16_nchw",
+          "2_3_1_1_fp16_nhwc",
+          "2_3_1_1_fp32_nchw",
+          "2_3_1_1_fp32_nhwc",
+          "2_3_1_bfp16_ncl",
+          "2_3_1_bfp16_nlc",
+          "2_3_1_fp16_ncl",
+          "2_3_1_fp16_nlc",
+          "2_3_1_fp32_ncl",
+          "2_3_1_fp32_nlc",
+          "2_3_2_4_4_bfp16_ncdhw",
+          "2_3_2_4_4_bfp16_ndhwc",
+          "2_3_2_4_4_fp16_ncdhw",
+          "2_3_2_4_4_fp16_ndhwc",
+          "2_3_2_4_4_fp32_ncdhw",
+          "2_3_2_4_4_fp32_ndhwc",
+          "2_3_3_1_1_bfp16_ncdhw",
+          "2_3_3_1_1_bfp16_ndhwc",
+          "2_3_3_1_1_fp16_ncdhw",
+          "2_3_3_1_1_fp16_ndhwc",
+          "2_3_3_1_1_fp32_ncdhw",
+          "2_3_3_1_1_fp32_ndhwc",
+          "32_3_1_14_bfp16_nchw",
+          "32_3_1_14_bfp16_nhwc",
+          "32_3_1_14_fp16_nchw",
+          "32_3_1_14_fp16_nhwc",
+          "32_3_1_14_fp32_nchw",
+          "32_3_1_14_fp32_nhwc"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

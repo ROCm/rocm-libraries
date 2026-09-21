@@ -11,6 +11,10 @@
 #include "ck/tensor_operation/gpu/device/device_base.hpp"
 #include "ck/library/utility/host_tensor.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace host {
@@ -79,7 +83,8 @@ struct ReferenceMoeGemm1BlockScale : public device::BaseOperator
 
         float Run(const Argument& arg)
         {
-            static_assert(ActivationType < 2, "Not supported activation type");
+            static_assert(ActivationType == 0 || ActivationType == 1 || ActivationType == 4,
+                          "Not supported activation type");
             const int full_n = arg.c_t_k_n_.mDesc.GetLengths()[2];
             auto f_mk_kn_mn  = [&](auto m, auto n) {
                 const int K = arg.a_t_k_.mDesc.GetLengths()[1];
@@ -183,6 +188,16 @@ struct ReferenceMoeGemm1BlockScale : public device::BaseOperator
                         tensor_operation::element_wise::Gelu{}(v_c, v_c);
                         arg.c_t_k_n_(t, topk_id, n) = v_c * v_c_up;
                     }
+                    else if constexpr(ActivationType == 4)
+                    {
+                        if constexpr(is_same_v<BDataType, pk_i4_t>)
+                        {
+                            v_c_up *= 16;
+                            v_c *= 16;
+                        }
+                        tensor_operation::element_wise::FastGelu{}(v_c, v_c);
+                        arg.c_t_k_n_(t, topk_id, n) = v_c * v_c_up;
+                    }
                 }
             };
 
@@ -278,3 +293,6 @@ struct ReferenceMoeGemm1BlockScale : public device::BaseOperator
 } // namespace host
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

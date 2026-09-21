@@ -139,7 +139,7 @@ struct NamedContainer
 //      );
 //
 template <typename... T>
-static auto MakeNamedParameterValues(const std::string& name, T... values)
+[[maybe_unused]] auto MakeNamedParameterValues(const std::string& name, T... values)
 {
     return testing::Values(NamedParameter<T>{name, values}...);
 }
@@ -162,9 +162,9 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
 //
 template <typename T>
     requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
-static auto MakeNamedParameterCollectionValues(const std::string& name,
-                                               const std::ranges::range auto& collection,
-                                               const std::string& separator = " ")
+[[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
+                                                         const std::ranges::range auto& collection,
+                                                         const std::string& separator = " ")
 {
     std::vector<NamedContainer<T>> v;
 
@@ -180,8 +180,8 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 
 template <typename T>
     requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
-static auto MakeNamedParameterCollectionValues(const std::string& name,
-                                               const std::ranges::range auto& collection)
+[[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
+                                                         const std::ranges::range auto& collection)
 {
     std::vector<NamedParameter<T>> v;
 
@@ -205,8 +205,8 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
 //      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
 //
-static std::string GetRangeAsString(const std::ranges::range auto& r,
-                                    std::string_view separator = " ")
+[[maybe_unused]] static std::string GetRangeAsString(const std::ranges::range auto& r,
+                                                     std::string_view separator = " ")
 {
     std::string str;
 

@@ -9,10 +9,12 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/Linux_Install_Guide
-    title: Install rocBLAS on Linux
-  - file: install/Windows_Install_Guide
-    title: Install rocBLAS on Windows
+    - file: install/install
+      title: Install rocBLAS
+    - file: install/Linux_Install_Guide
+      title: Build rocBLAS on Linux
+    - file: install/Windows_Install_Guide
+      title: Build rocBLAS on Windows
 
 - caption: Conceptual
   entries:

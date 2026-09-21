@@ -184,7 +184,7 @@ auto any_construct_impl(miopen::rank<1>,
 }
 
 template <class T, std::size_t... Ns, class Data>
-T any_construct_impl(miopen::rank<0>, std::index_sequence<Ns...>, const Data&)
+[[noreturn]] T any_construct_impl(miopen::rank<0>, std::index_sequence<Ns...>, const Data&)
 {
     throw std::runtime_error("Cannot construct: " + miopen::get_type_name<T>());
 }

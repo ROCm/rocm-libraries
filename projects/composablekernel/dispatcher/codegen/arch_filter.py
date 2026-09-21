@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
@@ -50,6 +50,8 @@ class OperatorType(Enum):
     GEMM = "gemm"
     GEMM_PRESHUFFLE = "gemm_preshuffle"
     GEMM_MULTI_D = "gemm_multi_d"
+    GEMM_GROUPED = "gemm_grouped"
+    GEMM_STREAMK = "gemm_streamk"
     CONV_FWD = "conv_fwd"
     CONV_BWD_DATA = "conv_bwd_data"
     CONV_BWD_WEIGHT = "conv_bwd_weight"
@@ -78,6 +80,28 @@ OPERATOR_TILE_CONSTRAINTS = {
         "tile_k_alignment": 16,
     },
     OperatorType.GEMM_MULTI_D: {
+        "min_tile_m": 16,
+        "min_tile_n": 16,
+        "min_tile_k": 8,
+        "tile_m_alignment": 16,
+        "tile_n_alignment": 16,
+        "tile_k_alignment": 8,
+    },
+    OperatorType.GEMM_GROUPED: {
+        "min_tile_m": 16,
+        "min_tile_n": 16,
+        "min_tile_k": 8,
+        "tile_m_alignment": 16,
+        "tile_n_alignment": 16,
+        "tile_k_alignment": 8,
+    },
+    # NOTE: these are copied from plain GEMM and only gate tile *shape* validity.
+    # They do NOT express Stream-K's real feasibility requirement -- that a problem
+    # has enough output tiles to partition K-work across the CUs. That gate is
+    # runtime (StreamKKernel::IsSupportedArgument / the backend supports() check),
+    # which lets the dispatcher fall back to a non-Stream-K kernel for too-small
+    # problems instead of rejecting them at codegen time.
+    OperatorType.GEMM_STREAMK: {
         "min_tile_m": 16,
         "min_tile_n": 16,
         "min_tile_k": 8,
@@ -135,7 +159,8 @@ try:
         WARP_TILE_SUPPORTED_COMBINATIONS,
         PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
         PRESHUFFLE_PIPELINES,
-        LDS_CAPACITY_LIMITS,
+        LDS_CAPACITY_LIMITS_BY_ARCH,
+        get_lds_limit,
         TRAIT_UNSUPPORTED_COMBINATIONS,
         DTYPE_COMBINATIONS,
     )
@@ -217,7 +242,43 @@ except ImportError:
 
     PRESHUFFLE_PIPELINES = ["preshufflev2"]
 
-    LDS_CAPACITY_LIMITS = {"compv4": 32768, "preshufflev2": 32768, "default": 65536}
+    # Conservative fallback: the historical 64 KB / 32 KB budget, applied to
+    # every architecture. It deliberately understates gfx950 and gfx1250 rather
+    # than overstating anything, because a budget larger than the silicon
+    # produces kernels that cannot launch. The generated module carries the
+    # real per-architecture numbers; regenerate it rather than relying on this.
+    _FALLBACK_LDS_BUDGET = {
+        "mem": 65536,
+        "compv1": 65536,
+        "compv2": 65536,
+        "compv3": 65536,
+        "compv4": 32768,
+        "compv5": 65536,
+        "compv6": 32768,
+        "preshufflev1": 32768,
+        "preshufflev2": 32768,
+        # Mandatory double buffering (num_lds_buffers = 2), so half the budget.
+        "comp_async": 32768,
+        "wavelet": 65536,
+        "default": 65536,
+    }
+
+    LDS_CAPACITY_LIMITS_BY_ARCH = {
+        arch: dict(_FALLBACK_LDS_BUDGET) for arch in ARCH_FAMILY_MAP
+    }
+
+    def get_lds_limit(
+        gpu_arch: str, pipeline: str, double_smem_buffer: bool = False
+    ) -> int:
+        """Get the LDS staging budget in bytes for an architecture and pipeline."""
+        per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(
+            gpu_arch.lower(), _FALLBACK_LDS_BUDGET
+        )
+        budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+        if double_smem_buffer:
+            # Conservative: the fallback assumes the smallest capacity we ship.
+            budget = min(budget, _FALLBACK_LDS_BUDGET["default"] // 2)
+        return budget
 
     TRAIT_UNSUPPORTED_COMBINATIONS = {
         ("compv3", "cshuffle", "interwave"),
@@ -328,6 +389,11 @@ class KernelConfig:
     pipeline: str = "compv4"
     epilogue: str = "cshuffle"
     scheduler: str = "intrawave"
+
+    # Ping-pong LDS staging. Only meaningful for the pipelines that make it a
+    # choice (mem, compv3, compv5, compv6); the ones that always double already
+    # carry it in their per-pipeline budget.
+    double_smem_buffer: bool = False
 
     # Layout (for whole-workgroup cover validation)
     layout: str = "rcr"
@@ -509,6 +575,7 @@ class ArchFilter:
         scheduler: str = "intrawave",
         layout: str = "rcr",
         operator: Optional[OperatorType] = None,
+        double_smem_buffer: bool = False,
     ) -> bool:
         """
         Quick validation check for a kernel configuration.
@@ -520,6 +587,8 @@ class ArchFilter:
             warp_tile_m, warp_tile_n, warp_tile_k: Warp tile dimensions
             pipeline, epilogue, scheduler: Kernel traits
             layout: Matrix layout (e.g., "rcr")
+            double_smem_buffer: Ping-pong LDS staging. Halves the staging
+                     budget for the pipelines that make it a choice.
             operator: Operator type (GEMM, CONV_FWD, CONV_BWD_DATA, etc.)
                      Affects validation rules for tile constraints.
                      Defaults to GEMM if not specified.
@@ -544,6 +613,7 @@ class ArchFilter:
             epilogue=epilogue.lower(),
             scheduler=scheduler.lower(),
             layout=layout.lower(),
+            double_smem_buffer=double_smem_buffer,
             operator=operator if operator is not None else OperatorType.GEMM,
         )
         return self.validate_kernel(config).valid
@@ -685,17 +755,29 @@ class ArchFilter:
         elem_size_a = ELEMENT_SIZE_MAP.get(config.datatype_a, 2)
         elem_size_b = ELEMENT_SIZE_MAP.get(config.datatype_b, 2)
 
+        # When the B cast policy runs before the LDS write, B is staged as
+        # ADataType rather than BDataType (GetSmemSizeB in
+        # gemm_universal_pipeline_ag_bg_cr_policy.hpp). Charging B at the wider
+        # of the two keeps a mixed-precision pair from being under-counted; for
+        # equal dtypes it is the same number.
+        elem_size_b_staged = max(elem_size_a, elem_size_b)
+
         matrix_a_size = config.tile_m * config.tile_k * elem_size_a
-        matrix_b_size = config.tile_n * config.tile_k * elem_size_b
+        matrix_b_size = config.tile_n * config.tile_k * elem_size_b_staged
         total_lds = matrix_a_size + matrix_b_size
 
-        max_lds = LDS_CAPACITY_LIMITS.get(
-            config.pipeline, LDS_CAPACITY_LIMITS["default"]
+        # The budget depends on the target, not just the pipeline: a tile that
+        # overflows one architecture's LDS may fit comfortably in another's.
+        max_lds = get_lds_limit(
+            self.gpu_arch, config.pipeline, config.double_smem_buffer
         )
 
         if total_lds > max_lds:
+            staging = " double-buffered" if config.double_smem_buffer else ""
             result.add_error(
-                f"LDS capacity exceeded: {total_lds} bytes > {max_lds} bytes limit. "
+                f"LDS capacity exceeded on {self.gpu_arch} "
+                f"(pipeline={config.pipeline}{staging}): "
+                f"{total_lds} bytes > {max_lds} bytes limit. "
                 f"Matrix A: {config.tile_m}x{config.tile_k}x{elem_size_a}={matrix_a_size}B, "
                 f"Matrix B: {config.tile_n}x{config.tile_k}x{elem_size_b}={matrix_b_size}B"
             )

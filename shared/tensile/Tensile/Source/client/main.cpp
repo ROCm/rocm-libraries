@@ -26,6 +26,7 @@
 
 #include <Tensile/ArithmeticUnitTypes.hpp>
 #include <Tensile/Contractions.hpp>
+#include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -50,13 +51,12 @@
 #include "ResultFileReporter.hpp"
 #include "ResultReporter.hpp"
 
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
+#include <sstream>
 
-namespace po = boost::program_options;
+namespace po = Tensile::Client::po;
 
 namespace Tensile
 {
@@ -280,7 +280,24 @@ namespace Tensile
 
             HIP_CHECK_EXC(hipSetDevice(deviceIdx));
 
-            return hip::GetCurrentDevice();
+            auto hardware = hip::GetCurrentDevice();
+
+            // f8 encoding differs by arch: gfx942 uses FNUZ (the default here),
+            // while gfx950/gfx1200/gfx1201 use OCP (bias 7/15, IEEE inf/NaN).
+            // The host f8 reference defaults to FNUZ, so switch it to OCP on the
+            // OCP archs. Without this, the CPU reference decodes f8 bytes under
+            // the wrong format and every f8 validation fails on gfx950.
+            if(auto* gpu = dynamic_cast<AMDGPU*>(hardware.get()))
+            {
+                if(gpu->processor == AMDGPU::Processor::gfx950
+                   || gpu->processor == AMDGPU::Processor::gfx1200
+                   || gpu->processor == AMDGPU::Processor::gfx1201)
+                {
+                    set_hip_f8_bias_mode_ieee();
+                }
+            }
+
+            return hardware;
         }
 
         hipStream_t GetStream(po::variables_map const& args)
@@ -350,15 +367,20 @@ namespace Tensile
 
         std::vector<size_t> split_ints(std::string const& value)
         {
-            std::vector<std::string> parts;
-            boost::split(parts, value, boost::algorithm::is_any_of(",;"));
+            std::vector<std::string> parts = po::split_string(value, ",;");
 
             std::vector<size_t> rv;
             rv.reserve(parts.size());
 
             for(auto const& part : parts)
                 if(part != "")
-                    rv.push_back(boost::lexical_cast<size_t>(part));
+                {
+                    size_t             v;
+                    std::istringstream ss(part);
+                    if(!(ss >> v))
+                        throw std::runtime_error("Failed to parse size_t: " + part);
+                    rv.push_back(v);
+                }
 
             return rv;
         }
@@ -372,7 +394,7 @@ namespace Tensile
             for(auto const& str : inValue)
                 outValue.push_back(split_ints(str));
 
-            boost::any v(outValue);
+            std::any v(outValue);
 
             args.at(name).value() = v;
         }
@@ -386,12 +408,12 @@ namespace Tensile
             if(type == DataType::Float || type == DataType::Double || type == DataType::ComplexFloat
                || type == DataType::ComplexDouble || type == DataType::Int32)
             {
-                args.at("a-type").value()     = boost::any(type);
-                args.at("b-type").value()     = boost::any(type);
-                args.at("c-type").value()     = boost::any(type);
-                args.at("d-type").value()     = boost::any(type);
-                args.at("alpha-type").value() = boost::any(type);
-                args.at("beta-type").value()  = boost::any(type);
+                args.at("a-type").value()     = std::any(type);
+                args.at("b-type").value()     = std::any(type);
+                args.at("c-type").value()     = std::any(type);
+                args.at("d-type").value()     = std::any(type);
+                args.at("alpha-type").value() = std::any(type);
+                args.at("beta-type").value()  = std::any(type);
             }
         }
 

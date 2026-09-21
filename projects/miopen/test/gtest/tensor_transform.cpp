@@ -336,7 +336,8 @@ inline auto GenFullTestCases()
     static const std::vector<std::vector<int>> all_lens{
         {32, 11, 32, 16}, {16, 30, 16, 16}, {15, 1, 14, 14}, {10, 16, 7, 7}, {1, 1, 1, 1}};
 
-    static const std::vector<std::vector<float>> all_scales{{1.0f, 0.0f}, {0.5f, 0.5f}};
+    static const std::vector<std::vector<float>> all_scales{
+        {1.0f, 0.0f}, {1.0f, 0.5f}, {0.5f, 0.0f}, {0.5f, 0.5f}};
 
 #if(MIO_TRANSFORM_DEBUG)
 #define NROWS 6

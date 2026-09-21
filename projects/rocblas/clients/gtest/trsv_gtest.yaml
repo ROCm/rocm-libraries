@@ -246,9 +246,10 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
   graph_test: true
-
+  os_flags: [ LINUX ]
   # TODO: see above graph test set, merge below when
   # windows stack up to date and unified
+
 - name: trsv_batched_graph_test
   category: pre_checkin
   function:
@@ -261,6 +262,8 @@ Tests:
   batch_count: [ 3 ]
   graph_test: true
   os_flags: [ LINUX ]
+  # TODO: see above graph test set, merge below when
+  # windows stack up to date and unified
 
 - name: trsv_repeatability_check
   category: stress

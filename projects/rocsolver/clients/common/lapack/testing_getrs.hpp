@@ -439,7 +439,6 @@ void testing_getrs(Arguments& argus)
                                           &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf);
     }
-
     else
     {
         // memory allocations
@@ -484,7 +483,7 @@ void testing_getrs(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using m * machine_precision as tolerance
+    // using n * machine_precision as tolerance
     if(argus.unit_check)
         ROCSOLVER_TEST_CHECK(T, max_error, n);
 

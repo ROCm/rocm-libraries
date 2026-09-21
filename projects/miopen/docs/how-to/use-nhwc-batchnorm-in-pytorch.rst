@@ -150,14 +150,14 @@ The output might look like this:
 
 .. code:: shell
 
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NHWC
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 0 -b 1 -s 1 --layout NHWC
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NCHW
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 0 -b 1 -s 1 --layout NCHW
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NHWC
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 0 -b 1 -s 1 --layout NHWC
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NCHW
-   MIOpen(HIP): Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 0 -b 1 -s 1 --layout NCHW
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NHWC
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 0 -b 1 -s 1 --layout NHWC
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NCHW
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 4 -c 8 -H 2 -W 2 -m 1 --forw 0 -b 1 -s 1 --layout NCHW
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NHWC
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 0 -b 1 -s 1 --layout NHWC
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 1 -b 0 -r 1 -s 1 --layout NCHW
+   MIOpen: Command [LogCmdBNorm] ./bin/MIOpenDriver bnorm -n 2 -c 8 -H 8 -W 1 -m 1 --forw 0 -b 1 -s 1 --layout NCHW
 
 Each line corresponds to a different command or operation.
 The ``./bin/MIOpenDriver`` string indicates that MIOpen was used for the operation.

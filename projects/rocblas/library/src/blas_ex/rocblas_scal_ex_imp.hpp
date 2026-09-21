@@ -120,8 +120,17 @@ namespace
 
         static constexpr API_INT        batch_count_1 = 1;
         static constexpr rocblas_stride stride_0      = 0;
-        return rocblas_scal_ex_template<API_INT, ROCBLAS_SCAL_NB, false>(
-            handle, n, alpha, alpha_type, x, x_type, incx, stride_0, batch_count_1, execution_type);
+        return rocblas_scal_ex_template<API_INT, ROCBLAS_SCAL_NB, false>(handle,
+                                                                         n,
+                                                                         alpha,
+                                                                         alpha_type,
+                                                                         stride_0,
+                                                                         x,
+                                                                         x_type,
+                                                                         incx,
+                                                                         stride_0,
+                                                                         batch_count_1,
+                                                                         execution_type);
     }
 }
 

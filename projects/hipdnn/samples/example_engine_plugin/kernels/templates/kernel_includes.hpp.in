@@ -1,0 +1,32 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Auto-generated from kernel_includes.hpp.in by EmbedKernelSources.cmake - DO NOT EDIT
+//
+// Embeds kernel header files (.h/.hpp) as string literals for HIPRTC. These are
+// passed in bulk to hiprtcCreateProgram() so that kernel .cpp sources can
+// #include them at runtime. See kernel_sources.hpp.in for the full embedding
+// overview covering all four generated files. If the kernel source files do not
+// #include any header files then the generated content in this file will be
+// empty. See kernel_sources.hpp.in for the full embedding overview.
+//
+// This file: declares extern variables for each embedded header and the
+// getKernelInc() / getKernelIncList() lookup functions.
+
+#pragma once
+
+#include <string_view>
+#include <vector>
+
+// Header declarations generation begin
+@HEADER_DECLARATIONS@
+// Header declarations generation end
+
+namespace example_provider {
+
+std::string_view getKernelInc(const char* name);
+
+void getKernelIncList(std::vector<std::string_view>& includeTexts,
+                      std::vector<const char*>& includeNames);
+
+} // namespace example_provider

@@ -579,9 +579,9 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
         miopenDestroyTensorDescriptor(weiDesc);
         miopenDestroyTensorDescriptor(outDesc);
 
-        hipFree(in_dev);
-        hipFree(wei_dev);
-        hipFree(out_dev);
+        (void)hipFree(in_dev);
+        (void)hipFree(wei_dev);
+        (void)hipFree(out_dev);
     }
 };
 
@@ -848,9 +848,9 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
         miopenDestroyTensorDescriptor(weiDesc);
         miopenDestroyTensorDescriptor(outDesc);
 
-        hipFree(in_dev);
-        hipFree(wei_dev);
-        hipFree(out_dev);
+        (void)hipFree(in_dev);
+        (void)hipFree(wei_dev);
+        (void)hipFree(out_dev);
     }
 };
 } // namespace
@@ -1102,179 +1102,179 @@ TEST_P(GPU_reference_kernel_bww_3d_NDHWC_BFP16_BFP16, Test) { Run(); }
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NCHW_FP32_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NCHW_FP16_FP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NCHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NCHW_I8_I32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NCHW_I8_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_2d_NCHW_FP32_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_2d_NCHW_FP16_FP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_2d_NCHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_2d_NCHW_FP32_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_2d_NCHW_FP16_FP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_2d_NCHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NCDHW_I8_I32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NCDHW_I8_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_3d_NCDHW_FP32_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_3d_NCDHW_FP16_FP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_3d_NCDHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_3d_NCDHW_FP32_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_3d_NCDHW_FP16_FP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_3d_NCDHW_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NHWC_FP32_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NHWC_FP16_FP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NHWC_I8_I32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_2d_NHWC_I8_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_2d_NHWC_FP32_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_2d_NHWC_FP16_FP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_2d_NHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_2d_NHWC_FP32_FP32,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_2d_NHWC_FP16_FP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_2d_NHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases2D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NDHWC_FP32_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NDHWC_FP16_FP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NDHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NDHWC_I8_I32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_fwd_3d_NDHWC_I8_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_3d_NDHWC_FP32_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_3d_NDHWC_FP16_FP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bwd_3d_NDHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_3d_NDHWC_FP32_FP32,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_3d_NDHWC_FP16_FP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_reference_kernel_bww_3d_NDHWC_BFP16_BFP16,
                          ::testing::ValuesIn(GenCases3D()),
-                         [](const auto& info) { return NameGenerator(info); });
+                         [](const auto& _info) { return NameGenerator(_info); });

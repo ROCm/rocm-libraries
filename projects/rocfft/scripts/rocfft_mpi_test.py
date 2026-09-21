@@ -54,6 +54,10 @@ def main():
                         type=int,
                         help='number of ranks',
                         required=True)
+    parser.add_argument('--accuracy',
+                        type=bool,
+                        help='triggers accuracy checks',
+                        default=True)
 
     args = parser.parse_args()
 
@@ -111,6 +115,8 @@ def main():
             cmd = workercmd
 
         allcmd = [args.launcher] + cmd
+        if(args.accuracy):
+            allcmd += ["--accuracy"]
         print(allcmd)
 
         fout = tempfile.TemporaryFile(mode="w+")

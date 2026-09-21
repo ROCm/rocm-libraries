@@ -1,0 +1,235 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <flatbuffers/flatbuffers.h>
+#include <memory>
+#include <stdexcept>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/NodeWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
+
+namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
+{
+
+/*
+ * The IGraph interface expects that any implementations have the graph sorted in topological order.
+ * The graph must also have no cycles and be fully connected(no orphan nodes).  We also expect
+ * that the all tensors in the graph have unique uids.
+*/
+class IGraph
+{
+public:
+    virtual ~IGraph() = default;
+
+    virtual const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const = 0;
+    virtual bool isValid() const = 0;
+    virtual uint32_t nodeCount() const = 0;
+    virtual bool hasOnlySupportedAttributes(
+        std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes> supportedAttributes) const
+        = 0;
+    virtual const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t index) const = 0;
+    virtual const INodeWrapper& getNodeWrapper(uint32_t index) const = 0;
+    virtual const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const = 0;
+    virtual const std::unordered_map<int64_t,
+                                     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        getTensorMap() const
+        = 0;
+
+    // ABI rule: `bytes()` is the last virtual in `IGraph`. Appending after it preserves
+    // existing caller slots, but separately compiled derived classes are not ABI-safe;
+    // never insert a virtual before it, or existing vtable slots can change.
+
+    /// The verified buffer this graph is a view over; the caller does not own it and
+    /// may copy it to outlive the caller's storage.
+    ///
+    /// Empty when invalid or unsupplied by an implementation. Callers must treat empty
+    /// as "cannot identify this graph" -- `GraphContentKey` declines to cache or match
+    /// under one, never as an empty graph matching others.
+    virtual SerializedBlobView bytes() const
+    {
+        return {};
+    }
+};
+
+class GraphWrapper : public IGraph
+{
+public:
+    explicit GraphWrapper(const void* buffer, size_t size)
+    {
+        if(buffer != nullptr)
+        {
+            flatbuffers::Verifier verifier(static_cast<const uint8_t*>(buffer), size);
+            if(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>())
+            {
+                _shallowGraph
+                    = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(buffer);
+                // Retained only once the verifier has accepted it, so bytes() can
+                // never hand out a buffer getGraph() would refuse to read.
+                _bytes = SerializedBlobView{static_cast<const uint8_t*>(buffer), size};
+            }
+        }
+    }
+
+    // Constructs a GraphWrapper from a buffer of uncertain provenance, such as
+    // the output of Graph::to_binary(), which may be a bare serialized Graph or
+    // an "HDGP" SerializedGraphAndPlan container that embeds the graph. The
+    // graph blob is peeled out via extractGraphBlob() before wrapping. Use the
+    // plain constructor when the buffer is known to be exactly a Graph buffer.
+    // Throws std::invalid_argument if the buffer is an HDGP container that fails
+    // verification or whose graph blob is missing/empty.
+    static GraphWrapper fromSerializedBlob(const void* buffer, size_t size)
+    {
+        const auto view = extractGraphBlob(buffer, size);
+        return GraphWrapper(view.data, view.size);
+    }
+
+    SerializedBlobView bytes() const override
+    {
+        return _bytes;
+    }
+
+    const hipdnn_flatbuffers_sdk::data_objects::Graph& getGraph() const override
+    {
+        throwIfNotValid();
+        return *_shallowGraph;
+    }
+
+    bool isValid() const override
+    {
+        return _shallowGraph != nullptr;
+    }
+
+    uint32_t nodeCount() const override
+    {
+        throwIfNotValid();
+        auto nodes = _shallowGraph->nodes();
+        if(nodes == nullptr)
+        {
+            return 0;
+        }
+        return static_cast<uint32_t>(nodes->size());
+    }
+
+    bool hasOnlySupportedAttributes(std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes>
+                                        supportedAttributes) const override
+    {
+        throwIfNotValid();
+
+        auto nodes = _shallowGraph->nodes();
+        if(nodes == nullptr)
+        {
+            return true; // No nodes means no unsupported attributes
+        }
+
+        return std::all_of(nodes->begin(), nodes->end(), [&](const auto node) {
+            return supportedAttributes.find(node->attributes_type()) != supportedAttributes.end();
+        });
+    }
+
+    const hipdnn_flatbuffers_sdk::data_objects::Node& getNode(uint32_t index) const override
+    {
+        throwIfNotValid();
+
+        auto nodes = _shallowGraph->nodes();
+        if(nodes == nullptr)
+        {
+            throw std::out_of_range("No nodes in graph");
+        }
+
+        if(index >= nodes->size())
+        {
+            throw std::out_of_range("Index out of range for graph nodes");
+        }
+
+        return *nodes->Get(index);
+    }
+
+    const INodeWrapper& getNodeWrapper(uint32_t index) const override
+    {
+        throwIfNotValid();
+
+        lazyInitNodeWrappers();
+
+        if(index >= _nodeWrappers.size())
+        {
+            throw std::out_of_range("Index out of range for graph nodes");
+        }
+        return *_nodeWrappers[index];
+    }
+
+    const std::vector<std::unique_ptr<INodeWrapper>>& nodeWrappers() const override
+    {
+        lazyInitNodeWrappers();
+
+        return _nodeWrappers;
+    }
+
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        getTensorMap() const override
+    {
+        throwIfNotValid();
+
+        if(!_tensorMap.empty())
+        {
+            return _tensorMap;
+        }
+
+        auto tensors = _shallowGraph->tensors();
+        if(tensors != nullptr)
+        {
+            for(const auto tensor : *tensors)
+            {
+                _tensorMap[tensor->uid()] = tensor;
+            }
+        }
+
+        return _tensorMap;
+    }
+
+private:
+    void throwIfNotValid() const
+    {
+        if(!isValid())
+        {
+            throw std::invalid_argument("Graph is not valid");
+        }
+    }
+
+    void lazyInitNodeWrappers() const
+    {
+        if(_nodeWrappers.empty())
+        {
+            auto nodes = _shallowGraph->nodes();
+            if(nodes == nullptr)
+            {
+                throw std::out_of_range("No nodes in graph");
+            }
+
+            _nodeWrappers.reserve(nodes->size());
+            for(const auto node : *nodes)
+            {
+                _nodeWrappers.push_back(std::make_unique<NodeWrapper>(node));
+            }
+        }
+    }
+
+    // Pointer to the flatbuffer representation of the graph. We do not own this memory
+    // as were just reading from the buffer passed during construction.
+    const hipdnn_flatbuffers_sdk::data_objects::Graph* _shallowGraph = nullptr;
+
+    // Non-owned view backing bytes(); see IGraph::bytes() for the contract.
+    SerializedBlobView _bytes;
+
+    //lazy init state;
+    mutable std::unordered_map<int64_t,
+                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        _tensorMap;
+
+    mutable std::vector<std::unique_ptr<INodeWrapper>> _nodeWrappers;
+};
+
+} // namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities

@@ -26,6 +26,7 @@
 #ifndef GUARD_TARGET_PROPERTIES_HPP
 #define GUARD_TARGET_PROPERTIES_HPP
 
+#include <miopen/config.hpp>
 #include <string>
 #include <tuple>
 #include <stdexcept>
@@ -168,6 +169,10 @@ class TargetProperties
     static const std::size_t MaxLocalMemorySize;
 
 public:
+    TargetProperties()                                   = default;
+    TargetProperties(const TargetProperties&)            = default;
+    TargetProperties& operator=(const TargetProperties&) = default;
+
     virtual ~TargetProperties() = default;
 
     TargetPropertyXnack xnack;
@@ -181,8 +186,17 @@ public:
     static std::size_t GetMaxWaveScratchSize() { return MaxWaveScratchSize; }
     static std::size_t GetMaxLocalMemorySize() { return MaxLocalMemorySize; }
 
-    void Init(const Handle*);
+    MIOPEN_INTERNALS_EXPORT void Init(const Handle*);
 };
+
+// gfx9 consumer APUs (gfx902/gfx909/gfx90c). The hand-written .s conv kernels have
+// never been validated on these parts; they also emit a fixed xnack-off code object
+// that these APUs' loader rejects, so such kernels cannot run there.
+inline bool IsGfx9ConsumerApu(const TargetProperties& target)
+{
+    const auto& name = target.Name();
+    return name == "gfx902" || name == "gfx909" || name == "gfx90c";
+}
 
 } // namespace miopen
 

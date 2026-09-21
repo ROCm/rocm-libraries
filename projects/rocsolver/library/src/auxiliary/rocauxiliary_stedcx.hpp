@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "auxiliary/rocauxiliary_stebz.hpp"
 #include "auxiliary/rocauxiliary_stein.hpp"
 #include "auxiliary/rocauxiliary_steqr.hpp"
@@ -36,7 +37,8 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define STEDCX_BDIM 512 // Number of threads per thread-block used in main stedc kernels
+#define STEDCX_BDIM \
+    ROCSOLVER_ASAN_VALUE(256, 512) // Number of threads per thread-block used in main stedc kernels
 
 // TODO: using macro STEDCX_EXTERNAL_GEMM = false for now. We can enable the use of
 // external gemm updates once the development is completed for stedc.

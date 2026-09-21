@@ -70,57 +70,41 @@ inline auto param_checkstride()
                 for(const auto& types :
                     generate_types(trans_type, {fft_placement_notinplace}, true))
                 {
-#ifdef WIN32
-                    for(bool callback : {false})
-#else
-                    for(bool callback : {true, false})
-#endif
+                    fft_params param;
+
+                    param.length               = std::get<0>(s);
+                    param.istride              = std::get<1>(s);
+                    param.ostride              = std::get<1>(s);
+                    param.nbatch               = std::get<2>(s);
+                    param.precision            = precision;
+                    param.idist                = std::get<3>(s);
+                    param.odist                = std::get<3>(s);
+                    param.transform_type       = std::get<0>(types);
+                    param.placement            = std::get<1>(types);
+                    param.itype                = std::get<2>(types);
+                    param.otype                = std::get<3>(types);
+                    param.check_output_strides = true;
+
+                    param.validate();
+
+                    const double roll = hash_prob(random_seed, param.token());
+                    const double run_prob
+                        = test_prob * (param.is_planar() ? complex_planar_prob_factor : 1.0)
+                          * (param.is_interleaved() ? complex_interleaved_prob_factor : 1.0)
+                          * (param.is_real() ? real_prob_factor : 1.0);
+
+                    if(roll > run_prob)
                     {
-                        // callbacks don't work for planar
-                        bool is_planar = std::get<2>(types) == fft_array_type_complex_planar
-                                         || std::get<2>(types) == fft_array_type_hermitian_planar
-                                         || std::get<3>(types) == fft_array_type_complex_planar
-                                         || std::get<3>(types) == fft_array_type_hermitian_planar;
-                        if(callback && is_planar)
-                            continue;
-
-                        fft_params param;
-
-                        param.length               = std::get<0>(s);
-                        param.istride              = std::get<1>(s);
-                        param.ostride              = std::get<1>(s);
-                        param.nbatch               = std::get<2>(s);
-                        param.precision            = precision;
-                        param.idist                = std::get<3>(s);
-                        param.odist                = std::get<3>(s);
-                        param.transform_type       = std::get<0>(types);
-                        param.placement            = std::get<1>(types);
-                        param.itype                = std::get<2>(types);
-                        param.otype                = std::get<3>(types);
-                        param.run_callbacks        = callback;
-                        param.check_output_strides = true;
-
-                        param.validate();
-
-                        const double roll = hash_prob(random_seed, param.token());
-                        const double run_prob
-                            = test_prob * (param.is_planar() ? complex_planar_prob_factor : 1.0)
-                              * (param.is_interleaved() ? complex_interleaved_prob_factor : 1.0)
-                              * (param.is_real() ? real_prob_factor : 1.0);
-
-                        if(roll > run_prob)
+                        if(verbose > 4)
                         {
-                            if(verbose > 4)
-                            {
-                                std::cout << "Test skipped (probability " << run_prob << " > "
-                                          << roll << ")\n";
-                            }
-                            continue;
+                            std::cout << "Test skipped (probability " << run_prob << " > " << roll
+                                      << ")\n";
                         }
-                        if(param.valid(0))
-                        {
-                            params.push_back(param);
-                        }
+                        continue;
+                    }
+                    if(param.valid(0))
+                    {
+                        params.push_back(param);
                     }
                 }
             }

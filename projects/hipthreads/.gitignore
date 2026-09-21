@@ -1,0 +1,74 @@
+build/bin
+build/lib
+build/test
+build/.cmake
+__pycache__/
+
+test/temp.cxx
+
+# Most of this is taken from https://github.com/github/gitignore
+
+# CMake files
+MakeLists.txt.user
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+hipthreadsConfig.cmake
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Visual Studio cache files
+# files ending in .cache can be ignored
+*.[Cc]ache
+# but keep track of directories ending in .cache
+!?*.[Cc]ache/
+
+# VS Code files for those working on multiple tools
+.vscode/*
+#!.vscode/settings.json
+#!.vscode/tasks.json
+#!.vscode/launch.json
+#!.vscode/extensions.json
+*.code-workspace
+
+# Local History for Visual Studio Code
+.history/

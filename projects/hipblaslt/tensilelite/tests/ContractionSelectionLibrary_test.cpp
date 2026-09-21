@@ -33,6 +33,8 @@
 #include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Distance.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
+#include <thread>
+#include <vector>
 
 using namespace TensileLite;
 
@@ -217,4 +219,43 @@ TEST(ContractionSelectionLibraryTest, TransposeSelection)
     MasterContractionLibrary mlib;
     mlib.solutions = map;
     mlib.library   = lib;
+}
+
+TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
+{
+    std::shared_ptr<Hardware> hardware = std::make_shared<AMDGPU>(
+        AMDGPU::Processor::gfx900, 64, "AMD Radeon Vega Frontier Edition");
+    auto problem = std::make_shared<ContractionProblemGemm>();
+
+    auto selectedSolution = std::make_shared<ContractionSolution>();
+    auto fallbackSolution = std::make_shared<ContractionSolution>();
+
+    std::shared_ptr<ContractionLibrary> selectedLibrary
+        = std::make_shared<SingleContractionLibrary>(selectedSolution);
+    std::shared_ptr<ContractionLibrary> fallbackLibrary
+        = std::make_shared<SingleContractionLibrary>(fallbackSolution);
+
+    HardwarePredicate firstMatch(std::make_shared<Predicates::True<Hardware>>());
+    HardwarePredicate secondMatch(std::make_shared<Predicates::True<Hardware>>());
+
+    ContractionHardwareSelectionLibrary::Row selectedRow(firstMatch, selectedLibrary);
+    ContractionHardwareSelectionLibrary::Row fallbackRow(secondMatch, fallbackLibrary);
+    ContractionHardwareSelectionLibrary      lib({selectedRow, fallbackRow});
+
+    constexpr int numThreads          = 16;
+    constexpr int iterationsPerThread = 2000;
+
+    std::vector<std::thread> workers;
+    workers.reserve(numThreads);
+
+    for(int i = 0; i < numThreads; i++)
+    {
+        workers.emplace_back([&]() {
+            for(int j = 0; j < iterationsPerThread; j++)
+                EXPECT_EQ(lib.findBestSolution(*problem, *hardware), selectedSolution);
+        });
+    }
+
+    for(auto& worker : workers)
+        worker.join();
 }

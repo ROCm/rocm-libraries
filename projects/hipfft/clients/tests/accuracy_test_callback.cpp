@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -101,38 +101,39 @@ const static std::vector<std::vector<size_t>> ooffset_range_zero = {{0, 0}};
 const static std::vector<std::vector<size_t>> ioffset_range = {{0, 0}, {1, 1}};
 const static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
 
+// It's hard to imagine callbacks breaking specifically on batch-1,
+// so just test batch > 1
+const static std::vector<size_t> callback_batch_range = {2};
+
 auto transform_types = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
 #ifdef __HIP__
-INSTANTIATE_TEST_SUITE_P(
-#ifdef WIN32
-    DISABLED_callback_no_offset,
-#else
-    callback,
-#endif
-    accuracy_test,
-    ::testing::ValuesIn(param_generator_base(test_prob,
-                                             transform_types,
-                                             callback_sizes,
-                                             precision_range_sp_dp,
-                                             batch_range,
-                                             generate_types,
-                                             stride_range,
-                                             stride_range,
-                                             ioffset_range_zero,
-                                             ooffset_range_zero,
-                                             place_range,
-                                             false,
-                                             true)),
-    accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(callback_no_offset,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_base(test_prob,
+                                                                  transform_types,
+                                                                  callback_sizes,
+                                                                  precision_range_sp_dp,
+                                                                  callback_batch_range,
+                                                                  generate_types,
+                                                                  stride_range,
+                                                                  stride_range,
+                                                                  ioffset_range_zero,
+                                                                  ooffset_range_zero,
+                                                                  place_range,
+                                                                  false,
+                                                                  callbacks_full)),
+                         accuracy_test::TestName);
 
+// function pointer callbacks need -fgpu-rdc, but that causes build
+// nondeterminism in kpack
 INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,
                                                                   transform_types,
                                                                   callback_sizes,
                                                                   precision_range_sp_dp,
-                                                                  batch_range,
+                                                                  callback_batch_range,
                                                                   generate_types,
                                                                   stride_range,
                                                                   stride_range,
@@ -140,7 +141,7 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                                                                   ooffset_range,
                                                                   place_range,
                                                                   false,
-                                                                  true)),
+                                                                  callbacks_full)),
                          accuracy_test::TestName);
 #endif
 
@@ -152,7 +153,7 @@ inline auto param_generator_scaling(const std::vector<std::vector<size_t>>& v_le
     auto params = param_generator(test_prob,
                                   callback_sizes,
                                   precision_range_sp_dp,
-                                  batch_range,
+                                  callback_batch_range,
                                   stride_range,
                                   stride_range,
                                   ioffset_range_zero,

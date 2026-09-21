@@ -60,7 +60,7 @@ private:
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams& /*tp*/)
     {
         os << "none";
         return os;
@@ -79,7 +79,7 @@ public:
     void RunTest()
     {
         const std::string_view name = MIOPEN_DEBUG_UNKNOWN_ENVIRONMENT_VARIABLE.name;
-        [[gnu::used]] std::optional<std::string> value;
+        std::optional<std::string> value;
         ASSERT_THROW(value = miopen::debug::env::GetEnvVariable(name), miopen::Exception);
     }
 };

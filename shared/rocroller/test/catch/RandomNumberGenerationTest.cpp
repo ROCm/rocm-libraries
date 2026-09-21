@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
@@ -35,9 +12,7 @@
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include "CustomMatchers.hpp"
-#include "CustomSections.hpp"
 #include "TestContext.hpp"
-#include "TestKernels.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -102,14 +77,12 @@ namespace RandomNumberGenerationTest
             std::vector<uint32_t> A(nx, 0u);
             auto                  d_A = make_shared_device(A);
             commandArgs.setArgument(tagA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagA, ArgumentType::Limit, nx);
             commandArgs.setArgument(tagA, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(tagA, ArgumentType::Stride, 0, (size_t)1);
 
             std::vector<uint32_t> output(nx, 0u);
             auto                  d_output = make_shared_device(output);
             commandArgs.setArgument(outputTag, ArgumentType::Value, d_output.get());
-            commandArgs.setArgument(outputTag, ArgumentType::Limit, nx);
             commandArgs.setArgument(outputTag, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(outputTag, ArgumentType::Stride, 0, (size_t)1);
 
@@ -197,7 +170,6 @@ namespace RandomNumberGenerationTest
             for(auto tag : inputTags)
             {
                 commandArgs.setArgument(tag, ArgumentType::Value, d_A.get());
-                commandArgs.setArgument(tag, ArgumentType::Limit, nx);
                 commandArgs.setArgument(tag, ArgumentType::Size, 0, nx);
                 commandArgs.setArgument(tag, ArgumentType::Stride, 0, (size_t)1);
             }
@@ -207,7 +179,6 @@ namespace RandomNumberGenerationTest
             {
                 auto d_output = make_shared_device<uint32_t>(nx, 0);
                 commandArgs.setArgument(outputTags[i], ArgumentType::Value, d_output.get());
-                commandArgs.setArgument(outputTags[i], ArgumentType::Limit, nx);
                 commandArgs.setArgument(outputTags[i], ArgumentType::Size, 0, nx);
                 commandArgs.setArgument(outputTags[i], ArgumentType::Stride, 0, (size_t)1);
                 d_outputs.push_back(d_output);
@@ -296,7 +267,8 @@ namespace RandomNumberGenerationTest
 
             CommandKernel commandKernel(command, context->kernel()->kernelName());
             commandKernel.setContext(context.get());
-            commandKernel.generateKernel();
+            REQUIRE_NOTHROW(commandKernel.generateKernel());
+            REQUIRE_NOTHROW(commandKernel.assembleKernel());
 
             CommandArguments commandArgs = command->createArguments();
 
@@ -306,21 +278,18 @@ namespace RandomNumberGenerationTest
             std::vector<uint32_t> A(nx, 0u);
             auto                  d_A = make_shared_device(A);
             commandArgs.setArgument(tagA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagA, ArgumentType::Limit, nx);
             commandArgs.setArgument(tagA, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(tagA, ArgumentType::Stride, 0, (size_t)1);
 
             std::vector<uint32_t> output1(nx, 0u);
             auto                  d_output1 = make_shared_device(output1);
             commandArgs.setArgument(outputTag1, ArgumentType::Value, d_output1.get());
-            commandArgs.setArgument(outputTag1, ArgumentType::Limit, nx);
             commandArgs.setArgument(outputTag1, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(outputTag1, ArgumentType::Stride, 0, (size_t)1);
 
             std::vector<uint32_t> output2(nx, 0u);
             auto                  d_output2 = make_shared_device(output2);
             commandArgs.setArgument(outputTag2, ArgumentType::Value, d_output2.get());
-            commandArgs.setArgument(outputTag2, ArgumentType::Limit, nx);
             commandArgs.setArgument(outputTag2, ArgumentType::Size, 0, nx);
             commandArgs.setArgument(outputTag2, ArgumentType::Stride, 0, (size_t)1);
 
@@ -412,8 +381,8 @@ namespace RandomNumberGenerationTest
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
-            auto macTile
-                = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+            auto macTile = KernelGraph::CoordinateGraph::MacroTile(
+                {m, n}, LayoutType::ROW_MAJOR, {t_m, t_n}, MemoryType::VGPR);
             params->setDimensionInfo(tagLoadA, macTile);
             params->setDimensionInfo(outputTag, macTile);
 

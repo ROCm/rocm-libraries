@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # rocThrust header-only library
@@ -20,10 +20,17 @@ target_include_directories(rocthrust
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
   target_link_libraries(rocthrust
     INTERFACE
     roc::rocprim_hip
+  )
+endif()
+
+if(ROCTHRUST_USE_LIBHIPCXX AND TARGET libhipcxx::libhipcxx)
+  target_link_libraries(rocthrust
+    INTERFACE
+    libhipcxx::libhipcxx
   )
 endif()
 
@@ -58,17 +65,15 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-include(ROCMExportTargetsHeaderOnly)
-
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
   # Export targets
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS roc::rocthrust
     DEPENDS PACKAGE rocprim
     NAMESPACE roc::
   )
 else()
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS roc::rocthrust
     NAMESPACE roc::
   )

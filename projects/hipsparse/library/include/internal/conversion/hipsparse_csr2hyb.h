@@ -30,7 +30,7 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse HYB matrix
+*  \brief Convert a sparse CSR matrix into a sparse HYB matrix.
 *
 *  \details
 *  \p hipsparseXcsr2hyb converts a CSR matrix into a HYB matrix. It is assumed
@@ -41,19 +41,19 @@ extern "C" {
 *  depending on the matrix structure.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
 *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle            handle to the hipsparse library context queue.
+*  handle            handle to the hipSPARSE library context queue.
 *  @param[in]
-*  m                 number of rows of the sparse CSR matrix. Must be non-negative.
+*  m                 number of rows of the sparse CSR matrix, which must be non-negative.
 *  @param[in]
-*  n                 number of columns of the sparse CSR matrix. Must be non-negative.
+*  n                 number of columns of the sparse CSR matrix, which must be non-negative.
 *  @param[in]
 *  descrA            descriptor of the sparse CSR matrix. Currently, only
 *                    \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -71,13 +71,13 @@ extern "C" {
 *                    \p partitionType == \ref HIPSPARSE_HYB_PARTITION_USER). Must be non-negative.
 *  @param[in]
 *  partitionType     \ref HIPSPARSE_HYB_PARTITION_AUTO (recommended),
-*                    \ref HIPSPARSE_HYB_PARTITION_USER or
+*                    \ref HIPSPARSE_HYB_PARTITION_USER, or
 *                    \ref HIPSPARSE_HYB_PARTITION_MAX.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p hybA, \p csrSortedValA,
-*          \p csrSortedRowPtrA or \p csrSortedColIndA is nullptr, \p m or \p n is negative, or
+*          \p csrSortedRowPtrA, or \p csrSortedColIndA is nullptr, \p m or \p n is negative, or
 *          \p userEllWidth or \p partitionType is invalid.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.

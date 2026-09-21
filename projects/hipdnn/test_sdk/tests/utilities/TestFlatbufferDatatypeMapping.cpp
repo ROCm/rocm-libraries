@@ -7,14 +7,15 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 
 // Compile-time checks for DataType to Native type mapping
 static_assert(std::is_same_v<DataTypeToNative<DataType::FLOAT>, float>);
 static_assert(std::is_same_v<DataTypeToNative<DataType::HALF>, half>);
 static_assert(std::is_same_v<DataTypeToNative<DataType::DOUBLE>, double>);
 static_assert(std::is_same_v<DataTypeToNative<DataType::INT32>, int32_t>);
-static_assert(std::is_same_v<DataTypeToNative<DataType::BFLOAT16>, hip_bfloat16>);
+static_assert(std::is_same_v<DataTypeToNative<DataType::BFLOAT16>, bfloat16>);
+static_assert(std::is_same_v<DataTypeToNative<DataType::BOOLEAN>, bool>);
 
 // Compile-time checks for Native type to DataType mapping
 // NativeToDataType is a type alias, but we can use nativeTypeToDataType in constexpr context
@@ -22,7 +23,8 @@ static_assert(nativeTypeToDataType<float>() == DataType::FLOAT);
 static_assert(nativeTypeToDataType<half>() == DataType::HALF);
 static_assert(nativeTypeToDataType<double>() == DataType::DOUBLE);
 static_assert(nativeTypeToDataType<int32_t>() == DataType::INT32);
-static_assert(nativeTypeToDataType<hip_bfloat16>() == DataType::BFLOAT16);
+static_assert(nativeTypeToDataType<bfloat16>() == DataType::BFLOAT16);
+static_assert(nativeTypeToDataType<bool>() == DataType::BOOLEAN);
 
 TEST(TestFlatbufferDatatypeMapping, DataTypeToNativeRuntimeSizeChecks)
 {
@@ -30,7 +32,8 @@ TEST(TestFlatbufferDatatypeMapping, DataTypeToNativeRuntimeSizeChecks)
     EXPECT_EQ(sizeof(DataTypeToNative<DataType::HALF>), sizeof(half));
     EXPECT_EQ(sizeof(DataTypeToNative<DataType::DOUBLE>), sizeof(double));
     EXPECT_EQ(sizeof(DataTypeToNative<DataType::INT32>), sizeof(int32_t));
-    EXPECT_EQ(sizeof(DataTypeToNative<DataType::BFLOAT16>), sizeof(hip_bfloat16));
+    EXPECT_EQ(sizeof(DataTypeToNative<DataType::BFLOAT16>), sizeof(bfloat16));
+    EXPECT_EQ(sizeof(DataTypeToNative<DataType::BOOLEAN>), sizeof(bool));
 }
 
 TEST(TestFlatbufferDatatypeMapping, NativeToDataTypeConversion)
@@ -40,7 +43,8 @@ TEST(TestFlatbufferDatatypeMapping, NativeToDataTypeConversion)
     constexpr auto HALF_TYPE = nativeTypeToDataType<half>();
     constexpr auto DOUBLE_TYPE = nativeTypeToDataType<double>();
     constexpr auto INT_TYPE = nativeTypeToDataType<int32_t>();
-    constexpr auto BFLOAT16_TYPE = nativeTypeToDataType<hip_bfloat16>();
+    constexpr auto BFLOAT16_TYPE = nativeTypeToDataType<bfloat16>();
+    constexpr auto BOOLEAN_TYPE = nativeTypeToDataType<bool>();
 
     // Test that the reverse mapping produces correct DataType values
     EXPECT_EQ(FLOAT_TYPE, DataType::FLOAT);
@@ -48,13 +52,15 @@ TEST(TestFlatbufferDatatypeMapping, NativeToDataTypeConversion)
     EXPECT_EQ(DOUBLE_TYPE, DataType::DOUBLE);
     EXPECT_EQ(INT_TYPE, DataType::INT32);
     EXPECT_EQ(BFLOAT16_TYPE, DataType::BFLOAT16);
+    EXPECT_EQ(BOOLEAN_TYPE, DataType::BOOLEAN);
 
     // Verify NativeToDataType alias resolves to the correct type
     static_assert(std::is_same_v<NativeToDataType<float>, DataType>);
     static_assert(std::is_same_v<NativeToDataType<half>, DataType>);
     static_assert(std::is_same_v<NativeToDataType<double>, DataType>);
     static_assert(std::is_same_v<NativeToDataType<int32_t>, DataType>);
-    static_assert(std::is_same_v<NativeToDataType<hip_bfloat16>, DataType>);
+    static_assert(std::is_same_v<NativeToDataType<bfloat16>, DataType>);
+    static_assert(std::is_same_v<NativeToDataType<bool>, DataType>);
 }
 
 TEST(TestFlatbufferDatatypeMapping, BidirectionalConsistency)
@@ -79,6 +85,16 @@ TEST(TestFlatbufferDatatypeMapping, BidirectionalConsistency)
     constexpr auto BFLOAT16_TYPE = nativeTypeToDataType<DataTypeToNative<DataType::BFLOAT16>>();
     static_assert(BFLOAT16_TYPE == DataType::BFLOAT16);
     EXPECT_EQ(BFLOAT16_TYPE, DataType::BFLOAT16);
+
+    constexpr auto BOOLEAN_TYPE = nativeTypeToDataType<DataTypeToNative<DataType::BOOLEAN>>();
+    static_assert(BOOLEAN_TYPE == DataType::BOOLEAN);
+    EXPECT_EQ(BOOLEAN_TYPE, DataType::BOOLEAN);
+}
+TEST(TestFlatbufferDatatypeMapping, BooleanRuntimeVariant)
+{
+    const auto value = datatypeToNativeVariant(DataType::BOOLEAN);
+    ASSERT_TRUE(std::holds_alternative<bool>(value));
+    EXPECT_FALSE(std::get<bool>(value));
 }
 
 TEST(TestFlatbufferDatatypeMapping, QualifierPropagation)
@@ -108,5 +124,5 @@ TEST(TestFlatbufferDatatypeMapping, TypeIdentity)
     EXPECT_EQ(typeid(HalfResult), typeid(half));
     EXPECT_EQ(typeid(DoubleResult), typeid(double));
     EXPECT_EQ(typeid(Int32Result), typeid(int32_t));
-    EXPECT_EQ(typeid(Bfloat16Result), typeid(hip_bfloat16));
+    EXPECT_EQ(typeid(Bfloat16Result), typeid(bfloat16));
 }

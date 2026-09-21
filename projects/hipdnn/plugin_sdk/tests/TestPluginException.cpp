@@ -9,7 +9,7 @@ using namespace hipdnn_plugin_sdk;
 
 TEST(TestPluginException, WhatReturnsMessage)
 {
-    HipdnnPluginException ex(HIPDNN_PLUGIN_STATUS_BAD_PARAM, "bad param");
+    const HipdnnPluginException ex(HIPDNN_PLUGIN_STATUS_BAD_PARAM, "bad param");
     EXPECT_STREQ(ex.what(), "bad param");
     EXPECT_EQ(ex.getMessage(), std::string("bad param"));
     EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);

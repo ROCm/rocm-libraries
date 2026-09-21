@@ -55,7 +55,13 @@ public:
     || defined(__SPIRV__)
         bool constexpr bndCtrl = false;
 #else
+    // Temporary fix: issue with dpp bound_ctrl for debug build. Compiler will not define macros
+    // like __GFX10__ and so on.
+    #if defined(NDEBUG) || !defined(_DEBUG)
         bool constexpr bndCtrl = true;
+    #else
+        bool constexpr bndCtrl = false;
+    #endif
 #endif
 
         if(VirtualWaveSize > 1)
@@ -85,7 +91,7 @@ public:
 
         // Check for __builtin_amdgcn_permlane16; if it exists, the DPP equivalent is not available.
         // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
-        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
+        if(ROCPRIM_HAS_PERMLANE())
         {
             if(VirtualWaveSize > 16)
             {
@@ -93,21 +99,11 @@ public:
                 output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
             }
 
-#if !ROCPRIM_TARGET_SPIRV
-            if constexpr(!ROCPRIM_IS_GENERIC())
+            if constexpr(VirtualWaveSize > 32)
             {
-                static_assert(VirtualWaveSize <= 32,
-                              "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-            }
-            else
-#endif
-            {
-                if constexpr(VirtualWaveSize > 32)
-                {
-                    ROCPRIM_PRINT_ERROR_ONCE(
-                        "VirtualWaveSize > 32 is not supported without DPP broadcasts");
-                    return;
-                }
+                ROCPRIM_PRINT_ERROR_ONCE(
+                    "VirtualWaveSize > 32 is not supported without DPP broadcasts");
+                return;
             }
         }
         else

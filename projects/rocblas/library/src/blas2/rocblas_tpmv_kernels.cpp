@@ -196,10 +196,8 @@ rocblas_tpmvn_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         rocblas_tpmvn_kernel_calc<NB>(is_upper,
                                       is_unit_diag,
                                       n,
@@ -207,10 +205,7 @@ rocblas_tpmvn_kernel(bool           is_upper,
                                       load_ptr_batch(x, batch, shift_x, stride_x),
                                       incx,
                                       load_ptr_batch(workspace, batch, shift_w, stride_w));
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <rocblas_int NB, typename TConstPtr, typename TPtr, typename TWork>
@@ -233,10 +228,8 @@ rocblas_tpmvt_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         rocblas_tpmvt_kernel_calc<NB>(is_upper,
                                       is_unit_diag,
@@ -245,9 +238,7 @@ rocblas_tpmvt_kernel(bool           is_upper,
                                       load_ptr_batch(x, batch, shift_x, stride_x),
                                       incx,
                                       load_ptr_batch(workspace, batch, shift_w, stride_w));
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <rocblas_int NB, typename TConstPtr, typename TPtr, typename TWork>
@@ -270,10 +261,8 @@ rocblas_tpmvc_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         rocblas_tpmvc_kernel_calc<NB>(is_upper,
                                       is_unit_diag,
                                       n,
@@ -281,9 +270,7 @@ rocblas_tpmvc_kernel(bool           is_upper,
                                       load_ptr_batch(x, batch, shift_x, stride_x),
                                       incx,
                                       load_ptr_batch(workspace, batch, shift_w, stride_w));
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 #undef tmpv_calc_upperat

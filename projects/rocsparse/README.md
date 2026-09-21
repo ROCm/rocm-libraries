@@ -1,7 +1,7 @@
 # rocSPARSE
 
 rocSPARSE exposes a common interface that provides Basic Linear Algebra Subroutines (BLAS) for
-sparse computation. It's implemented on top of AMD
+sparse computation. It is implemented on top of AMD
 [ROCm](https://github.com/ROCm/ROCm) runtime and toolchains. rocSPARSE is
 created using the [HIP](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip) programming
 language and optimized for AMD's latest discrete GPUs.

@@ -6,8 +6,10 @@
 #include "CallbackTypes.h"
 #include <hipdnn_data_sdk/Visibility.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 #include <atomic>
+#include <optional>
 #include <string>
 
 namespace hipdnn_data_sdk::logging
@@ -29,25 +31,53 @@ HIPDNN_HIDDEN inline std::atomic<bool>& getLogLevelInitialized()
     return s_initialized;
 }
 
-inline hipdnnSeverity_t stringToSeverity(const std::string& level)
+/**
+ * @brief Convert a log level string to severity enum
+ *
+ * Valid levels are: "off", "info", "warn", "error", "fatal" (case-insensitive, whitespace-tolerant)
+ *
+ * @param level The log level string to convert
+ * @return The severity enum if valid, std::nullopt if the string is not a valid log level
+ */
+inline std::optional<hipdnnSeverity_t> stringToSeverity(const std::string& level)
 {
-    if(level == "info")
+    // Normalize input: trim whitespace and convert to lowercase
+    const std::string normalized = utilities::toLower(utilities::trim(level));
+
+    if(normalized == "off")
+    {
+        return HIPDNN_SEV_OFF;
+    }
+    if(normalized == "info")
     {
         return HIPDNN_SEV_INFO;
     }
-    if(level == "warn")
+    if(normalized == "warn")
     {
         return HIPDNN_SEV_WARN;
     }
-    if(level == "error")
+    if(normalized == "error")
     {
         return HIPDNN_SEV_ERROR;
     }
-    if(level == "fatal")
+    if(normalized == "fatal")
     {
         return HIPDNN_SEV_FATAL;
     }
-    return HIPDNN_SEV_OFF;
+    return std::nullopt;
+}
+
+/**
+ * @brief Convert a log level string to severity enum, defaulting to OFF for invalid input
+ *
+ * This is a convenience wrapper around stringToSeverity() that treats invalid input as OFF.
+ *
+ * @param level The log level string to convert
+ * @return The severity enum, or HIPDNN_SEV_OFF if the string is not a valid log level
+ */
+inline hipdnnSeverity_t stringToSeverityOrOff(const std::string& level)
+{
+    return stringToSeverity(level).value_or(HIPDNN_SEV_OFF);
 }
 
 } // namespace detail
@@ -59,13 +89,21 @@ inline hipdnnSeverity_t stringToSeverity(const std::string& level)
  */
 inline void initializeLogLevel()
 {
-    if(detail::getLogLevelInitialized().exchange(true))
+    // Multiple threads may execute this concurrently. The initialized flag is set after
+    // the cache has been initialized. Consequently, depending on timing, multiple threads
+    // may see initialzied=false and proceed to read the value from getEnv() (which is reentrant)
+    // and set the cache value (to the same value) before initialized is set to true. This
+    // is considered an acceptable trade-off to avoid the overhead of having a mutex to guard
+    // the log level cache initialization.
+    if(detail::getLogLevelInitialized().load(std::memory_order_acquire))
     {
         return; // Already initialized
     }
 
-    std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
-    detail::getLogLevelCache().store(detail::stringToSeverity(logLevel), std::memory_order_relaxed);
+    const std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+    detail::getLogLevelCache().store(detail::stringToSeverityOrOff(logLevel),
+                                     std::memory_order_release);
+    detail::getLogLevelInitialized().store(true, std::memory_order_release);
 }
 
 /**
@@ -75,8 +113,8 @@ inline void initializeLogLevel()
  */
 inline void setLogLevel(hipdnnSeverity_t level)
 {
-    detail::getLogLevelCache().store(level, std::memory_order_relaxed);
-    detail::getLogLevelInitialized().store(true, std::memory_order_relaxed);
+    detail::getLogLevelCache().store(level, std::memory_order_release);
+    detail::getLogLevelInitialized().store(true, std::memory_order_release);
 }
 
 /**
@@ -86,11 +124,11 @@ inline void setLogLevel(hipdnnSeverity_t level)
  */
 inline hipdnnSeverity_t getLogLevel()
 {
-    if(!detail::getLogLevelInitialized().load(std::memory_order_relaxed))
+    if(!detail::getLogLevelInitialized().load(std::memory_order_acquire))
     {
         initializeLogLevel();
     }
-    return detail::getLogLevelCache().load(std::memory_order_relaxed);
+    return detail::getLogLevelCache().load(std::memory_order_acquire);
 }
 
 /**
@@ -101,7 +139,7 @@ inline hipdnnSeverity_t getLogLevel()
  */
 inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
 {
-    hipdnnSeverity_t currentLevel = getLogLevel();
+    const hipdnnSeverity_t currentLevel = getLogLevel();
     if(currentLevel == HIPDNN_SEV_OFF)
     {
         return false;
@@ -112,22 +150,19 @@ inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
 }
 
 /**
- * @brief Enable or disable logging globally
+ * @brief Reset logging state
  *
- * @param enabled If true, sets log level to INFO; if false, sets to OFF
+ * This resets the log level initialization flag, causing the next getLogLevel()
+ * call to re-read from the environment variable.
+ *
+ * @note This will effectively erase any log level that may have been set
+ * using setLogLevel() since the log level was first initialized, and the system will
+ * revert to the value set in the environment unless another call to setLogLevel()
+ * is made after calling this function.
  */
-inline void setLoggingEnabled(bool enabled)
+inline void resetLogLevelCache()
 {
-    setLogLevel(enabled ? HIPDNN_SEV_INFO : HIPDNN_SEV_OFF);
-}
-
-/**
- * @brief Reset logging state (for testing purposes)
- */
-inline void resetLogging()
-{
-    detail::getLogLevelInitialized().store(false, std::memory_order_relaxed);
-    detail::getLogLevelCache().store(HIPDNN_SEV_OFF, std::memory_order_relaxed);
+    detail::getLogLevelInitialized().store(false, std::memory_order_release);
 }
 
 } // namespace hipdnn_data_sdk::logging

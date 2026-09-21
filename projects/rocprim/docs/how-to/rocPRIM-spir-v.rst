@@ -10,31 +10,19 @@ Using SPIR-V with rocPRIM
 
 rocPRIM supports building with target-agnostic SPIR-V.
 
-.. note::
-
-    SPIR-V is in an early access state. Using it in production is not recommended.
-
-To build with SPIR-V, set the ``ROCPRIM_EXPERIMENTAL_SPIRV`` parameter to any non-zero value, and set ``--offload-arch`` to ``amdgcnspirv``.
+To build with SPIR-V, set ``--offload-arch`` to ``amdgcnspirv``.
 
 For example, with hipcc:
 
 .. code:: shell
 
-    hipcc -DROCPRIM_EXPERIMENTAL_SPIRV=1 --offload-arch=amdgcnspirv
+    hipcc --offload-arch=amdgcnspirv
 
 For example, with cmake:
 
 .. code:: shell
 
-    cmake -DCMAKE_CXX_FLAGS="-DROCPRIM_EXPERIMENTAL_SPIRV=1 --offload-arch=amdgcnspirv"
-
-
-.. note::
-
-    rocPRIM does not support mixed compilation targets. No other target can be set when ``--offload-arch=amdgcnspirv`` is used.
-    
-    Setting ``ROCPRIM_EXPERIMENTAL_SPIRV`` will disable all config dispatching.
-
+    cmake --offload-arch=amdgcnspirv"
 
 When targeting SPIR-V, the hardware wavefront size (also known as warp size) is not known
 at compile time. 
@@ -96,11 +84,11 @@ The wavefront size can be found using ``rocprim::arch::wavefront::get_target()``
         }
     };
 
-    .. note::
+.. note::
     
-        Developers who are modifying the rocPRIM code base can use ``rocprim::detail::dispatch_wave_size``. This function also manages exposed ``storage_type``- types to handle and map shared memory. Variadic templates are used to capture all signatures for a given member function.
+    Developers who are modifying the rocPRIM code base can use ``rocprim::detail::dispatch_wave_size``. This function also manages exposed ``storage_type``- types to handle and map shared memory. Variadic templates are used to capture all signatures for a given member function.
 
-        Developers who are only intending to use the rocPRIM library should not use ``dispatch_wave_size``.
+    Developers who are only intending to use the rocPRIM library should not use ``dispatch_wave_size``.
 
 
 ``rocprim::arch::wavefront::get_target()`` will resolve to ``target::dynamic`` and be handled through  partial specialization. A downside of this implementation is that more shared memory is allocated than is used. 

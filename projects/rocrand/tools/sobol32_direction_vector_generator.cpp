@@ -62,8 +62,18 @@ int main(int argc, char const* argv[])
     const std::filesystem::path binary_path(argv[4]);
 
     std::ofstream header_out(header_path, std::ios_base::out | std::ios_base::trunc);
+    if(!header_out)
+    {
+        std::cerr << "Error: could not open header output file: " << header_path << std::endl;
+        return -1;
+    }
     std::ofstream binary_out(binary_path,
                              std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+    if(!binary_out)
+    {
+        std::cerr << "Error: could not open binary output file: " << binary_path << std::endl;
+        return -1;
+    }
 
     rocrand_tools::write_preamble(header_out, "sobol32_direction_vector_generator")
         << "#ifndef ROCRAND_SOBOL32_PRECOMPUTED_H_\n"
@@ -82,6 +92,11 @@ int main(int argc, char const* argv[])
 
     binary_out.write(reinterpret_cast<const char*>(directions_32.data()),
                      rocrand_tools::SOBOL32_N * sizeof(directions_32[0]));
+    if(!binary_out)
+    {
+        std::cerr << "Error: could not write binary output file: " << binary_path << std::endl;
+        return -1;
+    }
 
     return 0;
 }

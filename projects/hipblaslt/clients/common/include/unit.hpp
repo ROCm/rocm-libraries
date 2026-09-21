@@ -243,25 +243,25 @@ inline void unit_check_general(int64_t                   M,
 }
 
 template <>
-inline void unit_check_general(int64_t                 M,
-                               int64_t                 N,
-                               int64_t                 lda,
-                               int64_t                 strideA,
+inline void unit_check_general(int64_t             M,
+                               int64_t             N,
+                               int64_t             lda,
+                               int64_t             strideA,
                                const hipblaslt_f8* hCPU,
                                const hipblaslt_f8* hGPU,
-                               int64_t                 batch_count)
+                               int64_t             batch_count)
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
 }
 
 template <>
-inline void unit_check_general(int64_t                  M,
-                               int64_t                  N,
-                               int64_t                  lda,
-                               int64_t                  strideA,
+inline void unit_check_general(int64_t              M,
+                               int64_t              N,
+                               int64_t              lda,
+                               int64_t              strideA,
                                const hipblaslt_bf8* hCPU,
                                const hipblaslt_bf8* hGPU,
-                               int64_t                  batch_count)
+                               int64_t              batch_count)
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
@@ -520,6 +520,32 @@ inline void unit_check_general(int64_t             M,
     UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_DOUBLE_EQ);
 }
 
+// Specialization for std::complex<float>
+template <>
+inline void unit_check_general(int64_t                    M,
+                               int64_t                    N,
+                               int64_t                    lda,
+                               int64_t                    strideA,
+                               const std::complex<float>* hCPU,
+                               const std::complex<float>* hGPU,
+                               int64_t                    batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_FLOAT_COMPLEX_EQ);
+}
+
+// Specialization for std::complex<double>
+template <>
+inline void unit_check_general(int64_t                     M,
+                               int64_t                     N,
+                               int64_t                     lda,
+                               int64_t                     strideA,
+                               const std::complex<double>* hCPU,
+                               const std::complex<double>* hGPU,
+                               int64_t                     batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_DOUBLE_COMPLEX_EQ);
+}
+
 template <typename T>
 constexpr double get_epsilon()
 {
@@ -575,6 +601,24 @@ inline void unit_check_general(int64_t     M,
                            strideA,
                            static_cast<double*>(hCPU),
                            static_cast<double*>(hGPU),
+                           batch_count);
+        break;
+    case HIP_C_32F:
+        unit_check_general(M,
+                           N,
+                           lda,
+                           strideA,
+                           static_cast<std::complex<float>*>(hCPU),
+                           static_cast<std::complex<float>*>(hGPU),
+                           batch_count);
+        break;
+    case HIP_C_64F:
+        unit_check_general(M,
+                           N,
+                           lda,
+                           strideA,
+                           static_cast<std::complex<double>*>(hCPU),
+                           static_cast<std::complex<double>*>(hGPU),
                            batch_count);
         break;
     case HIP_R_16F:
@@ -654,3 +698,149 @@ inline void unit_check_general(int64_t     M,
         break;
     }
 }
+
+/*! \brief IEEE classification of a value for special-value comparison. */
+enum class special_value_class
+{
+    finite,
+    positive_inf,
+    negative_inf,
+    not_a_number
+};
+
+inline special_value_class classify_special_value(double v)
+{
+    if(std::isnan(v))
+        return special_value_class::not_a_number;
+    if(std::isinf(v))
+        return std::signbit(v) ? special_value_class::negative_inf
+                               : special_value_class::positive_inf;
+    return special_value_class::finite;
+}
+
+inline const char* special_value_class_name(special_value_class c)
+{
+    switch(c)
+    {
+    case special_value_class::positive_inf:
+        return "+Inf";
+    case special_value_class::negative_inf:
+        return "-Inf";
+    case special_value_class::not_a_number:
+        return "NaN";
+    case special_value_class::finite:
+        break;
+    }
+    return "finite";
+}
+
+/*! \brief Check that CPU and GPU agree on the IEEE class of every element: an element must be
+ *  finite on both sides, +Inf on both, -Inf on both, or NaN on both. Any other combination fails
+ *  with a clear message (e.g. "CPU is +Inf but GPU is NaN"). Finite pairs are left to the
+ *  unit/norm checks. The comparison is symmetric on purpose: a finite reference paired with a
+ *  non-finite result must fail here, because GoogleTest's ULP-based FLOAT_EQ/DOUBLE_EQ treat the
+ *  largest finite value as almost equal to Inf and would otherwise accept that overflow.
+ *  Only for FP types that can have Inf/NaN; no-op for others. Run before unit_check so Inf->NaN bugs are reported clearly.
+ *
+ *  PREFERRED DIRECTION for future work (AIHPBLAS-989): this separate traversal is interim. The
+ *  intended end state is for classify_special_value() to be called from the elementwise
+ *  comparison operators themselves, so that equality policy lives in one place: inline in the
+ *  unit_check_general()/near_check_general() element loops, and during the conversion pass in
+ *  norm_check_general(), which still has no defined behavior for matched non-finite entries
+ *  (Inf - Inf is NaN, and a relative norm over an infinite reference is meaningless). That also
+ *  removes the extra O(M*N*batch_count) host traversal this function costs. Please extend that
+ *  path rather than growing this pre-pass. */
+#ifdef GOOGLE_TEST
+template <typename T>
+inline void check_special_value_consistency_impl(int64_t M,
+                                                 int64_t N,
+                                                 int64_t lda,
+                                                 int64_t strideA,
+                                                 const T* hCPU,
+                                                 const T* hGPU,
+                                                 int64_t  batch_count)
+{
+    for(int64_t k = 0; k < batch_count; k++)
+        for(int64_t j = 0; j < N; j++)
+            for(int64_t i = 0; i < M; i++)
+            {
+                size_t idx = i + j * size_t(lda) + k * size_t(strideA);
+                T      c   = hCPU[idx];
+                T      g   = hGPU[idx];
+                double cd = double(c);
+                double gd = double(g);
+
+                special_value_class cclass = classify_special_value(cd);
+                special_value_class gclass = classify_special_value(gd);
+                if(cclass != gclass)
+                {
+                    FAIL() << "Special value mismatch: CPU is " << special_value_class_name(cclass)
+                           << " (" << cd << ") but GPU is " << special_value_class_name(gclass)
+                           << " (" << gd << ") at (i=" << i << ", j=" << j << ", batch=" << k
+                           << ")";
+                }
+            }
+}
+
+inline void check_special_value_consistency(int64_t     M,
+                                           int64_t     N,
+                                           int64_t     lda,
+                                           int64_t     strideA,
+                                           void*       hCPU,
+                                           void*       hGPU,
+                                           int64_t     batch_count,
+                                           hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const float*>(hCPU),
+                                            static_cast<const float*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_64F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const double*>(hCPU),
+                                            static_cast<const double*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_16F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const hipblasLtHalf*>(hCPU),
+                                            static_cast<const hipblasLtHalf*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_16BF:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const hip_bfloat16*>(hCPU),
+                                            static_cast<const hip_bfloat16*>(hGPU),
+                                            batch_count);
+        break;
+    default:
+        break; // no-op for non-FP or FP8 types
+    }
+}
+#else
+inline void check_special_value_consistency(int64_t     M,
+                                           int64_t     N,
+                                           int64_t     lda,
+                                           int64_t     strideA,
+                                           void*       hCPU,
+                                           void*       hGPU,
+                                           int64_t     batch_count,
+                                           hipDataType type)
+{}
+#endif

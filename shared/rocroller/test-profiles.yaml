@@ -1,47 +1,68 @@
 # rocRoller Test profiles
+#
+# See scripts/lib/rrtest for Python utilities.
+
 profiles:
+  smoke:
+    description: "Smoke tests (TheRock CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
+      include:
+      - "*BasicGEMM*"
+      exclude: []
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include:
+      - "[kernel-graph]"
+      exclude:
+      - "[gpu]"
+
   precheckin:
-    description: "Test suite for pre-commit validation"
-    gtest:
+    description: "Test suite for pre-commit validation (TheRock CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
       include: []
       exclude: []
-    catch2:
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
       include: []
       exclude: []
-    ctest:
+    - executable: "ctest"
+      framework: "ctest"
       include: []
-      exclude: []
-  
-  # Codecov profile - excludes slow/exhaustive tests
-  codecov:
-    description: "Reduced test suite for code coverage analysis"
-    gtest:
+      exclude: [["-LE", "GTEST|CATCH"]]
+
+  codecov-mci:
+    description: "Reduced test suite for code coverage analysis (Math CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
       include: []
       exclude:
-        - "GEMMTest/StreamKWGMTestGPU.*"
-        - "GEMMTest/StreamKMultipleFixupsTestGPU.*"
-        - "GEMMTest/StreamKTestGPU.*"
-        - "GEMMF16Test/GEMMF16TestGPU.*"
-        - "GEMMF16Test/GEMMF16NTTestGPU.*"
-        - "GEMMF8F6F4Test/GEMMF8F6F4TestGPU.*"
-        - "MixedGEMMTest/MixedGEMMF8F6F4TestGPU.*"
-        - "ScaledMixedGEMMTest/ScaledMixedGEMMF8F6F4TestGPU.*"
-        - "GEMMTest/SwizzleScaledTestGPU.*"
-        - "GEMMTest/SwizzleScaledUnrollTestGPU.*"
-        - "GEMMTest/UnrollKTestGPU.*"
-        - "GEMMJammedTest/GEMMJammedTestGPU.*"
-        - "*WMMA*TestGPU*"
-        - "GEMMTest/GEMMLargeMacroTileTestGPU.*"
-        - "GEMMDirectLDSTestBasic/GEMMDirectLDSTestBasicGPU.*"
-        - "GEMMDirectLDSTest/GEMMDirectLDSTestGPU.*"
-        - "GEMMDirectLDSTest/GEMMDirectLDSF8F6F4TestGPU.*"
-        - "GEMMDirectLDSTestPrefetch/GEMMDirectLDSTestPrefetchGPU.*"
-        - "GEMMMXFP4TNSwizzleScaledUnrollTest/*"
-        - "ScaledMMCPU/*"
-        - "GEMMTest/SwizzleScaledF4TNTestGPU.*"
-    catch2:
+        - "*GEMM*"
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
       include: []
       exclude: []
-    ctest:
+    - executable: "ctest"
+      framework: "ctest"
+      include: []
+      exclude: [["-LE", "GTEST|CATCH"]]
+
+  precheckin-mci:
+    description: "Test suite for pre-commit validation (Math CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
       include: []
       exclude: []
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include: []
+      exclude: []
+    - executable: "ctest"
+      framework: "ctest"
+      include: []
+      exclude: [["-LE", "GTEST|CATCH"]]

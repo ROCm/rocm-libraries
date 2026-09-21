@@ -168,7 +168,15 @@ namespace
                 name << '_' << arg.stride_y;
 
             if(GEMV_TYPE != GEMV)
+            {
                 name << '_' << arg.batch_count;
+
+                if(arg.alpha_beta_stride)
+                {
+                    name << '_' << arg.stride_c;
+                    name << '_' << arg.stride_d;
+                }
+            }
 
             if(arg.api & c_API_64)
             {

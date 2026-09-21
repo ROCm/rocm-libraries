@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_utils.hpp"
-#include "benchmark_device_merge.parallel.hpp"
+#include "primbench.hpp"
+#include "benchmark_device_merge.hpp"
 
 #include <rocprim/types.hpp>
 
@@ -29,6 +29,6 @@
 
 namespace 
 {
-auto unused = benchmark_utils::executor::queue_autotune(
+auto unused = primbench::executor::queue_autotune(
     device_merge_benchmark_generator<@KeyType@, @ValueType@, @BlockSize@>::create);
 }

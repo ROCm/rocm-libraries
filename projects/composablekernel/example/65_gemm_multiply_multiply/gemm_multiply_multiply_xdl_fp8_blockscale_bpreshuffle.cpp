@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "ck/ck.hpp"
+
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3_blockscale_bpreshuffle.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
@@ -56,7 +57,7 @@ void preShuffleBuffer(const FP8* src, FP8* dst, int N, int K, int NXdl)
 {
     int KPack = 16;
     int NLane = NXdl;
-    int KLane = 64 / NLane;
+    int KLane = ck::get_warp_size() / NLane;
 
     int K0 = K / (KLane * KPack);
     // K -> K0 KLane KPack

@@ -23,89 +23,96 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <utility>
 
 #include "lstm.hpp"
-#include "get_handle.hpp"
-#include <gtest/gtest_common.hpp>
-#include <gtest/gtest.h>
-#include "gtest_common.hpp"
 
-namespace deepbench_lstm {
+namespace {
 
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
+struct TestCase
 {
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
-}
-
-auto GetTestCases(std::string precision)
-{
-    std::string flags = "test_lstm --verbose " + precision;
-    std::string commonFlags =
-        " --num-layers 1 --in-mode 1 --bias-mode 0 -dir-mode 0 --rnn-mode 0 --flat-batch-fill";
-
-    // clang-format off
-    return std::vector<std::string>{
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 512 --hidden-size 512" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 1024 --hidden-size 1024" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 2048 --hidden-size 2048" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 128 --seq-len 25 --vector-len 4096 --hidden-size 4096" + commonFlags},
-        {flags + " --batch-size 8 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 50 --vector-len 1536 --hidden-size 1536" + commonFlags},
-        {flags + " --batch-size 16 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags},
-        {flags + " --batch-size 32 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags},
-        {flags + " --batch-size 64 --seq-len 150 --vector-len 256 --hidden-size 256" + commonFlags}
-    };
-    // clang-format on
-}
-
-using TestCase = decltype(GetTestCases({}))::value_type;
-
-class GPU_DeepBench_lstm_FP32 : public testing::TestWithParam<std::vector<TestCase>>
-{
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
-};
-
-void Run2dDriverFloat(void)
-{
-    std::vector<std::string> params = GPU_DeepBench_lstm_FP32::GetParam();
-
-    for(const auto& test_value : params)
+    TestCase(int batch_size_, int seq_len_, int vector_len_, int hidden_size_)
+        : batch_size(batch_size_),
+          seq_len(seq_len_),
+          vector_len(vector_len_),
+          hidden_size(hidden_size_)
     {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
+    }
 
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
-        testing::internal::CaptureStderr();
-        test_drive<lstm_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+    int batch_size;
+    int seq_len;
+    int vector_len;
+    int hidden_size;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCase& tc)
+    {
+        return os << "batch-size:" << tc.batch_size << " seq-len:" << tc.seq_len
+                  << " vector-len:" << tc.vector_len << " hidden-size:" << tc.hidden_size;
     }
 };
-} // namespace deepbench_lstm
 
-using namespace deepbench_lstm;
+std::vector<TestCase> GetTestCases()
+{
+    return std::vector{
+        // clang-format off
+        //     batch-size seq-len vector-len hidden-size
+        TestCase( 16,       25,      512,       512 ),
+        TestCase( 32,       25,      512,       512 ),
+        TestCase( 64,       25,      512,       512 ),
+        TestCase(128,       25,      512,       512 ),
+        TestCase( 16,       25,     1024,      1024 ),
+        TestCase( 32,       25,     1024,      1024 ),
+        TestCase( 64,       25,     1024,      1024 ),
+        TestCase(128,       25,     1024,      1024 ),
+        TestCase( 16,       25,     2048,      2048 ),
+        TestCase( 32,       25,     2048,      2048 ),
+        TestCase( 64,       25,     2048,      2048 ),
+        TestCase(128,       25,     2048,      2048 ),
+        TestCase( 16,       25,     4096,      4096 ),
+        TestCase( 32,       25,     4096,      4096 ),
+        TestCase( 64,       25,     4096,      4096 ),
+        TestCase(128,       25,     4096,      4096 ),
+        TestCase(  8,       50,     1536,      1536 ),
+        TestCase( 16,       50,     1536,      1536 ),
+        TestCase( 32,       50,     1536,      1536 ),
+        TestCase( 16,      150,      256,       256 ),
+        TestCase( 32,      150,      256,       256 ),
+        TestCase( 64,      150,      256,       256 )
+        // clang-format on
+    };
+}
 
-TEST_P(GPU_DeepBench_lstm_FP32, FloatTest_deepbench_lstm) { Run2dDriverFloat(); };
+} // namespace
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_lstm_FP32, testing::Values(GetTestCases("--float")));
+template <typename T>
+struct GPU_DeepBench_LSTM_test : LSTM_test<T>, testing::TestWithParam<TestCase>
+{
+protected:
+    void SetUp() override
+    {
+        this->dataType = miopen_type<T>{};
+
+        auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
+
+        this->numLayers     = 1;
+        this->inputMode     = 1;
+        this->biasMode      = 0;
+        this->dirMode       = 0;
+        this->flatBatchFill = 1;
+        this->batchSize     = batchSize;
+        this->seqLength     = seqLength;
+        this->inVecLen      = inVecLen;
+        this->hiddenSize    = hiddenSize;
+    }
+};
+
+using GPU_DeepBench_LSTM_FP16 = GPU_DeepBench_LSTM_test<half_float::half>;
+
+TEST_P(GPU_DeepBench_LSTM_FP16, HalfTest) { RunTest(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP16, testing::ValuesIn(GetTestCases()));
+
+using GPU_DeepBench_LSTM_FP32 = GPU_DeepBench_LSTM_test<float>;
+
+TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest) { RunTest(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP32, testing::ValuesIn(GetTestCases()));

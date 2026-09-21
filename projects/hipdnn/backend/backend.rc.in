@@ -1,0 +1,39 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <winver.h>
+
+#ifdef _DEBUG
+#define VER_DEBUG VS_FF_DEBUG
+#else
+#define VER_DEBUG 0
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       VER_DEBUG
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Advanced Micro Devices, Inc."
+            VALUE "FileDescription",  "hipDNN Backend"
+            VALUE "FileVersion",      "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.@HIPDNN_BACKEND_VERSION_TWEAK@"
+            VALUE "InternalName",     "hipdnn_backend"
+            VALUE "LegalCopyright",   "Copyright (C) @HIPDNN_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
+            VALUE "OriginalFilename", "hipdnn_backend.dll"
+            VALUE "ProductName",      "AMD ROCm hipDNN Backend"
+            VALUE "ProductVersion",   "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.@HIPDNN_BACKEND_VERSION_TWEAK@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

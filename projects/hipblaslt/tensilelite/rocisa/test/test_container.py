@@ -24,11 +24,17 @@ import rocisa
 from copy import deepcopy
 import pickle
 import os
+import shutil
 
 isa = (9, 0, 10)
 rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
 global_isa = rocisa.rocIsa.getInstance()
-global_isa.init(isa, rocm_path + "/bin/amdclang++", False)
+_search_path = os.pathsep.join([
+    os.path.join(rocm_path, "bin"),
+    os.path.join(rocm_path, "lib", "llvm", "bin"),
+])
+_assembler = shutil.which("amdclang++", path=_search_path) or "amdclang++"
+global_isa.init(isa, _assembler, False)
 global_isa.setKernel(isa, 64)
 
 def test_containers():

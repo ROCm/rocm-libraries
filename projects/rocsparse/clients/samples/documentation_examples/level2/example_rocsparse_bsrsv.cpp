@@ -173,6 +173,8 @@ int main()
     HIP_CHECK(hipFree(dbsr_row_ptr));
     HIP_CHECK(hipFree(dbsr_col_ind));
     HIP_CHECK(hipFree(dbsr_val));
+    HIP_CHECK(hipFree(dx));
+    HIP_CHECK(hipFree(dy));
     HIP_CHECK(hipFree(temp_buffer));
 
     return 0;

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -170,6 +170,8 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
 //
 // INTERNAL MACRO TO SPECIALIZE TEST CALL NEEDED TO INSTANTIATE
 //
+#ifdef ROCSPARSE_DEBUGGING
+
 #define SPECIALIZE_ROCSPARSE_TEST_CALL(ROUTINE)                                                   \
     template <>                                                                                   \
     struct rocsparse_test_call<rocsparse_test_enum::ROUTINE>                                      \
@@ -177,6 +179,11 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
         template <typename... P>                                                                  \
         static void testing_bad_arg(const Arguments& arg)                                         \
         {                                                                                         \
+            const bool was_enabled = rocsparse_clients_test::hip_debug_t::instance().enabled();   \
+            if(was_enabled)                                                                       \
+            {                                                                                     \
+                rocsparse_clients_test::hip_debug_t::instance().disable();                        \
+            }                                                                                     \
             test_check::reset_auto_testing_bad_arg();                                             \
             testing_##ROUTINE##_bad_arg<P...>(arg);                                               \
             if(false && false == test_check::did_auto_testing_bad_arg())                          \
@@ -186,7 +193,12 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
                           << " must use auto_testing_bad_arg, or bad_arg_analysis." << std::endl; \
                 CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);                           \
             }                                                                                     \
+            if(was_enabled)                                                                       \
+            {                                                                                     \
+                rocsparse_clients_test::hip_debug_t::instance().enable();                         \
+            }                                                                                     \
         }                                                                                         \
+                                                                                                  \
         static void testing_extra(const Arguments& arg)                                           \
         {                                                                                         \
             try                                                                                   \
@@ -237,6 +249,79 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
             }                                                                                     \
         }                                                                                         \
     };
+
+#else
+
+#define SPECIALIZE_ROCSPARSE_TEST_CALL(ROUTINE)                                                   \
+    template <>                                                                                   \
+    struct rocsparse_test_call<rocsparse_test_enum::ROUTINE>                                      \
+    {                                                                                             \
+        template <typename... P>                                                                  \
+        static void testing_bad_arg(const Arguments& arg)                                         \
+        {                                                                                         \
+            test_check::reset_auto_testing_bad_arg();                                             \
+            testing_##ROUTINE##_bad_arg<P...>(arg);                                               \
+            if(false && false == test_check::did_auto_testing_bad_arg())                          \
+            {                                                                                     \
+                std::cerr << "rocsparse_test warning testing bad arguments of "                   \
+                          << rocsparse_test_enum::to_string(rocsparse_test_enum::ROUTINE)         \
+                          << " must use auto_testing_bad_arg, or bad_arg_analysis." << std::endl; \
+                CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);                           \
+            }                                                                                     \
+        }                                                                                         \
+                                                                                                  \
+        static void testing_extra(const Arguments& arg)                                           \
+        {                                                                                         \
+            try                                                                                   \
+            {                                                                                     \
+                testing_##ROUTINE##_extra(arg);                                                   \
+            }                                                                                     \
+            catch(rocsparse_status & status)                                                      \
+            {                                                                                     \
+                CHECK_ROCSPARSE_ERROR(status);                                                    \
+            }                                                                                     \
+            catch(hipError_t & error)                                                             \
+            {                                                                                     \
+                CHECK_HIP_ERROR(error);                                                           \
+            }                                                                                     \
+            catch(std::exception & error)                                                         \
+            {                                                                                     \
+                CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                         \
+            }                                                                                     \
+        }                                                                                         \
+                                                                                                  \
+        template <typename... P>                                                                  \
+        static void testing(const Arguments& arg)                                                 \
+        {                                                                                         \
+            if(rocsparse_reproducibility_t::instance().is_enabled()                               \
+               && arg.skip_reproducibility == false)                                              \
+            {                                                                                     \
+                testing_reproducibility<rocsparse_test_enum::ROUTINE>(arg,                        \
+                                                                      testing_##ROUTINE<P...>);   \
+            }                                                                                     \
+            else                                                                                  \
+            {                                                                                     \
+                try                                                                               \
+                {                                                                                 \
+                    testing_##ROUTINE<P...>(arg);                                                 \
+                }                                                                                 \
+                catch(rocsparse_status & status)                                                  \
+                {                                                                                 \
+                    CHECK_ROCSPARSE_ERROR(status);                                                \
+                }                                                                                 \
+                catch(hipError_t & error)                                                         \
+                {                                                                                 \
+                    CHECK_HIP_ERROR(error);                                                       \
+                }                                                                                 \
+                catch(std::exception & error)                                                     \
+                {                                                                                 \
+                    CHECK_ROCSPARSE_ERROR(rocsparse_status_thrown_exception);                     \
+                }                                                                                 \
+            }                                                                                     \
+        }                                                                                         \
+    };
+
+#endif
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 

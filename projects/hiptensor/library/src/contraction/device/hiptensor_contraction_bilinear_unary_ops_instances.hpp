@@ -461,6 +461,126 @@ namespace ck
                                                        hiptensor::CkBilinearUnary,
                                                        F32>>>& instances);
 
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_kknn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       F16_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_knnn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       F16_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_mknn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       F16_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_mnnn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       F16,
+                                                       F16,
+                                                       F16_Tuple,
+                                                       F16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       F16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_kknn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       BF16_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       BF16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_knnn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       BF16_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       BF16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mknn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       BF16_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       BF16>>>& instances);
+
+                void
+                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mnnn_instance(
+                        std::vector<std::unique_ptr<
+                            DeviceContractionMultipleD<6,
+                                                       6,
+                                                       6,
+                                                       BF16,
+                                                       BF16,
+                                                       BF16_Tuple,
+                                                       BF16,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkHiptensorUnaryOp,
+                                                       hiptensor::CkBilinearUnary,
+                                                       BF16>>>& instances);
+
                 // Contraction + Bilinear
                 template <index_t NumDimM,
                           index_t NumDimN,
@@ -581,7 +701,18 @@ namespace ck
                         {
                             if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
                             {
-                                if constexpr(is_same_v<ComputeDataType, float>)
+                                if constexpr(is_same_v<ComputeDataType, ck::half_t>)
+                                {
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_kknn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_knnn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_mknn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_mnnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, float>)
                                 {
                                     add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_f16_f16_f16_f16_compute_f32_kknn_instance(
                                         op_ptrs);
@@ -601,7 +732,18 @@ namespace ck
                         {
                             if constexpr(NumDimM == 6 && NumDimN == 6 && NumDimK == 6)
                             {
-                                if constexpr(is_same_v<ComputeDataType, float>)
+                                if constexpr(is_same_v<ComputeDataType, ck::bhalf_t>)
+                                {
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_kknn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_knnn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mknn_instance(
+                                        op_ptrs);
+                                    add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_mnnn_instance(
+                                        op_ptrs);
+                                }
+                                else if constexpr(is_same_v<ComputeDataType, float>)
                                 {
                                     add_device_contraction_bilinear_unary_m6_n6_k6_xdl_c_shuffle_bf16_bf16_bf16_bf16_compute_f32_kknn_instance(
                                         op_ptrs);

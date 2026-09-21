@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <string>
 #include <tuple>
@@ -44,7 +21,7 @@ namespace {
 
 struct TestParams
 {
-    friend std::ostream& operator<<(std::ostream& os, const TestParams& tp)
+    friend std::ostream& operator<<(std::ostream& os, const TestParams& /*tp*/)
     {
         os << "none";
         return os;
@@ -213,22 +190,12 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsm5x10u2v2f1",                                   {5,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm5x10u2v2b1",                                   {6,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm7x7c3h224w224k64u2v2p3q3f1",                   {7,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwdGen",                                 {9,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwd",                                    {11,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclDirectFwd1x1",                                 {13,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
+        {"ConvHipDirectFwd11x11",                               {8,     false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvBinWinograd3x3U",                                 {14,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvBinWinogradRxS",                                  {15,    true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvAsmBwdWrW3x3",                                    {16,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsmBwdWrW1x1",                                    {17,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<1>",                                   {18,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<2>",                                   {19,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<4>",                                   {20,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<8>",                                   {21,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2<16>",                                  {22,    false,  true,   "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW2NonTunable",                            {23,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvOclBwdWrW53",                                     {24,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
-        {"ConvOclBwdWrW1x1",                                    {25,    false,  false,  "miopenConvolutionFwdAlgoDirect"}},
         {"ConvHipImplicitGemmV4R1Fwd",                          {26,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmV4R1WrW",                          {31,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"fft",                                                 {34,    false,  false,  "miopenConvolutionFwdAlgoFFT"}},
@@ -249,8 +216,6 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvBinWinogradRxSf2x3",                              {53,    true,   true,   "miopenConvolutionFwdAlgoWinograd"}},
         {"ConvHipImplicitGemmV4R4Fwd",                          {54,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmBwdDataV1R1",                      {55,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdDataV4R1",                      {56,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdDataV1R1Xdlops",                {57,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmBwdDataV4R1Xdlops",                {60,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmV4R4WrW",                          {61,    false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmV4R1DynamicFwd",                   {62,    true,   false,  "miopenConvolutionFwdAlgoImplicitGEMM"}},
@@ -297,10 +262,7 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC",          {107,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC",          {108,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC",          {110,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvCkIgemmFwdV6r1DlopsNchw",                         {114,   false,  true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC",          {127,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmFwdXdlops",                        {128,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
-        {"ConvHipImplicitGemmBwdXdlops",                        {129,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupFwdXdlops",                   {137,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemm3DGroupFwdXdlops",                 {138,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvWinoFuryRxS<2-3>",                                {139,   true,   false,  "miopenConvolutionFwdAlgoWinograd"}},
@@ -308,6 +270,7 @@ const auto& GetSolversInfo<ConvSolverInfo>()
         {"ConvHipImplicitGemm3DGroupBwdXdlops",                 {141,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupBwdXdlops",                   {155,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
         {"ConvHipImplicitGemmGroupWrwXdlops",                   {156,   true,   true,   "miopenConvolutionFwdAlgoImplicitGEMM"}},
+        {"ConvHipDirectFwd",                                    {218,   false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         // clang-format on
     };
 
@@ -371,61 +334,54 @@ const auto& GetSolverConfigs<BatchNormSolverConfig>()
     return configs;
 }
 
-template <class SolverInfo>
-const auto& GetSolverNames()
-{
-    static const auto names = [] {
-        std::vector<std::string> names;
-        const auto& sinfo = GetSolversInfo<SolverInfo>();
-        names.reserve(sinfo.size());
-        for(const auto& s : sinfo)
-            names.push_back(s.first);
-        return names;
-    }();
-    return names;
-}
-
 template <class TestCase>
-const auto& GetTestCases()
+const auto GetTestCases()
 {
-    static const auto test_cases = [] {
-        std::vector<TestCase> test_cases;
-        const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
-        const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
-        test_cases.reserve(sinfo.size());
-        for(const auto& s : sinfo)
-        {
-            const auto& config = configs.find(s.first);
-            if(config == configs.end())
-                test_cases.emplace_back(TestCase{s.first, s.second, {}});
-            else
-                test_cases.emplace_back(TestCase{s.first, s.second, config->second});
-        }
-        return test_cases;
-    }();
-    return test_cases;
+    std::vector<TestCase> test_cases;
+    const auto& sinfo   = GetSolversInfo<decltype(std::declval<TestCase>().info)>();
+    const auto& configs = GetSolverConfigs<decltype(std::declval<TestCase>().config)>();
+    test_cases.reserve(sinfo.size());
+    for(const auto& s : sinfo)
+    {
+        const auto& config = configs.find(s.first);
+        if(config == configs.end())
+            test_cases.emplace_back(TestCase{s.first, s.second, {}});
+        else
+            test_cases.emplace_back(TestCase{s.first, s.second, config->second});
+    }
+    return std::move(test_cases);
 }
 
 #if MIOPEN_ENABLE_FIN_INTERFACE
 
-// Context
-template <class Problem>
-auto GetContext(miopen::Handle* handle, const Problem& problem);
-
-template <>
-auto GetContext(miopen::Handle* handle, const miopen::conv::ProblemDescription& problem)
+template <class SolverInfo>
+const auto& GetSolverNames()
 {
-    auto tmp = miopen::ExecutionContext{handle};
+    static const auto names = []() -> std::vector<std::string> {
+        std::vector<std::string> names_;
+        const auto& sinfo = GetSolversInfo<SolverInfo>();
+        names_.reserve(sinfo.size());
+        for(const auto& s : sinfo)
+            names_.push_back(s.first);
+        return names_;
+    }();
+    return names;
+}
+
+// Context
+miopen::ExecutionContext GetContext(miopen::Handle* handle,
+                                    const miopen::conv::ProblemDescription& problem)
+{
+    miopen::ExecutionContext tmp{handle};
     problem.SetupFloats(tmp);
     problem.SetupComputeType(tmp);
     return tmp;
 }
 
-template <>
-auto GetContext(miopen::Handle* handle, const miopen::batchnorm::ProblemDescription&)
+miopen::ExecutionContext GetContext(miopen::Handle* handle,
+                                    const miopen::batchnorm::ProblemDescription&)
 {
-    auto tmp = miopen::ExecutionContext{handle};
-    return tmp;
+    return miopen::ExecutionContext{handle};
 }
 
 // Checks

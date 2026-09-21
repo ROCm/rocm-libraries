@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,14 +23,15 @@
  * ************************************************************************ */
 
 #include "rocsparse_bsrilu0.hpp"
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_bsrilu0_kernel_launch.hpp"
 #include "rocsparse_utility.hpp"
-
-rocsparse_status rocsparse::bsrilu0(rocsparse_handle       handle,
-                                    rocsparse_bsrilu0_info bsrilu0_info,
-                                    rocsparse_spmat_descr  A,
-                                    size_t                 buffer_size,
-                                    void*                  buffer)
+rocsparse_status rocsparse::bsrilu0(rocsparse_handle          handle,
+                                    rocsparse_bsrilu0_info    bsrilu0_info,
+                                    rocsparse_spmat_descr     A,
+                                    rocsparse::numeric_boost* boost,
+                                    size_t                    buffer_size,
+                                    void*                     buffer)
 {
     if(A->rows == 0 || A->batch_count == 0)
     {
@@ -45,7 +46,26 @@ rocsparse_status rocsparse::bsrilu0(rocsparse_handle       handle,
                        ((A->rows > 0) && (trm_info == nullptr)),
                        rocsparse_status_invalid_pointer);
 
+    bsrilu0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
+
+    if(A->col_type == rocsparse_indextype_i32)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+            A->batch_count,
+            (int32_t*)bsrilu0_info->get_singularity_numeric_exact()->get_position(),
+            (const int32_t*)bsrilu0_info->get_position(),
+            handle->stream));
+    }
+    else
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+            A->batch_count,
+            (int64_t*)bsrilu0_info->get_singularity_numeric_exact()->get_position(),
+            (const int64_t*)bsrilu0_info->get_position(),
+            handle->stream));
+    }
+
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::bsrilu0_kernel_launch(handle, bsrilu0_info, A, buffer_size, buffer));
+        rocsparse::bsrilu0_kernel_launch(handle, bsrilu0_info, A, boost, buffer_size, buffer));
     return rocsparse_status_success;
 }

@@ -91,7 +91,7 @@ rocSOLVER supports the following data precision types:
 .. note::
 
    For more detailed information on the numerical precision types supported by the rocSOLVER library,
-   see :doc:`rocSOLVER precision support <../reference/precision>`.
+   see :doc:`rocSOLVER data type support <../reference/data_type_support>`.
 
 Matrix types
 ------------------------------

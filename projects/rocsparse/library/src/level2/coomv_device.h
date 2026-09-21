@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,9 @@ namespace rocsparse
                                                             T* __restrict__ val_block_red,
                                                             rocsparse_index_base idx_base)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         const int tid = hipThreadIdx_x;
 
         // Shared memory to hold row indices and values for segmented reduction
@@ -178,6 +181,9 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void segmented_blockreduce(const I* rows, T* vals)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         const int tid = hipThreadIdx_x;
 
 #pragma unroll

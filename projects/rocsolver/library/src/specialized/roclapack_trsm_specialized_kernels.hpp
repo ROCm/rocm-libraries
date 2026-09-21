@@ -27,10 +27,13 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
+
+#define ROCSOLVER_TRSM_MAX_THREADS ROCSOLVER_ASAN_VALUE(256, 1024)
 
 #ifdef USE_INTERNAL_TRSM
 #define ROCSOLVER_INTERNAL_TRSM 1
@@ -685,9 +688,9 @@ I rocsolver_trsm_blksize(const I m, const I n)
     }
 
     if(blk == 1 || (ROCSOLVER_INTERNAL_TRSM && blk == 0))
-        blk = std::min(m, I(512));
+        blk = std::min(m, I(ROCSOLVER_TRSM_MAX_THREADS));
 
-    return blk;
+    return std::min(blk, I(ROCSOLVER_TRSM_MAX_THREADS));
 }
 
 /** complex type version **/
@@ -716,9 +719,9 @@ I rocsolver_trsm_blksize(const I m, const I n)
     }
 
     if(blk == 1 || (ROCSOLVER_INTERNAL_TRSM && blk == 0))
-        blk = std::min(m, I(512));
+        blk = std::min(m, I(ROCSOLVER_TRSM_MAX_THREADS));
 
-    return blk;
+    return std::min(blk, I(ROCSOLVER_TRSM_MAX_THREADS));
 }
 
 /** This function determine workspace size for the internal trsm **/
@@ -844,7 +847,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
     I lda1, lda2, ldb1, ldb2, offA, offB, nx, ny, j = 0;
 
     // determine block size
-    I blk = std::min(isleft ? m : n, I(512));
+    I blk = std::min(isleft ? m : n, I(ROCSOLVER_TRSM_MAX_THREADS));
     if(inca == 1 && incb == 1)
     {
         blk = isleft ? rocsolver_trsm_blksize<ISBATCHED, T, I>(m, n)
@@ -867,7 +870,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
         nx = blk;
         ny = n;
         dimx = nx;
-        dimy = 1024 / dimx;
+        dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
         grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
@@ -903,7 +906,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             // solve last diagonal block
             nx = m - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -943,7 +946,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             // solve last diagonal block
             nx = m - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -961,7 +964,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
         nx = blk;
         ny = m;
         dimx = nx;
-        dimy = 1024 / dimx;
+        dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
         grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
@@ -996,7 +999,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             // solve last diagonal block
             nx = n - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -1037,7 +1040,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
             // solve last diagonal block
             nx = n - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -1107,7 +1110,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
     I lda1, lda2, ldb1, ldb2, offA, offB, nx, ny, j = 0;
 
     // determine block size
-    I blk = std::min(isleft ? m : n, I(512));
+    I blk = std::min(isleft ? m : n, I(ROCSOLVER_TRSM_MAX_THREADS));
     if(inca == 1 && incb == 1)
     {
         blk = isleft ? rocsolver_trsm_blksize<ISBATCHED, T, I>(m, n)
@@ -1130,7 +1133,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
         nx = blk;
         ny = n;
         dimx = nx;
-        dimy = 1024 / dimx;
+        dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
         grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
@@ -1166,7 +1169,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             // solve last diagonal block
             nx = m - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -1206,7 +1209,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             // solve last diagonal block
             nx = m - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -1224,7 +1227,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
         nx = blk;
         ny = m;
         dimx = nx;
-        dimy = 1024 / dimx;
+        dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
         blocks = (ny - 1) / dimy + 1;
         grid = dim3(1, blocks, batch_count);
         threads = dim3(dimx, dimy, 1);
@@ -1259,7 +1262,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             // solve last diagonal block
             nx = n - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);
@@ -1300,7 +1303,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
             // solve last diagonal block
             nx = n - j;
             dimx = nx;
-            dimy = 1024 / dimx;
+            dimy = ROCSOLVER_TRSM_MAX_THREADS / dimx;
             blocks = (ny - 1) / dimy + 1;
             grid = dim3(1, blocks, batch_count);
             threads = dim3(dimx, dimy, 1);

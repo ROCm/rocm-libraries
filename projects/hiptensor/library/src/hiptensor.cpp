@@ -24,6 +24,9 @@
  *
  *******************************************************************************/
 #include <cstring>
+#include <set>
+#include <utility>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 
@@ -33,6 +36,34 @@
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
 #include "util.hpp"
+
+// The elementwise kernels walk a single index space defined by the output, so
+// every input has to carry exactly the same modes as the output and may only
+// differ in their order. An input holding a subset of the output modes would
+// have to be broadcast along the modes it lacks, which is not implemented and
+// used to surface as HIPTENSOR_STATUS_INTERNAL_ERROR at execution time rather
+// than as a rejection at descriptor creation.
+static hiptensorStatus_t checkElementwiseModes(char const*                 apiFuncName,
+                                               std::vector<int32_t> const& inModes,
+                                               char const*                 inName,
+                                               std::vector<int32_t> const& outModes,
+                                               char const*                 outName)
+{
+    if(std::set<int32_t>(inModes.cbegin(), inModes.cend())
+       == std::set<int32_t>(outModes.cbegin(), outModes.cend()))
+    {
+        return HIPTENSOR_STATUS_SUCCESS;
+    }
+
+    char msg[256];
+    snprintf(msg,
+             sizeof(msg),
+             "Elementwise operation where %s and %s carry different modes is not supported",
+             inName,
+             outName);
+    hiptensor::Logger::instance()->logError(apiFuncName, msg);
+    return HIPTENSOR_STATUS_NOT_SUPPORTED;
+}
 
 hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
 {
@@ -79,17 +110,16 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
-    const char* plan_cache_disable = std::getenv("HIPTENSOR_DISABLE_PLAN_CACHE");
-    if(plan_cache_disable == nullptr || strcmp(plan_cache_disable, "ON") != 0)
+    if (hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
     {
-        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
-        (*handle)->setPlanCache(planCache);
-        snprintf(msg, sizeof(msg), "Plan Cache is %s", "enabled.");
+        snprintf(msg, sizeof(msg), "Plan Cache is disabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
     else
     {
-        snprintf(msg, sizeof(msg), "Plan Cache is %s", "disabled.");
+        hiptensor::PlanCache* planCache = new hiptensor::PlanCache;
+        (*handle)->setPlanCache(planCache);
+        snprintf(msg, sizeof(msg), "Plan Cache is enabled.");
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
@@ -372,6 +402,35 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
                                              const int32_t                      modeB[],
                                              const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB, modeB);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    auto modeBV = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+
+    if(auto status = checkElementwiseModes("hiptensorCreatePermutation", modeAV, "A", modeBV, "B");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     (*desc)->mTag          = 0u;
@@ -386,16 +445,19 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
     (*desc)->mContractionOpId = 0;
 
     (*desc)->mDescA       = descA;
-    (*desc)->mModeA       = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    (*desc)->mModeA       = std::move(modeAV);
     (*desc)->mOpA         = opA;
     (*desc)->mDescB       = descB;
-    (*desc)->mModeB       = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+    (*desc)->mModeB       = std::move(modeBV);
     (*desc)->mOpB         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescC       = nullptr;
     (*desc)->mModeC       = {};
     (*desc)->mOpC         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescD       = nullptr;
     (*desc)->mModeD       = {};
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = HIPTENSOR_OP_IDENTITY;
     (*desc)->mOpABC       = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescCompute = descCompute;
@@ -416,6 +478,42 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
                                                    hiptensorOperator_t                opAC,
                                                    const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC, modeC);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD, modeD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+
+    for(auto const& [inModes, inName] : {std::pair{&modeAV, "A"}, std::pair{&modeCV, "C"}})
+    {
+        if(auto status = checkElementwiseModes(
+               "hiptensorCreateElementwiseBinary", *inModes, inName, modeDV, "D");
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     *desc                  = new hiptensorOperationDescriptor();
     (*desc)->mTag          = 0u;
     (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -429,16 +527,19 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
     (*desc)->mContractionOpId = 0;
 
     (*desc)->mDescA       = descA;
-    (*desc)->mModeA       = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    (*desc)->mModeA       = std::move(modeAV);
     (*desc)->mOpA         = opA;
     (*desc)->mDescB       = nullptr;
     (*desc)->mModeB       = {};
     (*desc)->mOpB         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescC       = descC;
-    (*desc)->mModeC       = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    (*desc)->mModeC       = std::move(modeCV);
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
-    (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mModeD       = std::move(modeDV);
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = opAC;
     (*desc)->mOpABC       = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescCompute = descCompute;
@@ -463,6 +564,46 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
                                                     hiptensorOperator_t                opABC,
                                                     const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB, modeB);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC, modeC);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD, modeD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    auto modeBV = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+    auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+
+    for(auto const& [inModes, inName] :
+        {std::pair{&modeAV, "A"}, std::pair{&modeBV, "B"}, std::pair{&modeCV, "C"}})
+    {
+        if(auto status = checkElementwiseModes(
+               "hiptensorCreateElementwiseTrinary", *inModes, inName, modeDV, "D");
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     *desc                  = new hiptensorOperationDescriptor();
     (*desc)->mTag          = 0u;
     (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -476,16 +617,19 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
     (*desc)->mContractionOpId = 0;
 
     (*desc)->mDescA       = descA;
-    (*desc)->mModeA       = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    (*desc)->mModeA       = std::move(modeAV);
     (*desc)->mOpA         = opA;
     (*desc)->mDescB       = descB;
-    (*desc)->mModeB       = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+    (*desc)->mModeB       = std::move(modeBV);
     (*desc)->mOpB         = opB;
     (*desc)->mDescC       = descC;
-    (*desc)->mModeC       = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    (*desc)->mModeC       = std::move(modeCV);
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
-    (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mModeD       = std::move(modeDV);
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = opAB;
     (*desc)->mOpABC       = opABC;
     (*desc)->mDescCompute = descCompute;
@@ -506,6 +650,28 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
                                            hiptensorOperator_t                opReduce,
                                            const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC, modeC);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD, modeD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     *desc                  = new hiptensorOperationDescriptor();
     (*desc)->mTag          = 0u;
     (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -529,6 +695,9 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
     (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = opReduce;
     (*desc)->mOpABC       = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescCompute = descCompute;
@@ -626,6 +795,11 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                                               const hiptensorPlanPreference_t      planPref,
                                               const hiptensorWorksizePreference_t  workspacePref,
                                               uint64_t* workspaceSizeEstimate);
+hiptensorStatus_t contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
+                                                     const hiptensorOperationDescriptor_t desc,
+                                                     const hiptensorPlanPreference_t      planPref,
+                                                     const hiptensorWorksizePreference_t  workspacePref,
+                                                     uint64_t* workspaceSizeEstimate);
 hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
                                                  const hiptensorOperationDescriptor_t desc,
                                                  const hiptensorPlanPreference_t      planPref,
@@ -637,6 +811,11 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
         return contractionGetWorkspaceSize(
             handle, desc, planPref, workspacePref, workspaceSizeEstimate);
     }
+    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
+    {
+        return contractionTrinaryGetWorkspaceSize(
+            handle, desc, planPref, workspacePref, workspaceSizeEstimate);
+    }
     *workspaceSizeEstimate = 0u;
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -646,6 +825,11 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
                                       const hiptensorOperationDescriptor_t desc,
                                       const hiptensorPlanPreference_t      pref,
                                       uint64_t                             workspaceSizeLimit);
+hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t              handle,
+                                             hiptensorPlan_t                      plan,
+                                             const hiptensorOperationDescriptor_t desc,
+                                             const hiptensorPlanPreference_t      pref,
+                                             uint64_t                             workspaceSizeLimit);
 hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t*                     plan,
                                       const hiptensorOperationDescriptor_t desc,
@@ -653,13 +837,50 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       uint64_t                             workspaceSizeLimit)
 {
     (*plan)                     = new hiptensorPlan();
-    (*plan)->mRequiredWorkspace = workspaceSizeLimit;
-    (*plan)->mOpDesc            = desc;
-    (*plan)->mPref              = pref;
+    hiptensorPlan_t             newPlan = *plan;
+    newPlan->mRequiredWorkspace = workspaceSizeLimit;
+
+    // Deep-copy the tensor descriptors referenced by the operation descriptor
+    if(desc->mDescA)
+    {
+        newPlan->mOwnedDescA = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescA);
+    }
+    if(desc->mDescB)
+    {
+        newPlan->mOwnedDescB = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescB);
+    }
+    if(desc->mDescC)
+    {
+        newPlan->mOwnedDescC = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescC);
+    }
+    if(desc->mDescD)
+    {
+        newPlan->mOwnedDescD = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescD);
+    }
+    if(desc->mDescE)
+    {
+        newPlan->mOwnedDescE = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescE);
+    }
+
+    newPlan->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
+    newPlan->mOwnedOpDesc->mDescA = newPlan->mOwnedDescA.get();
+    newPlan->mOwnedOpDesc->mDescB = newPlan->mOwnedDescB.get();
+    newPlan->mOwnedOpDesc->mDescC = newPlan->mOwnedDescC.get();
+    newPlan->mOwnedOpDesc->mDescD = newPlan->mOwnedDescD.get();
+    newPlan->mOwnedOpDesc->mDescE = newPlan->mOwnedDescE.get();
+
+    newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
+
+    newPlan->mOpDesc = newPlan->mOwnedOpDesc.get();
+    newPlan->mPref   = newPlan->mOwnedPref.get();
 
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
-        return contractionInitPlan(handle, *plan, desc, pref, workspaceSizeLimit);
+        return contractionInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
+    }
+    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
+    {
+        return contractionTrinaryInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     return HIPTENSOR_STATUS_SUCCESS;
 }

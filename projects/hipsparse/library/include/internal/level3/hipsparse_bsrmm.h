@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level3_module
- *  \brief Sparse matrix dense matrix multiplication using BSR storage format
+ *  \brief Sparse matrix dense matrix multiplication using the BSR storage format.
  *
  *  \details
  *  \p hipsparseXbsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
@@ -59,14 +59,14 @@ extern "C" {
  *  and where \f$k = blockDim \times kb\f$ and \f$m = blockDim \times mb\f$.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
  *
  *  @param[in]
- *  handle      handle to the hipsparse library context queue.
+ *  handle      handle to the hipSPARSE library context queue.
  *  @param[in]
  *  dirA        the storage format of the blocks. Can be \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
@@ -113,10 +113,10 @@ extern "C" {
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
- *          \p mb, \p n, \p kb or \p nnzb is negative, \p ldb or \p ldc is invalid,
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+ *          \p mb, \p n, \p kb, or \p nnzb is negative, \p ldb or \p ldc is invalid,
  *          \p blockDim is less than or equal to zero, or \p bsrValA, \p bsrRowPtrA, \p bsrColIndA,
- *          \p B or \p C is nullptr.
+ *          \p B, or \p C is nullptr.
  *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
  *          \p transB is \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE, or

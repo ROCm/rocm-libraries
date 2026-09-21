@@ -85,13 +85,6 @@ bool AttnSoftmax::IsApplicable([[maybe_unused]] const ExecutionContext& context,
            (seq_len > 16 || nhs <= 1024);                       // heuristic
 }
 
-std::size_t AttnSoftmax::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::softmax::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution AttnSoftmax::GetSolution(const ExecutionContext& context,
                                       const miopen::softmax::ProblemDescription& problem) const
 {
@@ -128,23 +121,23 @@ ConvSolution AttnSoftmax::GetSolution(const ExecutionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::softmax::InvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-            kernel(params.x,
-                   params.forward_y,
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   nullptr, // attention related parameters
-                   seq_len,
-                   nhs);
+            kernel_(params.x,
+                    params.forward_y,
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    nullptr, // attention related parameters
+                    seq_len,
+                    nhs);
         };
     };
 

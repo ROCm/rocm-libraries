@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/hiptensor/docs/conf.py
 
 formats: [htmlzip, pdf, epub]
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/hiptensor/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04
@@ -18,4 +18,4 @@ build:
       python: "mambaforge-22.9"
 
 conda:
-   environment: docs/environment.yml
+   environment: projects/hiptensor/docs/environment.yml

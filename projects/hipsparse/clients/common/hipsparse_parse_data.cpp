@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,9 +25,8 @@
 #include "hipsparse_parse_data.hpp"
 #include "hipsparse_data.hpp"
 
-bool hipsparse_parse_data(int& argc, char** argv, const std::string& default_file)
+bool hipsparse_parse_data(const std::string& default_file)
 {
-    std::cout << "default_file: " << default_file << std::endl;
     HipSPARSE_TestData::set_filename(default_file, false);
     return true;
 }

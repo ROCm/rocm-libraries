@@ -609,6 +609,13 @@ void initialize_a_b_c_bias(std::vector<TiA>&        ha,
         hipblaslt_init_hpl<Tout>(hc, size_c);
         hipblaslt_init_hpl<float>(h_bias, size_bias);
     }
+    else if(initialization == hipblaslt_initialization::uniform_low_precision)
+    {
+        hipblaslt_init_low_precision<TiA>(ha, size_a);
+        hipblaslt_init_low_precision<TiB>(hb, size_b);
+        hipblaslt_init_low_precision<Tout>(hc, size_c);
+        hipblaslt_init_low_precision<float>(h_bias, size_bias);
+    }
     else if(initialization == hipblaslt_initialization::special)
     {
         hipblaslt_init_alt_impl_big<TiA>(ha, size_a);
@@ -618,6 +625,18 @@ void initialize_a_b_c_bias(std::vector<TiA>&        ha,
     }
     else if(initialization == hipblaslt_initialization::zero)
     {
+        hipblaslt_init_zero<TiA>(ha, size_a);
+        hipblaslt_init_zero<TiB>(hb, size_b);
+        hipblaslt_init_zero<Tout>(hc, size_c);
+        hipblaslt_init_zero<float>(h_bias, size_bias);
+    }
+    else if(initialization == hipblaslt_initialization::norm_dist
+            || initialization == hipblaslt_initialization::uniform_01
+            || initialization == hipblaslt_initialization::integer_exact
+            || initialization == hipblaslt_initialization::fp16_accumulator_probe)
+    {
+        // These modes use matmul-specific layouts on the device path; this host initializer cannot
+        // reproduce them. Zero-fill so we do not copy uninitialized memory to the GPU.
         hipblaslt_init_zero<TiA>(ha, size_a);
         hipblaslt_init_zero<TiB>(hb, size_b);
         hipblaslt_init_zero<Tout>(hc, size_c);

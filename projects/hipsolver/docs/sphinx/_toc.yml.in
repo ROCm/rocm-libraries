@@ -5,7 +5,9 @@ subtrees:
 - caption: Install
   entries:
   - file: installation/install.rst
-    title: Installation guide
+    title: Install hipSOLVER
+  - file: installation/build.rst
+    title: Build from source
 
 - caption: How to
   entries:
@@ -20,7 +22,7 @@ subtrees:
 - caption: Reference
   entries:
   - file: reference/intro.rst
-  - file: reference/precision.rst
+  - file: reference/data-type-support.rst
   - file: reference/api/index.rst
     entries:
     - file: reference/api/types.rst

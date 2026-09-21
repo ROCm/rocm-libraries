@@ -1,6 +1,6 @@
 /******************************************************************************
 * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2022-2025, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2022-2026, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -87,17 +87,23 @@ void reg_to_shared(OutputIterator output, KeyT (&input)[ItemsPerThread])
 
 template<class Key,
          class Value,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize,
          typename Enable = void>
 struct block_merge_impl;
 
-template<class Key, class Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<class Key,
+         class Value,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
 struct block_merge_impl<
     Key,
     Value,
     BlockSize,
     ItemsPerThread,
+    TargetWaveSize,
     std::enable_if_t<
         !std::is_trivially_copyable<Value>::value || rocprim::is_floating_point<Value>::value
         || rocprim::is_integral<Value>::value || std::is_same<Value, ::rocprim::empty_type>::value>>
@@ -106,7 +112,8 @@ struct block_merge_impl<
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
     static constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
-    using block_store = block_store_impl<with_values, BlockSize, ItemsPerThread, Key, Value>;
+    using block_store
+        = block_store_impl<with_values, BlockSize, ItemsPerThread, Key, Value, TargetWaveSize>;
 
     using keys_storage_   = Key[items_per_tile + 1];
     using values_storage_ = Value[items_per_tile + 1];
@@ -258,11 +265,16 @@ struct block_merge_impl<
 // ValueTypes with misaligned datastructures in them (e.g. custom_char_double)
 // when storing/loading those ValueTypes to/from registers.
 // Thus this is a temporary workaround.
-template<class Key, class Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<class Key,
+         class Value,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
 struct block_merge_impl<Key,
                         Value,
                         BlockSize,
                         ItemsPerThread,
+                        TargetWaveSize,
                         std::enable_if_t<std::is_trivially_copyable<Value>::value
                                          && !rocprim::is_floating_point<Value>::value
                                          && !rocprim::is_integral<Value>::value
@@ -271,7 +283,8 @@ struct block_merge_impl<Key,
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
     static constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
-    using block_store = block_store_impl<false, BlockSize, ItemsPerThread, Key, Value>;
+    using block_store
+        = block_store_impl<false, BlockSize, ItemsPerThread, Key, Value, TargetWaveSize>;
 
     using keys_storage_   = Key[items_per_tile + 1];
     using values_storage_ = Value[items_per_tile + 1];

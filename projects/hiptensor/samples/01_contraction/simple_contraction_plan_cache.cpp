@@ -163,7 +163,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            C[i] = (BDataType)(float(i) / 100);
+            C[i] = (CDataType)(float(i) / 100);
         }
     }
 

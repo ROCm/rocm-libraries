@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -36,15 +36,18 @@ namespace rocsparse
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const T* __restrict__ csr_val,
-                                           T* __restrict__ B,
+                                           T*      B,
                                            int64_t ldb,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
-                                           J* __restrict__ zero_pivot,
+                                           J*                   zero_pivot,
                                            rocsparse_index_base idx_base,
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         // Index into the row map
         const J idx = hipBlockIdx_x % m;
 
@@ -91,15 +94,17 @@ namespace rocsparse
             // This happens only once for each chunk of BLOCKSIZE elements
             if(k == 0)
             {
+                __syncthreads();
+
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
                 scsr_val[hipThreadIdx_x]
                     = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
-            }
 
-            // Wait for preload to finish
-            __syncthreads();
+                // Wait for preload to finish
+                __syncthreads();
+            }
 
             // Current column this lane operates on
             const J local_col = scsr_col_ind[k];
@@ -121,8 +126,13 @@ namespace rocsparse
                 local_val = static_cast<T>(1);
             }
 
-            // Differentiate upper and lower triangular mode
-            if(fill_mode == rocsparse_fill_mode_upper)
+            // Differentiate upper and lower triangular mode.
+            // For lower fill mode, once we pass the diagonal we must stop iterating
+            // over the row, so we flag it and break out of the for loop after the switch.
+            bool stop_row = false;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_upper:
             {
                 // Processing upper triangular
 
@@ -144,14 +154,16 @@ namespace rocsparse
                     // Skip diagonal entry
                     continue;
                 }
+                break;
             }
-            else if(fill_mode == rocsparse_fill_mode_lower)
+            case rocsparse_fill_mode_lower:
             {
                 // Processing lower triangular
 
                 // Ignore all entries that are above the diagonal
                 if(local_col > row)
                 {
+                    stop_row = true;
                     break;
                 }
 
@@ -165,8 +177,16 @@ namespace rocsparse
                     }
 
                     // Skip diagonal entry
+                    stop_row = true;
                     break;
                 }
+                break;
+            }
+            }
+
+            if(stop_row)
+            {
+                break;
             }
 
             // Spin loop until dependency has been resolved

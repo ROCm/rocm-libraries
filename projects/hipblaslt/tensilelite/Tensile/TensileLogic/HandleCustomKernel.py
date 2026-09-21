@@ -27,11 +27,10 @@ from pprint import pformat
 from pathlib import Path
 from typing import Dict, Tuple
 
-from Tensile.Common import print1, IsaVersion, IsaInfo
+from Tensile.Common import print1, print2, IsaVersion, IsaInfo
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
 from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
-from Tensile import CUSTOM_KERNEL_PATH
 
 
 def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tuple[dict, bool]:
@@ -50,15 +49,14 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
         return sol, False
 
     name = sol["CustomKernelName"]
-    dir = CUSTOM_KERNEL_PATH
-    config = getCustomKernelConfig(name, {}, dir)
+    config = getCustomKernelConfig(name, {})
     sol.update(config)
 
     mi = sol["MatrixInstruction"]
-    print1(f">>   Found custom kernel: {name} with MI {mi}")
+    print2(f">>   Found custom kernel: {name} with MI {mi}")
 
     if not (len(mi) == 4 or len(mi) == 0):
-        print1(
+        print2(
             f">>     Error: Custom kernels in logic files should have 'MatrixInstruction' of length 4 or 0, not length {len(mi)}"
         )
         mi = sol["MatrixInstruction"]
@@ -67,9 +65,9 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
         ptype = sol["ProblemType"]
         workgroup = sol.get("WorkGroup", None)
         miParams = matrixInstructionToMIParameters(
-            mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap
+            mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap, sol.get("SourceSwap", False)
         )
-        print1(
+        print2(
             f">>     Hint: Replace 'MatrixInstruction' in {name}.s with following diff:\n"
             f"{prepareCustomKernelConfig(miParams, mi)}"
         )

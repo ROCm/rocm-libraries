@@ -1,0 +1,91 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "BatchnormForwardTrainingTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "bias_tensor_uid": 4,
+        "epsilon_tensor_uid": 5,
+        "momentum_tensor_uid": null,
+        "peer_stats_tensor_uid": [],
+        "prev_running_mean_tensor_uid": null,
+        "prev_running_variance_tensor_uid": null,
+        "scale_tensor_uid": 6,
+        "x_tensor_uid": 3
+      },
+      "name": "Batchnorm_0",
+      "outputs": {
+        "inv_variance_tensor_uid": 0,
+        "mean_tensor_uid": 1,
+        "next_running_mean_tensor_uid": null,
+        "next_running_variance_tensor_uid": null,
+        "y_tensor_uid": 2
+      },
+      "type": "BatchnormAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::INV_VARIANCE",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::MEAN",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::Y",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "X",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "value": 9.97212960147963e-05,
+      "value_type": "Float64Value",
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 6,
+      "virtual": false
+    }
+  ]
+}

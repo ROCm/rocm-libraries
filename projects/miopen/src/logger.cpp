@@ -24,12 +24,14 @@
  *
  *******************************************************************************/
 #include <miopen/env.hpp>
+#include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/config.h>
 #include <miopen/sysinfo_utils.hpp>
 
 #include <cstdlib>
 #include <chrono>
+#include <fstream>
 #include <ios>
 #include <iomanip>
 #include <sstream>
@@ -68,7 +70,125 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LOGGING_ROCTX)
 /// Disable logging quieting.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LOGGING_QUIETING_DISABLE)
 
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_LOG_BUFFER_SIZE, 0);
+
 namespace miopen {
+
+size_t GetBufferSize() { return env::value(MIOPEN_LOG_BUFFER_SIZE); }
+
+size_t& GetBufferIdx()
+{
+    static thread_local size_t log_buffer_i = 0;
+    return log_buffer_i;
+}
+
+// Optimization: Thread-local stream pool to avoid repeated ostringstream construction
+std::ostringstream& GetThreadLocalLogStream()
+{
+    static thread_local std::ostringstream stream;
+    stream.str(""); // Clear contents
+    stream.clear(); // Clear state flags
+    return stream;
+}
+
+std::vector<std::string>& GetLogBuffer()
+{
+    auto log_buffer_size = GetBufferSize();
+    static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
+    if(log_buffer_size != log_buffer.size())
+    {
+        log_buffer.resize(log_buffer_size);
+        auto& log_buffer_i = GetBufferIdx();
+        if(log_buffer_i > 0 && log_buffer_i >= log_buffer_size)
+            log_buffer_i = 0;
+    }
+    return log_buffer;
+}
+
+bool IsLogBufferOn() { return GetBufferSize() != 0 && !IsLogging(LoggingLevel::Info2); }
+
+void ClearLogBuffer()
+{
+    auto& log_buffer   = GetLogBuffer();
+    auto& log_buffer_i = GetBufferIdx();
+    log_buffer         = std::vector<std::string>(GetBufferSize(), "");
+    log_buffer_i       = 0;
+}
+
+void BufferLog(std::string&& line)
+{
+    auto& log_buffer         = GetLogBuffer();
+    auto& log_buffer_i       = GetBufferIdx();
+    log_buffer[log_buffer_i] = std::move(line);
+    log_buffer_i             = (log_buffer_i + 1) % GetBufferSize();
+}
+
+void LogXQCustomImpl(const LoggingLevel level,
+                     const bool disableQuieting,
+                     const std::string_view category,
+                     const std::string_view fn_name,
+                     std::string message)
+{
+    const bool is_logging = IsLogging(level, disableQuieting);
+    if(is_logging)
+    {
+        // Path 1: Logging to stderr is enabled - use full prefix.
+        auto& miopen_log_ss = GetThreadLocalLogStream();
+        miopen_log_ss << LoggingPrefix() << category << " [" << fn_name << "] " << message
+                      << std::endl;
+        std::cerr << miopen_log_ss.str();
+        // Also buffer if buffer is enabled.
+        if(IsLogBufferOn())
+        {
+            if(level < LoggingLevel::Trace)
+            {
+                BufferLog(miopen_log_ss.str());
+            }
+            if(level == LoggingLevel::Error)
+                OutputBufferedLogs();
+        }
+    }
+    else
+    {
+        // Path 2: Logging disabled, buffer-only - use minimal prefix.
+        if(IsLogBufferOn())
+        {
+            if(level < LoggingLevel::Trace)
+            {
+                auto& miopen_log_ss = GetThreadLocalLogStream();
+                miopen_log_ss << LoggingPrefixMinimal() << category << " [" << fn_name << "] "
+                              << message << std::endl;
+                BufferLog(miopen_log_ss.str());
+            }
+            if(level == LoggingLevel::Error)
+                OutputBufferedLogs();
+        }
+    }
+}
+
+void OutputBufferedLogs()
+{
+    auto& log_buffer     = GetLogBuffer();
+    auto& log_buffer_i   = GetBufferIdx();
+    auto log_buffer_size = GetBufferSize();
+    auto buffer_size     = (log_buffer[log_buffer_size - 1] == "") ? log_buffer_i : log_buffer_size;
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(::getpid()) + ".log");
+    std::cerr << "Buffered " << buffer_size << " messages to file: " << sysinfo::GetSystemHostname()
+              << ":" << filename.string() << std::endl;
+    auto err_file = std::ofstream{filename, std::ofstream::app};
+    size_t i      = log_buffer_i;
+    do
+    {
+        if(log_buffer[i] != "")
+        {
+            err_file << log_buffer[i];
+        }
+        i = (i + 1) % log_buffer_size;
+    } while(i != log_buffer_i);
+    err_file << std::endl;
+    ClearLogBuffer();
+}
 
 namespace debug {
 
@@ -194,8 +314,9 @@ const char* LoggingLevelToCString(const LoggingLevel level)
     case LoggingLevel::Info: return "Info";
     case LoggingLevel::Info2: return "Info2";
     case LoggingLevel::Trace: return "Trace";
-    default: return "<Unknown>";
     }
+
+    return "<Unknown>";
 }
 
 bool IsLoggingCmd() { return env::enabled(MIOPEN_ENABLE_LOGGING_CMD) && !IsLoggingDebugQuiet(); }
@@ -209,11 +330,6 @@ std::string LoggingPrefix()
         ss << GetProcessAndThreadId() << ' ';
     }
     ss << "MIOpen";
-#if MIOPEN_BACKEND_OPENCL
-    ss << "(OpenCL)";
-#elif MIOPEN_BACKEND_HIP
-    ss << "(HIP)";
-#endif
     if(env::enabled(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME))
     {
         ss << std::fixed << std::setprecision(3) << std::setw(8) << GetTimeDiff();
@@ -224,6 +340,19 @@ std::string LoggingPrefix()
     }
     ss << ": ";
     return ss.str();
+}
+
+std::string LoggingPrefixMinimal()
+{
+    // Optimization: Cache the static prefix to avoid repeated string construction
+    // This minimal prefix skips expensive syscalls (hostname, TID, timestamps)
+    // and is used for buffer-only logs when actual logging is disabled.
+    static const std::string prefix = []() {
+        std::stringstream ss;
+        ss << "MIOpen: ";
+        return ss.str();
+    }();
+    return prefix;
 }
 
 } // namespace miopen

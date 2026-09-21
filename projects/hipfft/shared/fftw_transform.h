@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -75,42 +75,60 @@ static constexpr double default_double_epsilon()
     return 1e-15;
 }
 
-// C++ traits to translate float->fftwf_complex and
-// double->fftw_complex.
-// The correct FFTW complex type can be accessed via, for example,
+// C++ traits to simplify type selection for FFTW plans, complex and/or real
+// FFTW types, based on the base real type of the floating-point arithmetic of
+// interest. The correct FFTW complex type can be accessed via, for example,
 // using complex_t = typename fftw_complex_trait<Tfloat>::complex_t;
-template <typename Tfloat>
-struct fftw_trait;
-template <>
-struct fftw_trait<rocfft_fp16>
+// NOTE: FFTW does not support half-precision: members of fftw_trait<rocfft_fp16>
+// are made equivalent to the members of fftw_trait<float>.
+template <typename Tfloat,
+          std::enable_if_t<std::is_same<Tfloat, double>::value || std::is_same<Tfloat, float>::value
+                               || std::is_same<Tfloat, rocfft_fp16>::value,
+                           bool> = true>
+struct fftw_trait
 {
-    // fftw does not support half precision, so use single precision and convert
-    using fftw_complex_type = fftwf_complex;
-    using fftw_plan_type    = fftwf_plan;
-};
-template <>
-struct fftw_trait<float>
-{
-    using fftw_complex_type = fftwf_complex;
-    using fftw_plan_type    = fftwf_plan;
-};
-template <>
-struct fftw_trait<double>
-{
-    using fftw_complex_type = fftw_complex;
-    using fftw_plan_type    = fftw_plan;
-};
 
-// Copies the half-precision input buffer to a single-precision
-// buffer.  Note that the input buffer is already sized like it's a
-// single-precision buffer (but only half of it is filled), because
-// we allocate a single-precision buffer for FFTW to plan with.
+private:
+    using raw_fftw_plan_type = std::conditional_t<std::is_same_v<Tfloat, double>,
+                                                  std::remove_pointer<fftw_plan>::type,
+                                                  std::remove_pointer<fftwf_plan>::type>;
+    static void plan_deleter(raw_fftw_plan_type* plan_ptr)
+    {
+        static_assert(
+            std::is_same<raw_fftw_plan_type, std::remove_pointer<fftw_plan>::type>::value
+            || std::is_same<raw_fftw_plan_type, std::remove_pointer<fftwf_plan>::type>::value);
+        if constexpr(std::is_same<raw_fftw_plan_type, std::remove_pointer<fftw_plan>::type>::value)
+            fftw_destroy_plan(plan_ptr);
+        else
+            fftwf_destroy_plan(plan_ptr);
+    }
+
+public:
+    using real_t = std::conditional_t<std::is_same<Tfloat, double>::value, double, float>;
+    using complex_t
+        = std::conditional_t<std::is_same<Tfloat, double>::value, fftw_complex, fftwf_complex>;
+    using plan_wrapper_t = std::unique_ptr<raw_fftw_plan_type, decltype(&plan_deleter)>;
+
+    static plan_wrapper_t make_wrapper(raw_fftw_plan_type* raw_plan_ptr)
+    {
+        return plan_wrapper_t{raw_plan_ptr, plan_deleter};
+    }
+};
+// External alias templates to avoid verbose syntax thereafter
+template <typename T>
+using fftw_plan_wrapper_t = typename fftw_trait<T>::plan_wrapper_t;
+template <typename T>
+using fftw_complex_t = typename fftw_trait<T>::complex_t;
+template <typename T>
+using fftw_real_t = typename fftw_trait<T>::real_t;
+
+// Copies the half-precision input buffer to a single-precision buffer.
 static hostbuf half_to_single_copy(const hostbuf& in)
 {
-    auto out      = in.copy();
+    hostbuf out;
+    out.alloc(2 * in.size());
     auto in_begin = reinterpret_cast<const rocfft_fp16*>(in.data());
-    std::copy_n(
-        in_begin, in.size() / sizeof(rocfft_fp16) / 2, reinterpret_cast<float*>(out.data()));
+    std::copy_n(in_begin, in.size() / sizeof(rocfft_fp16), reinterpret_cast<float*>(out.data()));
     return out;
 }
 
@@ -148,14 +166,14 @@ inline double* fftw_alloc_real_type<double>(size_t n)
 
 // Template wrappers for complex-valued FFTW allocators:
 template <typename Tfloat>
-inline typename fftw_trait<Tfloat>::fftw_complex_type* fftw_alloc_complex_type(size_t n);
+inline fftw_complex_t<Tfloat>* fftw_alloc_complex_type(size_t n);
 template <>
-inline typename fftw_trait<float>::fftw_complex_type* fftw_alloc_complex_type<float>(size_t n)
+inline fftw_complex_t<float>* fftw_alloc_complex_type<float>(size_t n)
 {
     return fftwf_alloc_complex(n);
 }
 template <>
-inline typename fftw_trait<double>::fftw_complex_type* fftw_alloc_complex_type<double>(size_t n)
+inline fftw_complex_t<double>* fftw_alloc_complex_type<double>(size_t n)
 {
     return fftw_alloc_complex(n);
 }
@@ -195,293 +213,275 @@ inline rocfft_complex<double>* fftw_alloc_type<rocfft_complex<double>>(size_t n)
 
 // Template wrappers for FFTW plan executors:
 template <typename Tfloat>
-inline void fftw_execute_type(typename fftw_trait<Tfloat>::fftw_plan_type plan);
+inline void fftw_execute_type(const fftw_plan_wrapper_t<Tfloat>& plan);
 template <>
-inline void fftw_execute_type<float>(typename fftw_trait<float>::fftw_plan_type plan)
+inline void fftw_execute_type<float>(const fftw_plan_wrapper_t<float>& plan)
 {
-    return fftwf_execute(plan);
+    return fftwf_execute(plan.get());
 }
 template <>
-inline void fftw_execute_type<double>(typename fftw_trait<double>::fftw_plan_type plan)
+inline void fftw_execute_type<double>(const fftw_plan_wrapper_t<double>& plan)
 {
-    return fftw_execute(plan);
-}
-
-// Template wrappers for FFTW plan destroyers:
-template <typename Tfftw_plan>
-inline void fftw_destroy_plan_type(Tfftw_plan plan);
-template <>
-inline void fftw_destroy_plan_type<fftwf_plan>(fftwf_plan plan)
-{
-    return fftwf_destroy_plan(plan);
-}
-template <>
-inline void fftw_destroy_plan_type<fftw_plan>(fftw_plan plan)
-{
-    return fftw_destroy_plan(plan);
+    return fftw_execute(plan.get());
 }
 
 // Template wrappers for FFTW c2c planners:
 template <typename Tfloat>
-inline typename fftw_trait<Tfloat>::fftw_plan_type
-    fftw_plan_guru64_dft(int                                             rank,
-                         const fftw_iodim64*                             dims,
-                         int                                             howmany_rank,
-                         const fftw_iodim64*                             howmany_dims,
-                         typename fftw_trait<Tfloat>::fftw_complex_type* in,
-                         typename fftw_trait<Tfloat>::fftw_complex_type* out,
-                         int                                             sign,
-                         unsigned                                        flags);
+inline fftw_plan_wrapper_t<Tfloat> fftw_plan_guru64_dft(int                     rank,
+                                                        const fftw_iodim64*     dims,
+                                                        int                     howmany_rank,
+                                                        const fftw_iodim64*     howmany_dims,
+                                                        fftw_complex_t<Tfloat>* in,
+                                                        fftw_complex_t<Tfloat>* out,
+                                                        int                     sign,
+                                                        unsigned                flags);
 
 template <>
-inline typename fftw_trait<rocfft_fp16>::fftw_plan_type
-    fftw_plan_guru64_dft<rocfft_fp16>(int                 rank,
-                                      const fftw_iodim64* dims,
-                                      int                 howmany_rank,
-                                      const fftw_iodim64* howmany_dims,
-                                      typename fftw_trait<rocfft_fp16>::fftw_complex_type* in,
-                                      typename fftw_trait<rocfft_fp16>::fftw_complex_type* out,
-                                      int                                                  sign,
-                                      unsigned                                             flags)
+inline fftw_plan_wrapper_t<rocfft_fp16>
+    fftw_plan_guru64_dft<rocfft_fp16>(int                          rank,
+                                      const fftw_iodim64*          dims,
+                                      int                          howmany_rank,
+                                      const fftw_iodim64*          howmany_dims,
+                                      fftw_complex_t<rocfft_fp16>* in,
+                                      fftw_complex_t<rocfft_fp16>* out,
+                                      int                          sign,
+                                      unsigned                     flags)
 {
-    return fftwf_plan_guru64_dft(rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+    return fftw_trait<rocfft_fp16>::make_wrapper(
+        fftwf_plan_guru64_dft(rank, dims, howmany_rank, howmany_dims, in, out, sign, flags));
 }
 
 template <>
-inline typename fftw_trait<float>::fftw_plan_type
-    fftw_plan_guru64_dft<float>(int                                            rank,
-                                const fftw_iodim64*                            dims,
-                                int                                            howmany_rank,
-                                const fftw_iodim64*                            howmany_dims,
-                                typename fftw_trait<float>::fftw_complex_type* in,
-                                typename fftw_trait<float>::fftw_complex_type* out,
-                                int                                            sign,
-                                unsigned                                       flags)
+inline fftw_plan_wrapper_t<float> fftw_plan_guru64_dft<float>(int                    rank,
+                                                              const fftw_iodim64*    dims,
+                                                              int                    howmany_rank,
+                                                              const fftw_iodim64*    howmany_dims,
+                                                              fftw_complex_t<float>* in,
+                                                              fftw_complex_t<float>* out,
+                                                              int                    sign,
+                                                              unsigned               flags)
 {
-    return fftwf_plan_guru64_dft(rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+    return fftw_trait<float>::make_wrapper(
+        fftwf_plan_guru64_dft(rank, dims, howmany_rank, howmany_dims, in, out, sign, flags));
 }
 
 template <>
-inline typename fftw_trait<double>::fftw_plan_type
-    fftw_plan_guru64_dft<double>(int                                             rank,
-                                 const fftw_iodim64*                             dims,
-                                 int                                             howmany_rank,
-                                 const fftw_iodim64*                             howmany_dims,
-                                 typename fftw_trait<double>::fftw_complex_type* in,
-                                 typename fftw_trait<double>::fftw_complex_type* out,
-                                 int                                             sign,
-                                 unsigned                                        flags)
+inline fftw_plan_wrapper_t<double> fftw_plan_guru64_dft<double>(int                 rank,
+                                                                const fftw_iodim64* dims,
+                                                                int                 howmany_rank,
+                                                                const fftw_iodim64* howmany_dims,
+                                                                fftw_complex_t<double>* in,
+                                                                fftw_complex_t<double>* out,
+                                                                int                     sign,
+                                                                unsigned                flags)
 {
-    return fftw_plan_guru64_dft(rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+    return fftw_trait<double>::make_wrapper(
+        fftw_plan_guru64_dft(rank, dims, howmany_rank, howmany_dims, in, out, sign, flags));
 }
 
 // Template wrappers for FFTW c2c executors:
 template <typename Tfloat>
-inline void fftw_plan_execute_c2c(typename fftw_trait<Tfloat>::fftw_plan_type plan,
-                                  std::vector<hostbuf>&                       in,
-                                  std::vector<hostbuf>&                       out);
-
+inline void fftw_plan_execute_c2c(const fftw_plan_wrapper_t<Tfloat>& plan,
+                                  std::vector<hostbuf>&              in,
+                                  std::vector<hostbuf>&              out);
 template <>
-inline void
-    fftw_plan_execute_c2c<rocfft_fp16>(typename fftw_trait<rocfft_fp16>::fftw_plan_type plan,
-                                       std::vector<hostbuf>&                            in,
-                                       std::vector<hostbuf>&                            out)
+inline void fftw_plan_execute_c2c<rocfft_fp16>(const fftw_plan_wrapper_t<rocfft_fp16>& plan,
+                                               std::vector<hostbuf>&                   in,
+                                               std::vector<hostbuf>&                   out)
 {
     // since FFTW does not natively support half precision, convert
     // input to single, execute, then convert output back to half
     auto in_single = half_to_single_copy(in.front());
-    fftwf_execute_dft(plan,
+    fftwf_execute_dft(plan.get(),
                       reinterpret_cast<fftwf_complex*>(in_single.data()),
                       reinterpret_cast<fftwf_complex*>(out.front().data()));
     single_to_half_inplace(out.front());
 }
 
 template <>
-inline void fftw_plan_execute_c2c<float>(typename fftw_trait<float>::fftw_plan_type plan,
-                                         std::vector<hostbuf>&                      in,
-                                         std::vector<hostbuf>&                      out)
+inline void fftw_plan_execute_c2c<float>(const fftw_plan_wrapper_t<float>& plan,
+                                         std::vector<hostbuf>&             in,
+                                         std::vector<hostbuf>&             out)
 {
-    fftwf_execute_dft(plan,
+    fftwf_execute_dft(plan.get(),
                       reinterpret_cast<fftwf_complex*>(in.front().data()),
                       reinterpret_cast<fftwf_complex*>(out.front().data()));
 }
 
 template <>
-inline void fftw_plan_execute_c2c<double>(typename fftw_trait<double>::fftw_plan_type plan,
-                                          std::vector<hostbuf>&                       in,
-                                          std::vector<hostbuf>&                       out)
+inline void fftw_plan_execute_c2c<double>(const fftw_plan_wrapper_t<double>& plan,
+                                          std::vector<hostbuf>&              in,
+                                          std::vector<hostbuf>&              out)
 {
-    fftw_execute_dft(plan,
+    fftw_execute_dft(plan.get(),
                      reinterpret_cast<fftw_complex*>(in.front().data()),
                      reinterpret_cast<fftw_complex*>(out.front().data()));
 }
 
 // Template wrappers for FFTW r2c planners:
 template <typename Tfloat>
-inline typename fftw_trait<Tfloat>::fftw_plan_type
-    fftw_plan_guru64_r2c(int                                             rank,
-                         const fftw_iodim64*                             dims,
-                         int                                             howmany_rank,
-                         const fftw_iodim64*                             howmany_dims,
-                         Tfloat*                                         in,
-                         typename fftw_trait<Tfloat>::fftw_complex_type* out,
-                         unsigned                                        flags);
+inline fftw_plan_wrapper_t<Tfloat> fftw_plan_guru64_r2c(int                     rank,
+                                                        const fftw_iodim64*     dims,
+                                                        int                     howmany_rank,
+                                                        const fftw_iodim64*     howmany_dims,
+                                                        Tfloat*                 in,
+                                                        fftw_complex_t<Tfloat>* out,
+                                                        unsigned                flags);
 template <>
-inline typename fftw_trait<rocfft_fp16>::fftw_plan_type
-    fftw_plan_guru64_r2c<rocfft_fp16>(int                 rank,
-                                      const fftw_iodim64* dims,
-                                      int                 howmany_rank,
-                                      const fftw_iodim64* howmany_dims,
-                                      rocfft_fp16*        in,
-                                      typename fftw_trait<rocfft_fp16>::fftw_complex_type* out,
-                                      unsigned                                             flags)
+inline fftw_plan_wrapper_t<rocfft_fp16>
+    fftw_plan_guru64_r2c<rocfft_fp16>(int                          rank,
+                                      const fftw_iodim64*          dims,
+                                      int                          howmany_rank,
+                                      const fftw_iodim64*          howmany_dims,
+                                      rocfft_fp16*                 in,
+                                      fftw_complex_t<rocfft_fp16>* out,
+                                      unsigned                     flags)
 {
-    return fftwf_plan_guru64_dft_r2c(
-        rank, dims, howmany_rank, howmany_dims, reinterpret_cast<float*>(in), out, flags);
+    return fftw_trait<rocfft_fp16>::make_wrapper(fftwf_plan_guru64_dft_r2c(
+        rank, dims, howmany_rank, howmany_dims, reinterpret_cast<float*>(in), out, flags));
 }
 template <>
-inline typename fftw_trait<float>::fftw_plan_type
-    fftw_plan_guru64_r2c<float>(int                                            rank,
-                                const fftw_iodim64*                            dims,
-                                int                                            howmany_rank,
-                                const fftw_iodim64*                            howmany_dims,
-                                float*                                         in,
-                                typename fftw_trait<float>::fftw_complex_type* out,
-                                unsigned                                       flags)
+inline fftw_plan_wrapper_t<float> fftw_plan_guru64_r2c<float>(int                    rank,
+                                                              const fftw_iodim64*    dims,
+                                                              int                    howmany_rank,
+                                                              const fftw_iodim64*    howmany_dims,
+                                                              float*                 in,
+                                                              fftw_complex_t<float>* out,
+                                                              unsigned               flags)
 {
-    return fftwf_plan_guru64_dft_r2c(rank, dims, howmany_rank, howmany_dims, in, out, flags);
+    return fftw_trait<float>::make_wrapper(
+        fftwf_plan_guru64_dft_r2c(rank, dims, howmany_rank, howmany_dims, in, out, flags));
 }
 template <>
-inline typename fftw_trait<double>::fftw_plan_type
-    fftw_plan_guru64_r2c<double>(int                                             rank,
-                                 const fftw_iodim64*                             dims,
-                                 int                                             howmany_rank,
-                                 const fftw_iodim64*                             howmany_dims,
-                                 double*                                         in,
-                                 typename fftw_trait<double>::fftw_complex_type* out,
-                                 unsigned                                        flags)
+inline fftw_plan_wrapper_t<double> fftw_plan_guru64_r2c<double>(int                 rank,
+                                                                const fftw_iodim64* dims,
+                                                                int                 howmany_rank,
+                                                                const fftw_iodim64* howmany_dims,
+                                                                double*             in,
+                                                                fftw_complex_t<double>* out,
+                                                                unsigned                flags)
 {
-    return fftw_plan_guru64_dft_r2c(rank, dims, howmany_rank, howmany_dims, in, out, flags);
+    return fftw_trait<double>::make_wrapper(
+        fftw_plan_guru64_dft_r2c(rank, dims, howmany_rank, howmany_dims, in, out, flags));
 }
 
 // Template wrappers for FFTW r2c executors:
 template <typename Tfloat>
-inline void fftw_plan_execute_r2c(typename fftw_trait<Tfloat>::fftw_plan_type plan,
-                                  std::vector<hostbuf>&                       in,
-                                  std::vector<hostbuf>&                       out);
+inline void fftw_plan_execute_r2c(const fftw_plan_wrapper_t<Tfloat>& plan,
+                                  std::vector<hostbuf>&              in,
+                                  std::vector<hostbuf>&              out);
 template <>
-inline void fftw_plan_execute_r2c<rocfft_fp16>(typename fftw_trait<float>::fftw_plan_type plan,
-                                               std::vector<hostbuf>&                      in,
-                                               std::vector<hostbuf>&                      out)
+inline void fftw_plan_execute_r2c<rocfft_fp16>(const fftw_plan_wrapper_t<rocfft_fp16>& plan,
+                                               std::vector<hostbuf>&                   in,
+                                               std::vector<hostbuf>&                   out)
 {
     // since FFTW does not natively support half precision, convert
     // input to single, execute, then convert output back to half
     auto in_single = half_to_single_copy(in.front());
-    fftwf_execute_dft_r2c(plan,
+    fftwf_execute_dft_r2c(plan.get(),
                           reinterpret_cast<float*>(in_single.data()),
                           reinterpret_cast<fftwf_complex*>(out.front().data()));
     single_to_half_inplace(out.front());
 }
 template <>
-inline void fftw_plan_execute_r2c<float>(typename fftw_trait<float>::fftw_plan_type plan,
-                                         std::vector<hostbuf>&                      in,
-                                         std::vector<hostbuf>&                      out)
+inline void fftw_plan_execute_r2c<float>(const fftw_plan_wrapper_t<float>& plan,
+                                         std::vector<hostbuf>&             in,
+                                         std::vector<hostbuf>&             out)
 {
-    fftwf_execute_dft_r2c(plan,
+    fftwf_execute_dft_r2c(plan.get(),
                           reinterpret_cast<float*>(in.front().data()),
                           reinterpret_cast<fftwf_complex*>(out.front().data()));
 }
 template <>
-inline void fftw_plan_execute_r2c<double>(typename fftw_trait<double>::fftw_plan_type plan,
-                                          std::vector<hostbuf>&                       in,
-                                          std::vector<hostbuf>&                       out)
+inline void fftw_plan_execute_r2c<double>(const fftw_plan_wrapper_t<double>& plan,
+                                          std::vector<hostbuf>&              in,
+                                          std::vector<hostbuf>&              out)
 {
-    fftw_execute_dft_r2c(plan,
+    fftw_execute_dft_r2c(plan.get(),
                          reinterpret_cast<double*>(in.front().data()),
                          reinterpret_cast<fftw_complex*>(out.front().data()));
 }
 
 // Template wrappers for FFTW c2r planners:
 template <typename Tfloat>
-inline typename fftw_trait<Tfloat>::fftw_plan_type
-    fftw_plan_guru64_c2r(int                                             rank,
-                         const fftw_iodim64*                             dims,
-                         int                                             howmany_rank,
-                         const fftw_iodim64*                             howmany_dims,
-                         typename fftw_trait<Tfloat>::fftw_complex_type* in,
-                         Tfloat*                                         out,
-                         unsigned                                        flags);
+inline fftw_plan_wrapper_t<Tfloat> fftw_plan_guru64_c2r(int                     rank,
+                                                        const fftw_iodim64*     dims,
+                                                        int                     howmany_rank,
+                                                        const fftw_iodim64*     howmany_dims,
+                                                        fftw_complex_t<Tfloat>* in,
+                                                        Tfloat*                 out,
+                                                        unsigned                flags);
 template <>
-inline typename fftw_trait<rocfft_fp16>::fftw_plan_type
-    fftw_plan_guru64_c2r<rocfft_fp16>(int                 rank,
-                                      const fftw_iodim64* dims,
-                                      int                 howmany_rank,
-                                      const fftw_iodim64* howmany_dims,
-                                      typename fftw_trait<rocfft_fp16>::fftw_complex_type* in,
-                                      rocfft_fp16*                                         out,
-                                      unsigned                                             flags)
+inline fftw_plan_wrapper_t<rocfft_fp16>
+    fftw_plan_guru64_c2r<rocfft_fp16>(int                          rank,
+                                      const fftw_iodim64*          dims,
+                                      int                          howmany_rank,
+                                      const fftw_iodim64*          howmany_dims,
+                                      fftw_complex_t<rocfft_fp16>* in,
+                                      rocfft_fp16*                 out,
+                                      unsigned                     flags)
 {
-    return fftwf_plan_guru64_dft_c2r(
-        rank, dims, howmany_rank, howmany_dims, in, reinterpret_cast<float*>(out), flags);
+    return fftw_trait<rocfft_fp16>::make_wrapper(fftwf_plan_guru64_dft_c2r(
+        rank, dims, howmany_rank, howmany_dims, in, reinterpret_cast<float*>(out), flags));
 }
 template <>
-inline typename fftw_trait<float>::fftw_plan_type
-    fftw_plan_guru64_c2r<float>(int                                            rank,
-                                const fftw_iodim64*                            dims,
-                                int                                            howmany_rank,
-                                const fftw_iodim64*                            howmany_dims,
-                                typename fftw_trait<float>::fftw_complex_type* in,
-                                float*                                         out,
-                                unsigned                                       flags)
+inline fftw_plan_wrapper_t<float> fftw_plan_guru64_c2r<float>(int                    rank,
+                                                              const fftw_iodim64*    dims,
+                                                              int                    howmany_rank,
+                                                              const fftw_iodim64*    howmany_dims,
+                                                              fftw_complex_t<float>* in,
+                                                              float*                 out,
+                                                              unsigned               flags)
 {
-    return fftwf_plan_guru64_dft_c2r(rank, dims, howmany_rank, howmany_dims, in, out, flags);
+    return fftw_trait<float>::make_wrapper(
+        fftwf_plan_guru64_dft_c2r(rank, dims, howmany_rank, howmany_dims, in, out, flags));
 }
 template <>
-inline typename fftw_trait<double>::fftw_plan_type
-    fftw_plan_guru64_c2r<double>(int                                             rank,
-                                 const fftw_iodim64*                             dims,
-                                 int                                             howmany_rank,
-                                 const fftw_iodim64*                             howmany_dims,
-                                 typename fftw_trait<double>::fftw_complex_type* in,
-                                 double*                                         out,
-                                 unsigned                                        flags)
+inline fftw_plan_wrapper_t<double> fftw_plan_guru64_c2r<double>(int                 rank,
+                                                                const fftw_iodim64* dims,
+                                                                int                 howmany_rank,
+                                                                const fftw_iodim64* howmany_dims,
+                                                                fftw_complex_t<double>* in,
+                                                                double*                 out,
+                                                                unsigned                flags)
 {
-    return fftw_plan_guru64_dft_c2r(rank, dims, howmany_rank, howmany_dims, in, out, flags);
+    return fftw_trait<double>::make_wrapper(
+        fftw_plan_guru64_dft_c2r(rank, dims, howmany_rank, howmany_dims, in, out, flags));
 }
 
 // Template wrappers for FFTW c2r executors:
 template <typename Tfloat>
-inline void fftw_plan_execute_c2r(typename fftw_trait<Tfloat>::fftw_plan_type plan,
-                                  std::vector<hostbuf>&                       in,
-                                  std::vector<hostbuf>&                       out);
+inline void fftw_plan_execute_c2r(const fftw_plan_wrapper_t<Tfloat>& plan,
+                                  std::vector<hostbuf>&              in,
+                                  std::vector<hostbuf>&              out);
 template <>
-inline void fftw_plan_execute_c2r<rocfft_fp16>(typename fftw_trait<float>::fftw_plan_type plan,
-                                               std::vector<hostbuf>&                      in,
-                                               std::vector<hostbuf>&                      out)
+inline void fftw_plan_execute_c2r<rocfft_fp16>(const fftw_plan_wrapper_t<rocfft_fp16>& plan,
+                                               std::vector<hostbuf>&                   in,
+                                               std::vector<hostbuf>&                   out)
 {
     // since FFTW does not natively support half precision, convert
     // input to single, execute, then convert output back to half
     auto in_single = half_to_single_copy(in.front());
-    fftwf_execute_dft_c2r(plan,
+    fftwf_execute_dft_c2r(plan.get(),
                           reinterpret_cast<fftwf_complex*>(in_single.data()),
                           reinterpret_cast<float*>(out.front().data()));
     single_to_half_inplace(out.front());
 }
 template <>
-inline void fftw_plan_execute_c2r<float>(typename fftw_trait<float>::fftw_plan_type plan,
-                                         std::vector<hostbuf>&                      in,
-                                         std::vector<hostbuf>&                      out)
+inline void fftw_plan_execute_c2r<float>(const fftw_plan_wrapper_t<float>& plan,
+                                         std::vector<hostbuf>&             in,
+                                         std::vector<hostbuf>&             out)
 {
-    fftwf_execute_dft_c2r(plan,
+    fftwf_execute_dft_c2r(plan.get(),
                           reinterpret_cast<fftwf_complex*>(in.front().data()),
                           reinterpret_cast<float*>(out.front().data()));
 }
 template <>
-inline void fftw_plan_execute_c2r<double>(typename fftw_trait<double>::fftw_plan_type plan,
-                                          std::vector<hostbuf>&                       in,
-                                          std::vector<hostbuf>&                       out)
+inline void fftw_plan_execute_c2r<double>(const fftw_plan_wrapper_t<double>& plan,
+                                          std::vector<hostbuf>&              in,
+                                          std::vector<hostbuf>&              out)
 {
-    fftw_execute_dft_c2r(plan,
+    fftw_execute_dft_c2r(plan.get(),
                          reinterpret_cast<fftw_complex*>(in.front().data()),
                          reinterpret_cast<double*>(out.front().data()));
 }
@@ -489,22 +489,21 @@ inline void fftw_plan_execute_c2r<double>(typename fftw_trait<double>::fftw_plan
 #ifdef FFTW_HAVE_SPRINT_PLAN
 // Template wrappers for FFTW print plan:
 template <typename Tfloat>
-inline char* fftw_sprint_plan(const typename fftw_trait<Tfloat>::fftw_plan_type plan);
+inline char* fftw_sprint_plan(const fftw_plan_wrapper_t<Tfloat>& plan);
 template <>
-inline char*
-    fftw_sprint_plan<rocfft_fp16>(const typename fftw_trait<rocfft_fp16>::fftw_plan_type plan)
+inline char* fftw_sprint_plan<rocfft_fp16>(const fftw_plan_wrapper_t<rocfft_fp16>& plan)
 {
-    return fftwf_sprint_plan(plan);
+    return fftwf_sprint_plan(plan.get());
 }
 template <>
-inline char* fftw_sprint_plan<float>(const typename fftw_trait<float>::fftw_plan_type plan)
+inline char* fftw_sprint_plan<float>(const fftw_plan_wrapper_t<float>& plan)
 {
-    return fftwf_sprint_plan(plan);
+    return fftwf_sprint_plan(plan.get());
 }
 template <>
-inline char* fftw_sprint_plan<double>(const typename fftw_trait<double>::fftw_plan_type plan)
+inline char* fftw_sprint_plan<double>(const fftw_plan_wrapper_t<double>& plan)
 {
-    return fftw_sprint_plan(plan);
+    return fftw_sprint_plan(plan.get());
 }
 #endif
 

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -131,17 +108,13 @@ namespace rocRoller
             return stream << toString(mode);
         }
 
-        SubTileTranspose::SubTileTranspose(OperationTag input, std::vector<size_t> tileDimensions)
+        SubTileTranspose::SubTileTranspose(OperationTag        input,
+                                           std::vector<size_t> tileDimensions,
+                                           bool                transpose)
             : m_input(input)
             , m_tileDimensions(std::move(tileDimensions))
+            , m_transpose(transpose)
         {
-            if(!m_tileDimensions.empty())
-            {
-                AssertFatal(m_tileDimensions.size() == 3, ShowValue(m_tileDimensions));
-                AssertFatal(m_tileDimensions[0] * m_tileDimensions[1] == 256
-                                && (m_tileDimensions[2] == 2 || m_tileDimensions[2] == 4),
-                            ShowValue(m_tileDimensions));
-            }
         }
 
         std::unordered_set<OperationTag> SubTileTranspose::getInputs() const
@@ -153,9 +126,15 @@ namespace rocRoller
             return fmt::format(
                 "SubTileTranspose({}: input {})", concatenate(m_tileDimensions), m_input.value);
         }
+
         const std::vector<size_t>& SubTileTranspose::tileDimensions() const
         {
             return m_tileDimensions;
+        }
+
+        bool SubTileTranspose::isTranspose() const
+        {
+            return m_transpose;
         }
 
         bool SubTileTranspose::operator==(SubTileTranspose const& other) const

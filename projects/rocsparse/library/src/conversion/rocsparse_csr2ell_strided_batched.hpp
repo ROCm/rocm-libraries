@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,17 +56,4 @@ namespace rocsparse
                                                   T*                        ell_val,
                                                   int64_t                   ell_val_stride,
                                                   J*                        ell_col_ind);
-
-    template <typename... P>
-    rocsparse_status csr2ell_strided_batched_template(P&&... p)
-    {
-        const rocsparse_status status = rocsparse::csr2ell_strided_batched_quickreturn(p...);
-        if(status != rocsparse_status_continue)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(status);
-            return rocsparse_status_success;
-        }
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2ell_strided_batched_core(p...));
-        return rocsparse_status_success;
-    }
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,8 +56,8 @@ void testing_gtsv_no_pivot_strided_batch_bad_arg(const Arguments& arg)
                             args_to_exclude_solve,
                             PARAMS_SOLVE);
 
-    // m > 512
-    batch_stride = m = 513;
+    // m > 1024
+    batch_stride = m = 1025;
     temp_buffer      = (void*)nullptr;
     EXPECT_ROCSPARSE_STATUS(rocsparse_gtsv_no_pivot_strided_batch<T>(PARAMS_SOLVE),
                             rocsparse_status_invalid_pointer);

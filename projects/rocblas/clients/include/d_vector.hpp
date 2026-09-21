@@ -27,6 +27,9 @@
 #include "rocblas_test.hpp"
 #include "singletons.hpp"
 
+#if __GLIBC__ < 3 && __GLIBC__MINOR__ < 39
+#undef _GLIBCXX_USE_C99_INTTYPES_TR1
+#endif
 #include <cinttypes>
 
 #define MEM_MAX_GUARD_PAD 8192

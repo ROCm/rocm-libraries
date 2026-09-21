@@ -1,5 +1,5 @@
 .. meta::
-  :description: rocThrust API data type support
+  :description: rocThrust API precision support
   :keywords: rocThrust, ROCm, API, reference, data type, support
 
 .. _index:
@@ -15,28 +15,29 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
 .. grid:: 2
   :gutter: 3
 
-  .. grid-item-card:: Installation
+  .. grid-item-card:: Install
 
-    * :doc:`Prerequisites <install/rocThrust-prerequisites>`
-    * :doc:`Installation overview <install/rocThrust-install-overview>`
-    * :doc:`Installing on Linux <install/rocThrust-install-script>`
-    * :doc:`Installing on Windows <install/rocThrust-rmake-install>`
-    * :doc:`Installing on Linux and Windows with CMake <install/rocThrust-install-with-cmake>`
+    * :doc:`Install rocThrust <install/install>`
+    * :doc:`Build from source <install/source-build>`
+
+  .. grid-item-card:: Conceptual
+
+    * :ref:`Synchronization and blocking <synchronization-and-blocking>`
 
   .. grid-item-card:: How to
 
+    * :doc:`Build rocThrust for different backends <./how-to/rocThrust-build-for-backends>`
+    * :ref:`Avoid synchronization barriers <hip-execution-policies>`
     * :doc:`Add rocThrust to a CMake project <./how-to/use-rocThrust-in-a-project>`
     * :doc:`Run tests on multiple GPUs <./how-to/run-rocThrust-tests-on-multiple-gpus>`
-    * :doc:`Build rocThrust applications on different backends <./how-to/rocThrust-build-backends>`
     * :doc:`Use HIPSTDPAR <./how-to/rocThrust-hipstdpar>`
 
   .. grid-item-card:: Reference
 
+    * :ref:`rocthrust-data-type-support`
     * :ref:`bitwise-repro`
-    * :ref:`hipgraph-support`
-    * :ref:`hip-execution-policies`
-    * :ref:`api-reference`
-    * :ref:`genindex`
+    * :ref:`atomic-path`
+    * :ref:`rocThrust API reference <api-reference>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

@@ -1,0 +1,8 @@
+// Insert into backend/src/NodeFactory.cpp
+
+// Add #include at top:
+// #include "descriptors/{{ op.class_name }}.hpp"
+
+// Add case in NodeFactory::createOperationFromNode() switch:
+    case NodeAttributes::{{ op.fbs_table }}:
+        return {{ op.class_name }}::fromNode(nodeT, tensorMap);

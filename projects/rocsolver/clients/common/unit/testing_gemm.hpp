@@ -58,7 +58,7 @@ void gemm_initData(const rocblas_handle handle, Td& dA, Th& hA, Td& dB, Th& hB, 
     }
 }
 
-template <typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
+template <bool STRIDED, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
 void gemm_getError(const rocblas_handle handle,
                    const rocblas_operation transA,
                    const rocblas_operation transB,
@@ -93,10 +93,9 @@ void gemm_getError(const rocblas_handle handle,
 
     // execute computations
     // GPU
-    CHECK_ROCBLAS_ERROR(
-        (rocsolver::rocsolver_gemm<T, I>)(handle, transA, transB, m, n, k, dalpha.data(), dA.data(),
-                                          0, inca, lda, stA, dB.data(), 0, incb, ldb, stB,
-                                          dbeta.data(), dC.data(), 0, incc, ldc, stC, bc, nullptr));
+    CHECK_ROCBLAS_ERROR(rocsolver_gemm(STRIDED, handle, transA, transB, m, n, k, dalpha.data(),
+                                       dA.data(), lda, stA, dB.data(), ldb, stB, dbeta.data(),
+                                       dC.data(), ldc, stC, bc, inca, incb, incc));
     CHECK_HIP_ERROR(hCRes.transfer_from(dC));
 
     // CPU lapack
@@ -119,7 +118,7 @@ void gemm_getError(const rocblas_handle handle,
     }
 }
 
-template <typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
+template <bool STRIDED, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
 void gemm_getPerfData(const rocblas_handle handle,
                       const rocblas_operation transA,
                       const rocblas_operation transB,
@@ -174,11 +173,9 @@ void gemm_getPerfData(const rocblas_handle handle,
     {
         gemm_initData<false, true, T, I>(handle, dA, hA, dB, hB, dC, hC);
 
-        CHECK_ROCBLAS_ERROR((rocsolver::rocsolver_gemm<T, I>)(handle, transA, transB, m, n, k,
-                                                              dalpha.data(), dA.data(), 0, inca,
-                                                              lda, stA, dB.data(), 0, incb, ldb,
-                                                              stB, dbeta.data(), dC.data(), 0, incc,
-                                                              ldc, stC, bc, nullptr));
+        CHECK_ROCBLAS_ERROR(rocsolver_gemm(STRIDED, handle, transA, transB, m, n, k, dalpha.data(),
+                                           dA.data(), lda, stA, dB.data(), ldb, stB, dbeta.data(),
+                                           dC.data(), ldc, stC, bc, inca, incb, incc));
     }
 
     // gpu-lapack performance
@@ -201,11 +198,9 @@ void gemm_getPerfData(const rocblas_handle handle,
         gemm_initData<false, true, T, I>(handle, dA, hA, dB, hB, dC, hC);
 
         timer.start(stream);
-        CHECK_ROCBLAS_ERROR((rocsolver::rocsolver_gemm<T, I>)(handle, transA, transB, m, n, k,
-                                                              dalpha.data(), dA.data(), 0, inca,
-                                                              lda, stA, dB.data(), 0, incb, ldb,
-                                                              stB, dbeta.data(), dC.data(), 0, incc,
-                                                              ldc, stC, bc, nullptr));
+        CHECK_ROCBLAS_ERROR(rocsolver_gemm(STRIDED, handle, transA, transB, m, n, k, dalpha.data(),
+                                           dA.data(), lda, stA, dB.data(), ldb, stB, dbeta.data(),
+                                           dC.data(), ldc, stC, bc, inca, incb, incc));
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
@@ -314,18 +309,18 @@ void testing_gemm(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            gemm_getError<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
-                                incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,
-                                hB, hC, hCRes, &max_error);
+            gemm_getError<STRIDED, T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda,
+                                         stA, dB, incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc,
+                                         halpha, hbeta, hA, hB, hC, hCRes, &max_error);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            gemm_getPerfData<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
-                                   incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,
-                                   hB, hC, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
-                                   argus.profile_kernels, argus.perf);
+            gemm_getPerfData<STRIDED, T, I>(
+                handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB, incb, ldb, stB,
+                dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA, hB, hC, &gpu_time_used,
+                &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
         }
     }
 
@@ -349,18 +344,18 @@ void testing_gemm(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            gemm_getError<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
-                                incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,
-                                hB, hC, hCRes, &max_error);
+            gemm_getError<STRIDED, T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda,
+                                         stA, dB, incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc,
+                                         halpha, hbeta, hA, hB, hC, hCRes, &max_error);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            gemm_getPerfData<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
-                                   incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,
-                                   hB, hC, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
-                                   argus.profile_kernels, argus.perf);
+            gemm_getPerfData<STRIDED, T, I>(
+                handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB, incb, ldb, stB,
+                dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA, hB, hC, &gpu_time_used,
+                &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
         }
     }
 

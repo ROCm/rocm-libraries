@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -122,6 +122,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
         kernel_name += std::to_string(specs.static_dim);
     }
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(precision);
 
     if(placement == rocfft_placement_inplace)
@@ -278,9 +279,9 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
                          const std::optional<LoadOps>&    loadOps,
                          const std::optional<StoreOps>&   storeOps)
 {
-    std::unique_ptr<Function> lds2reg, reg2lds, device;
+    std::unique_ptr<Function> lds2reg, reg2lds, device, device_pp;
     std::unique_ptr<Function> lds2reg_pp_steps, reg2lds_pp_steps;
-    std::unique_ptr<Function> twiddle_multiply_pp, local_transpose_pp;
+    std::unique_ptr<Function> local_transpose_pp;
     std::unique_ptr<Function> lds2reg1, reg2lds1, device1;
     std::unique_ptr<Function> bluestein_load, bluestein_intrinsic_load;
     std::unique_ptr<Function> bluestein_store, bluestein_intrinsic_store;
@@ -359,29 +360,30 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
             reg2lds
                 = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_input_step_1_2_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_steps_1_2_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_output_pp_step_1_2_function());
-            twiddle_multiply_pp = std::make_unique<Function>(
-                kernel_pp->generate_twiddle_multiply_pp_function(direction));
+                kernel_pp->generate_lds_from_reg_partial_pass_steps_1_2_output_function());
             device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp
+                = std::make_unique<Function>(kernel_pp->generate_pp_steps_1_2_device_function());
             break;
         }
         case PPT_SBCC:
         {
             auto kernel_pp = static_cast<StockhamPartialPassKernelCC*>(kernel.get());
 
-            lds2reg
-                = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_pp_function());
+            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
             reg2lds
-                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_pp_function());
+                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
             lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_input_step_3_4_function());
+                kernel_pp->generate_lds_to_reg_partial_pass_steps_3_4_input_function());
             reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_output_pp_step_3_4_function());
+                kernel_pp->generate_lds_from_reg_partial_pass_steps_3_4_output_function());
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
             device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp
+                = std::make_unique<Function>(kernel_pp->generate_pp_steps_3_4_device_function());
             break;
         }
         default:
@@ -423,6 +425,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         *device = make_inverse(*device);
         if(device1)
             *device1 = make_inverse(*device1);
+        if(device_pp)
+            *device_pp = make_inverse(*device_pp);
         *global = make_inverse(*global);
     }
 
@@ -450,6 +454,9 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_precision_type_decl(precision);
+    src += rtc_kint_type_decl(specs.itype);
+    src += load_store_decls(loadOps, storeOps, cbtype);
     src += memory_gfx_h;
     src += callback_h;
     src += butterfly_constant_h;
@@ -472,8 +479,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         src += lds2reg_pp_steps->render();
         src += reg2lds_pp_steps->render();
 
-        if(ppType == PPT_SBRR)
-            src += twiddle_multiply_pp->render();
+        src += device_pp->render();
 
         if(ppType == PPT_SBCC)
             src += local_transpose_pp->render();
@@ -486,17 +492,20 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     if(device1)
         src += device1->render();
     if(bluestein_load)
+    {
+        *bluestein_load = make_callback_realcomplex(*bluestein_load, cbtype, loadOps, storeOps);
         src += bluestein_load->render();
+    }
     if(bluestein_intrinsic_load)
         src += bluestein_intrinsic_load->render();
     if(bluestein_store)
+    {
+        *bluestein_store = make_callback_realcomplex(*bluestein_store, cbtype, loadOps, storeOps);
         src += bluestein_store->render();
+    }
     if(bluestein_intrinsic_store)
         src += bluestein_intrinsic_store->render();
 
-    // make_rtc removes templates from global function - add typedefs
-    // and constants to replace them
-    src += rtc_precision_type_decl(precision);
     if(unit_stride)
         src += "static const StrideBin sb = SB_UNIT;\n";
     else
@@ -533,8 +542,6 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         break;
     }
 
-    src += rtc_const_cbtype_decl(cbtype);
-
     switch(dir2regMode)
     {
     case DirectRegType::FORCE_OFF_OR_NOT_SUPPORT:
@@ -548,9 +555,21 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += "static const bool apply_large_twiddle = ";
     src += (largeTwdBase > 0 && largeTwdSteps > 0) ? "true;\n" : "false;\n";
 
-    // callback kernels need to disable buffer load/store
+    // legacy callbacks need to disable buffer load/store
     if(cbtype != CallbackType::NONE || dir2regMode == DirectRegType::FORCE_OFF_OR_NOT_SUPPORT)
         intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
+
+    // SPIR-V JIT callbacks can affect just one of load or store, so
+    // disable the intrinsic for the affected side as the load/store
+    // needs to go through the callback
+    if(storeOps && storeOps->has_spirv() && intrinsicMode == IntrinsicAccessType::ENABLE_BOTH)
+    {
+        intrinsicMode = IntrinsicAccessType::ENABLE_LOAD_ONLY;
+    }
+    if(loadOps && loadOps->has_spirv())
+    {
+        intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
+    }
 
     switch(intrinsicMode)
     {
@@ -571,7 +590,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += "static const size_t large_twiddle_base = " + std::to_string(largeTwdBase) + ";\n";
     src += "static const size_t large_twiddle_steps = " + std::to_string(largeTwdSteps) + ";\n";
 
-    *global = make_callback_realcomplex(*global, cbtype);
+    *global = make_callback_realcomplex(*global, cbtype, loadOps, storeOps);
 
     *global = make_rtc(*global, kernel_name);
     src += global->render();

@@ -1,0 +1,16 @@
+{
+  "kernel": "wmma_gemm_iu8_dequant (Path A: true int8 i32-acc, f16 dequant out)",
+  "atom": "wmma_i32_16x16x16_iu8",
+  "shape": {
+    "M": 256,
+    "N": 128,
+    "K": 256
+  },
+  "scale_a": 0.05,
+  "scale_b": 0.05,
+  "tol": 0.02,
+  "max_abs_diff": 7.748603820800781e-07,
+  "bad": 0,
+  "size": 32768,
+  "pass": true
+}

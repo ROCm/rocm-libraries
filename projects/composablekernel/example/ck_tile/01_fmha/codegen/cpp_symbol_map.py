@@ -9,6 +9,8 @@ FWD_DTYPE_MAP = {
     "fp8fp16": "FmhaFwdFp8Fp16",
     "fp8bf16": "FmhaFwdFp8Bf16",
     "fp8fp32": "FmhaFwdFp8Fp32",
+    "mxfp8": "FmhaFwdMxFp8",
+    "mxfp4": "FmhaFwdMxFp4",
 }
 
 BWD_DTYPE_MAP = {"fp32": "FmhaBwdFp32", "fp16": "FmhaBwdFp16", "bf16": "FmhaBwdBf16"}
@@ -79,6 +81,8 @@ QSCALE_MAP = {
     "pertensor": "ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR",
     "blockscale": "ck_tile::BlockAttentionQuantScaleEnum::BLOCKSCALE",
     "kv_blockscale": "ck_tile::BlockAttentionQuantScaleEnum::KV_BLOCKSCALE",
+    "mx": "ck_tile::BlockAttentionQuantScaleEnum::MX",
+    "perhead": "ck_tile::BlockAttentionQuantScaleEnum::PERHEAD",
 }
 
 QSCALE_CHECK_MAP = {
@@ -86,6 +90,8 @@ QSCALE_CHECK_MAP = {
     "pertensor": "quant_scale_enum::pertensor",
     "blockscale": "quant_scale_enum::blockscale",
     "kv_blockscale": "quant_scale_enum::kv_blockscale",
+    "mx": "quant_scale_enum::mx",
+    "perhead": "quant_scale_enum::perhead",
 }
 
 BIAS_MAP = {
@@ -135,20 +141,24 @@ LAYOUT_MAP = {"row": "true", "col": "false"}
 
 PIPELINE_MAP = {
     "qr": "ck_tile::BlockFmhaPipelineQRKSVS",
+    "qr_hpad": "ck_tile::BlockFmhaPipelineQRKSVSHpad",
     "qr_async": "ck_tile::BlockFmhaPipelineQRKSVSAsync",
     "qs": "ck_tile::BlockFmhaPipelineQSKSVS",
     "qr_async_trload": "ck_tile::BlockFmhaPipelineQRKSVSAsyncTrload",
     "qr_async_trload_v3": "ck_tile::BlockFmhaFwdV3Pipeline",
+    "qr_tdm": "ck_tile::BlockFmhaPipelineQRKSVSTdm",
 }
 
 PIPELINE_ENUM_MAP = {
     "qr": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
+    "qr_hpad": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_HPAD",
     "qr_async": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC",
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
     "qs": "ck_tile::BlockFmhaPipelineEnum::QSKSVS",
     "qr_pagedkv": "ck_tile::BlockFmhaPipelineEnum::QRKSVS",
     "qr_async_trload": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD",
     "qr_async_trload_v3": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_ASYNC_TRLOAD_V3",
+    "qr_tdm": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM",
 }
 
 BOOL_MAP = {

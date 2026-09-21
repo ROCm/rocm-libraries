@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <miopen/config.hpp>
@@ -39,7 +17,6 @@
 #include <miopen/lock_file.hpp>
 #include <miopen/env.hpp>
 
-#include <boost/core/explicit_operator_bool.hpp>
 #include "sqlite3.h"
 #include <mutex>
 
@@ -146,15 +123,14 @@ struct SQLiteSerializable
         for(auto& el : int_fields)
             ss << ",`" << el << "` INT NOT NULL";
         ss << ");";
-        ss << "CREATE UNIQUE INDEX IF NOT EXISTS "
-           << "`idx_" << Derived::table_name() << "` "
+        ss << "CREATE UNIQUE INDEX IF NOT EXISTS " << "`idx_" << Derived::table_name() << "` "
            << "ON " << Derived::table_name() << "( " << miopen::JoinStrings(str_fields, ",") << ", "
            << miopen::JoinStrings(int_fields, ",") << " );";
         return ss.str();
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT SQLite
+class SQLite
 {
     class impl;
     // do we need propagate const
@@ -187,18 +163,18 @@ public:
     };
 
     using result_type = std::vector<std::unordered_map<std::string, std::string>>;
-    SQLite();
-    SQLite(const fs::path& filename_, bool is_system);
-    ~SQLite();
-    SQLite(SQLite&&) noexcept;
-    SQLite& operator=(SQLite&&) noexcept;
+    MIOPEN_INTERNALS_EXPORT SQLite();
+    MIOPEN_INTERNALS_EXPORT SQLite(const fs::path& filename_, bool is_system);
+    MIOPEN_INTERNALS_EXPORT ~SQLite();
+    MIOPEN_INTERNALS_EXPORT SQLite(SQLite&&) noexcept;
+    MIOPEN_INTERNALS_EXPORT SQLite& operator=(SQLite&&) noexcept;
     SQLite& operator=(const SQLite&) = delete;
-    bool Valid() const;
-    result_type Exec(const std::string& query) const;
-    int Changes() const;
+    MIOPEN_INTERNALS_EXPORT bool Valid() const;
+    MIOPEN_INTERNALS_EXPORT result_type Exec(const std::string& query) const;
+    MIOPEN_INTERNALS_EXPORT int Changes() const;
     int Retry(std::function<int()>) const;
     static int Retry(std::function<int()> f, fs::path filename);
-    std::string ErrorMessage() const;
+    MIOPEN_INTERNALS_EXPORT std::string ErrorMessage() const;
 };
 
 template <typename Derived>
@@ -207,9 +183,11 @@ class SQLiteBase
 protected:
 public:
     SQLiteBase(DbKinds, const fs::path& filename_, bool is_system_)
-        : filename(filename_), is_system(is_system_)
+        : filename(filename_),
+          is_system(is_system_),
+          disable_file_io(!is_system_ && IsUserDbDisabled())
     {
-        if(DisableUserDbFileIO && !is_system)
+        if(disable_file_io)
             return;
 
         MIOPEN_LOG_I2("Initializing " << (InMemDb ? "In Memory " : "")
@@ -235,7 +213,7 @@ public:
                 if(!fs::create_directories(directory))
                     MIOPEN_LOG_W("Unable to create a directory: " << directory);
                 else
-                    fs::permissions(directory, FS_ENUM_PERMS_ALL);
+                    fs::permissions(directory, miopen::fs::perms::all);
             }
         }
         sql = SQLite{filename_, is_system};
@@ -316,7 +294,7 @@ public:
     inline auto FindRecord(U&... args)
     {
         using Ret = decltype(reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...));
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return Ret{};
         return reinterpret_cast<Derived*>(this)->FindRecordUnsafe(args...);
     }
@@ -324,7 +302,7 @@ public:
     template <typename... U>
     inline auto RemoveRecord(U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return true;
         return reinterpret_cast<Derived*>(this)->RemoveRecordUnsafe(args...);
     }
@@ -332,7 +310,7 @@ public:
     template <typename... U>
     inline auto StoreRecord(U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return true;
         return reinterpret_cast<Derived*>(this)->StoreRecordUnsafe(args...);
     }
@@ -340,7 +318,7 @@ public:
     template <typename... U>
     inline auto Remove(const U&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return true;
         return reinterpret_cast<Derived*>(this)->RemoveUnsafe(args...);
     }
@@ -349,7 +327,7 @@ public:
     inline auto Update(const U&... args)
     {
         using Ret = decltype(reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...));
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return Ret{};
         return reinterpret_cast<Derived*>(this)->UpdateUnsafe(args...);
     }
@@ -357,15 +335,21 @@ public:
     template <typename... U>
     inline bool Load(U&&... args)
     {
-        if(!is_system && DisableUserDbFileIO)
+        if(disable_file_io)
             return false;
         return reinterpret_cast<Derived*>(this)->LoadUnsafe(args...);
     }
 
     fs::path filename;
-    bool dbInvalid;
+    bool dbInvalid = true;
     SQLite sql;
     bool is_system;
+
+    /// Whether file I/O against this database is suppressed. Latched at construction, so that
+    /// every operation on a given instance sees one consistent answer even if the debug override
+    /// behind IsUserDbDisabled() is flipped between constructions. Always false for the system
+    /// databases, which the user-db switch does not govern.
+    const bool disable_file_io;
 };
 
 template <typename Derived>
@@ -534,7 +518,7 @@ public:
     }
 
     /// Updates record under key PROBLEM_CONFIG with data ID:VALUES in database.
-    /// Returns updated record or boost::none if insertion failed
+    /// Returns updated record or std::optional equals to nullopt_t if insertion failed
     template <class T, class V>
     inline std::optional<DbRecord>
     UpdateUnsafe(const T& problem_config, const std::string& id, const V& values)

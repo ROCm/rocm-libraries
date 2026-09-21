@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,10 +59,12 @@ public:
                    Counter hist[Bins])
     {
         static_assert(
-            std::is_same<Counter, unsigned int>::value || std::is_same<Counter, int>::value ||
-            std::is_same<Counter, float>::value || std::is_same<Counter, unsigned long long>::value,
-            "Counter must be type that is supported by atomics (float, int, unsigned int, unsigned long long)"
-        );
+            std::is_same<Counter, unsigned int>::value || std::is_same<Counter, int>::value
+                || std::is_same<Counter, unsigned long>::value
+                || std::is_same<Counter, unsigned long long>::value
+                || std::is_same<Counter, float>::value || std::is_same<Counter, double>::value,
+            "Counter must be type that is supported by atomics (unsigned int, int, unsigned long, "
+            "unsigned long long, float, double)");
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {

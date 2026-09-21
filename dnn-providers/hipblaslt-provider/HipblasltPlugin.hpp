@@ -14,6 +14,7 @@ hipdnnPluginStatus_t hipdnnPluginGetVersionImpl(const char** version);
 hipdnnPluginStatus_t hipdnnPluginGetTypeImpl(hipdnnPluginType_t* type);
 void hipdnnPluginGetLastErrorStringImpl(const char** errorStr);
 hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callback);
+hipdnnPluginStatus_t hipdnnPluginSetLogLevelImpl(hipdnnSeverity_t level);
 hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
                                                            uint32_t maxEngines,
                                                            uint32_t* numEngines);

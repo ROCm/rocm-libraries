@@ -62,6 +62,7 @@ static void print_version_info()
 int main(int argc, char** argv)
 {
     print_version_info();
+    print_asan_kernel_warning("rocsolver-test");
 
     // print device info
     int device_count = query_device_property();

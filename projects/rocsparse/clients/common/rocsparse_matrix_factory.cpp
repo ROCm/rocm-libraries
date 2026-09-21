@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1040,6 +1040,89 @@ void rocsparse_matrix_factory<T, I, J>::init_hyb(
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     traits_init_hyb<T, I, J>::init(*this, that, M, N, nnz, base, conform);
+}
+
+//
+// BLOCKED ELL
+//
+template <typename T, typename I, typename J>
+void rocsparse_matrix_factory<T, I, J>::init_bell(std::vector<I>&      bell_col_ind,
+                                                  std::vector<T>&      bell_val,
+                                                  I&                   mb,
+                                                  I&                   nb,
+                                                  I&                   ell_cols,
+                                                  I&                   ell_block_size,
+                                                  rocsparse_index_base base)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // Generate or load a block level CSR matrix first (using whichever underlying matrix
+    // initialization was selected), then convert it to Blocked ELL. The CSR matrix describes
+    // the block sparsity pattern (mb block rows by nb block columns).
+    J              Mb = static_cast<J>(mb);
+    J              Nb = static_cast<J>(nb);
+    I              nnzb;
+    std::vector<I> csr_row_ptr;
+    std::vector<J> csr_col_ind;
+    std::vector<T> csr_val;
+
+    this->m_instance->init_csr(csr_row_ptr,
+                               csr_col_ind,
+                               csr_val,
+                               Mb,
+                               Nb,
+                               nnzb,
+                               base,
+                               rocsparse_matrix_type_general,
+                               rocsparse_fill_mode_lower,
+                               rocsparse_storage_mode_sorted);
+
+    mb = static_cast<I>(Mb);
+    nb = static_cast<I>(Nb);
+
+    host_csr_to_bell(
+        mb, ell_block_size, csr_row_ptr, csr_col_ind, bell_col_ind, bell_val, ell_cols, base);
+}
+
+template <typename T, typename I, typename J>
+void rocsparse_matrix_factory<T, I, J>::init_bell(
+    host_bell_matrix<T, I>& that, I& m, I& n, I block_dim, rocsparse_index_base base)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // Build a Blocked-ELL matrix from a randomly generated block sparsity pattern. The raw
+    // init_bell helper works in block units: it takes the number of block-rows/columns and
+    // produces the column index array (one block-column index per ELL slot, length
+    // block_rows * ell_cols / block_dim) and the value array (length rows * ell_cols). The
+    // bell_matrix stores these arrays with scalar rows/cols and a scalar ell_cols.
+    I mb             = (m + block_dim - 1) / block_dim;
+    I nb             = (n + block_dim - 1) / block_dim;
+    I ell_cols       = 0;
+    I ell_block_size = block_dim;
+
+    std::vector<I> bell_col_ind;
+    std::vector<T> bell_val;
+
+    this->init_bell(bell_col_ind, bell_val, mb, nb, ell_cols, ell_block_size, base);
+
+    // Scalar dimensions (ell_cols is already the scalar padded ELL column count).
+    const I rows = mb * block_dim;
+    const I cols = nb * block_dim;
+
+    that.define(rows, cols, ell_cols, block_dim, base);
+
+    // Report back the (possibly adjusted) scalar dimensions to the caller.
+    m = rows;
+    n = cols;
+
+    for(size_t i = 0; i < bell_col_ind.size(); ++i)
+    {
+        that.ind[i] = bell_col_ind[i];
+    }
+    for(size_t i = 0; i < bell_val.size(); ++i)
+    {
+        that.val[i] = bell_val[i];
+    }
 }
 
 //

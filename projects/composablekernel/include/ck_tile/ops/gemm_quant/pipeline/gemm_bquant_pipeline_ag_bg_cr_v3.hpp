@@ -185,10 +185,8 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
         CK_TILE_DEVICE static void LoadAndConvertBTile(BBlockTile_& b_block_tile,
                                                        const BDramWindow& b_dram_window)
         {
-            using DestDataType            = typename BBlockTile_::DataType;
-            using SrcDataType             = typename BDramWindow::Base::TileWindowBase::DataType;
             constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(b_block_tile, b_dram_window);
+            load_and_convert_tile<UnaryOpSize>(b_block_tile, b_dram_window);
         }
 
         template <typename BBlockTile_, typename BDramWindow, typename BDramTileWindowStep>
@@ -265,8 +263,7 @@ struct BQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
             using BQDramTileWindowStep = typename BQDramBlockWindowTmp::BottomTensorIndex;
 
             // Note: BDataType PkInt4 gets converted during loading, before going to LDS
-            auto&& [a_lds_block, b_lds_block] =
-                Base::template GetABLdsTensorViews<ADataType, OverrideBDataType>(p_smem);
+            auto&& [a_lds_block, b_lds_block] = Base::GetABLdsTensorViews(p_smem);
 
             constexpr auto a_lds_load_tile_distr =
                 make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());

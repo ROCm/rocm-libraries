@@ -13,6 +13,12 @@ Tests:
     function: set_get_pointer_mode
     precision: *single_precision
 
+  - name: set_get_alpha_beta_stride_general
+    category: quick
+    function: set_get_alpha_beta_stride
+    precision: *single_precision
+    api: [ FORTRAN, C ]
+
   - name: set_get_math_mode_general
     category: quick
     function: set_get_math_mode

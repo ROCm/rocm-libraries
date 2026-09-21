@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,54 +23,47 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VMacF32, SSetPrior
 from ..Common.DataType import DataType
-from ..Component import Component, MAC
+from ..Component import MAC
 
 class MAC_F32C_Plain(MAC):
-    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.ComplexFloat)}}
+    kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.ComplexFloat),
+                              "MacDataTypeB": DataType(DataTypeEnum.ComplexFloat)}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("MAC_F32C_Plain")
         module.addComment(self.commentHeader())
-        priority = Component.Priority.find(writer)
 
-        vars = {}
-        vars["m"] = m
-        vars["ThreadTile0"] = kernel["ThreadTile0"]
+        ccA = kernel["ProblemType"]["ComplexConjugateA"]
+        ccB = kernel["ProblemType"]["ComplexConjugateB"]
+        tt0 = kernel["ThreadTile0"]
 
         for b in range(0, kernel["ThreadTile1"]):
-            for a in range(0, kernel["ThreadTile0"]):
+            for a in range(0, tt0):
                 for iui in range(0, innerUnroll):
-                    vars["a"] = a
-                    vars["b"] = b
-                    vars["iui"] = iui
+                    # each complex-single element is 2 vgprs: real=+0, imag=+1
+                    cReal = vgpr("ValuC+%d" % ((a + b*tt0)*2 + 0))
+                    cImag = vgpr("ValuC+%d" % ((a + b*tt0)*2 + 1))
+                    aReal = vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*2 + 0))
+                    aImag = vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*2 + 1))
+                    bReal = vgpr("ValuB_X%d_I%d+%d" % (m, iui, b*2 + 0))
+                    bImag = vgpr("ValuB_X%d_I%d+%d" % (m, iui, b*2 + 1))
 
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*2]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*2]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*2]".format_map(vars)
-                    module.addInst("_v_mac_f32", cStr, aStr, bStr, "")
+                    # c.real += a.real * b.real
+                    module.add(VMacF32(dst=cReal, src0=aReal, src1=bReal))
+                    # c.real -= a.imag * b.imag  (sign flips under a single conjugate)
+                    module.add(VMacF32(dst=cReal, src0=aImag.getMinus() if (ccA == ccB) else aImag, src1=bImag))
+                    # c.imag += a.real * b.imag  (negate b.imag when conjugating B)
+                    module.add(VMacF32(dst=cImag, src0=aReal, src1=bImag.getMinus() if ccB else bImag))
+                    # c.imag += a.imag * b.real  (negate a.imag when conjugating A)
+                    module.add(VMacF32(dst=cImag, src0=aImag.getMinus() if ccA else aImag, src1=bReal))
 
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*2]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*2+1]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*2+1]".format_map(vars)
-                    sign = "-" if (not kernel["ProblemType"]["ComplexConjugateA"] and not kernel["ProblemType"]["ComplexConjugateB"]) or \
-                            (kernel["ProblemType"]["ComplexConjugateA"] and kernel["ProblemType"]["ComplexConjugateB"]) else ""
-                    module.addInst("_v_mac_f32", cStr, sign + aStr, bStr, "")
+                    if (b == 0) and (a == 0) and (iui == 0):
+                        module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
 
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*2+1]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*2]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*2+1]".format_map(vars)
-                    sign = "-" if kernel["ProblemType"]["ComplexConjugateB"] else ""
-                    module.addInst("_v_mac_f32", cStr, aStr, sign + bStr, "")
-
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*2+1]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*2+1]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*2]".format_map(vars)
-                    sign = "-" if kernel["ProblemType"]["ComplexConjugateA"] else ""
-                    module.addInst("_v_mac_f32", cStr, sign + aStr, bStr, "")
-
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
         return module

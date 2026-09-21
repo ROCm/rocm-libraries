@@ -39,7 +39,7 @@ namespace std
 #include <math.h>
 #include <vector>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -49,13 +49,14 @@ namespace std
 #endif
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/fft_enums.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/rocfft_params.h"
 #include "bench.h"
 #include "rocfft/rocfft.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 typedef HMODULE ROCFFT_LIB;
 #else
 typedef void* ROCFFT_LIB;
@@ -64,7 +65,7 @@ typedef void* ROCFFT_LIB;
 // Load the rocfft library
 ROCFFT_LIB rocfft_lib_load(const std::string& path)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return LoadLibraryA(path.c_str());
 #else
     return dlopen(path.c_str(), RTLD_LAZY);
@@ -74,7 +75,7 @@ ROCFFT_LIB rocfft_lib_load(const std::string& path)
 // Return a string describing the error loading rocfft
 const char* rocfft_lib_load_error()
 {
-#ifdef WIN32
+#ifdef _WIN32
     // just return the error number
     static std::string error_str;
     error_str = std::to_string(GetLastError());
@@ -87,7 +88,7 @@ const char* rocfft_lib_load_error()
 // Get symbol from rocfft lib
 void* rocfft_lib_symbol(ROCFFT_LIB libhandle, const char* sym)
 {
-#ifdef WIN32
+#ifdef _WIN32
     return reinterpret_cast<void*>(GetProcAddress(libhandle, sym));
 #else
     return dlsym(libhandle, sym);
@@ -96,7 +97,7 @@ void* rocfft_lib_symbol(ROCFFT_LIB libhandle, const char* sym)
 
 void rocfft_lib_close(ROCFFT_LIB libhandle)
 {
-#ifdef WIN32
+#ifdef _WIN32
     FreeLibrary(libhandle);
 #else
     dlclose(libhandle);
@@ -122,6 +123,12 @@ rocfft_plan make_plan(ROCFFT_LIB libhandle, const fft_params& params)
         = (decltype(&rocfft_plan_create))rocfft_lib_symbol(libhandle, "rocfft_plan_create");
 
     procfft_setup();
+    auto cm_istride = params.istride;
+    auto cm_ostride = params.ostride;
+    auto cm_length  = params.length;
+    std::reverse(cm_istride.begin(), cm_istride.end());
+    std::reverse(cm_ostride.begin(), cm_ostride.end());
+    std::reverse(cm_length.begin(), cm_length.end());
 
     rocfft_plan_description desc = NULL;
     LIB_V_THROW(procfft_plan_description_create(&desc), "rocfft_plan_description_create failed");
@@ -131,11 +138,11 @@ rocfft_plan make_plan(ROCFFT_LIB libhandle, const fft_params& params)
                                                  rocfft_array_type_from_fftparams(params.otype),
                                                  params.ioffset.data(),
                                                  params.ooffset.data(),
-                                                 params.istride.size(),
-                                                 params.istride.data(),
+                                                 cm_istride.size(),
+                                                 cm_istride.data(),
                                                  params.idist,
-                                                 params.ostride.size(),
-                                                 params.ostride.data(),
+                                                 cm_ostride.size(),
+                                                 cm_ostride.data(),
                                                  params.odist),
         "rocfft_plan_description_data_layout failed");
     rocfft_plan plan = NULL;
@@ -144,8 +151,8 @@ rocfft_plan make_plan(ROCFFT_LIB libhandle, const fft_params& params)
                                     rocfft_result_placement_from_fftparams(params.placement),
                                     rocfft_transform_type_from_fftparams(params.transform_type),
                                     rocfft_precision_from_fftparams(params.precision),
-                                    params.length.size(),
-                                    params.length.data(),
+                                    cm_length.size(),
+                                    cm_length.data(),
                                     params.nbatch,
                                     desc),
                 "rocfft_plan_create failed");
@@ -179,7 +186,7 @@ void destroy_info(ROCFFT_LIB libhandle, rocfft_execution_info& info)
 }
 
 // Given a libhandle from dload, and a corresponding rocFFT plan, return how much work
-// buffer is required.
+// buffer is required for the current HIP device
 size_t get_wbuffersize(ROCFFT_LIB libhandle, const rocfft_plan& plan)
 {
     auto procfft_plan_get_work_buffer_size
@@ -192,6 +199,21 @@ size_t get_wbuffersize(ROCFFT_LIB libhandle, const rocfft_plan& plan)
                 "rocfft_plan_get_work_buffer_size failed");
 
     return workBufferSize;
+}
+
+// Given a libhandle from dload, and a corresponding rocFFT plan, get
+// work buffer requirements for all devices
+std::vector<size_t> get_wbuffersizes_all_devices(ROCFFT_LIB libhandle, const rocfft_plan& plan)
+{
+    const int           ndevices = rocfft_scoped_device::device_count();
+    std::vector<size_t> sizes(ndevices);
+
+    for(int device = 0; device < ndevices; ++device)
+    {
+        rocfft_scoped_device dev(device);
+        sizes[device] = get_wbuffersize(libhandle, plan);
+    }
+    return sizes;
 }
 
 // Given a libhandle from dload and a corresponding rocFFT plan, print the plan information.
@@ -471,8 +493,8 @@ int main(int argc, char* argv[])
             std::copy(ingrid.begin(), ingrid.end(), input_grid.begin() + 1);
             std::copy(outgrid.begin(), outgrid.end(), output_grid.begin() + 1);
 
-            params.distribute_input(localDeviceCount, input_grid);
-            params.distribute_output(localDeviceCount, output_grid);
+            params.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
+            params.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
         }
 
         if(*opt_not_in_place)
@@ -555,24 +577,14 @@ int main(int argc, char* argv[])
         std::cout << params.str() << std::endl;
     }
 
-    // Check free and total available memory:
-    size_t free  = 0;
-    size_t total = 0;
-    try
+    // Check available memory:
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
+    const auto io_vram_footprint = params.io_vram_footprint();
+    if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
-        HIP_V_THROW(hipMemGetInfo(&free, &total), "hipMemGetInfo failed");
-    }
-    catch(rocfft_hip_runtime_error)
-    {
-        return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
-    if(!vram_fits_problem(raw_vram_footprint, free))
-    {
-        std::cout << "SKIPPED: Problem size (" << raw_vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
@@ -652,7 +664,8 @@ int main(int argc, char* argv[])
         std::vector<rocfft_plan> plan;
         // Allocate the work buffer: just one, big enough for any dloaded library.
         std::vector<rocfft_execution_info> info;
-        size_t                             wbuffer_size = 0;
+        const auto                         ndevices = rocfft_scoped_device::device_count();
+        std::vector<size_t>                max_wbuffer_sizes(ndevices);
         for(unsigned int idx = 0; idx < lib_strings.size(); ++idx)
         {
             std::cout << idx << ": " << lib_strings[idx] << "\n";
@@ -666,37 +679,57 @@ int main(int argc, char* argv[])
             handle.push_back(libhandle);
             plan.push_back(make_plan(handle[idx], params));
             show_plan(handle[idx], plan[idx]);
-            wbuffer_size = std::max(wbuffer_size, get_wbuffersize(handle[idx], plan[idx]));
+
+            auto lib_wbuffer_sizes = get_wbuffersizes_all_devices(handle[idx], plan[idx]);
+            for(size_t i = 0; i < lib_wbuffer_sizes.size(); ++i)
+            {
+                max_wbuffer_sizes[i] = std::max(max_wbuffer_sizes[i], lib_wbuffer_sizes[i]);
+            }
+
             info.push_back(make_execinfo(handle[idx]));
         }
 
-        std::cout << "Work buffer size: " << wbuffer_size << std::endl;
+        std::cout << "Work buffer size: " << byte_sizes_to_str(max_wbuffer_sizes) << std::endl;
 
-        if(!vram_fits_problem(raw_vram_footprint + wbuffer_size, free))
+        // add work memory to vram footprint
+        auto total_vram_footprint = io_vram_footprint;
+        for(size_t i = 0; i < total_vram_footprint.size(); ++i)
         {
-            std::cout << "SKIPPED: Problem size (" << raw_vram_footprint << " + " << +wbuffer_size
-                      << " = " << raw_vram_footprint + wbuffer_size
-                      << " ) data too large for device.\n";
+            total_vram_footprint[i] += max_wbuffer_sizes[i];
+        }
+        if(!vram_fits_problem(total_vram_footprint, vram_avail))
+        {
+            std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(total_vram_footprint)
+                      << " = " << byte_sizes_to_str(io_vram_footprint) << " + "
+                      << byte_sizes_to_str(max_wbuffer_sizes)
+                      << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                      << ")\n";
             return EXIT_SUCCESS;
         }
 
-        gpubuf wbuffer;
-        if(wbuffer_size)
+        std::vector<gpubuf> wbuffers(ndevices);
+        for(int device = 0; device < ndevices; ++device)
         {
-            try
+            rocfft_scoped_device dev(device);
+            if(max_wbuffer_sizes[device])
             {
-                HIP_V_THROW(wbuffer.alloc(wbuffer_size), "Creating intermediate Buffer failed");
+                try
+                {
+                    HIP_V_THROW(wbuffers[device].alloc(max_wbuffer_sizes[device]),
+                                "Creating intermediate Buffer failed");
+                }
+                catch(rocfft_hip_runtime_error)
+                {
+                    return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
+                }
             }
-            catch(rocfft_hip_runtime_error)
-            {
-                return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-            }
-        }
 
-        // Associate the work buffer to the individual libraries:
-        for(unsigned int idx = 0; idx < lib_strings.size(); ++idx)
-        {
-            set_work_buffer(handle[idx], info[idx], wbuffer_size, wbuffer.data());
+            // Associate the work buffer to the individual libraries:
+            for(unsigned int idx = 0; idx < lib_strings.size(); ++idx)
+            {
+                set_work_buffer(
+                    handle[idx], info[idx], wbuffers[device].size(), wbuffers[device].data());
+            }
         }
 
         // Run the plan using its associated rocFFT library:

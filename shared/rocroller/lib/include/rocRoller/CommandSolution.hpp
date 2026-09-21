@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -85,6 +62,9 @@ namespace rocRoller
         void setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts);
         std::optional<std::pair<uint, uint>> getManualWavefrontCounts() const;
 
+        void setManualWorkgroupClusterSize(std::array<unsigned int, 3> const&);
+        std::optional<std::array<unsigned int, 3>> getManualWorkgroupClusterSize() const;
+
         /**
          * @brief Set the number of wave tiles to execute within a workgroup
          *
@@ -121,8 +101,6 @@ namespace rocRoller
 
         bool packMultipleElementsInto1VGPR = true;
 
-        unsigned int unrollX   = 0;
-        unsigned int unrollY   = 0;
         unsigned int unrollK   = 0;
         bool         fuseLoops = true;
         bool         tailLoops = true;
@@ -164,7 +142,8 @@ namespace rocRoller
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
-        std::optional<std::pair<uint, uint>> m_wavefrontCounts;
+        std::optional<std::pair<uint, uint>>       m_wavefrontCounts;
+        std::optional<std::array<unsigned int, 3>> m_workgroupClusterSize;
 
         int m_kernelDimension = 0;
 
@@ -345,6 +324,8 @@ namespace rocRoller
          */
         hipFunction_t getHipFunction() const;
 
+        void generateKernelGraph();
+
     private:
         CommandPtr  m_command;
         std::string m_name;
@@ -357,7 +338,6 @@ namespace rocRoller
         CommandParametersPtr              m_commandParameters;
         CommandLaunchParametersPtr        m_launchParameters;
 
-        void generateKernelGraph(std::string name);
         void generateKernelSource();
 
         /**

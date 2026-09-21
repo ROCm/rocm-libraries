@@ -7,72 +7,72 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceSignatureKey.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_sdk_test_utils;
 
 TEST(TestBatchnormFwdInferenceSignatureKey, EqualityOperator)
 {
-    BatchnormFwdInferenceSignatureKey key1{
+    const BatchnormFwdInferenceSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key2{
+    const BatchnormFwdInferenceSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    BatchnormFwdInferenceSignatureKey key3{
+    const BatchnormFwdInferenceSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    BatchnormFwdInferenceSignatureKey key4{
+    const BatchnormFwdInferenceSignatureKey key4{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_TRUE(key3 == key4);
 
-    BatchnormFwdInferenceSignatureKey key5{
+    const BatchnormFwdInferenceSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key6{
+    const BatchnormFwdInferenceSignatureKey key6{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     EXPECT_FALSE(key5 == key6);
 
-    BatchnormFwdInferenceSignatureKey key7{
+    const BatchnormFwdInferenceSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key8{
+    const BatchnormFwdInferenceSignatureKey key8{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    BatchnormFwdInferenceSignatureKey key9{
+    const BatchnormFwdInferenceSignatureKey key9{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key10{
+    const BatchnormFwdInferenceSignatureKey key10{
         DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
 
-    BatchnormFwdInferenceSignatureKey key11{
+    const BatchnormFwdInferenceSignatureKey key11{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key12{
+    const BatchnormFwdInferenceSignatureKey key12{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key11 == key12);
 }
 
 TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
 {
-    BatchnormFwdInferenceSignatureKey key1{
+    const BatchnormFwdInferenceSignatureKey key1{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key2{
+    const BatchnormFwdInferenceSignatureKey key2{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    BatchnormFwdInferenceSignatureKey key3{
+    const BatchnormFwdInferenceSignatureKey key3{
         DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
-    BatchnormFwdInferenceSignatureKey key4{
+    const BatchnormFwdInferenceSignatureKey key4{
         DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key5{
+    const BatchnormFwdInferenceSignatureKey key5{
         DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key6{
+    const BatchnormFwdInferenceSignatureKey key6{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    BatchnormFwdInferenceSignatureKey key7{
+    const BatchnormFwdInferenceSignatureKey key7{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
@@ -88,9 +88,9 @@ TEST(TestBatchnormFwdInferenceSignatureKey, HashFunction)
 
 TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
 {
-    BatchnormFwdInferenceSignatureKey original{
+    const BatchnormFwdInferenceSignatureKey original{
         DataType::FLOAT, DataType::HALF, DataType::DOUBLE, DataType::FLOAT, DataType::BFLOAT16};
-    BatchnormFwdInferenceSignatureKey copied{original};
+    const BatchnormFwdInferenceSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
     EXPECT_EQ(copied.xDataType, DataType::FLOAT);
@@ -102,20 +102,22 @@ TEST(TestBatchnormFwdInferenceSignatureKey, Copy)
 
 TEST(TestBatchnormFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
 {
-    BatchnormFwdInferenceSignatureKey expectedKey{
+    const BatchnormFwdInferenceSignatureKey expectedKey{
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  DataType::FLOAT,
                                                  dims,
                                                  TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
-    BatchnormFwdInferenceSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+    const BatchnormFwdInferenceSignatureKey keyFromNode(graphWrap.getNode(0),
+                                                        graphWrap.getTensorMap());
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }

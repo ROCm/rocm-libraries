@@ -479,13 +479,13 @@ namespace
                          rocblas_int               batch_count,
                          rocblas_geam_ex_operation geam_ex_op)
     {
-        int   blz   = blockIdx.z; // block's matrix in the batch
+        int   batch = blockIdx.z; // block's matrix in the batch
         auto  alpha = load_scalar(alpha_in, blockIdx.z, 1);
         auto  beta  = load_scalar(beta_in, blockIdx.z, 1);
-        auto* d_a   = alpha ? load_ptr_batch(dA_input, blz, a_st_or_of) : nullptr;
-        auto* d_b   = alpha ? load_ptr_batch(dB_input, blz, b_st_or_of) : nullptr;
-        auto* d_c   = beta ? load_ptr_batch(dC_input, blz, c_st_or_of) : nullptr;
-        auto* d_d   = load_ptr_batch(dD_input, blz, d_st_or_of);
+        auto* d_a   = alpha ? load_ptr_batch(dA_input, batch, a_st_or_of) : nullptr;
+        auto* d_b   = alpha ? load_ptr_batch(dB_input, batch, b_st_or_of) : nullptr;
+        auto* d_c   = beta ? load_ptr_batch(dC_input, batch, c_st_or_of) : nullptr;
+        auto* d_d   = load_ptr_batch(dD_input, batch, d_st_or_of);
 
         constexpr bool TRANSA = TRANSA_C != 'N';
         constexpr bool TRANSB = TRANSB_C != 'N';

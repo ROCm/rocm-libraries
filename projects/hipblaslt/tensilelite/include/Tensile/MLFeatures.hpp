@@ -32,6 +32,8 @@
 
 #include <cstddef>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -255,3 +257,4 @@ namespace TensileLite
          */
     } // namespace MLFeatures
 } // namespace TensileLite
+

@@ -356,6 +356,7 @@ TYPED_TEST(RocprimThreadOperationTests, Reduction)
             {
                 thread_reduce_kernel<T, length>
                     <<<grid_size, block_size>>>(device_input.get(), device_output.get());
+                HIP_CHECK(hipGetLastError());
             }
             else
             {
@@ -453,6 +454,7 @@ TYPED_TEST(RocprimThreadOperationTests, ScanInclusive)
             {
                 thread_scan_inclusive_kernel<T, length>
                     <<<grid_size, block_size>>>(device_input.get(), device_output.get());
+                HIP_CHECK(hipGetLastError());
             }
             else
             {

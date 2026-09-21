@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Tests for rrperf.compare module with focus on resource tracking."""
 
@@ -29,12 +7,29 @@ import io
 import sys
 from pathlib import Path
 
+import yaml
 from rrperf.compare import compare
+from rrperf.problems import GEMMResult
 
 repo_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
 FILE_DIR = Path(__file__).parent.resolve()
+
+
+def write_sample_yaml(target_dir: Path, source_file: Path, m_override: int = None):
+    target_dir.mkdir(parents=True, exist_ok=True)
+    result = yaml.safe_load(source_file.read_text())
+    if m_override is not None:
+        problem = result.get("problem")
+        if not isinstance(problem, dict):
+            raise ValueError(
+                "Expected nested GEMM schema with a 'problem' mapping in sample YAML."
+            )
+        problem["M"] = m_override
+    (target_dir / "gemm-000000.yaml").write_text(
+        yaml.safe_dump(result, sort_keys=False)
+    )
 
 
 class TestResourceMarkdown:
@@ -114,3 +109,82 @@ class TestHTML:
             line = line.strip()
             if line:
                 assert line in result
+
+    def test_comparison_summary_counts(self):
+        result_io = io.StringIO()
+        samples_dir = FILE_DIR / "samples"
+        original_dir = samples_dir / "1"
+        compare(
+            directories=[str(original_dir), str(original_dir)],
+            format="html",
+            output=result_io,
+        )
+        result = result_io.getvalue()
+        assert "<h2>Comparison Summary</h2>" in result
+        assert "<li>Compared: 1</li>" in result
+        assert "<li>Significant diffs: 0</li>" in result
+        assert "<li>Insignificant diffs: 1</li>" in result
+        assert "<li>Not compared (total): 0</li>" in result
+
+
+class TestComparisonSummaryMarkdown:
+    def test_counts_for_matching_runs(self):
+        result_io = io.StringIO()
+        samples_dir = FILE_DIR / "samples"
+        original_dir = samples_dir / "1"
+        compare(
+            directories=[str(original_dir), str(original_dir)],
+            format="md",
+            output=result_io,
+        )
+        result = result_io.getvalue()
+        assert "- Compared: 1" in result
+        assert "- Significant diffs: 0" in result
+        assert "- Insignificant diffs: 1" in result
+        assert "- Not compared (reference-only): 0" in result
+        assert "- Not compared (candidate-only): 0" in result
+        assert "- Not compared (total): 0" in result
+
+    def test_counts_for_non_matching_runs(self, tmp_path):
+        samples_dir = FILE_DIR / "samples"
+        source_file = samples_dir / "1" / "gemm-000000.yaml"
+
+        reference_dir = tmp_path / "reference"
+        candidate_dir = tmp_path / "candidate"
+        write_sample_yaml(reference_dir, source_file, m_override=4096)
+        write_sample_yaml(candidate_dir, source_file, m_override=8192)
+
+        result_io = io.StringIO()
+        compare(
+            directories=[str(reference_dir), str(candidate_dir)],
+            format="md",
+            output=result_io,
+        )
+        result = result_io.getvalue()
+        assert "- Compared: 0" in result
+        assert "- Significant diffs: 0" in result
+        assert "- Insignificant diffs: 0" in result
+        assert "- Not compared (reference-only): 1" in result
+        assert "- Not compared (candidate-only): 1" in result
+        assert "- Not compared (total): 2" in result
+
+
+class TestRunInvariantToken:
+    def test_gemm_token_ignores_version_metadata(self):
+        baseline = GEMMResult(
+            resultType="GEMM",
+            path=Path("baseline.yaml"),
+            kernelGenerate=1,
+            kernelAssemble=1,
+            kernelExecute=[1],
+            version="abc12345",
+        )
+        candidate = GEMMResult(
+            resultType="GEMM",
+            path=Path("candidate.yaml"),
+            kernelGenerate=1,
+            kernelAssemble=1,
+            kernelExecute=[1],
+            version="def67890",
+        )
+        assert baseline.run_invariant_token == candidate.run_invariant_token

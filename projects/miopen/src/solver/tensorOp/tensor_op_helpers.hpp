@@ -101,7 +101,8 @@ inline std::tuple<int, int, unsigned int> GetBitmapAndWgInfo(const std::vector<s
                      ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
                      : 1;
 
-    int work_per_wg = std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
+    int work_per_wg = static_cast<int>(
+        std::accumulate(clens.begin() + d, clens.end(), size_t{1}, std::multiplies<size_t>()));
 
     unsigned int bitmap = 0;
     // update bitmap for first_not_one
@@ -154,7 +155,8 @@ Get4dParams(const miopen::tensorOp::ProblemDescription& problem, bool is4dLite)
                      ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
                      : 1;
 
-    int work_per_wg = std::accumulate(clens.begin() + d, clens.end(), 1, std::multiplies<int>());
+    int work_per_wg = static_cast<int>(
+        std::accumulate(clens.begin() + d, clens.end(), size_t{1}, std::multiplies<size_t>()));
 
     unsigned int bitmap = 0;
     // update bitmap for first_not_one

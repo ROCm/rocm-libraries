@@ -58,7 +58,7 @@ namespace rocsparse
         switch(csr_col_ind_indextype)
 
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -116,7 +116,7 @@ namespace rocsparse
         switch(csr_row_ptr_indextype)
         {
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }

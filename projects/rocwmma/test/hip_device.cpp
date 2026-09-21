@@ -103,6 +103,10 @@ namespace rocwmma
         {
             mGcnArch = hipGcnArch_t::GFX1201;
         }
+        else if(deviceName.find("gfx1250") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX1250;
+        }
 
         switch(mProps.warpSize)
         {

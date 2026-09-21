@@ -20602,6 +20602,144 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
+    The gemm_grouped_batched functions perform grouped batched matrix-matrix operations.
+    There are ``group_count`` groups. Within group ``i``, all problems share the same
+    ``transA``, ``transB``, ``m``, ``n``, ``k``, ``lda``, ``ldb``, ``ldc``, ``alpha``, and ``beta``.
+    Each group ``i`` contains ``group_size[i]`` problems. The total number of problems is
+    ``problem_count = sum(group_size[i])``.
+
+    For each problem ``j`` in group ``i``:
+
+        C_j = alpha_i*op( A_j )*op( B_j ) + beta_i*C_j,
+
+    where ``op( X )`` is one of
+
+        op( X ) = X      or
+        op( X ) = X**T   or
+        op( X ) = X**H.
+
+    ``Aarray``, ``Barray``, and ``Carray`` are device arrays of device pointers with length
+    ``problem_count``. The caller is responsible for ensuring that output matrices do not overlap.
+
+    @param[in]
+    handle    [rocblas_handle]
+              handle to the rocBLAS library context queue.
+    @param[in]
+    transa_array [const rocblas_operation*]
+              host array of length ``group_count`` specifying ``op( A )`` for each group.
+    @param[in]
+    transb_array [const rocblas_operation*]
+              host array of length ``group_count`` specifying ``op( B )`` for each group.
+    @param[in]
+    m_array   [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    n_array   [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    k_array   [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    alpha_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in]
+    Aarray    device array of device pointers storing each matrix ``A_j``.
+    @param[in]
+    lda_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    Barray    device array of device pointers storing each matrix ``B_j``.
+    @param[in]
+    ldb_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    beta_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in, out]
+    Carray    device array of device pointers storing each matrix ``C_j``.
+    @param[in]
+    ldc_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    group_count [rocblas_int]
+              number of groups.
+    @param[in]
+    group_size [const rocblas_int*]
+              host array of length ``group_count`` with the number of problems in each group.
+     ********************************************************************/
+ROCBLAS_EXPORT rocblas_status rocblas_sgemm_grouped_batched(rocblas_handle           handle,
+                                                            const rocblas_operation* transa_array,
+                                                            const rocblas_operation* transb_array,
+                                                            const rocblas_int*       m_array,
+                                                            const rocblas_int*       n_array,
+                                                            const rocblas_int*       k_array,
+                                                            const float*             alpha_array,
+                                                            const float* const       Aarray[],
+                                                            const rocblas_int*       lda_array,
+                                                            const float* const       Barray[],
+                                                            const rocblas_int*       ldb_array,
+                                                            const float*             beta_array,
+                                                            float* const             Carray[],
+                                                            const rocblas_int*       ldc_array,
+                                                            rocblas_int              group_count,
+                                                            const rocblas_int*       group_size);
+
+ROCBLAS_EXPORT rocblas_status rocblas_dgemm_grouped_batched(rocblas_handle           handle,
+                                                            const rocblas_operation* transa_array,
+                                                            const rocblas_operation* transb_array,
+                                                            const rocblas_int*       m_array,
+                                                            const rocblas_int*       n_array,
+                                                            const rocblas_int*       k_array,
+                                                            const double*            alpha_array,
+                                                            const double* const      Aarray[],
+                                                            const rocblas_int*       lda_array,
+                                                            const double* const      Barray[],
+                                                            const rocblas_int*       ldb_array,
+                                                            const double*            beta_array,
+                                                            double* const            Carray[],
+                                                            const rocblas_int*       ldc_array,
+                                                            rocblas_int              group_count,
+                                                            const rocblas_int*       group_size);
+
+ROCBLAS_EXPORT rocblas_status
+    rocblas_sgemm_grouped_batched_64(rocblas_handle           handle,
+                                     const rocblas_operation* transa_array,
+                                     const rocblas_operation* transb_array,
+                                     const int64_t*           m_array,
+                                     const int64_t*           n_array,
+                                     const int64_t*           k_array,
+                                     const float*             alpha_array,
+                                     const float* const       Aarray[],
+                                     const int64_t*           lda_array,
+                                     const float* const       Barray[],
+                                     const int64_t*           ldb_array,
+                                     const float*             beta_array,
+                                     float* const             Carray[],
+                                     const int64_t*           ldc_array,
+                                     int64_t                  group_count,
+                                     const int64_t*           group_size);
+
+ROCBLAS_EXPORT rocblas_status
+    rocblas_dgemm_grouped_batched_64(rocblas_handle           handle,
+                                     const rocblas_operation* transa_array,
+                                     const rocblas_operation* transb_array,
+                                     const int64_t*           m_array,
+                                     const int64_t*           n_array,
+                                     const int64_t*           k_array,
+                                     const double*            alpha_array,
+                                     const double* const      Aarray[],
+                                     const int64_t*           lda_array,
+                                     const double* const      Barray[],
+                                     const int64_t*           ldb_array,
+                                     const double*            beta_array,
+                                     double* const            Carray[],
+                                     const int64_t*           ldc_array,
+                                     int64_t                  group_count,
+                                     const int64_t*           group_size);
+//! @}
+
+/*! @{
+    \brief <b> BLAS Level 3 API </b>
+
+    \details
     The dgmm functions perform one of the matrix-matrix operations:
 
         C = A * diag(x) if side == rocblas_side_right
@@ -22299,6 +22437,161 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_strided_batched_ex_64(rocblas_handle 
                                         solution_index, \
                                         flags)
 // clang-format on
+
+/*! @{
+    \brief <b> BLAS Level 3 API </b>
+
+    \details
+    The gemm_grouped_batched_ex functions perform grouped batched matrix-matrix operations
+    with mixed precision types. There are ``group_count`` groups. Within group ``i``, all
+    problems share the same ``transA``, ``transB``, ``m``, ``n``, ``k``, ``lda``, ``ldb``,
+    ``ldc``, ``ldd``, ``alpha``, and ``beta``. Each group ``i`` contains ``group_size[i]``
+    problems.
+
+    For each problem ``j`` in group ``i``:
+
+        D_j = alpha_i*op( A_j )*op( B_j ) + beta_i*C_j,
+
+    Supported types are as follows:
+        - rocblas_datatype_f64_r = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f32_r = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f16_r = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f16_r = a_type = b_type = c_type = d_type; rocblas_datatype_f32_r =
+   compute_type
+        - rocblas_datatype_f16_r = a_type = b_type; rocblas_datatype_f32_r = c_type = d_type =
+   compute_type
+        - rocblas_datatype_bf16_r = a_type = b_type = c_type = d_type; rocblas_datatype_f32_r =
+   compute_type
+        - rocblas_datatype_bf16_r = a_type = b_type; rocblas_datatype_f32_r = c_type = d_type =
+   compute_type
+        - rocblas_datatype_i8_r = a_type = b_type; rocblas_datatype_i32_r = c_type = d_type =
+   compute_type
+        - rocblas_datatype_f32_c  = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f64_c  = a_type = b_type = c_type = d_type = compute_type
+
+    @param[in]
+    handle    [rocblas_handle]
+              handle to the rocBLAS library context queue.
+    @param[in]
+    transa_array [const rocblas_operation*]
+              host array of length ``group_count``.
+    @param[in]
+    transb_array [const rocblas_operation*]
+              host array of length ``group_count``.
+    @param[in]
+    m_array   [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    n_array   [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    k_array   [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    alpha_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in]
+    Aarray    device array of device pointers storing each matrix ``A_j``.
+    @param[in]
+    a_type    [rocblas_datatype]
+              datatype of each matrix ``A_j``.
+    @param[in]
+    lda_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    Barray    device array of device pointers storing each matrix ``B_j``.
+    @param[in]
+    b_type    [rocblas_datatype]
+              datatype of each matrix ``B_j``.
+    @param[in]
+    ldb_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    beta_array device pointer or host pointer to an array of length ``group_count``.
+    @param[in]
+    Carray    device array of device pointers storing each matrix ``C_j``.
+    @param[in]
+    c_type    [rocblas_datatype]
+              datatype of each matrix ``C_j``.
+    @param[in]
+    ldc_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in, out]
+    Darray    device array of device pointers storing each matrix ``D_j``.
+    @param[in]
+    d_type    [rocblas_datatype]
+              datatype of each matrix ``D_j``.
+    @param[in]
+    ldd_array [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    group_count [rocblas_int]
+              number of groups.
+    @param[in]
+    group_size [const rocblas_int*]
+              host array of length ``group_count``.
+    @param[in]
+    compute_type [rocblas_datatype]
+              datatype of computation.
+    @param[in]
+    algo      [rocblas_gemm_algo]
+              enumerant specifying the algorithm type.
+    @param[in]
+    flags     [uint32_t]
+              optional gemm flags.
+     ********************************************************************/
+ROCBLAS_EXPORT rocblas_status rocblas_gemm_grouped_batched_ex(rocblas_handle           handle,
+                                                              const rocblas_operation* transa_array,
+                                                              const rocblas_operation* transb_array,
+                                                              const rocblas_int*       m_array,
+                                                              const rocblas_int*       n_array,
+                                                              const rocblas_int*       k_array,
+                                                              const void*              alpha_array,
+                                                              const void* const        Aarray[],
+                                                              rocblas_datatype         a_type,
+                                                              const rocblas_int*       lda_array,
+                                                              const void* const        Barray[],
+                                                              rocblas_datatype         b_type,
+                                                              const rocblas_int*       ldb_array,
+                                                              const void*              beta_array,
+                                                              const void* const        Carray[],
+                                                              rocblas_datatype         c_type,
+                                                              const rocblas_int*       ldc_array,
+                                                              void* const              Darray[],
+                                                              rocblas_datatype         d_type,
+                                                              const rocblas_int*       ldd_array,
+                                                              rocblas_int              group_count,
+                                                              const rocblas_int*       group_size,
+                                                              rocblas_datatype         compute_type,
+                                                              rocblas_gemm_algo        algo,
+                                                              uint32_t                 flags);
+
+ROCBLAS_EXPORT rocblas_status
+    rocblas_gemm_grouped_batched_ex_64(rocblas_handle           handle,
+                                       const rocblas_operation* transa_array,
+                                       const rocblas_operation* transb_array,
+                                       const int64_t*           m_array,
+                                       const int64_t*           n_array,
+                                       const int64_t*           k_array,
+                                       const void*              alpha_array,
+                                       const void* const        Aarray[],
+                                       rocblas_datatype         a_type,
+                                       const int64_t*           lda_array,
+                                       const void* const        Barray[],
+                                       rocblas_datatype         b_type,
+                                       const int64_t*           ldb_array,
+                                       const void*              beta_array,
+                                       const void* const        Carray[],
+                                       rocblas_datatype         c_type,
+                                       const int64_t*           ldc_array,
+                                       void* const              Darray[],
+                                       rocblas_datatype         d_type,
+                                       const int64_t*           ldd_array,
+                                       int64_t                  group_count,
+                                       const int64_t*           group_size,
+                                       rocblas_datatype         compute_type,
+                                       rocblas_gemm_algo        algo,
+                                       uint32_t                 flags);
+//! @}
 
 /*! @{
     \brief <b> BLAS Level 3 API </b>

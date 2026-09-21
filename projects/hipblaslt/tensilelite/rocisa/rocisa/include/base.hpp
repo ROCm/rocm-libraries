@@ -69,6 +69,17 @@ namespace rocisa
         std::map<std::string, bool> asm_bugs;
     };
 
+    // Read a cap value, returning `defaultValue` for an absent key; some caps are
+    // absent (e.g. counter caps on archs without the matching wait op, or before
+    // init()), so std::map::at() would throw here.
+    inline int capOrDefault(const std::map<std::string, int>& caps,
+                            const std::string&                key,
+                            int                                defaultValue = 0)
+    {
+        auto it = caps.find(key);
+        return it != caps.end() ? it->second : defaultValue;
+    }
+
     class rocIsa
     {
     public:
@@ -112,6 +123,8 @@ namespace rocisa
                 = {nb::cast<int>(arch[0]), nb::cast<int>(arch[1]), nb::cast<int>(arch[2])};
             m_mutex.lock();
             m_threads[id] = std::move(KernelInfo(isaVersion, wavefrontSize));
+            m_vgpridx[id] = std::move(std::map<std::string, int>());
+            m_vgprmsb[id] = 0;
             m_mutex.unlock();
         }
 
@@ -132,17 +145,17 @@ namespace rocisa
             return m_isainfo[isaVersion];
         }
 
-        std::map<std::string, int> getAsmCaps()
+        const std::map<std::string, int>& getAsmCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].asm_caps;
         }
 
-        std::map<std::string, int> getRegCaps()
+        const std::map<std::string, int>& getRegCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].reg_caps;
         }
 
-        std::map<std::string, int> getArchCaps()
+        const std::map<std::string, int>& getArchCaps()
         {
             return m_isainfo[m_threads[std::this_thread::get_id()].isaVersion].arch_caps;
         }
@@ -155,6 +168,16 @@ namespace rocisa
         std::map<IsaVersion, IsaInfo> getData() const
         {
             return m_isainfo;
+        }
+
+        std::map<std::string, int> getVgprIdx()
+        {
+            return m_vgpridx[std::this_thread::get_id()];
+        }
+
+        int getVgprMsb()
+        {
+            return m_vgprmsb[std::this_thread::get_id()];
         }
 
         void setData(const std::map<IsaVersion, IsaInfo>& data)
@@ -176,14 +199,33 @@ namespace rocisa
             return m_outputOptions[id];
         }
 
+        void setVgprIdx(const std::string& s, const int idx)
+        {
+            std::thread::id id = std::this_thread::get_id();
+            // need lock here?
+            m_mutex.lock();
+            m_vgpridx[id][s] = idx;
+            m_mutex.unlock();
+        }
+
+        void setVgprMsb(const int msb)
+        {
+            std::thread::id id = std::this_thread::get_id();
+            // need lock here?
+            m_mutex.lock();
+            m_vgprmsb[id] = msb;
+            m_mutex.unlock();
+        }
+
     private:
         rocIsa() = default;
 
         std::mutex                            m_mutex;
         std::map<std::thread::id, KernelInfo> m_threads;
         std::map<IsaVersion, IsaInfo>         m_isainfo;
-
         std::map<std::thread::id, OutputOptions> m_outputOptions;
+        std::map<std::thread::id, std::map<std::string, int>> m_vgpridx;
+        std::map<std::thread::id, int>        m_vgprmsb;
     };
 
     struct Item
@@ -202,17 +244,17 @@ namespace rocisa
             return nullptr;
         }
 
-        std::map<std::string, int> getAsmCaps() const
+        const std::map<std::string, int>& getAsmCaps() const
         {
             return rocIsa::getInstance().getAsmCaps();
         }
 
-        std::map<std::string, int> getRegCaps() const
+        const std::map<std::string, int>& getRegCaps() const
         {
             return rocIsa::getInstance().getRegCaps();
         }
 
-        std::map<std::string, int> getArchCaps() const
+        const std::map<std::string, int>& getArchCaps() const
         {
             return rocIsa::getInstance().getArchCaps();
         }
@@ -220,6 +262,16 @@ namespace rocisa
         std::map<std::string, bool> getAsmBugs() const
         {
             return rocIsa::getInstance().getAsmBugs();
+        }
+
+        std::map<std::string, int> getVgprIdx() const
+        {
+            return rocIsa::getInstance().getVgprIdx();
+        }
+
+        int getVgprMsb() const
+        {
+            return rocIsa::getInstance().getVgprMsb();
         }
 
         KernelInfo kernel() const

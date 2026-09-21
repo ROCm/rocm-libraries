@@ -1,15 +1,63 @@
 .. meta::
-   :description: hipBLASLt library data type support
+   :description: hipBLASLt library precision support
    :keywords: hipBLASLt, ROCm, data type support
 
-.. _data-type-support:
+.. _hipblaslt-data-type-support:
 
 ******************************************
-Data type support
+hipBLASLt precision support
 ******************************************
 
 This topic lists the supported data types for the hipBLASLt GEMM operation,
 which is performed by :ref:`hipblasltmatmul`.
+
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _hipblaslt-input-output-type-support:
+
+Supported data types overview
+=============================
+
+The following table summarizes the input and output data types supported by
+hipBLASLt. For the full ``hipDataType`` enumeration, compute modes, and
+supported type combinations, see the sections that follow.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+    *
+      - ✅
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
+
+Data types not listed in the table below are not supported.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
+
+hipDataType enumeration
+=======================
 
 The ``hipDataType`` enumeration defines data precision types and is primarily
 used when the data reference itself does not include type information, such as
@@ -39,16 +87,6 @@ The hipBLASLt input and output types are listed in the following table.
       - ``HIP_R_4F_E2M1``
       - N/A
       - 4-bit real float4 precision floating-point
-
-    *
-      - ``HIP_R_6F_E2M3``
-      - N/A
-      - 6-bit real float6 precision floating-point
-
-    *
-      - ``HIP_R_6F_E3M2``
-      - N/A
-      - 6-bit real bfloat6 precision floating-point
 
     *
       - ``HIP_R_8F_E4M3_FNUZ``
@@ -85,6 +123,16 @@ The hipBLASLt input and output types are listed in the following table.
       - ``hipblasLtFloat``
       - 32-bit real single precision floating-point
 
+    *
+      - ``HIP_C_32F``
+      - ``hipblaslt_complex_float``
+      - 32-bit complex single precision floating-point
+
+    *
+      - ``HIP_C_64F``
+      - ``hipblaslt_complex_double``
+      - 64-bit real complex precision floating-point
+
 .. note::
 
    The ``hipblaslt_f8_fnuz`` and ``hipblaslt_bf8_fnuz`` data types are only
@@ -110,7 +158,7 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F``
-      - 32-bit singple precision floating-point compute mode.
+      - 32-bit single precision floating-point compute mode.
 
     *
       - ``HIPBLAS_COMPUTE_64F``
@@ -118,15 +166,21 @@ The hipBLASLt compute modes are listed in the following table.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16F``
-      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit half precision input and output.
+      - Enables the library to utilize Tensor Cores with automatic down-conversion and 16-bit half-precision computation for 32-bit float-precision input and output matrices.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_16BF``
-      - Enables the library to utilize Tensor Cores with 32-bit float computation for matrices with 16-bit bfloat16 precision input and output.
+      - Enables the library to utilize Tensor Cores with automatic down-conversion and 16-bit bfloat16-precision computation for 32-bit float-precision input and output matrices.
 
     *
       - ``HIPBLAS_COMPUTE_32F_FAST_TF32``
-      - Enables the library to utilize Tensor Cores with TF32 computation for matrices with 32-bit input and output.
+      - Enables the library to utilize Tensor Cores with TF32 computation (on the gfx942 and gfx950 platforms)
+        or emulated TF32 computation (on the gfx950 platform) for matrices with 32-bit input and output.
+
+.. note::
+   
+   For information on how to override certain compute types,
+   see the :ref:`environmental variables <env-type_overrides>` documentation.
 
 Data type combinations
 ======================
@@ -149,6 +203,3 @@ non-transpose, and :math:`alpha` and :math:`beta` are scalars.
 For complete details on supported data type combinations, including specific
 compute types, scale types, and bias configurations, see the
 :ref:`hipBLASLt API reference page <api-reference>`.
-
-For more information about data type support for the other ROCm libraries, see
-:doc:`Data types and precision support page <rocm:reference/precision-support>`.

@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_lange.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -37,6 +38,7 @@ rocblas_status rocsolver_lange_impl(rocblas_handle handle,
                                     T* A,
                                     const I lda,
                                     S* norms)
+try
 {
     ROCSOLVER_ENTER_TOP("lange", "--norm_type", norm_type, "-m", m, "-n", n, "--lda", lda);
 
@@ -75,6 +77,10 @@ rocblas_status rocsolver_lange_impl(rocblas_handle handle,
     // execution
     return rocsolver_lange_template<T, I, S>(handle, norm_type, m, n, A, shiftA, lda, strideA,
                                              batch_count, norms, (S*)work);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE
