@@ -497,6 +497,8 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
     }
 )
 
@@ -504,7 +506,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 129,
+    "kernels": 131,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -512,9 +514,9 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    # 60, plus the ten gfx1151 w4a16 kernels: their solutions set StaggerU 0,
+    # 60, plus the twelve gfx1151 w4a16 kernels: their solutions set StaggerU 0,
     # so they declare it rather than inheriting the default of 32.
-    "declaredZero": 70,
+    "declaredZero": 72,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 31,
 }
