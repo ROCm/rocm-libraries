@@ -54,7 +54,7 @@ class Tuner(BaseTuner):
         key_size = TYPE_CONFIGS[types["key_type"]].size
         val_size = TYPE_CONFIGS[types["value_type"]].size
 
-        max_shared_memory = 65536 - 2000
+        max_shared_memory = self.shared_mem - 2000
         # legacy tuner: std::max(sizeof(Key), sizeof(Value));
         max_size_per_element = max(key_size, val_size)
         def validate(params):

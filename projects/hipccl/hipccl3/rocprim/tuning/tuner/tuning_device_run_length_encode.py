@@ -55,12 +55,11 @@ class Tuner(BaseTuner):
     def _get_restrictions(self, types):
         key_size = TYPE_CONFIGS[types['key_type']].size
 
-        max_shared_memory = 65536
         def validate(params):
             block_size = params['block_size_x']
             ipt = params['ipt']
 
-            max_ipt = min((max_shared_memory // key_size // block_size) - 1, 15)
+            max_ipt = min((self.shared_mem // key_size // block_size) - 1, 15)
             return ipt <= max_ipt
 
         return validate

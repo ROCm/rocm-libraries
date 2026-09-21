@@ -136,6 +136,7 @@ class TunerArgs:
     simulation_mode: bool = False
     seed: int = -1
     arch_name: Optional[str] = None
+    shared_mem: Optional[int] = None
 
     def update_with_kwargs(self, **kwargs):
         for k, v in kwargs.items():
@@ -168,11 +169,16 @@ class BaseTuner(ABC):
             self.device_properties: hip.hipDeviceProp_t = hip.hipDeviceProp_t()
             (_, self.device_properties) = hip.hipGetDeviceProperties(self.device_id)
             self.arch_name = self.device_properties.gcnArchName.split(":")[0]
+            self.shared_mem = self.device_properties.sharedMemPerBlock
         else:
             assert (
                 args.arch_name
             ), "Simulation mode requires --arch-name to be specified"
+            assert (
+                args.shared_mem
+            ), "Simulation mode requires --shared-mem to be specified"
             self.arch_name = args.arch_name
+            self.shared_mem = args.shared_mem
         self.exclude_default_config = args.exclude_default_config
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
@@ -387,6 +393,8 @@ class BaseTuner(ABC):
             "config": config,
             **types,
         }
+
+        context["shared_memory"] = self.shared_mem
 
         content = template.render(**context)
 

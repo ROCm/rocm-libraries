@@ -55,13 +55,12 @@ class Tuner(BaseTuner):
         key_size = TYPE_CONFIGS[types["key_type"]].size
         val_size = TYPE_CONFIGS[types["value_type"]].size
 
-        max_shared_memory = 65536
         # legacy tuner: std::max(sizeof(Key) + sizeof(unsigned int), sizeof(Value))
         max_size_per_element = max(key_size + 4, val_size)
         def validate(params):
             block_size = params['block_size_x']
             ipt = params['ipt']
-            max_ipt = max_shared_memory // (block_size * max_size_per_element)
+            max_ipt = self.shared_mem // (block_size * max_size_per_element)
 
             max_ipt_exponent = log2(max_ipt) - 1
             min_ipt_exponent = log2(1024 // block_size)

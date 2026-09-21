@@ -42,18 +42,16 @@ ALGOS = ['block_radix_rank_algorithm::basic', 'block_radix_rank_algorithm::match
 Class to compile and run a tiny probe to check if the params passed in is valid for device radix sort onesweep
 """
 class CheckParam:
-    def __init__(self):
+    def __init__(self, shared_mem: int):
 
         self.rocm_include = f"{BASE_DIR}/../rocprim/include"
 
         self.cache = {}
         self.v_params = {}
-        self.code = r"""
-        #include <rocprim/device/detail/device_radix_sort.hpp>
+        self.code = rf"""
+        #define TUNING_SHARED_MEMORY_MAX {shared_mem}u
 
-        #ifndef TUNING_SHARED_MEMORY_MAX
-        #define TUNING_SHARED_MEMORY_MAX 65536u
-        #endif
+        #include <rocprim/device/detail/device_radix_sort.hpp>
 
         using sharedmem_storage = typename rocprim::detail::onesweep_iteration_helper<
             PROBE_Key, PROBE_Value, size_t, PROBE_BlockSize, PROBE_ItemsPerThread, PROBE_RadixBits, false,
@@ -104,8 +102,8 @@ class Tuner(BaseTuner):
         return TunerArgs(algo_full_name='device_radix_sort_onesweep')
 
     def __init__(self, args: TunerArgs) -> None:
-        self.param_checker = CheckParam()
         super().__init__(args)
+        self.param_checker = CheckParam(self.shared_mem)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()

@@ -1,3 +1,10 @@
+{% block defines %}
+{% if shared_memory %}
+// Overwrites TUNING_SHARED_MEMORY_MAX in benchmark_utils.hpp.
+#define TUNING_SHARED_MEMORY_MAX {{shared_memory}}u
+{% endif %}
+{% endblock %}
+
 {% block includes %}
 // Include utils for {{algo_name}}_config<...>.
 #include "rocprim/device/detail/device_config_helper.hpp" 

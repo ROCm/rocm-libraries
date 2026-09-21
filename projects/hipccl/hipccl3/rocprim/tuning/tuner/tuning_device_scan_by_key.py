@@ -57,7 +57,7 @@ class Tuner(BaseTuner):
             block_size = params["block_size_x"]
             ipt = params["ipt"]
             
-            if block_size * ipt * total_size > 65536:
+            if block_size * ipt * total_size > self.shared_mem:
                 return False
             return True
         return validate

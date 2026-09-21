@@ -266,7 +266,7 @@ struct device_scan_benchmark_generator
             {
                 // Limit items per thread to not over-use shared memory
                 static constexpr unsigned int max_items_per_thread
-                    = ::rocprim::min<size_t>(65536 / (block_size * sizeof(T)) - 1, 24);
+                    = ::rocprim::min<size_t>(TUNING_SHARED_MEMORY_MAX / (block_size * sizeof(T)) - 1, 24);
                 static_for_each<make_index_range<unsigned int, 1, max_items_per_thread>,
                                 create_ipt>(storage);
             }
