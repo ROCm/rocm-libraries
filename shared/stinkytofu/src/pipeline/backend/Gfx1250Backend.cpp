@@ -43,6 +43,7 @@
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -134,6 +135,11 @@ void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module)
     else if (configured == static_cast<int>(Mode::Shadow))
         mode = Mode::Shadow;
     if (mode == Mode::Off) return;
+
+    // Rebuild the CFG in case a label was left inside a block, where it is a
+    // branch target with no edges. Building only runs on a flat function.
+    pm.addPass(createFlattenCFGPass());
+    pm.addPass(createCFGBuilderPass());
 
     pm.addPass(createStinkyUnreachableBlockElimPass());
     pm.addPass(createRemoveDefUseAnalysisPass());
