@@ -38,6 +38,7 @@ class StinkyAsmModuleWithAdapterSignature:
     def emitAssembly(self) -> str:
         out = ""
         if self._signature is not None:
+            self._refreshSgprCount()
             out += self._signature.toString()
         # .set directives go between signature and instruction body.
         set_dirs = getattr(self._inner, "getSetDirectives", None)
@@ -45,6 +46,29 @@ class StinkyAsmModuleWithAdapterSignature:
             out += set_dirs()
         out += self._inner.emitAssembly()
         return out
+
+    def _refreshSgprCount(self) -> None:
+        """Take the declared SGPR count from the lowered code, as C++ does.
+
+        Port of ``StinkyAsmModuleWithSignature::refreshSgprCount``. Tensile
+        declares ``sgprPool.size()``, the pool high-water mark, which still
+        counts registers that were checked back in and appear in no operand,
+        so the count arrives too high. Only that number moves, and only
+        downwards: everything else in the descriptor states what the hardware
+        does before entry, and a flow whose registers did not move keeps the
+        producer's number.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        counter = getattr(leaf, "getRequiredSgprCount", None)
+        if counter is None:
+            return
+        kd = self._signature.kernelDescriptor
+        required = int(counter(kd.numSgprPreload, list(kd.sgprWorkGroup)))
+        if required == 0 or required >= kd.totalSgprs:
+            return
+        self._signature.setGprs(kd.totalVgprs, kd.totalAgprs, required)
 
     def getName(self) -> str:
         return self._inner.getName()
