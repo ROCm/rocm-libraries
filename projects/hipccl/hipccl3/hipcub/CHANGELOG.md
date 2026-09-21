@@ -20,7 +20,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added env-based API for `hipcub::DeviceScan::ExclusiveScan` and `hipcub::DeviceScan::ExclusiveSum`.
 * Added `hipcub::DeviceFor::ForEachInLayout`.
 * Added `hipcub::DeviceCopy::Copy`.
-* Added `hipcub::WarpScan::InclusiveScanPartial` and `hipcub::WarpScan::ExclusiveScanPartial`.
+* Added `hipcub::WarpScan::InclusiveScanPartial`, `hipcub::WarpScan::ExclusiveScanPartial` and `hipcub::WarpScan::ScanPartial`.
 * Feature parity with CCCL/CUB 3.2.0.
 
 ### Changed

@@ -40,7 +40,11 @@
 #include <cstddef>
 #include <vector>
 
-template<bool IsInclusive, unsigned int LogicalWarpSize, class T, class ScanOpT>
+template<bool         IsInclusive,
+         bool         InclusiveWoInit,
+         unsigned int LogicalWarpSize,
+         class T,
+         class ScanOpT>
 std::vector<T>
     warp_scan_host(std::vector<T>& output, ScanOpT scan_op, int valid_items, T initial_value = T{})
 {
@@ -53,8 +57,9 @@ std::vector<T>
     for(unsigned int w = 0; w < warps_no; ++w)
     {
         T*       warp_output = output.data() + w * LogicalWarpSize;
-        acc_type accumulator = acc_type{initial_value};
-        acc_type reduction   = warp_output[0];
+        acc_type accumulator
+            = (IsInclusive && InclusiveWoInit) ? acc_type{} : acc_type{initial_value};
+        acc_type reduction = warp_output[0];
         for(int i = 0; i < std::clamp(valid_items, 0, static_cast<int>(LogicalWarpSize)); i++)
         {
             const auto input_val = warp_output[i];
@@ -156,9 +161,10 @@ void inclusive_scan_test()
 
             // Calculate expected results on host
             std::vector<T> expected(input);
-            warp_scan_host<true /*IsInclusive*/, logical_warp_size>(expected,
-                                                                    binary_op_host,
-                                                                    valid_items);
+            warp_scan_host<true /*IsInclusive*/, false /*InclusiveWoInit*/, logical_warp_size>(
+                expected,
+                binary_op_host,
+                valid_items);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -279,10 +285,11 @@ void inclusive_scan_init_test()
 
             // Calculate expected results on host
             std::vector<T> expected(input);
-            warp_scan_host<true /*IsInclusive*/, logical_warp_size>(expected,
-                                                                    binary_op_host,
-                                                                    valid_items,
-                                                                    initial_value);
+            warp_scan_host<true /*IsInclusive*/, false /*InclusiveWoInit*/, logical_warp_size>(
+                expected,
+                binary_op_host,
+                valid_items,
+                initial_value);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -411,9 +418,9 @@ void inclusive_scan_reduce_test()
             std::vector<T> expected(input);
             std::vector<T> expected_reductions(output_reductions.size());
             expected_reductions
-                = warp_scan_host<true /*IsInclusive*/, logical_warp_size>(expected,
-                                                                          binary_op_host,
-                                                                          valid_items);
+                = warp_scan_host<true /*IsInclusive*/,
+                                 false /*InclusiveWoInit*/,
+                                 logical_warp_size>(expected, binary_op_host, valid_items);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -547,11 +554,12 @@ void inclusive_scan_reduce_init_test()
             // Calculate expected results on host
             std::vector<T> expected(input);
             std::vector<T> expected_reductions(output_reductions.size());
-            expected_reductions
-                = warp_scan_host<true /*IsInclusive*/, logical_warp_size>(expected,
-                                                                          binary_op_host,
-                                                                          valid_items,
-                                                                          initial_value);
+            expected_reductions = warp_scan_host<true /*IsInclusive*/,
+                                                 false /*InclusiveWoInit*/,
+                                                 logical_warp_size>(expected,
+                                                                    binary_op_host,
+                                                                    valid_items,
+                                                                    initial_value);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -684,9 +692,10 @@ void exclusive_scan_test()
 
             // Calculate expected results on host
             std::vector<T> expected(input);
-            warp_scan_host<false /*IsInclusive*/, logical_warp_size>(expected,
-                                                                     binary_op_host,
-                                                                     valid_items);
+            warp_scan_host<false /*IsInclusive*/, false /*InclusiveWoInit*/, logical_warp_size>(
+                expected,
+                binary_op_host,
+                valid_items);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -813,10 +822,11 @@ void exclusive_scan_init_test()
 
             // Calculate expected results on host
             std::vector<T> expected(input);
-            warp_scan_host<false /*IsInclusive*/, logical_warp_size>(expected,
-                                                                     binary_op_host,
-                                                                     valid_items,
-                                                                     init);
+            warp_scan_host<false /*IsInclusive*/, false /*InclusiveWoInit*/, logical_warp_size>(
+                expected,
+                binary_op_host,
+                valid_items,
+                init);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -945,9 +955,9 @@ void exclusive_scan_reduce_test()
             std::vector<T> expected(input);
             std::vector<T> expected_reductions(output_reductions.size());
             expected_reductions
-                = warp_scan_host<false /*IsInclusive*/, logical_warp_size>(expected,
-                                                                           binary_op_host,
-                                                                           valid_items);
+                = warp_scan_host<false /*IsInclusive*/,
+                                 false /*InclusiveWoInit*/,
+                                 logical_warp_size>(expected, binary_op_host, valid_items);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -1087,10 +1097,9 @@ void exclusive_scan_reduce_init_test()
             std::vector<T> expected(input);
             std::vector<T> expected_reductions(output_reductions.size());
             expected_reductions
-                = warp_scan_host<false /*IsInclusive*/, logical_warp_size>(expected,
-                                                                           binary_op_host,
-                                                                           valid_items,
-                                                                           init);
+                = warp_scan_host<false /*IsInclusive*/,
+                                 false /*InclusiveWoInit*/,
+                                 logical_warp_size>(expected, binary_op_host, valid_items, init);
 
             // Launching kernel
             if(current_device_warp_size == ws32)
@@ -1138,6 +1147,302 @@ void exclusive_scan_reduce_init_test()
 
             // Validating results
             test_utils::assert_near(output, expected, test_utils::precision<T> * logical_warp_size);
+            test_utils::assert_near(output_reductions,
+                                    expected_reductions,
+                                    test_utils::precision<T> * logical_warp_size);
+        }
+    }
+}
+
+template<typename TestFixture, bool Partial>
+void scan_test()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::params::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
+    static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+
+    // The different warp sizes
+    static constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
+
+    // Block size of warp size 64
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
+
+    unsigned int current_device_warp_size;
+    HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    const unsigned int grid_size = 4;
+
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
+    {
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
+        GTEST_SKIP();
+    }
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
+        std::vector<T> output_inclusive(size);
+        std::vector<T> output_exclusive(size);
+        const T        init = test_utils::get_random_value<T>(0, 100, seed_value);
+        SCOPED_TRACE(testing::Message() << "with init = " << init);
+
+        // Writing to device memory
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_inclusive_output(output_inclusive.size());
+        common::device_ptr<T> device_exclusive_output(output_exclusive.size());
+
+        // Note: valid_items is only actually used when Partial is true
+        const std::vector<int> valid_items_values
+            = Partial ? test_utils::get_warp_valid_items<logical_warp_size>(seed_value)
+                      : std::vector<int>{logical_warp_size};
+
+        for(int valid_items : valid_items_values)
+        {
+            SCOPED_TRACE(testing::Message() << "with valid_items = " << valid_items);
+
+            // Calculate expected results on host
+            std::vector<T> expected_inclusive(input);
+            std::vector<T> expected_exclusive(input);
+            warp_scan_host<true /*IsInclusive*/, true /*InclusiveWoInit*/, logical_warp_size>(
+                expected_inclusive,
+                binary_op_host,
+                valid_items,
+                init);
+            warp_scan_host<false /*IsInclusive*/, true /*InclusiveWoInit*/, logical_warp_size>(
+                expected_exclusive,
+                binary_op_host,
+                valid_items,
+                init);
+
+            // Launching kernel
+            if(current_device_warp_size == ws32)
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_scan_kernel<T, block_size_ws32, logical_warp_size, Partial>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    valid_items,
+                    init);
+            }
+            else if(current_device_warp_size == ws64)
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_scan_kernel<T, block_size_ws64, logical_warp_size, Partial>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    valid_items,
+                    init);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Read from device memory
+            output_inclusive = device_inclusive_output.load();
+            output_exclusive = device_exclusive_output.load();
+
+            // Validating results
+            test_utils::assert_near(output_inclusive,
+                                    expected_inclusive,
+                                    test_utils::precision<T> * logical_warp_size);
+            test_utils::assert_near(output_exclusive,
+                                    expected_exclusive,
+                                    test_utils::precision<T> * logical_warp_size);
+        }
+    }
+}
+
+template<typename TestFixture, bool Partial>
+void scan_reduce_test()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::params::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
+    static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+
+    // The different warp sizes
+    static constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    static constexpr size_t block_size_ws32
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws32 / logical_warp_size), 1) * logical_warp_size;
+
+    // Block size of warp size 64
+    static constexpr size_t block_size_ws64
+        = rocprim::detail::is_power_of_two(logical_warp_size)
+              ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+              : rocprim::max<size_t>((ws64 / logical_warp_size), 1) * logical_warp_size;
+
+    unsigned int current_device_warp_size;
+    HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    const unsigned int grid_size = 4;
+
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if((logical_warp_size > current_device_warp_size)
+       || (current_device_warp_size != ws32
+           && current_device_warp_size != ws64)) // Only VirtualWaveSize 32 and 64 is supported
+    {
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: "
+               "%u.    Skipping test\n",
+               logical_warp_size,
+               block_size,
+               current_device_warp_size);
+        GTEST_SKIP();
+    }
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
+        std::vector<T> output_inclusive(size);
+        std::vector<T> output_exclusive(size);
+        std::vector<T> output_reductions(size / logical_warp_size);
+        const T        init = test_utils::get_random_value<T>(0, 100, seed_value);
+        SCOPED_TRACE(testing::Message() << "with init = " << init);
+
+        // Writing to device memory
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_inclusive_output(output_inclusive.size());
+        common::device_ptr<T> device_exclusive_output(output_exclusive.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
+
+        // Note: valid_items is only actually used when Partial is true
+        const std::vector<int> valid_items_values
+            = Partial ? test_utils::get_warp_valid_items<logical_warp_size>(seed_value)
+                      : std::vector<int>{logical_warp_size};
+
+        for(int valid_items : valid_items_values)
+        {
+            SCOPED_TRACE(testing::Message() << "with valid_items = " << valid_items);
+
+            // Calculate expected results on host
+            std::vector<T> expected_inclusive(input);
+            std::vector<T> expected_exclusive(input);
+            std::vector<T> expected_reductions(output_reductions.size());
+            expected_reductions
+                = warp_scan_host<true /*IsInclusive*/, true /*InclusiveWoInit*/, logical_warp_size>(
+                    expected_inclusive,
+                    binary_op_host,
+                    valid_items,
+                    init);
+            warp_scan_host<false /*IsInclusive*/, true /*InclusiveWoInit*/, logical_warp_size>(
+                expected_exclusive,
+                binary_op_host,
+                valid_items,
+                init);
+
+            // Launching kernel
+            if(current_device_warp_size == ws32)
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_scan_reduce_kernel<T, block_size_ws32, logical_warp_size, Partial>),
+                    dim3(grid_size),
+                    dim3(block_size_ws32),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    valid_items,
+                    device_output_reductions.get(),
+                    init);
+            }
+            else if(current_device_warp_size == ws64)
+            {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(
+                        warp_scan_reduce_kernel<T, block_size_ws64, logical_warp_size, Partial>),
+                    dim3(grid_size),
+                    dim3(block_size_ws64),
+                    0,
+                    0,
+                    device_input.get(),
+                    device_inclusive_output.get(),
+                    device_exclusive_output.get(),
+                    valid_items,
+                    device_output_reductions.get(),
+                    init);
+            }
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Read from device memory
+            output_inclusive  = device_inclusive_output.load();
+            output_exclusive  = device_exclusive_output.load();
+            output_reductions = device_output_reductions.load();
+
+            // Validating results
+            test_utils::assert_near(output_inclusive,
+                                    expected_inclusive,
+                                    test_utils::precision<T> * logical_warp_size);
+            test_utils::assert_near(output_exclusive,
+                                    expected_exclusive,
+                                    test_utils::precision<T> * logical_warp_size);
             test_utils::assert_near(output_reductions,
                                     expected_reductions,
                                     test_utils::precision<T> * logical_warp_size);

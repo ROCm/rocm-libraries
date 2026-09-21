@@ -313,12 +313,13 @@ void warp_exclusive_scan_reduce_initial_value_kernel(
     }
 }
 
-template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize, bool Partial>
 __global__ __launch_bounds__(BlockSize)
-void warp_scan_kernel(T* device_input,
-                      T* device_inclusive_output,
-                      T* device_exclusive_output,
-                      T  init)
+void warp_scan_kernel(T*  device_input,
+                      T*  device_inclusive_output,
+                      T*  device_exclusive_output,
+                      int valid_items,
+                      T   init)
 {
     if constexpr(LogicalWarpSize <= rocprim::arch::wavefront::max_size())
     {
@@ -327,24 +328,38 @@ void warp_scan_kernel(T* device_input,
         unsigned int           index    = threadIdx.x + (blockIdx.x * blockDim.x);
 
         T input = device_input[index];
-        T inclusive_output, exclusive_output;
+        T inclusive_output = input, exclusive_output = input;
 
         using wscan_t = rocprim::warp_scan<T, LogicalWarpSize>;
         __shared__ typename wscan_t::storage_type storage[warps_no];
-        wscan_t().scan(input, inclusive_output, exclusive_output, init, storage[warp_id]);
+        if constexpr(Partial)
+        {
+            wscan_t().partial_scan(input,
+                                   inclusive_output,
+                                   exclusive_output,
+                                   valid_items,
+                                   init,
+                                   storage[warp_id]);
+        }
+        else
+        {
+            (void)valid_items;
+            wscan_t().scan(input, inclusive_output, exclusive_output, init, storage[warp_id]);
+        }
 
         device_inclusive_output[index] = inclusive_output;
         device_exclusive_output[index] = exclusive_output;
     }
 }
 
-template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize, bool Partial>
 __global__ __launch_bounds__(BlockSize)
-void warp_scan_reduce_kernel(T* device_input,
-                             T* device_inclusive_output,
-                             T* device_exclusive_output,
-                             T* device_output_reductions,
-                             T  init)
+void warp_scan_reduce_kernel(T*  device_input,
+                             T*  device_inclusive_output,
+                             T*  device_exclusive_output,
+                             int valid_items,
+                             T*  device_output_reductions,
+                             T   init)
 {
     if constexpr(LogicalWarpSize <= rocprim::arch::wavefront::max_size())
     {
@@ -353,12 +368,26 @@ void warp_scan_reduce_kernel(T* device_input,
         unsigned int           index    = threadIdx.x + (blockIdx.x * blockDim.x);
 
         T input = device_input[index];
-        T inclusive_output, exclusive_output, reduction;
+        T inclusive_output = input, exclusive_output = input, reduction;
 
         using wscan_t = rocprim::warp_scan<T, LogicalWarpSize>;
         __shared__ typename wscan_t::storage_type storage[warps_no];
-        wscan_t()
-            .scan(input, inclusive_output, exclusive_output, init, reduction, storage[warp_id]);
+        if constexpr(Partial)
+        {
+            wscan_t().partial_scan(input,
+                                   inclusive_output,
+                                   exclusive_output,
+                                   valid_items,
+                                   init,
+                                   reduction,
+                                   storage[warp_id]);
+        }
+        else
+        {
+            (void)valid_items;
+            wscan_t()
+                .scan(input, inclusive_output, exclusive_output, init, reduction, storage[warp_id]);
+        }
 
         device_inclusive_output[index] = inclusive_output;
         device_exclusive_output[index] = exclusive_output;

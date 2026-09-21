@@ -231,6 +231,20 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      storage_type&  storage,
+                      BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, inclusive_output, valid_items, storage, scan_op);
+        to_exclusive(exclusive_output, valid_items, init, storage, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T              input,
               T&             inclusive_output,
               T&             exclusive_output,
@@ -243,6 +257,19 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      storage_type&  storage,
+                      BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, inclusive_output, valid_items, storage, scan_op);
+        to_exclusive(exclusive_output, valid_items, storage);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T              input,
               T&             inclusive_output,
               T&             exclusive_output,
@@ -251,11 +278,25 @@ public:
               storage_type&  storage,
               BinaryFunction scan_op)
     {
-        storage_type_& storage_ = storage.get();
-        inclusive_scan(input, inclusive_output, storage, scan_op);
-        reduction = storage_.threads[VirtualWaveSize - 1];
+        inclusive_scan(input, inclusive_output, reduction, storage, scan_op);
         ::rocprim::wave_barrier();
         to_exclusive(exclusive_output, init, storage, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_scan(T              input,
+                      T&             inclusive_output,
+                      T&             exclusive_output,
+                      int            valid_items,
+                      T              init,
+                      T&             reduction,
+                      storage_type&  storage,
+                      BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, inclusive_output, valid_items, reduction, storage, scan_op);
+        ::rocprim::wave_barrier();
+        to_exclusive(exclusive_output, valid_items, init, storage, scan_op);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -326,13 +367,16 @@ private:
     {
         const unsigned int lid      = detail::logical_lane_id<VirtualWaveSize>();
         storage_type_&     storage_ = storage.get();
-        if((lid != 0) && (static_cast<int>(lid) < valid_items))
+        if(static_cast<int>(lid) < valid_items)
         {
-            exclusive_output = scan_op(init, storage_.threads[lid - 1]);
-        }
-        if((lid == 0) && (valid_items > 0))
-        {
-            exclusive_output = init;
+            if(lid != 0)
+            {
+                exclusive_output = scan_op(init, storage_.threads[lid - 1]);
+            }
+            else
+            {
+                exclusive_output = init;
+            }
         }
     }
 
@@ -391,7 +435,8 @@ private:
     void compute_reduction(int valid_items, T& reduction, storage_type& storage)
     {
         storage_type_& storage_ = storage.get();
-        const int      last_valid_src_lane = ::rocprim::clamp(valid_items - 1, 0, static_cast<int>(VirtualWaveSize - 1));
+        const int      last_valid_src_lane
+            = ::rocprim::clamp(valid_items - 1, 0, static_cast<int>(VirtualWaveSize - 1));
         reduction = storage_.threads[last_valid_src_lane];
     }
 };
