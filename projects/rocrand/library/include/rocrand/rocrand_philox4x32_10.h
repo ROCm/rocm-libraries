@@ -281,6 +281,7 @@ public:
 #endif
 
 #ifdef PHILOX_OPTIMIZATION_ARRAY
+/*
         asm volatile("// philox_read_start_array");
 
         unsigned int s = m_state.substate;
@@ -298,7 +299,25 @@ public:
         }
         m_state.substate = s;
         return ret;
-#endif
+*/
+        asm volatile("// philox_read_start_array");
+
+        unsigned int vs[4] = {m_state.result.x, m_state.result.y, m_state.result.z, m_state.result.w};
+        unsigned int ret = vs[m_state.substate];
+
+        asm volatile("// philox_read_end_ref");
+
+        m_state.substate++;
+        if(m_state.substate == 4)
+        {
+            m_state.substate = 0;
+            this->discard_state();
+            m_state.result = this->ten_rounds(m_state.counter, m_state.key);
+        }
+
+        return ret;
+
+        #endif
     }
 
     __forceinline__ __device__ __host__ uint4 next4()
