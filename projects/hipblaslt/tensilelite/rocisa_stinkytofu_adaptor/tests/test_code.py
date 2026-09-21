@@ -3268,6 +3268,45 @@ class TestSignatureBaseSetGprs(_SignatureKernelSetup, unittest.TestCase):
         self.assertIn(".vgpr_count:                 32", s)
 
 
+class TestSignatureBaseOptimizationConfig(_SignatureKernelSetup, unittest.TestCase):
+    def test_prints_after_num_sgpr_from_options(self):
+        sig = _make_signature_base()
+        sig.setOptimizationConfig(
+            (64, 8), (4, 32), (2, 1), 1, 1, 2, 2, False, False, 0
+        )
+        s = sig.kernelDescriptor.toString()
+        sgpr = s.index("/* Num SGPR   =")
+        opt = s.index("/* Optimizations and Config:")
+        self.assertGreater(opt, sgpr)
+        self.assertIn("/* ThreadTile= 64 x 8 */", s)
+        self.assertIn("/* SubGroup= 4 x 32 */", s)
+        self.assertIn("/* VectorWidthA=1 */", s)
+        self.assertIn("/* VectorWidthB=1 */", s)
+        self.assertIn(
+            "/* GlobalReadVectorWidthA=2, GlobalReadVectorWidthB=2 */", s
+        )
+        self.assertIn("/* DirectToLdsA=False */", s)
+        self.assertIn("/* DirectToLdsB=False */", s)
+        self.assertIn("/* UseSgprForGRO=False */", s)
+
+    def test_survives_outputNoComment(self):
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        sig = _make_signature_base()
+        sig.setOptimizationConfig(
+            (64, 8), (4, 32), (2, 1), 1, 1, 2, 2, False, False, 0
+        )
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            s = sig.kernelDescriptor.toString()
+        finally:
+            opts.outputNoComment = saved
+        self.assertIn("/* Optimizations and Config:", s)
+        self.assertIn("/* ThreadTile= 64 x 8 */", s)
+
+
 class TestSignatureBaseAddArg(_SignatureKernelSetup, unittest.TestCase):
     def test_add_arg_delegates_to_code_meta(self):
         sig = _make_signature_base()
