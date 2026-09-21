@@ -585,11 +585,11 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
-    rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
+    rv["DSLow16NotPreserve"] = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}, {11, 7, 2}});
     rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
     rv["NoSDWA"]             = checkInList(isaVersion[0], {11, 12});
-    rv["VOP3ByteSel"]        = isaVersion[0] == 12;
-    rv["HasFP8_OCP"]         = isaVersion[0] == 12;
+    rv["VOP3ByteSel"]        = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}, {11, 7, 2}});
+    rv["HasFP8_OCP"]         = isaVersion[0] == 12 || checkInList(isaVersion, {{11, 7, 0}, {11, 7, 1}, {11, 7, 2}});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
@@ -662,7 +662,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     {
         // Code path for gfx11XX (RDNA3, two SIMDs per CU, wave32).
         // gfx1100, gfx1101 and gfx1151 have a 1536-VGPR file per SIMD; every
-        // other gfx11 part has 1024.
+        // other gfx11 part (e.g. gfx1102, gfx1103, gfx115X, gfx117X) has 1024.
         const bool has1536Vgpr = (isaVersion[1] == 0 && (isaVersion[2] == 0 || isaVersion[2] == 1))
                                  || (isaVersion[1] == 5 && isaVersion[2] == 1);
         const int vgprPerSimd = has1536Vgpr ? 1536 : 1024;
