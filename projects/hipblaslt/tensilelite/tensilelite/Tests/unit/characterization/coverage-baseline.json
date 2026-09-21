@@ -134,7 +134,7 @@
     "tensilelite/TensileRetuneLibrary.py": 96.45,
     "tensilelite/TensileUpdateLibrary.py": 98.46,
     "tensilelite/Toolchain/Assembly.py": 95.38,
-    "tensilelite/Toolchain/Component.py": 94.63,
+    "tensilelite/Toolchain/Component.py": 99.54,
     "tensilelite/Toolchain/HelperKernelCache.py": 99.14,
     "tensilelite/Toolchain/Source.py": 97.73,
     "tensilelite/Toolchain/Validators.py": 99.24,
