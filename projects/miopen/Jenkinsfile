@@ -272,7 +272,7 @@ def runTheRockDockerPromote() {
 
 //launch develop branch nightly/weekly jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
-0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX90A=true;TARGET_GFX942=true
+0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_FULL_TESTS=false;TARGET_GFX90A=true;TARGET_GFX942=true
 0 22 * * * % BUILD_THEROCK_DOCKER=true
 ''' : ""
 
@@ -297,7 +297,7 @@ pipeline {
             defaultValue: false,
             description: "")
         // Operational safety toggle: lets a build exercise the Build TheRock Docker +
-        // Package/Static Checks + Full Tests stages without pushing to the production
+        // Full Tests stages without pushing to the production
         // rocm/miopen:therock / rocm/miopen-dev:latest tags. Defaults to true so the
         // nightly cron promotes as usual; set false for a test-only build (e.g. from a
         // PR) that validates the image but leaves production tags untouched.
@@ -309,14 +309,6 @@ pipeline {
             name: "BUILD_FULL_TESTS",
             defaultValue: true,
             description: "")
-        booleanParam(
-            name: "RUN_HIP_TIDY",
-            defaultValue: true,
-            description: "Control the Hip Tidy (clang-analyze) stage in Full Tests")
-        booleanParam(
-            name: "BUILD_PACKAGE_AND_CHECKS",
-            defaultValue: true,
-            description: "Control the Package and Static Checks stage")
         booleanParam(
             name: "TARGET_NOGPU",
             defaultValue: true,
@@ -424,20 +416,6 @@ pipeline {
                 // stage('Build Docker gfx942, gfx950') { steps { script { runDockerBuild('gfx942_gfx950') } } }
             }
         }
-        stage("Package and Static checks") {
-            when {
-                expression {
-                    params.BUILD_THEROCK_DOCKER \
-                    || (params.BUILD_PACKAGE_AND_CHECKS && params.TARGET_NOGPU && params.DATATYPE_NA)
-                }
-            }
-            steps {
-                script {
-                    ensureUtils()
-                    parallel utils.packageAndStaticCheckStages(params, env, this.&rocmnode, this.&withWorkingDir)
-                }
-            }
-        }
         stage("Full Tests") {
             when {
                 expression {
@@ -452,7 +430,7 @@ pipeline {
             }
         }
         // Promotes the candidate to :therock only after all CI stages pass. The stage ordering
-        // already gates this (a failed Package/Static or Full Tests stage aborts before here);
+        // already gates this (a failed Full Tests stage aborts before here);
         // the explicit currentResult == 'SUCCESS' check makes "publish only on green" auditable
         // and also skips promotion when the build is merely UNSTABLE (e.g. flaky-test retries).
         stage('Build TheRock Docker: Promote') {

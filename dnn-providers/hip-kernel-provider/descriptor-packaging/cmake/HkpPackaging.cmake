@@ -268,10 +268,11 @@ function(hkp_wire_pack_target)
     # reading the edge as up to date and letting the embedding check walk nothing and
     # pass at zero descriptors.
     #
-    # This does not cover a tree emptied while its stamp survives: the build reads the
-    # edge as up to date and the embedding check walks nothing and passes, because a
-    # root with no descriptors is a legal pass. Only a check-side rule -- a stamped
-    # root must hold at least one descriptor -- would catch it.
+    # It does not by itself cover a tree emptied while its stamp survives: the build
+    # reads the edge as up to date and the embedding check walks nothing and passes,
+    # because a root with no descriptors is otherwise a legal pass. The rule that catches
+    # it -- a stamped root must hold at least one descriptor -- is stamped_root_failures()
+    # in hkp_verify_embedded_sources.py.
     #
     # The output root is created before the stamp is written, because a pack that emits
     # nothing never creates it and `touch` does not create parents. Such a root holds
@@ -378,12 +379,14 @@ endfunction()
 #   descriptor written by a pack no PACK_NAMES value lists still resolves.
 #
 #   PACK_NAMES lists the pack roots that write STAGED_DESCRIPTOR_ROOTS. Each one
-#   contributes its stamp file, so packing a root reruns the check. A name whose
-#   root is not wired contributes nothing.
+#   contributes its stamp file twice: as a dependency, so packing a root reruns
+#   the check, and as an argument, so the step also fails when a stamped pack
+#   root holds no descriptor at all. A name whose root is not wired contributes
+#   neither, so a dormant root -- production, with no source root set -- is not
+#   held to that rule.
 #
 #   An absent root, an empty root, a root with no embedded_source descriptor and
-#   an empty key table each pass -- including a root emptied after its pack
-#   stamped it.
+#   an empty key table each pass. A root emptied after its pack stamped it does not.
 #
 #   The comparison runs one way, from a staged descriptor to the table. A key no
 #   descriptor names is not an error, and neither is a descriptor no pack stages.
@@ -439,11 +442,15 @@ function(hkp_verify_embedded_sources)
     # The stamp file, not the packaging target: a target-level edge orders the two
     # steps but leaves the check stale after a repack.
     set(_pack_stamps "")
+    set(_stamp_args "")
     set(_pack_targets "")
     foreach(_pack IN LISTS ARG_PACK_NAMES)
         get_property(_pack_stamp GLOBAL PROPERTY HKP_PACK_STAMP_${_pack})
         if(_pack_stamp)
             list(APPEND _pack_stamps "${_pack_stamp}")
+            # The same stamp again as an argument, so the tool holds the root it
+            # sits in to the non-empty rule.
+            list(APPEND _stamp_args --pack-stamp "${_pack_stamp}")
         endif()
         if(TARGET hkp_packaging_${_pack})
             list(APPEND _pack_targets hkp_packaging_${_pack})
@@ -456,6 +463,7 @@ function(hkp_verify_embedded_sources)
                 --target "${ARG_TARGET}"
                 ${_manifest_arg}
                 ${_root_args}
+                ${_stamp_args}
                 ${_source_root_args}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${_tool}" ${_manifest_dep} ${_pack_stamps}
@@ -471,6 +479,120 @@ function(hkp_verify_embedded_sources)
         add_dependencies(hkp_verify_${ARG_TARGET} ${_pack_targets})
     endif()
     add_dependencies(${ARG_TARGET} hkp_verify_${ARG_TARGET})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_imported_library_location(<target> <out_path>)
+#   Full path of the loadable library behind an imported <target>, or empty.
+#
+#   The configuration is chosen deliberately rather than by taking whichever
+#   one the package exported first: the configuration being built when that is
+#   known, else a documented order, else any exported configuration that
+#   resolves. A package may also export a configuration whose file is not on
+#   disk, so each candidate is checked and the scan continues past one that
+#   fails -- stopping at the first exported entry yields nothing in that case
+#   even when another configuration would have worked.
+#
+#   IMPORTED_IMPLIB is deliberately never consulted: the caller hands this path
+#   to rocke, which ctypes.CDLLs it, and a Windows import library is not
+#   loadable. Returning empty lets rocke resolve normally, which a dead path
+#   would not.
+# ---------------------------------------------------------------------------
+function(hkp_imported_library_location target out_path)
+    set(_derived "")
+    # A multi-config generator does not know the configuration at configure
+    # time, so CMAKE_BUILD_TYPE may be empty and the rest of the order decides.
+    # NOCONFIG is what an export() with no build type emits.
+    set(_preferred "")
+    if(CMAKE_BUILD_TYPE)
+        string(TOUPPER "${CMAKE_BUILD_TYPE}" _preferred)
+    endif()
+    list(APPEND _preferred RELEASE RELWITHDEBINFO MINSIZEREL DEBUG NOCONFIG)
+
+    # IN_LIST against a NOTFOUND property is a hard error, which is what the
+    # guard prevents.
+    get_target_property(_cfgs ${target} IMPORTED_CONFIGURATIONS)
+    if(_cfgs)
+        foreach(_cfg IN LISTS _preferred)
+            if(NOT _cfg IN_LIST _cfgs)
+                continue()
+            endif()
+            get_target_property(_loc ${target} IMPORTED_LOCATION_${_cfg})
+            if(_loc AND EXISTS "${_loc}")
+                set(_derived "${_loc}")
+                break()
+            endif()
+        endforeach()
+    endif()
+    # Nothing preferred resolved: any real library beats none.
+    if(NOT _derived AND _cfgs)
+        foreach(_cfg IN LISTS _cfgs)
+            get_target_property(_loc ${target} IMPORTED_LOCATION_${_cfg})
+            if(_loc AND EXISTS "${_loc}")
+                set(_derived "${_loc}")
+                break()
+            endif()
+        endforeach()
+    endif()
+    # A package that exports no configurations at all.
+    if(NOT _derived)
+        get_target_property(_loc ${target} IMPORTED_LOCATION)
+        if(_loc AND EXISTS "${_loc}")
+            set(_derived "${_loc}")
+        endif()
+    endif()
+    set(${out_path} "${_derived}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_default_rocke_comgr_lib()
+#   Give HIPKERNELPROVIDER_ROCKE_COMGR_LIB a package-derived default in the
+#   CALLER's scope, so a correctly configured build needs no explicit path.
+#   Does nothing when the variable already holds a value.
+#
+#   The result is a plain (non-cache) variable on purpose. It has to be visible
+#   both to hkp_probe_comgr_resolvable, whose assertion only runs when the
+#   override is non-empty, and to the pack step and ctest entries -- one value,
+#   or configure validates something the build does not use.
+#
+#   Every path out of here says what it decided. Staying empty is safe, because
+#   rocke then resolves comgr itself, but it is indistinguishable at a glance
+#   from "no override was wanted" -- and on Windows rocke's own search can reach
+#   a System32 amd_comgr.dll, which is the failure this default exists to avoid.
+# ---------------------------------------------------------------------------
+function(hkp_default_rocke_comgr_lib)
+    if(HIPKERNELPROVIDER_ROCKE_COMGR_LIB)
+        return()
+    endif()
+    # hip's config supplies the target on Linux but not on Windows, so the
+    # package is searched for only when it is genuinely absent.
+    if(NOT TARGET amd_comgr)
+        find_package(amd_comgr CONFIG QUIET)
+    endif()
+    if(NOT TARGET amd_comgr)
+        message(STATUS
+            "hkp: no amd_comgr target and no amd_comgr CONFIG package, so "
+            "HIPKERNELPROVIDER_ROCKE_COMGR_LIB stays empty and rocke will "
+            "resolve comgr by its own search.")
+        return()
+    endif()
+    hkp_imported_library_location(amd_comgr _derived)
+    if(_derived)
+        set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "${_derived}" PARENT_SCOPE)
+        message(STATUS
+            "hkp: HIPKERNELPROVIDER_ROCKE_COMGR_LIB derived from the "
+            "amd_comgr package: ${_derived}")
+    else()
+        get_target_property(_cfgs amd_comgr IMPORTED_CONFIGURATIONS)
+        if(NOT _cfgs)
+            set(_cfgs "<none>")
+        endif()
+        message(STATUS
+            "hkp: the amd_comgr target exists but exports no library path that "
+            "is present on disk, so HIPKERNELPROVIDER_ROCKE_COMGR_LIB stays "
+            "empty and rocke will resolve comgr by its own search. Exported "
+            "configurations: ${_cfgs}")
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -496,6 +618,11 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_probe_comgr_resolvable out_ok out_detail)
     set(_rocke_root "${HKP_PKG_DIR}/../rocke")
+    # Joined with the platform's own PYTHONPATH separator. The assignment reaches
+    # `cmake -E env` as one argv element because the expansion at the call site below is
+    # quoted; a quoted argument never splits on a semicolon, so the Windows separator
+    # needs no escaping here. Escaping it would put a literal backslash in the child's
+    # first sys.path entry.
     if(WIN32)
         set(_sep ";")
     else()
@@ -774,6 +901,12 @@ function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
     # hipcc.exe or hipcc.bat. hipcc.bin.exe is the raw clang driver and is only
     # a last-resort fallback.
+    #
+    # The default name-major search is what holds that ordering: every directory is
+    # tried for hipcc before hipcc.bin.exe is tried anywhere, so the fallback wins
+    # only when no real driver exists anywhere on the path. NAMES_PER_DIR would
+    # demote this list to a tiebreak within one directory and let an early
+    # hipcc.bin.exe beat a later hipcc.
     find_program(HKP_HIPCC NAMES hipcc hipcc.bat hipcc.bin.exe)
     if(NOT HKP_HIPCC)
         message(FATAL_ERROR
@@ -877,11 +1010,18 @@ into the staged and installed trees. Empty leaves production packaging dormant."
 
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
         "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
-ROCKE_COMGR_LIB for the pack step and the ctest entries. Needed on Windows, \
-where a System32 amd_comgr.dll can shadow the ROCm one; empty lets rocke \
-resolve normally. rocke itself treats this as the first CANDIDATE and falls \
-through when it does not load, so configure asserts that the library which \
-loaded is the one named here.")
+ROCKE_COMGR_LIB for the pack step and the ctest entries. Leave it empty for \
+the normal case: the path is then derived from the amd_comgr package, and it \
+stays empty only when no usable location can be derived, which configure \
+reports and which leaves rocke to resolve comgr by its own search. Set it to \
+override that -- needed on Windows, where a System32 amd_comgr.dll can shadow \
+the ROCm one. rocke treats the value as the first CANDIDATE and falls through \
+when it does not load, so configure asserts that the library which loaded is \
+the one named here.")
+
+    # Runs before the copy below and before the probe, so the derived value is
+    # what both of them see. An explicitly-set value is left alone.
+    hkp_default_rocke_comgr_lib()
 
     # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
     # value comes from our own cache entry and is forwarded into the environment rocke

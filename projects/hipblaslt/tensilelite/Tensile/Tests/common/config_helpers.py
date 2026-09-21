@@ -143,10 +143,16 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
+    under_ffm = bool(os.environ.get("HSA_MODEL_MEMFILE"))
     for arch in availableArchs:
         ArchFail = "xfail-%s" % arch
         if markNamed(ArchFail) in marks:
-            marks.append(pytest.mark.xfail)
+            # xfail-<arch> encodes a real-hardware expectation. Under FFM the config
+            # often passes (no CheckASMCodeSize / emulated exec), which xfail_strict
+            # would turn into an XPASS failure. Skip the arch-xfail under FFM; a config
+            # that ALSO fails under emulation carries ffm_fail (handled below).
+            if not under_ffm:
+                marks.append(pytest.mark.xfail)
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
@@ -214,7 +220,8 @@ def findAvailableArchs(gpu_targets=None):
         List of architecture strings (e.g. ["gfx942"]).
     """
     if gpu_targets:
-        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
+        # Strip a trailing version suffix so architecture marks match the base gfx target.
+        return [re.sub(r"v\d+$", "", t.strip()) for t in gpu_targets.split(";") if t.strip()]
 
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()

@@ -685,6 +685,16 @@
              false,
              "IF_VALU"},
 
+                                    {"VCndMaskB16",
+             "VCndMaskB16",
+             3,
+             true,
+             "Vector Other",
+             true,
+             true,
+             false,
+             "IF_VALU"},
+
                                     {"VLShiftLeftB16",
              "VLShiftLeftB16",
              2,

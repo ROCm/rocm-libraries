@@ -24,10 +24,16 @@ Every root is optional. An absent root, an empty root, a root with no
 the two counts it compared, so a pass over nothing reads differently in the
 build log from a step that did not run.
 
-An emptied root therefore passes even when its pack stamp is still present. That
-is the one corruption this check cannot tell apart from a root that is
-legitimately empty, and why the stale-tree hint says to confirm against a clean
-build directory.
+One further rule keys on a pack stamp rather than on the comparison above:
+
+  non-empty  A pack root whose stamp file is present holds at least one
+             descriptor. The stamp lives inside the root it vouches for, so its
+             presence is the build's own claim that this root was packed, and a
+             packed root that holds nothing was emptied afterwards.
+
+`--pack-stamp` names the stamps to hold to that rule, one per wired pack. A root
+whose pack is not wired -- the dormant production root is one -- contributes no
+stamp and is not checked.
 
 The comparison runs one way, from a staged descriptor to the table. Neither
 reverse direction is checked.
@@ -148,6 +154,35 @@ def descriptor_files(root: Path) -> list[Path]:
     return sorted(root.rglob("*.json"))
 
 
+def stamped_root_failures(stamps: list[Path]) -> list[str]:
+    """Check that every stamped pack root still holds a descriptor.
+
+    A stamp is written inside the root it vouches for and is wiped with it, so a
+    present stamp over an empty root means either a pack that emitted nothing or
+    a tree emptied under a stamp that outlived it.
+
+    A stamp that is absent is not a failure. The pack has not run yet, or its
+    root was wiped whole, and the next build packs it.
+    """
+    failures = []
+    for stamp in stamps:
+        if not stamp.exists():
+            continue
+        root = stamp.parent
+        if descriptor_files(root):
+            continue
+        failures.append(
+            f"the pack root '{root}' is stamped as packed but holds no "
+            f"descriptor.\n"
+            f"  stamp: {stamp}\n"
+            "  A pack writes its stamp inside the root it filled, so an empty "
+            "stamped root is either a pack that emitted nothing or a tree "
+            "emptied afterwards.\n"
+            "  Configure a clean build directory to repack it."
+        )
+    return failures
+
+
 def embedded_source_objects(doc: object) -> list[dict]:
     """Every object of one descriptor document that names a source to embed.
 
@@ -259,6 +294,7 @@ def verify(
     manifest: Path | None,
     roots: list[Path],
     source_roots: dict[str, str],
+    pack_stamps: list[Path] | None = None,
 ) -> tuple[list[str], int, int]:
     """Check one target against every staged root it serves.
 
@@ -267,7 +303,7 @@ def verify(
     examined descriptors from a pass over nothing.
     """
     table = read_key_manifest(manifest)
-    failures = []
+    failures = stamped_root_failures(pack_stamps or [])
     checked = 0
     for root in roots:
         for descriptor in descriptor_files(root):
@@ -319,6 +355,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     ap.add_argument(
+        "--pack-stamp",
+        action="append",
+        default=[],
+        dest="pack_stamps",
+        help=(
+            "The stamp file of one wired pack; repeatable. A stamp that is "
+            "present asserts that the root holding it -- the stamp's own "
+            "directory -- holds at least one descriptor. Omit it for a pack "
+            "that is not wired, so a dormant root is not held to the rule."
+        ),
+    )
+    ap.add_argument(
         "--source-root",
         action="append",
         default=[],
@@ -337,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.key_manifest) if args.key_manifest else None,
             [Path(root) for root in args.staged_descriptor_roots],
             source_roots,
+            [Path(stamp) for stamp in args.pack_stamps],
         )
     except (OSError, ValueError) as exc:
         print(f"hkp_verify_embedded_sources: {exc}", file=sys.stderr)
