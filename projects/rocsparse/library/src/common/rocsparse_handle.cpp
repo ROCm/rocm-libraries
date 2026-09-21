@@ -123,26 +123,6 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
         THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
 #endif
 
-        // create blas handle
-        rocsparse::blas_impl blas_impl;
-
-#ifdef ROCSPARSE_WITH_ROCBLAS
-
-        blas_impl = rocsparse::blas_impl_rocblas;
-
-#else
-
-        //
-        // Other implementation available? Otherwise, set it to none.
-        //
-        blas_impl = rocsparse::blas_impl_none;
-#endif
-
-        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
-        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
-        THROW_IF_ROCSPARSE_ERROR(
-            rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
-
         // Open log file
         if(layer_mode & rocsparse_layer_mode_log_trace)
         {
@@ -168,7 +148,6 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-        PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(blas_handle), "handle error");
         throw;
     }
 }
@@ -196,7 +175,7 @@ _rocsparse_handle::_rocsparse_handle()
         // ASIC revision
         asic_rev = properties.asicRevision;
 #else
-        asic_rev  = 0;
+        asic_rev = 0;
 #endif
 
         // Layer mode
@@ -254,26 +233,6 @@ _rocsparse_handle::_rocsparse_handle()
         THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
 #endif
 
-        // create blas handle
-        rocsparse::blas_impl blas_impl;
-
-#ifdef ROCSPARSE_WITH_ROCBLAS
-
-        blas_impl = rocsparse::blas_impl_rocblas;
-
-#else
-
-        //
-        // Other implementation available? Otherwise, set it to none.
-        //
-        blas_impl = rocsparse::blas_impl_none;
-#endif
-
-        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
-        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
-        THROW_IF_ROCSPARSE_ERROR(
-            rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
-
         // Open log file
         if(layer_mode & rocsparse_layer_mode_log_trace)
         {
@@ -299,7 +258,6 @@ _rocsparse_handle::_rocsparse_handle()
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
         PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
-        PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(blas_handle), "handle error");
         throw;
     }
 }
@@ -323,9 +281,6 @@ _rocsparse_handle::~_rocsparse_handle()
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
-
-    // destroy blas handle
-    PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(this->blas_handle), "handle error");
 
     // Close log files
     if(log_trace_ofs.is_open())
@@ -358,9 +313,6 @@ rocsparse_status _rocsparse_handle::set_stream(hipStream_t user_stream)
     // TODO check if stream is valid
     stream = user_stream;
 
-    // blas set stream
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, user_stream));
-
     return rocsparse_status_success;
 }
 
@@ -384,9 +336,6 @@ rocsparse_status _rocsparse_handle::set_pointer_mode(rocsparse_pointer_mode user
 
     // TODO check if stream is valid
     this->pointer_mode = user_mode;
-
-    // blas set stream
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::blas_set_pointer_mode(this->blas_handle, user_mode));
 
     return rocsparse_status_success;
 }

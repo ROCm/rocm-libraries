@@ -23,8 +23,6 @@
 
 #include "rocsparse_sddmm_ell_kernel.hpp"
 
-#include "../conversion/rocsparse_ell2dense.hpp"
-
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
 {
@@ -55,17 +53,6 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
-        {
-
-            if(nnz == 0)
-            {
-                *buffer_size = 0;
-                return rocsparse_status_success;
-            }
-
-            *buffer_size = ((sizeof(C) * m * n - 1) / 256 + 1) * 256;
-            return rocsparse_status_success;
-        }
         case rocsparse_sddmm_alg_default:
         {
             *buffer_size = 0;
@@ -148,129 +135,6 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
-        {
-            // Batched computation is currently only supported for the default
-            // algorithm.
-            if(batch_count > 1)
-            {
-                return rocsparse_status_not_implemented;
-            }
-
-            if(nnz == 0)
-            {
-                return rocsparse_status_success;
-            }
-
-            if(buffer == nullptr)
-            {
-                return rocsparse_status_invalid_pointer;
-            }
-
-            char* ptr   = reinterpret_cast<char*>(buffer);
-            C*    dense = reinterpret_cast<C*>(ptr);
-
-            const auto ell_width = static_cast<J>(nnz / m);
-
-            // Convert to Dense
-            RETURN_IF_ROCSPARSE_ERROR((rocsparse::ell2dense_template(handle,
-                                                                     m,
-                                                                     n,
-                                                                     C_descr,
-                                                                     ell_width,
-                                                                     C_val_data,
-                                                                     C_col_data,
-                                                                     dense,
-                                                                     m,
-                                                                     rocsparse_order_column)));
-
-            const bool A_col_major = (order_A == rocsparse_order_column);
-            const bool B_col_major = (order_B == rocsparse_order_column);
-
-            const rocsparse_operation trans_A_adjusted
-                = (A_col_major != (trans_A == rocsparse_operation_none))
-                      ? rocsparse_operation_transpose
-                      : rocsparse_operation_none;
-            const rocsparse_operation trans_B_adjusted
-                = (B_col_major != (trans_B == rocsparse_operation_none))
-                      ? rocsparse_operation_transpose
-                      : rocsparse_operation_none;
-
-            // Compute
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::blas_gemm_ex(handle->blas_handle,
-                                                              trans_A_adjusted,
-                                                              trans_B_adjusted,
-                                                              m,
-                                                              n,
-                                                              k,
-                                                              alpha,
-                                                              A_val,
-                                                              rocsparse::get_datatype<A>(),
-                                                              A_ld,
-                                                              B_val,
-                                                              rocsparse::get_datatype<B>(),
-                                                              B_ld,
-                                                              beta,
-                                                              dense,
-                                                              rocsparse::get_datatype<C>(),
-                                                              m,
-                                                              dense,
-                                                              rocsparse::get_datatype<C>(),
-                                                              m,
-                                                              rocsparse::get_datatype<T>(),
-                                                              rocsparse::blas_gemm_alg_standard,
-                                                              0,
-                                                              0));
-
-            // Sample dense C
-            if(handle->wavefront_size == 32)
-            {
-                static constexpr rocsparse_int WAVEFRONT_SIZE         = 32;
-                static constexpr rocsparse_int NELL_COLUMNS_PER_BLOCK = 16;
-
-                rocsparse_int blocks = (ell_width - 1) / NELL_COLUMNS_PER_BLOCK + 1;
-                dim3          k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NELL_COLUMNS_PER_BLOCK);
-
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, T>),
-                    k_blocks,
-                    k_threads,
-                    0,
-                    handle->stream,
-                    m,
-                    n,
-                    dense,
-                    m,
-                    ell_width,
-                    C_val_data,
-                    C_col_data,
-                    C_base);
-            }
-            else
-            {
-                static constexpr rocsparse_int WAVEFRONT_SIZE         = 64;
-                static constexpr rocsparse_int NELL_COLUMNS_PER_BLOCK = 16;
-
-                rocsparse_int blocks = (ell_width - 1) / NELL_COLUMNS_PER_BLOCK + 1;
-                dim3          k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NELL_COLUMNS_PER_BLOCK);
-
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, T>),
-                    k_blocks,
-                    k_threads,
-                    0,
-                    handle->stream,
-                    m,
-                    n,
-                    dense,
-                    m,
-                    ell_width,
-                    C_val_data,
-                    C_col_data,
-                    C_base);
-            }
-
-            return rocsparse_status_success;
-        }
         case rocsparse_sddmm_alg_default:
         {
             static constexpr int NB = 512;

@@ -44,11 +44,6 @@ function( apply_omp_settings lib_target_ )
   endif()
 endfunction()
 
-if (rocblas_FOUND)
-  message("Build rocSPARSE client with rocBLAS")
-  add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
-endif()
-
 if (BUILD_CLIENTS_ONLY)
   find_package(rocsparse 4.0.0 REQUIRED)
 endif()

@@ -44,11 +44,6 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-if (rocblas_FOUND)
-  message("-- Build rocSPARSE library with rocBLAS")
-  add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
-endif()
-
 # Configure the version header (version numbers only) and the config header
 # (build-time feature flags). Variables referenced via #cmakedefine in the
 # .h.in must be set (or unset) prior to the configure_file() calls.
@@ -70,8 +65,8 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-config.h.in"
 # flags that appear in a public header but are intentionally build-only and never
 # reach consumers; only ROCSPARSE_WITH_MEMSTAT qualifies (it gates dev-only
 # memory-tracing routines in rocsparse-auxiliary.h). Other build-only flags
-# (ASAN, ROCBLAS) are used solely in src, never in public headers, so the
-# guardrail never sees them and they do not need excluding.
+# ASAN is used solely in src, never in public headers, so the
+# guardrail never sees ASAN and it do not need excluding.
 include(CheckFeatureFlags)
 check_config_header_flags(
   PREFIX   ROCSPARSE_WITH_
@@ -132,13 +127,6 @@ target_include_directories(rocsparse
 # Target link libraries
 target_link_libraries(rocsparse PRIVATE roc::rocprim hip::device)
 set(static_depends PACKAGE rocprim)
-
-if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)
-  target_link_libraries(rocsparse PRIVATE roc::rocblas)
-  if(NOT BUILD_SHARED_LIBS)
-    list(APPEND static_depends PACKAGE rocblas)
-  endif()
-endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsparse PRIVATE -fprofile-instr-generate -fcoverage-mapping)
