@@ -3158,7 +3158,9 @@ def direct_dgrad_coalesced_workspace_bytes(
         raise ValueError(
             f"DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got {p.kpg})"
         )
-    N_K_ATOMS = p.kpg // K_ATOM_SZ  # kpg_orig = cpg of transposed fprop
+    N_K_ATOMS = (
+        p.kpg + K_ATOM_SZ - 1
+    ) // K_ATOM_SZ  # ceil; kpg_orig = cpg of transposed fprop
     N_M_TILES = (p.cpg + 15) // 16  # cpg_orig = kpg of transposed fprop
     return (
         p.groups * p.KH * p.KW * N_K_ATOMS * N_M_TILES * 64 * ELEMS_PER_LANE * 2

@@ -1095,6 +1095,20 @@ def _run_dgrad_sweep(
     rt.memcpy_h2d(W_dev, u8(W_t), W_t.nbytes)
     rt.memset(dX_dev, 0, dX_t.nbytes)
 
+    _I32_MAX = (1 << 31) - 1
+    _too_large = [
+        (name, nb)
+        for name, nb in [("dY", dY_t.nbytes), ("W", W_t.nbytes), ("dX", dX_t.nbytes)]
+        if nb > _I32_MAX
+    ]
+    if _too_large:
+        desc = ", ".join(f"{n}={nb}" for n, nb in _too_large)
+        print(
+            f"[skip] problem too large for i32 byte-offset params ({desc}); skipping.",
+            flush=True,
+        )
+        return 0, []
+
     # Workspaces for 3-kernel MFMA pipeline:
     # wt_dev:  W_T (step 1, simple transposed weights)
     # wt_coa:  W_coa (step 2, reorganized coalesced weights)
