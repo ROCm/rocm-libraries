@@ -229,6 +229,21 @@ if( ROCFFT_BUILD_INTERNAL_TESTS )
 endif()
 
 add_subdirectory( library )
+# Fortran bindings. Self-contained: it declares bind(C) interfaces only, so it
+# compiles against neither the rocFFT headers nor librocfft, and it is safe to
+# add unconditionally. The directory does its own guarding and returns quietly
+# when BUILD_FORTRAN_BINDINGS is off or no Fortran compiler was found. It reports
+# back through ROCFFT_HAVE_FORTRAN_BINDINGS, which is FALSE in both those cases
+# and TRUE only when the rocfft_fortran target was really created.
+#
+# After library/ on purpose. The directory falls back to find_package( rocfft )
+# when roc::rocfft is absent, because otherwise it records no link interface and
+# every consumer hits undefined references to rocfft_setup despite linking
+# roc::rocfft_fortran exactly as documented. Hooked in BEFORE library/, that
+# fallback would silently resolve against whatever rocFFT is INSTALLED on the
+# build machine, and the in-tree build would ship bindings pointing at the wrong
+# librocfft with no diagnostic at all.
+add_subdirectory( fortran )
 
 include( clients/cmake/build-options.cmake )
 
