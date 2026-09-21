@@ -70,6 +70,27 @@ static std::string chirp_rtc_wide_type_decl(const KIntType& itype)
                                   : "typedef unsigned long long wide_type;\n";
 }
 
+// Thread index for the one-thread-per-element grid laid out by
+// flat_grid_dim.
+//
+// A grid that fits in X alone indexes in integer_type, which keeps the
+// index provably 32-bit for the common case.  That range matters well
+// past the index itself: tx feeds the division and modulus by numof,
+// which cost noticeably more once the dividend can be any 64-bit value.
+//
+// Once the grid spills into Y the index no longer fits, so it is
+// computed in size_t.  integer_type would not do even when it is 64-bit
+// wide: it is derived from the data extents, which say nothing about the
+// Bluestein work item count that sizes the grid.
+static const char* flat_grid_thread_index(bool splitGrid)
+{
+    if(!splitGrid)
+        return "threadIdx.x + static_cast<integer_type>(blockIdx.x) * blockDim.x";
+
+    return "threadIdx.x + static_cast<size_t>(blockIdx.x) * blockDim.x"
+           " + static_cast<size_t>(blockIdx.y) * gridDim.x * blockDim.x";
+}
+
 std::string bluestein_single_rtc(const std::string& kernel_name, const BluesteinSingleSpecs& specs)
 {
     auto length               = specs.length;
@@ -172,6 +193,9 @@ std::string bluestein_multi_rtc_kernel_name(const BluesteinMultiSpecs& specs)
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
+    // only suffixed when set, to leave the usual kernel names alone
+    if(specs.splitGrid)
+        kernel_name += "_gridxy";
     kernel_name += load_store_name_suffix(specs.loadOps, specs.storeOps);
     kernel_name += rtc_cbtype_name(specs.cbtype);
 
@@ -202,8 +226,7 @@ static std::string bluestein_multi_chirp_rtc(const std::string&         kernel_n
     Variable tx{"tx", "wide_type"};
     Variable val{"val", "scalar_type"};
 
-    func.body
-        += Declaration{tx, "threadIdx.x + static_cast<integer_type>(blockIdx.x) * blockDim.x"};
+    func.body += Declaration{tx, Literal{flat_grid_thread_index(specs.splitGrid)}};
     func.body += Declaration{val, CallExpr{"scalar_type", {Literal{"0.0"}, Literal{"0.0"}}}};
 
     func.body
@@ -305,8 +328,7 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable chirp{"chirp", "scalar_type", true};
     Variable out_elem{"out_elem", "scalar_type"};
 
-    func.body
-        += Declaration{tx, "threadIdx.x + static_cast<integer_type>(blockIdx.x) * blockDim.x"};
+    func.body += Declaration{tx, Literal{flat_grid_thread_index(specs.splitGrid)}};
 
     func.body += If{tx >= totalWI, {Return{}}};
 
