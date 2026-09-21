@@ -1285,6 +1285,21 @@ class TestPopulateLogicalModule(unittest.TestCase):
             ],
         )
 
+    def test_endif_comment_dropped_when_outputNoComment(self):
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        m = Module()
+        m.add(ValueIf("0"))
+        m.add(ValueEndif("overflowed resources"))
+        try:
+            opts.outputNoComment = True
+            items = self._payloads(m)
+        finally:
+            opts.outputNoComment = saved
+        self.assertEqual(items[-1], ("endif", ""))
+
     def test_callable_module_emits_callable_markers(self):
         outer = Module()
         callable_module = Module("activation")
@@ -1425,6 +1440,24 @@ class TestToStinkyAsm(unittest.TestCase):
             ".endif" + " " * 44 + " // overflowed resources\n",
             text,
         )
+
+    def test_endif_omits_comment_when_outputNoComment(self):
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        m = Module("kConditionalNoComment")
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueIf("0"))
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueEndif("overflowed resources"))
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+        finally:
+            opts.outputNoComment = saved
+        self.assertIn(".endif\n", text)
+        self.assertNotIn("overflowed resources", text)
 
     def test_arch_accepts_sequence_not_just_list(self):
         # Tuples / arrays are common in KernelWriter (kernel["ISA"] is
