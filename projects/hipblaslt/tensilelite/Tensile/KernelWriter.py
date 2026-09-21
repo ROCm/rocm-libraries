@@ -8186,8 +8186,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.useAtomicPkAddBF16 = kernel["GlobalSplitUAlgorithm"] == "AtomicDest"
 
     # The inst HasAtomicAdd is using is not compatible with int32.
-    # 'SingleBuffer' is the fp32 staging workspace, so the atomic target is fp32
-    # there; AtomicDest leaves _GlobalAccumulation None and is excluded already.
     self.states.useAtomicAdd = (self.states.asmCaps["HasAtomicAdd"] and kernel["ProblemType"]["ComputeDataType"].isSingle()) and \
                         (kernel["_GlobalAccumulation"] == 'SingleBuffer')
 
@@ -8211,9 +8209,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.states.bpeCexternalGSU1 = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
     self.states.bpeCexternal = self.states.bpeCexternalGSU1
-    # Only a staging buffer makes the store stride the compute-type one. AtomicDest
-    # accumulates into the real D and leaves _GlobalAccumulation None, so it keeps
-    # the dest stride through this test.
     if kernel["GlobalSplitU"] > 0 and kernel["_GlobalAccumulation"] and kernel["_GlobalAccumulation"] != 'PartialsBuffer':
       self.states.bpeCexternal = self.states.bpeCinternal
 
