@@ -4,12 +4,9 @@
 add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
 
-# Windows resolves header names case-insensitively, so this must precede
-# common/include to select TensileLite's Utility.hpp instead of utility.hpp.
 target_include_directories(hipblaslt-clients-common
-    BEFORE
     PRIVATE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/client/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/client>
 )
 
 target_include_directories(hipblaslt-clients-common
