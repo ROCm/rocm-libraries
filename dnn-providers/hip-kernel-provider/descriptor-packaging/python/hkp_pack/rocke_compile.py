@@ -177,17 +177,14 @@ def _resolve_spec_class(module, builder_fn):
 def _require_spec_arch_signature(builder_fn, builder):
     """Require exactly `(spec, *, arch)` — nothing the UKD cannot supply.
 
-    Keyword-only parameters beyond `arch` are the dangerous case, and the
-    original check could not see them: it counted only POSITIONAL_ONLY and
-    POSITIONAL_OR_KEYWORD. `gfx942/attention_dense.py`'s
-    `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` slipped through and was
-    silently frozen at its default on every pack, with nothing in the descriptor
-    able to influence it and nothing in the output recording that.
+    Keyword-only parameters beyond `arch` are the dangerous case. A builder that
+    takes a defaulted tuning object would leave that tuning value silently frozen
+    at its default on every pack, with nothing in the descriptor able to
+    influence it and nothing in the output recording that.
 
-    That is not a hypothetical: the tuning class's own docstring warns the
-    pattern "is exactly how a real +79% got reported as -17% in this tree."
-    Silently defaulting a performance knob is worse than refusing to build,
-    because the artifact looks fine.
+    That is not a hypothetical: a silently defaulted knob is exactly how a real
+    regression got mis-reported in this tree. Defaulting a performance knob out
+    of sight is worse than refusing to build, because the artifact looks fine.
 
     A parameter with a default is still rejected. Having a default is what makes
     it invisible; it does not make it unimportant.

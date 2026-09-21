@@ -193,7 +193,7 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${
 find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
-set(VERSION_STRING "4.6.0")
+set(VERSION_STRING "5.0.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 
@@ -277,18 +277,19 @@ endif()
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocprim INTERFACE
     -w
-    -fprofile-instr-generate
-    -fcoverage-mapping
+    # Note: use SHELL here to prevent cmake from removing what it thinks is duplicate -Xarch_host options.
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping"
   )
   target_link_options(rocprim INTERFACE
-    -fprofile-instr-generate
+    "SHELL:-Xarch_host -fprofile-instr-generate"
   )
 endif()
 
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
-if(BUILD_CODE_COVERAGE)
+if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
   add_custom_target(
     coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
