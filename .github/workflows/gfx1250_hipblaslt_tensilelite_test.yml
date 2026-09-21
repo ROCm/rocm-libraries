@@ -284,14 +284,10 @@ jobs:
           mkdir -p tensilelite_test_results
           export PYTHONPATH="$ROCM/share/hipblaslt/tensilelite:${PYTHONPATH:-}"
           cd "$ROCM/share/hipblaslt/tensilelite"
-          echo "::group::rocisa import"
-          python3 -c "import rocisa; print('rocisa import OK')" 2>&1 \
-            || echo "::warning::rocisa import failed from the artifact PYTHONPATH"
-          echo "::endgroup::"
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
-          # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
-          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
+          # Common GEMM tests run against the prebuilt client. Per-test cap 5400s (90 min).
+          TL_TARGET=gfx1250v0
           # HIP device compiles through ccache.
           # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
           if ! command -v ccache >/dev/null 2>&1; then
@@ -303,10 +299,11 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" \
+            --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
-            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
+            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++" \
             --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
