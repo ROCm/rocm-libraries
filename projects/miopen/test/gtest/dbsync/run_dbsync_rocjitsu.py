@@ -33,7 +33,7 @@ from pathlib import Path
 
 # Pinned rocjitsu source (ROCm/rocm-systems). Bump deliberately.
 ROCJITSU_REPO = "https://github.com/ROCm/rocm-systems.git"
-ROCJITSU_REF = "481982dfe23e181a302006747c561e7cf43e35ba"  # 2026-06-04
+ROCJITSU_REF = "b2099a6b8703c089134ad526253752d26bbbf43a"  # 2026-09-10
 
 # family -> (arch, rocjitsu KMD config, [CU counts to validate]). The CU list is the arch's real
 # per-SKU CU counts; each = a StaticFDBSync param and drives one CU-corrected run. gfx94X-dcgpu
@@ -42,12 +42,12 @@ ROCJITSU_REF = "481982dfe23e181a302006747c561e7cf43e35ba"  # 2026-06-04
 FAMILY_MAP = {
     "gfx94X-dcgpu": {
         "arch": "gfx942",
-        "rj_config": "amdgpu_cdna3_kmd.json",
+        "rj_config": "gfx942_cdna3_kmd.json",
         "cus": [304, 228],
     },
     "gfx950-dcgpu": {
         "arch": "gfx950",
-        "rj_config": "amdgpu_cdna4_kmd.json",
+        "rj_config": "gfx950_mi355x_kmd.json",
         "cus": [256],
     },
 }
@@ -82,15 +82,22 @@ def cu_correct_config(in_path: Path, cu_count: int, out_path: Path):
 
 
 def ensure_build_tools():
-    """Install cmake/build-essential/libdrm-dev/git if missing (needs root; container runs --user 0)."""
+    """Install cmake/build-essential/libdrm-dev/git if missing.
+
+    Uses sudo rather than assuming the container runs as root: TheRock's
+    no_rocm_image_ubuntu24_04 (and its variants) run as an unprivileged
+    `tester` user with passwordless sudo configured, and some CI runner
+    pools don't honor a container's --user 0:0 override.
+    """
     if (
         all(shutil.which(t) for t in ("cmake", "c++", "git"))
         and Path("/usr/include/libdrm").exists()
     ):
         return
-    run(["apt-get", "update"])
+    run(["sudo", "apt-get", "update"])
     run(
         [
+            "sudo",
             "apt-get",
             "install",
             "-y",
@@ -104,9 +111,12 @@ def ensure_build_tools():
 
 
 def build_rocjitsu(workdir: Path):
-    """Sparse-clone rocjitsu @ the pinned ref and build rocjitsu_kmd_shim.
+    """Sparse-clone rocjitsu @ the pinned ref and build the rocjitsu CLI launcher.
 
-    Returns (kmd_so_path, rocjitsu_source_dir)."""
+    The launcher (not a raw LD_PRELOAD of librocjitsu.so) is the supported entry point: it stands
+    up the simulated KFD and injects the interposer into the child process it execs.
+
+    Returns (rocjitsu_bin_path, rocjitsu_source_dir)."""
     src = workdir / "rocm-systems"
     if not src.exists():
         run(["git", "init", str(src)])
@@ -132,15 +142,18 @@ def build_rocjitsu(workdir: Path):
             "--build",
             str(build),
             "--target",
-            "rocjitsu_kmd_shim",
+            "rocjitsu_bin",
+            "rocjitsu_shared",
             "-j",
             str(os.cpu_count() or 4),
         ]
     )
-    kmd = build / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "librocjitsu_kmd.so"
-    if not kmd.exists():
-        sys.exit(f"::error::rocjitsu KMD shim not found at {kmd} after build")
-    return kmd, src
+    rocjitsu_bin = build / "tools" / "rocjitsu" / "rocjitsu"
+    if not rocjitsu_bin.exists():
+        sys.exit(
+            f"::error::rocjitsu CLI launcher not found at {rocjitsu_bin} after build"
+        )
+    return rocjitsu_bin, src
 
 
 def main():
@@ -190,7 +203,7 @@ def main():
     work = Path("rocjitsu-work").resolve()
     work.mkdir(exist_ok=True)
     ensure_build_tools()
-    kmd, rj_src = build_rocjitsu(work)
+    rocjitsu_bin, rj_src = build_rocjitsu(work)
     configs_dir = rj_src / "emulation" / "rocjitsu" / "configs"
 
     env_base = os.environ.copy()
@@ -198,16 +211,24 @@ def main():
     env_base["LD_LIBRARY_PATH"] = (
         f"{dist / 'lib'}:{env_base.get('LD_LIBRARY_PATH', '')}"
     )
-    env_base["LD_PRELOAD"] = str(kmd)
     env_base["MIOPEN_DBSYNC_MAX_THREADS"] = str(DBSYNC_MAX_THREADS)
 
     for cu in cus:
         print(f"::group::StaticFDBSync {arch} @ {cu} CU", flush=True)
         rj_config = work / f"rj_config_{cu}.json"
         cu_correct_config(configs_dir / rj_config_name, cu, rj_config)
-        env = env_base.copy()
-        env["RJ_CONFIG"] = str(rj_config)
-        run([str(gtest), "--gtest_filter=*StaticFDBSync*", "--gtest_color=no"], env=env)
+        run(
+            [
+                str(rocjitsu_bin),
+                "--config",
+                str(rj_config),
+                "--",
+                str(gtest),
+                "--gtest_filter=*StaticFDBSync*",
+                "--gtest_color=no",
+            ],
+            env=env_base,
+        )
         print("::endgroup::", flush=True)
 
     return 0
