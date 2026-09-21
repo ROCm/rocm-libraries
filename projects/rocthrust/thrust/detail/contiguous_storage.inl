@@ -33,6 +33,10 @@
 #include <thrust/detail/allocator/value_initialize_range.h>
 #include <thrust/detail/contiguous_storage.h>
 
+#include _THRUST_STD_INCLUDE(utility)
+
+#include <nv/target>
+
 #include <stdexcept> // for std::runtime_error
 
 THRUST_NAMESPACE_BEGIN
@@ -256,8 +260,8 @@ THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::o
     m_allocator = _THRUST_STD::move(other.m_allocator);
   }
 
-  m_begin = std::move(other.m_begin);
-  m_size  = std::move(other.m_size);
+  m_begin = _THRUST_STD::move(other.m_begin);
+  m_size  = _THRUST_STD::move(other.m_size);
 
   other.m_begin = pointer(static_cast<T*>(0));
   other.m_size  = 0;

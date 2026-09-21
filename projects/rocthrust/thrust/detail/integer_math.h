@@ -28,33 +28,14 @@
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
 
+#include _THRUST_STD_INCLUDE(__bit/countl.h)
+#include _THRUST_STD_INCLUDE(__type_traits/make_unsigned.h)
+#include _THRUST_STD_INCLUDE(limits)
 #include _THRUST_STD_INCLUDE(type_traits)
-
-#include <limits>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
-template <typename Integer>
-THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer clz(Integer x)
-{
-  Integer result;
-
-  _THRUST_IF_TARGET(
-    _THRUST_IS_DEVICE,
-    (result = ::__clz(x);),
-    (int num_bits = 8 * sizeof(Integer); int num_bits_minus_one = num_bits - 1; result = num_bits;
-     for (int i = num_bits_minus_one; i >= 0; --i) {
-       if ((Integer(1) << i) & x)
-       {
-         result = num_bits_minus_one - i;
-         break;
-       }
-     }));
-
-  return result;
-}
 
 template <typename Integer>
 THRUST_HOST_DEVICE THRUST_FORCEINLINE bool is_power_of_2(Integer x)
@@ -86,7 +67,7 @@ THRUST_HOST_DEVICE THRUST_FORCEINLINE Integer log2(Integer x)
   Integer num_bits           = 8 * sizeof(Integer);
   Integer num_bits_minus_one = num_bits - 1;
 
-  return num_bits_minus_one - clz(x);
+  return num_bits_minus_one - _THRUST_STD::countl_zero(::cuda::std::__to_unsigned_like(x));
 }
 
 template <typename Integer>

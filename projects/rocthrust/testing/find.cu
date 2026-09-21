@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/find.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
@@ -147,7 +146,7 @@ void TestFindIfDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::find_if(sys, vec.begin(), vec.end(), ::internal::identity{});
+  thrust::find_if(sys, vec.begin(), vec.end(), _THRUST_STD::identity{});
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -164,7 +163,7 @@ void TestFindIfDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-  thrust::find_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
+  thrust::find_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), _THRUST_STD::identity{});
 
   ASSERT_EQUAL(13, vec.front());
 }
@@ -198,7 +197,7 @@ void TestFindIfNotDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::find_if_not(sys, vec.begin(), vec.end(), ::internal::identity{});
+  thrust::find_if_not(sys, vec.begin(), vec.end(), _THRUST_STD::identity{});
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -215,7 +214,7 @@ void TestFindIfNotDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-  thrust::find_if_not(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
+  thrust::find_if_not(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), _THRUST_STD::identity{});
 
   ASSERT_EQUAL(13, vec.front());
 }
@@ -303,12 +302,12 @@ void TestFindWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
-  _THRUST_STD::intmax_t distance_low_value = thrust::distance(begin, thrust::find(thrust::device, begin, end, 17));
+  _THRUST_STD::intmax_t distance_low_value = _THRUST_STD::distance(begin, thrust::find(thrust::device, begin, end, 17));
 
   _THRUST_STD::intmax_t distance_high_value =
-    thrust::distance(begin, thrust::find(thrust::device, begin, end, (1ll << magnitude) - 17));
+    _THRUST_STD::distance(begin, thrust::find(thrust::device, begin, end, (1ll << magnitude) - 17));
 
   ASSERT_EQUAL(distance_low_value, 16);
   ASSERT_EQUAL(distance_high_value, (1ll << magnitude) - 18);

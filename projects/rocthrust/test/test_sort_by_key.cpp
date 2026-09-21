@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -115,8 +115,8 @@ TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
       thrust::host_vector<T> h_values   = h_keys;
       thrust::device_vector<T> d_values = d_keys;
 
-      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::less<T>());
-      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::less<T>());
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), _THRUST_STD::less<T>());
+      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), _THRUST_STD::less<T>());
 
       ASSERT_EQ(h_keys, d_keys);
       ASSERT_EQ(h_values, d_values);
@@ -143,8 +143,8 @@ TEST(SortByKeyTests, TestSortDescendingKeyValue)
       thrust::host_vector<int> h_values   = h_keys;
       thrust::device_vector<int> d_values = d_keys;
 
-      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<int>());
-      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<int>());
+      thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), _THRUST_STD::greater<int>());
+      thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), _THRUST_STD::greater<int>());
 
       ASSERT_EQ(h_keys, d_keys);
       ASSERT_EQ(h_values, d_values);
@@ -196,8 +196,8 @@ TEST(SortByKeyTests, TestSortByKeyBoolDescending)
     thrust::device_vector<bool> d_keys  = h_keys;
     thrust::device_vector<int> d_values = h_values;
 
-    thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<bool>());
-    thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<bool>());
+    thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin(), _THRUST_STD::greater<bool>());
+    thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin(), _THRUST_STD::greater<bool>());
 
     ASSERT_EQ(h_keys, d_keys);
     ASSERT_EQ(h_values, d_values);

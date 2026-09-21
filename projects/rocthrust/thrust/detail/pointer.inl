@@ -103,14 +103,14 @@ namespace detail
 // Implementation for dereference() when Reference is Element&,
 // e.g. cuda's managed_memory_pointer
 template <typename Reference, typename Derived>
-THRUST_HOST_DEVICE Reference pointer_dereference_impl(const Derived& ptr, thrust::detail::true_type /* is_cpp_ref */)
+THRUST_HOST_DEVICE Reference pointer_dereference_impl(const Derived& ptr, _THRUST_STD::true_type /* is_cpp_ref */)
 {
   return *ptr.get();
 }
 
 // Implementation for pointers with proxy references:
 template <typename Reference, typename Derived>
-THRUST_HOST_DEVICE Reference pointer_dereference_impl(const Derived& ptr, thrust::detail::false_type /* is_cpp_ref */)
+THRUST_HOST_DEVICE Reference pointer_dereference_impl(const Derived& ptr, _THRUST_STD::false_type /* is_cpp_ref */)
 {
   return Reference(ptr);
 }

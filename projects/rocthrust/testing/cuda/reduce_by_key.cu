@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -213,8 +213,8 @@ void TestReduceByKeyDevice(ExecutionPolicy exec)
     values.begin(),
     output_keys.begin(),
     output_values.begin(),
-    thrust::equal_to<T>(),
-    thrust::plus<T>(),
+    _THRUST_STD::equal_to<T>(),
+    _THRUST_STD::plus<T>(),
     new_last_vec.begin());
   {
     cudaError_t const err = cudaDeviceSynchronize();
@@ -331,8 +331,8 @@ void TestReduceByKeyCudaStreams(ExecutionPolicy policy)
     values.begin(),
     output_keys.begin(),
     output_values.begin(),
-    thrust::equal_to<T>(),
-    thrust::plus<T>());
+    _THRUST_STD::equal_to<T>(),
+    _THRUST_STD::plus<T>());
 
   ASSERT_EQUAL(new_last.first - output_keys.begin(), 5);
   ASSERT_EQUAL(new_last.second - output_values.begin(), 5);
@@ -417,7 +417,7 @@ void TestReduceByKeyWithBigIndexesHelper(int magnitude)
 
   counting_it count_begin(0ll);
   counting_it count_end = count_begin + num_items;
-  ASSERT_EQUAL(static_cast<std::int64_t>(thrust::distance(count_begin, count_end)), num_items);
+  ASSERT_EQUAL(static_cast<std::int64_t>(_THRUST_STD::distance(count_begin, count_end)), num_items);
 
   transform_key_it keys_begin(count_begin, div_op{key_size});
   transform_key_it keys_end(count_end, div_op{key_size});

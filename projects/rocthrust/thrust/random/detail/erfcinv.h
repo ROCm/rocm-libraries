@@ -1,6 +1,6 @@
 /*
 Copyright © 2003-2013 SciPy Developers.
-Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 following conditions are met:
 
@@ -21,8 +21,8 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <cmath>
-#include <limits>
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 /* sqrt(2pi) */
 static double s2pi              = 2.50662827463100050242E0;
@@ -196,11 +196,11 @@ static inline double erfcinv(double x)
   }
   if (x == 0.0)
   {
-    return std::numeric_limits<double>::infinity();
+    return _THRUST_STD::numeric_limits<double>::infinity();
   }
   if (x == 2.0)
   {
-    return -std::numeric_limits<double>::infinity();
+    return -_THRUST_STD::numeric_limits<double>::infinity();
   }
   return -ndtri(0.5 * x) * one_o_sqrt2;
 }

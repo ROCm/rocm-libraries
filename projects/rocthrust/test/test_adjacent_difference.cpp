@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
   Vector ref{1, 3, 2, 1};
   ASSERT_EQ(output, ref);
 
-  result = thrust::adjacent_difference(input.begin(), input.end(), output.begin(), thrust::plus<T>());
+  result = thrust::adjacent_difference(input.begin(), input.end(), output.begin(), _THRUST_STD::plus<T>());
 
   ASSERT_EQ(result - output.begin(), 4);
   ref = {1, 5, 10, 13};
@@ -90,16 +90,16 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifference)
       ASSERT_EQ(std::size_t(d_result - d_output.begin()), size);
       ASSERT_EQ(h_output, d_output);
 
-      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
-      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
+      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::plus<T>());
+      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::plus<T>());
 
       ASSERT_EQ(std::size_t(h_result - h_output.begin()), size);
       ASSERT_EQ(std::size_t(d_result - d_output.begin()), size);
       ASSERT_EQ(h_output, d_output);
 
       // in-place operation
-      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_input.begin(), thrust::plus<T>());
-      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_input.begin(), thrust::plus<T>());
+      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_input.begin(), _THRUST_STD::plus<T>());
+      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_input.begin(), _THRUST_STD::plus<T>());
 
       ASSERT_EQ(std::size_t(h_result - h_input.begin()), size);
       ASSERT_EQ(std::size_t(d_result - d_input.begin()), size);
@@ -133,12 +133,12 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceInPlaceWithRel
       typename thrust::host_vector<T>::iterator h_result;
       typename thrust::device_vector<T>::iterator d_result;
 
-      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
-      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
+      h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), _THRUST_STD::plus<T>());
+      d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), _THRUST_STD::plus<T>());
 
       // in-place operation with different iterator types
-      h_result = thrust::adjacent_difference(h_input.cbegin(), h_input.cend(), h_input.begin(), thrust::plus<T>());
-      d_result = thrust::adjacent_difference(d_input.cbegin(), d_input.cend(), d_input.begin(), thrust::plus<T>());
+      h_result = thrust::adjacent_difference(h_input.cbegin(), h_input.cend(), h_input.begin(), _THRUST_STD::plus<T>());
+      d_result = thrust::adjacent_difference(d_input.cbegin(), d_input.cend(), d_input.begin(), _THRUST_STD::plus<T>());
 
       ASSERT_EQ(std::size_t(h_result - h_input.begin()), size);
       ASSERT_EQ(std::size_t(d_result - d_input.begin()), size);
@@ -224,7 +224,7 @@ __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void AdjacentDifferenceKernel(int co
   {
     thrust::device_ptr<int> begin(array);
     thrust::device_ptr<int> end(array + N);
-    // thrust::advance(begin,2);
+    // _THRUST_STD::advance(begin,2);
     thrust::adjacent_difference(thrust::hip::par, begin, end, begin);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -62,7 +62,7 @@ int word_count(const thrust::device_vector<char>& input)
     input.end() - 1, // sequence of left characters
     input.begin() + 1, // sequence of right characters
     0, // initialize sum to 0
-    thrust::plus<int>(), // sum values together
+    _THRUST_STD::plus<int>(), // sum values together
     is_word_start()); // how to compare the left and right characters
 
   // if the first character is alphabetical, then it also begins a word

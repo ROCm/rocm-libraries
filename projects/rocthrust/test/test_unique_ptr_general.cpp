@@ -136,7 +136,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnMove)
             ASSERT_NE(p1.get_raw(), nullptr);
             ASSERT_NE(p2.get_raw(), nullptr);
 
-            p2 = std::move(p1);
+            p2 = _THRUST_STD::move(p1);
 
             ASSERT_EQ(p2.get_raw(), raw_p1);
             ASSERT_EQ(p1.get_raw(), nullptr);
@@ -168,7 +168,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnMoveArray)
             ASSERT_NE(p1.get_raw(), nullptr);
             ASSERT_NE(p2.get_raw(), nullptr);
 
-            p2 = std::move(p1);
+            p2 = _THRUST_STD::move(p1);
 
             ASSERT_EQ(p2.get_raw(), raw_p1);
             ASSERT_EQ(p1.get_raw(), nullptr);
@@ -192,7 +192,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrAsgnSelfMove)
         int* raw_p = p.get_raw();
         THRUST_DIAG_PUSH
         THRUST_DIAG_SUPPRESS_CLANG("-Wself-move")
-        p = std::move(p);
+        p = _THRUST_STD::move(p);
         ASSERT_EQ(p.get_raw(), raw_p);
     }
 }
@@ -208,7 +208,7 @@ TEST(UniquePtrGeneralTests, TestUnqiuePtrAsgnSelfMoveArray)
         int* raw_p = p.get_raw();
         THRUST_DIAG_PUSH
         THRUST_DIAG_SUPPRESS_CLANG("-Wself-move")
-        p = std::move(p);
+        p = _THRUST_STD::move(p);
         ASSERT_EQ(p.get_raw(), raw_p);
     }
 }
@@ -280,7 +280,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrCtorMove)
     {
         thrust::unique_ptr<int> p1 = thrust::make_unique<int>(42);
         int* raw_p1 = p1.get_raw();
-        thrust::unique_ptr<int> p2(std::move(p1));
+        thrust::unique_ptr<int> p2(_THRUST_STD::move(p1));
         ASSERT_EQ(p2.get_raw(), raw_p1);
         ASSERT_EQ(p1, nullptr);
     }   
@@ -333,7 +333,7 @@ TEST(UniquePtrGeneralTests, TestUniquePtrCtorMoveArray)
     {
         thrust::unique_ptr<int[]> p1 = thrust::make_unique<int[]>(3);
         int* raw_p1 = p1.get_raw();
-        thrust::unique_ptr<int[]> p2(std::move(p1));
+        thrust::unique_ptr<int[]> p2(_THRUST_STD::move(p1));
         ASSERT_EQ(p2.get_raw(), raw_p1);
         ASSERT_EQ(p1, nullptr); 
     }

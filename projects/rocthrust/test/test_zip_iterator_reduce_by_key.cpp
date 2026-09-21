@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -81,7 +81,7 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
           make_zip_iterator(h_data1.begin(), h_data2.begin()),
           h_data3.begin(),
           make_zip_iterator(h_data4.begin(), h_data5.begin()),
-          equal_to<T>(),
+          _THRUST_STD::equal_to<T>(),
           TuplePlus<Tuple>());
 
         // run on device
@@ -91,7 +91,7 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
           make_zip_iterator(d_data1.begin(), d_data2.begin()),
           d_data3.begin(),
           make_zip_iterator(d_data4.begin(), d_data5.begin()),
-          equal_to<T>(),
+          _THRUST_STD::equal_to<T>(),
           TuplePlus<Tuple>());
 
         ASSERT_EQ(h_data3, d_data3);
@@ -119,7 +119,7 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
           make_zip_iterator(h_data1.begin(), h_data2.begin()),
           make_zip_iterator(h_data3.begin(), h_data4.begin()),
           make_zip_iterator(h_data5.begin(), h_data6.begin()),
-          equal_to<Tuple>(),
+          _THRUST_STD::equal_to<Tuple>(),
           TuplePlus<Tuple>());
 
         // run on device
@@ -129,7 +129,7 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
           make_zip_iterator(d_data1.begin(), d_data2.begin()),
           make_zip_iterator(d_data3.begin(), d_data4.begin()),
           make_zip_iterator(d_data5.begin(), d_data6.begin()),
-          equal_to<Tuple>(),
+          _THRUST_STD::equal_to<Tuple>(),
           TuplePlus<Tuple>());
 
         ASSERT_EQ(h_data3, d_data3);
@@ -158,10 +158,10 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
         float* h_begin6       = thrust::raw_pointer_cast(h_data6.data());
         thrust::reduce_by_key(
           thrust::host,
-          thrust::make_zip_iterator(thrust::make_tuple(h_begin1, h_begin2)),
-          thrust::make_zip_iterator(thrust::make_tuple(h_begin1, h_begin2)) + size,
+          thrust::make_zip_iterator(h_begin1, h_begin2),
+          thrust::make_zip_iterator(h_begin1, h_begin2) + size,
           h_begin3,
-          thrust::make_zip_iterator(thrust::make_tuple(h_begin4, h_begin5)),
+          thrust::make_zip_iterator(h_begin4, h_begin5),
           h_begin6);
 
         // run on device
@@ -173,10 +173,10 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
         float* d_begin6       = thrust::raw_pointer_cast(d_data6.data());
         thrust::reduce_by_key(
           thrust::device,
-          thrust::make_zip_iterator(thrust::make_tuple(d_begin1, d_begin2)),
-          thrust::make_zip_iterator(thrust::make_tuple(d_begin1, d_begin2)) + size,
+          thrust::make_zip_iterator(d_begin1, d_begin2),
+          thrust::make_zip_iterator(d_begin1, d_begin2) + size,
           d_begin3,
-          thrust::make_zip_iterator(thrust::make_tuple(d_begin4, d_begin5)),
+          thrust::make_zip_iterator(d_begin4, d_begin5),
           d_begin6);
 
         ASSERT_EQ(h_data3, d_data3);

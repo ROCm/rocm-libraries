@@ -41,13 +41,25 @@
 
 #include _THRUST_STD_INCLUDE(utility)
 
-#include <initializer_list>
 #include <vector>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
+#include _THRUST_STD_INCLUDE(initializer_list)
+
 THRUST_NAMESPACE_BEGIN
+
+struct default_init_t
+{};
+struct no_init_t
+{};
+
+//! Tag to indicate that a vector's elements should be default initialized
+inline constexpr default_init_t default_init;
+
+//! Tag to indicate that a vector's elements should not be initialized
+inline constexpr no_init_t no_init;
 
 namespace detail
 {
@@ -88,6 +100,16 @@ public:
    *  \param n The number of elements to create.
    */
   explicit vector_base(size_type n);
+
+  //! This constructor creates a vector_base with default-initialized elements.
+  //! \param n The number of elements to create.
+  explicit vector_base(size_type n, default_init_t);
+
+  //! This constructor creates a vector_base without initializing elements. It mandates that the element type is
+  //! trivially default-constructible.
+  //! \param n The number of elements to create.
+  template <typename T2 = T>
+  explicit vector_base(size_type n, no_init_t);
 
   /*! This constructor creates a vector_base with value-initialized elements.
    *  \param n The number of elements to create.
@@ -144,18 +166,18 @@ public:
   /*! This constructor builds a \p vector_base from an intializer_list.
    *  \param il The intializer_list.
    */
-  vector_base(std::initializer_list<T> il);
+  vector_base(_THRUST_STD::initializer_list<T> il);
 
   /*! This constructor builds a \p vector_base from an intializer_list.
    *  \param il The intializer_list.
    *  \param alloc The allocator to use by this device_vector.
    */
-  vector_base(std::initializer_list<T> il, const Alloc& alloc);
+  vector_base(_THRUST_STD::initializer_list<T> il, const Alloc& alloc);
 
   /*! Assign operator copies from an initializer_list
    *  \param il The initializer_list.
    */
-  vector_base& operator=(std::initializer_list<T> il);
+  vector_base& operator=(_THRUST_STD::initializer_list<T> il);
 
   /*! Copy constructor copies from an exemplar vector_base with different
    *  type.
@@ -193,8 +215,7 @@ public:
    *  \param first The beginning of the range.
    *  \param last The end of the range.
    */
-  template <typename InputIterator,
-            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<_THRUST_STD::__has_input_traversal<InputIterator>, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -202,8 +223,7 @@ public:
    *  \param last The end of the range.
    *  \param alloc The allocator to use by this vector_base.
    */
-  template <typename InputIterator,
-            _THRUST_STD::enable_if_t<::internal::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
+  template <typename InputIterator, _THRUST_STD::enable_if_t<_THRUST_STD::__has_input_traversal<InputIterator>, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
@@ -212,7 +232,7 @@ public:
 
   /*! \brief Resizes this vector_base to the specified number of elements.
    *  \param new_size Number of elements this vector_base should contain.
-   *  \throw std::length_error If n exceeds max_size9).
+   *  \throw std::length_error If n exceeds max_size().
    *
    *  This method will resize this vector_base to the specified number of
    *  elements. If the number is smaller than this vector_base's current
@@ -220,6 +240,19 @@ public:
    *  extended and new elements are value initialized.
    */
   void resize(size_type new_size);
+
+  //! \brief Resizes this vector_base to the specified number of elements, performing default-initialization instead of
+  //!         value-initialization.
+  //! \param new_size Number of elements this vector_base should contain.
+  //! \throw std::length_error If n exceeds max_size().
+  void resize(size_type new_size, default_init_t);
+
+  //! \brief Resizes this vector_base to the specified number of elements, without initializing elements. It mandates
+  //! that the element type is trivially default-constructible.
+  //! \param new_size Number of elements this vector_base should contain.
+  //! \throw std::length_error If n exceeds max_size().
+  template <typename T2 = T>
+  void resize(size_type new_size, no_init_t);
 
   /*! \brief Resizes this vector_base to the specified number of elements.
    *  \param new_size Number of elements this vector_base should contain.
@@ -484,8 +517,8 @@ public:
    */
   allocator_type get_allocator() const;
 
-  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator);
-  THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator);
+  THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator)
+  THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator)
 
 protected:
   // Our storage
@@ -495,13 +528,6 @@ protected:
   size_type m_size;
 
 private:
-  // these methods resolve the ambiguity of the constructor template of form (Iterator, Iterator)
-  template <typename IteratorOrIntegralType>
-  void init_dispatch(IteratorOrIntegralType begin, IteratorOrIntegralType end, false_type);
-
-  template <typename IteratorOrIntegralType>
-  void init_dispatch(IteratorOrIntegralType n, IteratorOrIntegralType value, true_type);
-
   template <typename InputIterator>
   void range_init(InputIterator first, InputIterator last);
 
@@ -519,6 +545,7 @@ private:
   void insert_dispatch(iterator position, InputIteratorOrIntegralType n, InputIteratorOrIntegralType x, true_type);
 
   // this method appends n value-initialized elements at the end
+  template <bool SkipInit = false>
   void append(size_type n);
 
   // this method performs insertion from a fill value
@@ -527,14 +554,6 @@ private:
   // this method performs insertion from a range
   template <typename InputIterator>
   void copy_insert(iterator position, InputIterator first, InputIterator last);
-
-  // these methods resolve the ambiguity of the assign() template of form (InputIterator, InputIterator)
-  template <typename InputIterator>
-  void assign_dispatch(InputIterator first, InputIterator last, false_type);
-
-  // these methods resolve the ambiguity of the assign() template of form (InputIterator, InputIterator)
-  template <typename Integral>
-  void assign_dispatch(Integral n, Integral x, true_type);
 
   // this method performs assignment from a range
   template <typename InputIterator>

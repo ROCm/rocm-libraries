@@ -16,7 +16,6 @@
  */
 
 #include <thrust/count.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -228,7 +227,7 @@ TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
   Vector data{1, 2, 1, 3, 2};
   Vector stencil{0, 1, 0, 0, 1};
 
-  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), _THRUST_STD::identity{});
 
   ASSERT_EQ(end - data.begin(), 3);
   data.resize(end - data.begin());
@@ -345,7 +344,7 @@ TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
   Vector result(5);
 
   typename Vector::iterator end =
-    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), ::internal::identity{});
+    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), _THRUST_STD::identity{});
 
   ASSERT_EQ(end - result.begin(), 3);
   result.resize(end - result.begin());
@@ -594,15 +593,15 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIteratorZipped)
       using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
       ZipIterator1 h_result = thrust::remove_copy(
-        thrust::make_zip_iterator(thrust::make_tuple(h_data.begin(), h_data.begin())),
-        thrust::make_zip_iterator(thrust::make_tuple(h_data.end(), h_data.end())),
-        thrust::make_zip_iterator(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator())),
+        thrust::make_zip_iterator(h_data.begin(), h_data.begin()),
+        thrust::make_zip_iterator(h_data.end(), h_data.end()),
+        thrust::make_zip_iterator(h_output.begin(), thrust::make_discard_iterator()),
         thrust::make_tuple(T(0), T(0)));
 
       ZipIterator2 d_result = thrust::remove_copy(
-        thrust::make_zip_iterator(thrust::make_tuple(d_data.begin(), d_data.begin())),
-        thrust::make_zip_iterator(thrust::make_tuple(d_data.end(), d_data.end())),
-        thrust::make_zip_iterator(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator())),
+        thrust::make_zip_iterator(d_data.begin(), d_data.begin()),
+        thrust::make_zip_iterator(d_data.end(), d_data.end()),
+        thrust::make_zip_iterator(d_output.begin(), thrust::make_discard_iterator()),
         thrust::make_tuple(T(0), T(0)));
 
       thrust::discard_iterator<> reference(num_nonzeros);
@@ -668,7 +667,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
       thrust::device_vector<T> d_data = h_data;
 
-      size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), thrust::not_fn(is_true<T>()));
+      size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), _THRUST_STD::not_fn(is_true<T>()));
 
       thrust::discard_iterator<> h_result =
         thrust::remove_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), is_true<T>());
@@ -748,7 +747,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
         size, get_default_limits<bool>::min(), get_default_limits<bool>::max(), seed + seed_value_addition);
       thrust::device_vector<bool> d_stencil = h_stencil;
 
-      size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not_fn(is_true<T>()));
+      size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), _THRUST_STD::not_fn(is_true<T>()));
 
       thrust::discard_iterator<> h_result = thrust::remove_copy_if(
         h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), is_true<T>());

@@ -236,7 +236,7 @@ void TestSetDifferenceWithBigIndexesHelper(int magnitude)
   thrust::counting_iterator<long long> begin(0);
   thrust::counting_iterator<long long> end        = begin + (1ll << magnitude);
   thrust::counting_iterator<long long> end_longer = end + 1;
-  ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQ(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_vector<long long> result;
   result.resize(1);
@@ -253,7 +253,7 @@ TEST(SetDifferenceTests, TestSetDifferenceWithBigIndexes)
 #ifdef ADDRESS_SANITIZER_BUILD
   GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
 #endif
-	
+
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
 #  ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
