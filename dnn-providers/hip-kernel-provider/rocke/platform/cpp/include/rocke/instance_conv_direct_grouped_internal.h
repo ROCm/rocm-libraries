@@ -120,6 +120,7 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* c_cpg; /* const_i32(cpg)                       */
     rocke_value_t* c_kpg; /* const_i32(kpg)                       */
     rocke_value_t* c_W; /* const_i32(W)                         */
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg; /* const_i32(BLOCK_GROUPS * cpg)        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                         */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                 */
@@ -413,6 +414,7 @@ typedef struct rocke_dconv_8c_ctx
     rocke_value_t* c_cpg;
     rocke_value_t* c_kpg;
     rocke_value_t* c_W;
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
@@ -512,6 +514,7 @@ typedef struct rocke_dconv_32c_ctx
     rocke_value_t* c_cpg;
     rocke_value_t* c_kpg;
     rocke_value_t* c_W;
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
@@ -587,6 +590,9 @@ typedef struct rocke_dconv_dw_ctx
     int THREADS;
     int BLOCK_CH;
     int n_iters;
+    int Ho; /* output height: (H + 2*PAD - KH) / stride + 1 */
+    int Wo; /* output width:  (W + 2*PAD - KW) / stride + 1 */
+    int c_stride_dw; /* p.stride (kept as int for flush-loop modulo) */
 
     rocke_value_t* A;
     rocke_value_t* Bp;
@@ -597,10 +603,12 @@ typedef struct rocke_dconv_dw_ctx
 
     rocke_value_t* c0;
     rocke_value_t* c_wave;
-    rocke_value_t* c_W;
+    rocke_value_t* c_W; /* const_i32(Wo) — output width          */
+    rocke_value_t* c_groups; /* const_i32(groups)                     */
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
     rocke_value_t* zero_f32;
+    rocke_value_t* ch_in_range; /* ch < p.groups — guards partial channel tile */
 
     rocke_value_t* tid;
     rocke_value_t* wave_id;
@@ -618,7 +626,7 @@ typedef struct rocke_dconv_dw_ctx
 
     const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,C] + 2 embeds */
     const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,1] naive */
-    const rocke_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive */
+    const rocke_tensor_descriptor_t* d_desc; /* D[N,Ho,Wo,total_k] naive */
 
     /* weights_f32[r][s]: KH x KW preloaded f32 scalars */
     rocke_value_t* weights_f32[ROCKE_DCONV_DW_MAX_KH][ROCKE_DCONV_DW_MAX_KW];

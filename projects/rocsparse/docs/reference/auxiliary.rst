@@ -20,12 +20,26 @@ rocsparse_create_handle()
 
 .. doxygenfunction:: rocsparse_create_handle
 
+.. _rocsparse_handle_create_:
+
+rocsparse_handle_create()
+-------------------------
+
+.. doxygenfunction:: rocsparse_handle_create
+
 .. _rocsparse_destroy_handle_:
 
 rocsparse_destroy_handle()
 --------------------------
 
 .. doxygenfunction:: rocsparse_destroy_handle
+
+.. _rocsparse_handle_destroy_:
+
+rocsparse_handle_destroy()
+--------------------------
+
+.. doxygenfunction:: rocsparse_handle_destroy
 
 .. _rocsparse_set_stream_:
 
@@ -592,6 +606,11 @@ rocsparse_csc_set_strided_batch
 -------------------------------
 
 .. doxygenfunction:: rocsparse_csc_set_strided_batch
+
+rocsparse_ell_set_strided_batch
+-------------------------------
+
+.. doxygenfunction:: rocsparse_ell_set_strided_batch
 
 rocsparse_spmat_get_attribute
 -----------------------------
