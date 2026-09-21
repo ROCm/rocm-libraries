@@ -43,8 +43,10 @@ graph comparison. Enumerate every downstream consumer.
 
 ## Authored intent and compiler evidence
 
-The [generator reference](../../../IngestorGenerator/README.md#specialization-agreement)
-owns the declaration format. The generator carries
+The generator reference owns the declaration format: its **Specialization agreement**
+section, documented from the repository root in
+`projects/hipdnn/tools/IngestorGenerator/README.md` (RUNBOOK's `$GEN/README.md`). Locate
+that section by heading; do not rely on a link fragment. The generator carries
 `provenance.specialization_contract` **once on each enclosing KDP**. Inline UKDs
 inherit it only when they have no own declaration; a per-UKD declaration overrides
 **wholesale**, never merges. Standalone UKDs carry their own. This rule is identical
@@ -73,8 +75,22 @@ Compiler-owned `provenance.effective_spec` stays **per-kernel and is never inher
 It binds observations/producer origins to current descriptor/schema/metadata/arch
 and payload; authored input cannot supply or overwrite it. Serial, prewarm and
 shared compile results must check every consumer independently. Full verification
-reads that record without importing today's producer. A packed no-specialized-field
-kernel without a record is `NOT VERIFIED HERE`, not binary-agreement evidence.
+reads that record without importing today's producer.
+
+A packed kernel that declares no specialized `metadata_fields` and carries no
+`effective_spec` resolves **by producer origin**, not uniformly:
+
+- `provenance.origin_kind == "rocke"` — **hard failure** of full verification. The packer
+  published the record when it shipped the kernel, so its absence means no record is left
+  to bind and the archive bytes were never read. Relabelling a rocKE kernel's specialized
+  fields as matcher-only does not convert it into an unspecialized source, and does not
+  retire the check.
+- Absent `origin_kind`, or `"hip"` — `NOT VERIFIED HERE`, not binary-agreement evidence.
+  An absent `origin_kind` is **not** rocKE: descriptors packed before the field existed,
+  and hand-authored inputs, carry none.
+
+So `NOT VERIFIED HERE` is the fall-through for the non-rocKE origins only; missing
+compiler evidence on a rocKE-produced kernel fails the gate rather than downgrading it.
 These checks do not prove native dispatch or arbitrary machine-code correctness.
 
 ## Layout, geometry and ABI

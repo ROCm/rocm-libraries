@@ -67,13 +67,20 @@ Two packer rules govern what that walk accepts:
   relative to the descriptor's own folder, for example `kernels/MyKernel.cpp`.
 
 The one registration a generated engine does need is the **kernel source**, and only
-for `kernel_source.kind == "embedded_source"`:
+for `kernel_source.kind == "embedded_source"`. The kinds divide into three groups, and
+only the middle one is registered:
+
+| Group | Kinds | What happens |
+|---|---|---|
+| Compilation inputs | `hip`, `rocke` | Authored, and lowered to a code object at pack time. The packer has exactly these two producer arms; anything else reaches its unsupported-kind raise. Needs no CMake registration. |
+| Passthrough | `embedded_source` | The sole passthrough kind: shipped as authored, no producer runs, no archive entry. **This is the one that needs the registration below.** |
+| Runtime descriptor forms | `hsaco`, `kpack` | Written *by* the packer, never authored. `hsaco` is its own intermediate between compile and archive; `kpack` is the shipped runtime form. Do not author either. |
 
 ```cmake
 # In P/src/tests/CMakeLists.txt, beside base's existing calls. Required ONLY for
 # kernel_source.kind == "embedded_source": that kind resolves source_file against a
-# key table the build compiles into the binary. hip / rocke / hsaco / kpack lower at
-# pack time and need nothing here.
+# key table the build compiles into the binary. hip and rocke lower at pack time and
+# need nothing here; hsaco and kpack are packer output, not authored input.
 set(_my_kernel_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/<set>/<slug>/kernels")
 add_kernels_for_embedding(
     TARGET hip_kernel_provider_tests

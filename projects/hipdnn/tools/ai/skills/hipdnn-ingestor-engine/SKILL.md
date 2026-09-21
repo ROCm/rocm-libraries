@@ -17,7 +17,7 @@ These pages supply contracts, not alternate procedures:
 | [rocke-mining.md](rocke-mining.md) | Applicability, specialization, layout, geometry and ABI |
 | [native-pack.md](native-pack.md) | Native hooks, ownership, registration and census scope |
 | [workloads.md](workloads.md) | Corpus identity, coverage and runtime accounting |
-| [Sweep reference](../../../IngestorGenerator/tools/README-sweeps.md) | Python CLI, YAML, measurement and resume |
+| Sweep reference, from the repository root in `projects/hipdnn/tools/IngestorGenerator/tools/README-sweeps.md` (RUNBOOK's `$GEN/tools/README-sweeps.md`) | Python CLI, YAML, measurement and resume |
 
 ## Entry contract
 

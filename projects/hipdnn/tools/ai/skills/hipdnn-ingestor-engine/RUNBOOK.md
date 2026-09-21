@@ -23,10 +23,17 @@ PROFILE=/absolute/path/to/authoring.profile.yaml
 SHAPES=/absolute/path/to/request-shapes.json
 CORPUS_DIR=/absolute/path/to/graph-corpora
 ARCH=gfx942
-ENGINE=hipkernel:Gfx942AttentionDense   # illustrative: your own bundle's engine name
+ENGINE=<your-bundle-engine-id>
 ```
 
-Use [generator setup](../../../IngestorGenerator/README.md#setup). Authoring/mining
+`ENGINE` carries the `<your-bundle-engine-id>` placeholder and is consumed verbatim as
+`--expect-engine` later, so it must be replaced with your own bundle's engine ID
+before any command below will resolve. A gfx942 dense
+attention bundle would spell it `hipkernel:Gfx942AttentionDense`; no such engine is
+shipped from this tree.
+
+Follow the **Setup** section of the generator's own README at `$GEN/README.md`.
+Authoring/mining
 imports need the profile's rocKE library environment; production packaging uses
 its selected compiler/wheel interpreter instead. Full artifact checking also needs
 `rocm_kpack` and its dependencies in `$PY` (including `zstandard` and `msgpack`).
@@ -121,9 +128,24 @@ Generate into an empty scratch directory, never over the live engine:
 "$PY" "$GEN/generate.py" --config "$CONFIG" \
   --output-dir "$GENERATED" --dry-run
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
-"$PY" "$GEN/tools/verify_variant_sets.py" --mode structural \
-  baseline "$GENERATED/descriptors"
 ```
+
+**The verification root follows the configured dialect**, by the same rule stated
+under **Descriptor placement** below: `direct_load` emits under `test_descriptors/`,
+`packaged` under `descriptors/`. Point the verifier at the root your dialect actually
+wrote — a root holding no `*.kdp.json` is a hard failure, so the wrong one fails every
+time rather than reporting nothing to check. Set `EMITTED_ROOT` accordingly:
+
+```bash
+EMITTED_ROOT="$GENERATED/descriptors"        # packaged
+# EMITTED_ROOT="$GENERATED/test_descriptors" # direct_load -- swap the two lines
+"$PY" "$GEN/tools/verify_variant_sets.py" --mode structural \
+  baseline "$EMITTED_ROOT"
+```
+
+Exactly one of those assignments must be live. Leaving both commented passes an empty
+root, which resolves to the current directory instead of failing — the one way to reach
+this gate without the wrong-root protection the paragraph above relies on.
 
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
 tuple identity includes schema types/defaults and effective architecture overlap.
@@ -280,9 +302,18 @@ native loading or numerical dispatch.
 ## 4. Build, pack, install and prove the host boundary
 
 Configure from `$REPO` using `hipdnn-superbuild`, with
-`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
-`HIPKERNELPROVIDER_ENABLE_TESTS=ON`. SDPA needs `HIPDNN_ENABLE_SDPA=ON` consistently
-in SDK and provider. There is **no per-producer production switch**: producer
+`CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`,
+`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` and `HIPKERNELPROVIDER_ENABLE_TESTS=ON`. The
+rocKE flag is mandatory, not conditional — see the coupling below. SDPA needs
+`HIPDNN_ENABLE_SDPA=ON` consistently in SDK and provider.
+
+The component selection must also actually include the provider. The
+`hipdnn-providers` preset does **not** build hip-kernel-provider; the presets that do
+are `hipdnn-providers-all`, `hip-kernel-provider`, `hipdnn-dev-all` and
+`miopen-hipdnn-dev-all`. Configuring the wrong one leaves every step below with
+nothing to observe.
+
+There is **no per-producer production switch**: producer
 selection is per-UKD on `kernel_source.kind`, so one root feeds every producer.
 
 Production packaging is wired on exactly one condition — the root named by
@@ -306,11 +337,19 @@ ship" from "something to ship that did not". The built-in default root goes **do
 in that case instead, so configuring for an arch your bundle does not declare is not a
 build error. A root that is set but is not a directory is fatal at configure.
 
-The [packaging dependencies](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md)
-are still required, and rocKE is resolved once for **every** root, test roots
-included, so an unresolvable comgr is fatal at configure even in a hip-only build.
-`HIPKERNELPROVIDER_ENABLE_ROCKE` gates the rocKE engine and its dependency
-readiness, which is a separate question from what the packer lowers.
+The packaging dependencies, documented from the repository root in
+`dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`, are still
+required, and rocKE is resolved once for **every** root, test roots included, so an
+unresolvable comgr is fatal at configure even in a hip-only build.
+
+**`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is not a separate question — the coupling is
+unconditional.** The provider's top-level `CMakeLists.txt` raises a `FATAL_ERROR`
+whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON and `HIPKERNELPROVIDER_ENABLE_ROCKE`
+is OFF. That condition inspects nothing else: not any UKD's `kernel_source.kind`, not
+the production source root, not whether a single rocKE KDP exists anywhere. It
+therefore fires for a HIP-only bundle, for an `embedded_source` bundle, and for a
+default configure whose production root is dormant. Turning the ingestor on obliges
+you to turn rocKE on, whatever you intend to pack.
 
 Build the provider, validator and required test targets through the configured
 superbuild. For packaged engines, run `hkp_packaging_product` after the full build
@@ -380,9 +419,17 @@ separately:
   dialect instead of inferring it from exit 0. Missing declarations, mismatches
   and required checks `NOT RUN` block acceptance, including missing vocabulary.
 - A packed kernel declaring no specialized `metadata_fields` and carrying no
-  `effective_spec` reports **`NOT VERIFIED HERE`**. It neither fails the gate nor
+  `effective_spec` reports **`NOT VERIFIED HERE`** — but **only when its
+  `provenance.origin_kind` is absent or `hip`**. It then neither fails the gate nor
   gains compiled-specialization proof. Full-mode exit 0 does not certify those
   binaries; AOT HIP specialization remains outside this check.
+- **The exemption does not extend to rocKE.** When that same
+  no-`metadata_fields`-and-no-`effective_spec` condition holds and
+  `provenance.origin_kind` is `rocke`, full verification records a **hard failure**:
+  the packer publishes a rocKE kernel's compiler-owned `effective_spec` when it ships
+  it, so the pair means the record was lost and the archive bytes were never read.
+  Relabelling a rocKE kernel's specialized fields as matcher-only does not convert it
+  into an unspecialized source; it fails the gate.
 - For declared specialization, the per-kernel record binds the current descriptor,
   schema, metadata, architecture and named payload bytes. Generation supplies the
   declaration, not that compiler-owned evidence; see [rocke-mining.md](rocke-mining.md).
@@ -446,16 +493,25 @@ ctest --test-dir "$PROVIDER_BUILD" --no-tests=error -V \
 
 Those entries bind the build-tree shard. For **final installed packaged evidence**,
 run the same suite against the installed shard by supplying the same explicit
-environment to the installed binary:
+environment to the installed binary — including the pin, which the CTest entries get
+from `EXPECTED_CASES` and a hand-run invocation does not:
 
 ```bash
 HIPDNN_TEST_CENSUS_SUITE="$CENSUS_SUITE" \
 HIPDNN_TEST_EXPECTED_ARCH="$ARCH" \
+HIPDNN_TEST_CENSUS_EXPECTED_CASES="$EXPECTED_CASES" \
 HIPDNN_DESCRIPTOR_DIR="$FINAL_DESCRIPTOR_ROOT" \
 "$INSTALL/bin/hip_kernel_provider_tests" --gtest_filter="${CENSUS_SUITE}.*"
 ```
 
-Adjust the binary path for a nondefault install bindir. A nonempty
+Set `EXPECTED_CASES` to the same reviewed comma-separated case-name list the build-tree
+registration pins — the one `hkp_register_census_tests()` carries into
+`HIPDNN_TEST_CENSUS_EXPECTED_CASES`. **Do not derive it from the installed binary under
+test**: a list read back out of that binary agrees with it by construction and pins
+nothing. Omitting it is silent, not an error — the listener returns early when the
+expected list is empty, so the expected-vs-registered comparison never runs and the
+census still reports complete. Adjust the binary path for a nondefault install bindir.
+A nonempty
 `HIPDNN_TEST_CENSUS_SUITE` activates the native strict guard: before default-root
 setup it rejects an empty expected arch and a missing, empty or nonexistent explicit
 descriptor root, and it rejects an absent or empty named suite. Every registered
@@ -522,18 +578,29 @@ A missing/invisible installation fails even if early feasibility passed. Use
 
 Do not accept the helper's first provider-prefixed command as exact-engine proof.
 The provider's default installed CTest root is **`$INSTALL/bin/hip_kernel_provider`**,
-not `$INSTALL`; substitute the configured bindir if customized. The gfx942 dense
-names below are illustrative — the production descriptor root ships no bundle, so
-no such target is registered; substitute your own bundle's target and engine ID:
+not `$INSTALL`; substitute the configured bindir if customized.
+
+The provider does register `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests`,
+which is the ASM SDPA engine and **not** ingestor evidence. A passing ASM SDPA run
+proves nothing about whether your ingested engine dispatches; it is a different
+engine reached by a different path. Never substitute it for your bundle's own
+registration.
+
+The production descriptor root ships no bundle, so no dense-attention target is
+registered here; the `<your-bundle-ctest-target>` placeholder below must be
+replaced with your own bundle's CTest target before the block will run at all (a
+gfx942 dense bundle would name something shaped like
+`hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, which
+exists nowhere in this tree):
 
 ```bash
 CTEST_ROOT="$INSTALL/bin/hip_kernel_provider"
-DEVICE_TEST=hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests   # illustrative: your own bundle's CTest target
+DEVICE_TEST=<your-bundle-ctest-target>
 ctest --test-dir "$CTEST_ROOT" -N -V -R "^${DEVICE_TEST}$"
 ```
 
 Require exactly your bundle's registration. Inspect its command/config for that
-bundle's engine ID — `hipkernel:Gfx942AttentionDense` in the illustration —
+bundle's engine ID — `hipkernel:Gfx942AttentionDense` would be the illustration's —
 installed executable/plugin/config paths and the intended quick/standard
 selection. Then execute:
 
@@ -585,10 +652,11 @@ to its absolute path, then run:
 "$PY" "$GEN/tools/sweep.py" --config "$SWEEP_CONFIG"
 ```
 
-Follow [workloads.md](workloads.md)'s one-session, baseline-first order, gated
-warmup, rounds, isolated caches and separate correctness requirements. The sweep
-selects the discovered engine ID through the benchmark's `--engine` option; do not
-override its phase-owned arguments.
+[workloads.md](workloads.md)'s *Installed measurement contract* owns every rule this
+run must satisfy — session and arm ordering, warmup, rounds, cache isolation,
+separate correctness, and the sweep's ownership of the benchmark's `--engine` and its
+other phase-owned arguments. Satisfy it there; this page owns only the commands and
+their order.
 
 For rocKE, investigate measured survivors. Set `PAIRWISE_KNOBS` to comma-separated
 surviving knob names and `PAIRWISE_CONFIG_ROOT` to their config output directory,
@@ -618,21 +686,16 @@ still requires final installed artifact and corpus proof.
 ## 7. Final corpus proof and runtime reconciliation
 
 Run the final installed artifact through a fresh-output YAML sweep with
-`correctness.enabled: true`. Require the exact phase key set and validated
-`SWEEP_DONE`. Resume may reuse content-valid evidence diagnostically; it does not
-make separate sessions a single comparative cohort. `SWEEP_TIMING_ONLY` is not
-final success.
+`correctness.enabled: true`, and require the exact phase key set.
+[workloads.md](workloads.md)'s *Installed measurement contract* owns what each
+terminal status means — `SWEEP_DONE`, `SWEEP_TIMING_ONLY`, `SWEEP_INCOMPLETE` — and
+what resume does and does not make a single cohort; read the verdict there.
 
-Harvest final phase results and available engine logs into [workloads.md](workloads.md)'s
-complete per-input outcome ledger. Preserve semantic identity, all original
-corpus/source/graph occurrences, current phase/input fingerprints, exact engines
-and result/log locations. Distinguish served, explicitly declined, execution-error,
-missing and ambiguous outcomes. A missing timing row is not a decline reason.
-
-Join within each corpus/phase before making its graph-name-to-reason JSON. Reject
-missing outcomes, duplicate/ambiguous names and mismatched fingerprints. Runtime
-reasons unavailable in the evidence stay unavailable; do not reconstruct them from
-offline policy. This is an explicit evidence review, not a promised automatic
+Harvest final phase results and available engine logs into the per-input outcome
+ledger, then join within each corpus/phase before making its graph-name-to-reason
+JSON. [workloads.md](workloads.md)'s *Complete final runtime join* owns the ledger
+fields, the join scope and every rejection rule; satisfy it there rather than from a
+restatement here. This is an explicit evidence review, not a promised automatic
 matcher-reason extractor.
 
 For rocKE, set `CORPUS_SHAPES` and `RUNTIME_DECLINES` to that corpus's requests and
@@ -649,10 +712,9 @@ escape flags cannot excuse broken reference APIs or unexplained gaps. Direct-loa
 pointwise instead uses its explicit one-element corpus, installed engine results
 and independent arithmetic/reference correctness, with `exclude_tensors: none`.
 
-Report full per-source denominators, served/reference-validated populations and
-all remaining outcomes separately from timing. Include geomean-of-ratios,
-time-weighted sum-baseline/sum-arm, round drift and byte-identical controls chosen
-from artifact hashes.
+Report exactly the populations and statistics [workloads.md](workloads.md)'s
+*Required reporting statistics* requires; that page owns the reporting list, and
+timing is reported separately from the outcome accounting.
 
 **Gate:** zero wrong answers, complete final-runtime accounting, and no missing,
 ambiguous, erroneous or unexplained in-scope outcomes. Changed installed artifacts

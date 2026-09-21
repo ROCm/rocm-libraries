@@ -68,13 +68,32 @@ shared by kernels differing only by entry point. A device that cannot be made cu
 fails the load rather than yielding a foreign module, because an entry cached under
 one ordinal and resident on another is a wrong answer every later dispatch reuses.
 
-**A malformed descriptor is a hard failure, not one fewer candidate.**
-`GenericPlanBuilder` rethrows `HIPDNN_PLUGIN_STATUS_INVALID_VALUE` instead of
-absorbing it and trying the next candidate, in plan build, in the filtered path and
-in benchmarking alike. Falling past it would hide the fault and silently serve a
-different kernel than the one authored. Read the consequence when triaging: a
-descriptor bug presents as **no plan at all**, not as a thinner candidate list, so
-"the engine declined" and "the descriptor is broken" look nothing alike.
+**A broken descriptor has two very different presentations, and only one of them is
+loud.** Which one you get depends on whether the fault is caught at load time or at plan
+time.
+
+**Loader-time drop — silent, and indistinguishable from a decline.**
+`loadValidatedDescriptorSets` pre-flights each set and *drops* it, logging at ERROR and
+`continue`-ing, when: any graph or kernel match symbol is unregistered; the engine's
+`graph_match` symbol is unregistered; a dispatch symbol is unregistered; a `native`
+heuristic's score symbol is unregistered; the engine name collides on engine id with an
+already-registered engine; or the probe `makeStateManager` throws, logged as `does not
+validate: … dropping it`. A dropped set never reaches `GenericPlanBuilder` at all — the
+engine is simply absent from the registry, and the graph gets a plain "no engine"
+outcome that looks **exactly like a legitimate decline**. Nothing in the plan result
+distinguishes them.
+
+**Plan-time rethrow — loud.** Once a set is loaded, `GenericPlanBuilder` rethrows
+`HIPDNN_PLUGIN_STATUS_INVALID_VALUE` instead of absorbing it and trying the next
+candidate — in plan build, in the filtered path and in benchmarking alike. Falling past
+it would hide the fault and silently serve a different kernel than the one authored. A
+malformed descriptor that *did* load therefore presents as no plan at all, not as a
+thinner candidate list.
+
+Triage consequence: **never classify a missing engine as a supported decline from the
+plan outcome alone.** First check the loader diagnostics for `dropping it` at ERROR, and
+confirm against the loaded-descriptor inventory that the engine is actually present. An
+unregistered native symbol is the common cause and produces no plan-time error whatsoever.
 
 Grid/block and workspace formulas must match current source and every deciding
 metadata field. A launch-surface declaration links Python source, C++ mirror,
@@ -98,43 +117,31 @@ Native proof executes real registrations and
 structural validator substitutes no-op native stubs and cannot establish this.
 Fresh processes are required because registration/discovery is memoized.
 
-The census is a direct native obligation, registered one
+The census is a direct native obligation. **Packaged census: direct native CTest
+entries** in [RUNBOOK.md](RUNBOOK.md) owns that procedure and is the only statement of
+it. Read it there for: the per-suite, per-arch test family and why the family must be run
+rather than the census entry alone; entry naming and invocation; the environment each
+entry supplies; why a control passes on refusal text rather than exit status; the guard's
+fail-closed conditions and what ordinary non-census invocations retain; what an empty
+`SUITES`, tests built OFF, and a **dormant** `PACK_NAME` each register, and why that is
+absence of census evidence rather than a pass; where dormancy stops and a configure-time
+fatal begins; and what a registration without `EXPECTED_CASES` forfeits. Do not
+re-derive any of those from this page.
+
+What this page adds is the **registration site**: one
 `hkp_register_census_tests(TARGET … PACK_NAME … SUITES … EXPECTED_CASES …)` call per
 packed target in `src/tests/CMakeLists.txt`, beside `hkp_verify_embedded_sources()` and
-after the test target exists. Per declared suite and per arch in that pack target's own
-recorded list, CMake registers **four** independent tests: the census entry, plus the
-`-control-unvisited`, `-control-absent-root` and `-control-unregistered-case` controls,
-the last only where a pin exists. Run the family, not the entry alone. Entry naming, the
-invocation, the environment each entry supplies and why a control passes on refusal text
-rather than exit status are under **Packaged census: direct native CTest entries** in
-[RUNBOOK.md](RUNBOOK.md). There is no Python launcher and no XML census guard.
+after the test target exists. There is no Python launcher and no XML census guard.
+
 Expected names/counts, runtime source kind and SDK version come from the finalized
 emitted inventory; the arch comes from the wired arch list, never from loaded
 descriptors or the host GPU — a bundle cannot be its own expectation.
 
 **What may be censused is decided by shard count, not by dialect** — an entry hands the
 binary exactly one directory, so only a suite confined to one pack target's shard
-qualifies; **Packaged census: direct native CTest entries** in [RUNBOOK.md](RUNBOOK.md)
-carries the worked examples and the one-suite-at-two-pack-targets rule.
-
-The guard is active only for a nonempty census-suite variable, and it fails closed:
-an empty arch, a missing/empty/nonexistent explicit root, an absent or empty named
-suite, any case that skips or fails, list-only or zero-iteration invocations, and
-partial runs that never complete one full iteration. Ordinary invocations without
-the variable keep normal filtering and skip behavior, and the runtime's production
-descriptor-root fallback is unchanged. An empty `SUITES`, tests built OFF, and a
-`PACK_NAME` this configuration left **dormant** each register nothing — absence of
-census evidence, not a pass. Dormancy is the deliberate exception; a prerequisite that
-could not have been chosen deliberately is fatal at configure instead, and **Packaged
-census: direct native CTest entries** in [RUNBOOK.md](RUNBOOK.md) draws that line. An
-uncensused suite states its inventory through its ordinary host run; invoked directly it
-still requires an explicit expected arch and descriptor root.
-
-`EXPECTED_CASES` pins the suite's case-name set and arrives as
-`HIPDNN_TEST_CENSUS_EXPECTED_CASES`, comma-separated. It is optional to CMake and
-required for the census to mean what it claims, so a registration without it is green in
-exactly the case it exists to catch; **Packaged census: direct native CTest entries** in
-[RUNBOOK.md](RUNBOOK.md) states the mechanism and what an unpinned call forfeits.
+qualifies. The RUNBOOK section named above carries the worked examples and the
+one-suite-at-two-pack-targets rule. An uncensused suite states its inventory through its
+ordinary host run instead.
 
 Placeholder/audit, native inventory and numerical dispatch are distinct evidence.
 Neither a structural pass nor a loaded registry proves that a graph was served.

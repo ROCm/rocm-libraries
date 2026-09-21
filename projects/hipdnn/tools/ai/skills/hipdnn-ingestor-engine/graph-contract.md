@@ -46,8 +46,9 @@ spellings, topology and shape magnitude. Read workload manifests before exclusio
 identity and all source occurrences as specified by [workloads.md](workloads.md).
 Malformed or unrepresentable inputs remain explicit outcomes.
 
-Read the current [reference limits](../../../../../../dnn-providers/integration-tests/README.md#what-the-reference-executors-cannot-verify)
-and actual plan predicates. Both current CPU and GPU SDPA plans reject
+Read the current reference limits — the **What the reference executors cannot verify**
+section, documented from the repository root in
+`dnn-providers/integration-tests/README.md` — and actual plan predicates. Both current CPU and GPU SDPA plans reject
 `sink_token_tensor_uid`; **CPU is not a sink fallback**. Representation does not
 establish reference support. `auto` may exhaust golden/GPU/CPU choices and skip;
 that validates nothing. Missing capable independent numerics blocks the feature.

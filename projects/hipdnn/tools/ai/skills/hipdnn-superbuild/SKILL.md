@@ -16,7 +16,7 @@ Infer options from the user request:
 - **Preset**: default `hipdnn-providers`
 - **Clean rebuild**: remove the build directory before configuring only when the user asks for a clean build and the active host policy permits deletion
 - **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`. On Windows, when omitted it is derived from the wheel venv (`<venv>/Lib/site-packages/_rocm_sdk_devel`, venv default `D:/develop/latest_wheels`)
-- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`. Clang is a prerequisite and is not provisioned; install it via `scripts/windows/windows_build_setup.ps1` if missing
+- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`. Clang is a prerequisite and is not provisioned; install it via `projects/hipdnn/scripts/windows/windows_build_setup.ps1` (repo-relative) if missing
 - **GPU targets**: optional `GPU_TARGETS=<arch>` override; Windows wheel setup defaults to `gfx1151`
 - **Wheel SHA**: optional Windows `SHA=<commit>` to install pinned S3 staging wheels instead of nightlies
 - **Provision mode**: Windows `--provision auto|always|never`; default `auto` provisions (creates the venv and pip-installs the ROCm SDK wheels) only when the SDK is missing, `always` forces a fresh wheel pull, `never` validates existing paths only
@@ -39,6 +39,13 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 
 ## Workflow
 
+Placeholders used below: `<repo-root>` (step 1), `<build-dir>` and `<log>` (step 2),
+`<scripts>` (step 3), `<rocm-bin>` — the ROCm `bin` directory, on Windows the wheel
+venv's `_rocm_sdk_devel/bin` — and `<PY>`, the resolved Python interpreter path for the active
+environment, i.e. the interpreter the active workspace or repository instructions
+mandate, otherwise the active venv's `python`. Resolve it once and substitute the full
+path; never invoke a bare `python` or `python3` off `PATH`.
+
 1. Determine the repository root:
    ```bash
    git rev-parse --show-toplevel
@@ -53,7 +60,7 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 
 4. Resolve ROCm and Clang paths (Windows also provisions the ROCm SDK wheels when missing):
    ```bash
-   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--venv-path <path>] [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>] [--provision auto|always|never]
+   <PY> <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--venv-path <path>] [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>] [--provision auto|always|never]
    ```
    On Linux this echoes only provided overrides. On Windows it validates the wheel-based ROCm install and, when the SDK is absent (or `--provision always`), creates the venv and pip-installs the ROCm SDK wheels before printing `KEY=VALUE` lines on stdout. Progress goes to stderr, so stdout carries only the `ROCM_PATH=`/`CLANG_PATH=`/`GPU_TARGETS=` lines. Clang is a prerequisite and is not provisioned; a missing clang is reported as an error.
 
@@ -61,9 +68,17 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 
 6. Configure from the repository root. Always bind the preset configure to the selected build directory so configure and build operate on the same tree:
    ```bash
-   cmake --preset <preset> -B <build-dir> [extra -D options]
+   cmake --preset <preset> -B <build-dir> -G Ninja [extra -D options]
    ```
    Add `-DROCM_PATH=<path>` when a ROCm path is resolved or provided. On Windows also add `-DCMAKE_PROGRAM_PATH=<clang-path>` and `-DGPU_TARGETS=<arch>`.
+
+   **`-G Ninja` is required, not a preference.** No preset in `CMakePresets.json` sets a
+   `generator` — the base `default:release` preset supplies only the toolchain file, the
+   binary directory, the build type and the install prefix — so without `-G Ninja` CMake
+   falls back to the platform default generator. Downstream tooling hard-requires a
+   Ninja tree: the `hipdnn-superbuild-test` skill stops unless `<build-dir>/build.ninja`
+   exists, and its `discover_test_targets.py` shells out to `ninja -t targets` to
+   enumerate tests. The superbuild CI passes `-GNinja` explicitly for the same reason.
 
    **Use the preset.** It carries the `rocm-clang.cmake` toolchain and the component
    list. Hand-rolling `-DCMAKE_CXX_COMPILER=...` and `-DROCM_LIBS_ENABLE_COMPONENTS=...`
@@ -80,10 +95,15 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
    | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
    | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
-   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | rocKE engine/dependency readiness; a separate question from what the packer lowers. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | **Required ON whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON.** The coupling is unconditional: the provider's top-level check inspects no source kind and no descriptor root, so it also fires for HIP-only and embedded-source bundles and when no rocKE KDP exists anywhere. Ingestor ON with this OFF is a fatal configure error, not a degraded build. |
    | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging compiles from. Packaging is wired only while that root holds at least one non-hidden `*.kdp.json`; with none it is dormant and any stale product tree is removed, neither being an error. Set but not a directory is fatal. |
    | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
    | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
+
+   These flags only do anything on a preset that actually builds hip-kernel-provider.
+   The default `hipdnn-providers` preset does **not** include it; the presets that do are
+   `hipdnn-providers-all`, `hip-kernel-provider`, `hipdnn-dev-all` and
+   `miopen-hipdnn-dev-all`.
 
    **There is no per-producer production switch.** Producer selection is per-UKD on
    `kernel_source.kind`, so one source root feeds every producer, and what gets built
@@ -102,8 +122,11 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    Declarations travel in UKD `provenance.specialization_contract`. Only the producing
    compiler writes `provenance.effective_spec`, distinct from authored `provenance.spec`;
    generic generation is toolchain-free. No packaging `--profile`, CMake `PROFILES`
-   or external root manifest is part of this interface. Read the
-   [packaging reference](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
+   or external root manifest is part of this interface. Read the packaging reference at
+   `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`, resolved against
+   the `<repo-root>` from step 1 rather than against this skill's own directory — an
+   installed skill is copied without the tree above it, so a relative path out of the
+   skill directory does not resolve there.
    A build is not compiler-agreement, native-registration or numerical evidence by
    itself; the RUNBOOK requires those observations against the final installation.
 
@@ -113,11 +136,11 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    ```
    If explicit jobs are allowed and requested, pass them through to CMake/Ninja. On failure, report the log path and tail the last relevant lines.
 
-8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
+8. If the build fails with a stale CMake cache error such as `does not match the source`, the selected build directory has to be cleaned once. Unlike step 5 this deletion is model-initiated, not user-requested, so it carries the same restrictions and one more: clean only when the active host policy permits deletion, go through the active host's normal approval/safety flow, and ask the user before deleting because they did not request a clean build. Then reconfigure with the same `-B <build-dir>` command and retry once. Do not loop. If deletion is not permitted or the user declines, report the stale-cache diagnostic and the build directory path and stop.
 
 9. On Windows, always stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
    ```bash
-   python3 <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
+   <PY> <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
    ```
    The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and can fail to JIT-build kernels at runtime (GCN-assembly Winograd solvers are the common example, but the mismatch is not limited to them). Do this on every Windows build rather than only when a specific kernel path is expected. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner (`cmake_run.py`) stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
 
@@ -140,7 +163,7 @@ Summarize:
   slows by an order of magnitude — a *cold* cache on local storage beats a *warm* one on a
   network home by more than 10x. Export `AMD_COMGR_CACHE_DIR` to a RAM disk or local disk
   (e.g. `/tmp/comgr-cache`) before building.
-- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
+- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and for a setup script in a separate benchmarking checkout that is external to this repository and not versioned here. Keep `windows_rocm_setup.py` and `wheel_build_setup.ps1` in sync.
 - `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.

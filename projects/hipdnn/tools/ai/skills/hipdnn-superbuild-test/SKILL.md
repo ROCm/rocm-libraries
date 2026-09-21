@@ -31,6 +31,16 @@ Infer options from the user request:
 2. Resolve paths:
    - Build directory: honor active workspace instructions first; otherwise use `<repo-root>/build`.
    - Binary directory: `<build-dir>/bin`.
+   - `<binary-path>`: the full path to a test executable under `<build-dir>/bin`, used
+     with `--binary` when running one binary directly instead of a build target.
+   - `<installed-ctest-root>`: the CTest root of an *installed* tree, which for this
+     provider is `<install-prefix>/bin/hip_kernel_provider` rather than the prefix itself.
+   - `<PY>`: the resolved Python interpreter path for the active environment — the
+     interpreter the active workspace or repository instructions mandate, otherwise the
+     active venv's `python`. Resolve it once and substitute the full path; never invoke
+     a bare `python` or `python3` off `PATH`.
+   - `<GEN>`: the IngestorGenerator root, from the repository root at
+     `<repo-root>/projects/hipdnn/tools/IngestorGenerator`.
    - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
 
 3. Verify the superbuild exists:
@@ -41,13 +51,13 @@ Infer options from the user request:
 
 4. Resolve ROCm path on Windows:
    ```bash
-   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>]
+   <PY> <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>]
    ```
    Parse `ROCM_PATH=...` from stdout and set `ROCM_BIN=<rocm-path>/bin`. Skip this step on Linux unless the user supplied an override. On Windows, always pass the resolved `ROCM_BIN` to `cmake_run.py` (steps 6-8) via `--rocm-bin`: it is required both for the runtime PATH and for staging the wheel's `amd_comgr.dll` app-local (see Notes).
 
 5. Discover CMake test targets:
    ```bash
-   python3 <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
+   <PY> <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
    ```
    The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
@@ -57,12 +67,16 @@ Infer options from the user request:
    requested engine's registration. Inspect the actual installed CTest entry before
    executing it. The gfx942 dense names below are illustrative — the production
    descriptor root ships no bundle, so no such target is registered; substitute your
-   own bundle's target and engine ID:
+   own bundle's target and engine ID. Replace `<your-bundle-ctest-target>` below with
+   the name your own registration actually creates — the illustrative gfx942 dense name
+   would be `hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests`, which
+   no checkout registers today, so copying it verbatim fails the second command outright
+   under `--no-tests=error`:
    ```bash
    ctest --test-dir <installed-ctest-root> -N -V \
-     -R '^hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests$'
+     -R '^<your-bundle-ctest-target>$'
    ctest --test-dir <installed-ctest-root> --no-tests=error -V \
-     -R '^hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests$'
+     -R '^<your-bundle-ctest-target>$'
    ```
    Require your bundle's exact registration, its engine pin
    (`hipkernel:Gfx942AttentionDense` in the illustration), current installed
@@ -73,24 +87,28 @@ Infer options from the user request:
 
 6. Run tests through `cmake_run.py` when no gtest filter is requested:
    ```bash
-   python3 <scripts>/cmake_run.py --build-dir <build-dir> --target <target> [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+   <PY> <scripts>/cmake_run.py --build-dir <build-dir> --target <target> [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
    ```
    Add `--jobs <N>` only when explicit jobs are both requested and permitted. For verbose mode, append `-verbose` to the target name.
 
 7. Run direct binaries when a gtest filter is requested:
    ```bash
-   python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <binary-path> --gtest-filter "<filter>" [--extra-arg=<flag> ...] [-- <passthrough args>] [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+   <PY> <scripts>/cmake_run.py --build-dir <build-dir> --binary <binary-path> --gtest-filter "<filter>" [--rocm-path <path>] [--rocm-bin <path>] [--extra-arg=<flag> ...] [-- <passthrough args>] > <log> 2>&1
    ```
    Use the component-to-binary mapping below to choose binaries. `cmake_run.py` accepts arbitrary passthrough flags for the binary: simple values via repeatable `--extra-arg` (use `--extra-arg=--flag` for flag-like values), or an entire flag list after a literal `--`. Passing multiple tokens inside `--binary` is rejected with a clear error.
+
+   **Every helper option must appear BEFORE the `--`.** `--rocm-path`, `--rocm-bin`, `--extra-bin`, `--no-stage-comgr`, `--jobs` and any other `cmake_run.py` flag belong to the left of the delimiter; only arguments meant for the test binary go to the right of it. **Everything after `--` is forwarded to the binary verbatim** — `passthrough` is declared `nargs=argparse.REMAINDER`, so argparse stops interpreting at the delimiter and hands the rest through untouched.
+
+   This is silent, not an error. A helper flag written after `--` does not populate its option; it is passed to the test binary as an unrecognized argument while `cmake_run.py` proceeds as though the flag were never supplied. For `--rocm-bin` on Windows that means no ROCm bin directory on the child PATH and no app-local `amd_comgr.dll` staging, so the failure surfaces as a `0xc0000135` loader error from the test binary rather than as an argument-parsing complaint.
 
 8. Reproduce the cross-provider external-integration suite (`--scope external-integration`):
    - To run the whole suite exactly as CI does, build the custom target:
      ```bash
-     python3 <scripts>/cmake_run.py --build-dir <build-dir> --target <provider>-external-integration-check [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+     <PY> <scripts>/cmake_run.py --build-dir <build-dir> --target <provider>-external-integration-check [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
      ```
    - To run with a custom gtest filter, take the `<component>:command:<cmdline>` line from step 5, run the first token as `--binary` and the rest after `--`, adding your own `--gtest-filter`:
      ```bash
-     python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
+     <PY> <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> [--rocm-path <path>] [--rocm-bin <path>] -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
      ```
 
 9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.

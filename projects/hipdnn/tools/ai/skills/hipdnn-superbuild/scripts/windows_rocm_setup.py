@@ -16,10 +16,11 @@ the target venv, this script creates the venv, pip-installs the ROCm SDK
 wheels (multi-arch nightlies, or S3 staging when --sha is given), and runs
 `python -m rocm_sdk init`. This is a Python port of the install logic in
 projects/hipdnn/scripts/windows/wheel_build_setup.ps1; that PowerShell script
-is intentionally left in place for its existing consumers (interactive users
-and tools/dnn-benchmarking/setup.ps1, which relies on its in-shell venv
-activation and the ROCM_WHEEL_VENV it publishes -- neither of which a child
-Python process can do for a parent shell).
+is intentionally left in place for its existing consumers: interactive users,
+and a setup script that lives in a separate benchmarking checkout outside this
+repository and relies on the in-shell venv activation and the ROCM_WHEEL_VENV
+variable that the PowerShell script publishes -- neither of which a child
+Python process can do for a parent shell.
 
 Clang is NOT provisioned here: the wheel setup never installed it. If clang is
 missing, this script errors and points at windows_build_setup.ps1.
