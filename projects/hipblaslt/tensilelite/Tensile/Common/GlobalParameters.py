@@ -523,6 +523,7 @@ defaultBenchmarkCommonParameters = [
     {"GlobalSplitUAlgorithm": ["MultipleBuffer"]},
     {"GlobalSplitUCoalesced": [False]},
     {"GlobalSplitUWorkGroupMappingRoundRobin": [False]},
+    {"NarrowGSUWorkspace": [False]},
     {"Use64bShadowLimit": [True]},
     {"Use64bShadowLimitMX": [False]}, # Disable Use64bShadowLimit for MXSA/B by default
     {"NumLoadsCoalescedA": [1]},

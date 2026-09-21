@@ -705,6 +705,12 @@ validParameters = { # we need to make sure this matches develop
     # True:  wg issused oder = {(wg0,wg0,wg0)|(wg1,wg1,wg1)|(wg2,wg2,wg2)|...|(wgn,wgn,wgn)}
     #   -> workgroups split up the summation -> faster GR but slower GW
     "GlobalSplitUWorkGroupMappingRoundRobin": [False, True],
+    # Store GSU partial sums at the destination width instead of the compute width.
+    # Halves workspace traffic on both the GEMM write and the reduction read when
+    # DestDataType is narrower than ComputeDataType, at the cost of one extra
+    # rounding per split. Only takes effect for MultipleBuffer: MBSK accumulates
+    # in-kernel with the width fixed to the compute type.
+    "NarrowGSUWorkspace": [False, True],
     # 0=don't use magic div (source only)
     # 1=magic div alg #1.  Slightly faster but limited range (if magic number is 2^32)
     # 2=magic div alg#2.  Slightly slower but handles all unsigned ints up to 2^32

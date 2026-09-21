@@ -2041,7 +2041,15 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalAccumulation requires BufferStore (workspace SRD addressing not supported)")
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
-    state["_WorkspaceSizePerElemC"] = computeBytes
+    # MBSK accumulates partials in-kernel with the width fixed to the compute
+    # type, so narrowing is restricted to MultipleBuffer.
+    workspaceType = state["ProblemType"]["ComputeDataType"]
+    if state.get("NarrowGSUWorkspace", False) \
+        and state["_GlobalAccumulation"] == 'MultipleBuffer' \
+        and state["ProblemType"]["DestDataType"].numBytes() < computeBytes:
+      workspaceType = state["ProblemType"]["DestDataType"]
+    state["_WorkspaceDataType"] = workspaceType
+    state["_WorkspaceSizePerElemC"] = int(workspaceType.numBytes())
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = computeBytes
