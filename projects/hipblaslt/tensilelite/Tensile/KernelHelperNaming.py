@@ -156,6 +156,13 @@ def initConversionKernelObjects(solution, isaInfoMap):
   conversionKernelObjects = []
   loadVectorWidth = [1] if solution["ProblemType"]["DataType"].numBytes() > 8 else \
     [1, 2] if solution["ProblemType"]["DataType"].numBytes() > 4 else [1, 2, 4]
+  # A narrow workspace halves the bytes per element, so the widest group that
+  # still lands in a single 128-bit fetch doubles. Without this the reduction
+  # keeps issuing the same number of loads at half the payload.
+  wsBytes = solution["_WorkspaceDataType"].numBytes()
+  if wsBytes < solution["ProblemType"]["ComputeDataType"].numBytes():
+    widest = int(16 // wsBytes)
+    loadVectorWidth += [vw for vw in (8,) if vw <= widest and vw not in loadVectorWidth]
   genPGRPostKernels = True
   gsuList = [internalParameters["GlobalSplitUPGR"]]
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":

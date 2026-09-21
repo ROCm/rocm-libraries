@@ -2986,13 +2986,27 @@ namespace TensileLite
         for(size_t i = 0; i < problem.batchIndices().size(); i++)
             wiZ *= problem.batchSize(i);
 
+        // A narrow GSU workspace halves the bytes per element, so the widest
+        // group that still lands in one 128-bit fetch doubles. Has to track
+        // KernelHelperNaming, which only emits the wider conversion kernel
+        // under the same condition.
+        size_t maxVw = 4;
+        if(sizeMapping.workspaceSizePerElemC > 0
+           && sizeMapping.workspaceSizePerElemC
+                  < DataTypeInfo::Get(problem.computeType()).elementSize)
+            maxVw = 16 / sizeMapping.workspaceSizePerElemC;
+
         size_t vw = 1;
         if(wiX * wiY * wiZ > 2048)
         {
             //reach threashhold to trigger wider load
-            if(problem.freeSizeA(0) % 4 == 0
+            if(maxVw >= 8 && problem.freeSizeA(0) % 8 == 0
                && DataTypeInfo::Get(problemType.aType).elementSize
                       < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
+                vw = 8;
+            else if(problem.freeSizeA(0) % 4 == 0
+                    && DataTypeInfo::Get(problemType.aType).elementSize
+                           < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
             else if(problem.freeSizeA(0) % 2 == 0
                     && DataTypeInfo::Get(problemType.aType).elementSize
@@ -3080,11 +3094,18 @@ namespace TensileLite
             //reach threashhold to trigger wider load
             if(wi_count > 2048)
             {
+                bool not8 = false;
                 bool not4 = false;
                 bool not2 = false;
                 for(int idx = 0; idx < problems.size(); idx++)
                 {
                     auto problem = problems[idx];
+                    if(problem.freeSizeA(0) % 8 != 0
+                       || sizeMapping.workspaceSizePerElemC == 0
+                       || sizeMapping.workspaceSizePerElemC * 8 > 16
+                       || sizeMapping.workspaceSizePerElemC
+                              >= DataTypeInfo::Get(problem.computeType()).elementSize)
+                        not8 = true;
                     if(problem.freeSizeA(0) % 4 != 0
                        && DataTypeInfo::Get(problemType.aType).elementSize
                               < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
@@ -3093,7 +3114,9 @@ namespace TensileLite
                         not2 = true;
                 }
 
-                if(!not4)
+                if(!not8)
+                    vw = 8;
+                else if(!not4)
                     vw = 4;
                 else if(!not2)
                     vw = 2;

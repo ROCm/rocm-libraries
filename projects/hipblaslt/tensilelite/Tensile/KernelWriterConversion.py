@@ -582,7 +582,7 @@ class KernelWriterConversion(KernelWriterBase):
       loadTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_load == 1 else self.num_dword_load)
       storeTypeStr = "%s%s" % (self.datatype, "" if self.num_dword_store == 1 else self.num_dword_store)
     else:
-      loadTypeStr = "%s%s" % (typeStr, "" if self.num_dword_load == 1 else self.num_dword_load)
+      loadTypeStr = self.accumVecTypeStr(typeStr)
       storeTypeStr = "%s%s" % (typeStr, self.num_dword_store) if self.num_dword_store >= 1 else typeStr2 if self.num_dword_store == 0.5 else destTypeStr
 
     #Bias A/B
@@ -613,6 +613,7 @@ class KernelWriterConversion(KernelWriterBase):
 
     #Load GSU D buffer
     if self.state["UnrollOnly"]:
+      kStr += self.emitAccumVecTypedef(typeStr)
       kStr += "  %s temp[NUM_GSU];" % loadTypeStr + self.endLine
       if self.wsIsNarrow:
         kStr += "  %s rawTemp[NUM_GSU];" % self.rawLoadTypeStr() + self.endLine
@@ -625,21 +626,14 @@ class KernelWriterConversion(KernelWriterBase):
       castToIntermidate = ("(%s)" % intermediateDataType) if intermediateDataType != self.datatype else ""
       #Accumlate all D buffer
       for gsuIdx in range(self.state["GlobalSplitU"]):
-        if self.num_dword_load == 1:
-          kStr += "  accum[0] += %stemp[%d];" % (castToIntermidate, gsuIdx) + self.endLine
-        elif self.num_dword_load >= 2:
-          kStr += "  accum[0] += %stemp[%d].x;" % (castToIntermidate, gsuIdx) + self.endLine
-          kStr += "  accum[1] += %stemp[%d].y;" % (castToIntermidate, gsuIdx) + self.endLine
-        if self.num_dword_load == 4:
-          kStr += "  accum[2] += %stemp[%d].z;" % (castToIntermidate, gsuIdx) + self.endLine
-          kStr += "  accum[3] += %stemp[%d].w;" % (castToIntermidate, gsuIdx) + self.endLine
+        kStr += self.emitScalarAccum(castToIntermidate, gsuIdx)
       kStr += self.endLine
     else:
       if self.state["ProblemType"]["ComputeDataType"].isSingle():
         if self.num_dword_load > 1:
-          kStr += "  float2 accumVec(accum[0], accum[1]);" + self.endLine
-          if self.num_dword_load > 2:
-            kStr += "  float2 accumVec2(accum[2], accum[3]);" + self.endLine
+          for pair in range(self.num_dword_load // 2):
+            name = "accumVec" if pair == 0 else "accumVec%d" % (pair + 1)
+            kStr += "  float2 %s(accum[%d], accum[%d]);%s" % (name, 2 * pair, 2 * pair + 1, self.endLine)
       canPKF32Arch = []
       for isa in self.isaInfoMap.keys():
         if self.isaInfoMap[isa].asmCaps['v_pk_add_f32']:
@@ -652,6 +646,7 @@ class KernelWriterConversion(KernelWriterBase):
       else:
         defineStr = "#if 0"
       # PGR=2
+      kStr += self.emitAccumVecTypedef(typeStr)
       kStr += "  %s temp[NUM_GSU];" % loadTypeStr + self.endLine
       if self.wsIsNarrow:
         kStr += "  %s rawTemp[NUM_GSU];" % self.rawLoadTypeStr() + self.endLine
@@ -669,14 +664,7 @@ class KernelWriterConversion(KernelWriterBase):
         if self.state["ProblemType"]["ComputeDataType"].isSingle():
           kStr += self.getAsm(defineStr, castToIntermidate, gsuIdx, space="    ")
         else:
-          if self.num_dword_load == 1:
-            kStr += "  accum[0] += %stemp[%d];" % (castToIntermidate, gsuIdx) + self.endLine
-          elif self.num_dword_load >= 2:
-            kStr += "  accum[0] += %stemp[%d].x;" % (castToIntermidate, gsuIdx) + self.endLine
-            kStr += "  accum[1] += %stemp[%d].y;" % (castToIntermidate, gsuIdx) + self.endLine
-          if self.num_dword_load == 4:
-            kStr += "  accum[2] += %stemp[%d].z;" % (castToIntermidate, gsuIdx) + self.endLine
-            kStr += "  accum[3] += %stemp[%d].w;" % (castToIntermidate, gsuIdx) + self.endLine
+          kStr += self.emitScalarAccum(castToIntermidate, gsuIdx)
         kStr += "    __builtin_amdgcn_sched_barrier(0);" + self.endLine
         kStr += self.emitWorkspaceLoad(loadTypeStr, gsuIdx, space="    ")
         kStr += "    __builtin_amdgcn_sched_barrier(0);" + self.endLine
@@ -696,14 +684,7 @@ class KernelWriterConversion(KernelWriterBase):
           if self.state["ProblemType"]["ComputeDataType"].isSingle():
             kStr += self.getAsm(defineStr, castToIntermidate, gsuIdx2, space="      ")
           else:
-            if self.num_dword_load == 1:
-              kStr += "  accum[0] += %stemp[%d];" % (castToIntermidate, gsuIdx2) + self.endLine
-            elif self.num_dword_load >= 2:
-              kStr += "  accum[0] += %stemp[%d].x;" % (castToIntermidate, gsuIdx2) + self.endLine
-              kStr += "  accum[1] += %stemp[%d].y;" % (castToIntermidate, gsuIdx2) + self.endLine
-            if self.num_dword_load == 4:
-              kStr += "  accum[2] += %stemp[%d].z;" % (castToIntermidate, gsuIdx2) + self.endLine
-              kStr += "  accum[3] += %stemp[%d].w;" % (castToIntermidate, gsuIdx2) + self.endLine
+            kStr += self.emitScalarAccum(castToIntermidate, gsuIdx2)
           if caseRemain > gsuIdx2:
             kStr += "      __builtin_amdgcn_sched_barrier(0);" + self.endLine
             kStr += self.emitWorkspaceLoad(loadTypeStr, gsuIdx2, space="      ")
@@ -715,25 +696,17 @@ class KernelWriterConversion(KernelWriterBase):
           if self.state["ProblemType"]["ComputeDataType"].isSingle():
             kStr += self.getAsm(defineStr, castToIntermidate, gsuIdx2, space="      ")
           else:
-            if self.num_dword_load == 1:
-              kStr += "  accum[0] += %stemp[%d];" % (castToIntermidate, gsuIdx2) + self.endLine
-            elif self.num_dword_load >= 2:
-              kStr += "  accum[0] += %stemp[%d].x;" % (castToIntermidate, gsuIdx2) + self.endLine
-              kStr += "  accum[1] += %stemp[%d].y;" % (castToIntermidate, gsuIdx2) + self.endLine
-            if self.num_dword_load == 4:
-              kStr += "  accum[2] += %stemp[%d].z;" % (castToIntermidate, gsuIdx2) + self.endLine
-              kStr += "  accum[3] += %stemp[%d].w;" % (castToIntermidate, gsuIdx2) + self.endLine
+            kStr += self.emitScalarAccum(castToIntermidate, gsuIdx2)
         kStr += "    } break;" + self.endLine
       kStr += "  }" + self.endLine
 
       kStr += defineStr + self.endLine
       if self.state["ProblemType"]["ComputeDataType"].isSingle():
         if self.num_dword_load > 1:
-          kStr += "  accum[0] = accumVec.x;" + self.endLine
-          kStr += "  accum[1] = accumVec.y;" + self.endLine
-          if self.num_dword_load > 2:
-            kStr += "  accum[2] = accumVec2.x;" + self.endLine
-            kStr += "  accum[3] = accumVec2.y;" + self.endLine
+          for pair in range(self.num_dword_load // 2):
+            name = "accumVec" if pair == 0 else "accumVec%d" % (pair + 1)
+            kStr += "  accum[%d] = %s.x;%s" % (2 * pair, name, self.endLine)
+            kStr += "  accum[%d] = %s.y;%s" % (2 * pair + 1, name, self.endLine)
       kStr += "#endif" + self.endLine
 
     accumStr = "accum"
@@ -1065,6 +1038,35 @@ class KernelWriterConversion(KernelWriterBase):
 
     return (0, fileString)
 
+  # Component accessors for the accumulator vector. HIP vector types stop at 4
+  # lanes, so wider groups use an ext_vector typedef whose lanes past w are only
+  # reachable through the sN names.
+  ACCUM_COMPS = ["x", "y", "z", "w", "s4", "s5", "s6", "s7"]
+
+  def accumVecTypeStr(self, typeStr):
+    if self.num_dword_load == 1:
+      return typeStr
+    if self.num_dword_load <= 4:
+      return "%s%d" % (typeStr, self.num_dword_load)
+    return "tsAccumVec%d" % self.num_dword_load
+
+  def emitAccumVecTypedef(self, typeStr, space="  "):
+    """Local typedef for accumulator groups wider than a HIP vector type."""
+    if self.num_dword_load <= 4:
+      return ""
+    return "%stypedef %s %s __attribute__((ext_vector_type(%d)));%s" \
+           % (space, typeStr, self.accumVecTypeStr(typeStr), self.num_dword_load, self.endLine)
+
+  def emitScalarAccum(self, castToIntermidate, gsuIdx, space="  "):
+    """Scalar fallback accumulation, one statement per accumulator lane."""
+    if self.num_dword_load == 1:
+      return "%saccum[0] += %stemp[%d];%s" % (space, castToIntermidate, gsuIdx, self.endLine)
+    kStr = ""
+    for i in range(self.num_dword_load):
+      kStr += "%saccum[%d] += %stemp[%d].%s;%s" \
+              % (space, i, castToIntermidate, gsuIdx, self.ACCUM_COMPS[i], self.endLine)
+    return kStr
+
   def rawLoadBytes(self):
     return int(self.num_elements_load * self.wsDataTypeObj.numBytes())
 
@@ -1099,7 +1101,7 @@ class KernelWriterConversion(KernelWriterBase):
     """
     if not self.wsIsNarrow:
       return ""
-    comps = ["x", "y", "z", "w"]
+    comps = self.ACCUM_COMPS
     def dst(i):
       return "temp[%d]" % gsuIdx if self.num_dword_load == 1 else "temp[%d].%s" % (gsuIdx, comps[i])
     rawBytes = self.rawLoadBytes()
@@ -1183,6 +1185,28 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += space + "    \"v_add_f32 %3, %7, %3 \\n\\t\"" + self.endLine
         kStr += space + "    : \"+v\"(accum[0]), \"+v\"(accum[1]), \"+v\"(accum[2]), \"+v\"(accum[3]): \"v\"(%stemp[%d].x), \"v\"(%stemp[%d].y), \"v\"(%stemp[%d].z), \"v\"(%stemp[%d].w)"% (castToIntermidate, gsuIdx, castToIntermidate, gsuIdx, castToIntermidate, gsuIdx, castToIntermidate, gsuIdx) + self.endLine
         kStr += "#endif" + self.endLine
+    elif self.num_dword_load > 4 and self.num_dword_load % 2 == 0 and self.datatype != self.int32Str:
+      # Wider groups only appear on a narrow workspace, where the fetch stays a
+      # single b128 and the unpack has already widened temp to compute precision.
+      n = self.num_dword_load
+      pairs = n // 2
+      comps = self.ACCUM_COMPS
+      accName = lambda p: "accumVec" if p == 0 else "accumVec%d" % (p + 1)
+      kStr += defineStr + self.endLine
+      for p in range(pairs):
+        kStr += space + "    \"v_pk_add_f32 %%%d, %%%d, %%%d \\n\\t\"%s" % (p, pairs + p, p, self.endLine)
+      outs = ", ".join("\"+v\"(%s)" % accName(p) for p in range(pairs))
+      ins = ", ".join("\"v\"(%smake_float2(temp[%d].%s,temp[%d].%s))"
+                      % (castToIntermidate, gsuIdx, comps[2 * p], gsuIdx, comps[2 * p + 1])
+                      for p in range(pairs))
+      kStr += space + "    : %s: %s%s" % (outs, ins, self.endLine)
+      kStr += "#else" + self.endLine
+      for i in range(n):
+        kStr += space + "    \"v_add_f32 %%%d, %%%d, %%%d \\n\\t\"%s" % (i, n + i, i, self.endLine)
+      outs = ", ".join("\"+v\"(accum[%d])" % i for i in range(n))
+      ins = ", ".join("\"v\"(%stemp[%d].%s)" % (castToIntermidate, gsuIdx, comps[i]) for i in range(n))
+      kStr += space + "    : %s: %s%s" % (outs, ins, self.endLine)
+      kStr += "#endif" + self.endLine
     else:
       assert 0 and "Does not support this dword load"
     vgprStr = ""
