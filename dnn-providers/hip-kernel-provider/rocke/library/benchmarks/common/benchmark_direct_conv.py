@@ -1413,7 +1413,7 @@ def _run_dgrad_sweep(
         else ""
     )
     print(
-        f"\nBest dgrad: {best['label']}  {best['tflops']:.1f} TFLOPS  {best['ms']:.3f} ms{passed_str}",
+        f"\nBest: {best['tflops']:.1f} TFLOPS — {best['label']}  {best['ms']:.3f} ms{passed_str}",
         flush=True,
     )
     return 0, results
