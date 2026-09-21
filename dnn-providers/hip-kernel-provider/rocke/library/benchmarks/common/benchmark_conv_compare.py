@@ -281,8 +281,8 @@ def main() -> int:
     )
 
     implicit_grp = parser.add_argument_group(
-        "Implicit-GEMM only",
-        "Flags forwarded exclusively to benchmark_implicit_gemm_conv.py.",
+        "Implicit-GEMM options",
+        "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
     )
     implicit_grp.add_argument(
         "--sample",
