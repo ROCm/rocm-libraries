@@ -111,6 +111,32 @@ endif()
 if(HIPSPARSE_ENABLE_HOST)
     add_subdirectory(library)
 endif()
+# Fortran bindings for hipSPARSE, generated from the public headers and
+# committed under fortran/. Self-contained: a Fortran binding declares bind(C)
+# interfaces only, so it compiles against neither the hipSPARSE headers nor
+# libhipsparse, and this is safe to add unconditionally. The directory does its
+# own guarding and returns quietly when BUILD_FORTRAN_BINDINGS is off or no
+# Fortran compiler was found. It reports back through
+# HIPSPARSE_HAVE_FORTRAN_BINDINGS, FALSE in both those cases and TRUE only when
+# the target was really created.
+#
+# Outside the HIPSPARSE_ENABLE_HOST guard above on purpose. That guard controls
+# whether libhipsparse is built in this tree; the bindings do not need it built,
+# only linked, and libhipsparse resolves from the prefix path when the in-tree
+# target is absent. Inheriting the guard would silently drop the bindings from a
+# build that can perfectly well produce and install them.
+add_subdirectory(fortran)
+
+# The Fortran samples used to compile the hand-written module themselves; they
+# now link roc::hipsparse_fortran, so they cannot be built when the bindings
+# were not. Turning the option off here rather than failing keeps
+# -DHIPSPARSE_ENABLE_CLIENT=ON working on a machine with no Fortran compiler.
+if(HIPSPARSE_ENABLE_FORTRAN AND NOT HIPSPARSE_HAVE_FORTRAN_BINDINGS)
+    message(STATUS
+        "hipSPARSE: the Fortran bindings were not built, skipping the Fortran "
+        "samples. Enable BUILD_FORTRAN_BINDINGS to get them back.")
+    set(HIPSPARSE_ENABLE_FORTRAN OFF)
+endif()
 
 # Must be set before add_subdirectory(clients): clients/tests needs it for CTest categories
 # (shared/ctest/TestCategories.cmake and test_categories.yaml).

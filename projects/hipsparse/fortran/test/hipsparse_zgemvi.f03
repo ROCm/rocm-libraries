@@ -1,0 +1,67 @@
+!!!!!!!!!!!!!!
+! hipsparse Zgemvi example (dense matrix * sparse vector, double complex, Fortran 2003)
+! see: https:!rocm.docs.amd.com/projects/hipSPARSE/en/latest/
+!
+! Computes y = alpha * A * x + beta * y, where A is a dense m-by-n matrix and x
+! is a sparse vector (nnz values xVal at indices xInd). The result is checked
+! against a dense host reference (alpha * matmul(A, x_dense) + beta * y).
+!
+! f2003 style: device buffers are type(c_ptr) allocated by byte count; host data
+! is moved with hipMemcpy + c_loc. alpha/beta are host scalars (host pointer mode).
+!!!!!!!!!!!!!!
+!
+program hipsparse_zgemvi
+  use iso_c_binding
+  use hip
+  use hipsparse
+  implicit none
+  integer :: i
+  integer(c_int), parameter :: m = 3, n = 4, lda = 3, nnz = 2
+  complex(c_double_complex), target :: hA(3,4) = reshape((/ &
+    (1.0d0,1.0d0), (2.0d0,0.0d0), (3.0d0,1.0d0), (4.0d0,0.0d0), (5.0d0,1.0d0), (6.0d0,0.0d0), &
+    (7.0d0,1.0d0), (8.0d0,0.0d0), (9.0d0,1.0d0), (10.0d0,0.0d0), (11.0d0,1.0d0), (12.0d0,0.0d0)/), (/3,4/))
+  complex(c_double_complex), target :: hXval(2) = (/(2.0d0,1.0d0), (3.0d0,-1.0d0)/)
+  integer(c_int), target :: hXind(2) = (/0, 2/)
+  complex(c_double_complex), target :: hY(3) = (/(1.0d0,0.0d0), (1.0d0,0.0d0), (1.0d0,0.0d0)/)
+  complex(c_double_complex) :: alpha = (2.0d0,1.0d0), beta = (3.0d0,0.0d0)
+  complex(c_double_complex) :: xDense(4), hRef(3)
+  type(c_ptr) :: handle = c_null_ptr
+  type(c_ptr) :: dA, dXval, dXind, dY, dBuf
+  integer(c_int) :: bufSize
+  write(*,"(a)",advance="no") "-- Running test 'hipsparse_zgemvi' (Fortran 2003 interfaces) - "
+
+  ! Dense host reference.
+  xDense = (0.0d0,0.0d0)
+  do i = 1, nnz
+     xDense(hXind(i) + 1) = hXval(i)
+  end do
+  hRef = alpha * matmul(hA, xDense) + beta * hY
+
+  call hipCheck(hipMalloc(dA,    int(m*n,c_size_t) * 16))
+  call hipCheck(hipMalloc(dXval, int(nnz,c_size_t) * 16))
+  call hipCheck(hipMalloc(dXind, int(nnz,c_size_t) * 4))
+  call hipCheck(hipMalloc(dY,    int(m,c_size_t)   * 16))
+  call hipCheck(hipMemcpy(dA,    c_loc(hA(1,1)),  int(m*n,c_size_t) * 16, hipMemcpyHostToDevice))
+  call hipCheck(hipMemcpy(dXval, c_loc(hXval(1)), int(nnz,c_size_t) * 16, hipMemcpyHostToDevice))
+  call hipCheck(hipMemcpy(dXind, c_loc(hXind(1)), int(nnz,c_size_t) * 4, hipMemcpyHostToDevice))
+  call hipCheck(hipMemcpy(dY,    c_loc(hY(1)),    int(m,c_size_t)   * 16, hipMemcpyHostToDevice))
+
+  call hipsparseCheck(hipsparseCreate(handle))
+  call hipsparseCheck(hipsparseZgemvi_bufferSize(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, &
+       m, n, nnz, bufSize))
+  call hipCheck(hipMalloc(dBuf, int(max(bufSize,1),c_size_t)))
+  call hipsparseCheck(hipsparseZgemvi(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, m, n, alpha, &
+       dA, lda, nnz, dXval, dXind, beta, dY, HIPSPARSE_INDEX_BASE_ZERO, dBuf))
+  call hipCheck(hipDeviceSynchronize())
+  call hipCheck(hipMemcpy(c_loc(hY(1)), dY, int(m,c_size_t) * 16, hipMemcpyDeviceToHost))
+
+  do i = 1, m
+     if (abs(hY(i) - hRef(i)) > 1.0d-10) then
+        write(*,*) "FAILED! y(", i, ") = ", hY(i), " expected ", hRef(i); call exit(1)
+     end if
+  end do
+  call hipsparseCheck(hipsparseDestroy(handle))
+  call hipCheck(hipFree(dA)); call hipCheck(hipFree(dXval)); call hipCheck(hipFree(dXind))
+  call hipCheck(hipFree(dY)); call hipCheck(hipFree(dBuf))
+  write(*,*) "PASSED!"
+end program hipsparse_zgemvi
