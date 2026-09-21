@@ -1467,7 +1467,10 @@ class Module(Item):
             lm.add_if_directive(it.value)
             return
         if isinstance(it, ValueEndif):
-            lm.add_endif_directive(it.comment)
+            # Match rocisa ValueEndif::toString / native toStinkyTofuModule:
+            # formatStr drops the comment when outputNoComment (DisableAsmComments).
+            comment = "" if _outputNoComment() else it.comment
+            lm.add_endif_directive(comment)
             return
         if isinstance(it, ValueSet):
             text = it.toString().strip()  # ".set <sym>, <val>"
