@@ -514,7 +514,7 @@ Configuration, asymmetric aligned layouts in segment_interleave, consolidated
 derived-state cases in Solution, LDS token selection in Component, and focused
 reduction/fixup paths in GSU and StreamK.
 
-## D27 — Refresh config-driven emit results after develop changes
+## D29 — Refresh config-driven emit results after develop changes
 
 **ADR:** [`adr/0014-refresh-config-emit-results-after-develop.md`](adr/0014-refresh-config-emit-results-after-develop.md)
 
