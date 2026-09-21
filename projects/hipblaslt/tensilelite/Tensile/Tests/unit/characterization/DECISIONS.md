@@ -484,39 +484,32 @@ recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
 `--snapshot-update`, confirm byte-stability with two clean runs, and log the
 regeneration here.
 
-## D28 — Per-file ratchet baseline refresh after wave-2 (r8 + HUX crossover)
-**Decision:** Refresh `coverage-baseline.json` (158 files, tolerance 1.0) from the
-combined `coverage-unit` lane on branch `users/davidd-amd/mut-v2-coverage`
-(HEAD e69017042cf, coverage.py 7.15.4, branch=True). The prior baseline was the
-stale #9123 (`f90130fb37d`) snapshot that predated the whole mutation stack. The
-refresh locks in 31 upward floors and accepts 3 sub-tolerance downward moves, each
-with an evidence-backed disposition below.
-**Why:** the #9123 floors understated real coverage (e.g. Solution.py 70.55,
-SubtileGREmit.py 73.39), so a blind ratchet was impossible without either gaming
-or losing the mut-stack gains. `coverage_ratchet.py check` was clean (0 regression,
-tol 1 pp) before `update`; `tox -e coverage-gate` exits 0 after (TOTAL 78.76% ->
-79.11%).
-**Upward floors locked (top):** WaitAluInsertion 18.81->69.31, SubtileGREmit
-73.39->88.44 (r8, MUTCOV-002), Configuration 91.18->99.25, MAC_F32C 14.58->22.50,
-segment_interleave 93.57->100.00, MAC_F64C 16.33->22.73, Solution 70.55->74.58,
-TensorDataMover 71.68->74.95, SubtileLREmit 85.49->88.60, BenchmarkSplitter
-97.92->100.00.
-**Downward dispositions (all sub-tolerance, < 1 pp; ratchet check passed):**
-- `KernelHelperNaming.py` 97.10 -> 96.20 (-0.90): source UNCHANGED since the
-  baseline commit (`git diff f90130fb37d..HEAD` = 0 lines). Arc/branch-accounting
-  noise, not a coverage loss. Disposition: accept, noise.
-- `TensileLogic/Run.py` 89.90 -> 89.15 (-0.75): source UNCHANGED since baseline
-  (0 lines). Arc noise. Disposition: accept, noise.
-- `KernelWriter.py` 78.05 -> 77.72 (-0.33): source CHANGED (+177 lines) by 9
-  develop-side GPU-feature commits merged after the baseline (#9410 TDM iterate,
-  #10104 gfx1250 replay-hazard, #10209 segment-conflict, #9851 XFP32, #10298,
-  #10217, #10210, #10213, staggerU-disable). This is real feature dilution from
-  GPU paths the CPU-only char lane cannot reach; NOT caused by the mut stack.
-  Disposition: accept as documented feature dilution; the coverage gap belongs to
-  those features' owners (author GPU char coverage is out of scope for a
-  test/config-only change).
-**crossover.py:** stays 100% (now deterministic via MUTCOV-003); per MUTCOV-004
-scope it is NOT recorded as a new rise.
-**Classification:** baseline-maintenance only; no behavior pinned, so no ADR. The
-baseline write and this DECISIONS entry land as two separate atomic commits per
-the MUTCOV-004 delivery rule. No push; David reviews the baseline diff.
+## D28 — Per-file ratchet audit after wave-2 (r8 + HUX crossover)
+**Decision:** Keep the current `develop` floors for the six files flagged in
+review, except for two reproducible increases: raise `Configuration.py` from
+91.18% to 92.53% and `StreamK.py` from 82.18% to 82.24%. Do not import the
+higher floors measured on `users/davidd-amd/mut-v2-coverage` at e69017042cf.
+
+**Evidence:** The local combined report and the uploaded #11967 report agree to
+two decimal places: Configuration 92.53%, segment_interleave 94.41%, Solution
+70.40%, Component 93.49%, GSU 73.72%, and StreamK 82.24%. The gate passes all
+172 files with the existing one-point tolerance. No floor is lowered;
+Solution.py remains at 70.55% even though the current measurement is 0.15 points
+lower.
+
+The e69017042cf report was produced from a different source and test tree. That
+tree has 101 test files absent from this layer, while this layer has 58 other
+test files and 198 modified tests. Relative to that tree, segment_interleave,
+Solution, GSU, and StreamK also changed substantially. The old 99.25%, 100.00%,
+74.58%, 97.20%, 75.86%, and 84.29% values therefore cannot be used as floors for
+this earlier stack layer.
+
+**Classification:** None of the six reported drops is run-to-run measurement
+noise; repeated local and hosted runs reproduce the current values. Configuration
+and Component lost indirect execution supplied by the other test tree.
+segment_interleave, Solution, GSU, and StreamK combine a different test set with
+source growth. Restoring the old floors requires new tests rather than another
+baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
+Configuration, asymmetric aligned layouts in segment_interleave, consolidated
+derived-state cases in Solution, LDS token selection in Component, and focused
+reduction/fixup paths in GSU and StreamK.
