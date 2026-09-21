@@ -12,11 +12,22 @@ set(TEST_MAIN
 list(TRANSFORM TEST_MAIN PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
 # Common include directories for all tests
+# rocisa public headers (via hipblaslt/tensilelite)
+set(_rocisa_root
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblaslt/tensilelite
+)
+set(_rocisa_include ${_rocisa_root}/rocisa/rocisa/include)
+# For private headers (IRLexer.hpp, etc.)
+set(_src_include ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+# For IRLexer.hpp and parser/lexer private headers
+set(_asm_ser_include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/serialization/asm
+)
 set(TEST_INCLUDE_DIRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipblaslt/tensilelite/rocisa/rocisa/include
+    ${_rocisa_include}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src          # For private headers (IRLexer.hpp, etc.)
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/serialization/asm   # For IRLexer.hpp and parser/lexer private headers
+    ${_src_include}
+    ${_asm_ser_include}
     ${CMAKE_CURRENT_SOURCE_DIR}/../hardware/include
     ${CMAKE_CURRENT_SOURCE_DIR}/unit  # For TestHelpers.hpp
     ${TABLEGEN_OUTPUT_DIR}
@@ -54,6 +65,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/InsertPhiTest.cpp
     unit/asm/EstimateAsmCyclesTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
+    unit/asm/AsmMovePropagationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/ModuleAdaptorsTest.cpp
@@ -113,6 +125,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
     unit/asm/HWModelTest.cpp
+    unit/asm/SchedulingKnobHeuristicsTest.cpp
 )
 
 # High-Level IR Tests
@@ -145,6 +158,7 @@ set(UNIT_COMMON_TEST_FILES
     unit/ErrorHandlingTest.cpp
     unit/FunctionDestructionTest.cpp
     unit/IntrusiveListTest.cpp
+    unit/ir/AsmSetSymbolMap_test.cpp
     unit/ir/IntrinsicExpansionPassTest.cpp
     unit/ir/RegisterWidthValidationTest.cpp
     unit/ir/SymbolicRegNameTest.cpp
@@ -171,24 +185,26 @@ if(WIN32)
     target_compile_options(unit_tests PRIVATE -frtti)
 endif()
 
-# Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin target
-# only exists when examples are built, so the integration test compiles only then.
-# Future example tests slot in under this same flag.
+# Example-plugin tests are gated by STINKYTOFU_BUILD_EXAMPLES: the plugin
+# target only exists when examples are built, so the integration test
+# compiles only then. Future example tests slot in under this same flag.
 #
 # Static build: plugin is an OBJECT lib linked directly into unit_tests.
-# Shared build: plugin is a MODULE loaded at runtime via loadPlugin(). Because
-# the plugin links stinkytofu.dll, the test binary must also use the shared lib
-# so both share the same registry instance. Plugin tests therefore live in
-# api_tests (which links stinkytofu shared), not unit_tests (which links
-# stinkytofu_static). Only the STINKYTOFU_BUILD_EXAMPLES compile definition is
-# added to unit_tests so non-plugin tests in the same file still compile.
+# Shared build: plugin is a MODULE loaded at runtime via loadPlugin().
+# Because the plugin links stinkytofu.dll, the test binary must also use
+# the shared lib so both share the same registry instance. Plugin tests
+# therefore live in api_tests (which links stinkytofu shared), not
+# unit_tests (which links stinkytofu_static). Only the
+# STINKYTOFU_BUILD_EXAMPLES compile definition is added to unit_tests so
+# non-plugin tests in the same file still compile.
 if(STINKYTOFU_BUILD_EXAMPLES)
     if(BUILD_SHARED_LIBS)
-        # Shared build: plugin links stinkytofu.dll so the plugin test must run
-        # inside api_tests (which also links stinkytofu.dll). unit_tests links
-        # stinkytofu_static — two separate registry instances — so the plugin test
-        # would not see its registered passes. Leave STINKYTOFU_BUILD_EXAMPLES
-        # undefined here; PassBuilderTest.cpp's plugin section is compiled out.
+        # Shared build: plugin links stinkytofu.dll so the plugin test must
+        # run inside api_tests (which also links stinkytofu.dll).
+        # unit_tests links stinkytofu_static — two separate registry
+        # instances — so the plugin test would not see its registered
+        # passes. Leave STINKYTOFU_BUILD_EXAMPLES undefined here;
+        # PassBuilderTest.cpp's plugin section is compiled out.
     else()
         target_compile_definitions(unit_tests PRIVATE STINKYTOFU_BUILD_EXAMPLES)
         target_include_directories(unit_tests PRIVATE
@@ -234,8 +250,9 @@ if(BUILD_SHARED_LIBS)
     add_executable(api_tests
         ${TEST_MAIN}
         ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
-        # Address identity of the per-arch HWModel objects. Meaningful only against
-        # the shared lib; the unit_tests copy links statically and cannot fail.
+        # Address identity of the per-arch HWModel objects. Meaningful
+        # only against the shared lib; the unit_tests copy links
+        # statically and cannot fail.
         ${CMAKE_CURRENT_SOURCE_DIR}/api/HWModelIdentityTest.cpp
     )
     target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
@@ -257,9 +274,14 @@ if(BUILD_SHARED_LIBS)
         target_sources(api_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/unit/core/PassBuilderTest.cpp
         )
+        # Plugin path macros must expand to quoted C string literals. Keep each
+        # physical line <=80 chars for cmake-lint (C0301) by staging the path.
+        set(_plugin_helloworld_path
+            "\"$<TARGET_FILE:stinkytofu-plugin-helloworld>\""
+        )
         target_compile_definitions(api_tests PRIVATE
             STINKYTOFU_BUILD_EXAMPLES
-            STINKYTOFU_PLUGIN_HELLOWORLD_PATH="$<TARGET_FILE:stinkytofu-plugin-helloworld>"
+            "STINKYTOFU_PLUGIN_HELLOWORLD_PATH=${_plugin_helloworld_path}"
         )
         target_include_directories(api_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
@@ -274,7 +296,9 @@ if(BUILD_SHARED_LIBS)
             ${CMAKE_CURRENT_SOURCE_DIR}/plugins/BadVersionPlugin.cpp
         )
         if(WIN32)
-            target_link_libraries(stinkytofu-plugin-bad-version PRIVATE stinkytofu)
+            target_link_libraries(
+                stinkytofu-plugin-bad-version PRIVATE stinkytofu
+            )
         else()
             target_include_directories(stinkytofu-plugin-bad-version PRIVATE
                 $<TARGET_PROPERTY:stinkytofu,INTERFACE_INCLUDE_DIRECTORIES>
@@ -283,8 +307,11 @@ if(BUILD_SHARED_LIBS)
         set_target_properties(stinkytofu-plugin-bad-version PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
         )
+        set(_plugin_bad_version_path
+            "\"$<TARGET_FILE:stinkytofu-plugin-bad-version>\""
+        )
         target_compile_definitions(api_tests PRIVATE
-            STINKYTOFU_PLUGIN_BAD_VERSION_PATH="$<TARGET_FILE:stinkytofu-plugin-bad-version>"
+            "STINKYTOFU_PLUGIN_BAD_VERSION_PATH=${_plugin_bad_version_path}"
         )
         add_dependencies(api_tests stinkytofu-plugin-bad-version)
     endif()
@@ -325,12 +352,16 @@ target_include_directories(test_gen_instructions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
-# Pass the configured arch list so the test checks the same set the build declares outputs for,
-# instead of a list of its own that would silently stop tracking it.
+# Pass the configured arch list so the test checks the same set the build
+# declares outputs for, instead of a list of its own that would silently
+# stop tracking it.
 add_test(NAME GenInstructionsTest
-         COMMAND $<TARGET_FILE:test_gen_instructions> ${CMAKE_CURRENT_SOURCE_DIR}/..
-                 ${STINKYTOFU_ARCHS_TO_BUILD}
-         WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    COMMAND
+        $<TARGET_FILE:test_gen_instructions>
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+        ${STINKYTOFU_ARCHS_TO_BUILD}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
 
 set_tests_properties(GenInstructionsTest PROPERTIES
     LABELS "unit_tests"
@@ -361,27 +392,31 @@ if(STINKYTOFU_BUILD_PYTHON)
             message(STATUS "pytest found - adding Python tests to CTest")
 
             # Discover all test files in python_module/tests/
-            file(GLOB PYTEST_FILES "${CMAKE_SOURCE_DIR}/python_module/tests/test_*.py")
+            file(GLOB PYTEST_FILES
+                "${CMAKE_SOURCE_DIR}/python_module/tests/test_*.py"
+            )
 
             # Register each test file as a separate CTest entry
-            foreach(PYTEST_FILE ${PYTEST_FILES})
+            foreach(pytest_file ${PYTEST_FILES})
                 # Extract test file name without path and extension
-                get_filename_component(TEST_NAME ${PYTEST_FILE} NAME_WE)
+                get_filename_component(TEST_NAME ${pytest_file} NAME_WE)
 
-                # Add test (CTest suppresses output by default, shows on failure)
+                # Add test (CTest suppresses output by default, shows on
+                # failure)
                 add_test(
                     NAME python.${TEST_NAME}
                     COMMAND ${Python_EXECUTABLE} -m pytest
-                            ${PYTEST_FILE}
+                            ${pytest_file}
                             -v
                             --tb=short
                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                 )
 
-                # Set PYTHONPATH so pytest can find the module. The staleness-guard
-                # test briefly puts a probe .def in the scanned tree, which would
-                # make any concurrent `import stinkytofu` raise, so the Python tests
-                # share a lock rather than overlapping.
+                # Set PYTHONPATH so pytest can find the module. The
+                # staleness-guard test briefly puts a probe .def in the
+                # scanned tree, which would make any concurrent
+                # `import stinkytofu` raise, so the Python tests share a
+                # lock rather than overlapping.
                 set_tests_properties(python.${TEST_NAME} PROPERTIES
                     ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib"
                     LABELS "python;unit_tests"
@@ -390,19 +425,33 @@ if(STINKYTOFU_BUILD_PYTHON)
             endforeach()
 
             list(LENGTH PYTEST_FILES PYTEST_FILE_COUNT)
-            message(STATUS "  - Registered ${PYTEST_FILE_COUNT} Python test files")
+            message(STATUS
+                "  - Registered ${PYTEST_FILE_COUNT} Python test files"
+            )
             message(STATUS "  - Run all: ctest -L python")
             message(STATUS "  - Run one: ctest -R python.test_ir_basic")
-            message(STATUS "  - Debug: pytest python_module/tests/test_ir_basic.py::TestClass::test_func -v")
+            message(STATUS
+                "  - Debug: pytest"
+                " python_module/tests/test_ir_basic.py"
+                "::TestClass::test_func -v"
+            )
         else()
-            message(WARNING "pytest not found - Python tests will not be added to CTest")
+            message(WARNING
+                "pytest not found - Python tests will not be added to CTest"
+            )
             message(STATUS "  - Install pytest with: pip3 install pytest")
         endif()
     else()
-        message(WARNING "Python interpreter not found - Python tests will not be added to CTest")
+        message(WARNING
+            "Python interpreter not found - Python tests will not be added"
+            " to CTest"
+        )
     endif()
 else()
-    message(STATUS "Python module build disabled (STINKYTOFU_BUILD_PYTHON=OFF) - skipping Python tests")
+    message(STATUS
+        "Python module build disabled (STINKYTOFU_BUILD_PYTHON=OFF)"
+        " - skipping Python tests"
+    )
 endif()
 
 ##===----------------------------------------------------------------------===##

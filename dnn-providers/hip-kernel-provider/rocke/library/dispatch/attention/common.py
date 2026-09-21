@@ -59,7 +59,7 @@ from kernels.common.attention_unified import (
     UNIFIED_HEAD_SIZES,
 )
 from rocke.core.arch import ArchTarget
-from rocke.dispatch.core import KernelCandidate, OperatorRequest
+from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
 
 FAMILY = "attention_unified"
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
@@ -93,15 +93,18 @@ class AttentionRequest(OperatorRequest):
     spec_id: str = "auto"
     use_fp8: bool = False
     fp8_fnuz: bool = False
-    # --- gfx950 attention_dense knobs (only consumed by the opt-in
+    # --- standalone attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
-    #     Defaults deliver the persistent ~970-TFLOPS prefill path for large Sq:
+    #     Defaults deliver the best qualified persistent prefill path for large Sq:
     #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
     #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
-    #     picks the L2-locality hkv-major decode where it is balance-safe. ---
+    #     resolves through the selected architecture's concrete dense spec.
+    #     gfx950 may select one-/two-phase GQA pairing and wide DMA; gfx942
+    #     supports only qb-major/hkv-major ordering. ---
     dense_persistent: str = "auto"  # "auto" | "on" | "off"
     dense_num_persistent: int = 256
-    dense_persist_decode: str = "auto"  # "auto" | "qb_major" | "hkv_major"
+    # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
+    dense_persist_decode: str = "auto"
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -272,16 +275,9 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     )
 
 
-def _selector_matches(
-    req: AttentionRequest, candidate: KernelCandidate
-) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
+# Shared pin-selector: identical across families, so it lives in the dispatch
+# core and each family re-exports it under its own name.
+_selector_matches = selector_matches
 
 
 @dataclass(frozen=True)

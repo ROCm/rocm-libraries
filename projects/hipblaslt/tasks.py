@@ -500,6 +500,7 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "no_compress": "Don't compress TensileLite assembly objects.",
         "keep_build_tmp": "Keep the temporary build artifacts.",
         "experimental": "Include 'Experimental' logic directories.",
+        "gemm_a2a_fusion": "Build experimental fused GEMM + all-to-all support.",
         "logic_filter": "Logic YAML filter (e.g. 'gfx942/Equality/*').",
         "legacy_hipblas_direct": "Enable legacy HIPBLAS_DIRECT mode.",
         "disable_marker": "Disable hipBLASLt markers.",
@@ -559,6 +560,7 @@ def build(
     # -g from --gprof and cascades onto --logic-filter's -f.
     asic_revision=None,
     fortran_compiler=None,
+    gemm_a2a_fusion=False,
 ):
     _supported_distros()
 
@@ -671,7 +673,13 @@ def build(
     if codecoverage:
         cmake_opts.append("-DHIPBLASLT_ENABLE_COVERAGE=ON")
     if static:
-        cmake_opts.append("-DHIPBLASLT_BUILD_SHARED_LIBS=OFF")
+        cmake_opts.extend(
+            [
+                "-DHIPBLASLT_BUILD_SHARED_LIBS=OFF",
+                "-DTENSILELITE_BUILD_SHARED_LIBS=OFF",
+                "-DORIGAMI_BUILD_SHARED_LIBS=OFF",
+            ]
+        )
     if gprof:
         cmake_opts += ["-DCMAKE_CXX_FLAGS=-pg", "-DCMAKE_C_FLAGS=-pg"]
     if not use_rocroller:
@@ -698,6 +706,9 @@ def build(
             cmake_opts.append(f"-DTENSILELITE_BUILD_PARALLEL_LEVEL={tensile_threads}")
 
     cmake_opts.append(f"-DHIPBLASLT_ENABLE_YAML={'OFF' if not no_msgpack else 'ON'}")
+    cmake_opts.append(
+        f"-DHIPBLASLT_ENABLE_GEMM_A2A_FUSION={'ON' if gemm_a2a_fusion else 'OFF'}"
+    )
 
     if build_type != "Release":
         cmake_opts.append("-DTENSILELITE_ASM_DEBUG=ON")
