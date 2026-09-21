@@ -557,7 +557,9 @@ class ConvGroupedSpec:
             warp_tile_k=self.warp_tile_k,
             wave_size=target.wave_size,
             pipeline=self.pipeline,
-            epilogue=self.epilogue,
+            # two_stage writes one f32 per element via workspace store; cshuffle
+            # is not used and would produce an invalid spec (validator rejects it).
+            epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
             force_deterministic=self.force_deterministic,

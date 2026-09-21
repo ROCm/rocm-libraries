@@ -669,6 +669,13 @@ class WgradConvSpec:
                 f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
                 f"scattered MFMA layout; cshuffle produces contiguous pairs)"
             )
+        # two_stage uses an f32 workspace store, not LDS cshuffle; cshuffle is
+        # both redundant and misleading in the kernel name.
+        if _effective_two_stage and self.epilogue == "cshuffle":
+            raise ValueError(
+                "two_stage wgrad uses an f32 workspace store epilogue; "
+                "epilogue='cshuffle' is invalid (use epilogue='default')"
+            )
         if self.async_dma and not self.lds_k_outer:
             # Direct global->LDS load is only correct on the K-outer tile.
             # `raw_ptr_buffer_load_lds` moves N *contiguous global* elements into
@@ -1150,6 +1157,11 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"split_k atomic with dtype_d={spec.data.dtype_d!r} requires "
             f"epilogue='cshuffle' (default emits zero-fill packed atomics with "
             f"scattered MFMA layout; cshuffle produces contiguous pairs)"
+        )
+    if _effective_two_stage and spec.epilogue == "cshuffle":
+        return False, (
+            "two_stage wgrad uses an f32 workspace store epilogue; "
+            "epilogue='cshuffle' is invalid (use epilogue='default')"
         )
 
     if spec.split_k == 0 and (
