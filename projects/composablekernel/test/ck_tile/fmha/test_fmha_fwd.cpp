@@ -411,6 +411,76 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
     }
 }
 
+// gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
+// generic General sweep does not cover -- (160,160) and (80,96). The generic
+// suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
+// the pipeline, and never requests 160 or the true 80/96 tile. Non-multiple
+// seqlens select the seqlen-padded instances; (80,96) only matches the
+// dpad="t" variant since 80 % 128 != 0.
+class QrTdmNewHeadDim
+    : public TestWithParam<std::tuple<mode_enum, std::tuple<int, int, int, int, const char*>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QrTdmNewHeadDim,
+    Combine(Values(mode_enum::batch, mode_enum::group),
+            Values(std::tuple{160, 160, 127, 509, "0"}, // 160 dense, seqlen-padded
+                   std::tuple{160, 160, 99, 256, "1"},  // 160 causal
+                   std::tuple{80, 96, 127, 509, "0"},   // 80/96 dense, dpad only
+                   std::tuple{80, 96, 99, 256, "1"}))); // 80/96 causal
+
+TEST_P(QrTdmNewHeadDim, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm is only supported on gfx1250";
+
+        auto [mode, dims]                                   = GetParam();
+        auto [hdim_q, hdim_v, seqlen_q, seqlen_k, mask_str] = dims;
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   2,
+                                                   2,
+                                                   2,
+                                                   {adjust_seqlen(seqlen_q)},
+                                                   {adjust_seqlen(seqlen_k)},
+                                                   adjust_hdim(hdim_q),
+                                                   adjust_hdim(hdim_v),
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   0,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
+    }
+}
+
 class General
     : public TestWithParam<std::tuple<std::tuple<int, int>,
                                       bool,
