@@ -924,6 +924,13 @@ class KernelWriterConversion(KernelWriterBase):
     # add input datatype into kernel name (the datatype of workspace)
     inputTypeStr = DataType("I").toChar() if state["ProblemType"]["DataType"].isInt8() or state["ProblemType"]["DataType"].isInt32() else \
                                   (DataType("D").toChar() if state["ProblemType"]["DataType"].isDouble() else DataType("S").toChar())
+    # A narrow workspace makes the slot above wrong, and the wide and narrow
+    # kernels would otherwise share a name. Only override in that case so the
+    # names of every existing kernel stay byte-identical. ContractionSolution
+    # derives the same character from the destination type.
+    wsType = state.get("_WorkspaceDataType", state["ProblemType"]["ComputeDataType"])
+    if wsType != state["ProblemType"]["ComputeDataType"]:
+      inputTypeStr = wsType.toChar()
 
     name += (inputTypeStr + state["ProblemType"]["DestDataType"].toChar())
 
