@@ -17,6 +17,11 @@ They are useful coverage and generation-status checks, but they do not define a
 stable instruction sequence. Treating those cases as semantic snapshots made
 compiler changes fail unrelated coverage tests.
 
+The same distinction applies to the S00-S11 designed configurations. A later
+`develop` rebase changed 29 kernel basenames while their generation and source
+validation still succeeded. Their saved results therefore measured compiler
+identity rather than the emitter behavior named by the module.
+
 ## Decision
 
 Remove the opcode-set digest from the shared saved-result format. Keep
@@ -24,6 +29,10 @@ set-cover cases as explicitly named smoke tests that assert the selected problem
 group produces kernels. Cases without known emitter failures require every
 kernel to succeed; known-failure cases allow a later fix to turn them green.
 They no longer create `.ambr` snapshots.
+
+Treat S00-S11 cases without a stable emitted observable the same way: require
+successful generation and valid target assembly, but do not save the generated
+basename. Remove their 29 basename-only `.ambr` files.
 
 Add `required_source_patterns` to the shared emit assertion for tests that name
 specific generated behavior. Each pattern has a human-readable description and
@@ -35,8 +44,9 @@ source assertion would misrepresent what those tests observe.
 
 ## Consequences
 
-Compiler changes no longer require re-recording the 75 set-cover cases. Those
-tests continue to protect reachability and generation status, but make no claim
-about instruction semantics. A named behavior is protected only when its test
-supplies a focused source assertion; remaining configuration-driven tests must
-gain such assertions as their intended behavior is reviewed.
+Compiler changes no longer require re-recording the 75 set-cover cases or the
+29 S00-S11 smoke cases. Those tests continue to protect reachability and
+generation status, but make no claim about instruction semantics. A named
+behavior is protected only when its test supplies a focused source assertion;
+the S11a conversion retains that assertion after its basename snapshot is
+removed.

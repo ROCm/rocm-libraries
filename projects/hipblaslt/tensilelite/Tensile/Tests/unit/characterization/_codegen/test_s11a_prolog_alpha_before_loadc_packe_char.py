@@ -25,7 +25,7 @@ import os
 
 import pytest
 
-from config_harness import assert_config_emits_golden
+from config_harness import assert_config_emits
 
 pytestmark = pytest.mark.unit
 
@@ -41,12 +41,11 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s11a_prolog_alpha_before_loadc_packe_golden(snapshot):
+def test_s11a_prolog_alpha_before_loadc_packe_emits():
     """The alpha-before-load-C path converts its int32 accumulator to fp32."""
-    assert_config_emits_golden(
+    assert_config_emits(
         _CONFIG,
         _ARCH,
-        snapshot,
         limit=8,
         validate_source=True,
         required_source_patterns=(
