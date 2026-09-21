@@ -34,8 +34,6 @@ Inclusive range for params tuning, edit these to adjust tuning grid range
 """
 BLOCK_SIZES = [64, 128, 256, 512, 1024]
 IPT = [1, 2, 4, 8, 16, 32]
-FAPD = [1, 5, 9]
-
 
 class Tuner(BaseTuner):
     @classmethod
