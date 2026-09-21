@@ -1313,21 +1313,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mxUnitA = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"] if kernel["ProblemType"]["MXBlockA"] else 0
       mxUnitB = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"] if kernel["ProblemType"]["MXBlockB"] else 0
       # MXBlock=MI_K splat v_perm is JIT'd next to the WMMA in mfmaIter, so it
-      # is not a pack item for SIA3.
+      # is not a pack item for SIA3. 1D: packed last-used. 2D: in-place first-use.
       if kernel["ProblemType"]["MXBlockA"] and mxUnitA == 1:
-        instPerPackMXSA = kernel["MIWaveTileA"]
-        if mxFreeTile(kernel, "MXSA") > 1:
-          instPerPackMXSA = kernel["MIWaveTileA"] // max(1, int(kernel["VectorWidthMXSA"]))
-        if lrMX.getMxsTileSpanInfo(kernel, "MXSA", 0, self.states.asmCaps) is not None:
-          instPerPackMXSA //= 2
+        instPerPackMXSA = 0
       elif kernel["ProblemType"]["MXBlockA"] and (not kernel["UnrollMajorLDSMXSA"]):
         instPerPackMXSA = int(kernel["MIInputPerThreadMXSA"] * kernel["ProblemType"]["DataTypeMXSA"].numRegisters() * instPerRegPackMX)
       if kernel["ProblemType"]["MXBlockB"] and mxUnitB == 1:
-        instPerPackMXSB = kernel["MIWaveTileB"]
-        if mxFreeTile(kernel, "MXSB") > 1:
-          instPerPackMXSB = kernel["MIWaveTileB"] // max(1, int(kernel["VectorWidthMXSB"]))
-        if lrMX.getMxsTileSpanInfo(kernel, "MXSB", 1, self.states.asmCaps) is not None:
-          instPerPackMXSB //= 2
+        instPerPackMXSB = 0
       elif kernel["ProblemType"]["MXBlockB"] and (not kernel["UnrollMajorLDSMXSB"]):
         instPerPackMXSB = int(kernel["MIInputPerThreadMXSB"] * kernel["ProblemType"]["DataTypeMXSB"].numRegisters() * instPerRegPackMX)
 
@@ -5057,6 +5049,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self._subtileDtileBaseVgpr = None
     #expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
+    self._mx2dSplatGen = {}
+    self._mx2dSplatEmitted = {}
+    self._mx2dSplatGenSeen = {}
 
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
@@ -5504,6 +5499,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.tPB = tensorParametersB
     expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
+    self._mx2dSplatGen = {}
+    self._mx2dSplatEmitted = {}
+    self._mx2dSplatGenSeen = {}
 
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 

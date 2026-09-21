@@ -712,7 +712,10 @@ class LocalReadMFMA(LocalRead):
                 ds = DSModifiers(na=1, offset=paramList[0])
                 self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=readModule, comment=comment)
                 # mxUnit==1 v_perm is emitted next to the WMMA that first reads
-                # that byte (KernelWriterAssembly._emitMxSplatBeforeWmma).
+                # that byte (KernelWriterAssembly._emitMxSplatBeforeWmma /
+                # _emitMx2dSplatBeforeWmma).
+                if splatInPlace and mx2d and hasattr(writer, "_mx2dSplatNoteLoad"):
+                    writer._mx2dSplatNoteLoad(tc, bufferIdx, iui, valuStart)
                 if not mxsTileSpan:
                     valufIdx += numVgpr
             if mxsTileSpan:

@@ -8772,6 +8772,8 @@ class KernelWriterAssembly(KernelWriter):
   def _mxSplatInPlace(self, kernel, tc):
     if "MXS" not in tc:
       return False
+    if mxFreeTile(kernel, tc) > 1:
+      return False
     mxTc = tc[3]
     mxBlock = kernel["ProblemType"].get("MXBlock%s"%mxTc, 0)
     if not mxBlock:
@@ -8972,6 +8974,49 @@ class KernelWriterAssembly(KernelWriter):
     # block (scaleSel==1) shares the same loaded register and is selected by matrix_*_scale.
     mappedIdx   = group * vectorWidth + regInHalf
     return mappedIdx, scaleSel
+
+  def _mx2dSplatInPlace(self, kernel, tc):
+    # 2D MXBlockFree: one e8 per VGPR. 1D packed last-used splat stays in
+    # _emitMxSplatBeforeWmma.
+    if "MXS" not in tc:
+      return False
+    if mxFreeTile(kernel, tc) <= 1:
+      return False
+    mxBlock = kernel["ProblemType"].get("MXBlock%s"%tc[3], 0)
+    if not mxBlock:
+      return False
+    return kernel["MatrixInstK"] // mxBlock == 1
+
+  def _mx2dSplatNoteLoad(self, tc, bufferIdx, iui, valuStart):
+    if not hasattr(self, "_mx2dSplatGen"):
+      self._mx2dSplatGen = {}
+    key = (tc, bufferIdx, iui, valuStart)
+    self._mx2dSplatGen[key] = self._mx2dSplatGen.get(key, 0) + 1
+
+  def _emitMx2dSplatBeforeWmma(self, kernel, tP_MX, mappedIdx, innerUnroll, vregSetIdx,
+                               vgprPerInputMX, m, u, iui, imod):
+    tc = tP_MX["tensorChar"]
+    if not self._mx2dSplatInPlace(kernel, tc):
+      return
+    key = (tc, m, iui, mappedIdx)
+    gen = getattr(self, "_mx2dSplatGen", {}).get(key, 0)
+    if not hasattr(self, "_mx2dSplatEmitted"):
+      self._mx2dSplatEmitted = {}
+      self._mx2dSplatGenSeen = {}
+    if self._mx2dSplatGenSeen.get(key) != gen:
+      self._mx2dSplatEmitted[key] = False
+      self._mx2dSplatGenSeen[key] = gen
+    if self._mx2dSplatEmitted[key]:
+      return
+    dstStr = self.generateSrcStrForMFMA(kernel, tP_MX, innerUnroll, vregSetIdx,
+                                        vgprPerInputMX, m, u, iui, mappedIdx)
+    imod.add(VPermB32(
+        dst=vgpr(dstStr),
+        src0=vgpr(dstStr),
+        src1=vgpr(dstStr),
+        src2="0x00000000",
+        comment="splat MX byte 0 -> SSSS"))
+    self._mx2dSplatEmitted[key] = True
 
   ##############################################################################
   # MAC Iteration
@@ -10050,9 +10095,13 @@ class KernelWriterAssembly(KernelWriter):
                 if kernel["ProblemType"]["MXBlockA"]:
                   self._emitMxSplatBeforeWmma(kernel, tPA["MX"], mxsaIdx, innerUnroll, vregSetIdx,
                                               vgprPerInputMXSA, m, u, iui, imod)
+                  self._emitMx2dSplatBeforeWmma(kernel, tPA["MX"], mxsaIdx, innerUnroll, vregSetIdx,
+                                                vgprPerInputMXSA, m, u, iui, imod)
                 if kernel["ProblemType"]["MXBlockB"]:
                   self._emitMxSplatBeforeWmma(kernel, tPB["MX"], mxsbIdx, innerUnroll, vregSetIdx,
                                               vgprPerInputMXSB, m, u, iui, imod)
+                  self._emitMx2dSplatBeforeWmma(kernel, tPB["MX"], mxsbIdx, innerUnroll, vregSetIdx,
+                                                vgprPerInputMXSB, m, u, iui, imod)
                 block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
                 imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
