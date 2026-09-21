@@ -48,6 +48,17 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+TEST(internal_hostblocks_itilu0, align_size)
+{
+    // Empty slices must not wrap: sizeof(T) * 0 - 1 is SIZE_MAX as size_t.
+    EXPECT_EQ(rocsparse::align_size<int32_t>(0), 0u);
+    EXPECT_EQ(rocsparse::align_size<double>(0), 0u);
+
+    EXPECT_EQ(rocsparse::align_size<int32_t>(1), 256u);
+    EXPECT_EQ(rocsparse::align_size<int32_t>(64), 256u); // exactly 256 bytes
+    EXPECT_EQ(rocsparse::align_size<int32_t>(65), 512u);
+}
+
 TEST(internal_hostblocks_itilu0, assign_b)
 {
     std::vector<char> mem(1024);
@@ -104,10 +115,10 @@ TEST(internal_hostblocks_itilu0, unassign_b_is_inverse_of_assign_b)
 }
 
 // buffer_layout_contiguous_t::init lays out all of the itilu0 working arrays
-// contiguously inside one user buffer. We verify the per-array sizes and that
-// every array starts exactly where the previous one ended (the partition
-// invariant), plus the reserved double-aligned header and the trailing
-// "remaining buffer" accounting.
+// inside one user buffer. Every array is rounded up to 256 bytes, so we verify
+// the per-array sizes, that each array starts on a 256-byte boundary right after
+// the previous one (the partition invariant), plus the reserved header and the
+// trailing "remaining buffer" accounting.
 TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
 {
     using layout_t = rocsparse::buffer_layout_contiguous_t;
@@ -117,10 +128,12 @@ TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
     const I m   = 8;
     const I nnz = 20;
 
-    // Generously sized, double-aligned backing store so every assign_b succeeds.
-    std::vector<double> backing(4096, 0.0);
-    void*               buffer      = backing.data();
-    size_t              buffer_size = backing.size() * sizeof(double);
+    // Generously sized backing store, 256-byte aligned like a device allocation
+    // would be, so every assign_b succeeds.
+    std::vector<char> backing(65536, 0);
+    const uintptr_t   offset      = reinterpret_cast<uintptr_t>(backing.data()) % 256;
+    void*             buffer      = backing.data() + ((offset > 0) ? (256 - offset) : 0);
+    size_t            buffer_size = 32768;
 
     void* const  base      = buffer;
     const size_t base_size = buffer_size;
@@ -128,11 +141,13 @@ TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
     layout_t layout;
     layout.init<I, J>(m, nnz, rocsparse_datatype_f64_r, buffer_size, buffer);
 
-    // Header reserved at the front: get_sizeof_double() doubles.
-    const size_t header_bytes = layout_t::get_sizeof_double() * sizeof(double);
-    char* const  after_header = reinterpret_cast<char*>(base) + header_bytes;
+    // Header reserved at the front, it holds the device side copy of the layout.
+    const size_t header_bytes = layout_t::get_header_size();
+    EXPECT_GE(header_bytes, sizeof(layout_t));
+    EXPECT_EQ(header_bytes % 256, 0u);
+    char* const after_header = reinterpret_cast<char*>(base) + header_bytes;
 
-    // Expected per-array sizes.
+    // The reported sizes are the sizes of the arrays, not of the 256-byte slices.
     EXPECT_EQ(layout.get_size(layout_t::perm), sizeof(I) * nnz);
     EXPECT_EQ(layout.get_size(layout_t::lnnz), sizeof(I) * 1);
     EXPECT_EQ(layout.get_size(layout_t::lptr), sizeof(I) * (m + 1));
@@ -141,23 +156,35 @@ TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
     EXPECT_EQ(layout.get_size(layout_t::ind), sizeof(J) * nnz);
     EXPECT_EQ(layout.get_size(layout_t::x), sizeof(double) * nnz); // f64_r
 
-    // Contiguous placement in allocation order: perm, lnnz, lptr, unnz, uptr,
-    // ind, x - each starting exactly where the previous ended.
+    // Placement in allocation order: perm, lnnz, lptr, unnz, uptr, ind, x - each
+    // starting where the 256-byte slice of the previous one ended.
     char* cursor = after_header;
     EXPECT_EQ(layout.get_pointer(layout_t::perm), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(I) * nnz;
+    cursor += rocsparse::align_size<I>(nnz);
     EXPECT_EQ(layout.get_pointer(layout_t::lnnz), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(I) * 1;
+    cursor += rocsparse::align_size<I>(1);
     EXPECT_EQ(layout.get_pointer(layout_t::lptr), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(I) * (m + 1);
+    cursor += rocsparse::align_size<I>(m + 1);
     EXPECT_EQ(layout.get_pointer(layout_t::unnz), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(I) * 1;
+    cursor += rocsparse::align_size<I>(1);
     EXPECT_EQ(layout.get_pointer(layout_t::uptr), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(I) * (m + 1);
+    cursor += rocsparse::align_size<I>(m + 1);
     EXPECT_EQ(layout.get_pointer(layout_t::ind), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(J) * nnz;
+    cursor += rocsparse::align_size<J>(nnz);
     EXPECT_EQ(layout.get_pointer(layout_t::x), reinterpret_cast<void*>(cursor));
-    cursor += sizeof(double) * nnz;
+    cursor += rocsparse::align_size<double>(nnz);
+
+    for(void* p : {layout.get_pointer(layout_t::perm),
+                   layout.get_pointer(layout_t::lnnz),
+                   layout.get_pointer(layout_t::lptr),
+                   layout.get_pointer(layout_t::unnz),
+                   layout.get_pointer(layout_t::uptr),
+                   layout.get_pointer(layout_t::ind),
+                   layout.get_pointer(layout_t::x),
+                   layout.get_pointer(layout_t::buffer)})
+    {
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(p) % 256, 0u);
+    }
 
     // lptr_end / uptr_end point one element past lptr / uptr.
     EXPECT_EQ(
@@ -172,10 +199,11 @@ TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
     EXPECT_EQ(layout.get_pointer(layout_t::buffer), reinterpret_cast<void*>(cursor));
     EXPECT_EQ(layout.get_size(layout_t::buffer), buffer_size);
 
-    // Total consumed = header + all arrays; leftover is the rest of the store.
-    const size_t consumed = header_bytes + sizeof(I) * nnz + sizeof(I) * 1 + sizeof(I) * (m + 1)
-                            + sizeof(I) * 1 + sizeof(I) * (m + 1) + sizeof(J) * nnz
-                            + sizeof(double) * nnz;
+    // Total consumed = header + all slices; leftover is the rest of the store.
+    const size_t consumed = header_bytes + rocsparse::align_size<I>(nnz)
+                            + rocsparse::align_size<I>(1) + rocsparse::align_size<I>(m + 1)
+                            + rocsparse::align_size<I>(1) + rocsparse::align_size<I>(m + 1)
+                            + rocsparse::align_size<J>(nnz) + rocsparse::align_size<double>(nnz);
     EXPECT_EQ(buffer_size, base_size - consumed);
     EXPECT_EQ(buffer, reinterpret_cast<void*>(cursor));
 }
