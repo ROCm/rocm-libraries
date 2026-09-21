@@ -701,6 +701,7 @@ size_t calculate_flush_batch_count(size_t arg_flush_batch_count,
 //Function to limit the number of devices to be used in a mult-gpu setup
 hipError_t limit_device_count(int& device_count, int max_limit)
 {
+    max_limit            = max_limit > 1 ? max_limit : 1;
     hipError_t hipStatus = hipGetDeviceCount(&device_count);
     if(hipStatus == hipSuccess)
         device_count = std::min(device_count, max_limit);
