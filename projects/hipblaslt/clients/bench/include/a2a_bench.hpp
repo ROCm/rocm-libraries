@@ -354,14 +354,14 @@ namespace hipblaslt_bench
         CHECK_HIP_RC(hipMalloc(&res.workspace, kWorkspaceSize));
         CHECK_HIP_RC(hipMemset(res.dRecv, 0, bytesRecv));
 
-        // Every queue loops back to this rank's own device.
         try
         {
             const uint32_t srcNode = TensileLite::Client::sdmaNodeIdForDevice(env.local_rank);
             for(uint32_t j = 0; j < arg.a2a_world; ++j)
             {
+                const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(j);
                 res.ownedQueues.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
-                    srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, srcNode)));
+                    srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, dstNode)));
                 const HsaQueueResource& q = res.ownedQueues.back()->queueResource();
                 res.queues[j] = {res.ownedQueues.back()->ringBase(),
                                  (void*)q.Queue_read_ptr_aql,
@@ -522,20 +522,20 @@ namespace hipblaslt_bench
         return fill_operands(env, arg, res);
     }
 
-    inline bool select_algo(RankResources& res, hipblasLtMatmulHeuristicResult_t& heur)
+    inline hipblasStatus_t
+        select_algo(RankResources& res, hipblasLtMatmulHeuristicResult_t& heur, int& algoCount)
     {
-        int algoCount = 0;
-        CHECK_LT_RC(hipblasLtMatmulAlgoGetHeuristic(res.handle,
-                                                    res.mm,
-                                                    res.lay[0],
-                                                    res.lay[1],
-                                                    res.lay[2],
-                                                    res.lay[3],
-                                                    res.pref,
-                                                    1,
-                                                    &heur,
-                                                    &algoCount));
-        return algoCount > 0;
+        algoCount = 0;
+        return hipblasLtMatmulAlgoGetHeuristic(res.handle,
+                                               res.mm,
+                                               res.lay[0],
+                                               res.lay[1],
+                                               res.lay[2],
+                                               res.lay[3],
+                                               res.pref,
+                                               1,
+                                               &heur,
+                                               &algoCount);
     }
 
     // Successive launches alternate the communicator's flag regions.

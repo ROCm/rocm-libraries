@@ -672,6 +672,10 @@ if(HIPBLASLT_ENABLE_CLIENT)
 
     if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         rocm_install(
+            TARGETS hipblaslt-bench-a2a
+            COMPONENT benchmarks
+        )
+        rocm_install(
             PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/a2a/hipblaslt-bench-a2a-launch"
             DESTINATION "${CMAKE_INSTALL_BINDIR}"
             COMPONENT benchmarks

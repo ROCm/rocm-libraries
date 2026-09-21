@@ -77,7 +77,14 @@ try
         return 1;
 
     hipblasLtMatmulHeuristicResult_t heur{};
-    const uint8_t                    found = select_algo(res, heur) ? 1 : 0;
+    int                              algoCount  = 0;
+    const hipblasStatus_t            algoStatus = select_algo(res, heur, algoCount);
+    if(algoStatus != HIPBLAS_STATUS_SUCCESS)
+    {
+        hipblaslt_cerr << "error: hipblasLtMatmulAlgoGetHeuristic -> " << int(algoStatus) << "\n";
+        return 1;
+    }
+    const uint8_t found = algoCount > 0 ? 1 : 0;
 
     std::vector<uint8_t> allFound(env.world);
     if(rendezvous.allgather(&found, allFound.data(), sizeof(found)) != HIPBLAS_STATUS_SUCCESS)

@@ -34,6 +34,13 @@ _CONFIG = os.path.normpath(
 # Emitted only by the SDMA ring/packet emitters.
 _A2A_MARKERS = ("s_atomic_umax_x2", "s_atomic_cmpswap_x2", "s_bfm_b64")
 
+# The handshake's three resets, matched on their comments.
+_A2A_RESETS = (
+    "// clear self flag[lane]",
+    "// clear the outbound counter",
+    "// fused-A2A: clear SDMA cursors",
+)
+
 
 def test_fused_a2a_gfx950_emits_assembly():
     """FusedGemmA2A=1: SDMA ring instructions present, assembles for gfx950."""
@@ -50,7 +57,7 @@ def test_fused_a2a_gfx950_emits_assembly():
         )
         assert ".amdgcn_target" in src, f"Kernel {base!r} missing .amdgcn_target"
         assert "gfx950" in src, f"Kernel {base!r} missing gfx950 arch marker"
-        missing = [m for m in _A2A_MARKERS if m not in src]
+        missing = [m for m in _A2A_MARKERS + _A2A_RESETS if m not in src]
         assert not missing, f"Kernel {base!r}: missing SDMA instructions {missing}"
 
 

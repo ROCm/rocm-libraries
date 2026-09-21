@@ -172,11 +172,10 @@ namespace
         return !fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
     }
 
-    // Checked when the descriptor is attached to a matmul descriptor: every stage
-    // present must have the parameters it cannot run without. World size is not
-    // known here, so the per-rank arrays are checked for content but not length;
-    // validate_fused_a2a_launch compares both against it.
-    hipblasStatus_t validate_fused_epilogue_attach(const hipblasLtFusedEpilogueDescriptor* desc)
+    // Every stage present must have the parameters it cannot run without. World
+    // size is not known here, so the per-rank arrays are checked for content but
+    // not length; validate_fused_a2a_launch compares both against it.
+    hipblasStatus_t validate_fused_epilogue_contents(const hipblasLtFusedEpilogueDescriptor* desc)
     {
         if(!fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
             return HIPBLAS_STATUS_SUCCESS;
@@ -312,6 +311,10 @@ namespace
         if(desc == nullptr
            || !fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
             return HIPBLAS_STATUS_SUCCESS;
+
+        const hipblasStatus_t contents = validate_fused_epilogue_contents(desc);
+        if(contents != HIPBLAS_STATUS_SUCCESS)
+            return contents;
 
         return validate_fused_a2a_launch(
             (rocblaslt_handle)handle, desc, (rocblaslt_matrix_layout)Ddesc);
@@ -702,26 +705,6 @@ hipblasStatus_t hipblasLtMatmulDescSetAttribute(hipblasLtMatmulDesc_t           
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescSetAttribute");
-
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    // Attaching a fused epilogue is where the stages are checked for completeness:
-    // the descriptor stops being a work in progress at this call.
-    if(matmulAttr == HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE && buf != nullptr
-       && sizeInBytes >= sizeof(hipblasLtFusedEpilogueDescriptor_t))
-    {
-        hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
-        memcpy(&fused, buf, sizeof(fused));
-        if(fused != nullptr)
-        {
-            hipblasStatus_t attach_status = validate_fused_epilogue_attach(fused);
-            if(attach_status != HIPBLAS_STATUS_SUCCESS)
-            {
-                rocblaslt::Debug::Instance().markerStop();
-                return attach_status;
-            }
-        }
-    }
-#endif
 
     auto status = RocBlasLtStatusToHIPStatus(
         rocblaslt_matmul_desc_set_attribute((rocblaslt_matmul_desc)matmulDesc,

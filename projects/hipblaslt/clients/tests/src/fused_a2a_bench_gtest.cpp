@@ -53,8 +53,9 @@ TEST(FusedA2ABench_smoke, single_rank_round_trip)
     ASSERT_TRUE(hipblaslt_bench::setup_rank(env, arg, res));
 
     hipblasLtMatmulHeuristicResult_t heur{};
-    if(!hipblaslt_bench::select_algo(res, heur))
-        GTEST_SKIP() << "no fused GEMM+A2A solution in the loaded library";
+    int algoCount = 0;
+    ASSERT_EQ(hipblaslt_bench::select_algo(res, heur, algoCount), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_GT(algoCount, 0) << "no fused GEMM+A2A solution in the loaded library";
 
     uint32_t                       launchCount = 0;
     hipblasStatus_t                lastStatus  = HIPBLAS_STATUS_SUCCESS;
@@ -85,8 +86,9 @@ TEST(FusedA2ABench_smoke, reused_channels_stay_correct)
     ASSERT_TRUE(hipblaslt_bench::setup_rank(env, arg, res));
 
     hipblasLtMatmulHeuristicResult_t heur{};
-    if(!hipblaslt_bench::select_algo(res, heur))
-        GTEST_SKIP() << "no fused GEMM+A2A solution in the loaded library";
+    int algoCount = 0;
+    ASSERT_EQ(hipblaslt_bench::select_algo(res, heur, algoCount), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_GT(algoCount, 0) << "no fused GEMM+A2A solution in the loaded library";
 
     uint32_t                       launchCount = 0;
     hipblasStatus_t                lastStatus  = HIPBLAS_STATUS_SUCCESS;
