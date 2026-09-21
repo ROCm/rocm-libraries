@@ -42,6 +42,7 @@ import subprocess
 import sys
 import textwrap
 import unittest
+import unittest.mock
 
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap (matches test_container / test_code).
@@ -53,12 +54,13 @@ if _PKG_PARENT not in sys.path:
 
 from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
+    GLOBALModifiers,
     RegisterContainer,
     SMEMModifiers,
     sgpr,
     vgpr,
 )
-from rocisa_stinkytofu_adaptor.enum import DelayALUType, InstType  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import CacheScope, DelayALUType, InstType, TemporalHint  # noqa: E402
 from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
@@ -278,6 +280,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     DSStore2B64,
     DSBPermuteB32,
     TensorLoadToLds,
+    GlobalPrefetchB8,
     BranchInstruction,
     SBranch,
     SCBranchSCC0,
@@ -2583,6 +2586,55 @@ class TestTensorLoadToLds(unittest.TestCase):
     def test_collected_by_module(self):
         m = Module()
         m.add(TensorLoadToLds(group0=vgpr(0), group1=vgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestGlobalPrefetchB8(unittest.TestCase):
+    def _mods(self):
+        return GLOBALModifiers(th=TemporalHint.TH_NT, scope=CacheScope.SCOPE_SE)
+
+    def test_construction_stores_modifiers(self):
+        mods = self._mods()
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0), mods, "pf")
+        self.assertIs(inst._modifiers, mods)
+        self.assertEqual(inst.comment, "pf")
+        self.assertIn("global_prefetch_b8", str(inst))
+
+    def test_deepcopy_copies_modifiers(self):
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0), self._mods())
+        clone = copy.deepcopy(inst)
+        self.assertIsInstance(clone, GlobalPrefetchB8)
+        self.assertIsNot(clone._modifiers, inst._modifiers)
+        self.assertEqual(clone._modifiers.th, TemporalHint.TH_NT)
+        self.assertEqual(clone._modifiers.scope, CacheScope.SCOPE_SE)
+
+    def test_has_to_stinky_logical(self):
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    def test_to_stinky_logical_applies_global_modifiers(self):
+        mods = self._mods()
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0), mods)
+        logical = unittest.mock.Mock()
+        factory = unittest.mock.Mock(return_value=logical)
+        fake_st = unittest.mock.Mock()
+        fake_st.GlobalPrefetchB8 = factory
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda a: a,
+             ), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._apply_global",
+             ) as apply_g:
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        apply_g.assert_called_once_with(logical, mods)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(GlobalPrefetchB8(vgpr(0, 2), sgpr(0), self._mods()))
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
