@@ -449,13 +449,13 @@ using MxQuantizeTypes = ::testing::Types<TypeTriple<float, fp8_e4m3, fp8_e8m0>,
                                          TypeTriple<half, fp6_e3m2, fp8_e8m0>>;
 
 template <class T>
-class CpuFpReferenceMxQuantize : public ::testing::Test
+class CpuFpReferenceBlockScaleQuantizeMxTyped : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceMxQuantize, MxQuantizeTypes, );
+TYPED_TEST_SUITE(CpuFpReferenceBlockScaleQuantizeMxTyped, MxQuantizeTypes, );
 
-TYPED_TEST(CpuFpReferenceMxQuantize, WithE8m0Scale)
+TYPED_TEST(CpuFpReferenceBlockScaleQuantizeMxTyped, WithE8m0Scale)
 {
     using XType = typename TypeParam::InputType;
     using YType = typename TypeParam::OutputType;
@@ -467,16 +467,16 @@ TYPED_TEST(CpuFpReferenceMxQuantize, WithE8m0Scale)
 
     const auto maxOutVal = static_cast<float>(std::numeric_limits<YType>::max());
 
-    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal), 0, 0);
-    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal), 0, 1);
-    xTensor.setHostValue(safeTestTypeCast<XType>(2.0f * maxOutVal), 0, 2);
-    xTensor.setHostValue(safeTestTypeCast<XType>(2.0f * maxOutVal), 0, 3);
+    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal / 2.0f), 0, 0);
+    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal / 2.0f), 0, 1);
+    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal), 0, 2);
+    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal), 0, 3);
 
     CpuFpReferenceBlockScaleQuantize::quantize(xTensor, yTensor, scaleTensor, 2);
 
     const auto tolerance = 1e-2f;
-    EXPECT_NEAR(static_cast<float>(scaleTensor.getHostValue(0, 0)), 1.0f, tolerance);
-    EXPECT_NEAR(static_cast<float>(scaleTensor.getHostValue(0, 1)), 2.0f, tolerance);
+    EXPECT_NEAR(static_cast<float>(scaleTensor.getHostValue(0, 0)), 0.5f, tolerance);
+    EXPECT_NEAR(static_cast<float>(scaleTensor.getHostValue(0, 1)), 1.0f, tolerance);
 
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 0)), maxOutVal, tolerance);
     EXPECT_NEAR(static_cast<float>(yTensor.getHostValue(0, 1)), maxOutVal, tolerance);
