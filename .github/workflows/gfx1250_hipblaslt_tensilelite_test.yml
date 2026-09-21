@@ -299,7 +299,7 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" -rxX \
             --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
