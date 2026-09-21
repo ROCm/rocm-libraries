@@ -1192,7 +1192,7 @@ def _run_dgrad_sweep(
             block_ch = spec.block_groups * spec.wave_size
             q_tiles = math.ceil(p.W / block_q)
             c_tiles = math.ceil(p.total_c / block_ch)
-            grid = (q_tiles, c_tiles, p.N * p.H)
+            grid = (q_tiles, c_tiles, p.N)
             label = f"bq={block_q:3d} bg={block_groups:3d} scFMA"
             block_dim = (spec.threads_per_block, 1, 1)
             kernel = kernel_or_pair

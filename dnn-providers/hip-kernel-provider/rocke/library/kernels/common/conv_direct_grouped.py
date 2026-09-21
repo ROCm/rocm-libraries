@@ -2089,6 +2089,12 @@ class DirectConvSpec:
             raise ValueError(
                 f"DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got {p.cpg})"
             )
+        if self.block_groups > 1 and self.waves_k > 1:
+            raise ValueError(
+                f"block_groups={self.block_groups} > 1 combined with waves_k={self.waves_k} > 1 "
+                f"is not supported: the LDS reduction row index does not account for "
+                f"wave_group_idx, causing cross-group partial-sum corruption"
+            )
         N_K_ATOMS = (p.cpg + 15) // 16
         if N_K_ATOMS % self.waves_k != 0:
             raise ValueError(
@@ -2535,11 +2541,11 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         c_block_sz = b.const_i32(_pw_elems_per_block)
         _pw_n_dwords = LOAD_VEC // 2  # for buffer_load_vN_f16 n parameter
         # W_coa layout: [groups, KH, KW, N_K_ATOMS, N_M_TILES, WAVE, LOAD_VEC]
-        # group-level block offset (g_tile for non-persistent; 0 for persistent
-        # since persistent with WAVES_K>1 and groups>1 is not a supported combo).
+        # group-level block offset uses the absolute group index g (not the g_tile)
+        # so that each wave-group loads its own group's filters when block_groups > 1.
         _pw_blocks_per_group = p.KH * p.KW * N_K_ATOMS * N_M_TILES
-        _pw_g_tile = by if not PERSISTENT else b.const_i32(0)
-        _pw_group_base = b.mul(_pw_g_tile, b.const_i32(_pw_blocks_per_group))
+        _pw_g_abs = g if not PERSISTENT else b.const_i32(0)
+        _pw_group_base = b.mul(_pw_g_abs, b.const_i32(_pw_blocks_per_group))
         for r_const in range(p.KH):
             for s_const in range(p.KW):
                 for local_atom in range(N_K_LOCAL):
@@ -2730,13 +2736,14 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                     r_const * p.KW * N_K_ATOMS + s_const * N_K_ATOMS
                                 ) * N_M_TILES
                                 # W_coa layout: [groups, KH, KW, N_K_ATOMS, N_M_TILES, ...].
-                                # Include group-tile base offset so g>0 loads the correct group.
+                                # Use absolute group g so each wave-group loads its own
+                                # group's filters when block_groups > 1.
                                 _rk_blocks_per_group = (
                                     p.KH * p.KW * N_K_ATOMS * N_M_TILES
                                 )
-                                _rk_g_tile = by if not PERSISTENT else b.const_i32(0)
+                                _rk_g_abs = g if not PERSISTENT else b.const_i32(0)
                                 _rk_group_base = b.mul(
-                                    _rk_g_tile, b.const_i32(_rk_blocks_per_group)
+                                    _rk_g_abs, b.const_i32(_rk_blocks_per_group)
                                 )
                                 block_idx_rk = b.add(
                                     _rk_group_base,
@@ -3200,7 +3207,7 @@ def build_direct_reorganize_weights(
         raise ValueError(
             f"DirectConvSpec fold_k32 requires cpg to be a multiple of 32 (got {p.kpg})"
         )
-    N_K_ATOMS = p.kpg // K_ATOM_SZ  # kpg = cpg of transposed fprop
+    N_K_ATOMS = (p.kpg + K_ATOM_SZ - 1) // K_ATOM_SZ  # ceil; matches workspace sizing
     N_M_TILES = (p.cpg + 15) // 16  # cpg = kpg of transposed fprop
     WAVE = 64
 
@@ -3513,23 +3520,22 @@ class DirectConvDgradSpec:
 
         dX[n, hi, wi, c] = sum_{r, s, k} dY[n, ho, wo, k] * W[k, r, s, c]
 
-    where ho = hi + PAD - r  and  wo = wi + PAD - s  (stride-1 only).
+    where ho = (hi + PAD - r) / stride, wo = (wi + PAD - s) / stride.
 
-    Algorithm — per-(hi, wi_tile) workgroup:
-      For each (r, s) tap:
-        ho = hi + PAD - r,  wo = wi + PAD - s  (boundary-checked by embed)
-        Reduce over K using mfma_f32_16x16x16_f16:
-          A = W[k, r, s, c] (transposed K×C tile), B = dY[n, ho, wo, k] (K×N tile)
-          C = dX[n, hi, wi, c] (cpg × BLOCK_Q tile)
+    Algorithm — per-(n, wi_tile, c_in_tile) workgroup:
+      The workgroup loops over all H rows (hi_iv) and for each (r, s) tap
+      reduces over all K output channels via scalar FMA.  No weight transpose
+      prepass is needed: W is accessed as W[k, r, s, c_in] with a strided
+      pointer step per k.
 
     Block geometry:
       - ``block_groups`` waves per workgroup, one group per wave.
       - ``block_q = 16`` input W positions per block.
-      - MFMA: M=cpg_tile(16), N=BLOCK_Q(16), K=kpg (runtime scf.for).
-      - Grid: (ceil(Wi / block_q), groups / block_groups, N * Hi)
-        (Hi is the batch of input rows; n and hi decoded from block_id_z)
+      - Scalar FMA over K (no MFMA); supports any cpg/kpg alignment and stride >= 1.
+      - Grid: (ceil(Wi / block_q), ceil(total_c / block_ch), N)
+        where block_ch = block_groups * wave_size; each workgroup loops over all H.
 
-    Supported: cpg multiple of 4, kpg multiple of 16, stride=1, PAD>=0.
+    Supported: cpg >= 1, kpg >= 1, stride >= 1, PAD >= 0, groups divisible by block_groups.
     """
 
     problem: DirectConvProblem
@@ -3657,13 +3663,12 @@ def build_direct_conv_dgrad(
     wave_id = b.div(tid, c_wave)
     lane = b.mod(tid, c_wave)
 
-    # Grid: bx=Wi-tile, by=c_in-tile, bz=n*Hi+hi.
+    # Grid: bx=Wi-tile, by=c_in-tile, bz=n.
+    # Each workgroup iterates over all H rows in the scf_for below, so grid.z = N.
     bx = b.block_id_x()
     by = b.block_id_y()
     bz = b.block_id_z()
-    c_Hi = b.const_i32(p.H)
-    hi = b.mod(bz, c_Hi)
-    n = b.div(bz, c_Hi)
+    n = bz
 
     wi_tile_start = b.mul(bx, b.const_i32(BLOCK_W))
     # Absolute c_in index for this thread.

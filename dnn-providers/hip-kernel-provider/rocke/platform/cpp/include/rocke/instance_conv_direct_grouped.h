@@ -368,7 +368,7 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
  *      block_groups: int = 8   # waves per workgroup (one group per wave)
  *      wave_size: int = 64
  *
- *  Grid: (ceil(Wi / block_q), groups / block_groups, N * Hi)
+ *  Grid: (ceil(Wi / block_q), ceil(total_c / (block_groups * wave_size)), N)
  *  Block: (block_groups * wave_size, 1, 1)
  * ===================================================================== */
 typedef struct rocke_direct_conv_dgrad_spec

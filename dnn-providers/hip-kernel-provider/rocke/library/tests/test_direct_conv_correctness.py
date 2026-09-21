@@ -84,6 +84,7 @@ class _Shape:
     PAD: int = 1
     stride: int = 1
     kpg: int = 0  # output channels-per-group; 0 means same as cpg
+    block_groups: int = 0  # dgrad block_groups override; 0 means use spec default
 
 
 # One representative shape per cpg variant.  groups is chosen to be a
@@ -597,7 +598,17 @@ _DGRAD_SHAPES: List[_Shape] = [
     _Shape("dg_16c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=16),
     _Shape("dg_32c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=32),
     # Asymmetric grouped: cpg != kpg — exercises the independent cpg/kpg path.
-    _Shape("dg_asym_cpg16_kpg32_g4", N=2, H=8, W=8, groups=4, cpg=16, kpg=32),
+    # block_groups=4 to satisfy groups % block_groups == 0 with groups=4.
+    _Shape(
+        "dg_asym_cpg16_kpg32_g4",
+        N=2,
+        H=8,
+        W=8,
+        groups=4,
+        cpg=16,
+        kpg=32,
+        block_groups=4,
+    ),
     # Grouped stride-2: non-unit stride grouped dgrad.
     _Shape("dg_16c_N2H8W8_g8_s2", N=2, H=8, W=8, groups=8, cpg=16, stride=2),
 ]
@@ -643,7 +654,10 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         PAD=shape.PAD,
         stride=shape.stride,
     )
-    spec = DirectConvDgradSpec(problem=p, name=f"test_dgrad_{shape.id}")
+    spec_kwargs = {"problem": p, "name": f"test_dgrad_{shape.id}"}
+    if shape.block_groups > 0:
+        spec_kwargs["block_groups"] = shape.block_groups
+    spec = DirectConvDgradSpec(**spec_kwargs)
 
     ok, reason = is_valid_dgrad_spec(spec, arch=arch)
     if not ok:
@@ -708,10 +722,11 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         rt.free(dX_dev)
         return False, f"kernel load failed: {e}"
 
-    # Grid: (ceil(Wi / block_q), groups / block_groups, N * Hi)
+    # Grid: (ceil(Wi / block_q), ceil(total_c / block_ch), N)
+    block_ch = spec.block_groups * spec.wave_size
     q_tiles = math.ceil(p.W / spec.block_q)
-    g_tiles = p.groups // spec.block_groups
-    grid = (q_tiles, g_tiles, p.N * p.H)
+    c_tiles = math.ceil(total_c / block_ch)
+    grid = (q_tiles, c_tiles, p.N)
     block = (spec.threads_per_block, 1, 1)
 
     values = {
