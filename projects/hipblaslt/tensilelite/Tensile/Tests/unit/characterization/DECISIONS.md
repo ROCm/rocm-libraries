@@ -625,12 +625,12 @@ floor reductions remain in the rebased branch.
 **ADR:** [`adr/0023-separate-codegen-smoke-from-semantics.md`](adr/0023-separate-codegen-smoke-from-semantics.md)
 
 **Decision:** Remove the compiler-sensitive opcode-set hash from shared saved
-results. Set-cover cases now state that they are coverage smoke tests and require
-successful generation except where an existing emitter failure is allowed.
-Tests that claim a specific emitted behavior use explicit source-pattern
-assertions; the S11a conversion test detects replacement of `v_cvt_f32_i32`,
-while two unstable gfx1250 cases are retained explicitly as generation smoke
-tests because their named intermediate behavior is not present in final assembly.
+results and remove basename snapshots from the 75 set-cover cases and 29
+S00-S11 designed smoke cases. These tests require successful generation except
+where an existing emitter failure is allowed. Tests that claim a specific
+emitted behavior use explicit source-pattern assertions; the S11a conversion
+test still detects replacement of `v_cvt_f32_i32`, while cases without a stable
+final-assembly observable remain explicitly labeled generation smoke tests.
 
 ## D39 — Select set-cover problem groups by content
 

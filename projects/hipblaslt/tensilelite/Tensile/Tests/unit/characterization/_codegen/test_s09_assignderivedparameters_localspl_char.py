@@ -25,7 +25,7 @@ import os
 
 import pytest
 
-from config_harness import assert_config_emits_golden
+from config_harness import assert_config_emits
 
 pytestmark = pytest.mark.unit
 
@@ -41,6 +41,6 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s09_assignderivedparameters_localspl_golden(snapshot):
-    """P3 golden: order-invariant {basename, err} digest of the emit."""
-    assert_config_emits_golden(_CONFIG, _ARCH, snapshot, limit=8, validate_source=True)
+def test_s09_assignderivedparameters_localspl_emits():
+    """The selected configuration emits valid assembly."""
+    assert_config_emits(_CONFIG, _ARCH, limit=8, validate_source=True)
