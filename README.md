@@ -18,7 +18,6 @@ TheRock CI performs multi-component testing on top of builds leveraging the [The
 
 ### Library Directory and Math CI Status
 
-Browse each library or shared component, check its existing Math CI status, and find its documentation. A dash indicates that no component-level Math CI badge was listed in the previous table.
 
 | Library | Description | Math CI Status | Documentation |
 |---------|-------------|----------------|---------------|
