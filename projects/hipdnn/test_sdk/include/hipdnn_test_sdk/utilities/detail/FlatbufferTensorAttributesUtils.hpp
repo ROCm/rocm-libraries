@@ -6,6 +6,8 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hipdnn_data_sdk/utilities/PackedFp4Tensor.hpp>
+#include <hipdnn_data_sdk/utilities/PackedFp6Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -78,7 +80,8 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> bindOptiona
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                  const std::vector<int64_t>& dims,
-                 const std::vector<int64_t>& strides)
+                 const std::vector<int64_t>& strides,
+                 bool packSubByteElements = false)
 {
     using namespace hipdnn_data_sdk::utilities;
     using namespace hipdnn_data_sdk::types;
@@ -107,12 +110,28 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E8M0:
         return std::make_unique<Tensor<fp8_e8m0>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp4Tensor>(dims, strides);
+        }
         return std::make_unique<Tensor<fp4_e2m1>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT4:
+        if(packSubByteElements)
+        {
+            throw std::runtime_error("createTensor: packed layout not implemented for INT4");
+        }
         return std::make_unique<Tensor<uint8_t>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp6Tensor<fp6_e2m3>>(dims, strides);
+        }
         return std::make_unique<Tensor<fp6_e2m3>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
+        if(packSubByteElements)
+        {
+            return std::make_unique<PackedFp6Tensor<fp6_e3m2>>(dims, strides);
+        }
         return std::make_unique<Tensor<fp6_e3m2>>(dims, strides);
     case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
         return std::make_unique<Tensor<bool>>(dims, strides);
@@ -122,14 +141,22 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 }
 
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> createTensorFromAttribute(
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
+    bool packSubByteElements = false)
 {
     auto dims
         = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
     auto strides = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
         attribute.strides());
 
-    return createTensor(attribute.data_type(), dims, strides);
+    return createTensor(attribute.data_type(), dims, strides, packSubByteElements);
+}
+
+inline bool isSubByteDataType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
 }
 
 } // namespace hipdnn_test_sdk::detail
