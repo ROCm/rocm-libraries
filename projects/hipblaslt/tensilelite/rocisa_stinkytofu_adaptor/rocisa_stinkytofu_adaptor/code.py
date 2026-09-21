@@ -1964,6 +1964,10 @@ class _SignatureKernelDescriptor(Item):
         "totalVgprs", "totalAgprs", "totalSgprs", "originalTotalVgprs",
         "accumOffset", "groupSegSize", "sgprWorkGroup", "vgprWorkItem",
         "numSgprPreload",
+        "threadTile", "subGroup", "waveGroup",
+        "vectorWidthA", "vectorWidthB",
+        "globalReadVectorWidthA", "globalReadVectorWidthB",
+        "directToLdsA", "directToLdsB", "useSgprForGRO",
     )
 
     def __init__(
@@ -1985,6 +1989,16 @@ class _SignatureKernelDescriptor(Item):
         self.totalSgprs = int(totalSgprs)
         self.originalTotalVgprs = int(totalVgprs)
         self.numSgprPreload = int(numSgprPreload)
+        self.threadTile = (0, 0)
+        self.subGroup = (0, 0)
+        self.waveGroup = (0, 0)
+        self.vectorWidthA = 0
+        self.vectorWidthB = 0
+        self.globalReadVectorWidthA = 0
+        self.globalReadVectorWidthB = 0
+        self.directToLdsA = False
+        self.directToLdsB = False
+        self.useSgprForGRO = 0
         self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
 
     def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
@@ -2011,6 +2025,36 @@ class _SignatureKernelDescriptor(Item):
 
     def getNextFreeSgpr(self) -> int:
         return self.totalSgprs
+
+    def setOptimizationConfig(
+        self,
+        tt: Sequence[int],
+        sg: Sequence[int],
+        wg: Sequence[int],
+        vwA: int,
+        vwB: int,
+        glvwA: int,
+        glvwB: int,
+        d2lA: bool,
+        d2lB: bool,
+        useSgprForGRO: int,
+    ) -> None:
+        """Store tiling knobs that ``toString`` prints after Num SGPR.
+
+        Port of C++ ``SignatureKernelDescriptor::setOptimizationConfig``.
+        Native ``toStinkyTofuModule`` fills these from ModuleOptions and
+        emits them as raw comment text, not as ``TextBlock``s.
+        """
+        self.threadTile = (int(tt[0]), int(tt[1]))
+        self.subGroup = (int(sg[0]), int(sg[1]))
+        self.waveGroup = (int(wg[0]), int(wg[1]))
+        self.vectorWidthA = int(vwA)
+        self.vectorWidthB = int(vwB)
+        self.globalReadVectorWidthA = int(glvwA)
+        self.globalReadVectorWidthB = int(glvwB)
+        self.directToLdsA = bool(d2lA)
+        self.directToLdsB = bool(d2lB)
+        self.useSgprForGRO = int(useSgprForGRO)
 
     def toString(self) -> str:
         kd_indent = "  "
@@ -2095,6 +2139,32 @@ class _SignatureKernelDescriptor(Item):
         out += _sig_block(f"Num VGPR   ={self.originalTotalVgprs}")
         out += _sig_block(f"Num AccVGPR={self.totalAgprs}")
         out += _sig_block(f"Num SGPR   ={self.totalSgprs}")
+        # Same placement as C++ SignatureKernelDescriptor::toString: raw
+        # comment text after the GPR counts, not gated by outputNoComment.
+        out += _sig_block3line("Optimizations and Config:")
+        out += _sig_block(
+            f"ThreadTile= {self.threadTile[0]} x {self.threadTile[1]}"
+        )
+        out += _sig_block(
+            f"SubGroup= {self.subGroup[0]} x {self.subGroup[1]}"
+        )
+        out += _sig_block(f"VectorWidthA={self.vectorWidthA}")
+        out += _sig_block(f"VectorWidthB={self.vectorWidthB}")
+        out += _sig_block(
+            "GlobalReadVectorWidthA="
+            f"{self.globalReadVectorWidthA}, "
+            f"GlobalReadVectorWidthB={self.globalReadVectorWidthB}"
+        )
+        out += _sig_block(
+            f"DirectToLdsA={'True' if self.directToLdsA else 'False'}"
+        )
+        out += _sig_block(
+            f"DirectToLdsB={'True' if self.directToLdsB else 'False'}"
+        )
+        out += _sig_block(
+            "UseSgprForGRO="
+            f"{'True' if self.useSgprForGRO else 'False'}"
+        )
         return out
 
     def prettyPrint(self, indent: str = "") -> str:
@@ -2246,6 +2316,23 @@ class SignatureBase(Item):
     def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
         self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
         self.codeMeta.setGprs(totalVgprs, totalSgprs)
+
+    def setOptimizationConfig(
+        self,
+        tt: Sequence[int],
+        sg: Sequence[int],
+        wg: Sequence[int],
+        vwA: int,
+        vwB: int,
+        glvwA: int,
+        glvwB: int,
+        d2lA: bool,
+        d2lB: bool,
+        useSgprForGRO: int,
+    ) -> None:
+        self.kernelDescriptor.setOptimizationConfig(
+            tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO
+        )
 
     @property
     def offset(self) -> int:
