@@ -113,6 +113,35 @@ rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
 rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
                                                int32_t*         sm_count_target);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+/*! \ingroup aux_module
+ *  \brief Bytes in one device communicator channel's flag region.
+ *
+ *  \details
+ *  The kernel's arrival atomics and drain barrier index into this region, so the
+ *  backend that supplies the kernel owns its layout and this only reports the
+ *  total, which is all the host needs in order to allocate and zero it. Stating
+ *  the geometry a second time on the host would be a second definition of an ABI
+ *  the kernel already fixes, and a host region smaller than the block the kernel
+ *  addresses corrupts memory rather than returning a wrong answer.
+ */
+size_t rocblaslt_device_comm_flag_block_bytes(void);
+#endif
+
+/*! \ingroup aux_module
+ *  \brief Set the handle-level uniform-summation-order request.
+ *  See hipblasLtSetUniformSummationOrder.
+ */
+rocblaslt_status rocblaslt_set_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t          uniform_summation_order);
+
+/*! \ingroup aux_module
+ *  \brief Return the handle-level uniform-summation-order request.
+ *  See hipblasLtGetUniformSummationOrder.
+ */
+rocblaslt_status rocblaslt_get_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t*         uniform_summation_order);
+
 /*! \ingroup aux_module
  *  \brief Create a descriptor for matrix
  *  \details
@@ -421,12 +450,17 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                     rocblaslt::RocGemmType gemmType,
                                     int32_t                mode);
 
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value);
+
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
                                      rocblaslt::RocGemmType gemmType,
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
+                                     const bool             uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 
@@ -434,6 +468,11 @@ rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matm
 
 // for internal use during testing, fetch arch name
 std::string rocblaslt_internal_get_arch_name();
+
+// The library subtree the current device loads: "gfx1250v0" for a v0 part (its
+// own tree only, no fallback), otherwise the base name. Filenames inside the
+// subtree keep the revision-agnostic rocblaslt_internal_get_arch_name().
+std::string rocblaslt_internal_get_library_arch_name();
 
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);

@@ -301,6 +301,8 @@ constexpr rocblas_fill char2rocblas_fill(char value)
     case 'u': return rocblas_fill_upper;
     case 'L':
     case 'l': return rocblas_fill_lower;
+    case 'F':
+    case 'f': return rocblas_fill_full;
     default: return static_cast<rocblas_fill>(0);
     }
 }

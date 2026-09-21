@@ -180,6 +180,7 @@ The Backend uses descriptors as opaque handles to manage different aspects of gr
 - Represents a backend engine
 - Contains engine ID, and a set of behavioral notes + configurable settings
 - Retrieved from engine config Descriptor
+- Exposes the engine name through the read-only `HIPDNN_ATTR_ENGINE_NAME_EXT` attribute
 
 ##### 5. Execution Plan Descriptor (`HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR`)
 - Combines an engine configuration with a graph

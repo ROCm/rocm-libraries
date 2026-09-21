@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,6 @@ gpubuf twiddles_create_2D(size_t                     N1,
                           rocfft_precision           precision,
                           const hipDeviceProp_t&     deviceProp,
                           bool                       attach_halfN,
-                          bool                       attach_halfN2,
                           const std::vector<size_t>& radices1,
                           const std::vector<size_t>& radices2,
                           unsigned int               deviceId);
