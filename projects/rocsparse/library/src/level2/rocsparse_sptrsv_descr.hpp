@@ -23,6 +23,7 @@
 
 #include "rocsparse-types.h"
 #include "rocsparse_csrsv_info.hpp"
+#include "rocsparse_ellsv_info.hpp"
 #include <memory>
 struct _rocsparse_sptrsv_descr
 {
@@ -37,7 +38,12 @@ protected:
     rocsparse_datatype                     m_compute_datatype;
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
+    std::shared_ptr<_rocsparse_ellsv_info> m_ellsv_info;
     rocsparse_format                       m_format{};
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_solve_mode        m_solve_mode{rocsparse_solve_mode_triangular};
+    rocsparse_diagonal_modifier m_diagonal_modifier{rocsparse_diagonal_modifier_none};
+#endif
 
 public:
     int64_t m_batch_count{};
@@ -66,6 +72,17 @@ public:
     rocsparse_csrsv_info get_csrsv_info();
     void                 set_csrsv_info(rocsparse_csrsv_info value);
     void                 set_shared_csrsv_info(std::shared_ptr<_rocsparse_csrsv_info> value);
+
+    rocsparse_ellsv_info get_ellsv_info();
+    void                 set_ellsv_info(rocsparse_ellsv_info value);
+    void                 set_shared_ellsv_info(std::shared_ptr<_rocsparse_ellsv_info> value);
+
+#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
+    rocsparse_solve_mode        get_solve_mode() const;
+    void                        set_solve_mode(rocsparse_solve_mode value);
+    rocsparse_diagonal_modifier get_diagonal_modifier() const;
+    void                        set_diagonal_modifier(rocsparse_diagonal_modifier value);
+#endif
 
     float m_local_host_alpha_value[4];
 

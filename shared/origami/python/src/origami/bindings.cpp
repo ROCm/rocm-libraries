@@ -27,6 +27,7 @@ NB_MODULE(origami, m) {
       .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1101", hardware_t::architecture_t::gfx1101)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .value("gfx1152", hardware_t::architecture_t::gfx1152)
@@ -412,6 +413,11 @@ NB_MODULE(origami, m) {
         "Compute latency per K-complete MT wave");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
+        nanobind::arg("non_temporal_a_available") = true,
+        nanobind::arg("non_temporal_b_available") = true,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions
