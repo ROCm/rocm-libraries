@@ -334,7 +334,6 @@ class _PostProcessModule:
         asm = _postprocess_vcmpx(asm)
         asm = _postprocess_sbarrier(asm)
         asm = _postprocess_carry(asm)
-        asm = asm.replace("+-", "-")
         return asm
 
     def getSetDirectives(self) -> str:
