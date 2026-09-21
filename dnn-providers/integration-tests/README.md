@@ -261,8 +261,11 @@ is its own binary, not a mode of the engine harness.
 A bundle may carry a `.support.json` sidecar promising that a named engine supports
 that graph on a given arch and platform. `--enforce-support-claims` (which requires
 `--test-engine`) turns a broken promise into a test failure instead of a silent
-skip. Claims are checked for the single engine under test. Off by default. See
-[`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
+skip; `--report-support-claims` prints the same verdicts without failing. Claims are
+checked for the single engine under test. Neither flag is on when you invoke the
+binary directly, but the CTest registrations pass one of them: enforce by default,
+report when configured with `-DHIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF`.
+See [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 
 ## Test Tiers
 
