@@ -218,9 +218,42 @@ constexpr bool dense_fp8_fallbacks(std::index_sequence<I...>)
 {
     return (!ck_tile::detail::is_qr_tdm_dense_fp8_v<DenseFp8FallbackProblem<I>> && ...);
 }
-static_assert(dense_fp8_fallbacks(std::make_index_sequence<17>{}));
+static_assert(dense_fp8_fallbacks(std::index_sequence<0, 5, 6, 7, 8, 9, 10, 12, 13, 14, 16>{}));
+
+template <std::size_t... I>
+constexpr bool dense_fp8_admitted_features(std::index_sequence<I...>)
+{
+    return ((ck_tile::detail::is_qr_tdm_dense_fp8_v<DenseFp8FallbackProblem<I>> ==
+             (ck_tile::detail::is_qr_tdm_padding_supported_arch_v &&
+              !USE_NEW_UNIFIED_FRAMEWORK)) && ...);
+}
+static_assert(dense_fp8_admitted_features(std::index_sequence<1, 2, 3, 4, 11, 15>{}));
 static_assert(ck_tile::detail::is_qr_tdm_dense_fp8_v<DenseFp8Problem> ==
-              ck_tile::detail::is_qr_tdm_padding_supported_arch_v);
+              (ck_tile::detail::is_qr_tdm_padding_supported_arch_v &&
+               !USE_NEW_UNIFIED_FRAMEWORK));
+
+// Exercise both scale modes with every combination of padding and masking flags.
+template <std::size_t Flags>
+struct DenseFp8AdmittedProblem : DenseFp8Problem
+{
+    static constexpr bool kPadSeqLenQ  = (Flags & 1) != 0;
+    static constexpr bool kPadSeqLenK  = (Flags & 2) != 0;
+    static constexpr bool kPadHeadDimQ = (Flags & 4) != 0;
+    static constexpr bool kPadHeadDimV = (Flags & 8) != 0;
+    using FmhaMask = ck_tile::SimplifiedGenericAttentionMask<(Flags & 16) != 0>;
+    static constexpr auto QScaleEnum = (Flags & 32) != 0
+                                          ? ck_tile::BlockAttentionQuantScaleEnum::BLOCKSCALE
+                                          : ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR;
+};
+
+template <std::size_t... I>
+constexpr bool dense_fp8_admitted_combinations(std::index_sequence<I...>)
+{
+    return ((ck_tile::detail::is_qr_tdm_dense_fp8_v<DenseFp8AdmittedProblem<I>> ==
+             (ck_tile::detail::is_qr_tdm_padding_supported_arch_v &&
+              !USE_NEW_UNIFIED_FRAMEWORK)) && ...);
+}
+static_assert(dense_fp8_admitted_combinations(std::make_index_sequence<64>{}));
 
 #if(defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)) || \
     (!defined(__HIP_DEVICE_COMPILE__) && defined(CK_USE_GFX1250))
@@ -665,6 +698,38 @@ constexpr bool validate_policy_coupling()
     return true;
 }
 
+#if(defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)) || \
+    (!defined(__HIP_DEVICE_COMPILE__) && defined(CK_USE_GFX1250))
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 64>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 128>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 64>());
+static_assert(validate_policy_coupling<ck_tile::fp8_t, 128>());
+static_assert(validate_policy_coupling<ck_tile::fp8_t, 64>());
+#else
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 64>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 64>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::fp8_t, 128>>>());
+static_assert(is_disabled_selection<
+              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::fp8_t, 64>>>());
+#endif
+
+using DispatchProblem = TestFmhaProblem<ck_tile::half_t, 128>;
+static_assert(
+    ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVSTdm<DispatchProblem>>);
+static_assert(
+    !ck_tile::detail::uses_qr_tdm_lds_arena_v<ck_tile::BlockFmhaPipelineQRKSVS<DispatchProblem>>);
+static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
+              ck_tile::BlockFmhaPipelineQRKSVSAsync<DispatchProblem>>);
+static_assert(!ck_tile::detail::uses_qr_tdm_lds_arena_v<
+              ck_tile::BlockFmhaPipelineQRKSVSAsyncTrload<DispatchProblem>>);
 
 struct RoundTripArgs
 {

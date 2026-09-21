@@ -227,7 +227,7 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
 // original recurrence.
 template <typename Problem>
 inline constexpr bool is_qr_tdm_dense_fp8_v =
-    is_qr_tdm_padding_enabled_problem_v<Problem> &&
+    !USE_NEW_UNIFIED_FRAMEWORK && is_qr_tdm_padding_enabled_problem_v<Problem> &&
     is_qr_tdm_measured_tiling_v<Problem, fp8_t, 128, 128> &&
     Problem::BlockFmhaShape::kM0 == 64 &&
     std::is_same_v<typename Problem::PDataType, fp8_t>&&
@@ -242,6 +242,7 @@ inline constexpr bool is_qr_tdm_dense_fp8_v =
     (Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
      Problem::QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE);
 
+#if !USE_NEW_UNIFIED_FRAMEWORK
 struct QrTdmScaledQK : WarpGemmWmma_f32_16x16x128_f8f6f4<fp8_t, fp8_t, true>
 {
     template <typename... Params, typename C, typename A, typename B>
@@ -251,6 +252,7 @@ struct QrTdmScaledQK : WarpGemmWmma_f32_16x16x128_f8f6f4<fp8_t, fp8_t, true>
             c, a, b, int32_t{0x7f7f7f7f}, int32_t{0x7f7f7f7f});
     }
 };
+#endif
 
 template <typename Problem, bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>>
 struct QrTdmPaddingSelection
@@ -611,9 +613,13 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
                                true>;
 
+#if USE_NEW_UNIFIED_FRAMEWORK
+        using WarpGemm = DefaultWarpGemm;
+#else
         using WarpGemm = std::conditional_t<detail::is_qr_tdm_dense_fp8_v<Problem>,
                                             detail::QrTdmScaledQK,
                                             DefaultWarpGemm>;
+#endif
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::QDataType,

@@ -549,6 +549,89 @@ TEST_P(QuantScale, DataTypeConfig)
                                                COMMON_ARGS_INIT(qscale_init_method(qscale)));
     CHECK_RESULT(result);
 }
+
+class BlockScaleStreamed
+    : public TestWithParam<std::tuple<int, std::tuple<int, int, int, int, const char*>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BlockScaleStreamed,
+    Combine(Values(32, 96, 128),
+            Values(std::tuple{256, 512, 2, 128, "0"},
+                   std::tuple{129, 257, 1, 128, "0"},
+                   std::tuple{128, 127, 2, 128, "0"},
+                   std::tuple{128, 129, 2, 128, "0"},
+                   std::tuple{256, 512, 2, 64, "0"},
+                   std::tuple{129, 257, 1, 64, "0"},
+                   std::tuple{512, 512, 2, 128, "1"},
+                   std::tuple{256, 128, 1, 128, "2"},
+                   std::tuple{200, 129, 1, 128, "2"}, // mixed empty/nonempty query tile
+                   std::tuple{129, 257, 1, 64, "1"})));
+
+TEST_P(BlockScaleStreamed, DataTypeConfig)
+{
+    if constexpr(!std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+        GTEST_SKIP() << "Streamed blockscale coverage is specific to fp8bf16";
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "Streamed blockscale coverage requires gfx125";
+
+    const auto [scale_size, dims] = GetParam();
+    const auto [sq, sk, hk, dv, mask] = dims;
+    std::string kernel_name;
+    // Each invocation validates the production pipeline across multiple KV iterations.
+    for(int repeat = 0; repeat < 3; ++repeat)
+    {
+        const auto result = fmha_fwd_run<DataTypeConfig>(
+            mode_enum::batch, 1, 2, hk, {sq}, {sk}, 128, dv,
+            0, {-1}, {-1}, {}, {}, 0, true, true, 0, 0, true, false,
+            0, false, "n", 0.0f, 0, 0, false, mask, "bs", true, 1,
+            "3", static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))) +
+                     static_cast<uint32_t>(repeat),
+            1, 0, 0, stream_config, std::nullopt, &kernel_name, scale_size);
+        // A missing instance must fail here, rather than silently reducing coverage.
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(kernel_name.find("_qr_tdm_"), std::string::npos);
+        EXPECT_NE(kernel_name.find("_b64x128x128x128x128x128_"), std::string::npos);
+        EXPECT_NE(kernel_name.find("_blockscale_"), std::string::npos);
+        const char* padding = sk % 128 == 0 ? (dv == 128 ? "npad" : "pddv")
+                                           : (dv == 128 ? "pssk" : "psskddv");
+        EXPECT_NE(kernel_name.find(std::string{"_vr_"} + padding + "_"), std::string::npos);
+        EXPECT_NE(kernel_name.find(std::string{"_nbias_"} +
+                                   (std::string_view{mask} == "0" ? "nmask" : "mask") + "_"),
+                  std::string::npos);
+    }
+}
+
+TEST(TestCkTileFmhaFwd, BlockScaleRecurrenceEdges)
+{
+    if constexpr(!std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+        GTEST_SKIP() << "Streamed blockscale coverage is specific to fp8bf16";
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "Streamed blockscale coverage requires gfx125";
+
+    for(auto pattern : {blockscale_test_pattern::equal_logits,
+                        blockscale_test_pattern::dominant_key,
+                        blockscale_test_pattern::rising_max})
+    {
+        for(int sk : {384, 385})
+        {
+            SCOPED_TRACE(::testing::Message() << "pattern=" << static_cast<int>(pattern)
+                                             << " sk=" << sk);
+            std::string kernel_name;
+            const auto result = fmha_fwd_run<DataTypeConfig>(
+                mode_enum::batch, 1, 2, 2, {64}, {sk}, 128, 128,
+                0, {-1}, {-1}, {}, {}, 0, true, true, 0, 0, true, false,
+                0, false, "n", 0.0f, 0, 0, false, "0", "bs", true, 1,
+                "3", 57, 1, 0, 0, stream_config, std::nullopt, &kernel_name, 96, pattern);
+            ASSERT_EQ(result, fwd_result::success);
+            EXPECT_NE(kernel_name.find("_b64x128x128x128x128x128_"), std::string::npos);
+            EXPECT_NE(kernel_name.find("_qr_tdm_"), std::string::npos);
+            EXPECT_NE(kernel_name.find("_blockscale_"), std::string::npos);
+        }
+    }
+}
 #endif
 
 // ---------------------------------------------------------------
