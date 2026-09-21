@@ -118,9 +118,6 @@ else( )
 
   # hipBLAS' public headers expose cuBLAS and CUDA runtime declarations on this
   # backend, so propagate their usage requirements to consumers of roc::hipblas.
-  # Using legacy FindCUDA variables since FindCUDAToolkit (which provides
-  # imported targets) requires CMake 3.17. Include dirs must be added explicitly
-  # because legacy variables do not propagate them transitively.
   target_link_libraries( hipblas PUBLIC CUDA::cublas CUDA::cudart )
 endif( )
 
@@ -192,6 +189,7 @@ else( )
   rocm_export_targets(
     TARGETS roc::hipblas
     DEPENDS PACKAGE HIP
+    DEPENDS PACKAGE CUDAToolkit
     DEPENDS PACKAGE hipblas-common
     NAMESPACE roc::
   )

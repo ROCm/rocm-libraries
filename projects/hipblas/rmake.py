@@ -73,7 +73,7 @@ def parse_args():
                         help='Specify path to host compiler. Default is amdclang++.')
 
     parser.add_argument('--cuda', '--use-cuda', dest='use_cuda', required=False, default=False, action='store_true',
-                        help='Build library for CUDA backend using nvcc directly (sets -DUSE_CUDA=ON). '
+                        help='Build library for the CUDA backend without hipcc (sets -DUSE_CUDA=ON). '
                              'nvcc must be on PATH or specified via --cudapath.')
 
     parser.add_argument(      '--cudapath', type=str, required=False, default='/usr/local/cuda', dest='cuda_path',
@@ -282,8 +282,7 @@ def config_cmd():
         cmake_options.append(f"-DCMAKE_CXX_COMPILER={args.compiler}")
 
     # amdclang++ default in linux toolchain, clang++ in windows toolchain.
-    # Skip when targeting CUDA: nvcc drives device compilation and g++ is not
-    # the right host compiler for CUDA workflows.
+    # Let the toolchain choose the host compiler when targeting CUDA.
     if os.name != "nt" and args.compiler is None:
         if not args.use_amdclang_compiler and not args.use_cuda:
             cmake_options.append(f"-DCMAKE_CXX_COMPILER=g++")
@@ -340,18 +339,20 @@ def config_cmd():
         rocsolver_path_cmake =  f'"{raw_rocsolver_path}"'
         cmake_options.append( f"-DCUSTOM_ROCSOLVER={rocsolver_path_cmake}")
 
-    # CUDA backend: pass USE_CUDA=ON and locate nvcc so CMake's find_package(CUDA)
-    # resolves without any hipcc involvement.
+    # CUDA backend: pass USE_CUDA=ON and locate the toolkit through nvcc so
+    # find_package(CUDAToolkit) resolves without hipcc.
     if args.use_cuda:
         cmake_options.append("-DUSE_CUDA=ON")
         cuda_path = args.cuda_path  # defaults to /usr/local/cuda
         nvcc_candidate = os.path.join(cuda_path, 'bin', 'nvcc')
         if not os.path.exists(nvcc_candidate):
             nvcc_candidate = which('nvcc') or ''
+            if nvcc_candidate:
+                cuda_path = os.path.dirname(os.path.dirname(os.path.realpath(nvcc_candidate)))
         if not nvcc_candidate:
             fatal("nvcc not found. Install the CUDA toolkit or pass "
                   "--cudapath=/path/to/cuda to specify its location.")
-        cmake_options.append(f"-DCUDA_TOOLKIT_ROOT_DIR={cuda_path}")
+        cmake_options.append(f"-DCUDAToolkit_ROOT={cuda_path}")
         cmake_options.append(f"-DCMAKE_CUDA_COMPILER={nvcc_candidate}")
 
     if args.cmake_dargs:

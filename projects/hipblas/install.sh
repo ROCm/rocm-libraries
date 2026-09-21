@@ -360,10 +360,9 @@ cat <<EOF
 
     --cmake_install               Install minimum cmake version if required.
 
-    --cuda, --use-cuda            Build library for CUDA backend using nvcc
-                                  directly (no hipcc dependency). Passes
-                                  -DUSE_CUDA=ON to CMake. nvcc must be on
-                                  PATH or reachable via --cudapath.
+    --cuda, --use-cuda            Build library for the CUDA backend without
+                                  hipcc. Passes -DUSE_CUDA=ON to CMake. nvcc
+                                  must be on PATH or reachable via --cudapath.
 
     -d, --dependencies            Build and install external dependencies. Dependencies are to be installed in /usr/local.
                                   This should be done only once (this does not install rocBLAS, rocSolver, or cuda).

@@ -138,8 +138,8 @@ def test_get_rocm_version_path_fallback_hip_version_h(
 
     In TheRock CI builds ROCm tools such as amdclang++ are on PATH but
     ROCM_PATH is not set and /opt/rocm does not exist. The fallback walks up
-    from the found executable's directory (up to 5 levels) looking for either
-    .info/version or include/hip/hip_version.h. Two typical layouts are
+    from the found executable's directory (up to 5 levels) looking for HIP
+    build metadata before .info/version. Two typical layouts are
     exercised: dist/bin/ (1 level up to dist/) and dist/lib/llvm/bin/ (3
     levels up to dist/).
     """
@@ -161,20 +161,10 @@ def test_get_rocm_version_path_fallback_hip_version_h(
     monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.delenv("ROCM_PATH", raising=False)
     monkeypatch.delenv("HIP_PATH", raising=False)
-    import shutil as _shutil
-    monkeypatch.setattr(_shutil, "which", lambda name: str(exe) if name == "amdclang++" else None)
-
-    # Block all .info/version reads (including the hardcoded /opt/rocm fallback)
-    # so the code falls through to the PATH-based hip_version.h branch.
-    from pathlib import Path as _Path
-    _orig_read_text = _Path.read_text
-
-    def _selective_read_text(self, **kwargs):
-        if self.name == "version" and self.parent.name == ".info":
-            raise OSError(f"mocked absence: {self}")
-        return _orig_read_text(self, **kwargs)
-
-    monkeypatch.setattr(_Path, "read_text", _selective_read_text)
+    monkeypatch.setattr(C, "_DEFAULT_ROCM_ROOT", tmp_path / "missing-default")
+    monkeypatch.setattr(
+        C.shutil, "which", lambda name: str(exe) if name == "amdclang++" else None
+    )
 
     assert C.get_rocm_version() == expected_version
 
@@ -311,7 +301,7 @@ def test_bundler_compress(fixed_version, captured_invoke):
     args = captured_invoke[0]
     assert "--compress" in args
     assert any("gfx942" in str(a) for a in args)
-    assert f"--output=dst.co" in args
+    assert "--output=dst.co" in args
 
 
 def test_bundler_unbundle_call(fixed_version, captured_invoke):

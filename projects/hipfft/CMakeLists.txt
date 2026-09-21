@@ -110,14 +110,31 @@ if(BUILD_ADDRESS_SANITIZER)
   add_compile_definitions(ADDRESS_SANITIZER)
 endif()
 
-# USE_CUDA: build hipFFT for the CUDA backend using nvcc directly.
-# Replaces the old ENV{HIP_PLATFORM} check (hipcc/hipconfig removed).
-option(USE_CUDA "Build hipFFT for the CUDA backend using nvcc directly (no hipcc)" OFF)
+# USE_CUDA is a convenience alias for the existing BUILD_WITH_LIB selector.
+string(TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB)
+set(_HIPFFT_USE_CUDA_DEFAULT OFF)
+if(BUILD_WITH_LIB STREQUAL "CUDA")
+  set(_HIPFFT_USE_CUDA_DEFAULT ON)
+endif()
+option(USE_CUDA "Build hipFFT against CUDA libraries" ${_HIPFFT_USE_CUDA_DEFAULT})
+unset(_HIPFFT_USE_CUDA_DEFAULT)
+
+if(USE_CUDA)
+  set(BUILD_WITH_LIB "CUDA" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE)
+  set(HIP_PLATFORM nvidia)
+else()
+  set(BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE)
+  set(HIP_PLATFORM amd)
+endif()
+
+# Loading HIP after defining its platform prevents hip-config.cmake from
+# invoking hipconfig to choose a backend.
+find_package(hip CONFIG REQUIRED)
 
 # Set internal BUILD_WITH_COMPILER.
 if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
   set( BUILD_WITH_COMPILER "HOST-default" )
-elseif( USE_CUDA )
+elseif( BUILD_WITH_LIB STREQUAL "CUDA" )
   set( BUILD_WITH_COMPILER "HIP-nvcc" )
 else()
   set( BUILD_WITH_COMPILER "HIP-clang" )
@@ -127,7 +144,6 @@ else()
 endif()
 
 string( TOUPPER "${BUILD_WITH_COMPILER}" BUILD_WITH_COMPILER )
-string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
