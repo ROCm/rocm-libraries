@@ -38,11 +38,19 @@ GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
 GEMM_MX_PIPELINES_BY_ARCH = {
     "gfx950": ("comp_async", "comp_async_eight_waves", "weight_preshuffle"),
-    "gfx1250": ("comp_tdm", "comp_tdm_v2"),
+    "gfx1250": (
+        "comp_tdm",
+        "comp_tdm_v2",
+        "comp_async",
+        "comp_async_eight_waves",
+        "weight_preshuffle",
+    ),
 }
-GEMM_MX_PIPELINES = [
-    p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
-]
+GEMM_MX_PIPELINES = list(
+    dict.fromkeys(
+        p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
+    )
+)
 GEMM_BQUANT_PIPELINES = ["compv3"]
 
 GEMM_ABQUANT_PIPELINES = ["compv3"]
@@ -321,7 +329,7 @@ def is_trait_combination_valid(
         return scheduler == "intrawave" and (
             (pipeline in GEMM_MX_PIPELINES_BY_ARCH["gfx950"] and epilogue == "cshuffle")
             or (
-                pipeline in GEMM_MX_PIPELINES_BY_ARCH["gfx1250"]
+                pipeline in ("comp_tdm", "comp_tdm_v2")
                 and epilogue == "tdm"
                 and not persistent_or_preshuffle_quant
             )
@@ -471,6 +479,7 @@ def validate_lds_capacity(
     b_datatype: str,
     pipeline: str,
     gpu_target: str = "",
+    lds_capacity_bytes: int = None,
 ) -> Tuple[bool, str]:
     """Validate LDS capacity requirements."""
     matrix_a_size = (tile_m * tile_k) * element_size(a_datatype)
@@ -494,7 +503,9 @@ def validate_lds_capacity(
     total_tile_in_lds = matrix_a_size + matrix_b_size
 
     base_gpu_target = _base_gfx_arch(gpu_target)
-    hw_lds_size = LDS_SIZE_MAP.get(base_gpu_target, DEFAULT_LDS_SIZE)
+    hw_lds_size = lds_capacity_bytes or LDS_SIZE_MAP.get(
+        base_gpu_target, DEFAULT_LDS_SIZE
+    )
     double_buffer = pipeline in [
         "preshufflev2",
         "compv4",
@@ -687,7 +698,7 @@ def is_tile_config_valid(
     mx_eight_waves = (
         kernel_name_prefix == "mx_gemm"
         and pipeline == "comp_async_eight_waves"
-        and _base_gfx_arch(gpu_target) == "gfx950"
+        and _base_gfx_arch(gpu_target) in ("gfx950", "gfx1250")
         and (warp_m, warp_n, warp_k) == (4, 2, 1)
     )
     if not mx_eight_waves and not validate_warp_configuration(
@@ -720,7 +731,23 @@ def is_tile_config_valid(
 
     # Validate LDS capacity
     lds_valid, lds_error = validate_lds_capacity(
-        tile_m, tile_n, tile_k, a_datatype, b_datatype, pipeline, gpu_target
+        tile_m,
+        tile_n,
+        tile_k,
+        a_datatype,
+        b_datatype,
+        pipeline,
+        gpu_target,
+        # Native gfx1250 async paths use the 320 KiB capacity in get_lds_size().
+        # Keep the existing default TDM search space and non-MX validation stable.
+        lds_capacity_bytes=(
+            320 * 1024
+            if kernel_name_prefix == "mx_gemm"
+            and _base_gfx_arch(gpu_target) == "gfx1250"
+            and pipeline
+            in ("comp_async", "comp_async_eight_waves", "weight_preshuffle")
+            else None
+        ),
     )
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")
@@ -1335,7 +1362,7 @@ def validate_gemm_mx(
     arch = _base_gfx_arch(gpu_target)
     if pipeline not in GEMM_MX_PIPELINES_BY_ARCH.get(arch, ()):
         return False, f"MX pipeline {pipeline!r} is not supported on {arch}"
-    if arch == "gfx1250":
+    if arch == "gfx1250" and pipeline in ("comp_tdm", "comp_tdm_v2"):
         if (warp_m, warp_n, warp_k) != (2, 2, 1):
             return False, "gfx1250 MX GEMM requires 2x2x1 warps"
         return True, ""
@@ -1347,7 +1374,9 @@ def validate_gemm_mx(
         pad_bytes = 4 if (row_bytes // 4) % 2 == 0 else 0
         rows = tile_m // lds_layer
         epilogue_bytes = rows * row_bytes + (rows - 1) * pad_bytes
-        if epilogue_bytes > LDS_SIZE_MAP[arch]:
+        if arch == "gfx1250":
+            epilogue_bytes = tile_m * tile_n * 2 + (tile_m - 1) * 2
+        if epilogue_bytes > (320 * 1024 if arch == "gfx1250" else LDS_SIZE_MAP[arch]):
             return (
                 False,
                 "MX packed CShuffle epilogue exceeds the architecture LDS capacity",
@@ -1378,6 +1407,11 @@ def validate_gemm_mx(
             return False, "MX weight preshuffle requires tiles divisible by 32x128x256"
         if b_datatype == "fp4" and tile_n % 512:
             return False, "MX FP4 weight preshuffle requires N tiles divisible by 512"
+        return True, ""
+
+    if arch == "gfx1250":
+        if (warp_m, warp_n, warp_k) != (2, 2, 1):
+            return False, "gfx1250 MX async requires 2x2x1 warps"
         return True, ""
 
     warp_size = get_warp_size_for_gpu(gpu_target)

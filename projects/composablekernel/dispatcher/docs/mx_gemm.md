@@ -15,6 +15,9 @@ The bridge exposes all five pipeline choices in the native MX GEMM selector:
 | gfx950 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
 | gfx1250 | `comp_tdm` | `GemmPipelineAgBgCrCompTDMV1` | TDM |
 | gfx1250 | `comp_tdm_v2` | `GemmPipelineAgBgCrCompTDMV2` | TDM |
+| gfx1250 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
+| gfx1250 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
+| gfx1250 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
 
 These are the five choices in the native `MxGemmPipelineType` selector.
 CK-Tile also has a separate `MXFlatmmKernel` family, including
@@ -26,7 +29,7 @@ All use intrawave scheduling and a 16 × 16 × 128 warp tile. The default remain
 `comp_async` on gfx950 and `comp_tdm` on gfx1250. Select another pipeline with
 `default_fp8_config("gfx950", pipeline="weight_preshuffle")`,
 `default_fp4_config("gfx950", pipeline="comp_async_eight_waves")`, or
-`default_fp8_config("gfx1250", pipeline="comp_tdm_v2")`. These helpers choose
+`default_fp8_config("gfx1250", pipeline="comp_async")`. These helpers choose
 compatible block tiles and warp counts for the selected pipeline.
 
 Eight-wave async requires `4 × 2 × 1` warps and M/N block tiles divisible by
@@ -34,11 +37,15 @@ Eight-wave async requires `4 × 2 × 1` warps and M/N block tiles divisible by
 `1 × 4 × 1` warps and block tiles divisible by `32 × 128 × 256`; FP4 also
 requires block N divisible by 512. The host reshuffles B for weight preshuffle,
 so callers supply the same packed RCR input buffers for every pipeline.
+On gfx1250, weight preshuffle requires problem N divisible by 16; the host
+rejects other N sizes before reshuffling. Async and TDM require `2 × 2 × 1`
+warps on gfx1250.
 The generator and Python configuration validation apply the same architecture,
 tile-distribution, and LDS limits.
 
 The gfx1250 path uses WMMA without cluster launch and supports revision 0.
-M and N may include partial tiles; the host pads their scale buffers before
+M and N may include partial tiles subject to the weight-preshuffle N alignment;
+the host pads their scale buffers before
 reshuffling. K must be divisible by both 128 and the selected block tile K.
 Split-K, persistent execution, and K padding are not supported by this bridge's
 gfx1250 path. The separate 32 × 32 packed-FP4 instruction is not selected.
@@ -92,6 +99,9 @@ PYCODE
 
 ## Regression tests
 
+The [gfx1250 validation report](mx_gemm_validation.md) records the full pipeline
+matrix, reference comparisons, architecture regression checks and their scope.
+
 CPU tests cover architecture selection, invalid configurations, scale/packing
 codecs, the CI configuration, and exact generated-header parity with Tile Engine:
 
@@ -99,9 +109,12 @@ codecs, the CI configuration, and exact generated-header parity with Tile Engine
 python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_bridge.py -v
 ```
 
-The GPU suite builds all 16 gfx1250 CI configurations (two pipelines × two input
-types × two M tiles × two N tiles), runs seven shapes with two seeds, varies
-scales across rows and K blocks, and checks K-tail/split-K rejection. On gfx950
+The GPU suite builds all 16 gfx1250 TDM CI configurations and six configurations
+covering async, eight-wave async, and weight preshuffle in FP4 and FP8. It tests
+partial tiles and one through five and eight K-loop iterations with two seeds,
+varies scales across rows and K blocks, and repeats eight-wave launches to catch
+buffer-reuse races. It checks K-tail/split-K rejection and weight-preshuffle N
+alignment. On gfx950
 it tests all three pipelines with FP4 and FP8 over four block-relative shapes
 and two seeds:
 
@@ -119,6 +132,8 @@ cmake -S . -B build/mx_native \
   -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++ -DCMAKE_PREFIX_PATH=/opt/rocm
 cmake --build build/mx_native --target test_ck_tile_mx_gemm_e8m0_gfx1250 --parallel 2
 ctest --test-dir build/mx_native -R test_ck_tile_mx_gemm_e8m0_gfx1250 --output-on-failure
+cmake --build build/mx_native --target test_ck_tile_mx_gemm_splitk_support --parallel 2
+ctest --test-dir build/mx_native -R test_ck_tile_mx_gemm_splitk_support --output-on-failure
 ```
 
 For Tile Engine, enable `BUILD_CK_TILE_ENGINE`, use `GPU_TARGETS=gfx1250`, and
@@ -130,6 +145,8 @@ a `16 x 16 x 128` warp tile, and no padding or persistent execution. Block M/N
 range from 64 to 256 in steps of 64; block K is 128 or 256. The existing
 datatype-specific LDS checks filter this search space to 22 FP4 and 7 FP8
 kernels per pipeline, for 58 kernels total.
+This conservative default set contains TDM kernels. The three CShuffle pipelines
+are available through explicit configuration or the Python helpers above.
 
 For the smaller 16-kernel CI set covering both TDM pipelines, pass
 `-DMX_GEMM_CONFIG_FILE=default_ci_config_gfx1250.json` to CMake. The

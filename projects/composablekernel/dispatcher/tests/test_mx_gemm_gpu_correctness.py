@@ -99,7 +99,7 @@ class TestMxGemmGpu(unittest.TestCase):
             )
         ]
         if self.ARCH == "gfx1250":
-            configs = [
+            configs += [
                 MxGemmKernelConfig(
                     datatype=dtype,
                     gpu_target=self.ARCH,
@@ -128,7 +128,17 @@ class TestMxGemmGpu(unittest.TestCase):
                 (2 * bm, 2 * bn, 4 * bk),
             ]
             if self.ARCH == "gfx1250":
-                shapes += [(1, 17, 128), (63, 65, 256), (129, 257, 512)]
+                if config.pipeline == "weight_preshuffle":
+                    shapes += [(1, 16, bk), (bm + 1, bn + 16, 2 * bk)]
+                else:
+                    shapes += [(1, 17, bk), (bm - 1, bn + 1, 2 * bk)]
+                shapes += [(bm, bn, 5 * bk), (bm, bn, 8 * bk)]
+                if config.pipeline in (
+                    "comp_async", "comp_async_eight_waves", "weight_preshuffle"
+                ):
+                    # FP8 inputs occupy a full 1 MiB allocation here. Smaller
+                    # allocations can hide a prefetch past the physical buffer.
+                    shapes.append((512, 512, 2048))
             for M, N, K in shapes:
                 for seed in (5, 19):
                     with self.subTest(
@@ -157,15 +167,23 @@ class TestMxGemmGpu(unittest.TestCase):
                         self.assertTrue(np.all(np.isfinite(got)))
                         error = _max_rel_err(got, ref)
                         self.assertLessEqual(error, _TOL)
+                        if config.pipeline == "comp_async_eight_waves":
+                            # Buffer reuse races can pass a single invocation.
+                            for _ in range(4):
+                                repeated = runner.run(problem, A_bytes, B_bytes, sa, sb)
+                                np.testing.assert_array_equal(repeated.C, result.C)
                         print(
                             f"[mx_gemm/{dtype}/{config.pipeline}] tile={config.tile_m}x{config.tile_n} "
                             f"shape={M}x{N}x{K} seed={seed} max_rel={error:.4e}"
                         )
             # Unsupported K tails and split-K must be rejected before reshuffling.
-            for problem in (
+            unsupported = [
                 MxGemmProblem(bm, bn, 32),
                 MxGemmProblem(bm, bn, bk, 2),
-            ):
+            ]
+            if self.ARCH == "gfx1250" and config.pipeline == "weight_preshuffle":
+                unsupported.append(MxGemmProblem(bm, 17, bk))
+            for problem in unsupported:
                 _, _, a, b, sa, sb = runner.make_inputs(problem, scale=1.0, seed=5)
                 with self.assertRaisesRegex(RuntimeError, "unsupported"):
                     runner.run(problem, a, b, sa, sb)

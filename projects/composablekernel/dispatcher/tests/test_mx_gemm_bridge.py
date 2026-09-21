@@ -393,7 +393,7 @@ class TestMxArchitectureKernels(unittest.TestCase):
         cfg = default_fp8_config("gfx1250")
         for changes in (
             {"gpu_target": "gfx1200"},
-            {"pipeline": "comp_async"},
+            {"pipeline": "mx_flatmm"},
             {"epilogue": "cshuffle"},
             {"persistent": True},
             {"pad_k": True},
@@ -454,6 +454,9 @@ class TestMxArchitectureKernels(unittest.TestCase):
             "gfx1250": {
                 "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
                 "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+                "comp_async": "GemmPipelineAgBgCrCompAsync",
+                "comp_async_eight_waves": "GemmPipelineAgBgCrCompAsyncEightWaves",
+                "weight_preshuffle": "MXGemmPreshufflePipelineAGmemBGmemCRegV1",
             },
         }
         for arch, implementations in pipelines.items():
@@ -484,9 +487,9 @@ class TestMxArchitectureKernels(unittest.TestCase):
         from unified_mx_gemm_codegen import _validate
 
         invalid = [
-            default_fp8_config("gfx1250", "comp_async"),
+            replace(default_fp8_config("gfx1250", "comp_async"), warp_m=1),
             default_fp8_config("gfx950", "comp_tdm_v2"),
-            default_fp8_config("gfx1250", "weight_preshuffle"),
+            replace(default_fp8_config("gfx1250", "weight_preshuffle"), tile_k=128),
             replace(default_fp4_config("gfx950", "comp_async"), tile_m=192, tile_n=512),
             replace(
                 default_fp8_config("gfx950", "comp_async"),
@@ -546,7 +549,16 @@ class TestMxArchitectureKernels(unittest.TestCase):
                     "gfx950",
                     ("comp_async", "comp_async_eight_waves", "weight_preshuffle"),
                 ),
-                ("gfx1250", ("comp_tdm", "comp_tdm_v2")),
+                (
+                    "gfx1250",
+                    (
+                        "comp_tdm",
+                        "comp_tdm_v2",
+                        "comp_async",
+                        "comp_async_eight_waves",
+                        "weight_preshuffle",
+                    ),
+                ),
             ):
                 for pipeline in pipelines:
                     cfg = default_fp8_config(arch, pipeline)
@@ -557,7 +569,10 @@ class TestMxArchitectureKernels(unittest.TestCase):
                         self.assertEqual(info["pipeline"], pipeline)
                         self.assertEqual(info["scheduler"], "intrawave")
                         self.assertEqual(
-                            info["epilogue"], "tdm" if arch == "gfx1250" else "cshuffle"
+                            info["epilogue"],
+                            "tdm"
+                            if pipeline in ("comp_tdm", "comp_tdm_v2")
+                            else "cshuffle",
                         )
 
 

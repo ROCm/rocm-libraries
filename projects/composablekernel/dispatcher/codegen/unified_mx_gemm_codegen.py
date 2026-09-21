@@ -22,8 +22,8 @@ Each header is compiled per-kernel via force-include:
     hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE mx_gemm_ctypes_lib.cpp
 
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
-and gfx1250. gfx950 provides async, eight-wave async, and weight-preshuffle
-pipelines with CShuffle; gfx1250 provides TDM V1 and V2 with the TDM epilogue.
+and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
+pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue.
 Both use intrawave scheduling and a 16x16x128 warp tile.
 """
 
@@ -121,6 +121,7 @@ def _validate(cfg: dict) -> None:
             f"pipeline must be one of {GEMM_MX_PIPELINES_BY_ARCH[arch]} on {arch}, got {pipeline!r}"
         )
 
+    valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
     epilogue = cfg.get("epilogue", valid_epilogue)
     if epilogue != valid_epilogue:
         raise ValueError(
@@ -158,8 +159,6 @@ def _validate(cfg: dict) -> None:
         if tc[block] % (tc[waves] * tc[warp]):
             raise ValueError("block tiles must be divisible by their warp arrangement")
     if arch == "gfx1250":
-        if (tc["warp_m"], tc["warp_n"], tc["warp_k"]) != (2, 2, 1):
-            raise ValueError("gfx1250 MX GEMM requires 2x2x1 warps")
         if cfg.get("persistent") or cfg.get("pad_k"):
             raise ValueError(
                 "gfx1250 MX GEMM does not support persistent execution or K padding"
@@ -184,7 +183,9 @@ def _tile_config_from_cfg(cfg: dict) -> dict:
 
 def _trait_combo_from_cfg(cfg: dict) -> Tuple:
     """7-tuple: (pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent)."""
-    valid_pipeline, valid_epilogue = ARCH_TRAITS[cfg["gpu_target"]]
+    valid_pipeline, _ = ARCH_TRAITS[cfg["gpu_target"]]
+    pipeline = cfg.get("pipeline", valid_pipeline)
+    valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
     return (
         cfg.get("pipeline", valid_pipeline),
         cfg.get("epilogue", valid_epilogue),

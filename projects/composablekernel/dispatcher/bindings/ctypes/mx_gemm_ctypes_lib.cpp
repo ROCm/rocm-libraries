@@ -233,6 +233,12 @@ int dispatcher_run_mx_gemm(const void* A,
     constexpr ck_tile::index_t xdl_k_thread  = 64 / xdl_mn_thread;
 
     // Validate before reshuffling: packed scale descriptors cannot represent K tails.
+    if constexpr(SelectedKernel::Preshuffle)
+    {
+        // shuffle_b forms complete native warp tiles before the device launch.
+        if(n % n_per_xdl != 0 || k % k_per_xdl != 0)
+            return -2;
+    }
     if constexpr(is_gfx1250)
     {
         if(k % 128 != 0 || k % SelectedKernel::TileK != 0)

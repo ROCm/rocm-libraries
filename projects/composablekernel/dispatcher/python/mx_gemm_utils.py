@@ -278,7 +278,9 @@ class MxGemmKernelConfig:
     def to_codegen_config(self) -> dict:
         arch = self.gpu_target or _get_arch()
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-        epilogue = self.epilogue or ("tdm" if arch == "gfx1250" else "cshuffle")
+        epilogue = self.epilogue or (
+            "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
+        )
         return {
             "datatype": self.datatype,
             "layout": self.layout,
@@ -359,7 +361,16 @@ class MxGemmKernelConfig:
             self.layout,
             self.pipeline
             or ("comp_tdm" if self.gpu_target == "gfx1250" else "comp_async"),
-            self.epilogue or ("tdm" if self.gpu_target == "gfx1250" else "cshuffle"),
+            self.epilogue
+            or (
+                "tdm"
+                if (
+                    self.pipeline
+                    or ("comp_tdm" if self.gpu_target == "gfx1250" else "comp_async")
+                )
+                in ("comp_tdm", "comp_tdm_v2")
+                else "cshuffle"
+            ),
             self.scheduler,
             str(self.pad_m),
             str(self.pad_n),
@@ -948,6 +959,13 @@ def default_fp8_config(
         warp_tile_n=16,
         warp_tile_k=128,
     )
+    if gfx_arch == "gfx1250" and pipeline in (
+        "comp_async",
+        "comp_async_eight_waves",
+        "weight_preshuffle",
+    ):
+        cfg.pad_m = True
+        cfg.pad_n = True
     if pipeline == "comp_async_eight_waves":
         cfg.tile_n = 256
         cfg.warp_m = 4

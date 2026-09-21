@@ -26,6 +26,8 @@ def _import_gemm_kernel_builder():
 
 GemmKernelBuilder = _import_gemm_kernel_builder()
 
+from gemm_validation_utils import GEMM_MX_PIPELINES_BY_ARCH  # noqa: E402
+
 
 class MxGemmKernelBuilder(GemmKernelBuilder):
     def __init__(
@@ -56,10 +58,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
 
     def _generate_trait_combinations(self):
         arch = self.gpu_target.split(":", 1)[0]
-        expected = {
-            "gfx950": ("comp_async", "comp_async_eight_waves", "weight_preshuffle"),
-            "gfx1250": ("comp_tdm", "comp_tdm_v2"),
-        }.get(arch, ())
+        expected = GEMM_MX_PIPELINES_BY_ARCH.get(arch, ())
         return [
             combo
             for combo in super()._generate_trait_combinations()

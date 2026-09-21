@@ -1089,7 +1089,7 @@ struct SelectedKernel {{
         using GemmPipeline = {pipeline_impl_map.get(pipeline)}<UniversalGemmProblem>;"""
 
         # Epilogue
-        instance_code += self.populate_epilogue(epilogue)
+        instance_code += self.populate_epilogue(epilogue, pipeline)
 
         # Kernel type
         if self.kernel_name_prefix == "gemm_multi_d":
@@ -1460,7 +1460,7 @@ struct SelectedKernel {{
 """
         return instance_code
 
-    def populate_epilogue(self, epilogue):
+    def populate_epilogue(self, epilogue, pipeline=None):
         instance_code = """
 
         // Epilogue
@@ -1478,7 +1478,7 @@ struct SelectedKernel {{
             elif self.kernel_name_prefix == "gemm_preshuffle":
                 instance_code += self.populate_cshuffle_gemm_preshuffle()
             elif self.kernel_name_prefix == "mx_gemm":
-                instance_code += self.populate_cshuffle_mx_gemm()
+                instance_code += self.populate_cshuffle_mx_gemm(pipeline=pipeline)
         else:  # default epilogue
             if self.kernel_name_prefix in [
                 "gemm_universal",
@@ -1594,7 +1594,16 @@ struct SelectedKernel {{
         using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
         return instance_code
 
-    def populate_cshuffle_mx_gemm(self, tdm=False):
+    def populate_cshuffle_mx_gemm(self, tdm=False, pipeline=None):
+        wave32_async = not tdm and self.gpu_target.split(":")[0] == "gfx1250"
+        extra = (
+            (
+                ", AccDataType, CDataType, "
+                + ("true" if pipeline == "comp_async_eight_waves" else "false")
+            )
+            if wave32_async
+            else ""
+        )
         instance_code = f"""
         using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
             ADataType,
@@ -1614,13 +1623,13 @@ struct SelectedKernel {{
             WarpTileK,
             TransposeC,
             1,         // NumWaveGroups
-            false,     // FixedVectorSize_
+            {"true" if wave32_async else "false"},     // FixedVectorSize_
             1,         // VectorSizeC_
             Preshuffle ? 2 : 1, // BlockedXDLNPerWarp
             {"true" if tdm else "false"},     // DoubleSmemBuffer_
             ADataType, // AComputeDataType
             BDataType, // BComputeDataType
-            !Preshuffle>; // TilesPacked_
+            !Preshuffle{extra}>; // TilesPacked_
 
         using GemmEpilogue = ck_tile::{"TdmEpilogue" if tdm else "CShuffleEpilogue"}<EpilogueProblem>;"""
         return instance_code
