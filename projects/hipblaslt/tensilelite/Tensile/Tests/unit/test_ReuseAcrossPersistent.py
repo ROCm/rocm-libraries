@@ -377,22 +377,21 @@ def test_rap_never_derives_fewer_ktiles_than_the_section_count(
     assert sol["_RAPNumResidentKTiles"] == sol["PrefetchGlobalRead"] + 1
 
 
-def test_rap_free_predicates_admit_whole_tiles_in_both_free_dims(
+def test_rap_leaves_both_free_dims_alone(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    """M and N are both "a whole number of tiles", nothing narrower.
+    """K is the only dim RAP constrains. M and N carry nothing.
 
-    M used to be SizeEqual: one M-tile, which made WorkGroup0 constant and the
-    resident A trivially the same for every tile a workgroup visited. The entry
-    guard now carries that instead, comparing the pending tile's M-tile as well
-    as its batch, so any multiple of MacroTile0 is sound. What the multiple costs
-    is a separate question -- with skGrid not a multiple of NumWorkGroups0 the
-    guard fires every tile and RAP reloads as often as it would without it --
-    but that is throughput, not correctness, and no predicate can express it
-    (skGrid is a launch property, not a problem size).
+    The entry guard carries what the M == MacroTile0 predicate used to: which A a
+    tile needs is (M-tile, batch), and it compares both. A partial M-tile leaves
+    another M-tile's rows in the resident registers, which cannot reach a C
+    element that matters -- row m of C depends only on row m of A, and the edge
+    store masks the rows past M. An N edge reaches only the store.
 
-    Still SizeMultiple rather than nothing: a partial tile in either dim takes
-    the edge store path, which the resident k-tile count is not budgeted against.
+    Asserting the absence rather than a tag, because re-adding a constraint on
+    either dim is how the support would silently narrow again. Absence is not
+    unconstrained: AssertFree0/1ElementMultiple are emitted elsewhere, still
+    apply, and are not RAP's to relax -- hence only the compound set here.
     """
     import Tensile.Contractions as C
 
@@ -401,17 +400,13 @@ def test_rap_free_predicates_admit_whole_tiles_in_both_free_dims(
 
     problemType = C.ProblemType.FromOriginalState(sol["ProblemType"])
     preds = C.ProblemPredicate.CompoundPredicates(sol, problemType)
+
     freePreds = {(p.index, p.tag, p.value) for p in preds if p.index in (0, 1)}
+    assert freePreds == set(), f"M and N should carry no RAP predicate, got {freePreds}"
 
-    assert freePreds == {
-        (0, "SizeMultiple", sol["MacroTile0"]),
-        (1, "SizeMultiple", sol["MacroTile1"]),
-    }
-
-    # The distinction the tags alone do not show: SizeEqual would have refused
-    # every M above one tile, and those are the sizes this stage exists for.
-    mt0 = sol["MacroTile0"]
-    assert mt0 * 3 % mt0 == 0, "a multiple of MacroTile0 now satisfies the M predicate"
+    # And K still does, so this is not just an empty predicate list.
+    kIdx = sol["ProblemType"]["NumIndicesC"]
+    assert any(p.index == kIdx for p in preds), "K must still be constrained"
 
 
 def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
@@ -786,7 +781,12 @@ def test_store_guard_rejects_when_residency_splits_the_store():
 
 
 @pytest.mark.parametrize("beta, edge", [(False, False), (True, True), (False, True)])
-def test_store_guard_only_examines_the_path_the_predicates_allow(beta, edge):
-    # beta=1/edge=0 is the tightest variant this problem can reach; checking the
-    # others would reject on paths the size predicates already exclude.
+def test_store_guard_examines_only_the_beta_non_edge_path(beta, edge):
+    # beta=1/edge=0 is the tightest of the non-edge variants, and the only one
+    # the guard looks at. Not because the size predicates exclude the rest --
+    # since N was unconstrained they do not, and the edge path is reachable -- but
+    # because pricing the edge path would cost resident k-tiles for every problem
+    # to cover the ones that reach it. Measured, an edge store takes one batch
+    # more under RAP than without it; see rapCheckStoreNeutrality for the figures
+    # and for what this guard would do if it were let near that path.
     assert _runStoreGuard(400, beta=beta, edge=edge).overflowedResources == 0
