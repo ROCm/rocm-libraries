@@ -229,6 +229,7 @@ include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
 include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
+include(cmake/ResourceCompiler.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)

@@ -376,6 +376,23 @@ namespace TensileLite
         int nonTemporalA = 0;
         int nonTemporalB = 0;
 
+        int temporalHintA = 0;
+        int temporalHintB = 0;
+
+        bool hasTemporalHint = false;
+
+        int cacheHintA() const
+        {
+            return hasTemporalHint ? (temporalHintA == 1 || temporalHintA == 3 ? 4 : 0)
+                                   : nonTemporalA;
+        }
+        /// @see cacheHintA
+        int cacheHintB() const
+        {
+            return hasTemporalHint ? (temporalHintB == 1 || temporalHintB == 3 ? 4 : 0)
+                                   : nonTemporalB;
+        }
+
         int adaptiveGemmNTAB = 0;
 
         int customMainLoopScheduling = 0;

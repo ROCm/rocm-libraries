@@ -5,10 +5,15 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ## hipTensor 2.5.0
 
 ### Added
+* Added broadcast support to the elementwise operations. An input tensor of `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` may now carry a subset of the output tensor's modes, in which case it's broadcast along the modes it lacks. For example, `A` with modes `{n}` can be combined with `B`, `C`, and `D` with modes `{m,n}`.
 * Added `gfx1250-strict` as a supported offload target and classified its device pass as `gfx1250`.
+
+### Changed
+* Changed `hiptensorCreatePermutation`, `hiptensorCreateElementwiseBinary`, and `hiptensorCreateElementwiseTrinary` to return `HIPTENSOR_STATUS_INVALID_VALUE` when a mode shared by an input tensor and the output tensor has a different extent in each, and `HIPTENSOR_STATUS_NOT_SUPPORTED` when a mode is repeated within one tensor. An input tensor that carries a mode the output tensor doesn't carry is still rejected with `HIPTENSOR_STATUS_NOT_SUPPORTED`, since that would have to be reduced away rather than broadcast.
 
 ### Resolved issues
 * Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.
+* Fixed elementwise operations reading the wrong elements when two input tensors ordered the same modes differently. Every tensor's strides are now permuted into the output tensor's mode order before reaching the kernel.
 
 ## hipTensor 2.4.0 for ROCm 10.1
 
