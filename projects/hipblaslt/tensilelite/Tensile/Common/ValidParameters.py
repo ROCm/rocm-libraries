@@ -349,6 +349,10 @@ validParameters = { # we need to make sure this matches develop
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    # PrefetchGlobalReadA/B = -1: auto max-LDS pair. Both keys must be set or
+    # both omitted; Components/DecouplePGR.py holds the accepted combinations.
+    "PrefetchGlobalReadA": [-1] + list(range(16 + 1)),
+    "PrefetchGlobalReadB": [-1] + list(range(16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
@@ -356,7 +360,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
+    # Currently we do not support StaggerU (forced off), general batch, 6-bit float,
+    # or Stream-K other than DP-first (StreamK==3). GSU is supported; with a
+    # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
+    # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -1205,6 +1212,21 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
+    # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
+    # not two heterogeneous regions in one instruction.
+    #
+    #   0  default. Leave grouping to defineTdmSgprs (usually {A,B}+{MXSA,MXSB}
+    #      when NumWaves>1). Hidden from the kernel name.
+    #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
+    #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
+    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
+    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #
+    # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
+    "TDMFuse": [0, 1, 2, 3],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
