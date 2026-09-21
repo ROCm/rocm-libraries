@@ -18,6 +18,7 @@ import types
 import pytest
 
 from Tensile.Component import Component, PartialMatch
+from Tensile.Components.DecouplePGR import dcpLdsSide
 
 # NOTE: Component.py ends with `from .Components import *`, which rebinds the
 # module-level name `LocalRead` to the Components.LocalRead submodule. The real
@@ -189,7 +190,9 @@ def _tdm_split_kernel_tP(swap=0, is_m=False):
 
 
 def test_localread_get_lds_read_mem_token():
-    writer = types.SimpleNamespace(states=types.SimpleNamespace(ldsReadTokenIdx=3))
+    writer = types.SimpleNamespace(
+        states=types.SimpleNamespace(ldsReadTokenIdx=3, dcpTokenGate=False)
+    )
     token, idx = LocalRead._getLdsReadMemToken(
         types.SimpleNamespace(), writer, {"TDMSplit": False}, None
     )
@@ -218,6 +221,38 @@ def test_localread_get_lds_read_mem_token_tdmsplit_half_by_offset():
     )
     assert idx0 == 10
     assert idx1 == 20
+
+
+def _dcpWriter(dcpTokenGate=False, **stateKwargs):
+    """A writer carrying the per-side token state decoupled PGR installs."""
+    states = types.SimpleNamespace(
+        ldsReadTokenIdx=3, dcpTokenGate=dcpTokenGate, **stateKwargs
+    )
+    return types.SimpleNamespace(states=states, _dcpTokenSide=dcpLdsSide)
+
+
+@pytest.mark.parametrize("tc,expected", [("A", 7), ("MXSA", 7), ("B", 9), ("MXSB", 9)])
+def test_localread_mem_token_divergent_pgr_reads_its_own_side(tc, expected):
+    # Divergent PGR: each side has its own LDS token; a read waits on the filler.
+    writer = _dcpWriter(
+        dcpTokenGate=True,
+        memTokenLdsDcp={"A": [7, 8], "B": [9, 10]},
+        ldsReadTokenIdxA=7,
+        ldsReadTokenIdxB=9,
+    )
+    _token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, {"TDMSplit": False}, {"tensorChar": tc}
+    )
+    assert idx == expected
+
+
+def test_localread_mem_token_divergent_without_dcp_state_keeps_shared_token():
+    # Off the token path the shared token is the only one that exists.
+    writer = _dcpWriter()
+    _token, idx = LocalRead._getLdsReadMemToken(
+        types.SimpleNamespace(), writer, {"TDMSplit": False}, {"tensorChar": "A"}
+    )
+    assert idx == 3
 
 
 def test_localread_emit_lds_read():
