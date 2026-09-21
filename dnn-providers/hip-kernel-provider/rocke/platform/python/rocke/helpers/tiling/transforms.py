@@ -52,13 +52,14 @@ def interleave_idx(gather: int, stride: int, count: int, length: int | None = No
     ``(stride, count//stride)`` grid. ``target[i]`` for ``i in range(length)`` (``length`` defaults
     to ``count`` and must be a multiple of ``count``). A NOP when ``stride in {1, count}``.
 
-    Only ``gather == 1`` (the gfx90a A/B case) is implemented; ``gather > 1`` (the 32x32-accumulator
-    ``interleave<4,8,16>`` grouped form) is a deferred milestone -- it needs the acc-transform tables.
+    Only ``gather == 1`` is implemented -- and the static-distribution recipe reaches every interleaved
+    target (any atom, incl. 32x32) at ``gather == 1``. The grouped ``gather > 1`` form is unimplemented and
+    is not this layer's path.
     """
     if gather != 1:
         raise NotImplementedError(
-            f"interleave_idx gather>1 not supported yet -- gather={gather} "
-            "(grouped form, e.g. 32x32-acc interleave<4,8,16>); deferred"
+            f"interleave_idx gather>1 not supported -- gather={gather} "
+            "(grouped form; the static-distribution recipe uses gather==1)"
         )
     if count <= 0 or stride <= 0 or count % stride != 0:
         raise ValueError(

@@ -129,10 +129,9 @@ Restrictions: the **tile is an integer multiple of the atom** (`m/n/k_iter ∈ �
 **A multi-patch accumulator (32×32 and anything like it) is NOT disqualified from an interleaved layout.**
 C de-interleave stays in-register as long as the derived C's per-lane ownership is a set of **congruent,
 evenly-spaced patches** — one patch is the easy case, not the requirement. ✗ Never reject a candidate on
-patch count, and ✗ never read "32×32 accumulator" in §5/§7's out-of-scope lists as a verdict on a
-CONSTRUCTED interleaved accumulator (those describe shuffling a *canonical* one). **The construction is
-`tiling_interleaving_design.md` §9 → *Accumulators — the multi-patch construction*** — read it there, never
-re-derive it. Two preconditions decide whether a candidate is worth constructing at all, so check them
+patch count — 32×32 (and any atom) is a valid interleaving target, built cross-lane-free by the same
+recipe. **The construction is `tiling_interleaving_design.md` §9 → *Accumulators — the multi-patch
+construction*** — read it there, never re-derive it. Two preconditions decide whether a candidate is worth constructing at all, so check them
 BEFORE you open §9:
 - **accumulator:** `R · atom.n == wave_size` (`R = m / c_m_per_lane`). Assert it, but note it holds for all
   128 registered rows — it is a guard against a future atom, not a screening gate. The operand one is the

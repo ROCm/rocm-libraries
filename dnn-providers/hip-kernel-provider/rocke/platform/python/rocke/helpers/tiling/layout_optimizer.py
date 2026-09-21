@@ -26,7 +26,7 @@ Cost ladder (cheapest -> last resort):
                                  Pass ``lds_conflict_cost=(store_bc, read_bc)``; without it the edge is a flagged
                                  LOWER BOUND (barrier + bandwidth only).
   hi   cross_lane                DPP / ds_bpermute -- LAST RESORT, cost scales with **(ops-per-register) x
-                                 #registers**: a 1-op/reg permute is cheap, flip&zip / grouped interleaves do
+                                 #registers**: a 1-op/reg permute is cheap, grouped / multi-op permutes do
                                  MORE ops/reg -> dearer. Worse as the tile grows.
 
 **Equal shots at the empirical frontier.** ``cross_lane`` and ``reposition_lds`` are flagged ``empirical`` --
@@ -59,8 +59,8 @@ _DWORD_BITS = 32
 _LDS_BARRIER = 1.0             # fixed sync for a reposition round-trip
 _LDS_BW_PER_REG = 0.25        # LDS round-trip traffic per register -- LDS BANDWIDTH is the binding resource
 _CROSS_LANE_BASE = 8.0        # per-op setup for a cross-lane instruction (DPP / ds_bpermute)
-_CROSS_LANE_CYC_PER_OP_REG = 0.5   # ~cost per (cross-lane op x register): a 1-op/reg permute is cheap; flip&zip
-                                   # / grouped interleaves do MORE ops per register -> proportionally dearer
+_CROSS_LANE_CYC_PER_OP_REG = 0.5   # ~cost per (cross-lane op x register): a 1-op/reg permute is cheap;
+                                   # grouped / multi-op permutes do MORE ops per register -> proportionally dearer
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ def _num_lanes(fwd: dict) -> int:
 def _price(plan, *, dtype_bits: int, through_lds: bool, tile_regs: int, lds_conflict_cost,
            cross_lane_ops_per_reg: float = 1.0) -> Edge:
     """Price the classified delta against the cost ladder. ``cross_lane_ops_per_reg`` scales the cross-lane cost
-    by how many ops the mechanism runs per register (1 for a simple permute; more for flip&zip / grouped)."""
+    by how many ops the mechanism runs per register (1 for a simple permute; more for grouped / multi-op)."""
     if plan.tier == "reorder":
         if plan.permutation == tuple(range(len(plan.permutation))):
             return Edge("identity", 0.0, "no movement")

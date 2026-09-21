@@ -2,31 +2,73 @@
 
 ## TL;DR — the point (read this FIRST)
 
-**The whole exercise is the full interleaved pipeline:** interleaved (free-dim-contiguous) A/B reads →
-the MMA **produces** a store-friendly interleaved C → **wide coalesced store**. Canonical is a teaching
-baseline for the K-invariant (§2), **NOT** a path to wide stores. If you are reasoning about a layout
-and reaching for "canonical," stop — the target state is always interleaved.
+The MMA is a fixed vector machine. ISA documentation often refers to **"canonical"** data layouts when using
+MMA, as a teaching baseline for the K-invariant (§2). Canonical layouts are, in many cases, not
+efficient in memory-access ordering. Fortunately, canonical is **not** the requirement — we have
+flexibility to use more efficient layouts while still satisfying the physical constraints of the MMA
+(see [`mma_is_machinery.md`](./mma_is_machinery.md)).
 
-**Load-bearing consequence (see §7):** the interleaved C ownership is *cross-lane* from canonical, so
-you **cannot** reach the wide-store layout by shuffling a canonical accumulator. You get interleaved C
-**only by feeding interleaved A/B**. "Just add a C-shuffle to the canonical kernel" is the classic
-wrong turn — the interleaved A/B reads come first and are what make the wide store exist.
+An **interleaved layout** is a non-default rule for **which thread (and register) owns which elements of
+the matrices** in its wave-tile assignment. It computes the *same* result as canonical — it only rearranges
+who-owns-what so the memory side is more efficient. Two properties are the whole point:
 
-**If you are reasoning from "the MFMA needs canonical," STOP and read
-[`mma_is_machinery.md`](./mma_is_machinery.md) first.** MMA is dumb multiply-accumulate machinery; correctness is the
-**sound MAC** — per-operand M/N-fixed *plus* `A.K-dist == B.K-dist` positionally — and M/N placement is
-free (you choose the constant, which merely routes the output). That doc is the **SOT for layout
-correctness**; it exists specifically to kill the canonical-default mental model that repeatedly derails
-this work.
+**1 — What each issued atom covers.** A wave tile is one or more atoms, and the MMA always issues **whole
+atoms** — what differs between the layouts is which logical data each issued atom carries:
+- **Canonical:** each issued atom **is** one whole canonical atom; iterate atoms to cover the wave tile.
+- **Interleaved:** an issued (**interleaved**) atom computes a **small portion of all the canonical
+  atoms** at once; iterate those portions to cover the wave tile. That spreading is the interleave — and
+  it can make the loads/stores more **coalescing**-friendly than one canonical atom at a time.
+
+(Either way the MMA issues whole atoms; the *issue order* — M-outer/N-outer — is a separate knob, §7.)
+
+```
+CANONICAL — each issued atom IS one whole canonical atom; iterate to cover the wave tile:
+   step 0:  atom0 M[0-15] K[0-15]
+   step 1:  atom1 M[16-31]K[0-15]
+   step 2:  atom2 M[32-47]K[0-15]   
+   ... 
+
+INTERLEAVED — each issued atom computes a small portion of ALL canonical atoms; iterate to cover the wave tile:
+   step 0:  a small portion of atom0, atom1, atom2, …
+   step 1:  the next small portion of atom0, atom1, atom2, …
+   …
+```
+
+**2 — Switching coalescing order is a cheap in-register re-order.** Because interleaved thread patches are regular,
+moving between the coalesced-memory order and the order the next stage needs (e.g., free-dim or k-dim contiguous)
+is a **pure register re-order inside each thread — no reload, no cross-lane exchange**. So one layout serves the wide coalesced
+access **and** is at most one cheap re-order away from what the next stage wants, on **both** sides of the
+MMA — input (memory → MMA) and output (MMA → store). C is store-ready **for free** when the issue order
+already matches the store order; otherwise it pays **one cheap in-register re-order** on the way out
+(intra-lane only because C came from interleaved A/B — the §7 canonical trap).
+
+```
+One thread's 4×4 patch (rows = M, cols = K) → two register orders, same 16 elements:
+
+       K0 K1 K2 K3
+  M0 [ a  b  c  d ]     K-contiguous    (row-walk): [a b c d][e f g h][i j k l][m n o p]
+  M1 [ e  f  g  h ]     free-dim-contig (col-walk): [a e i m][b f j n][c g k o][d h l p]
+  M2 [ i  j  k  l ]
+  M3 [ m  n  o  p ]     switch = a transpose of the register slots — no reload, no cross-lane
+```
+
+**Canonical is the degenerate case, not a special one.** A tile with a single atom along the free dim
+(`DPT==1`) has nothing to interleave, so its map *is* canonical.
+
+**The physical constraint (why any of this is legal).** Correctness is the **sound MAC** — per-operand
+M/N-fixed *plus* `A.K-dist == B.K-dist` positionally — and M/N placement is free (you choose the constant;
+it merely routes the output). [`mma_is_machinery.md`](./mma_is_machinery.md) is the **SOT for MMA
+soundness** — the full model lives there.
 
 Source-of-truth specification for interleaved MMA operand/accumulator layouts. Formulas are verified
 against the interleave reference tables (MFMA/WMMA, CDNA + RDNA).
 
-**Scope — what this doc is self-sufficient for:** the **MmaDim-16 A/B and C `reorder` tier** — intra-lane
-register permutations (§8). Everything needed to implement that tier is here. The **cross-lane
-extensions** (`gather>1` grouped interleaves, the 32×32-accumulator `flip & zip`, f64 `UnpackLoHi`, RDNA
-`replicate`) are **out of scope**: they are named where they arise, but their mechanics live in the
-reference tables, not this doc.
+**Scope.** One recipe (§6, §8, §9) builds the intra-lane `reorder` tier **cross-lane-free**, by adjusting
+the **static distribution** read from the target's traits — so it is **atom-, dtype-, and arch-agnostic**:
+any AMDGPU arch (CDNA, RDNA, …), any atom (16×16, 32×32, …), any dtype (incl. f64) follows the identical
+construction, with no special-casing. What varies is only **validation status** — re-derive and check per
+instance (§9), don't assume. (Worked and validated in full on MmaDim-16 f16, gfx90a; other arch/atom/dtype
+follow the same recipe and are not yet validated.)
 
 **Naming.** This layer uses two descriptive labels for the register order, each naming exactly which
 axis the vector width runs along — no "structure" to interpret, no other layout vocabulary needed:
@@ -39,18 +81,20 @@ axis the vector width runs along — no "structure" to interpret, no other layou
 
 Defined once here so the rest reads cold:
 
-- **wave / lane** — a *wave* is the 64 threads that execute one MFMA together (wave64 on CDNA); a *lane*
-  is one thread. Layouts are wave-wide.
-- **atom** — the smallest hardware MMA instruction shape, e.g. a `16×16×16` MFMA. A wave *tile* is a
+- **wave / lane** — a *wave* is the threads that execute one MMA together (64 on CDNA/wave64, 32 on
+  RDNA/wave32); a *lane* is one thread. Layouts are wave-wide.
+- **atom** — the smallest hardware MMA instruction shape, e.g. a `16×16×16` MMA. A wave *tile* is a
   grid of atoms.
 - **fragment** — the data a wave holds in registers for one operand (A, B, or C), together with its
   layout.
-- **MmaDim** — the atom's M and N size (16 here; "MmaDim-16" = 16×16 atoms).
-- **VW (vector width)** — elements per contiguous memory access; also the accumulator vector width
-  `ACC_VW` (4 for 16-bit C).
+- **MmaDim** — the atom's M and N size (16 in the worked examples; "MmaDim-16" = 16×16 atoms).
+- **VW (vector width)** — elements per contiguous memory access.
+- **ACC_VW** — the accumulator's per-lane register run (a distinct quantity from VW; 4 per lane per
+  16×16 atom in the worked examples).
 - **m_iter / n_iter / k_iter** — how many atoms the wave tile spans in M / N / K =
   `wave_tile_dim ÷ atom_dim`. (These are the `MmaA` / `MmaB` / K-atom counts in the reference tables.)
-- **k_ab_per_lane** — K elements a lane holds per atom for A/B (4 for the f16 16×16×16 atom).
+- **k_ab_per_lane** — K elements a lane holds per atom for A/B (read from the traits row for any atom;
+  4 for the f16 16×16×16 atom).
 - **DPT / KPT** — per-lane free-dim / K element counts (§6): `DPT = m_iter`(A)/`n_iter`(B),
   `KPT = k_ab_per_lane × k_iter`.
 - **K-dist / M-dist** — the map `(lane, register-slot) → K coordinate` / `→ M coordinate`: how an axis
@@ -63,10 +107,8 @@ Defined once here so the rest reads cold:
   is an explicit **relabel**) lives in **`label_flow_and_transforms.md`** — interleaving is a *consumer* of it.
 - **vec_extract / vec_insert** — read / write one element of a vector register; the ops a compile-time
   register reorder emits.
-- **DPP / ds_bpermute** — hardware cross-lane data-movement ops; used only by the deferred `cross_lane`
-  tier (§8).
-- **flip & zip / unpackLoHi** — specific cross-lane register ops used by the 32×32 / f64 accumulator
-  extensions (out of scope, §7).
+- **DPP / ds_bpermute** — hardware cross-lane data-movement ops; used only by the `cross_lane` tier (§8),
+  which the static-distribution recipe is built to avoid.
 
 ## 1. What interleaving is
 
@@ -93,19 +135,10 @@ MAC** holds (per-operand M/N fixed + `A.K-dist == B.K-dist`) — interleaving ne
 The rest of this section develops the A/B-input facet (the per-lane register order). An MMA operand fragment is
 the data a wave holds in registers. Each lane's share is a small 2D tile of `(free-dim × K)` elements, and
 **this facet of interleaving is just the order those elements sit in the lane's registers** — i.e. which axis
-the vector width walks first. The *same* tile, read two ways:
-
-```
-lane's 2D tile          K-contiguous                   free-dim-contiguous
-(rows = free dim,       (VW along K — walk each row)    (VW along free — walk each column)
- cols = K)              a b c  d e f  g h i             a d g  b e h  c f i
-[[a b c]
- [d e f]
- [g h i]]
-```
-
-Both orders are the **same elements owned by the same lane** — only the register slot order differs. So
-they cost the **same wide, coalesced load**; nothing about *which* data a lane holds changes.
+the vector width walks first — **K-contiguous** walks each row (VW along K), **free-dim-contiguous** walks
+each column (VW along the free dim). Both orders hold the **same elements owned by the same lane** — only
+the register slot order differs, so they cost the **same wide, coalesced load**; nothing about *which* data
+a lane holds changes. (Worked in full, with real register indices, at §6.)
 
 **Why that matters — the whole point.** Because the two layouts differ only in register order, moving
 between them is never a re-load and never cross-lane data movement — it is a single **in-register
@@ -132,7 +165,7 @@ elements are not congruent and evenly spaced, neither hallmark holds (the reorde
    slots. The order is **not arbitrary**: it is the structured **transpose to the *other* vectorization axis**
    (K-contiguous ↔ free-dim-contiguous).
 2. **The transpose is cheap — a pure register re-order.** Switching the patch's vectorization direction is the
-   closed-form `interleave_idx<1, KPT, DPT·KPT>` permutation — the in-register **`reorder`** tier (§8), never
+   closed-form `interleave_idx<1, DPT, DPT·KPT>` permutation (K→free; the inverse free→K uses stride `KPT`) — the in-register **`reorder`** tier (§8), never
    cross-lane. Hallmarks 1 and 2 are the **same permutation seen two ways**.
 
 **Checkable, not vibes.** #1: the register→coord order differs from the canonical encoding. #2:
@@ -145,12 +178,20 @@ transposable" and "correct to load/use" are separate checks. (This cheap **in-th
 from bridging *canonical ↔ interleaved lane ownership*, which changes which lane owns which elements and can be
 cross-lane — see §8.)
 
+**Three canonical↔interleaved relationships — do not conflate them:**
+
+| relationship | tier | where |
+|---|---|---|
+| in-thread K-contiguous ↔ free-dim-contiguous (register order) | `reorder` (cheap) | §1 / §6 |
+| canonical ↔ interleaved *lane ownership* across a multi-atom tile | `cross_lane` (avoided) | §7 canonical trap |
+| crossed A↔B source-swap + `c_transpose` bridge | **free** (reposition + routing) | §8 |
+
 ## 2. Hardware contract — the pairwise K-match half of the sound MAC
 
 **Correctness SOT:** [`mma_is_machinery.md`](./mma_is_machinery.md) owns the full correctness model, the
 **sound MAC** = per-operand soundness (one M per output on A, one N per output on B) *plus* the pairwise
 K-match. This section derives that **pairwise K-match half**; per-operand soundness holds by construction
-here (fragments are atom-derived — see the closing note).
+here — the fragments are atom-derived, so each output gets exactly one M on A and one N on B.
 
 The MFMA/WMMA hardware multiply-accumulates: it pairs A-slot-`s` with B-slot-`s`, forms the product,
 and sums over K. The sum is order-independent, so **the K-slot ordering is free** — any bijection `σ`
@@ -165,8 +206,10 @@ is valid provided A holds `A[m, σ(s)]` and B holds `B[σ(s), n]` in the same sl
   layout** (§7).
 
 `validate_operands(a_layout, b_layout)` enforces exactly this: `k_distribution(a) == k_distribution(b)`
-positionally. Lane ownership is guaranteed valid by construction (fragments come from atom-derived
-descs), so a positional K-match is sufficient.
+positionally, **compared per atom** — not across the concatenated whole-fragment K-list (§8 for the
+rectangular-tile rationale). Lane ownership
+is guaranteed valid by construction (fragments come from atom-derived descs), so a positional per-atom
+K-match is sufficient.
 
 ### Example — one contraction, 4 K-slots
 
@@ -302,7 +345,7 @@ This is the distinction that most often trips people up, so state it plainly.
 
 A fragment is the set of values a wave holds in registers, plus a **layout** (a
 `WarpDistributionEncoding`) recording which `(lane, register-slot)` holds which logical element. That
-layout is bookkeeping **we** maintain — **the hardware is layout-blind.** The MFMA reads register slot
+layout is bookkeeping **we** maintain — **the hardware is layout-blind.** The MMA reads register slot
 `s` of whatever operand it is handed; it has no idea what we *think* sits in slot `s`. So a fragment
 can legitimately be in *any* order. Same 4 elements a lane owns (a 2×2 tile `{M0,M1}×{K0,K1}`), three
 different fragment states:
@@ -316,23 +359,13 @@ different fragment states:
 "Fragment state" = which layout it is in **right now**. `transform_fragment` changes the state
 (register order) without changing which elements the lane owns (§8 tiers). The single row above is one
 lane; the *full* state also spans the wave — a register read across lanes is a structured **slice** of
-an axis (the M=64-into-16-lanes picture in §6, "Across the wave").
+an axis (the wave64 M=64-into-16-lanes example in §6, "Across the wave").
 
 ### MMA-acceptability is a *relationship between A and B*, not a property of one fragment
 
 There is no "this fragment is MMA-ready" in isolation. The hardware's only requirement is that the
-**pair** agree on K, position-for-position (§2):
-
-```
-   A fragment, K per slot:   K0  K1  K2  K3
-   B fragment, K per slot:   K0  K1  K2  K3
-                             ══  ══  ══  ══     MFMA pairs slot s of A with slot s of B
-   ACCEPTABLE  ⇔  the two K rows are identical.    (M on A, N on B are not shown — they are free)
-
-   mismatch (REJECTED):
-   A K per slot:   K0  K1  K2  K3
-   B K per slot:   K1  K0  K3  K2      ← slot 0 pairs A.K0 with B.K1  →  wrong product
-```
+**pair** agree on K, position-for-position: acceptability ⇔ A's and B's K-rows are identical slot-for-slot
+(M on A / N on B are free) — worked in full at §2's slot tables.
 
 So "make this fragment acceptable" always means "reorder it until its K-row matches its **partner's**".
 `validate_operands(a, b)` compares the two fragments; it never checks either against a canonical.
@@ -373,7 +406,7 @@ What falls out of the table:
   ║            A.K-dist == B.K-dist   (position-for-position, §2/§3)         ║
   ╚═══════════════════════════════════┬════════════════════════════════════╝
                                       ▼
-                    MFMA — one issue per atom, over the M×N×K grid
+                    MMA — one issue per atom, over the M×N×K grid
                                       ▼
                           ┌────────────────────────┐
                           │   C FRAGMENT            │   state = native accumulator order,
@@ -384,14 +417,14 @@ What falls out of the table:
               storable order ─────►  STORE (wide)   or   feed a downstream MMA as its A/B
 ```
 
-Read it as: **load → (maybe) reorder A/B so the pair agrees on K → MFMA → C in a derived order →
+Read it as: **load → (maybe) reorder A/B so the pair agrees on K → MMA → C in a derived order →
 reorder C for its consumer.** The two reorders are the only transform sites; everything else is data
 flowing through. As five steps:
 
 1. **Load A/B** from global memory (row/col-major) → wide loads, identical lane ownership.
 2. **A/B → MMA form.** If the pair's K-rows already match, nothing happens; otherwise reorder one (or
    both) so `A.K-dist == B.K-dist`.
-3. **MFMA** over the M×N×K grid of atoms. The accumulator emerges in one fixed register order, set by
+3. **MMA** over the M×N×K grid of atoms. The accumulator emerges in one fixed register order, set by
    the MMA issue order (§7).
 4. **C-shuffle.** Re-order the native accumulator to a storable/consumable order (row/col-major, or an
    interleaved layout to feed a downstream MMA).
@@ -421,11 +454,11 @@ Worked example — `interleave_idx<1, 2, 8>` (count 8, stride 2 → a `2 × 4` g
 
 - **NOP when `stride ∈ {1, count}`** (a 1×count or count×1 grid is not transposed).
 - `stride` and `count` for each use are supplied by §6 (A/B) and §7 (C).
-- **`gather > 1` is OUT OF SCOPE** — the grouped form used by a **canonically-laid-out** 32×32 accumulator
-  (`interleave<4,8,16>`); its mechanics live in the reference tables, not here. ✗ This is **not** a verdict on
-  a **constructed** interleaved multi-patch accumulator — see §9 → *Accumulators*.
 
-## 6. A/B input interleave, MmaDim 16
+## 6. A/B input interleave (worked on MmaDim-16; general construction in §9)
+
+*(Worked instance: MmaDim-16 f16, wave64, gfx90a — the numbers below (M=64, 16 lanes, DPT/KPT) are this
+instance. The construction generalizes to any atom / wave size / arch; see §9.)*
 
 Per lane:
 - **DPT (DimPerThread)** = free-dim atoms per lane = `m_iter` (A) / `n_iter` (B).
@@ -435,14 +468,15 @@ The transform is a transpose of the `DPT × KPT` per-lane register grid:
 
 | direction | permutation |
 |-----------|-------------|
-| K-contiguous → free-dim-contiguous | `interleave_idx<1, KPT, DPT*KPT>`  (stride = KPT) |
-| free-dim-contiguous → K-contiguous | `interleave_idx<1, DPT, DPT*KPT>`  (stride = DPT) |
+| K-contiguous → free-dim-contiguous | `interleave_idx<1, DPT, DPT*KPT>`  (stride = DPT) |
+| free-dim-contiguous → K-contiguous | `interleave_idx<1, KPT, DPT*KPT>`  (stride = KPT) |
 
 The two are inverses. **NOP when DPT == 1** (a single atom in the free dim — nothing to interleave
 against K).
 
-Reference rows (MmaDim 16): 32×16 (DPT 2, KPT 4) → `<1,4,8>` / `<1,2,8>`; 64×16 (DPT 4, KPT 4) →
-`<1,4,16>`; 32×32 (DPT 2, KPT 8) → `<1,8,16>` / `<1,2,16>`; 16×16 (DPT 1) → NOP.
+Reference rows (MmaDim-16 **tile** shapes, 16×16 atom; each pair is **K→free / free→K**): 32×16 (DPT 2,
+KPT 4) → `<1,2,8>` / `<1,4,8>`; 64×16 (DPT 4, KPT 4) → `<1,4,16>` (DPT==KPT, one value); 32×32-**tile**
+(DPT 2, KPT 8) → `<1,2,16>` / `<1,8,16>`; 16×16 (DPT 1) → NOP.
 
 ### Worked example — A operand, 64×16 tile (DPT 4, KPT 4), one lane
 
@@ -472,14 +506,15 @@ direction (each `[...]` is a 4-register run):
  regs 0→15:  [M0K0 M1K0 M2K0 M3K0]  [M0K1 M1K1 M2K1 M3K1]  [M0K2 M1K2 M2K2 M3K2]  [M0K3 M1K3 M2K3 M3K3]
 ```
 
-Same 16 elements, same lane — only the register slot order differs. Transposing the 4×4 grid is
-`interleave_idx<1, KPT=4, 16>`:
+Same 16 elements, same lane — only the register slot order differs. Transposing the 4×4 grid (K→free) is
+`interleave_idx<1, DPT=4, 16>` — **note DPT==KPT==4 here, so this example cannot distinguish the
+direction; the general stride is `DPT` for K→free (table/rows above)**:
 ```
  K-contiguous reg:   0  1  2  3   4  5  6  7   8  9 10 11  12 13 14 15
       lands at reg:   0  4  8 12   1  5  9 13   2  6 10 14   3  7 11 15   (free-dim-contiguous)
 ```
 
-### Across the wave — a register is an axis *slice*
+### Across the wave — a register is an axis *slice* *(worked instance: wave64, 16×16 atom; the mechanism generalizes, the 16-lane / M=64 numbers do not)*
 
 The view above is one lane. Across the whole wave, an axis is **distributed over lanes × registers as
 structured slices** — that is what "compress the free/K dims" means. free-dim-contiguous load
@@ -515,7 +550,7 @@ each order flips (K-contiguous is col-major for B, row-major for A).
 
 ## 7. C accumulator transforms
 
-The accumulator comes out of the MFMA in one fixed register order, and **that order is set by the
+The accumulator comes out of the MMA in one fixed register order, and **that order is set by the
 order the MMAs are issued** across the M×N subtile grid — nothing else. Same products, same math; only
 the register grouping changes with the loop nest. Two cases (this is exactly the `Tiling.order` knob):
 
@@ -531,7 +566,7 @@ which subtile loop is outer.
 which `C[m,n]` each lane's product lands on. C's native layout is therefore *derived* from A's M-order,
 B's N-order, and the issue order — not chosen independently. To store or reuse C you re-order it.
 
-**The machine coupling is fixed and PHYSICAL — "following" the inputs.** The MFMA is a fixed physical
+**The machine coupling is fixed and PHYSICAL — "following" the inputs.** The MMA is a fixed physical
 wiring: physical `A(reg,tid)` and physical `B(reg,tid)` are paired and summed into physical
 `C(reg,tid)`, identically for every problem. Canonical vs interleaved is *only* which logical label you
 loaded into each physical slot — canonical inputs → canonical outputs; interleaved inputs → interleaved
@@ -564,38 +599,37 @@ mapping is a fixed PHYSICAL coupling") for the `reg0/tid0` worked example.
 > and wrong; the interleaved A/B path avoids it by construction.
 
 The **C-shuffle** re-orders that native accumulator to a storable order; it is a function of the issue
-order (the starting register grouping) and the target store order. For a single-patch atom it is a plain
-intra-lane `interleave_idx`. Let `VW = ACC_VW` (4 for 16-bit C) and `MmaA`, `MmaB` = the atom counts
-along C's two axes (`m_iter`, `n_iter`), so the C fragment has `VW·MmaA·MmaB` registers. For the
-reference table's native accumulator (the **M-outer / A-major** issue order):
+order (the starting register grouping) and the target store order. For a **single-patch** accumulator
+(`P=1` — every 16×16-atom wave tile) it is a plain intra-lane `interleave_idx`. Let `ACC_VW = c_m_per_lane` (= `P·V`; the per-lane accumulator run — 4 for the 16×16 atom, f32) and
+`MmaA`, `MmaB` = the atom counts along C's two axes (`m_iter`, `n_iter`), so the C fragment has
+`ACC_VW·MmaA·MmaB` registers. The C-shuffle stride is the **store vector width** `store_VW` (distinct from
+`ACC_VW`). For the reference table's native accumulator (the **M-outer / A-major** issue order):
 
-| store order | C-shuffle |
-|---|---|
-| row-major (VW = `VW`)       | `interleave_idx<1, VW, VW·MmaA·MmaB>` |
-| col-major (VW = `VW·MmaB`)  | `interleave_idx<1, VW·MmaB, VW·MmaA·MmaB>` |
+| store order | `store_VW` | C-shuffle |
+|---|---|---|
+| row-major | `ACC_VW`      | `interleave_idx<1, ACC_VW, ACC_VW·MmaA·MmaB>` |
+| col-major | `ACC_VW·MmaB` | `interleave_idx<1, ACC_VW·MmaB, ACC_VW·MmaA·MmaB>` |
 
-Verified across the reference ACC rows (16×16, 32×16, 64×16, 32×32, 64×64, …). Worked instance — 64×64
-C, 4×4 atom grid (`MmaA=MmaB=4`, `VW=4` → 64 registers): row-major = `interleave_idx<1, 4, 64>`;
+Verified across the reference ACC rows (16×16, 32×16, 64×16, 32×32, 64×64, … — all **16×16-atom** wave
+tiles, so `P=1`; a multi-patch *atom* like the 32×32 atom is built via §9's construction, not this closed
+form). Worked instance — 64×64
+C, 4×4 atom grid (`MmaA=MmaB=4`, `ACC_VW=4` → 64 registers): row-major = `interleave_idx<1, 4, 64>`;
 col-major = `interleave_idx<1, 16, 64>`.
 
 **N-outer issue order** transposes the native grouping: swap `MmaA ↔ MmaB` (equivalently swap the
 row/col roles). *Derived by M↔N symmetry — confirm against the ACC reference table's rows before
 relying on it.*
 
-**Cross-lane extensions — OUT OF SCOPE** (named for orientation; mechanics in the reference tables). **These
-are shuffles of a CANONICAL accumulator; a multi-patch accumulator built by the §9 construction does not take
-this path.**
-- **32×32-acc**: `interleave<4,8,16> + "flip & zip"` (`flip&zip = unpackLoHi32(extractLo, extractHi)`);
-  also the `gather=4` grouped `interleave_idx`.
-- **f64**: `UnpackLoHi16 + UnpackLoHi32`.
-- **RDNA3**: `replicate` (DPP).
+**Accumulators for any target are built the same way, cross-lane-free** — the atom-/dtype-/arch-agnostic
+§9 construction (only validation status varies, f64 untested; see §9).
 
 ### C-store coalescing — the lane-major axis (store-transaction cost)
 
 Coalescing is decided by how many distinct cache lines the wave's addresses touch **per store
 instruction** — it is address/cache-line based, **not** lane-adjacency based (non-adjacent lanes whose
-addresses land in the same line DO coalesce). What matters is which C axis varies across **consecutive
-lanes**: that axis must be the output's **stride-1** axis for the wave's writes to fuse.
+addresses land in the same line DO coalesce). Consecutive-lane stride is what *sets* those addresses,
+so which C axis varies across **consecutive lanes** decides it: that axis must be the output's
+**stride-1** axis for the wave's writes to fuse.
 
 For the 16×16 atom, 64×64 wave (4×4 atoms, `ACC_VW=4`) the interleaved C ownership is
 `lane = 16·(M//16) + (N//4)` — each lane owns a contiguous **16 M × 4 N** patch (verified in code via
@@ -604,7 +638,8 @@ For the 16×16 atom, 64×64 wave (4×4 atoms, `ACC_VW=4`) the interleaved C owne
 - **M is block-major:** only the 4 lanes `{0,16,32,48}` span a contiguous **64-M** run; consecutive
   lanes step N and jump 16 lanes to advance M.
 
-Consequence — the store major that matches the lane-major axis coalesces; the other pays for it:
+Consequence — the store major that matches the lane-major axis coalesces; the other pays for it (16×16
+atom / wave64 example; the factor generalizes below):
 
 | C output major | vectorized store axis (§2b) | lanes spanning the 64-run | store transactions / 128 B line |
 |---|---|---|---|
@@ -614,20 +649,20 @@ Consequence — the store major that matches the lane-major axis coalesces; the 
 Both stores are per-lane wide and §2b-valid (each vectorizes its own stride-1 axis) — the difference is
 purely **cross-lane fusion**. The col-major store touches the **same total footprint** (128 lines for the
 64×64 f32 tile, identical DRAM bytes) but issues **~4× the store transactions**: each cache line is
-written by 4 partial stores instead of 1, because only 4 lanes — not 16 — are inline along M. The factor
+written by ~4× as many partial stores (the `16/4` lane ratio), because only 4 lanes — not 16 — are inline along M. The factor
 is `lanes_along_N / lanes_along_M` (here 16/4 = 4); it generalizes to any wave/atom via the ownership
 split.
 
-The MFMA fixes this lane split, so the **output major decides the cost**: row-major C is *with* the grain,
+The MMA fixes this lane split, so the **output major decides the cost**: row-major C is *with* the grain,
 col-major C is *against* it. To make a col-major C wave-coalesced, move M onto the lane-major axis — the
 **crossed A↔B swap + `c_transpose`** (§8, free-symmetry tier): **route** A into the B-slot so the machine
 emits `Cᵀ` (source-swap, labels invariant), then **reposition** the C coordinates `(N,M)→(M,N)`; M becomes
 lane-consecutive and the col-major store fuses. Register-identity (reposition + routing), not cross-lane —
 NOT a label change.
 
-**Cost reality (empirical seam).** The ~4× is *exact address arithmetic* (verified), but it is a
+**Cost reality (empirical seam).** The ~4× *ratio* is *exact address arithmetic* (verified), but it is a
 **store-transaction** count, NOT automatically a TFLOPS hit — the C store is a one-time epilogue that is
-often hidden in the MFMA shadow. Treat it like a bank conflict: real, modelled, but subordinate to the
+often hidden in the MMA shadow. Treat it like a bank conflict: real, modelled, but subordinate to the
 binding stage. **Measure per case** (sweep the A↔B-swap knob); do not assume the 4× shows up end-to-end.
 
 ## 7a. Register states + the layout optimizer
@@ -655,7 +690,9 @@ silently wrong for the next).
 ### Transforms are discovered, not tabulated
 
 The permutation between two states is the **delta between two constructed layouts**, computed by rocKE's own
-solver (`classify_transform`) — never a formula copied from a table. Those change with every context and are
+solver (`classify_transform`) — never a formula copied from a table. (Closed forms exist for exactly two
+cases: the single-patch operand transpose (§6) and the single-patch `P=1` accumulator C-shuffle (§7);
+multi-patch (`P>1`) and novel-atom cases are discovered.) These change with every context and are
 error-prone to transcribe; construct the two states and ask the solver. The optimizer
 (`helpers/tiling/layout_optimizer.py`) wraps this into the two questions a designer actually asks:
 
@@ -667,12 +704,13 @@ error-prone to transcribe; construct the two states and ask the solver. The opti
   reposition, an intra-lane reorder, or a *different distribution* before falling to cross-lane.
   `recommend(ranked)` picks the winner; `enumerate_stripings(shape, wave_size)` builds the candidate set.
 
-**Cost ladder (cheapest → last resort):** free-symmetry (0) < `reorder` dword-aligned (1) < `reorder`
-sub-dword (~pack factor) < **LDS reposition** < **`cross_lane`** (DPP/`ds_bpermute`, last resort, grows with
+**Cost ladder (cheapest → last resort; register tiers defined in §8, the SOT; the LDS-reposition rung is defined below):** free-symmetry (0) < `reorder` dword-aligned (1) < `reorder`
+sub-dword (~pack factor) < **LDS reposition** (only when the data already transits LDS; otherwise a full
+round-trip that can exceed a register `cross_lane` on a small tile) < **`cross_lane`** (DPP/`ds_bpermute`, last resort, grows with
 the tile). The **LDS reposition** is the cheaper alternative to a register cross-lane *when the data already
 transits LDS* — but it is **not free and not below a register reorder**: a full round-trip = store + read at
 the throughput **floor** + a **barrier** (paid even conflict-free) + the **new access's bank conflicts** (TWO
-patterns — store and read — each EMPIRICAL under its own port rule via `/bank-conflict`) + any LDS
+patterns — store and read — each EMPIRICAL under its own port rule (`lds_banks.md` §1.4 write / §1.5 read) via `/bank-conflict`) + any LDS
 **capacity/occupancy** cost; routing through LDS can even *introduce* conflicts the register path never had, so
 measure the new pattern per case. **Both heavy movers scale with the number of registers moved** — cross-lane
 moves each register individually (steeper), the LDS reposition is **bandwidth-bound** (store + read of every
@@ -686,7 +724,7 @@ ladder** (dword-aligned = register renumber ~0 ops; sub-dword = ~pack-factor `v_
 wide load + conflict-free LDS; avoiding it by narrowing the load (VW→1) is a bandwidth cliff, backwards.
 It is **derived per case** (`transforms.reorder_between` → `classify_transform`/`name_permutation`, e.g. the
 CRC A-read `interleave_idx(1,8,32)` sub-dword, the C-shuffle `interleave_idx(1,16,64)` dword) — never
-tabulated — and is **subordinate to the binding stage** (often hidden in the MFMA shadow: report the
+tabulated — and is **subordinate to the binding stage** (often hidden in the MMA shadow: report the
 `v_perm`/lane count, do not imply a TFLOPS hit; measure per case). `/layout-viz` draws it as an explicit
 reg→reg stage with the named arrow + this cost.
 
@@ -694,7 +732,7 @@ reg→reg stage with the named arrow + this cost.
 
 Store coalescing is the lane-major property of the interleaved-C ownership (§7 "C-store coalescing"): a
 C-major that lands on the lane-major axis stores **with the grain** (1×); the other pays `~lanes_maj/lanes_min×`
-transactions **against the grain**. Vectorizable width is the per-lane stride-1 run capped at 128-bit — the
+transactions **against the grain**. Vectorizable width is the per-lane stride-1 run capped at the registered vector ceiling (128-bit on current AMDGPU targets) — the
 layout's **intent**, distinct from the codegen's *achieved* store width (a separate efficiency question).
 
 ## 8. Transform tiers
@@ -707,12 +745,11 @@ layout's **intent**, distinct from the codegen's *achieved* store width (a separ
     f4 = 8). Needs **unpack (extract lo/hi) → move → repack**, cost ∝ the pack factor (f16 ~2×, f8 ~4×).
     Still `reorder` — the element does NOT change lane, it is only re-packed in place.
   Compile-time `vec_extract`/`vec_insert`. All single-patch A/B and C-shuffle interleaves are this tier.
-  ✗ The `cross_lane` entries below (32×32 flip&zip, f64 unpack, RDNA replicate) are shuffles of a **CANONICAL**
-  accumulator — they are NOT a verdict on a multi-patch accumulator BUILT by the §9 construction, which stays
-  in this tier. See §9 → *Accumulators*.
+  The §9 construction stays in THIS tier for **any** target — any atom, dtype, or arch — it adjusts the
+  static distribution and never emits a cross-lane shuffle. See §9 → *Accumulators*.
 - **`cross_lane`** — an element moves **between lanes**, or the on-lane permutation is not lane-uniform.
-  Needs DPP / `ds_bpermute` / LDS. 32×32 flip&zip, f64 UnpackLoHi, RDNA replicate live here. **THIS is
-  the reject/defer seam** (see the D1 correction below).
+  Needs DPP / `ds_bpermute` / LDS. **THIS is the reject/defer seam** (see the D1 correction below) — the
+  static-distribution recipe is built to avoid it.
 
 **D1 reject-seam CORRECTION (locked).** D1 originally rejected *sub-dword* permutations. That is wrong:
 sub-dword addressing does NOT change which lane owns an element (it re-packs within the lane), so it
@@ -753,7 +790,7 @@ per-operand override can force otherwise (author's responsibility; verify K-dist
 
 **K-alignment is validated PER ATOM, not per whole fragment.** `validate_operands` (`transforms.py`) compares
 A and B on their **per-atom** K signature, not the concatenated whole-fragment K-list — because the MMA is
-issued per 16×16×16 atom, and a rectangular wave tile has `m_iter ≠ n_iter` (A tiles more M-atoms than B tiles
+issued per atom, and a rectangular wave tile has `m_iter ≠ n_iter` (A tiles more M-atoms than B tiles
 N-atoms), giving different whole-fragment register counts even when every issued atom pairs the same K. It
 takes the free-dim atom counts (`a_free_atoms`/`b_free_atoms` = m_iter/n_iter) so rectangular tiles like
 64×32×32 build and are bit-exact; the whole-fragment compare would falsely reject them (it only passed
@@ -785,8 +822,8 @@ significance. **NOP when `DPT == 1`** (nothing to swap against).
 3. read off the per-lane `source_register → target_register` permutation and check it is **identical on
    every lane** (a `reorder`, §8).
 
-The resulting permutation must equal the §6 closed form — `interleave_idx<1, KPT, DPT*KPT>`
-(K-contiguous → free-dim-contiguous) or `<1, DPT, DPT*KPT>` (the inverse) — for the tile's `(DPT, KPT)`.
+The resulting permutation must equal the §6 closed form — `interleave_idx<1, DPT, DPT*KPT>`
+(K-contiguous → free-dim-contiguous) or `<1, KPT, DPT*KPT>` (the inverse) — for the tile's `(DPT, KPT)`.
 The closed form is both the fast path (emit it directly) and the oracle the structural delta is checked
 against.
 
@@ -798,37 +835,53 @@ makes it intra-lane is that the target preserves the lane's element ownership �
 adjacent. ✗ Do not read a multi-patch accumulator as disqualified from an interleaved layout. Construct it.
 
 **Precondition — assert it, though it has never bitten.** `R · atom.n == wave_size`, where `R` is the
-free-axis lane level (below) and `atom.n` the atom's lane level on the other free axis. Measured: it holds
+M-side lane level (below) and `atom.n` is the N-side lane count — it equals the size `atom.n` only because
+each lane owns one N per atom-column (`c_n_per_lane ≡ 1`; the traits carry only the M-side per-lane
+structure). The assert catches a future atom that breaks that one-N-per-column assumption. Measured: it holds
 for **all 128 registered rows**, so it rejects nothing today — keep it as a defensive assert against a future
 atom, and do not present it as a screening gate. (The gate that DOES bite is the operand one below.) The two must multiply to exactly one
 wave; that arithmetic is the whole reason the bijection validator passes at rank 2. An atom that breaks it
 builds a silently wrong lane map — a wrong ANSWER, not an exception.
 
-**Construction.** Four steps. Every quantity is READ from the traits row and never hand-typed, so a new atom
-or a new target needs no new table:
+**Construction.** Four steps. Every *atom* quantity is READ from the traits row (`traits/mma_traits.py`,
+the 128-row catalogue) and never hand-typed; the *wave-tile* factors (`m_sub`, `n_sub`) come from the
+chosen tile. A new atom or a new target needs no new table:
 
-1. Read the accumulator's shape from the traits row:
+1. Read the atom's accumulator shape from the traits row (`traits/mma_traits.py`) — **both free axes**:
 
-   | quantity | traits field |
+   | quantity | traits field / derivation |
    |---|---|
-   | patches per lane `P` | `c_m_num_access` |
-   | lane-rows `R` | `m / c_m_per_lane` |
-   | inner run `V` | `c_m_per_lane / c_m_num_access` |
+   | **M** patches per lane `P` | `c_m_num_access` |
+   | **M** lane-rows `R` | `m / c_m_per_lane` |
+   | **M** inner run `V` | `c_m_per_lane / c_m_num_access` (so `c_m_per_lane = P·V = ACC_VW`) |
+   | **M** across-atom factor `m_sub` | `wave_m / atom.m` (= `m_iter`; **1** for a single atom) |
+   | **N** lane count | `atom.n` (traits `n`) — one N per lane per atom-column (`c_n_per_lane ≡ 1`) |
+   | **N** across-atom run `n_sub` | `wave_n / atom.n` (= `n_iter`; **1** for a single atom) |
 
-2. Factor the free axis into the levels `(P, R, V, free_sub)`.
-3. Send `R` to the **lane**; send `P`, `V` and `free_sub` to **registers**. Every level is then claimed
-   exactly once, which is what the bijection validator checks — so **no unmerge is needed for the
-   accumulator descriptor itself**. ✗ An epilogue that CHUNKS the accumulator still needs one: the chunk's
-   rank-3 form is what carries the lane level's place value in a tensor stride.
+2. Factor the free axes: **M** into `(P, R, V, m_sub)`, **N** into `(atom.n, n_sub)`.
+3. **Lane** = `R` (M) × `atom.n` (N) — together `R·atom.n = wave` (the precondition). **Registers** =
+   `P·V·m_sub` (M) × `n_sub` (N). Every level is claimed exactly once (what the bijection validator checks),
+   so **no unmerge is needed for the accumulator descriptor itself**. ✗ An epilogue that CHUNKS the
+   accumulator still needs one: the chunk's rank-3 form carries the lane level's place value in a tensor stride.
 4. Confirm slot-by-slot against `derive_c_distribution` (the ground truth), then `classify_transform` the
    C-shuffle against the **same lane's** store order (§8 — a verdict against a target that itself re-owns
    lanes is self-consistent and answers a different question).
 
-Worked, from the registered traits (two wave64 rows, to show single- and multi-patch are one procedure):
+**General identities** (any atom / tile): `wave_m = P·R·V·m_sub` (= `atom.m·m_sub`), `wave_n = atom.n·n_sub`;
+total C registers per lane = `(P·V·m_sub)·n_sub`. Register significance (major → minor) = `m_sub`, `n_sub`, `P`, `V`.
+
+Worked from the registered traits — single-atom, then multi-atom, then the `P>1 ∧ free_sub>1` composition:
 
 ```
-mfma_f32_16x16x16f16:  m=16 c_m_per_lane=4  c_m_num_access=1  ->  P=1  R=4  V=4   R*n = 4*16 = 64 = wave ✓
-mfma_f32_32x32x8f16:   m=32 c_m_per_lane=16 c_m_num_access=4  ->  P=4  R=2  V=4   R*n = 2*32 = 64 = wave ✓
+single atom (m_sub = n_sub = 1):
+  16×16  mfma_f32_16x16x16f16:  P=1 R=4 V=4  ->  R·atom.n = 4·16 = 64 = wave ✓;   4 C regs/lane
+  32×32  mfma_f32_32x32x8f16:   P=4 R=2 V=4  ->  R·atom.n = 2·32 = 64 = wave ✓;  16 C regs/lane
+
+multi-atom (free_sub > 1):
+  16×16 atom, 64×64 tile (m_sub = n_sub = 4):  P=1 R=4 V=4
+     wave_m = P·R·V·m_sub = 1·4·4·4 = 64;   wave_n = atom.n·n_sub = 16·4 = 64;   regs/lane = (P·V·m_sub)·n_sub = 16·4 = 64
+  32×32 atom, 64×64 tile (m_sub = n_sub = 2):  P=4 R=2 V=4     (P>1 AND free_sub>1)
+     wave_m = P·R·V·m_sub = 4·2·4·2 = 64;   wave_n = atom.n·n_sub = 32·2 = 64;   regs/lane = (P·V·m_sub)·n_sub = 32·2 = 64
 ```
 
 **`P == 1` is the degenerate case of this same construction** — single-patch and multi-patch are one code
@@ -886,23 +939,15 @@ over. It rests on two facts (derived in §1/§6 and §2):
 
 ### The five-step recipe
 
-1. **Know the memory order, load coalesced.** The thread-tile serves either row- or col-major data; you just
-   need to know which so you vectorize along the **contiguous** axis (wide/coalesced), never strided.
-2. **Reach MMA-ready by in-register transpose if needed.**
-   - *Happy case* — A row_major `M×K` × B col_major `K×N`: the coalesced K-load is **already** MMA-ready →
-     zero reorder.
-   - *Mismatch* — e.g. A arrives col_major (M contiguous). Do **not** strided-load into K-order. Load
-     coalesced in the memory-native order (vectorize wide), **then re-order registers** into K-contiguous
-     (the transpose). Wide load + one cheap reorder beats a strided load.
-3. **Issue the atoms** in a chosen order (M-outer / N-outer). C comes out carrying the **flowed logical
-   labels** — derived from A's M-placement, B's N-placement, and the issue order — riding the fixed canonical
-   C positions (§7; POSITION ≠ LABEL, see `mma_is_machinery.md`).
-4. **C is ALSO interleaved → its thread-tile is a rectangle (`M×N`).** So making C store-compatible
-   (row- or col-major, wide coalesced store) is the **same in-register transpose** used on A/B — not
-   cross-lane (within the already-interleaved ownership; the canonical-C trap of §7 does not apply here).
-5. **Store coalesced.** The loop closes: coalesced load → transpose to MMA-ready → issue → interleaved C →
-   transpose to store order → wide coalesced store. **Every transpose is an in-register reorder; nothing goes
-   cross-lane.**
+It is exactly §4's end-to-end flow — **coalesced load → transpose to MMA-ready (if needed) → issue →
+interleaved C → transpose to store order → wide coalesced store** (see §4 for the steps). Two things this
+recipe adds on top of §4:
+- **Step 2 has a happy case and a mismatch case.** *Happy:* A row-major `M×K` × B col-major `K×N` loads
+  coalesced **and** is already MMA-ready → zero reorder. *Mismatch* (e.g. A col-major, M contiguous): load
+  coalesced in the memory-native order, then **one cheap in-register transpose** to K-contiguous — never a
+  strided load.
+- **C is also a rectangle (`M×N`),** so making it store-compatible is the **same in-register transpose** as
+  A/B (within the already-interleaved ownership; the §7 canonical trap does not apply here).
 
 ### The cost — and the intelligence
 
@@ -972,24 +1017,24 @@ layout (derived)**; the picker merges N-D -> 2D-logical (M, N, K) and scores the
 |---|---|---|---|
 | **global_load** | load-dir matches the contiguous input axis (coalesced) | — | strided (major mismatch) |
 | **transform** | free-symmetry — transpose (reposition) / A↔B (source-swap routing), any dtype; label invariant | `reorder` dword-aligned (whole-VGPR MOV) | `reorder` sub-dword (unpack/move/repack, ∝ pack_factor: f16 2×, f8 4×); **`cross_lane`** = REJECT/DEFER |
-| **lds_read** | read contiguous on the LDS innermost | — | N-way bank conflict (read stride vs 32 banks) |
-| **c_epilogue** | native accum order == output (interleaved MMA) | in-register `reorder` (dtype-graded) | LDS round-trip (cross-lane C) |
+| **lds_read** | read contiguous on the LDS innermost | — | N-way bank conflict (read stride vs `NB` banks, 32 on gfx90a) |
+| **c_epilogue** | native accum **order** already == store order (aligned issue-order) | in-register `reorder` (dtype-graded) | LDS reposition, else register `cross_lane` (round-trip for cross-lane C) |
 
-**Tier ranking (cheapest → invasive):** free-symmetry(0) < `reorder`-dword-aligned < `reorder`-sub-dword
-(∝ 1/dtype-size) ≪ `cross_lane` (reject/defer seam). Smaller dtype ⇒ sub-dword reorder gets pricier ⇒
+**Tier ranking (cheapest → invasive; register tiers defined in §8, the SOT; the LDS-reposition rung is defined in §7a):** free-symmetry(0) < `reorder`-dword-aligned < `reorder`-sub-dword
+(∝ 1/dtype-size) < **LDS reposition** (conditional — only if the data already transits LDS; else can exceed a register `cross_lane` on a small tile) ≪ `cross_lane` (reject/defer seam). Smaller dtype ⇒ sub-dword reorder gets pricier ⇒
 the value of reaching a chain via a **free symmetry rises** (symmetry moves nothing at any dtype).
 
 ### Chains + findings (the MECHANISM; measured perf lives in the per-kernel design record, not the SOT)
 | chain | transform | lds_read | c_epilogue | outcome |
 |---|---|---|---|---|
-| interleaved / interleaved | none (matched) | M-innermost free-dim (`ds_read2_b32`); low conflict WITHOUT a pad | in-register, native==store | **model winner** (ranking validated) |
-| canonical / canonical | none (matched) | K-innermost (`ds_read2_b64`, wider/op); K-row aliases banks → fixable conflict (pad to fix) | none (RCC direct store) | baseline (honest = PADDED) |
+| interleaved / interleaved | none (matched) | M-innermost free-dim (`ds_read2_b32`); low conflict WITHOUT a pad | free(0) if issue-order==store order, else one in-register `reorder` (native ownership==store, intra-lane) | **model winner** (ranking validated) |
+| canonical / canonical | none (matched) | K-innermost (`ds_read2_b64`, wider/op); K-row aliases banks → fixable conflict (measured via `/bank-conflict`, outside the `lds_banks.md` §1.5 b32 read model; pad to fix) | none (RCC direct store) | baseline (honest = PADDED) |
 | interleaved / canonical (crossed) | A↔B swap + `c_transpose` (free-symmetry: routing + reposition, §8, DERIVED) | — | round-trip only if output ≠ native | not yet built |
 | canonical / interleaved (crossed) | ″ | — | in-register (interleaved C) | not yet built |
 
-**Findings (the durable MECHANISM — measured perf/counters live in the per-kernel design record + `/bank-conflict`, never the SOT):**
+**Findings (the durable MECHANISM — measured perf/counters live in the per-kernel design record + `/bank-conflict`, never the SOT; measured on gfx90a/CDNA2, so `MFMA`/`MfmaUtil` below are the CDNA matrix op and its util counter — the RDNA analogue is the WMMA-pipe util):**
 - **Interleaved beats canonical (RCR):** interleaved's M-innermost free-dim LDS read has low conflict WITHOUT
-  a pad; canonical's K-innermost read has a K-row stride that is a multiple of 32 dwords → K rows alias the
+  a pad; canonical's K-innermost read has a K-row stride that is a multiple of `NB` dwords (`NB`=32 on gfx90a) → K rows alias the
   same banks (a REAL, *fixable* K-aliasing conflict, NOT the throughput floor — model in `lds_banks.md`).
 - **Use the HONEST baseline: a PADDED canonical.** Padding the canonical K-dim de-aliases the banks and closes
   most of the gap; the naive unpadded canonical is a strawman. Interleaving's real edge is **modest**, and its
@@ -1010,7 +1055,7 @@ TWO transform SITES: **global→LDS** (coop store) and **LDS→MMA** (wave read)
 
 **RCR (A K-contig, B K-contig — symmetric):**
 - interleaved/interleaved — global_load coalesced (K); global→LDS = free-dim `reorder` on BOTH A,B
-  (dword-cheap at f16, hidden in the MFMA shadow); LDS→MMA none (matched); lds_read low-conflict (free-dim);
+  (dword-cheap at f16, hidden in the MMA shadow); LDS→MMA none (matched); lds_read low-conflict (free-dim);
   c_epilogue in-register. **The model's predicted winner** (ranking validated).
 - canonical/canonical — global_load coalesced (K); global→LDS identity; LDS→MMA none; lds_read K-innermost
   (wide `ds_read2_b64`) with the K-aliasing conflict (pad to fix); c_epilogue none (RCC direct). Ranks below
@@ -1030,7 +1075,7 @@ falsifiable f8 prediction and exactly why the two TO-CALIBRATE coefficients belo
 
 ### LDS bank-conflict model
 
-See **`lds_banks.md`** — the SOT for the LDS bank model (per-half-wave × per-dword-phase arbitration),
+See **`lds_banks.md`** — the SOT for the LDS bank model (per-served-group (`ArchLDS.HALF`, per-arch) × per-dword-phase arbitration),
 K-stride aliasing, the contiguity floor + width ladder (b128/b64/b32), the fixes (free symmetry / pad /
 contiguity-preserving swizzle / narrow / redistribute), and the **binding-stage decision** (conflict
 reduction is subordinate to wall-time — a conflict-free narrow-store variant can be *slower*). A and B are
@@ -1047,8 +1092,10 @@ separate LDS regions — isolate them (A-only / B-only, store-only / read-only) 
 
 - Interleave reference tables (MFMA/WMMA), CDNA + RDNA: `interleave_idx`, the transforms summary, the
   per-tile A/B grids, and the ACC transform tables.
+- `helpers/tiling/traits/mma_traits.py` — the traits / catalogue registry (128 atom rows); every §9
+  construction quantity is read from here.
 - `helpers/tiling/transforms.py` — `interleave_idx`, `k_distribution`, `classify_transform`,
-  `validate_operands`.
+  `validate_operands`, `derive_c_distribution` (the §9 accumulator ground truth).
 - `helpers/tiling/mma/warp_encoding.py` — canonical `a_/b_warp_encoding` (the `interleaved=` flag is BROKEN
   and raises; it does not produce a proper interleaved layout).
 - `helpers/tiling/kernels/tiling_gemm_interleaved_demo.py` — `_wave_descs_interleaved`: the real interleaved
