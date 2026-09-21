@@ -90,10 +90,10 @@ TEST(TestLayernormBpropSignatureKey, Copy)
     const LayernormBpropSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
+    EXPECT_EQ(copied.dxDataType, DataType::FLOAT);
     EXPECT_EQ(copied.dyDataType, DataType::FLOAT);
     EXPECT_EQ(copied.scaleBiasDataType, DataType::HALF);
     EXPECT_EQ(copied.meanInvVarianceDataType, DataType::DOUBLE);
-    EXPECT_EQ(copied.outputDataType, DataType::FLOAT);
     EXPECT_EQ(copied.computeDataType, DataType::BFLOAT16);
 }
 
@@ -104,6 +104,7 @@ TEST(TestLayernormBpropSignatureKey, CreateFromNodeAndTensorMap)
     const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
@@ -127,6 +128,7 @@ TEST(TestLayernormBpropSignatureKey, CreateFromNodeAndTensorMapWithOptionals)
     const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
@@ -173,6 +175,7 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingDy)
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
+                                          DataType::FLOAT,
                                           dims,
                                           normalizedDimCount,
                                           hipdnn_data_sdk::utilities::TensorLayout::NHWC);
@@ -199,6 +202,7 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingX)
     const std::vector<int64_t> dims = {1, 1, 1, 1};
     const int64_t normalizedDimCount = 3;
     auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
@@ -231,6 +235,7 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingDx)
                                           DataType::FLOAT,
                                           DataType::FLOAT,
                                           DataType::FLOAT,
+                                          DataType::FLOAT,
                                           dims,
                                           normalizedDimCount,
                                           hipdnn_data_sdk::utilities::TensorLayout::NHWC);
@@ -255,10 +260,10 @@ TEST(TestLayernormBpropSignatureKey, ThrowForMissingDx)
 TEST(TestLayernormBpropSignatureKey, StreamOperator)
 {
     const LayernormBpropSignatureKey key{
-        DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::INT32};
+        DataType::DOUBLE, DataType::HALF, DataType::BFLOAT16, DataType::FLOAT, DataType::INT32};
     std::stringstream stream;
     stream << key;
     ASSERT_EQ(stream.str(),
-              "Layernorm(dyX=FLOAT, scale=HALF, meanInvVar=BFLOAT16, dxDscaleDbias=DOUBLE, "
+              "Layernorm(dy=DOUBLE, dx=FLOAT, scaleDscaleDbias=HALF, meanInvVar=BFLOAT16, "
               "compute=INT32)");
 }

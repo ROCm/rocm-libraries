@@ -320,7 +320,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
     pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
                     makeTestKernel(testId(0x65), "kernel_256_float", 256, "FLOAT")};
 
-    const KernelIngestorStateManager<int> manager(
+    const KernelIngestorStateManager<TestHandle> manager(
         std::move(schema),
         std::vector<MatchDescriptor>{
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}},

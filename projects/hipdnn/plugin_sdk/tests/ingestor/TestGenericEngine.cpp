@@ -133,8 +133,88 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
                                                                                      details.size);
     ASSERT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.engineId(), engine.id());
-    ASSERT_EQ(wrapper.knobCount(), 1U);
+    // The UED name, so a graph-time record identifies its engine the same way the
+    // getEngineName entry point does.
+    EXPECT_EQ(wrapper.name(), "test:engine");
+    // GenericEngine::getDetails() always prepends the out-of-band benchmarking knob
+    // (Task 1.4), so a UED declaring one knob of its own advertises two; looked up by
+    // name, since the prepend fixes a position Phase 2 must not assume by index either.
+    ASSERT_EQ(wrapper.knobCount(), 2U);
     EXPECT_EQ(wrapper.getKnobByName(BLOCK_SIZE).knobId(), BLOCK_SIZE);
+}
+
+/// GenericEngine::getDetails() advertises global.benchmarking out-of-band, so a UED
+/// declaring zero knobs of its own still reports exactly this one knob -- and its
+/// value semantics (int, default 0, min/max 0/1) match MIOpen's createBenchmarkingKnob
+/// (plan design record, Finding 1). Looked up by name: the prepend fixes a position
+/// no test should assume by index.
+TEST(TestIngestorGenericEngine, GetDetailsAdvertisesTheBenchmarkingKnobOutOfBand)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x65));
+    hipdnnPluginConstData_t details{};
+
+    engine.getDetails(handle, graph, details);
+
+    ASSERT_NE(details.ptr, nullptr);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
+                                                                                     details.size);
+    ASSERT_TRUE(wrapper.isValid());
+
+    const auto& knob = wrapper.getKnobByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+    EXPECT_EQ(knob.knobId(), hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+
+    ASSERT_TRUE(knob.hasDefaultValue());
+    EXPECT_EQ(knob.defaultValueType(), hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+    const auto& defaultValue
+        = knob.defaultValueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
+    EXPECT_EQ(defaultValue.value(), 0);
+
+    ASSERT_TRUE(knob.hasConstraint());
+    EXPECT_EQ(knob.constraintType(),
+              hipdnn_flatbuffers_sdk::data_objects::KnobConstraint::IntConstraint);
+    const auto& constraint
+        = knob.constraintAs<hipdnn_flatbuffers_sdk::data_objects::IntConstraint>();
+    EXPECT_EQ(constraint.min_value(), 0);
+    EXPECT_EQ(constraint.max_value(), 1);
+    EXPECT_EQ(constraint.step(), 1);
+}
+
+/// A UED naming no knobs of its own still gets the out-of-band prepend: advertisement
+/// does not depend on the engine declaring anything.
+TEST(TestIngestorGenericEngine, GetDetailsAdvertisesExactlyTheBenchmarkingKnobWhenNoneAreDeclared)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubEngine engine(makeEngineWithKnobs({}), makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x66));
+    hipdnnPluginConstData_t details{};
+
+    engine.getDetails(handle, graph, details);
+
+    ASSERT_NE(details.ptr, nullptr);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
+                                                                                     details.size);
+    ASSERT_TRUE(wrapper.isValid());
+    ASSERT_EQ(wrapper.knobCount(), 1U);
+    EXPECT_EQ(wrapper.getKnobByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME).knobId(),
+              hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+}
+
+/// The out-of-band knob never enters EngineDescriptor.knobs, so a UED declaring no
+/// knobs must not trip findUndeclaredKnob's std::invalid_argument.
+TEST(TestIngestorGenericEngine, ConstructingAnEngineWithNoDeclaredKnobsNeverThrows)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+
+    EXPECT_NO_THROW((StubEngine(makeEngineWithKnobs({}), makeStubStateManager(), resolver)));
 }
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)

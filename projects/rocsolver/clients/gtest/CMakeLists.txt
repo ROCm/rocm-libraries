@@ -56,6 +56,7 @@ set(roclapack_test_source
   lapack/gelq2_gelqf_gtest.cpp
   # problem and matrix reductions (diagonalizations)
   lapack/gebd2_gebrd_gtest.cpp
+  lapack/gehd2_gehrd_gtest.cpp
   lapack/sytxx_hetxx_gtest.cpp
   lapack/sygsx_hegsx_gtest.cpp
   # singular value decomposition
@@ -103,6 +104,7 @@ set(rocauxiliary_test_source
   auxiliary/ormxl_unmxl_gtest.cpp
   auxiliary/ormbr_unmbr_gtest.cpp
   auxiliary/ormtr_unmtr_gtest.cpp
+  auxiliary/ormtr_unmtr_hb2st_gtest.cpp
   # bidiagonal matrices
   auxiliary/labrd_gtest.cpp
   auxiliary/bdsqr_gtest.cpp
@@ -120,6 +122,7 @@ set(rocauxiliary_test_source
   auxiliary/lahr2_gtest.cpp
   # symmetric matrices
   auxiliary/lasyf_gtest.cpp
+  auxiliary/sb2st_hb2st_gtest.cpp
   auxiliary/sy2sb_he2hb_gtest.cpp
   # triangular matrices
   auxiliary/lauum_gtest.cpp
@@ -249,6 +252,9 @@ if(ROCSOLVER_ENABLE_CHOLQR)
 endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
 
 # Mirror the library's 2-stage eigensolver feature flag so the tests assert the

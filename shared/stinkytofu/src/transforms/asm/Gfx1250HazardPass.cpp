@@ -82,20 +82,6 @@ bool isFlat(const StinkyInstruction& inst) {
     return isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst);
 }
 
-bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
-    for (const StinkyRegister& dest : inst.getDestRegs()) {
-        bool overlaps = false;
-        forEachRegUnit(dest, [&](RegKey key) { overlaps |= sources.contains(key); });
-        if (overlaps) return true;
-    }
-    return false;
-}
-
-void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
-    for (const StinkyRegister& src : inst.getSrcRegs())
-        forEachRegUnit(src, [&](RegKey key) { sources.insert(key); });
-}
-
 bool hasSelfDestSourceOverlap(const StinkyInstruction& inst) {
     RegKeySet sources;
     addSources(sources, inst);
@@ -173,10 +159,6 @@ bool isImmediateMemorySuccessor(BasicBlock::iterator it, BasicBlock& bb, ReplayM
     return false;
 }
 
-void addSources(GroupState& state, const StinkyInstruction& inst) {
-    addSources(state.sources, inst);
-}
-
 // Rules 2 and 3 are repaired by cutting the replay group short, which costs
 // memory-level parallelism. Report it: a register allocation without the
 // overlap would have kept the group intact.
@@ -230,8 +212,10 @@ class Gfx1250HazardPass : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        // Only run if `RequiresXCntForVolatileVMEM` is enabled.
-        if (!passCtx.getAsmCapsConfig().requiresXCntForVolatileVMEM) {
+        const auto& caps = passCtx.getAsmCapsConfig();
+        // Run if either flag is set: `RequiresXCntForVolatileVMEM` (atomics only) or
+        // `EnableXnackReplay` (full replay protection including atomics).
+        if (!caps.requiresXCntForVolatileVMEM && !caps.enableXnackReplay) {
             return preserveCFGAnalyses();
         }
 
@@ -239,7 +223,7 @@ class Gfx1250HazardPass : public Pass {
 
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
-        runOnFunction(func, archId, *profile);
+        runOnFunction(func, archId, *profile, caps.enableXnackReplay);
         profile->print();
         return preserveCFGAnalyses();
     }
@@ -261,7 +245,8 @@ class Gfx1250HazardPass : public Pass {
     // preserves replay sources and inserts required drains.
     static void applySingleGroupXnackReplayFix(BasicBlock& bb, BasicBlock::iterator it,
                                                AsmIRBuilder& builder, GfxArchID archId,
-                                               GroupState& state, XcntDrainProfileBase& profile) {
+                                               GroupState& state, XcntDrainProfileBase& profile,
+                                               bool enableXnackReplay) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr || isPseudoInst(inst)) return;
 
@@ -271,32 +256,34 @@ class Gfx1250HazardPass : public Pass {
             state.clear();
             return;
         }
+        if (enableXnackReplay) {
+            if (isForeverSleep(*inst)) {
+                if (state.hasMemory)
+                    insertXcntDrain(builder, archId, inst, state, profile,
+                                    XcntDrainReason::ForeverSleep);
+                // s_sleep is a non-memory single-group boundary.
+                state.clear();
+                return;
+            }
 
-        if (isForeverSleep(*inst)) {
-            if (state.hasMemory)
-                insertXcntDrain(builder, archId, inst, state, profile,
-                                XcntDrainReason::ForeverSleep);
-            // s_sleep is a non-memory single-group boundary.
-            state.clear();
-            return;
-        }
+            // SW-prefetch runs later and owns its hints' XCnt waits; handle only
+            // pre-existing scalar prefetches here.
+            if (isScalarPrefetch(*inst)) {
+                if (state.hasMemory)
+                    insertXcntDrain(builder, archId, inst, state, profile,
+                                    XcntDrainReason::ScalarPrefetch);
+                state.clear();
+                return;
+            }
 
-        // SW-prefetch runs later and owns its hints' XCnt waits; handle only
-        // pre-existing scalar prefetches here.
-        if (isScalarPrefetch(*inst)) {
-            if (state.hasMemory)
-                insertXcntDrain(builder, archId, inst, state, profile,
-                                XcntDrainReason::ScalarPrefetch);
-            state.clear();
-            return;
-        }
-
-        if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
-            if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
-                insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::VgprMsb);
-            // s_set_vgpr_msb is a non-memory single-group boundary.
-            state.clear();
-            return;
+            if (inst->getUnifiedOpcode() == GFX::s_set_vgpr_msb) {
+                if (!isImmediateMemorySuccessor(it, bb, kReplayMode) && state.hasMemory)
+                    insertXcntDrain(builder, archId, inst, state, profile,
+                                    XcntDrainReason::VgprMsb);
+                // s_set_vgpr_msb is a non-memory single-group boundary.
+                state.clear();
+                return;
+            }
         }
 
         const MemoryGroupKind kind = getMemoryGroupKind(*inst, kReplayMode);
@@ -342,29 +329,34 @@ class Gfx1250HazardPass : public Pass {
 
         // Rule 4(a): the first atomic after non-atomic memory must start
         // with XCNT == 0. This drain clears state before Rule 2 runs below.
+        // Active under both `RequiresXCntForVolatileVMEM` and `EnableXnackReplay`
+        // (the pass only runs when at least one is set).
         const bool needsRule4aDrain = atomic && state.hasNonAtomic;
         if (needsRule4aDrain) {
             insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::AtomicRule4a);
         }
 
-        // Apply rule 3:
-        if (kind == MemoryGroupKind::SMEM && returnsMultipleDwords(*inst) &&
-            hasSelfDestSourceOverlap(*inst)) {
-            reportUnrepairableSmemSelfOverlap(bb, *inst);
-        }
+        // Rules 2 and 3 (source-clobber protection) require full replay support.
+        // `RequiresXCntForVolatileVMEM` alone only protects atomics (Rule 4).
+        if (enableXnackReplay) {
+            if (kind == MemoryGroupKind::SMEM && returnsMultipleDwords(*inst) &&
+                hasSelfDestSourceOverlap(*inst)) {
+                reportUnrepairableSmemSelfOverlap(bb, *inst);
+            }
 
-        if (kind == MemoryGroupKind::SMEM && violatesSmemSourceRule(*inst, state)) {
-            warnGroupBreak(bb, *inst, "SMEM");
-            insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::SmemRule3);
-        }
+            if (kind == MemoryGroupKind::SMEM && violatesSmemSourceRule(*inst, state)) {
+                warnGroupBreak(bb, *inst, "SMEM");
+                insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::SmemRule3);
+            }
 
-        // Rule 2 applies only to non-atomic FLAT. Rule 4 already handled the
-        // first atomic and permits a consecutive atomic run.
-        const bool violatesRule2 = kind == MemoryGroupKind::VMEM && isFlat(*inst) && !atomic &&
-                                   violatesFlatSourceRule(*inst, state);
-        if (violatesRule2) {
-            warnGroupBreak(bb, *inst, "FLAT");
-            insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::FlatRule2);
+            // Rule 2 applies only to non-atomic FLAT. Rule 4 already handled the
+            // first atomic and permits a consecutive atomic run.
+            const bool violatesRule2 = kind == MemoryGroupKind::VMEM && isFlat(*inst) && !atomic &&
+                                       violatesFlatSourceRule(*inst, state);
+            if (violatesRule2) {
+                warnGroupBreak(bb, *inst, "FLAT");
+                insertXcntDrain(builder, archId, inst, state, profile, XcntDrainReason::FlatRule2);
+            }
         }
 
         // Only VMEM and SMEM retain replay state.
@@ -376,11 +368,12 @@ class Gfx1250HazardPass : public Pass {
         state.kind = kind;
         state.hasMemory = true;
         state.hasNonAtomic |= !atomic;
-        addSources(state, *inst);
+        addSources(state.sources, *inst);
     }
 
    public:
-    static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile) {
+    static void runOnFunction(Function& func, GfxArchID archId, XcntDrainProfileBase& profile,
+                              bool enableXnackReplay) {
         profile.beginFunction(func);
 
         GroupState state;
@@ -394,7 +387,8 @@ class Gfx1250HazardPass : public Pass {
 
             AsmIRBuilder builder(bb, archId);
             for (auto it = bb.begin(); it != bb.end(); ++it) {
-                applySingleGroupXnackReplayFix(bb, it, builder, archId, state, profile);
+                applySingleGroupXnackReplayFix(bb, it, builder, archId, state, profile,
+                                               enableXnackReplay);
             }
             previous = &bb;
         }
@@ -419,14 +413,16 @@ class Gfx1250HazardModulePass : public ModulePass {
 
     PreservedAnalyses run(StinkyAsmModule& M, PassContext& passCtx,
                           ModuleAnalysisManager& /*MAM*/) override {
-        if (!passCtx.getAsmCapsConfig().requiresXCntForVolatileVMEM)
+        const auto& caps = passCtx.getAsmCapsConfig();
+        if (!caps.requiresXCntForVolatileVMEM && !caps.enableXnackReplay)
             return PreservedAnalyses::all();
 
         const auto arch = passCtx.getGemmTileConfig().arch;
         const GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         auto profile = makeXcntDrainProfile(enableXcntDrainProfile);
         for (Function* f : M.getFunctions())
-            if (f && !f->empty()) Gfx1250HazardPass::runOnFunction(*f, archId, *profile);
+            if (f && !f->empty())
+                Gfx1250HazardPass::runOnFunction(*f, archId, *profile, caps.enableXnackReplay);
         profile->print();
         return PreservedAnalyses::all();
     }
