@@ -192,7 +192,14 @@ static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<Mixed
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<PackedProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<QK64Problem>>());
-static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<V64Problem>>());
+// V64Problem (QK hdim=128, V hdim=64): the dynamic gate now enables padding.
+// K matches the d=128 value (verified via (128,128)); V matches the d=64 value
+// (verified via (64,64)) -- both backed by real verified kernels.
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>::Q, NoPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>::K,
+                             ck_tile::detail::LdsPaddingConfig<true, 256, 16>>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<V64Problem>::V,
+                             ck_tile::detail::LdsPaddingConfig<true, 128, 32>>);
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<TwoWarpProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<M96Problem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<N32Problem>>());
