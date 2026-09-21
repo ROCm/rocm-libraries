@@ -610,45 +610,23 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('FusedA2ATileDivisible', value=state['MacroTile0'])]
 
         if state.get('ReuseAcrossPersistent', 0):
-            # A lives in VGPRs for the whole persistent loop, so the kernel is only
-            # correct for problems where every tile a workgroup visits reads the
-            # same A, and where K is a whole number of resident k-tiles.
-            #   M % MacroTile0 == 0 - no edge tile in M. A half-filled tile would
-            #                         take the edge path, which the resident
-            #                         k-tile count is not budgeted against. More
-            #                         than one M-tile is fine: A's M-tile joins
-            #                         the batch in the entry guard's comparison,
-            #                         so a tile needing a different one is sent to
-            #                         the fill copy. Whether that costs a reload
-            #                         every tile or none at all is down to
-            #                         skGrid % NumWorkGroups0, which nothing
-            #                         currently arranges -- a throughput question,
-            #                         not a correctness one.
-            #   N % MacroTile1 == 0 - no edge tile in N either.
+            # A stays in VGPRs for the whole persistent loop, so the kernel is only
+            # correct where every tile a workgroup visits reads the same A. K is the
+            # only dim needing a predicate for that: the entry guard handles M by
+            # comparing (M-tile, batch), A does not depend on N, and a partial
+            # M-tile is safe because row m of C depends only on row m of A and the
+            # edge store masks the rows past M.
             #
-            # K is a range, not a point. The loop shell owns every resident k-tile
-            # and leaves as soon as the counter runs out, so any K from the floor up
-            # to the count the kernel holds works and the k-tiles above it simply go
-            # unused. K must still land on a k-tile boundary, because a section's
-            # registers are picked by a codegen-time k-tile number.
-            #
-            # The floor is one k-tile, and the reason is the loop-entry guard: it
-            # skips the loop when the counter reaches zero, and the InitCIterWmma
-            # clone that zeroes C lives inside the loop, so at zero k-tiles C would
-            # never be initialised. One is enough even at PrefetchGlobalRead 2 --
-            # the pre-loop prefetch skips its second stage when the counter is 1
-            # (label_skipPGR2_1), so nothing is fetched past this K, and the single
-            # section computes and then leaves through its own early exit. The
-            # toPGR1 escape that carries this case in a non-RAP kernel is not needed
-            # here: it exists to hand the work to the NGLL drain, which RAP does not
-            # emit because its sections do the work themselves.
-            #
-            # SizeGreaterThan and SizeLessThan are strict, hence the -1 and +1.
+            # K is a range, not a point: the loop shell owns every resident k-tile
+            # and leaves when the counter runs out, so any whole number of them up
+            # to the count the kernel holds works. It must land on a k-tile boundary
+            # because a section's registers are picked by a codegen-time k-tile
+            # number, and the floor is one because the InitCIterWmma clone that
+            # zeroes C lives inside the loop. SizeGreaterThan and SizeLessThan are
+            # strict, hence the -1 and +1.
             kIdx = state['ProblemType']['NumIndicesC']
             kTiles = state['_RAPNumResidentKTiles']
             floorTiles = 1
-            rv += [cls('SizeMultiple', index=0, value=state['MacroTile0'])]
-            rv += [cls('SizeMultiple', index=1, value=state['MacroTile1'])]
             rv += [cls('SizeMultiple', index=kIdx, value=state['DepthU'])]
             rv += [cls('SizeGreaterThan', index=kIdx,
                        value=floorTiles * state['DepthU'] - 1)]

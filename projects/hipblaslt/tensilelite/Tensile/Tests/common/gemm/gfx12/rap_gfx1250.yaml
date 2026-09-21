@@ -176,6 +176,30 @@ BenchmarkProblems:
           # Few enough tiles that a workgroup gets one: exercises the fill copy
           # alone, with the reuse copy never entered.
           - Exact: [64, 2048, 1, 512]
+          # More than one M-tile, which is what the entry guard's M-tile half is
+          # for. 3 is deliberate: the CU count is even, so NumWorkGroups0 of 2
+          # divides the walk stride and the M-tile never turns over, whereas 3
+          # does not divide it and every tile takes the guard. Removing that half
+          # of the guard fails this size and passes the 2 below it.
+          - Exact: [192, 4096, 1, 512]    # nWG0=3, 48 tiles
+          - Exact: [128, 6144, 1, 512]    # nWG0=2, 48 tiles
+          # RAP adds no N predicate, so the store's edge path is reachable. Even
+          # N only: these kernels derive GlobalReadVectorWidthB 2 and so assert
+          # Free1ElementMultiple 2, which is ordinary edge machinery and nothing
+          # to do with RAP -- an odd N is refused here and taken by group 3,
+          # whose kernels derive 1.
+          - Exact: [64, 12416, 1, 512]    # last N-tile half full
+          - Exact: [64, 128, 1, 512]      # a single half-full N-tile
+          # All three at once: several M-tiles, an N edge, and a batch boundary.
+          - Exact: [192, 4098, 2, 512]
+          # A partial M-tile, which leaves most of the resident A block holding
+          # another M-tile's rows for the whole persistent walk. 130 is chosen to
+          # make that as bad as it gets: the last tile holds 2 rows of 64, so 97%
+          # of the block is stale, and NumWorkGroups0 3 means the guard refills
+          # from a different M-tile every tile.
+          - Exact: [130, 4096, 1, 512]    # 2 of 64 rows valid in the last M-tile
+          - Exact: [190, 4096, 1, 512]    # 62 of 64, the other end of the range
+          - Exact: [130, 4098, 2, 512]    # partial M-tile, N edge and a batch
         - ActivationArgs:
           - [Enum: none]
 
@@ -241,6 +265,18 @@ BenchmarkProblems:
           - Exact: [64, 12288, 1, 2304]   # ceiling for 64x256
           - Exact: [128, 12288, 4, 256]
           - Exact: [128, 12288, 2, 1024]  # ceiling for 128x128
+          # The M-tile and N-edge relaxations against the one data type whose A
+          # really does differ per batch, so both halves of the entry guard are
+          # under load at once. MT 128x128 rejects the M=192 row (192 is not a
+          # multiple of 128) and takes the rest.
+          - Exact: [192, 4096, 2, 512]    # nWG0=3 at 64x256, batch 2
+          # Odd N, which these kernels can take because they derive
+          # GlobalReadVectorWidthB 1 and so assert Free1ElementMultiple 1. The
+          # narrowest N edge that exists, on top of several M-tiles.
+          - Exact: [128, 6145, 2, 512]
+          # Both dims odd and both partial, against the one data type whose A
+          # really differs per batch. The narrowest edge on each side at once.
+          - Exact: [129, 6145, 2, 512]
         - ActivationArgs:
           - [Enum: none]
 

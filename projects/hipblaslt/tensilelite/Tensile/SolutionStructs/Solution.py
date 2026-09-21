@@ -3546,7 +3546,13 @@ class Solution(collections.abc.Mapping):
 
     # optSingleColVgpr shares one address vgpr across the batch, so the store needs
     # no per-element address register. Mirrors AsmStoreState's beta, non-edge,
-    # non-atomic branch -- the only store path the RAP size predicates allow.
+    # non-atomic branch.
+    #
+    # Non-edge even though an edge store is reachable: the edge path loses
+    # optSingleColVgpr and so costs one more register per element, and pricing it
+    # here would lower the resident k-tile count for every problem to pay for the
+    # ones that take it. That count is what K's ceiling is made of, so the edge
+    # path is left to cost a store batch instead. See rapCheckStoreNeutrality.
     optSingleColVgpr = (state["BufferStore"] and not packedC0 and not packedC1
                         and not problemType["UseInitialStridesCD"])
     vgprsPerAddr = 0 if optSingleColVgpr else (1 if state["BufferStore"] else 2)

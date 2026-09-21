@@ -388,9 +388,12 @@ class KernelWriterAssembly(KernelWriter):
     fragmentation and occupancy limit included, so the counterfactual differs from
     it by exactly a known constant.
 
-    Only beta-with-no-edge is checked. beta reads C, so it needs the most
-    registers per element of the paths this problem can take, and the emitted size
-    predicates rule the edge variants out.
+    Only the beta, non-edge path is checked. beta reads C and so needs the most
+    registers per element of the non-edge paths. The edge path is reachable and
+    left unpriced deliberately: checking it would reject these kernels, and
+    pricing it in the model would cost every problem resident k-tiles to pay for
+    the ones that take it, so it is allowed its extra batch instead. See
+    rapMaxResidentKTiles.
     """
     if not (beta and not edge):
       return
