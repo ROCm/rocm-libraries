@@ -64,6 +64,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ROCRAND_PHILOX_W32_0 0x9E3779B9U
 #define ROCRAND_PHILOX_W32_1 0xBB67AE85U
 
+#define BENCH_ADDC
+
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
     #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out) \
         __builtin_addc(a, b, carry_in, carry_out)
@@ -97,37 +99,9 @@ class philox4x32_10_engine
 public:
     struct philox4x32_10_state
     {
-        // Unions are used here to force the compiler to map the variables
-        // strictly to VGPRs instead of spilling them to local scratch memory.
-        union
-        {
-            uint4 counter;
-            struct
-            {
-                unsigned int counter_x, counter_y, counter_z, counter_w;
-            };
-        };
-        union
-        {
-            uint4 result;
-            struct
-            {
-                unsigned int result_x, result_y, result_z, result_w;
-            };
-        };
-        union
-        {
-            uint2 key;
-            struct
-            {
-                unsigned int key_x, key_y;
-            };
-        };
-        /*
         uint4 counter;
         uint4 result;
         uint2 key;
-        */
         unsigned int substate;
 
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
@@ -211,28 +185,6 @@ public:
 
     __forceinline__ __device__ __host__ unsigned int next()
     {
-        unsigned int s = m_state.substate;
-        unsigned int ret;
-        if(s == 0)
-            ret = m_state.result_x;
-        else if(s == 1)
-            ret = m_state.result_y;
-        else if(s == 2)
-            ret = m_state.result_z;
-        else
-            ret = m_state.result_w;
-
-        s++;
-        if(s == 4)
-        {
-            s = 0;
-            this->discard_state();
-            m_state.result = this->ten_rounds(m_state.counter, m_state.key);
-        }
-        m_state.substate = s;
-        return ret;
-
-        /*
     #if defined(__HIP_PLATFORM_AMD__)
         unsigned int ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
     #else
@@ -247,8 +199,6 @@ public:
             m_state.result = this->ten_rounds(m_state.counter, m_state.key);
         }
         return ret;
-        */
-
     }
 
     __forceinline__ __device__ __host__ uint4 next4()
@@ -272,54 +222,47 @@ protected:
         // Discard states
         this->discard_state(counter_offset);
     }
-/*
+
     // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
     __forceinline__ __device__ __host__ void
         discard_subsequence_impl(unsigned long long subsequence)
     {
+#ifndef BENCH_ADDC
         unsigned int lo = static_cast<unsigned int>(subsequence);
         unsigned int hi = static_cast<unsigned int>(subsequence >> 32);
-
         unsigned int temp = m_state.counter_z;
         m_state.counter_z += lo;
         m_state.counter_w += hi + (m_state.counter_z < temp ? 1 : 0);
-    }
-*/
-    // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
-    __forceinline__ __device__ __host__ void
-        discard_subsequence_impl(unsigned long long subsequence)
-    {
+#else
         unsigned int lo = static_cast<unsigned int>(subsequence);
         unsigned int hi = static_cast<unsigned int>(subsequence >> 32);
         unsigned int carry = 0;
-
-        m_state.counter_z = ROCRAND_BUILTIN_ADDC(m_state.counter_z, lo, 0, &carry);
-        m_state.counter_w = ROCRAND_BUILTIN_ADDC(m_state.counter_w, hi, carry, &carry);
+        m_state.counter.z = ROCRAND_BUILTIN_ADDC(m_state.counter.z, lo, 0, &carry);
+        m_state.counter.w = ROCRAND_BUILTIN_ADDC(m_state.counter.w, hi, carry, &carry);
+#endif
     }
 
     // Advances the internal state by offset times.
     // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
     __forceinline__ __device__ __host__ void discard_state(unsigned long long offset)
     {
-    /*
+#ifndef BENCH_ADDC
         unsigned int lo = static_cast<unsigned int>(offset);
         unsigned int hi = static_cast<unsigned int>(offset >> 32);
-
         uint4 temp = m_state.counter;
-        m_state.counter_x += lo;
-        m_state.counter_y += hi + (m_state.counter_x < temp.x ? 1 : 0);
-        m_state.counter_z += (m_state.counter_y < temp.y ? 1 : 0);
-        m_state.counter_w += (m_state.counter_z < temp.z ? 1 : 0);
-    */
-
+        m_state.counter.x += lo;
+        m_state.counter.y += hi + (m_state.counter.x < temp.x ? 1 : 0);
+        m_state.counter.z += (m_state.counter.y < temp.y ? 1 : 0);
+        m_state.counter.w += (m_state.counter.z < temp.z ? 1 : 0);
+#else
         const unsigned int lo    = static_cast<unsigned int>(offset);
         const unsigned int hi    = static_cast<unsigned int>(offset >> 32);
         unsigned int       carry = 0;
-
-        m_state.counter_x = ROCRAND_BUILTIN_ADDC(m_state.counter_x, lo, 0, &carry);
-        m_state.counter_y = ROCRAND_BUILTIN_ADDC(m_state.counter_y, hi, carry, &carry);
-        m_state.counter_z = ROCRAND_BUILTIN_ADDC(m_state.counter_z, 0, carry, &carry);
-        m_state.counter_w = ROCRAND_BUILTIN_ADDC(m_state.counter_w, 0, carry, &carry);
+        m_state.counter.x = ROCRAND_BUILTIN_ADDC(m_state.counter.x, lo, 0, &carry);
+        m_state.counter.y = ROCRAND_BUILTIN_ADDC(m_state.counter.y, hi, carry, &carry);
+        m_state.counter.z = ROCRAND_BUILTIN_ADDC(m_state.counter.z, 0, carry, &carry);
+        m_state.counter.w = ROCRAND_BUILTIN_ADDC(m_state.counter.w, 0, carry, &carry);
+#endif
     }
 
     // Advances the internal state to the next state
@@ -331,22 +274,14 @@ protected:
 
     __forceinline__ __device__ __host__ static uint4 bump_counter(uint4 counter)
     {
-        /*
+#ifndef BENCH_ADDC
         counter.x++;
         unsigned int add      = counter.x == 0 ? 1 : 0;
         counter.y += add; add = counter.y == 0 ? add : 0;
         counter.z += add; add = counter.z == 0 ? add : 0;
         counter.w += add;
         return counter;
-        */
-
-        // result 3: seems to give the best results of the 3
-        unsigned int carry = 0;
-        counter.x                    = ROCRAND_BUILTIN_ADDC(counter.x, 1, 0, &carry);
-        counter.y                    = ROCRAND_BUILTIN_ADDC(counter.y, 0, carry, &carry);
-        counter.z                    = ROCRAND_BUILTIN_ADDC(counter.z, 0, carry, &carry);
-        counter.w                    = ROCRAND_BUILTIN_ADDC(counter.w, 0, carry, &carry);
-        return counter;
+#else
 
         /*
         // result 1
@@ -363,25 +298,14 @@ protected:
         return counter;
         */
 
-        /*
-        // result 2
-        struct counter_scalars
-        {
-            unsigned int x, y, z, w;
-        };
-        counter_scalars s;
-        memcpy(&s, &counter, sizeof(s));   // s has zero type relationship to uint4
-
+        // result 3: seems to give the best results of the 3
         unsigned int carry = 0;
-        s.x = ROCRAND_BUILTIN_ADDC(s.x, 1, 0, &carry);
-        s.y = ROCRAND_BUILTIN_ADDC(s.y, 0, carry, &carry);
-        s.z = ROCRAND_BUILTIN_ADDC(s.z, 0, carry, &carry);
-        s.w = ROCRAND_BUILTIN_ADDC(s.w, 0, carry, &carry);
-
-        uint4 result;
-        memcpy(&result, &s, sizeof(result));
-        return result;
-      */
+        counter.x                    = ROCRAND_BUILTIN_ADDC(counter.x, 1, 0, &carry);
+        counter.y                    = ROCRAND_BUILTIN_ADDC(counter.y, 0, carry, &carry);
+        counter.z                    = ROCRAND_BUILTIN_ADDC(counter.z, 0, carry, &carry);
+        counter.w                    = ROCRAND_BUILTIN_ADDC(counter.w, 0, carry, &carry);
+        return counter;
+#endif
     }
 
     __forceinline__ __device__ __host__ uint4 interleave(const uint4 prev, const uint4 next) const
