@@ -1702,11 +1702,11 @@ class TestWgradValidatorAgreement(unittest.TestCase):
     """
 
     def _spec(self, **kw):
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         base = dict(
             problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3),
@@ -1724,7 +1724,7 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         return WgradConvSpec(**base)
 
     def _agree(self, spec, arch="gfx950"):
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             is_valid_wgrad_spec,
         )
 
@@ -1763,7 +1763,7 @@ class TestWgradValidatorAgreement(unittest.TestCase):
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to
         # bless it and let the builder raise.
-        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         ok, why = self._agree(
             self._spec(
@@ -1787,11 +1787,11 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
     """
 
     def _gfx1250_spec(self, **kw):
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         base = dict(
             problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
@@ -1812,7 +1812,7 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         return WgradConvSpec(**base)
 
     def test_two_stage_rejected_on_wmma(self):
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             is_valid_wgrad_spec,
         )
 
@@ -1825,7 +1825,7 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
     def test_two_stage_build_raises_value_error_not_attribute_error(self):
         # The failure mode that matters: a clean ValueError a caller can handle,
         # never an AttributeError out of the epilogue emitter.
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
         )
 
@@ -1838,7 +1838,7 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         # The gate is two-stage-specific: the packed atomic epilogue DOES have a
         # WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so plain split-K must
         # stay reachable on wave32.
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             is_valid_wgrad_spec,
         )
 
@@ -1862,11 +1862,11 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
     """
 
     def _spec(self, tile_m, tile_n, tile_k):
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         return WgradConvSpec(
             problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3),
@@ -1884,7 +1884,7 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
         )
 
     def test_reported_budget_uses_the_k_outer_shape(self):
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common.conv_implicit_gemm_wgrad import (
             is_valid_wgrad_spec,
         )
 

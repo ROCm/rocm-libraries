@@ -3689,6 +3689,14 @@ public:
         return m_last_bytes_per_second;
     }
 
+    /**
+     * \brief Returns a vector containing all bytes per second
+     */
+    std::vector<double> get_all_bytes_per_second()
+    {
+        return m_all_bytes_per_second;
+    }
+
 private:
     /// Parse optional arguments.
     void parse()
@@ -3993,6 +4001,7 @@ private:
                 auto state = new_state(algo, meta, specialization_index);
                 b->run(state);
                 m_last_bytes_per_second = state.get_last_bytes_per_second();
+                m_all_bytes_per_second.push_back(m_last_bytes_per_second);
             }
 
             specialization_index++;
@@ -4080,6 +4089,8 @@ private:
     detail::cli m_cli; ///< Command-line argument parser.
 
     double m_last_bytes_per_second = 0.0; /**< Last bytes per second */
+    std::vector<double>
+        m_all_bytes_per_second; /**< Vector that stores all run's bytes per second. Useful for some Kernel Tuning algorithms */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; ///< Stream blocker to serialize output.
