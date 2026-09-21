@@ -52,7 +52,7 @@ class TransformTuner(BaseTuner):
     ) -> Callable[[dict], bool]:
         """Constraints for what parameter combinations are valid during tuning"""
 
-        # No constraints needed al handled in the parameters.
+        # No constraints needed, these are handled in the parameters.
         def validate(params):
             return True
 
