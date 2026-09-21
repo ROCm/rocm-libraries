@@ -168,6 +168,7 @@ set(rocsparse_source
   src/level2/rocsparse_spsv.cpp
   src/level2/rocsparse_sptrsv.cpp
   src/level2/rocsparse_sptrsv_descr.cpp
+  src/level2/rocsparse_diagonal_solve.cpp
   src/level2/rocsparse_spitsv.cpp
   src/level2/rocsparse_gebsrmv.cpp
   src/level2/rocsparse_gebsrmv_template_row_block_dim_1.cpp
@@ -694,19 +695,25 @@ if(BUILD_ROCSPARSE_DEBUGGING)
     src/hip/rocsparse_hip_debug_t.cpp)
 endif()
 
-# Incomplete LDL^T (zero fill-in) sources, gated by BUILD_WITH_ILDLT0.
-if(BUILD_WITH_ILDLT0)
+# ELL triangular solve sources, gated by BUILD_WITH_ELL_TRSV.
+if(BUILD_WITH_ELL_TRSV)
   list(APPEND rocsparse_source
-    src/precond/csrildlt0/rocsparse_csrildlt0.cpp
-    src/precond/csrildlt0/rocsparse_csrildlt0_analysis.cpp
-    src/precond/csrildlt0/rocsparse_csrildlt0_buffer_size.cpp
-    src/precond/csrildlt0/rocsparse_csrildlt0_kernel_hash.cpp
-    src/precond/csrildlt0/rocsparse_csrildlt0_kernel_binsearch.cpp
-    src/precond/csrildlt0/rocsparse_csrildlt0_kernel_launch.cpp
-    src/generic/spildlt0/rocsparse_spildlt0_descr.cpp
-    src/generic/spildlt0/rocsparse_spildlt0_set_input.cpp
-    src/generic/spildlt0/rocsparse_spildlt0_get_output.cpp
-    src/generic/spildlt0/rocsparse_spildlt0.cpp
-    src/generic/spildlt0/rocsparse_spildlt0_buffer_size.cpp
-  )
+    src/level2/rocsparse_ellsv.cpp
+    src/level2/rocsparse_ellsv_analysis.cpp
+    src/level2/rocsparse_ellsv_solve.cpp)
 endif()
+
+# Incomplete LDL^T (zero fill-in) sources.
+list(APPEND rocsparse_source
+  src/precond/csrildlt0/rocsparse_csrildlt0.cpp
+  src/precond/csrildlt0/rocsparse_csrildlt0_analysis.cpp
+  src/precond/csrildlt0/rocsparse_csrildlt0_buffer_size.cpp
+  src/precond/csrildlt0/rocsparse_csrildlt0_kernel_hash.cpp
+  src/precond/csrildlt0/rocsparse_csrildlt0_kernel_binsearch.cpp
+  src/precond/csrildlt0/rocsparse_csrildlt0_kernel_launch.cpp
+  src/generic/spildlt0/rocsparse_spildlt0_descr.cpp
+  src/generic/spildlt0/rocsparse_spildlt0_set_input.cpp
+  src/generic/spildlt0/rocsparse_spildlt0_get_output.cpp
+  src/generic/spildlt0/rocsparse_spildlt0.cpp
+  src/generic/spildlt0/rocsparse_spildlt0_buffer_size.cpp
+)

@@ -18,7 +18,10 @@ Each module was characterized the same way, one atomic commit per module, **add-
 3. **Determinism.** No RNG / clock / network / global-state leakage into a snapshot. Normalize incidental fields *in the test*, never by changing production code to make a golden stable. Deep-copy shared globals and reset `globalParameters` between tests.
 4. **Measure.** Run path-mode coverage (below) for the module; aim ≥95% line. When a module can't reach the bar honestly (real fork/IPC paths, GPU/asm emit, integration-only builders), accept it below the bar: record an **ADR** under `adr/` explaining the structural reason, and index it with a short pointer row in `DECISIONS.md` — do not fake coverage.
 5. **No regression.** Once per batch, run the full `-m unit` suite and confirm it stays green and whole-project coverage does not drop.
-6. **Mutation (widening).** Once a module is covered, mutation testing certifies the assertions actually *catch* changes; survivors are triaged and killed (see **Mutation testing** below).
+6. **Mutation (gap discovery).** Once a module is covered, optional mutation
+   analysis looks for behavioral changes that its assertions do not detect.
+   Survivors are diagnostic leads; confirmed gaps are closed with focused
+   characterization tests (see **Mutation testing** below).
 
 ### Directory layout
 
@@ -283,10 +286,22 @@ ADRs are **append-only and superseded, never edited in place**. If a later chang
 
 ## Mutation testing
 
-The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and run through tox:
+Mutation testing is used only as an optional, offline technique for finding gaps
+in characterization coverage. A surviving mutant is not a product failure or a
+CI result. When it exposes an observable gap, the lasting result is a focused
+characterization test in this suite—not a mutation-score gate or a production
+code change made only to improve the score.
+
+The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and can
+be run explicitly through tox:
 
 ```bash
 tox -e mutation-unit
 ```
 
-It is currently a narrow **report-only pilot** (ten files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).
+It is not part of tox's default environment list or the project CI workflow.
+The optional maintainer/agent procedure and safety helpers live in the
+[`tensilelite-mutation-rerun` skill](../../../../../skills/tensilelite-mutation-rerun/SKILL.md).
+Accepted equivalent mutants and every `# pragma: no mutate` are justified in
+`DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on
+the mutant, and reverts cleanly).

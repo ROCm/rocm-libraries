@@ -86,6 +86,13 @@ rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
     return this->m_data[idx];
 }
 
+const rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
+                                                        rocsparse_fill_mode fill_mode) const
+{
+    const auto idx = rocsparse::trm_data_t::storage_index(operation, fill_mode);
+    return this->m_data[idx];
+}
+
 void rocsparse::trm_data_t::set(rocsparse_operation    operation,
                                 rocsparse_fill_mode    fill_mode,
                                 rocsparse::trm_info_t* trm_info)
