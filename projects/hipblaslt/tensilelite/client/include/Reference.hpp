@@ -110,7 +110,7 @@ namespace TensileLite
             float absDiff = std::fabs(fa - fb);
             // For BF16 a positive threshold is an extra *absolute* allowance, not
             // a replacement relative tolerance. Kernels that reduce in BF16 (see
-            // m_bf16AtomicSplits in ReferenceValidator) carry an error set by the
+            // m_atomicDestSplits in ReferenceValidator) carry an error set by the
             // intermediate partial sums, so it does not shrink as the result
             // approaches zero through cancellation. Leaving the relative term
             // alone keeps large values held to the normal bound.
