@@ -75,8 +75,33 @@ bool verifiedNothing(const SupportClaimCoverage& coverage)
     return coverage.graphsSelectedWithClaims > 0 && coverage.graphsQueried == 0;
 }
 
+namespace
+{
+
+// OFF is here for completeness rather than because production reaches it: with
+// claims off nothing seeds the counters, so the early return below fires first.
+std::string_view modeLabel(ClaimMode claims)
+{
+    switch(claims)
+    {
+    case ClaimMode::ENFORCE:
+        return " (ENFORCING)";
+    case ClaimMode::REPORT:
+        return " (REPORT ONLY - failures below are not fatal)";
+    case ClaimMode::OFF:
+        return " (CLAIM CHECKING OFF)";
+    default:
+        // A mode added without a label here would otherwise print a bare header, which
+        // is the exact ambiguity this label exists to remove. Say so instead.
+        return " (UNLABELLED MODE)";
+    }
+}
+
+} // namespace
+
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,
                               const SupportClaimVerdicts& verdicts,
+                              ClaimMode claims,
                               std::ostream& os)
 {
     const std::vector<SupportResult>& records = verdicts.all();
@@ -100,7 +125,7 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
     const size_t err = tally(SupportVerdict::QUERY_ERRORED);
     const size_t unc = tally(SupportVerdict::UNCLAIMED_SUPPORT);
 
-    os << "\n==== SUPPORT CLAIM SUMMARY ====\n"
+    os << "\n==== SUPPORT CLAIM SUMMARY" << modeLabel(claims) << " ====\n"
        << "  graphs: " << coverage.graphsFound << " found, " << coverage.graphsWithClaims
        << " with claims, " << coverage.graphsSelectedWithClaims << " selected, "
        << coverage.graphsQueried << " queried (" << records.size() << " verdicts)\n"

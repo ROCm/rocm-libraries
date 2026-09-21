@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -146,8 +147,12 @@ private:
 // enforce, which is not the same thing as enforcement failing to look.
 bool verifiedNothing(const SupportClaimCoverage& coverage);
 
+// `claims` only labels the header. Report and enforce produce byte-identical bodies,
+// CLAIM FAILURES block included, and differ solely in the exit code -- so a scraped
+// log showing failures next to a green lane is unreadable without the label.
 void printSupportClaimSummary(const SupportClaimCoverage& coverage,
                               const SupportClaimVerdicts& verdicts,
+                              ClaimMode claims,
                               std::ostream& os);
 
 } // namespace hipdnn_integration_tests::bundle

@@ -17,4 +17,12 @@ namespace hipdnn_integration_tests::bundle
 /// place production actually assembles one.
 HarnessPolicy productionPolicy(TensorPlacement placement);
 
+/// The two CLI flags, collapsed into the one value the harness reads. The only place
+/// the collapse happens, and order is the rule: enforcement subsumes reporting, so a
+/// run given both flags enforces.
+///
+/// Exposed rather than kept private to productionPolicy() because main.cpp needs the
+/// same answer for the summary header and must not re-derive the precedence.
+ClaimMode claimMode();
+
 } // namespace hipdnn_integration_tests::bundle

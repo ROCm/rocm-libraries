@@ -9,12 +9,6 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-namespace
-{
-
-/// The two CLI flags, collapsed into the one value the harness reads. The only place
-/// the collapse happens, and order is the rule: enforcement subsumes reporting, so a
-/// run given both flags enforces.
 ClaimMode claimMode()
 {
     if(TestConfig::get().enforceSupportClaims())
@@ -27,8 +21,6 @@ ClaimMode claimMode()
     }
     return ClaimMode::OFF;
 }
-
-} // namespace
 
 HarnessPolicy productionPolicy(TensorPlacement placement)
 {

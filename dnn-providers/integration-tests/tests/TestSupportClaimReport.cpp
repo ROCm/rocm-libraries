@@ -9,6 +9,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportVerdict.hpp"
 
+using hipdnn_integration_tests::bundle::ClaimMode;
 using hipdnn_integration_tests::bundle::coverageFor;
 using hipdnn_integration_tests::bundle::CoverageUpdate;
 using hipdnn_integration_tests::bundle::missedQueryComplaint;
@@ -39,10 +40,10 @@ SupportResult makeResult(SupportVerdict v)
                          {}};
 }
 
-std::string summary()
+std::string summary(ClaimMode claims = ClaimMode::ENFORCE)
 {
     std::ostringstream oss;
-    printSupportClaimSummary(supportClaimCoverage(), SupportClaimVerdicts::get(), oss);
+    printSupportClaimSummary(supportClaimCoverage(), SupportClaimVerdicts::get(), claims, oss);
     return oss.str();
 }
 
@@ -234,6 +235,52 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
     EXPECT_NE(output.find("2 found, 1 with claims, 1 selected, 1 queried"), std::string::npos);
     EXPECT_NE(output.find("confirmed: 1"), std::string::npos);
     EXPECT_NE(output.find("broken: 0"), std::string::npos);
+}
+
+// A failure block in a green lane is only readable if the header says the lane was
+// not enforcing. Asserted on a run that has failures, because that is the case where
+// the two modes are otherwise indistinguishable.
+TEST_F(TestSupportClaimReport, PrintHeaderNamesEnforcement)
+{
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+
+    const auto output = summary(ClaimMode::ENFORCE);
+
+    EXPECT_NE(output.find("==== SUPPORT CLAIM SUMMARY (ENFORCING) ===="), std::string::npos);
+    EXPECT_EQ(output.find("REPORT ONLY"), std::string::npos);
+}
+
+TEST_F(TestSupportClaimReport, PrintHeaderNamesReportMode)
+{
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+
+    const auto output = summary(ClaimMode::REPORT);
+
+    EXPECT_NE(output.find("(REPORT ONLY - failures below are not fatal)"), std::string::npos);
+    EXPECT_EQ(output.find("(ENFORCING)"), std::string::npos);
+    // The failures are still listed in full. Report mode withholding them would make
+    // the mode a coverage difference rather than an exit-code one.
+    EXPECT_NE(output.find("CLAIM FAILURES (1)"), std::string::npos);
+}
+
+// The header is the *only* difference. If a body ever diverges by mode, the report
+// lane stops predicting what enforcement would have done, which is its whole job.
+TEST_F(TestSupportClaimReport, PrintBodyIsIdenticalAcrossModes)
+{
+    supportClaimCoverage().graphsFound = 3;
+    supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsQueried = 2;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
+
+    const auto enforced = summary(ClaimMode::ENFORCE);
+    const auto reported = summary(ClaimMode::REPORT);
+
+    const auto body = [](const std::string& out) { return out.substr(out.find('\n', 1)); };
+
+    EXPECT_NE(enforced, reported);
+    EXPECT_EQ(body(enforced), body(reported));
 }
 
 // "accepted" and "confirmed" are different facts and the header has to say so,
@@ -602,7 +649,7 @@ TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
     coverage.graphsNotOpened = 1;
 
     std::ostringstream os;
-    printSupportClaimSummary(coverage, SupportClaimVerdicts::get(), os);
+    printSupportClaimSummary(coverage, SupportClaimVerdicts::get(), ClaimMode::ENFORCE, os);
     const std::string out = os.str();
 
     EXPECT_NE(out.find("could not be opened"), std::string::npos) << out;

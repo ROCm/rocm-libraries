@@ -27,6 +27,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
@@ -519,6 +520,7 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::bundle::printSupportClaimSummary(
                 hipdnn_integration_tests::bundle::supportClaimCoverage(),
                 hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
+                hipdnn_integration_tests::bundle::claimMode(),
                 std::cerr);
         }
 
