@@ -23,7 +23,7 @@ if _KPACK_DIR and Path(_KPACK_DIR).is_dir() and _KPACK_DIR not in sys.path:
 # producer tests, mirroring how this conftest already wires hkp_pack and
 # rocm_kpack onto sys.path.
 #
-# Source tree, not the packs' wheel venv: this tests producer logic, and the
+# Source tree, not the packs' private wheels: this tests producer logic, and the
 # packs already cover the wheel path.
 _ROCKE_ROOT = _TESTS_DIR.parent.parent / "rocke"
 for _rocke_sub in ("platform/python", "library"):
