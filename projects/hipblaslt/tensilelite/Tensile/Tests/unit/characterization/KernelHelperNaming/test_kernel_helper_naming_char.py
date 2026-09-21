@@ -44,6 +44,21 @@ def test_conversion_kernel_names_multiple_buffer_single_kernel(solution):
     assert K.conversionKernelNames(solution) is None
 
 
+def test_conversion_kernel_names_atomic_dest(solution):
+    # AtomicDest -> early `return`: the slices already accumulated into D, so
+    # there is nothing for a conversion kernel to read out of a workspace.
+    solution["GlobalSplitUAlgorithm"] = "AtomicDest"
+    assert K.conversionKernelNames(solution) == []
+
+
+def test_init_conversion_kernel_objects_atomic_dest(solution):
+    # Same early `return`. It lands before any KernelWriter is constructed, so
+    # this one object-construction function stays in scope for the suite and
+    # isaInfoMap is never read.
+    solution["GlobalSplitUAlgorithm"] = "AtomicDest"
+    assert K.initConversionKernelObjects(solution, None) == []
+
+
 def test_activation_enum_header_names(solution, snapshot):
     assert len(K.activationEnumHeaderNames(solution)) == snapshot
 
