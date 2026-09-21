@@ -325,6 +325,30 @@ static void _op_tile_mov_dpp8(rocke_lower_t* L, const rocke_op_t* op)
                    (long long)(sel & 0xFFFFFF));
 }
 
+static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* data = op->operands[0];
+    int64_t ctrl = 0;
+    if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
+    /* ctrl packs four two-bit lane selectors (p0 | p1<<2 | p2<<4 | p3<<6),
+     * so 0..255 is the whole legal range. Reject instead of masking: a
+     * truncated control is a different, silently valid permutation. */
+    if(ctrl < 0 || ctrl > 255)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.quad_perm: ctrl must be in 0..255, got %lld",
+                      (long long)ctrl);
+    rocke_ll_need(L, "update.dpp.i32");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.update.dpp.i32("
+                   "i32 %s, i32 %s, i32 %lld, i32 15, i32 15, i1 true)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, data),
+                   rocke_ll_operand(L, data),
+                   (long long)ctrl);
+}
+
 static void _op_tile_wave_reduce(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
@@ -919,6 +943,25 @@ static void _op_tile_inline_asm(rocke_lower_t* L, const rocke_op_t* op)
     const char* asm_str;
     int i;
 
+    const char* required_arch = rocke_attr_get_str(&op->attrs, "required_arch");
+    const char* required_flavor = rocke_attr_get_str(&op->attrs, "required_llvm_flavor");
+    if(required_arch
+       && (!L->backend || !L->backend->gfx || strcmp(L->backend->gfx, required_arch) != 0))
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.inline_asm requires %s, got %s",
+                      required_arch,
+                      (L->backend && L->backend->gfx) ? L->backend->gfx : "(unknown)");
+    }
+    if(required_flavor && strcmp(rocke_llvm_flavor_name(L->flavor), required_flavor) != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.inline_asm requires LLVM flavor %s, got %s",
+                      required_flavor,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
     raw_template = rocke_attr_get_str(&op->attrs, "template");
     if(raw_template == NULL)
     {
@@ -1031,6 +1074,7 @@ void rocke_ll_register_crosslane(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE_XOR, _op_tile_ds_swizzle_xor);
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE, _op_tile_ds_swizzle);
     rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP8, _op_tile_mov_dpp8);
+    rocke_ll_set_handler(ROCKE_OP_TILE_QUAD_PERM, _op_tile_quad_perm);
     rocke_ll_set_handler(ROCKE_OP_TILE_WAVE_REDUCE, _op_tile_wave_reduce);
     rocke_ll_set_handler(ROCKE_OP_TILE_READLANE, _op_tile_readlane);
     rocke_ll_set_handler(ROCKE_OP_TILE_WRITELANE, _op_tile_writelane);
