@@ -649,7 +649,7 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
         fix is a P3 occupancy item.
     Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
     """
-    return _rows_per_instr(head_size) == 1 and dtype == "fp16"
+    return _rows_per_instr(head_size) == 1
 
 
 def _v_swizzle_width(block_n: int) -> int:
