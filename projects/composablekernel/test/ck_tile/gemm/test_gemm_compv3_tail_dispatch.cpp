@@ -39,7 +39,7 @@ constexpr std::array<Scenario, 8> standard_scenarios = {
     Scenario{true, TailNumber::Odd},
 };
 
-constexpr std::array<Scenario, 8> mfma_eight_warp_scenarios = {
+[[maybe_unused]] constexpr std::array<Scenario, 8> mfma_eight_warp_scenarios = {
     Scenario{false, TailNumber::One},
     Scenario{false, TailNumber::Even},
     Scenario{false, TailNumber::Odd},
