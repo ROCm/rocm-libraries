@@ -16397,9 +16397,9 @@ class KernelWriterAssembly(KernelWriter):
         betas = betasBackup
         if gsuLimitIdx == 0:
           # useAtomicPkAddBF16 atomically accumulates into the real BF16 D, so
-          # the GSU>1 store keeps the dest element size rather than the fp32 one.
+          # the GSU>1 store keeps the dest element size rather than the workspace one.
           if not self.states.useAtomicPkAddBF16:
-            self.states.bpeCexternal = self.states.bpeCinternal
+            self.states.bpeCexternal = self.states.bpeCworkspace
           if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
             self.states.useBias = self.states.useBias if self.states.useBias == DataDirection.WRITE else DataDirection.NONE
           if self.states.useBias == DataDirection.WRITE and kernel["ProblemType"]["BiasSrc"] == "D":

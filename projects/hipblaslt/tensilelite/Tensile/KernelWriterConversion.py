@@ -39,6 +39,8 @@ class KernelWriterConversion(KernelWriterBase):
     self.state["ProblemType"] = deepcopy(state["ProblemType"])
     self.state["GenPGRPostKernels"] = state["GenPGRPostKernels"]
     self.state["_GlobalAccumulation"] = state["_GlobalAccumulation"]
+    self.state["_WorkspaceDataType"] = state.get("_WorkspaceDataType",
+                                                 state["ProblemType"]["ComputeDataType"])
     self.state["ActivationFused"] = state["ActivationFused"]
     self.state["GlobalSplitU"] = state["GlobalSplitU"]
 
@@ -60,6 +62,12 @@ class KernelWriterConversion(KernelWriterBase):
     self.int32Str = DataType('int32').toDevice(self.language)
     if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
       self.datatype = self.int32Str
+    # Element type actually held in the GSU workspace. NarrowGSUWorkspace stores
+    # partials at the destination width, so every byte-offset into arg.W must be
+    # scaled by this rather than by the compute type.
+    self.wsDataTypeObj = self.state["_WorkspaceDataType"]
+    self.wsDataType = self.wsDataTypeObj.toDevice(self.language)
+    self.wsIsNarrow = self.wsDataTypeObj != self.state["ProblemType"]["ComputeDataType"]
 
     # determine chars for fast access
     self.indexChars = []
@@ -335,6 +343,10 @@ class KernelWriterConversion(KernelWriterBase):
       self.num_dword_load  = self.num_elements_load
     if self.state["ProblemType"]["DestDataType"].numBytes() > 4:
       self.num_dword_store = self.num_elements_load
+    # Dwords actually fetched from the workspace. When narrower than
+    # num_dword_load, emitWorkspaceLoad widens them before any accumulation runs,
+    # so the accumulate paths below keep seeing num_dword_load values.
+    self.num_dword_load_raw = int(self.num_elements_load * self.wsDataTypeObj.numBytes() / 4)
     kStr += "#define NUM_ELEMENT_LOAD %d%s" % ( self.num_elements_load, self.endLine)
     kStr += "#define NUM_GSU %d%s" % (self.state["GlobalSplitU"], self.endLine)
 
@@ -543,7 +555,7 @@ class KernelWriterConversion(KernelWriterBase):
       indexChar = self.indexChars[i]
       kStr += " + (arg.size%s - 1) * arg.strideW%s" % (indexChar, indexChar)
     kStr += ";" + self.endLine
-    kStr += "  %s strideWLimit = strideW * arg.gsu * sizeof(%s);"%(self.uint64Str, self.datatype) + self.endLine
+    kStr += "  %s strideWLimit = strideW * arg.gsu * sizeof(%s);"%(self.uint64Str, self.wsDataType) + self.endLine
 
     kStr += "  " + intermediateDataType + " accum[NUM_ELEMENT_LOAD] = {0};" + self.endLine
     kStr += "  " + destTypeStr + " result[NUM_ELEMENT_LOAD];" + self.endLine
@@ -602,11 +614,14 @@ class KernelWriterConversion(KernelWriterBase):
     #Load GSU D buffer
     if self.state["UnrollOnly"]:
       kStr += "  %s temp[NUM_GSU];" % loadTypeStr + self.endLine
+      if self.wsIsNarrow:
+        kStr += "  %s rawTemp[NUM_GSU];" % self.rawLoadTypeStr() + self.endLine
       for gsuIdx in range(self.state["GlobalSplitU"]):
-        # kStr += "  temp[%d] = *((%s*)(arg.W+idxW));%s" % (gsuIdx, loadTypeStr, self.endLine)
-        kStr += "  buffer_load<%s, sizeof(%s), CacheOperation::Kind::Always>(temp[%d], arg.W, idxW * sizeof(%s), 0, strideWLimit);%s" % (loadTypeStr, loadTypeStr, gsuIdx, self.datatype, self.endLine)
+        kStr += self.emitWorkspaceLoad(loadTypeStr, gsuIdx, space="  ")
         kStr += "  idxW  += strideW;" + self.endLine
       kStr += self.endLine
+      for gsuIdx in range(self.state["GlobalSplitU"]):
+        kStr += self.emitWorkspaceUnpack(gsuIdx, space="  ")
       castToIntermidate = ("(%s)" % intermediateDataType) if intermediateDataType != self.datatype else ""
       #Accumlate all D buffer
       for gsuIdx in range(self.state["GlobalSplitU"]):
@@ -638,8 +653,10 @@ class KernelWriterConversion(KernelWriterBase):
         defineStr = "#if 0"
       # PGR=2
       kStr += "  %s temp[NUM_GSU];" % loadTypeStr + self.endLine
+      if self.wsIsNarrow:
+        kStr += "  %s rawTemp[NUM_GSU];" % self.rawLoadTypeStr() + self.endLine
       for gsuIdx in range(self.state["GlobalSplitU"]):
-        kStr += "  buffer_load<%s, sizeof(%s), CacheOperation::Kind::Always>(temp[%d], arg.W, idxW * sizeof(%s), 0, strideWLimit);%s" % (loadTypeStr, loadTypeStr, gsuIdx, self.datatype, self.endLine)
+        kStr += self.emitWorkspaceLoad(loadTypeStr, gsuIdx, space="  ")
         kStr += "  idxW  += strideW;" + self.endLine
       kStr += self.endLine
       kStr += "  int gsuRemain = (int)arg.gsu - NUM_GSU;" + self.endLine
@@ -648,6 +665,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "    gsuRemain -= NUM_GSU;" + self.endLine
       for gsuIdx in range(self.state["GlobalSplitU"]):
         castToIntermidate = ("(%s)" % intermediateDataType) if intermediateDataType != self.datatype else ""
+        kStr += self.emitWorkspaceUnpack(gsuIdx, space="    ")
         if self.state["ProblemType"]["ComputeDataType"].isSingle():
           kStr += self.getAsm(defineStr, castToIntermidate, gsuIdx, space="    ")
         else:
@@ -660,7 +678,7 @@ class KernelWriterConversion(KernelWriterBase):
             kStr += "  accum[2] += %stemp[%d].z;" % (castToIntermidate, gsuIdx) + self.endLine
             kStr += "  accum[3] += %stemp[%d].w;" % (castToIntermidate, gsuIdx) + self.endLine
         kStr += "    __builtin_amdgcn_sched_barrier(0);" + self.endLine
-        kStr += "    buffer_load<%s, sizeof(%s), CacheOperation::Kind::Always>(temp[%d], arg.W, idxW * sizeof(%s), 0, strideWLimit);%s" % (loadTypeStr, loadTypeStr, gsuIdx, self.datatype, self.endLine)
+        kStr += self.emitWorkspaceLoad(loadTypeStr, gsuIdx, space="    ")
         kStr += "    __builtin_amdgcn_sched_barrier(0);" + self.endLine
         kStr += "    idxW  += strideW;" + self.endLine
       kStr += "  }" + self.endLine
@@ -674,6 +692,7 @@ class KernelWriterConversion(KernelWriterBase):
         caseRemain = min(gsuIdx, self.state["GlobalSplitU"])
         for gsuIdx2 in range(self.state["GlobalSplitU"]):
           castToIntermidate = ("(%s)" % intermediateDataType) if intermediateDataType != self.datatype else ""
+          kStr += self.emitWorkspaceUnpack(gsuIdx2, space="      ")
           if self.state["ProblemType"]["ComputeDataType"].isSingle():
             kStr += self.getAsm(defineStr, castToIntermidate, gsuIdx2, space="      ")
           else:
@@ -687,11 +706,12 @@ class KernelWriterConversion(KernelWriterBase):
               kStr += "  accum[3] += %stemp[%d].w;" % (castToIntermidate, gsuIdx2) + self.endLine
           if caseRemain > gsuIdx2:
             kStr += "      __builtin_amdgcn_sched_barrier(0);" + self.endLine
-            kStr += "      buffer_load<%s, sizeof(%s), CacheOperation::Kind::Always>(temp[%d], arg.W, idxW * sizeof(%s), 0, strideWLimit);%s" % (loadTypeStr, loadTypeStr, gsuIdx2, self.datatype, self.endLine)
+            kStr += self.emitWorkspaceLoad(loadTypeStr, gsuIdx2, space="      ")
             kStr += "      __builtin_amdgcn_sched_barrier(0);" + self.endLine
             kStr += "      idxW  += strideW;" + self.endLine
         for gsuIdx2 in range(caseRemain):
           castToIntermidate = ("(%s)" % intermediateDataType) if intermediateDataType != self.datatype else ""
+          kStr += self.emitWorkspaceUnpack(gsuIdx2, space="      ")
           if self.state["ProblemType"]["ComputeDataType"].isSingle():
             kStr += self.getAsm(defineStr, castToIntermidate, gsuIdx2, space="      ")
           else:
@@ -1044,6 +1064,57 @@ class KernelWriterConversion(KernelWriterBase):
     self.state["UnrollOnly"] = backupUnroll
 
     return (0, fileString)
+
+  def rawLoadBytes(self):
+    return int(self.num_elements_load * self.wsDataTypeObj.numBytes())
+
+  def rawLoadTypeStr(self):
+    """POD type matching the workspace footprint of one NUM_ELEMENT_LOAD group."""
+    rawBytes = self.rawLoadBytes()
+    if rawBytes < 4:
+      return "unsigned short"
+    if rawBytes == 4:
+      return "float"
+    return "float%d" % (rawBytes // 4)
+
+  def emitWorkspaceLoad(self, loadTypeStr, gsuIdx, space=""):
+    """Issue the fetch of one GSU partial buffer.
+
+    Targets rawTemp[] on a narrow workspace so the fetch stays at the stored
+    width; emitWorkspaceUnpack widens it into temp[] before any accumulation.
+    """
+    if not self.wsIsNarrow:
+      return "%sbuffer_load<%s, sizeof(%s), CacheOperation::Kind::Always>(temp[%d], arg.W, idxW * sizeof(%s), 0, strideWLimit);%s" \
+             % (space, loadTypeStr, loadTypeStr, gsuIdx, self.wsDataType, self.endLine)
+    rawType = self.rawLoadTypeStr()
+    return "%sbuffer_load<%s, sizeof(%s), CacheOperation::Kind::Always>(rawTemp[%d], arg.W, idxW * sizeof(%s), 0, strideWLimit);%s" \
+           % (space, rawType, rawType, gsuIdx, self.wsDataType, self.endLine)
+
+  def emitWorkspaceUnpack(self, gsuIdx, space=""):
+    """Widen rawTemp[gsuIdx] into temp[gsuIdx] at compute precision.
+
+    bf16 occupies the high half of its fp32 image, so element 2i is the low
+    16 bits of raw dword i shifted up and element 2i+1 is the high 16 bits
+    masked. Emitted at the point of use so the fetch stays non-blocking.
+    """
+    if not self.wsIsNarrow:
+      return ""
+    comps = ["x", "y", "z", "w"]
+    def dst(i):
+      return "temp[%d]" % gsuIdx if self.num_dword_load == 1 else "temp[%d].%s" % (gsuIdx, comps[i])
+    rawBytes = self.rawLoadBytes()
+    if rawBytes < 4:
+      return "%s%s = __builtin_bit_cast(float, ((unsigned int)rawTemp[%d]) << 16);%s" \
+             % (space, dst(0), gsuIdx, self.endLine)
+    nRawDwords = rawBytes // 4
+    kStr = ""
+    for i in range(nRawDwords):
+      src = "rawTemp[%d]" % gsuIdx if nRawDwords == 1 else "rawTemp[%d].%s" % (gsuIdx, comps[i])
+      kStr += "%s{ unsigned int _w = __builtin_bit_cast(unsigned int, %s);%s" % (space, src, self.endLine)
+      kStr += "%s  %s = __builtin_bit_cast(float, _w << 16);%s" % (space, dst(2 * i), self.endLine)
+      kStr += "%s  %s = __builtin_bit_cast(float, _w & 0xffff0000u);%s" % (space, dst(2 * i + 1), self.endLine)
+      kStr += "%s}%s" % (space, self.endLine)
+    return kStr
 
   def getAsm(self, defineStr, castToIntermidate, gsuIdx, space=""):
     kStr = ""
