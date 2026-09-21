@@ -132,9 +132,11 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
             ):
                 if resource not in names:
                     problems.append(f"missing resource: {resource}")
+            custom_kernel_root = source_root / "tensilelite/CustomKernels"
             source_kernels = {
-                f"tensilelite/CustomKernels/{path.name}"
-                for path in (source_root / "tensilelite/CustomKernels").glob("*.s")
+                "tensilelite/CustomKernels/"
+                + path.relative_to(custom_kernel_root).as_posix()
+                for path in custom_kernel_root.rglob("*.s")
             }
             wheel_kernels = {
                 name for name in names if name.startswith("tensilelite/CustomKernels/")
