@@ -2424,12 +2424,20 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GlobalAccumulation requires BufferStore (workspace SRD addressing not supported)")
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
+    # MBSK accumulates partials in-kernel with the width fixed to the compute
+    # type, so narrowing is restricted to MultipleBuffer.
+    workspaceType = state["ProblemType"]["ComputeDataType"]
+    if state.get("NarrowGSUWorkspace", False) \
+        and state["_GlobalAccumulation"] == 'MultipleBuffer' \
+        and state["ProblemType"]["DestDataType"].numBytes() < computeBytes:
+      workspaceType = state["ProblemType"]["DestDataType"]
+    state["_WorkspaceDataType"] = workspaceType
     # AtomicDest reduces into D with packed atomics, so it stages nothing per
     # element of C. Zero here is what drops the WorkspaceCheck predicate
     # (Contractions.TaskPredicate only emits it for a non-zero size) and makes
     # requiredWorkspaceSizeGsu report 0 bytes.
     state["_WorkspaceSizePerElemC"] = \
-        0 if state["GlobalSplitUAlgorithm"] == 'AtomicDest' else computeBytes
+        0 if state["GlobalSplitUAlgorithm"] == 'AtomicDest' else int(workspaceType.numBytes())
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = computeBytes
