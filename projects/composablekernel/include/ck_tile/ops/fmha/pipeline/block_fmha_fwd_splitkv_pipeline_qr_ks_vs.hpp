@@ -231,14 +231,16 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
         clear_tile(o_acc);
         if((__builtin_isinf_sign(sink_v) >= 0) && i_split == 0)
         {
+            // sink_v is raw_sink / scale_s; soft cap folds scale_s into the score
+            // like bias and alibi do, so m has to carry it back here.
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
                 set_tile(m, sink_v * C_LOG2E * scale_s);
             else
                 set_tile(m, sink_v * C_LOG2E);
 #else
-            set_tile(m, sink_v);
+            set_tile(m, sink_v * scale_s);
 #endif
             set_tile(l, SMPLComputeDataType{1.0f});
         }
@@ -296,6 +298,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                     }
                     if(keeps_sink)
                     {
+                        // Mirror the main-path lse formula for the state this publishes
+                        // (m = sink seed, l = 1). Every seeding branch now leaves m in
+                        // final-logit units, so the natural-log lse is the same
+                        // expression throughout.
                         set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                     }
                     else
@@ -321,12 +327,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
             {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
                     set_tile(m, sink_v * C_LOG2E * scale_s);
                 else
                     set_tile(m, sink_v * C_LOG2E);
 #else
-                set_tile(m, sink_v);
+                set_tile(m, sink_v * scale_s);
 #endif
                 set_tile(l, SMPLComputeDataType{1.0f});
             }
