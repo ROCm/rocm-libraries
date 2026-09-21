@@ -199,6 +199,50 @@ enum class KernelSourceKind
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
 
+/// One argument a kernel expects the host to marshal, as the compiled code object's AMDGPU
+/// metadata note declares it -- read out of the object by the packager, never authored.
+///
+/// Compiler-appended hidden arguments are excluded: the host does not marshal them, so
+/// keeping them would make this list incomparable with the one a pack passes to `launch`.
+struct KernelArgument
+{
+    /// `.value_kind` verbatim: `global_buffer`, `by_value`, and so on. Kept as the string
+    /// the toolchain emits rather than mapped to an enum, so a kind this build has never
+    /// heard of still parses, still compares, and still prints in a diagnostic.
+    std::string kind;
+    uint32_t size = 0; ///< Bytes it occupies in the kernarg segment.
+    uint32_t offset = 0; ///< Where it starts within that segment.
+    /// `.name`, empty when the producer emitted none -- clang omits names for HIP
+    /// `extern "C" __global__` kernels. Empty means "this producer records no names",
+    /// never "named the empty string".
+    std::string name;
+};
+
+/// One argument list rendered for a diagnostic, as `kind:size@offset` per argument with the
+/// name appended when there is one.
+inline std::string describeKernelSignature(const std::vector<KernelArgument>& signature)
+{
+    if(signature.empty())
+    {
+        return "(no arguments)";
+    }
+    std::string text;
+    for(const auto& argument : signature)
+    {
+        if(!text.empty())
+        {
+            text += ", ";
+        }
+        text += argument.kind + ":" + std::to_string(argument.size) + "@"
+                + std::to_string(argument.offset);
+        if(!argument.name.empty())
+        {
+            text += " '" + argument.name + "'";
+        }
+    }
+    return text;
+}
+
 /// UKD's source. `EMBEDDED_SOURCE` and `KPACK` are implemented; a kind fills only its own
 /// fields and leaves the rest empty.
 struct KernelSource
@@ -220,12 +264,18 @@ struct KernelSource
     std::string symbol;
     /// KPACK: digest of the raw decompressed code object, as the packager recorded it.
     ///
-    /// Identification only. Nothing verifies it, on this path or any other, and it is
-    /// not a security control: a descriptor and the archive it names travel together, so
-    /// whoever can rewrite one can rewrite the other. Treat a match as evidence the two
-    /// came from the same pack run, nothing more. The loader's defence against a wrong
-    /// or corrupt payload is KpackArchive's container check, not this field.
+    /// Checked before the code object reaches the driver: a TOC entry pointing at the
+    /// wrong offset decompresses cleanly and yields another entry's blob, which only this
+    /// field can catch. An integrity check, not a security control -- a descriptor travels
+    /// with the archive it names, so whoever can rewrite one can rewrite the other.
     std::string sha256;
+    /// KPACK: the argument list `symbol` declares, read out of the code object at pack
+    /// time. Not a description of the call -- the list a pack marshals is fixed in its
+    /// C++; this is the copy that comparison checks it against, in requireSignatureMatch.
+    ///
+    /// Empty is a kernel that takes no arguments, which is why the parser rejects the key
+    /// being absent rather than reading absence as empty.
+    std::vector<KernelArgument> signature;
 };
 
 namespace detail
@@ -250,7 +300,7 @@ inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, A
 
 } // namespace detail
 
-// KernelSource's field count is pinned here: accepting exactly seven initializers and no
+// KernelSource's field count is pinned here: accepting exactly eight initializers and no
 // more makes an inserted field ill-formed at this assertion, rather than silently
 // rebinding every value after it at a positional initialization site. Only the count --
 // two same-typed members swapped past each other still brace-initialize.
@@ -261,7 +311,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                std::string,
                                                std::string,
                                                std::string,
-                                               std::string>
+                                               std::string,
+                                               std::vector<KernelArgument>>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        KernelSourceKind,
                                                        std::string,
@@ -270,6 +321,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        std::string,
                                                        std::string,
                                                        std::string,
+                                                       std::vector<KernelArgument>,
                                                        std::string>,
               "KernelSource gained or lost a field; append only, then extend this "
               "assertion.");
