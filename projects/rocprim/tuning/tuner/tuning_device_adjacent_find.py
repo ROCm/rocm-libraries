@@ -49,7 +49,6 @@ class Tuner(BaseTuner):
         params = OrderedDict()
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
-        params['FAPD'] = FAPD
         return params
 
     def _get_key_type_name(self) -> str:
