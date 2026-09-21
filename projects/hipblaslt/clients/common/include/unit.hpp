@@ -35,7 +35,111 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <cstring>
 #include <hipblaslt/hipblaslt.h>
+#include <limits>
+#include <type_traits>
+
+/*! \brief Return true when every addressed CPU and GPU element has identical storage.
+ *
+ *  This is only an early-success check. A byte mismatch must fall through to the numerical
+ *  comparison because distinct encodings can still compare equal, for example signed zero or
+ *  different NaN payloads. Padding between columns and batches is intentionally ignored.
+ */
+template <typename TCPU, typename TGPU>
+inline bool unit_check_storage_identical(int64_t     M,
+                                         int64_t     N,
+                                         int64_t     lda,
+                                         int64_t     strideA,
+                                         const TCPU* hCPU,
+                                         const TGPU* hGPU,
+                                         int64_t     batch_count)
+{
+    if constexpr(!std::is_same_v<std::remove_cv_t<TCPU>, std::remove_cv_t<TGPU>>)
+    {
+        return false;
+    }
+    else
+    {
+        if(M == 0 || N == 0 || batch_count == 0)
+            return true;
+        if(M < 0 || N < 0 || batch_count < 0 || lda < M || strideA < 0)
+            return false;
+
+        using value_type       = std::remove_cv_t<TCPU>;
+        const size_t rows      = static_cast<size_t>(M);
+        const size_t columns   = static_cast<size_t>(N);
+        const size_t stride    = static_cast<size_t>(strideA);
+        const size_t batches   = stride == 0 ? 1 : static_cast<size_t>(batch_count);
+        const size_t max_value = std::numeric_limits<size_t>::max();
+        if(rows > max_value / sizeof(value_type))
+            return false;
+        const size_t column_bytes = rows * sizeof(value_type);
+
+        if(static_cast<size_t>(lda) == rows && columns <= max_value / rows)
+        {
+            const size_t matrix_elements = rows * columns;
+            if(matrix_elements > max_value / sizeof(value_type))
+                return false;
+            const size_t matrix_bytes = matrix_elements * sizeof(value_type);
+            for(size_t batch = 0; batch < batches; ++batch)
+            {
+                if(stride != 0 && batch > max_value / stride)
+                    return false;
+                const size_t base = batch * stride;
+                if(base > max_value - matrix_elements)
+                    return false;
+                if(std::memcmp(hCPU + base, hGPU + base, matrix_bytes) != 0)
+                    return false;
+            }
+            return true;
+        }
+
+        for(size_t batch = 0; batch < batches; ++batch)
+        {
+            if(stride != 0 && batch > max_value / stride)
+                return false;
+            const size_t base = batch * stride;
+            for(size_t column = 0; column < columns; ++column)
+            {
+                const size_t leading_dimension = static_cast<size_t>(lda);
+                if(column > (max_value - base) / leading_dimension)
+                    return false;
+                const size_t offset = base + column * leading_dimension;
+                if(offset > max_value - rows)
+                    return false;
+                if(std::memcmp(hCPU + offset, hGPU + offset, column_bytes) != 0)
+                    return false;
+            }
+        }
+        return true;
+    }
+}
+
+template <typename T>
+inline const T* unit_check_data(const T* data)
+{
+    return data;
+}
+
+template <typename Container>
+inline auto unit_check_data(const Container& data) -> decltype(data.data())
+{
+    return data.data();
+}
+
+template <typename TCPU, typename TGPU>
+inline bool unit_check_batched_storage_identical(
+    int64_t M, int64_t N, int64_t lda, const TCPU hCPU[], const TGPU hGPU[], int64_t batch_count)
+{
+    if(batch_count < 0)
+        return false;
+    for(int64_t batch = 0; batch < batch_count; ++batch)
+        if(!unit_check_storage_identical(
+               M, N, lda, 0, unit_check_data(hCPU[batch]), unit_check_data(hGPU[batch]), 1))
+            return false;
+    return true;
+}
 
 #ifndef GOOGLE_TEST
 #define UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, UNIT_ASSERT_EQ)
@@ -44,6 +148,8 @@
 #define UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, UNIT_ASSERT_EQ)                \
     do                                                                                         \
     {                                                                                          \
+        if(unit_check_storage_identical(M, N, lda, strideA, hCPU, hGPU, batch_count))          \
+            break;                                                                             \
         for(size_t k = 0; k < batch_count; k++)                                                \
             for(size_t j = 0; j < N; j++)                                                      \
                 for(size_t i = 0; i < M; i++)                                                  \
@@ -61,6 +167,9 @@
 #define UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, UNIT_ASSERT_EQ)            \
     do                                                                              \
     {                                                                               \
+        if(unit_check_batched_storage_identical(                                    \
+               M, N, lda, hCPU, hGPU, batch_count))                                 \
+            break;                                                                  \
         for(size_t k = 0; k < batch_count; k++)                                     \
             for(size_t j = 0; j < N; j++)                                           \
                 for(size_t i = 0; i < M; i++)                                       \
@@ -760,6 +869,9 @@ inline void check_special_value_consistency_impl(int64_t M,
                                                  const T* hGPU,
                                                  int64_t  batch_count)
 {
+    if(unit_check_storage_identical(M, N, lda, strideA, hCPU, hGPU, batch_count))
+        return;
+
     for(int64_t k = 0; k < batch_count; k++)
         for(int64_t j = 0; j < N; j++)
             for(int64_t i = 0; i < M; i++)
