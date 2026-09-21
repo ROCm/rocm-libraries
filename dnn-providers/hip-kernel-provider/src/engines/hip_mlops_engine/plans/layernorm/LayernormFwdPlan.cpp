@@ -111,16 +111,16 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     const size_t normalizedDim
         = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
-    long outerSize = 1;
-    long innerSize = 1;
-    long stride = 1;
+    int64_t outerSize = 1;
+    int64_t innerSize = 1;
+    int64_t stride = 1;
     const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
     const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
 
     if(normalizedDim > 1
        && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
     {
-        stride = static_cast<long>(xDims->Get(1));
+        stride = static_cast<int64_t>(xDims->Get(1));
     }
 
     for(unsigned int i = 0; i < xDims->size(); ++i)
@@ -129,21 +129,21 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
         {
             if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
             {
-                outerSize *= static_cast<long>(xDims->Get(i));
+                outerSize *= static_cast<int64_t>(xDims->Get(i));
             }
         }
         else
         {
-            innerSize *= static_cast<long>(xDims->Get(i));
+            innerSize *= static_cast<int64_t>(xDims->Get(i));
         }
     }
 
-    const long xlocalsize = 1024;
-    const long xgridsize = outerSize * stride;
-    const long ylocalsize = 1;
-    const long ygridsize = 1;
-    const long zlocalsize = 1;
-    const long zgridsize = 1;
+    const int64_t xlocalsize = 1024;
+    const int64_t xgridsize = outerSize * stride;
+    const int64_t ylocalsize = 1;
+    const int64_t ygridsize = 1;
+    const int64_t zlocalsize = 1;
+    const int64_t zgridsize = 1;
 
     // Determine input/output data type configuration
     const auto inputDataType = _params.x()->data_type();

@@ -230,7 +230,7 @@ public:
               class MeanRstdDataType = ScaleBiasDataType,
               class ComputeDataType = float>
     static void bprop(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
-                      const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& x,
+                      const hipdnn_data_sdk::utilities::TensorBase<DxDataType>& x,
                       const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
                       hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
                       hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
