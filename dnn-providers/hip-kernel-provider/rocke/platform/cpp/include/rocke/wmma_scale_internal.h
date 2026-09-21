@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /* Shared gfx1250 operand contracts. Mirrors core/arch/wmma_scale.py:
- * E8M0ScalePacking -> rocke_e8m0_scale_packing_t
+ * ScalePacking    -> rocke_scale_packing_t
  * ScaledWmmaOp     -> rocke_scaled_wmma_op_t
  * gfx1250_scaled_wmma -> rocke_gfx1250_scaled_wmma
  */
@@ -15,12 +15,13 @@
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
 
-typedef struct rocke_e8m0_scale_packing
+typedef struct rocke_scale_packing
 {
-    /* Consecutive K groups, first group in the low byte, independently for A/B. */
+    /* Eight-bit encoded scales for consecutive K groups, first group in the
+     * low byte, independently for A/B. */
     int count;
     int block_k;
-} rocke_e8m0_scale_packing_t;
+} rocke_scale_packing_t;
 
 typedef struct rocke_scaled_wmma_op
 {
@@ -30,7 +31,7 @@ typedef struct rocke_scaled_wmma_op
     int matrix_words[2];
     char declaration_key[160];
     char intrinsic[160];
-    rocke_e8m0_scale_packing_t scales;
+    rocke_scale_packing_t scales;
 } rocke_scaled_wmma_op_t;
 
 static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma(const char* op_id)
@@ -101,7 +102,7 @@ static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma_from_op(const rock
     return rocke_gfx1250_scaled_wmma(op_id ? op_id : op->name);
 }
 
-static inline int rocke_e8m0_scale_word_bits(const rocke_e8m0_scale_packing_t* packing)
+static inline int rocke_scale_word_bits(const rocke_scale_packing_t* packing)
 {
     return packing->count * 8;
 }

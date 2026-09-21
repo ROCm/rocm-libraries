@@ -10,10 +10,10 @@ from .target import ArchTarget, MmaOp
 
 
 @dataclass(frozen=True)
-class E8M0ScalePacking:
+class ScalePacking:
     """Pack consecutive K groups into a word, first group in its low byte.
 
-    Each scale is one E8M0 byte. Both A and B use this ordering independently;
+    Each encoded scale occupies one byte. A and B use this ordering independently;
     the integer word is only a carrier for the encoded floating-point scales.
     """
 
@@ -40,7 +40,7 @@ class ScaledWmmaOp:
     atom: MmaOp
     matrix_formats: tuple[int, int]
     scale_formats: tuple[int, int]
-    scales: E8M0ScalePacking
+    scales: ScalePacking
 
     @property
     def op_id(self) -> str:
@@ -99,7 +99,5 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         atom=atom,
         matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
         scale_formats=(0, 0),  # E8M0 for each source.
-        scales=E8M0ScalePacking(
-            count=atom.a_scale_frag_len, block_k=atom.scale_block_k
-        ),
+        scales=ScalePacking(count=atom.a_scale_frag_len, block_k=atom.scale_block_k),
     )

@@ -217,7 +217,7 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     }
 
     char packed_type[8];
-    snprintf(packed_type, sizeof(packed_type), "i%d", rocke_e8m0_scale_word_bits(&spec->scales));
+    snprintf(packed_type, sizeof(packed_type), "i%d", rocke_scale_word_bits(&spec->scales));
     scale_ty = packed_type;
     if(strcmp(op->operands[3]->type->name, scale_ty) != 0
        || strcmp(op->operands[4]->type->name, scale_ty) != 0)
