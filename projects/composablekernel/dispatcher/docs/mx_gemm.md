@@ -16,6 +16,12 @@ The bridge exposes all five pipeline choices in the native MX GEMM selector:
 | gfx1250 | `comp_tdm` | `GemmPipelineAgBgCrCompTDMV1` | TDM |
 | gfx1250 | `comp_tdm_v2` | `GemmPipelineAgBgCrCompTDMV2` | TDM |
 
+These are the five choices in the native `MxGemmPipelineType` selector.
+CK-Tile also has a separate `MXFlatmmKernel` family, including
+`MXFlatmmPipelineAGmemBGmemCRegV1` and
+`WeightPreshufflePipelineAGmemBGmemCRegTDM`. Those MXFlatMM paths are not
+currently exposed by the old Tile Engine or this bridge.
+
 All use intrawave scheduling and a 16 × 16 × 128 warp tile. The default remains
 `comp_async` on gfx950 and `comp_tdm` on gfx1250. Select another pipeline with
 `default_fp8_config("gfx950", pipeline="weight_preshuffle")`,
