@@ -48,6 +48,7 @@ import random
 import re
 import sys
 from dataclasses import dataclass
+from typing import NamedTuple
 from typing import List
 
 # hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
@@ -79,10 +80,40 @@ _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
 _SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
+# Group-merge degrees swept for depthwise wgrad. Powers of two only: the
+# merged index math uses shifts and an xor.
+_GROUP_MERGE_SWEEP = (2, 4, 8, 16)
+
 
 # ---------------------------------------------------------------------------
 # Result record
 # ---------------------------------------------------------------------------
+
+
+class WgradCombo(NamedTuple):
+    """One point in the wgrad sweep.
+
+    A NamedTuple rather than a bare tuple because four sites unpack this and
+    they have to agree: when ``async_dma`` was added as a plain 9th field the
+    two-stage leg kept a stale 8-field unpack, and because that leg only runs
+    when ``C/groups`` is odd, nothing in CI noticed until a depthwise shape
+    reached it. A defaulted field cannot reproduce that -- callers that do not
+    know about it still construct correctly.
+    """
+
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    warp_m: int
+    warp_n: int
+    warp_tile_mn: int
+    pipeline: str
+    epilogue: str
+    async_dma: bool
+    split_k: int
+    # Conv groups merged into one workgroup. Only ever > 1 for depthwise, where
+    # it is swept against the split-K instances rather than combined with them.
+    group_merge: int = 1
 
 
 @dataclass
@@ -109,6 +140,10 @@ class Result:
     async_dma: bool = False
     passed: bool | None = None  # None when --verify was not requested
     two_stage: bool = False  # True when timed as Stage1+Stage2 deterministic pipeline
+    # Conv groups merged per workgroup. > 1 only on the depthwise merged leg;
+    # without it two rows differing only in Gm would be indistinguishable in
+    # the ranked table and would collide in the prune key.
+    group_merge: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -1369,6 +1404,7 @@ def _build_wgrad_one(args_tuple):
     Must live at module level for pickle.
     """
     combo, problem, dtype, arch = args_tuple
+    combo = WgradCombo(*combo)
     (
         tile_m,
         tile_n,
@@ -1380,7 +1416,8 @@ def _build_wgrad_one(args_tuple):
         epilogue,
         async_dma,
         split_k,
-    ) = combo
+    ) = combo[:10]
+    group_merge = combo.group_merge
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import ConvDataSpec
@@ -1458,6 +1495,7 @@ def _build_wgrad_one(args_tuple):
         pipeline=pipeline,
         epilogue=epilogue,
         split_k=resolved_split_k,
+        group_merge=group_merge,
         lds_k_outer=lds_k_outer,
         async_dma=async_dma,
     )
@@ -1484,6 +1522,7 @@ def _build_wgrad_two_stage_one(args_tuple):
     # only reachable when C/groups is odd, which nothing in CI exercises, so it
     # silently kept a stale 9-field unpack after async_dma was added and raised
     # "too many values to unpack" the moment a depthwise shape reached it.
+    combo = WgradCombo(*combo)
     (
         tile_m,
         tile_n,
@@ -1495,7 +1534,11 @@ def _build_wgrad_two_stage_one(args_tuple):
         epilogue,
         async_dma,
         split_k,
-    ) = combo
+    ) = combo[:10]
+    # Merging and split-K are alternatives; a merged combo is split_k=1 and
+    # belongs to the single-stage leg.
+    if combo.group_merge > 1:
+        return None
 
     from rocke.core.arch import ArchTarget
     from kernels.common.conv_implicit_gemm import ConvDataSpec
@@ -2238,6 +2281,7 @@ def _run_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
+            f"{f'gm{r.group_merge} ' if r.group_merge > 1 else ''}"
             f"{r.pipeline}/{r.epilogue}"
         )
         if show_verify:
@@ -2398,7 +2442,7 @@ def _run_wgrad_sweep(
     _legs = [(_p, False) for _p in _PIPELINES] + [(_ASYNC_PIPELINE, True)]
 
     combos = [
-        (*_geom, _pipeline, _epilogue, _async_dma, _sk)
+        WgradCombo(*_geom, _pipeline, _epilogue, _async_dma, _sk)
         for _geom in itertools.product(
             _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
         )
@@ -2408,6 +2452,40 @@ def _run_wgrad_sweep(
         for _pipeline, _async_dma in _legs
         for _sk in _split_k_values_for(_pipeline, _async_dma)
     ]
+
+    # Depthwise (cpg == kpg == 1) additionally sweeps group-merged instances.
+    # Merging and split-K are alternative ways to spend the same parallelism --
+    # merging raises the work per workgroup and divides the grid by Gm, split-K
+    # multiplies the grid and needs a reduction -- so they are swept against
+    # each other at split_k=1 and the ranked table picks the winner. No flag:
+    # the merged family is only legal for depthwise, and for depthwise the
+    # scalar per-channel load is exactly the thing merging exists to fix.
+    if p.cpg == 1 and p.kpg == 1 and p.groups > 1:
+        _spatial = (p.Z if getattr(p, "is_3d", False) else 1) * p.Y * p.X
+        _gm_combos = [
+            WgradCombo(*_geom, _pipeline, _epilogue, False, 1, _gm)
+            for _geom in itertools.product(
+                _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
+            )
+            if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
+            for _epilogue in _EPILOGUES
+            for _pipeline in _PIPELINES
+            for _gm in _GROUP_MERGE_SWEEP
+            # The merged GEMM must fit one tile, or a tile straddles group pairs
+            # the diagonal mask cannot separate. Filtered here rather than left
+            # to the validator so the combo count does not balloon.
+            if p.groups % _gm == 0
+            and _gm <= p.groups
+            and _gm <= _geom[0]
+            and _spatial * _gm <= _geom[1]
+        ]
+        combos = combos + _gm_combos
+        print(
+            f"  depthwise: +{len(_gm_combos)} group-merged combos "
+            f"(Gm in {_GROUP_MERGE_SWEEP}, split_k=1) swept against the "
+            f"split-K instances.",
+            flush=True,
+        )
 
     if args.sample is not None:
         total = len(combos)
@@ -2523,7 +2601,8 @@ def _run_wgrad_sweep(
             epilogue,
             _async_dma,
             _,
-        ) = combo
+        ) = combo[:10]
+        _gm = combo[10] if len(combo) > 10 else 1
         warp_tile_k = spec.warp_tile_k
         _is_rt = resolved_split_k == 0  # runtime split-K kernel
 
@@ -2675,6 +2754,7 @@ def _run_wgrad_sweep(
                     vec_a=_va,
                     vec_b=_vb,
                     vec_c=_vc,
+                    group_merge=_gm,
                 )
             )
 
@@ -2708,6 +2788,7 @@ def _run_wgrad_sweep(
                 f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
                 f"{pipeline}/{epilogue:9s} {_spk_label:<7s} "
                 f"{'async ' if _async_dma else '      '}"
+                f"{f'gm{_gm} ' if _gm > 1 else '    '}"
                 f"vec={_va}/{_vb}/{_vc} "
                 f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms"
                 f"{prune_marker}",
@@ -2759,7 +2840,8 @@ def _run_wgrad_sweep(
                 epilogue,
                 _async_dma,
                 _,
-            ) = combo
+            ) = combo[:10]
+            _gm = combo[10] if len(combo) > 10 else 1
             warp_tile_k = spec.warp_tile_k
 
             ws_nbytes = wgrad_two_stage_workspace_nbytes(spec)

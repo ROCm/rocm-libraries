@@ -316,6 +316,9 @@ def _run_one(
     async_dma: bool = False,
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -344,6 +347,17 @@ def _run_one(
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
     )
+    if spec is not None and (group_merge > 1 or tile_m or tile_n):
+        from dataclasses import replace as _dc_replace
+
+        _over = {}
+        if tile_m:
+            _over["tile_m"] = tile_m
+        if tile_n:
+            _over["tile_n"] = tile_n
+        if group_merge > 1:
+            _over["group_merge"] = group_merge
+        spec = _dc_replace(spec, **_over)
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
 
@@ -2099,8 +2113,8 @@ class TestWgradGroupMergeGate(unittest.TestCase):
             wave_size=64,
             pipeline="mem",
             epilogue="cshuffle",
-            split_k=4,
-            two_stage=True,
+            split_k=1,
+            two_stage=False,
             lds_k_outer=True,
         )
         base.update(kw)
@@ -2132,9 +2146,11 @@ class TestWgradGroupMergeGate(unittest.TestCase):
         cases = [
             dict(group_merge=3),  # not a supported degree
             dict(group_merge=128),  # not a supported degree
-            dict(group_merge=8, tile_n=32),  # merged N exceeds the tile
-            dict(group_merge=8, two_stage=False, split_k=1),  # needs two-stage
-            dict(group_merge=8, wave_size=32),  # MFMA only
+            dict(group_merge=8, tile_n=32, split_k=1, two_stage=False),
+            # Merging and split-K are alternatives, never combined.
+            dict(group_merge=8, two_stage=False, split_k=4),
+            dict(group_merge=8, two_stage=True, split_k=4),
+            dict(group_merge=8, wave_size=32, split_k=1, two_stage=False),
         ]
         for kw in cases:
             spec = self._spec(**kw)
@@ -2210,51 +2226,106 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
 
     # Depthwise: cpg == kpg == 1, so wg_N == Y*X and merged N == Y*X*Gm.
     _DW = _Shape(
-        "3x3_dw_N2H12W12C64K64", N=2, Hi=12, Wi=12, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        "3x3_dw_N2H12W12C64K64",
+        N=2,
+        Hi=12,
+        Wi=12,
+        C=64,
+        K=64,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=64,
     )
 
-    def _check(self, **kw):
-        # _make_spec uses a 2x2 warp grid, so tile_m must clear
-        # warp_m * warp_tile_m = 32. tile_n = 128 holds the merged N of
-        # Y*X*cpg*Gm = 9*8 = 72 for the largest degree tested.
-        kw.setdefault("tile_m", 32)
-        kw.setdefault("tile_n", 128)
-        kw.setdefault("warp_tile_mn", 16)
-        kw.setdefault("tile_k", 32)
-        ok, why = _check_two_stage(self._DW, "bf16", "mem", groups=64, **kw)
-        self.assertTrue(ok, why)
+    def test_group_merge_without_two_stage(self):
+        # The primary path: split_k=1, so dW is written straight from the tile
+        # by the direct or CShuffle store. Both carry the block-diagonal mask
+        # in their addr_fn, so no workspace and no second kernel are involved.
+        for epilogue in ("default", "cshuffle"):
+            for gm in (1, 2, 4, 8):
+                with self.subTest(epilogue=epilogue, group_merge=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        epilogue,
+                        split_k=1,
+                        lds_k_outer=True,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        tile_m=32,
+                        tile_n=128,
+                        group_merge=gm,
+                    )
+                    self.assertTrue(ok, why)
+                    # _run_one reports a skip as ok=True; without this the
+                    # whole group_merge axis can silently not run.
+                    self.assertNotIn("skip", why, f"case did not actually run: {why}")
 
-    def test_group_merge_degrees(self):
-        for gm in (1, 2, 4, 8):
-            with self.subTest(group_merge=gm):
-                self._check(split_k=4, group_merge=gm, seed=40 + gm)
+    def test_group_merge_and_split_k_are_exclusive(self):
+        # Merging and split-K are alternative ways to spend the same
+        # parallelism and are swept against each other, never combined.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 
-    def test_group_merge_with_deeper_split_k(self):
-        for gm in (2, 8):
-            with self.subTest(group_merge=gm):
-                self._check(split_k=8, group_merge=gm, seed=50 + gm)
+        spec, _p, _wtk = _make_spec(
+            GPU_ARCH, self._DW, "fp32", "mem", "default", 4, warp_tile_mn=16, tile_k=32
+        )
+        if spec is None:
+            self.skipTest("spec construction failed")
+        from dataclasses import replace as _dc_replace
+
+        spec = _dc_replace(
+            spec,
+            problem=_dc_replace(spec.problem, groups=64),
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+            two_stage=False,
+        )
+        ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
+        self.assertFalse(ok, "split_k > 1 + group_merge must be rejected")
+        self.assertIn("split_k == 1", why)
+        # ... and the two-stage form of the same combination.
+        ts = _dc_replace(spec, two_stage=True)
+        ok_ts, why_ts = is_valid_wgrad_spec(ts, arch=GPU_ARCH)
+        self.assertFalse(ok_ts, "two_stage + group_merge must be rejected")
 
     def test_group_merge_equals_group_count(self):
-        # grid_groups == 1: the merged problem has a single group, but the
-        # K-slice still has to be decoded off z and the diagonal still masked.
-        # Before the grouped path was forced on, this raised UnboundLocalError.
+        # grid_groups == 1: the merged problem has a single group. Before the
+        # grouped path was forced on for merged specs this raised
+        # UnboundLocalError rather than building.
         shape = _Shape(
-            "3x3_dw_N2H12W12C8K8", N=2, Hi=12, Wi=12, C=8, K=8, Y=3, X=3, pH=1, pW=1
+            "3x3_dw_N2H12W12C8K8",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=8,
+            K=8,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=8,
         )
-        ok, why = _check_two_stage(
+        ok, why = _run_one(
+            GPU_ARCH,
             shape,
             "bf16",
             "mem",
-            groups=8,
-            split_k=4,
-            group_merge=8,
-            tile_m=32,
-            tile_n=128,
+            "default",
+            split_k=1,
+            lds_k_outer=True,
             warp_tile_mn=16,
             tile_k=32,
-            seed=60,
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
         )
         self.assertTrue(ok, why)
+        self.assertNotIn("skip", why, f"case did not actually run: {why}")
 
 
 if __name__ == "__main__":
