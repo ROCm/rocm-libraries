@@ -99,9 +99,6 @@ namespace TensileLite
                           ContractionInputs const&      reference,
                           ContractionInputs const&      result);
 
-            double bf16AtomicAbsTolerance(ContractionProblemGemm const& problem,
-                                          ContractionInputs const&      reference) const;
-
             bool checkResults(TensorDescriptor const& tensor,
                               void const*             refPtr,
                               void const*             resPtr,
@@ -166,11 +163,6 @@ namespace TensileLite
             bool   m_error             = false;
             bool   m_executedSolution  = false;
             size_t m_errorsReported    = 0;
-
-            // Number of GSU slices the solution under test reduces with atomics
-            // into D instead of an fp32 workspace, resolved against the real
-            // hardware. 0 means the solution does not do this.
-            int m_atomicDestSplits = 0;
 
             bool validateSolution(std::shared_ptr<ProblemInputs> inputs);
         };

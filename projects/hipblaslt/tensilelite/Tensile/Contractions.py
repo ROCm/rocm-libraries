@@ -710,7 +710,6 @@ class SizeMapping:
                  'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
-                 'gsuAtomicDest',
                  'adaptiveGemmGSUA',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
@@ -808,11 +807,6 @@ class SizeMapping:
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
                    globalAccumulation       = globalAccum,
-                   # AtomicDest resolves globalAccumulation to 0, which the host
-                   # cannot tell apart from "no GSU accumulation at all". Carry it
-                   # as its own flag so the reference validator can widen its
-                   # tolerance by the number of atomic adds per element.
-                   gsuAtomicDest            = d.get('GlobalSplitUAlgorithm') == 'AtomicDest',
                    adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
