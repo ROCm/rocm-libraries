@@ -1,6 +1,7 @@
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
+  PrintSolutionRejectionReason: True
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: False
@@ -66,7 +67,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -143,7 +144,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -222,7 +223,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -300,7 +301,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -374,7 +375,7 @@ BenchmarkProblems:
         - TDMInst: [3]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -439,7 +440,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [True]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -497,7 +498,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
