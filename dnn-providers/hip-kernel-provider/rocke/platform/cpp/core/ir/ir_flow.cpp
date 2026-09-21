@@ -1170,6 +1170,34 @@ rocke_value_t* rocke_b_buffer_load_bf16(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_BF16, ops, 3, rocke_bf16(), NULL, "bl1");
 }
 
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    const char* name;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset || !dtype)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load: NULL operand");
+    name = dtype->name;
+    /* Mirrors the Python builder's _elem_bytes allow-list: 2-byte f16/bf16 and
+       4-byte f32/i32 are the widths the lowering has intrinsics for. */
+    if(!(rocke_i_type_is(dtype, "f16") || rocke_i_type_is(dtype, "bf16")
+         || rocke_i_type_is(dtype, "f32") || rocke_i_type_is(dtype, "i32")))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load: unsupported dtype '%s'", name);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "elem_type", name);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD, ops, 3, dtype, &attrs, "bl1");
+}
+
 rocke_value_t* rocke_b_buffer_load_vN_bf16(rocke_ir_builder_t* b,
                                            rocke_value_t* rsrc,
                                            rocke_value_t* voffset,

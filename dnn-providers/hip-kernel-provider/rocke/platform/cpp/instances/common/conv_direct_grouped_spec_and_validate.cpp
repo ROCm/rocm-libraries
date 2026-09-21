@@ -37,6 +37,7 @@
 
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
+#include "rocke/helper_rocke.helpers.fuse.h" /* rocke_fuse_dtype_to_ir_str          */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry   */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
@@ -994,12 +995,17 @@ rocke_status_t rocke_direct_depthwise_validate(const rocke_direct_depthwise_spec
     return ROCKE_OK;
 }
 
+/* Mirrors Python _DW_MAX_PRELOAD_TAPS in
+ * library/kernels/common/conv_direct_grouped.py. */
+#define ROCKE_DCONV_DW_MAX_PRELOAD_TAPS 200
+
 bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* spec,
                                           const char* arch,
                                           char* reason,
                                           size_t reason_cap)
 {
     int block_ch;
+    int taps;
     const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
@@ -1028,6 +1034,26 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
                      "cpg and kpg must both be 1 (got cpg=%d, kpg=%d)",
                      p->cpg,
                      p->kpg);
+        }
+        return false;
+    }
+    /* Python _DW_MAX_PRELOAD_TAPS: this variant hoists all KH*KW weights into
+     * registers before the H sweep, so the filter area is the register-pressure
+     * bound. Past the cap the caller must use DirectDepthwiseColSpec. */
+    taps = p->KH * p->KW;
+    if(taps > ROCKE_DCONV_DW_MAX_PRELOAD_TAPS)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "preloaded filter of %d taps (= KH*KW = %d*%d) exceeds max %d; "
+                     "use DirectDepthwiseColSpec, whose live-register cost is linear "
+                     "in KH and independent of KW",
+                     taps,
+                     p->KH,
+                     p->KW,
+                     ROCKE_DCONV_DW_MAX_PRELOAD_TAPS);
         }
         return false;
     }
@@ -1153,6 +1179,420 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
             snprintf(reason,
                      reason_cap,
                      "groups == wave_size: no W positions per wave (n_w_per_wave=0)");
+        }
+        return false;
+    }
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return true;
+}
+
+/* ===================================================================== *
+ *  DirectDepthwiseColSpec  (column-streamed depthwise)
+ * ===================================================================== */
+
+/* Python's `//` floors; C's `/` truncates toward zero. DirectConvProblem.Ho/.Wo
+ * use `//`, and the validator reports those values for degenerate geometries
+ * where the numerator IS negative, so the difference is observable. */
+static int rocke_dconv_col__floor_div(int a, int b)
+{
+    int q;
+    if(b == 0)
+    {
+        return 0;
+    }
+    q = a / b;
+    if((a % b != 0) && ((a < 0) != (b < 0)))
+    {
+        --q;
+    }
+    return q;
+}
+
+/* DirectConvProblem.Ho / .Wo. */
+static int rocke_dconv_col__Ho(const rocke_direct_conv_problem_t* p)
+{
+    return rocke_dconv_col__floor_div(p->H + 2 * p->PAD - p->KH, p->stride) + 1;
+}
+
+static int rocke_dconv_col__Wo(const rocke_direct_conv_problem_t* p)
+{
+    return rocke_dconv_col__floor_div(p->W + 2 * p->PAD - p->KW, p->stride) + 1;
+}
+
+/* Python `f"dtype {spec.dtype!r}"`: repr of a str is quoted, repr of None is
+ * the bare word None. A NULL const char* stands in for Python's None. */
+static void rocke_dconv_col__dtype_repr(const char* dtype, char* out, size_t out_cap)
+{
+    if(out == NULL || out_cap == 0)
+    {
+        return;
+    }
+    if(dtype == NULL)
+    {
+        snprintf(out, out_cap, "None");
+    }
+    else
+    {
+        snprintf(out, out_cap, "'%s'", dtype);
+    }
+}
+
+rocke_direct_depthwise_col_spec_t rocke_direct_depthwise_col_spec_default(void)
+{
+    rocke_direct_depthwise_col_spec_t spec;
+    memset(&spec, 0, sizeof(spec));
+    spec.problem = rocke_direct_conv_problem_default();
+    spec.name = "direct_depthwise_col";
+    spec.block_w = 1;
+    spec.block_waves = 1;
+    spec.wave_size = 64;
+    spec.dtype = "fp16";
+    spec.max_live_f32 = 0; /* Python None */
+    return spec;
+}
+
+int rocke_direct_depthwise_col_threads_per_block(const rocke_direct_depthwise_col_spec_t* spec)
+{
+    return spec->block_waves * spec->wave_size;
+}
+
+int rocke_direct_depthwise_col_block_ch(const rocke_direct_depthwise_col_spec_t* spec)
+{
+    return spec->block_waves * spec->wave_size;
+}
+
+int rocke_direct_depthwise_col_live_f32(const rocke_direct_depthwise_col_spec_t* spec)
+{
+    return rocke_dconv_col__Ho(&spec->problem) * spec->block_w + spec->problem.KH;
+}
+
+int rocke_direct_depthwise_col_resolve_max_live_f32(const rocke_direct_depthwise_col_spec_t* spec,
+                                                    const char* arch)
+{
+    const rocke_archtarget_t* target;
+    int budget;
+    if(spec == NULL)
+    {
+        return 0;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        return 0;
+    }
+    budget = target->limits.vgprs * 3 / 8;
+    if(spec->max_live_f32 <= 0)
+    {
+        return budget; /* Python None -> take the arch budget as-is */
+    }
+    return (spec->max_live_f32 < budget) ? spec->max_live_f32 : budget;
+}
+
+bool rocke_direct_depthwise_col_ch_tile_exact(const rocke_direct_depthwise_col_spec_t* spec)
+{
+    int block_ch = rocke_direct_depthwise_col_block_ch(spec);
+    if(block_ch <= 0)
+    {
+        return false; /* unreachable post-validation (Python: ZeroDivisionError) */
+    }
+    return (rocke_direct_conv_problem_total_c(&spec->problem) % block_ch) == 0;
+}
+
+bool rocke_direct_depthwise_col_w_tile_exact(const rocke_direct_depthwise_col_spec_t* spec)
+{
+    if(spec->block_w <= 0)
+    {
+        return false;
+    }
+    return (rocke_dconv_col__Wo(&spec->problem) % spec->block_w) == 0;
+}
+
+rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise_col_spec_t* spec,
+                                                    char* out,
+                                                    size_t out_cap)
+{
+    const rocke_type_t* dt;
+    const char* s;
+    size_t i;
+    size_t n;
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    dt = (spec->dtype != NULL) ? rocke_fuse_dtype_to_ir_str(spec->dtype) : NULL;
+    if(dt != NULL)
+    {
+        if(strlen(dt->name) + 1 > out_cap)
+        {
+            return ROCKE_ERR_VALUE;
+        }
+        strcpy(out, dt->name);
+        return ROCKE_OK;
+    }
+    /* Python fallback: "".join(c if c.isalnum() else "_" for c in str(self.dtype)) */
+    s = (spec->dtype != NULL) ? spec->dtype : "None";
+    n = strlen(s);
+    if(n + 1 > out_cap)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    for(i = 0; i < n; ++i)
+    {
+        char c = s[i];
+        bool alnum = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        out[i] = alnum ? c : '_';
+    }
+    out[n] = '\0';
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_direct_depthwise_col_kernel_name(
+    const rocke_direct_depthwise_col_spec_t* spec, char* out, size_t out_cap)
+{
+    char prob_short[128];
+    char r_buf[32];
+    char p_buf[24];
+    char s_buf[24];
+    char dt_buf[64];
+    char bw_buf[24];
+    char bwv_buf[24];
+    const char* parts[7];
+    if(spec == NULL || out == NULL || out_cap == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_conv_problem_short(&spec->problem, prob_short, sizeof(prob_short)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(rocke_direct_depthwise_col_dtype_tag(spec, dt_buf, sizeof(dt_buf)) != ROCKE_OK)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* kernel_name_join(name, p.short(), f"r{KH}x{KW}", f"p{PAD}", f"s{stride}",
+     *                  dtype_tag(), f"bw{block_w}", f"bw{block_waves}wv") */
+    snprintf(r_buf, sizeof(r_buf), "r%dx%d", spec->problem.KH, spec->problem.KW);
+    snprintf(p_buf, sizeof(p_buf), "p%d", spec->problem.PAD);
+    snprintf(s_buf, sizeof(s_buf), "s%d", spec->problem.stride);
+    snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
+    snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
+    parts[0] = prob_short;
+    parts[1] = r_buf;
+    parts[2] = p_buf;
+    parts[3] = s_buf;
+    parts[4] = dt_buf;
+    parts[5] = bw_buf;
+    parts[6] = bwv_buf;
+    return rocke_kernel_name_join(spec->name, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
+}
+
+rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_col_spec_t* spec,
+                                                   char* reason,
+                                                   size_t reason_cap)
+{
+    const rocke_direct_conv_problem_t* p;
+    if(spec == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    p = &spec->problem;
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseColSpec requires cpg=kpg=1 (got cpg=%d, kpg=%d)",
+                     p->cpg,
+                     p->kpg);
+        }
+        return ROCKE_ERR_VALUE;
+    }
+    if(reason && reason_cap > 0)
+    {
+        strncpy(reason, "ok", reason_cap);
+        reason[reason_cap - 1] = '\0';
+    }
+    return ROCKE_OK;
+}
+
+bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_spec_t* spec,
+                                              const char* arch,
+                                              char* reason,
+                                              size_t reason_cap)
+{
+    const rocke_archtarget_t* target;
+    const rocke_direct_conv_problem_t* p;
+    const rocke_type_t* dt;
+    char dtype_repr[96];
+    int Ho;
+    int Wo;
+    int max_threads;
+    int threads;
+    int live;
+    int allowed;
+    if(spec == NULL)
+    {
+        if(reason && reason_cap > 0)
+        {
+            strncpy(reason, "null spec", reason_cap);
+            reason[reason_cap - 1] = '\0';
+        }
+        return false;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
+    {
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        return false;
+    }
+    /* dtype allow-list: fp16 / bf16 / fp32 (aliases resolved by dtype_to_ir). */
+    dt = (spec->dtype != NULL) ? rocke_fuse_dtype_to_ir_str(spec->dtype) : NULL;
+    if(dt == NULL || !(strcmp(dt->name, "f16") == 0 || strcmp(dt->name, "bf16") == 0
+                       || strcmp(dt->name, "f32") == 0))
+    {
+        if(reason && reason_cap > 0)
+        {
+            rocke_dconv_col__dtype_repr(spec->dtype, dtype_repr, sizeof(dtype_repr));
+            snprintf(reason,
+                     reason_cap,
+                     "dtype %s is not supported; expected one of fp16, bf16, fp32",
+                     dtype_repr);
+        }
+        return false;
+    }
+    p = &spec->problem;
+    if(p->cpg != 1 || p->kpg != 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "cpg and kpg must both be 1 (got cpg=%d, kpg=%d)",
+                     p->cpg,
+                     p->kpg);
+        }
+        return false;
+    }
+    if(p->stride < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "stride must be >= 1 (got %d)", p->stride);
+        }
+        return false;
+    }
+    if(p->KH < 1 || p->KW < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "filter extents must be >= 1 (got KH=%d, KW=%d)",
+                     p->KH,
+                     p->KW);
+        }
+        return false;
+    }
+    if(p->PAD < 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "PAD must be >= 0 (got %d)", p->PAD);
+        }
+        return false;
+    }
+    Ho = rocke_dconv_col__Ho(p);
+    Wo = rocke_dconv_col__Wo(p);
+    if(Ho < 1 || Wo < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "filter does not fit the padded input: Ho=%d, Wo=%d "
+                     "(H=%d, W=%d, KH=%d, KW=%d, PAD=%d, stride=%d)",
+                     Ho,
+                     Wo,
+                     p->H,
+                     p->W,
+                     p->KH,
+                     p->KW,
+                     p->PAD,
+                     p->stride);
+        }
+        return false;
+    }
+    if(Ho > p->H)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "requires Ho <= H (got Ho=%d, H=%d)", Ho, p->H);
+        }
+        return false;
+    }
+    if(spec->block_w < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "block_w must be >= 1 (got %d)", spec->block_w);
+        }
+        return false;
+    }
+    if(spec->block_waves < 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "block_waves must be >= 1 (got %d)", spec->block_waves);
+        }
+        return false;
+    }
+    max_threads = target->limits.max_threads_per_block;
+    threads = rocke_direct_depthwise_col_threads_per_block(spec);
+    if(threads > max_threads)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "threads_per_block %d (= block_waves*wave_size = %d*%d) exceeds the "
+                     "%s limit of %d",
+                     threads,
+                     spec->block_waves,
+                     spec->wave_size,
+                     arch,
+                     max_threads);
+        }
+        return false;
+    }
+    live = rocke_direct_depthwise_col_live_f32(spec);
+    allowed = rocke_direct_depthwise_col_resolve_max_live_f32(spec, arch);
+    if(live > allowed)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "live f32 per lane %d (= Ho*block_w + KH = %d*%d + %d) exceeds "
+                     "max_live_f32=%d on %s; lower block_w",
+                     live,
+                     Ho,
+                     spec->block_w,
+                     p->KH,
+                     allowed,
+                     arch);
         }
         return false;
     }

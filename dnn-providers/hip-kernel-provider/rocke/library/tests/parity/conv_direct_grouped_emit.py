@@ -5,7 +5,8 @@
 # tests/parity/conv_direct_grouped_emit.py -- Python reference emitter for the
 # direct grouped convolution parity harness. Selects one of N sampled spec
 # configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec /
-# DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec, builds the
+# DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec /
+# DirectDepthwiseColSpec / DirectDepthwiseSpatialSpec, builds the
 # kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
 # prints _native_lower(arch=<cfg arch>) to stdout so it can be
 # byte-compared with the C emitter conv_direct_grouped_emit.c.
@@ -18,12 +19,14 @@ from kernels.common.conv_direct_grouped import (
     DirectConv8cSpec,
     DirectConv32cSpec,
     DirectDepthwiseSpec,
+    DirectDepthwiseColSpec,
     DirectDepthwiseSpatialSpec,
     build_direct_conv_16c,
     build_direct_conv_4c,
     build_direct_conv_8c,
     build_direct_conv_32c,
     build_direct_depthwise,
+    build_direct_depthwise_col,
     build_direct_depthwise_spatial,
 )
 
@@ -140,6 +143,90 @@ def _spec(idx: int):
             DirectDepthwiseSpatialSpec(problem=p, block_waves=1),
             "gfx950",
         )
+    if idx == 12:
+        # column-streamed depthwise, stride=1 fp16, both tile guards elided
+        # (groups % block_ch == 0 and Wo % block_w == 0): addr() must emit a
+        # bare mul with no select at all.
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=128, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=2, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 13:
+        # col stride=2 bf16 with BOTH guards live (groups=70 % 64, Wo=5 % 4)
+        p = DirectConvProblem(
+            N=1, H=9, W=9, groups=70, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="bf16"),
+            "gfx950",
+        )
+    if idx == 14:
+        # col stride=3 fp32: exercises the (y - r) % stride tap pruning and the
+        # f32 load/store forms; ch guard elided, w guard live.
+        p = DirectConvProblem(
+            N=1, H=16, W=16, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=3
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="fp32"),
+            "gfx950",
+        )
+    if idx == 15:
+        # col with a large filter (31x31): the regime the variant exists for --
+        # KW rides the runtime loop so only KH weights are live.
+        p = DirectConvProblem(
+            N=1, H=8, W=8, groups=64, cpg=1, kpg=1, KH=31, KW=31, PAD=15, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 16:
+        # col 1x1 / PAD=0 degenerate with a non-power-of-two group count
+        p = DirectConvProblem(
+            N=2, H=6, W=6, groups=3, cpg=1, kpg=1, KH=1, KW=1, PAD=0, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=2, block_waves=1, dtype="fp32"),
+            "gfx950",
+        )
+    if idx == 17:
+        # col with KH != KW (5x3): separates the unrolled axis from the runtime one
+        p = DirectConvProblem(
+            N=1, H=8, W=8, groups=128, cpg=1, kpg=1, KH=5, KW=3, PAD=2, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=2, dtype="bf16"),
+            "gfx950",
+        )
+    if idx == 18:
+        # col stride=2 with valid padding (PAD=0), both guards elided
+        p = DirectConvProblem(
+            N=1, H=13, W=13, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=0, stride=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=6, block_waves=1, dtype="fp16"),
+            "gfx950",
+        )
+    if idx == 19:
+        # col with block_w=1 and a channel tail (groups=100 % 128)
+        p = DirectConvProblem(
+            N=1, H=10, W=10, groups=100, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=1, block_waves=2, dtype="fp32"),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -160,6 +247,8 @@ def main() -> int:
         kernel = build_direct_conv_32c(spec, arch=arch)
     elif kind == "spatial":
         kernel = build_direct_depthwise_spatial(spec, arch=arch)
+    elif kind == "dwcol":
+        kernel = build_direct_depthwise_col(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":
