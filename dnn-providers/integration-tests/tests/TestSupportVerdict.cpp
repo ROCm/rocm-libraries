@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ using hipdnn_integration_tests::bundle::observeSupport;
 using hipdnn_integration_tests::bundle::promoteAcceptedClaim;
 using hipdnn_integration_tests::bundle::RankedEngines;
 using hipdnn_integration_tests::bundle::requiredDepth;
+using hipdnn_integration_tests::bundle::shallowPassComplaint;
 using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::SupportClaimLocator;
 using hipdnn_integration_tests::bundle::SupportObservation;
@@ -827,6 +829,78 @@ TEST(TestSupportVerdict, FailingVerdictDetailsNameTheStatus)
     EXPECT_NE(verdictDetail(SupportVerdict::CLAIM_BROKEN, ErrorCode::GRAPH_NOT_SUPPORTED)
                   .find(hipdnn_frontend::to_string(ErrorCode::GRAPH_NOT_SUPPORTED)),
               std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// shallowPassComplaint(): the green run that compared nothing.
+//
+// Every oracle in the chain may decline, so a bundle can reach PASSED having been
+// checked against nothing at all. The complaint is what stops that reading as
+// success.
+//
+// It is self-guarding -- only a PASSED outcome can trip it -- and TestBody() banks
+// on that by handing it every outcome with no surrounding condition. The FAILED and
+// SKIPPED cases below are what make that call site safe.
+// ---------------------------------------------------------------------------
+
+TEST(TestShallowPassComplaint, PassingBelowTheRequiredDepthIsAComplaint)
+{
+    const auto complaint
+        = shallowPassComplaint(VerificationOutcome::passed(VerificationDepth::EXECUTED),
+                               VerificationDepth::VERIFIED,
+                               "bundles/conv_fp32");
+
+    ASSERT_TRUE(complaint.has_value());
+    EXPECT_TRUE(complaint->fatal);
+    // Both halves matter to whoever reads the log: the rung that was owed, and the
+    // bundle that owed it.
+    EXPECT_NE(complaint->message.find(toString(VerificationDepth::VERIFIED)), std::string::npos)
+        << complaint->message;
+    EXPECT_NE(complaint->message.find("bundles/conv_fp32"), std::string::npos)
+        << complaint->message;
+}
+
+TEST(TestShallowPassComplaint, PassingAtTheRequiredDepthIsSilent)
+{
+    EXPECT_FALSE(shallowPassComplaint(VerificationOutcome::passed(VerificationDepth::BUILDABLE),
+                                      VerificationDepth::BUILDABLE,
+                                      "bundles/conv_fp32")
+                     .has_value());
+}
+
+// An `applicability` bundle whose run went all the way to VERIFIED did more than was
+// asked of it, not less.
+TEST(TestShallowPassComplaint, PassingAboveTheRequiredDepthIsSilent)
+{
+    EXPECT_FALSE(shallowPassComplaint(VerificationOutcome::passed(VerificationDepth::VERIFIED),
+                                      VerificationDepth::APPLICABLE,
+                                      "bundles/conv_fp32")
+                     .has_value());
+}
+
+// A failure already carries its own origin and message. Adding "and it did not reach
+// verified" puts a second, vaguer grievance on top of the real one -- and a blocked
+// claim reaches this call site as exactly that.
+TEST(TestShallowPassComplaint, FailingShortOfTheDepthIsNotAShallowPass)
+{
+    EXPECT_FALSE(shallowPassComplaint(VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                                                  FailureOrigin::ENGINE,
+                                                                  "engine declined"),
+                                      VerificationDepth::VERIFIED,
+                                      "bundles/conv_fp32")
+                     .has_value());
+}
+
+// A skipped test never claimed to have verified anything, so there is no false
+// success to object to. This and the case above are the whole reason TestBody() can
+// hand every outcome here unguarded.
+TEST(TestShallowPassComplaint, SkippingShortOfTheDepthIsNotAShallowPass)
+{
+    EXPECT_FALSE(shallowPassComplaint(
+                     VerificationOutcome::skipped(VerificationDepth::NOT_REACHED, "no device"),
+                     VerificationDepth::VERIFIED,
+                     "bundles/conv_fp32")
+                     .has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

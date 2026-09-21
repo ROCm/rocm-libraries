@@ -10,6 +10,8 @@
 #include "harness/bundle/SupportVerdict.hpp"
 
 using hipdnn_integration_tests::bundle::coverageFor;
+using hipdnn_integration_tests::bundle::CoverageUpdate;
+using hipdnn_integration_tests::bundle::missedQueryComplaint;
 using hipdnn_integration_tests::bundle::printSupportClaimSummary;
 using hipdnn_integration_tests::bundle::SidecarState;
 using hipdnn_integration_tests::bundle::SupportClaimCoverage;
@@ -559,6 +561,51 @@ TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
     EXPECT_EQ(out.find("--gtest_filter"), std::string::npos)
         << "every claim-bearing graph is accounted for, so nothing is the filter's doing\n"
         << out;
+}
+
+// ---------------------------------------------------------------------------
+// missedQueryComplaint(): the per-graph gap, worded once for both modes.
+//
+// The run-level guard only fires when *no* graph anywhere was queried, so a gap on
+// one graph out of many needs its own signal or it is silently absorbed.
+// ---------------------------------------------------------------------------
+
+TEST(TestMissedQueryComplaint, NoGapIsSilentInEitherMode)
+{
+    const CoverageUpdate update; // missedQuery defaults false
+
+    EXPECT_FALSE(missedQueryComplaint(update, "test/bundle", /*fatal=*/true).has_value());
+    EXPECT_FALSE(missedQueryComplaint(update, "test/bundle", /*fatal=*/false).has_value());
+}
+
+TEST(TestMissedQueryComplaint, GapUnderEnforcementIsFatal)
+{
+    CoverageUpdate update;
+    update.missedQuery = true;
+
+    const auto complaint = missedQueryComplaint(update, "test/bundle", /*fatal=*/true);
+
+    ASSERT_TRUE(complaint.has_value());
+    EXPECT_TRUE(complaint->fatal);
+    EXPECT_NE(complaint->message.find("test/bundle"), std::string::npos) << complaint->message;
+}
+
+// Report mode makes exactly one promise -- it never fails a run -- and exists for
+// exactly one purpose: predicting what enforcement would say. So the severity has to
+// move and the wording must not, or a log reader needs two greps to count one thing.
+TEST(TestMissedQueryComplaint, ReportModeChangesTheSeverityAndNotTheWording)
+{
+    CoverageUpdate update;
+    update.missedQuery = true;
+
+    const auto enforced = missedQueryComplaint(update, "test/bundle", /*fatal=*/true);
+    const auto reported = missedQueryComplaint(update, "test/bundle", /*fatal=*/false);
+
+    ASSERT_TRUE(enforced.has_value());
+    ASSERT_TRUE(reported.has_value());
+    EXPECT_EQ(enforced->message, reported->message);
+    EXPECT_TRUE(enforced->fatal);
+    EXPECT_FALSE(reported->fatal);
 }
 
 // NOLINTEND(readability-identifier-naming)
