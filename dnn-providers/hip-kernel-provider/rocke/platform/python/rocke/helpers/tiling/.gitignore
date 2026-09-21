@@ -2,9 +2,10 @@
 reference_docs/
 
 # Design docs kept out of the tracked repo until scrubbed for external publication.
+# NOTE: tiling_interleaving_design.md was scrubbed and is now TRACKED -- it is SOT that the
+# committed /rocke-tiling-api skill points at, so it cannot stay untracked.
 docs/tiling_design_plan.md
 docs/tiling_review_report.md
-docs/tiling_interleaving_design.md
 docs/tiling_interleaving_speed_run.md
 docs/README_tests.md
 

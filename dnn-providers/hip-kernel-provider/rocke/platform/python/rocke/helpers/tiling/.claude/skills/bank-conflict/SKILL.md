@@ -127,7 +127,7 @@ before doing any work, so a wrong target is caught in the first line and not aft
 |---|---|---|
 | **Find if the STORE conflicts** (and how much) | "does the <A/B> store cause a bank conflict?" | `conflicts/access`, measured (investigate) or modelled (simulate) — never ungated |
 | **Find if the READ conflicts** | "does the wave read conflict?" | `analyze_read` — `conflicts/access = BC/productive` (≈ `max_depth − 1` for a full-wave distinct-dword access) when the arch has a registered read model AND the access is in envelope (gfx90a; 2 dwords/lane; no broadcast; uniform per-instruction depth). Otherwise geometry only — WHETHER and WHERE lanes collide — and asking for a cost RAISES. See "Store vs read coverage" |
-| **Locate the collision** | (part of the analysis) | the served group (half-wave × phase) + bank + colliding `T{l}R{r}` + the N-way |
+| **Locate the collision** | (part of the analysis) | the served group (`ArchLDS.HALF` × phase) + bank + colliding `T{l}R{r}` + the N-way |
 | **Visualize it** | (part of the analysis) | the committed 3-panel register→LDS dataflow, **conflicted vs fixed** side-by-side |
 | **Understand WHY** in plain language | "why is it conflicting?" | the mechanism (e.g. K-stride aliasing) + a concrete thread walk-through + the fix |
 | **Compare layouts before writing a kernel** | "would interleaving conflict on <gfx target>?" | simulate mode — fast, no GPU, labelled |
@@ -161,7 +161,8 @@ variants — lives in **`helpers/tiling/docs/lds_banks.md`** and is owned by the
 Expert for the model and the fix decision (it treats the model as a hypothesis its simulator must validate).
 
 Two operational facts this skill's mechanics need (everything else: read `lds_banks.md`):
-- The simulator MUST arbitrate **per half-wave × per phase** — never sum a lane's `b128` dwords into one
+- The simulator MUST arbitrate **per served group (`ArchLDS.HALF`, NEVER derived from the wave size) × per
+  phase** — never sum a lane's `b128` dwords into one
   histogram (that hides the conflict). Validate it reproduces the measured `conflicts/access` before trusting.
 - `conflicts/access = SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE − SQ_LDS_BANK_CONFLICT)`; `SQ_LDS_ADDR_CONFLICT`
   (same-address broadcast, a separate pathology) should be ~0 — report it too.
@@ -440,7 +441,7 @@ simulate    → selftest(<arch>): PASS — the model reproduces <arch>'s own mea
 
 ### Diagram — register→LDS dataflow, conflict located (conflicted | fixed, side by side)
 - <path>: 3-panel register file → arrows → LDS bank grid; red box on the <N>-way bank; fixed panel alongside
-- located: served group <half-wave/phase>, bank <b>, colliding cells <T{l}R{r}, ...>
+- located: served group <size, source>/phase, bank <b>, colliding cells <T{l}R{r}, ...>
 - <simulate: note the figure is watermarked SIMULATED>
 
 ### Why it happens (plain language, with the walk-through example)

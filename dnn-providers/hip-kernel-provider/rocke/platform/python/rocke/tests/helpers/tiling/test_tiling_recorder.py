@@ -129,3 +129,53 @@ def test_verbs_restored_on_exception():
         tr.record_build(_boom)
     assert emit_mod.load_fragment is orig_emit
     assert TileMma.__call__ is orig_call
+
+
+# --------------------------------------------------------------------------------------------------
+# Declared target: the route for kernels with NO TileMma (reduction / scan / elementwise / epilogue),
+# where a recorded MMA is otherwise the recording's only source of arch + wave size.
+# --------------------------------------------------------------------------------------------------
+
+
+def _build_taking_arch(n, *, arch="gfx90a", wave_size=64):
+    """Stands in for the ~11 tiled build fns that take their OWN `arch=` keyword."""
+    return f"built-with-{arch}"
+
+
+def test_declared_target_does_not_shadow_the_build_fns_own_arch():
+    """REGRESSION: naming these params `arch`/`wave_size` swallowed the build fn's own `arch=`, so the
+    recording was labelled with the caller's target while the kernel was built at the fn's DEFAULT --
+    silently, with nothing raised. `arch=` must reach the build fn untouched."""
+    result, pipe = tr.record_build(_build_taking_arch, 4, arch="gfx942")
+    assert result == "built-with-gfx942"          # forwarded, NOT swallowed
+    assert pipe.arch is None                      # and it did NOT leak into the recording
+
+
+def test_declared_target_sets_the_recording_only():
+    result, pipe = tr.record_build(
+        _build_taking_arch, 4, declared_arch="gfx942", declared_wave_size=32)
+    assert (pipe.arch, pipe.wave_size, pipe.arch_declared) == ("gfx942", 32, True)
+    assert result == "built-with-gfx90a"          # the build fn kept its own default
+
+
+def test_declared_target_and_build_arch_are_independent():
+    result, pipe = tr.record_build(
+        _build_taking_arch, 4, arch="gfx942", declared_arch="gfx942", declared_wave_size=64)
+    assert result == "built-with-gfx942" and pipe.arch == "gfx942"
+
+
+@pytest.mark.parametrize("kwargs", [{"declared_arch": "gfx942"}, {"declared_wave_size": 64}])
+def test_half_declared_target_is_rejected(kwargs):
+    with pytest.raises(ValueError, match="TOGETHER"):
+        tr.record_build(_build_taking_arch, 4, **kwargs)
+
+
+def test_undeclared_is_unchanged():
+    _result, pipe = tr.record_build(_build_taking_arch, 4)
+    assert (pipe.arch, pipe.wave_size, pipe.arch_declared) == (None, None, False)
+
+
+def test_roundtrip_driver_names_the_fix_when_no_target_is_available():
+    from rocke.helpers.tiling.visualization.auto_pipeline import _arch_wave
+    with pytest.raises(ValueError, match="record_build"):
+        _arch_wave(tr.RecordedPipeline())

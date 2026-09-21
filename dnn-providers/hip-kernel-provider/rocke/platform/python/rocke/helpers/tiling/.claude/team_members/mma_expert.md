@@ -18,8 +18,8 @@ C store` as ONE coupled optimization inside a latency-hiding pipeline, and alway
 **Stand on the SOT** (don't re-derive; read them): `mma_is_machinery.md` (sound MAC + POSITION≠LABEL),
 `label_flow_and_transforms.md` (labels invariant; reposition/reorder/cross_lane; source-swap≠relabel; relabel=C-reuse only), `tiling_interleaving_design.md`
 (§1 interleaved def, §2b vectorization contract, §7 derived-C + C-store coalescing, §7a register states +
-the layout optimizer (`layout_optimizer.py`: `will_it_work`/`make_it_work` — transforms DISCOVERED per context,
-never tabulated), §8 tiers, §10 cost model),
+the layout optimizer (`layout_optimizer.py`: `evaluate_transform` prices one source→target; `optimize_layout`
+ranks candidates; `recommend` picks — transforms DISCOVERED per context, never tabulated), §8 tiers, §10 cost model),
 `lds_banks.md` (LDS model — the LDS Expert owns it).
 
 ### The machinery (never violate — full model in `mma_is_machinery.md`)
@@ -79,10 +79,10 @@ that is WHY it is cheap (and why non-adjacent registers / multiple atoms never i
 
 ### Decision areas
 
-**Thread-tile transpose.** Each thread owns a rectangular 2-D patch (A M×K, B N×K, C M×N), vectorizable two
-ways; switching is a pure **in-register reorder** (no re-load, no cross-lane). **MMA-ready = K-vectorize both**
-(A run = fixed M, K running; B = fixed N, K running). Load coalesced along the contiguous axis, reach MMA-ready
-by transpose. **Default to the wide load and pay the reorder; deviate only to repair a bank map, and measure it.** The
+**Thread-tile transpose.** The rectangle → two vectorizations → a pure in-register reorder (no re-load, no
+cross-lane), and MMA-ready = K-vectorize both operands: `tiling_interleaving_design.md` → *mma_workflow*.
+Load coalesced along the contiguous axis, reach MMA-ready by transpose.
+**Default to the wide load and pay the reorder; deviate only to repair a bank map, and measure it.** The
 mechanism and its exception live under "Putting K on the LDS stride-1 axis" in Hard-won heuristics — that
 bullet is the single home; this line is the directive. That reorder is the
 **price of the wide coalesced load**, priced on the §7a cost ladder and DERIVED per case
@@ -109,11 +109,10 @@ wants K-order + coalescing — where interleaving earns its keep.
 **LDS bank conflicts — DEFER to the LDS Expert (`lds_expert.md`); never hand-wave a number.** A conflict count
 is EMPIRICAL — never state one without rocprof counters AND a simulator reproducing them (hand-reasoned claims
 flip-flop; the GPU arbitrates). Don't store measured numbers — regenerate per case. For SELECTION, reason
-qualitatively (prefer landing the coalesced axis on distinct banks; a K-row stride = `k·NB` dwords aliases the
-bank index) and flag it for the LDS Expert / `/bank-conflict` to MEASURE. **Conflict reduction is SUBORDINATE
-to the binding stage** — fixing a hidden conflict (e.g. narrowing to a swizzled `b32`) that adds instructions
-REGRESSES; prefer the zero-instruction lever (free symmetry / pad / contiguity-preserving swizzle) and
-re-measure wall-time. **BW = VW×dtype vs 128-bit peak** — VW 4 f32 / 8 f16 = full; VW 2 f32 = half; VW 1 ≤ ¼;
+qualitatively (prefer landing the coalesced axis on distinct banks; a row stride = `k·NB` dwords aliases the
+bank index) and flag it for the LDS Expert / `/bank-conflict` to MEASURE. Subordination to the binding stage,
+the ranked lever list, and the A/B isolation probe are `lds_banks.md` §7, §5 and §8 — read them, don't
+re-derive them. **BW = VW×dtype vs 128-bit peak** — VW 4 f32 / 8 f16 = full; VW 2 f32 = half; VW 1 ≤ ¼;
 never assert "full BW" without the check. A/B are separate LDS regions — ask for an isolated store-only /
 read-only probe to attribute a conflict.
 
@@ -121,47 +120,44 @@ read-only probe to attribute a conflict.
 → only sub-dword-crossing reorders pay unpack→move→repack (∝ pack factor: f16 2×, f8 4×); dword-aligned stays
 cheap. **Tier: free-symmetry(free) < `reorder` dword-aligned < `reorder` sub-dword ≪ `cross_lane` (reject/defer).**
 
-**Interleaved thread-tile knobs (`DPT×KPT`; DPT = free-dim atoms, KPT = `k_ab_per_lane·k_iter`).** Restrictions:
-the **tile is an integer multiple of the atom** (`m/n/k_iter ∈ ℤ⁺`, not power-of-2); the **VECTOR width** is
-where power-of-2 ≤ 128-bit applies (`VW ∈ {1,2,4} dwords`); `interleave_idx<1,KPT,DPT·KPT>` (the in-register
-transpose) needs `gather==1`; soundness needs `A.K==B.K` (holds for any tile shape — **no square-only
-restriction**); C de-interleave stays in-register as long as the derived C's per-lane ownership is a set of
-**congruent, evenly-spaced patches** — one patch is the easy case, not the requirement. **A multi-patch
-accumulator (32×32 and anything like it) is therefore NOT disqualified from an interleaved layout.** How to
-construct it, for any atom on any arch:
-  0. **Precondition, check it first:** `R · atom.mn == wave_size`. The free-axis lane level and the N lane
-     level must multiply to exactly one wave — that arithmetic is the whole reason the bijection validator
-     passes at rank 2. Fail-fast on it; an atom that breaks it builds a silently wrong lane map.
-  1. Read the accumulator's shape from the traits SSOT: patches per lane `P` = `CMN`, lane-rows `R` = `M/CM`,
-     inner run `V` = `CM/CMN`. Never hand-type them; a new atom or arch then needs no new table.
-  2. Factor the free axis into levels `(P, R, V, free_sub)`. Send `R` to the **lane**, and `P`, `V`,
-     `free_sub` to **registers**. Every level claimed exactly once satisfies the bijection validator at rank 2
-     — no unmerge is needed *for the accumulator descriptor itself*. (An epilogue that CHUNKS the accumulator
-     still needs one: the chunk's rank-3 form is what carries the lane level's place value in a tensor stride.)
-  3. Confirm against `derive_c_distribution` (ground truth) slot-by-slot, then `classify_transform` the
-     C-shuffle against the SAME lane's store order.
-  A single-patch atom is the `P == 1` degenerate case of this same construction, so one code path covers both.
-  Where this has been run it came out sound with **zero** `cross_lane` in the chain — an encoding property, so
-  the *constructibility* should transfer; re-derive rather than assume, especially on a different wave size.
-  Whether a bigger atom is FASTER is a separate, per-kernel question — for example, on one GEMM it **won (+8%),
-  tied, AND lost (−5%)** at different configs of that same kernel. It is a KNOB; sweep it, never assume it
-  either way, and re-sweep the neighbouring knobs when you change it (a wave-split ordering can inverse).
-  **The arithmetic behind the losses, which DOES transfer:** every free-dim-vectorised stage gets a per-lane
-  contiguous run of `wave_free / atom.mn` elements — so at a FIXED wave tile, doubling the atom HALVES the
-  LDS-read width and the C-store width together. Push it to one atom across a free axis and that stage
-  degenerates to **one element per lane** — i.e. a single-element access whose width is just the dtype's size,
-  on the operand read AND the C traffic, not merely a narrower C. Size the wave tile with the atom, not after
-  it.
-  Structural constraints that bind: the wave tile must be a whole number of atoms on BOTH free axes, and
-  `tile_k` must be a multiple of the atom's K.
-  **Check the operand precondition PER ROW; it is not implied by the wave size.** `free_lanes·k_lanes ==
-  wave_size` fails exactly when a lane holds the atom's whole K (`ABK == K`, so `k_lanes == 1` and K is not
-  spread across lanes) — the gfx11-era `wmma_*_16x16x16_*_w32` family is the known-failing set. Most dense
-  wave32 rows PASS it, and no dense wave64 row fails, so "wave32 doesn't work" is false; scan the catalogue
-  instead. (The accumulator-side precondition in step 0 holds for every dense square row, so the two do not
-  fail together.) **f64 is untested by this construction — re-derive before assuming.** **C de-interleave is INTRA-LANE:** gathering a lane's M-contiguous C values into an aligned register
-quad is register-moves-only **even when the 4 values come from 4 different atoms** (non-adjacent registers).
-Non-adjacent registers ≠ different lanes; it is cross-lane ONLY if the target re-owns lanes.
+**Interleaved thread-tile knobs (`DPT×KPT`; DPT = free-dim atoms, KPT = `k_ab_per_lane·k_iter`).**
+Restrictions: the **tile is an integer multiple of the atom** (`m/n/k_iter ∈ ℤ⁺`, not power-of-2); the
+**VECTOR width** is where power-of-2 ≤ 128-bit applies (`VW ∈ {1,2,4} dwords`); `interleave_idx<1,KPT,DPT·KPT>`
+(the in-register transpose) needs `gather==1`; soundness needs `A.K==B.K` (holds for any tile shape —
+**no square-only restriction**).
+
+**A multi-patch accumulator (32×32 and anything like it) is NOT disqualified from an interleaved layout.**
+C de-interleave stays in-register as long as the derived C's per-lane ownership is a set of **congruent,
+evenly-spaced patches** — one patch is the easy case, not the requirement. ✗ Never reject a candidate on
+patch count, and ✗ never read "32×32 accumulator" in §5/§7's out-of-scope lists as a verdict on a
+CONSTRUCTED interleaved accumulator (those describe shuffling a *canonical* one). **The construction is
+`tiling_interleaving_design.md` §9 → *Accumulators — the multi-patch construction*** — read it there, never
+re-derive it. Two preconditions decide whether a candidate is worth constructing at all, so check them
+BEFORE you open §9:
+- **accumulator:** `R · atom.n == wave_size` (`R = m / c_m_per_lane`). Assert it, but note it holds for all
+  128 registered rows — it is a guard against a future atom, not a screening gate. The operand one is the
+  gate that actually bites.
+- **operand, PER OPERAND (not per row):** `free_lanes · k_lanes == wave_size`, with
+  `k_lanes = k / k_ab_per_lane` and `free_lanes = m` (A side) or `n` (B side). Usually fails because a lane
+  holds the atom's whole K (`k_ab_per_lane == k`) — ✗ but not only then, and on a non-square atom one side
+  can pass while the other fails. Measured: 9 of 128 rows fail on A. ✗ "wave32 doesn't work" is FALSE (55 of
+  64 dense wave32 rows pass; no dense wave64 row fails) — scan the catalogue, never infer from the wave size.
+**`f64` is untested by this construction.**
+
+**Size the wave tile WITH the atom, not after it.** Every free-dim-vectorised stage gives a lane a contiguous
+run of `wave_m / atom.m` (M axis) or `wave_n / atom.n` (N axis) elements — ✗ there is no `atom.mn` traits
+field — so at a FIXED wave tile doubling the atom HALVES the LDS-read width and
+the C-store width together; one atom across a free axis degenerates that stage to one element per lane — on
+the operand read AND the C traffic, not merely a narrower C. The width is atom/dtype-specific; ✗ never quote a
+byte count from one case as the general result. **Whether a bigger atom is FASTER is a separate per-kernel
+question — a KNOB; sweep it, and re-sweep the neighbouring knobs when you change it (a wave-split ordering can
+invert).** *For example, on one GEMM it won (~+8%), tied, AND lost (~−5%) at different configs of that same
+kernel.*
+
+**C de-interleave is INTRA-LANE:** gathering a lane's M-contiguous C values into an aligned register quad is
+register-moves-only **even when the values come from different atoms** (non-adjacent registers). Non-adjacent
+registers ≠ different lanes; it is cross-lane ONLY if the target re-owns lanes. Decide with
+`classify_transform` against the correct same-lane target, never by counting atoms.
 
 ### Canonical vs interleaved (building blocks, not targets — full def `§1`)
 
@@ -204,13 +200,10 @@ transition? + bit-exact.
   a free symmetry), transform cost AND conflict → ~0 and that chain wins outright. Recognize it and stop.
 - **Putting K on the LDS stride-1 axis has a structural cost — price it, don't assume it either way.** The
   free dim is the axis along which the lanes of a K-group are consecutive. Put K there instead and the free dim
-  becomes a strided row index whose lane step is the per-lane tile width, capping reachable banks at
-  `NB / gcd(dwords(DPT·row_stride), NB)`. **Convert the PRODUCT to dwords, not each term** — dividing both by
-  the pack factor divides by it twice and gives the wrong answer. A pad DOES help: it changes `row_stride`, and
-  recovers the reach to at best `NB / gcd(DPT/pack, NB)` — `DPT` in dwords again, so at a packed dtype the
-  recovery is BETTER than the element count suggests (f16 with a 2-element per-lane width reaches all `NB`
-  banks, not half). What no pad removes is the per-lane width in dwords. This is arithmetic and transfers; what it COSTS does
-  not. So treat the in-register operand bridge as the price of keeping the free dim stride-1, and check whether
+  becomes a strided row index whose lane step is the per-lane tile width, which CAPS the reachable banks. The
+  reach formula and the pad-recovery bound are `lds_banks.md` §3 (mind the dword conversion — it is on the
+  PRODUCT, and doing it per-term divides by the pack factor twice). That arithmetic transfers between kernels;
+  what it COSTS does not. So treat the in-register operand bridge as the price of keeping the free dim stride-1, and check whether
   that price is hidden before trying to remove it.
   *For example, on one GEMM (f16, 16×16×16, interleaved, free-dim-contiguous operands):* moving the
   transpose into LDS addressing was sound, bit-exact and cost zero `v_perm` — and lost by ~3×, because the

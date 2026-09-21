@@ -28,6 +28,29 @@ LDS bank conflicts are an **empirically verifiable statistic**. Do NOT state a c
    regenerate the data. This doc stores the MODEL and METHOD, never the answers.
 4. **Conflict reduction is SUBORDINATE to the binding stage** (see §7). `SQ_LDS_BANK_CONFLICT` is a diagnostic,
    not the objective — wall-time is.
+5. **A model that cannot discriminate on an axis must REFUSE, not return equal numbers.** Equal values read as
+   "no difference on this knob" — which is a claim, and the wrong one. §0 rule 1 covers a model being *wrong*; this
+   covers it being *insensitive*, which is harder to see because nothing looks broken. Which axes a given
+   model is blind on is per-model state discovered by comparing against wall time, so it lives **beside the
+   validation corpus in code**, not in prose here — and the **refusal belongs at the comparison site**, not in
+   the pricing call, which sees one descriptor and cannot know it is being used to rank.
+
+6. **What a SIMULATED number may and may not buy.** Simulation prices bank behaviour; it cannot price
+   instructions or occupancy, and it never sees wall-time. So a simulated number may **rank** candidates and
+   **flag** a suspect layout. It may **not** disqualify a layout, and it may not justify **adopting** a fix.
+   - **The adoption gate:** on simulated evidence alone, adopt only **zero-instruction levers** — a free
+     relabel/symmetry, a pad that preserves the access width, a contiguity-preserving swizzle. ✗ **Never a
+     narrowing swizzle or a redistribute**, which buy a finer permutation with instructions — the one
+     currency this mode cannot measure. §7 is the hardware case where exactly that trade lost.
+   - ✗ **Driving a SIMULATED `conflicts/access` down across iterations is the BC→0 antipattern** (§7) wearing
+     a caveat. The counter is not the objective in investigate mode and it is not the objective here either.
+
+**Report the GEOMETRY, refuse the COST, when the access falls outside the validated envelope.** These are two
+different outputs and only one of them degrades. How many rows a served group spans, what the address map
+does, where lanes land — all of that is countable from the descriptor and stays reportable no matter what.
+The conflict *number* is a priced claim and requires a validated model for that arch. ✗ Withholding the
+geometry along with the cost throws away the half of the answer that was never in question; ✗ reporting a cost
+outside the envelope is the hand-argument §0 rule 1 forbids, wearing a tool's output as a disguise.
 
 (This discipline exists because hand-reasoned claims about a real kernel flip-flopped and wasted time.)
 
@@ -37,10 +60,12 @@ LDS bank conflicts are an **empirically verifiable statistic**. Do NOT state a c
 
 - LDS is `NB` banks, each **4 bytes = 1 dword** wide, serving **one dword per bank per cycle**. Byte address
   `a` → `bank = (a/4) mod NB`; for a dword index `d`, `bank = d mod NB`.
-- **A wave64 LDS instruction is NOT issued for all 64 lanes at once.** It is served in **groups of ≤32 lanes
-  (a half-wave)** against the `NB` banks, and a **wide** access (`ds_*_b64`/`b128` = 2/4 dwords per lane) is
-  further split into **per-dword phases** (a `b128` = **4 phases**, one dword-position each).
-- **A bank conflict is evaluated PER served group × per phase.** Within one (half-wave, phase), if two lanes
+- **An LDS instruction is NOT issued for all lanes of a wave at once.** It is served in **lane groups of a
+  REGISTERED size** (`ArchLDS.HALF`; gfx90a = 32, i.e. the half-wave there) against the `NB` banks. ✗ The
+  group size is a per-arch hardware fact — read it from `ArchLDS.HALF`, never derive it from the wave size
+  (§1.2). A **wide** access (`ds_*_b64`/`b128` = 2/4 dwords per lane) is further split into **per-dword
+  phases** (a `b128` = **4 phases**, one dword-position each).
+- **A bank conflict is evaluated PER served group × per phase.** Within one (group, phase), if two lanes
   target the **same bank at different addresses**, the bank can serve only one/cycle → the instruction
   **replays** the extra ones. Each replay is one extra cycle. `SQ_LDS_BANK_CONFLICT` counts replay cycles.
   - *N-way conflict* = N distinct addresses stacked on one bank in one served group/phase = N cycles (N−1
@@ -100,7 +125,7 @@ BC         = IDX − productive
 `min(b,P) = min(b,C)` at b = 4, 8, 16, 32, so the terms cancel identically: `PORT_BANKS`/`COMBINE` are
 **not features of the read path**. This is narrower than "zero constants": the **served-group size**
 multiplies `IDX` directly and this corpus does not measure it — 8 and 16 are ruled out, 32 and 64 both
-fit, and 32 is retained by convention from §1.2. The two ports differ in BOTH the per-group cost function AND the phase rule — writes cap
+fit, and **32 is retained as the UNTESTED DEFAULT per §1.2 — 64 is not excluded by this corpus.** The two ports differ in BOTH the per-group cost function AND the phase rule — writes cap
 at an 8-bank stripe and pipeline their phases; reads serve all banks in parallel and serialize theirs.
 At depth 2 the two rules are numerically identical, which is why a single histogram point cannot
 separate them; the depth-8 row is what decides it.
@@ -135,9 +160,8 @@ VALIDATED-looking verdict.
 still costs one cycle per group while the productive floor is smaller.
 
 **ENVELOPE (gated in code, not assumed):** 2 dwords/lane (`ds_read2_b32`) and no broadcast. Outside it
-the model is unvalidated and `analyze_read` falls back to geometry only. Served-group size: 8 and 16
-are RULED OUT by the ladder; 32 vs 64 are not separable by this descriptor family — CDNA half-wave 32
-retained per §1.2.
+the model is unvalidated and `analyze_read` falls back to geometry only (the §0 rule, instantiated).
+Served-group size: not restated here — see the fit paragraph above and §1.2.
 
 **Measured corpus:** depth ladder 1/2/4/8 (m_sub 2/4/8/16) plus four depth-2 rows at banks_used
 16/20/24/28. Isolated by the **n_reads slope** design (N live barrier-separated reads to distinct
@@ -157,8 +181,11 @@ phases. A per-instruction-total model will confidently report "no conflict" when
 Run the simulator at group ∈ {8, 16, 32, 64} and see which reproduce the measured `conflicts/access`. In
 practice a given pattern **rules out group=64** (whole-wave-at-once lowers the predicted conflict, because the
 per-phase floor becomes `ceil(64/NB)=2` instead of 1) but often **cannot distinguish 8 vs 16 vs 32** (a
-pile-up contained in a smaller sub-block is caught by any grouping ≥ that block). Report what you ruled out;
-the CDNA default is the half-wave (32).
+pile-up contained in a smaller sub-block is caught by any grouping ≥ that block). **Start the ladder at the
+half-wave on CDNA, and report what you ruled out** — the half-wave is a default to test, never a value to
+adopt. ✗ Do not infer the served-group size from the wave size. Without a registered group size, report the
+raw geometry — how many distinct rows the first N lanes span, tabulated over plausible N — and label the group
+size UNKNOWN.
 
 ### 1.3 Order-independence
 `SQ_LDS_BANK_CONFLICT` is a SUM over (group × phase) replays, so the **order** groups/phases issue in (e.g.
@@ -184,15 +211,62 @@ thread trace), not conflict counts.
 
 ---
 
-## 3. K-stride aliasing (the common mechanism)
+## 3. Row-stride aliasing (the common mechanism) — *"K-stride aliasing"* in a GEMM
 
-For an LDS tile addressed `addr(K, m) = K·stride + m` (free dim `m` innermost, contraction `K` the row):
-`bank = ((K·stride + m)/2) mod NB`. **If `stride/2` is a multiple of `NB`** (i.e. the row stride is `k·NB`
-dwords), then `K·stride/2 mod NB = 0` and **the bank index is independent of K** — every K-row of a given `m`
-aliases the SAME bank. Any served group that carries the same free coordinate `m` with different `K` then
-piles those lanes onto one bank.
+**The general statement.** Any staged tile has a **row stride**: the distance between consecutive rows in LDS.
+For a tile addressed `addr(row, c) = row·stride + c` (the within-row coordinate `c` innermost):
+`bank = dwords(row·stride + c) mod NB`, where `dwords(x) = x · bytes_per_elem / 4` — ✗ the `/2` you will see
+in f16 examples is that dtype's pack factor, not a constant. **If `dwords(stride)` is a multiple of `NB`**,
+then `dwords(row·stride) mod NB = 0`
+and **the bank index is independent of the row** — every row at a given `c` aliases the SAME bank. Any served
+group carrying the same `c` with different rows piles those lanes onto one bank.
 
-*Worked structure (not a measurement):* a coop store where consecutive lanes step `K` by 4 and free-dim blocks
+In a GEMM the row axis is the contraction `K` and `c` is the free dim `m`, which is why this is usually met
+under the name *K-stride aliasing*. The mechanism has nothing to do with matrix multiply — it is the tile's
+stride against the bank count.
+
+**The general form — and it applies only under a DIFFERENT lane→address map.** The opening statement covers
+the ordinary case where lanes share a row and differ in `c`. The form below covers the case where **the ROW is
+the axis that steps per lane** (in GEMM terms: the contraction moved to stride-1, so the free dim became the
+strided row index). ✗ These are two different maps, not one general and one special case — the numbers only
+coincide when the per-lane row step is 1.
+
+Let `E` be the **elements per lane along the ROW axis** (✗ not the atom count that
+`tiling_interleaving_design.md` calls `DPT` — that is atoms, and converting one to the other is off by the
+atom size). Then the reachable banks are capped at:
+
+```
+reach = NB / gcd(dwords(E · row_stride), NB)          # ways = group_size / reach
+```
+
+**Convert the PRODUCT to dwords, not each term** — dividing both by the pack factor divides by it twice and
+gives the wrong answer. This is the single most-repeated arithmetic error in this area.
+
+**Count `E` within ONE instruction.** When a descriptor issues several ops per lane (`op_fanout`, §1.4), `E`
+is the per-INSTRUCTION row extent, not the lane's whole register set — otherwise this formula uses exactly the
+quantity the counting rule below forbids.
+
+**A pad DOES help here**: it changes `row_stride`, and recovers the reach to at best `NB / gcd(dwords(E), NB)`
+— so **at a packed dtype the recovery is BETTER than the element count suggests** (a 2-element per-lane width
+at a 2-per-dword dtype occupies 1 dword and reaches all `NB` banks, not half). What no pad removes is the
+per-lane width in dwords. Guard: when `dwords(E) < 1` (a sub-dword per-lane width) the gcd is undefined —
+the floor is then the dword itself, one lane per bank per phase.
+
+✗ **This is naive-map arithmetic**, same accounting as §4 — for a WRITE the validated §1.4 stripe rule
+supersedes it, and §1.4 measured a padded `b128` store reaching BC=0 where this bound predicts a floor.
+
+This arithmetic transfers between kernels; what it COSTS does not — price it, never assume it either way.
+
+**Two things that make the count wrong if you skip them:**
+
+- **Count within ONE hardware instruction.** A descriptor issuing several ops per lane spans several rows
+  *across* those ops, and that is not a conflict — arbitration happens per instruction. ✗ Summing rows over a
+  lane's whole register set invents a pile-up that the hardware never sees.
+- **The row count is a property of the descriptor's ACTUAL lane placement**, not of `tile_free / vw`. That
+  identity holds only for a free-major descriptor whose free-axis lane count divides the wave; real
+  descriptors in this repo violate it. Read the placement, do not compute it from the tile shape.
+
+*Worked structure — stated in GEMM terms, since that is where you will meet it (not a measurement):* a coop store where consecutive lanes step `K` by 4 and free-dim blocks
 by 8, into a tile whose row stride is `2·NB` dwords → in each phase the lanes sharing a free-dim block (same
 `m`, different `K`) collapse onto one bank → an 8-way pile, repeated across the group. Padding or a swizzle
 that makes `stride/2 mod NB ≠ 0` re-introduces the K spread.
@@ -216,9 +290,19 @@ group):
 | `b64`       | 2               | 2-way               | 2×                     |
 | `b32`       | 1               | 0-way (conflict-free) | 4×                   |
 
-**Reading it:** conflicts ↓ and instruction count ↑ *together*. Zero conflict is only reachable by narrowing to
-`b32` (no block to preserve → each dword places freely → full permutation) — at 4× the LDS instructions. The
-best width is **bottleneck-dependent** (§7), not "narrowest."
+**Reading it:** conflicts ↓ and instruction count ↑ *together*. Under this accounting zero conflict is only
+reachable by narrowing to `b32` (no block to preserve → each dword places freely → full permutation) — at 4×
+the LDS instructions. The best width is **bottleneck-dependent** (§7), not "narrowest."
+
+> ⚠ **SCOPE — this table is the NAIVE per-address replay accounting, i.e. the READ-side model. For WRITES it
+> is superseded by the validated §1.4 stripe-parity rule, and the two disagree in BOTH directions:**
+> §1.4 measured a **padded `b128` store at BC=0** (an odd multiple of the half-stripe unit `4·W`) — which this
+> table says is unreachable — and measured a **`b32` narrowing swizzle as WORSE** (`conflicts/access = 3.00`,
+> at 4× the instructions) — which this table recommends. §1.4 states plainly that the naive `bank = dword mod
+> NB` map this table rests on is *inverted* for that case.
+> **So: pricing a WRITE, use §1.4 and reach for the pad first. Use this table for reads, and for the
+> instruction-count column, which holds either way.** ✗ Never recommend narrowing a store to `b32` on the
+> strength of this table alone — that is the recommendation hardware refuted.
 
 ---
 
@@ -264,6 +348,12 @@ padding can only reduce the pile-up to `group/(NB/g)`-way — **not** to zero. P
 win; a swizzle (§4/§5) or a redistribution is required for a full permutation. Always MEASURE where the pad
 floors out — and note padding costs LDS capacity (occupancy), which can itself cost more than the conflict.
 
+**Padding has a CEILING as well as a floor.** The pad's bytes must fit the registered LDS capacity for the
+target, so a config already sitting at the capacity limit **has no padding lever at all** — the fix ladder
+starts at the swizzle for that config, which costs instructions instead of bytes. Check the headroom before
+recommending a pad, and take the capacity from the arch registry rather than a literal (occupancy and the
+capacity number are owned by `dsl_docs/architecture/multi_arch_data_layout.md`).
+
 ---
 
 ## 7. The binding stage decides — conflict reduction is subordinate to wall-time
@@ -285,7 +375,7 @@ is driven by the binding stage, not the conflict count:
 - **The trap, proven on hardware:** a fully **conflict-free** narrow (`b32`/`b64`) swizzle variant ran *slower*
   than a partially-fixed (4-way) padded one, because it quadrupled LDS instructions once compute was the
   limiter. **Lower conflict ≠ faster.** Report whether **TFLOPS actually moved**, not just whether BC dropped.
-- **Occupancy/pipeline is often the higher-leverage lever than any LDS micro-opt** — a deep double-buffered
+- **Occupancy/pipeline is often the higher-leverage lever than any LDS micro-opt** (the residency MODEL and its rules -- exclude UNKNOWN bounds, never say a bound *binds* -- are owned by `dsl_docs/architecture/multi_arch_data_layout.md` -> *Residency*) — a deep double-buffered
   pipeline can hide the LDS stage entirely (a conflict present in the fastest config). Ask "can I hide it?"
   before "can I remove it?".
 

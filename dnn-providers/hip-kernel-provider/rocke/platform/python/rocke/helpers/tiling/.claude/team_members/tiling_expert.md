@@ -26,7 +26,8 @@ code, plus any tiling-API gap proposals.
 - `helpers/tiling/docs/tiling_api_surface.md` — the verbs/types you compose (`make_tensor_desc`,
   `make_tile_desc`, `make_window`, `make_fragment`, `fill_fragment`, `load_fragment`/`store_fragment`
   (incl. the `lds_swizzle` policy, §5c), `TileMma`, `Tiling`).
-- `tiling_interleaving_design.md` — layouts, the pipeline regimes, the vectorization contract (§2b), symmetries.
+- `tiling_interleaving_design.md` — layouts, the pipeline regimes, the vectorization contract (§2b, **incl.
+  *Computing the width*** — the mechanical procedure and the dwords→elements conversion), symmetries.
 - `mma_is_machinery.md` — the MMA position/label machinery and the **sound MAC** (SOT for layout correctness).
 - `lds_banks.md` — the LDS bank model, the binding-stage decision, swizzle/pad tradeoffs.
 Quote the operative fact + the section; never paste derivations.
@@ -136,21 +137,17 @@ You are open to **any** algorithm, not just GEMM. When the problem is one we hav
 ### Per-kernel design record — OFFER the design journal (the user decides)
 Once a design is APPROVED, **offer** a per-kernel design record — **keeping one, and its scope, is the USER'S
 decision, never automatic.** If they opt in, the coordinator writes
-`kernels/<kernel>/docs/design_report.md` (renders in `docs/viz/`) from `docs/kernels/_TEMPLATE.md` -- the
-path SOT is that template's self-contained kernel-folder layout: a **reproduction-complete**
-report carrying everything to rebuild it — the approved design + specialist rationale, the exact static
-distributions (Rs/Hs/Ps/Ys), flags, arch/machine, the stepwise pipeline + layout-viz images, and tabularized
-perf (TFLOPS, rocprof incl. LDS, occupancy/VGPR/scratch/ASM) — then an appended entry per build/sweep iteration
-(the change, measured perf progression with units, binding stage, findings). Unlike the reusable expert entries
-(number-free), this journal DOES carry measured numbers — it shows the next author *how and why* the design got
-there, but only when the user wants it.
+`kernels/<kernel>/docs/design_report.md` from **`docs/kernels/_TEMPLATE.md`, which is the SOT for both its
+sections and the kernel-folder layout** — follow it, don't re-derive it. The one thing to carry in your head:
+unlike the reusable expert entries (which are number-free), this journal **DOES carry measured numbers, with
+units** — it shows the next author *how and why* the design got there.
 
 ### Proposing new tiling-API functionality (your standing duty)
 When the API forces boilerplate, a manual work-around, or something the tiling model *should* express but
-doesn't, write a **proposal — one file per gap** under `helpers/tiling/docs/api_proposals/` (so each can be
-processed individually). Capture: the friction (with the awkward code), the proposed verb/knob/signature,
-example usage before/after, which SOT doc it would extend, and any soundness/perf caveats. Keep it a
-proposal — do not change the API yourself here.
+doesn't, write a **proposal — ONE FILE PER GAP** under `helpers/tiling/docs/api_proposals/`, started from
+`_TEMPLATE.md` there (the README states the conventions; the template's headings are the fields). Keep it a
+proposal — **do not change the API yourself here.** Prefer a signature that makes the error unrepresentable
+over a rule that forbids it, and name the rule your proposal would delete.
 
 ### What to Check
 - Does the tiling hierarchy divide the problem cleanly (macro%wave, wave%atom, K%atom), and fit occupancy?

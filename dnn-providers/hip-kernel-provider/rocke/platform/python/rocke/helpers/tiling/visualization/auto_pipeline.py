@@ -218,12 +218,14 @@ def _elem_bytes(dtype_name: str) -> int:
 
 
 def _arch_wave(pipeline: Any) -> tuple[str, int]:
-    """The (arch, wave_size) the driver DERIVES from the recording (captured from the TileMma). Fails loud
-    if absent -- NO silent 'gfx90a'/64 fallback; a kernel without a recorded TileMma must supply them via
-    a different driver."""
+    """The (arch, wave_size) the driver DERIVES from the recording -- either DECLARED by the caller via
+    ``record_build(arch=, wave_size=)`` or captured from a recorded ``TileMma``. Fails loud if neither is
+    present -- NO silent 'gfx90a'/64 fallback."""
     if pipeline.arch is None or pipeline.wave_size is None:
-        raise ValueError("pipeline has no recorded arch/wave_size (no TileMma was recorded) -- cannot "
-                         "derive them; record a kernel with a TileMma, or drive the utilities directly")
+        raise ValueError(
+            "pipeline has no arch/wave_size: no TileMma was recorded and none was declared. A kernel with "
+            "no matrix instruction (reduction, scan, elementwise, LDS-combining epilogue) must pass the "
+            "target it already resolved: record_build(build_fn, ..., arch='gfxNNN', wave_size=N).")
     return pipeline.arch, pipeline.wave_size
 
 

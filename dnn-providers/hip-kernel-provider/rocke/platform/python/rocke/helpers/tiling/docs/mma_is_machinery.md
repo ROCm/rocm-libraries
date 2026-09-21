@@ -71,14 +71,14 @@ phys C(reg0,tid0) = M5 · N11  =  C[M5, N11]
 That physical slot is the one the canonical machine calls `M0N0`; physically nothing moved — the label is derived from what flowed in.
 
 > **Run the canonical machine on physical slots, but carry the SUPPLIED logical labels through it.**
-> For each physical C slot whose canonical identity is $(M_c, N_c)$, relabel it with *(the $M$ your A put on that slot's A-row, the $N$ your B put on its B-column)*.
+> For each physical C slot whose canonical identity is $(M_c, N_c)$, **label** it with *(the $M$ your A put on that slot's A-row, the $N$ your B put on its B-column)*.
 
 Two equivalent readings, both useful when visualizing:
 
 - **Fixed-physical:** the C layout *stays* the canonical machine layout; only the $(M,N)$ labels move onto it.
 - **Fixed-logical:** a result like $C[M5,N11]$ lands wherever the machine canonically calls $(M_c,N_c)$ — it moved *off* canonical $(M5,N11)$.
 
-This is a clean relabel because a register shuffle is a **permutation** of the free dimension — pure encoding arithmetic, no hardware re-derivation. It earns its keep in the interleaved case: you cannot eyeball where an input lands, so you trace it through the fixed coupling.
+This is a clean **DERIVATION** (✗ not a *relabel* — that word is reserved for the one declared re-view of a FINISHED tile; see `label_flow_and_transforms.md`) because a register shuffle is a **permutation** of the free dimension — pure encoding arithmetic, no hardware re-derivation. It earns its keep in the interleaved case: you cannot eyeball where an input lands, so you trace it through the fixed coupling.
 
 ## C's layout is DERIVED, never dictated
 
@@ -121,9 +121,10 @@ For any layout/direction question about an MMA operand or accumulator:
 
 **POSITION ≠ LABEL here is the atom-local case of a pipeline-wide law:** a datum's label is its identity and
 flows INVARIANT across every space (global → LDS → registers → MMA → epilogue → store); a transform changes
-*where* a datum lives, never *what* it is; the only label change is an explicit **relabel** (e.g. AB-swap:
-swap A↔B / M↔N on the inputs, C DERIVES). See **`label_flow_and_transforms.md`** for the full model + the four
-edge kinds (reposition / reorder / cross_lane / relabel) and their enforcement.
+*where* a datum lives, never *what* it is; the only label change is an explicit **relabel** — a FINISHED tile
+re-viewed as a downstream input. ✗ **AB-swap is NOT a relabel**: feeding A into the machine's B-slot is
+machine-input ROUTING, the labels ride invariant and C DERIVES. See **`label_flow_and_transforms.md`** for the
+full model + the four edge kinds (reposition / reorder / cross_lane / relabel) and their enforcement.
 
 ---
 

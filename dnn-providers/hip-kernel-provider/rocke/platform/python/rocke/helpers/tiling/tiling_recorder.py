@@ -94,8 +94,10 @@ class RecordedPipeline:
 
     nodes: list[Any] = field(default_factory=list)
     spaces: dict[int, str] = field(default_factory=dict)  # space_id -> space_name
-    arch: str | None = None       # gfx target (from the TileMma) -- the DRIVER's SoT for nbanks/wave_size
-    wave_size: int | None = None  # lanes per wave (from the TileMma traits) -- NOT assumed 64
+    arch: str | None = None       # gfx target -- the DRIVER's SoT for nbanks/wave_size
+    wave_size: int | None = None  # lanes per wave -- NOT assumed 64
+    arch_declared: bool = False   # True when the CALLER supplied arch/wave_size to record_build (a kernel
+                                  # with no TileMma has no other source); a recorded TileMma must then AGREE
 
     @property
     def transactions(self) -> list[PipelineTransaction]:
@@ -208,6 +210,12 @@ class _Recorder:
         if self.pipeline.arch is None:                         # the recording's SoT for arch/wave-size
             self.pipeline.arch = mma.target
             self.pipeline.wave_size = mma.wave_size
+        elif self.pipeline.arch_declared and (
+                (self.pipeline.arch, self.pipeline.wave_size) != (mma.target, mma.wave_size)):
+            raise ValueError(                                  # fail LOUD: a silent mismatch would make every
+                f"recorded MMA targets {mma.target}/wave{mma.wave_size}, but record_build was told "
+                f"{self.pipeline.arch}/wave{self.pipeline.wave_size}. Every bank, width and residency number "
+                "downstream is derived from this -- fix the caller, do not let them disagree.")
 
 
 def _access_vw(tile_desc: Any, strides: Any, dtype_name: str, swizzle: Any) -> int:
@@ -306,9 +314,30 @@ def record_pipeline(build_fn: Callable) -> Iterator[RecordedPipeline]:
         TileMma.__call__ = mma_orig
 
 
-def record_build(build_fn: Callable, *args: Any, **kwargs: Any) -> tuple[Any, RecordedPipeline]:
-    """Run ``build_fn(*args, **kwargs)`` with the verbs decorated; return ``(result, pipeline)``."""
+def record_build(build_fn: Callable, *args: Any,
+                 declared_arch: str | None = None, declared_wave_size: int | None = None,
+                 **kwargs: Any) -> tuple[Any, RecordedPipeline]:
+    """Run ``build_fn(*args, **kwargs)`` with the verbs decorated; return ``(result, pipeline)``.
+
+    ``declared_arch`` / ``declared_wave_size`` carry the target RESOLVED BY THE CALLER into the recording.
+    Supply them for any kernel with **no ``TileMma``** -- a reduction, a scan, an elementwise pass, an
+    LDS-combining epilogue -- because a recorded ``TileMma`` is otherwise the only source
+    (:meth:`_Recorder.add_mma`), and without them the round-trip and geometry drivers raise. Both must be
+    given together. When a ``TileMma`` IS recorded it must AGREE, or ``add_mma`` raises.
+
+    The names are deliberately NOT ``arch`` / ``wave_size``: most tiled build functions in this repo take
+    their own ``arch=`` keyword, and a same-named parameter here would SWALLOW it -- the build fn would
+    silently fall back to its default while the recording was labelled with the caller's value. Anything you
+    pass as ``arch=`` is forwarded to ``build_fn`` untouched, which is what you want."""
+    if (declared_arch is None) != (declared_wave_size is None):
+        raise ValueError(
+            "record_build: pass declared_arch and declared_wave_size TOGETHER (or neither) -- a "
+            "half-declared target silently leaves the other to be scavenged from a recorded TileMma.")
     with record_pipeline(build_fn) as pipeline:
+        if declared_arch is not None:
+            pipeline.arch = declared_arch
+            pipeline.wave_size = declared_wave_size
+            pipeline.arch_declared = True
         result = build_fn(*args, **kwargs)
     return result, pipeline
 
