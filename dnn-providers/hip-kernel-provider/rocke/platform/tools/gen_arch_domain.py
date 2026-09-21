@@ -546,6 +546,51 @@ def _flavor_of_clang(identity: str) -> str | None:
     return f"llvm{m.group(1)}" if m else None
 
 
+def _drift(committed: str, fresh: str) -> str | None:
+    """Describe how a committed column differs from a fresh run, or None.
+
+    None means "differs only in which compiler build answered" -- every cell
+    agrees, and so does every field describing how the probe was posed. That is
+    not staleness and must not fail: `toolchain.clang` records the exact ROCm
+    build, so a byte comparison reds on any host whose patch level differs from
+    the one that blessed the column, which is most of them. This check exists to
+    catch a *wrong measurement*, and a column this host reproduces cell for cell
+    is not one.
+
+    Everything else is drift, including the rest of `toolchain`. Those fields
+    are our own settings rather than properties of the host: `generator`,
+    `probe_cflags` and `probe_timeout_s` say how the question was asked, and a
+    change to any of them means the committed answers were obtained by a method
+    we no longer use. `probe_cflags` is the concrete example -- the same clang
+    reports `ok` or hangs for the same key depending on whether it carries
+    `-O0` -- so forgiving a difference there would forgive precisely the defect
+    that field was added to make visible.
+    """
+    try:
+        a, b = json.loads(committed), json.loads(fresh)
+    except json.JSONDecodeError as exc:
+        return f"committed column is not valid JSON: {exc}"
+
+    if a.get("keys") != b.get("keys"):
+        changed = [
+            f"{k}/{arch}: {a['keys'][k][arch]['status']} -> {cell['status']}"
+            for k, row in b.get("keys", {}).items()
+            for arch, cell in row.items()
+            if arch in a.get("keys", {}).get(k, {})
+            and a["keys"][k][arch]["status"] != cell["status"]
+        ]
+        head = "; ".join(changed[:5]) or "cell evidence or coverage differs"
+        more = f" (+{len(changed) - 5} more)" if len(changed) > 5 else ""
+        return f"measurements changed -- {head}{more}"
+
+    for doc in (a, b):
+        doc.get("toolchain", {}).pop("clang", None)
+    if a != b:
+        fields = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+        return f"differs in {', '.join(fields)}, not in the measurements"
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE intrinsic arch-domain generator")
     ap.add_argument(
@@ -814,14 +859,29 @@ def main() -> int:
                 f"({out.name}); nothing to check. Run without --check to add one."
             )
             return 0
-        if out.read_text() != text:
+        committed = out.read_text()
+        if committed == text:
+            print(f"\nOK: {out.name} is up to date.")
+            return 0
+        why = _drift(committed, text)
+        if why is None:
+            # Reproduced cell for cell by a different build of the same
+            # flavor. That is a pass, and a stronger one than a byte match:
+            # two independent compiler builds agreeing is evidence the column
+            # describes the flavor rather than one machine. See `_drift`.
             print(
-                f"\nFAIL: {out} is stale -- regenerating changed it.\n"
-                "      Re-run without --check and commit the result."
+                f"\nOK: {out.name} is up to date -- every cell reproduces "
+                "here; only the compiler build differs.\n"
+                f"      blessed by: {json.loads(committed)['toolchain']['clang']}\n"
+                f"      this host : {identity}"
             )
-            return 1
-        print(f"\nOK: {out.name} is up to date.")
-        return 0
+            return 0
+        print(
+            f"\nFAIL: {out} is stale -- regenerating changed it.\n"
+            f"      {why}\n"
+            "      Re-run without --check and commit the result."
+        )
+        return 1
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)
