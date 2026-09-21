@@ -662,17 +662,18 @@ NB_MODULE(_stinkytofu, m) {
         .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
-               int scope, int th, bool isStore) {
+               int scope, int th, bool isStore, int nv) {
                 MUBUFScope mScope = static_cast<MUBUFScope>(scope);
                 TemporalHint mTh = static_cast<TemporalHint>(th);
-                inst.mubuf = MUBUFModifiers(
-                    offen, offset, glc, slc, nt, /*lds=*/false, isStore, /*hasMUBUFConst=*/false,
-                    /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false, mScope, mTh);
+                inst.mubuf = MUBUFModifiers(offen, offset, glc, slc, nt, /*lds=*/false, isStore,
+                                            /*hasMUBUFConst=*/false,
+                                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
+                                            mScope, mTh, static_cast<NonVolatile>(nv));
             },
             nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
             nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0, nb::arg("th") = -1,
-            nb::arg("is_store") = false,
-            "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store)")
+            nb::arg("is_store") = false, nb::arg("nv") = 0,
+            "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store, nv)")
         .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
