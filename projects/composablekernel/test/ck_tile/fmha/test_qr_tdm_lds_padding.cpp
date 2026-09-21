@@ -461,12 +461,14 @@ static_assert(validate_policy_coupling<ck_tile::half_t, 128, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, false>());
 #else
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128, true>>>());
+static_assert(
+    is_disabled_selection<
+        ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 128, true>>>());
 static_assert(is_disabled_selection<
               ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::bf16_t, 64>>>());
-static_assert(is_disabled_selection<
-              ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128, true>>>());
+static_assert(
+    is_disabled_selection<
+        ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 128, true>>>());
 static_assert(is_disabled_selection<
               ck_tile::detail::QrTdmPaddingSelection<TestFmhaProblem<ck_tile::half_t, 64>>>());
 #endif
@@ -508,15 +510,13 @@ struct QrTdmRoundTripKernel
                                         std::conditional_t<TensorTag::Id == 1, KConfig, VConfig>>;
     using Layout   = typename Policy::template LdsArenaLayout<Problem, QConfig, KConfig, VConfig>;
 
-    static constexpr ck_tile::index_t kBlockSize    = Problem::kBlockSize;
-    static constexpr bool kUseDoubleKVLdsBuffer     = Problem::kUseDoubleKVLdsBuffer;
-    static constexpr ck_tile::index_t kRows         = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
-    static constexpr ck_tile::index_t kCols         = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
-                                                      : TensorTag::Id == 1
-                                                          ? (kUseDoubleKVLdsBuffer
-                                                                 ? Shape::kSubQKHeaddim
-                                                                 : Shape::kK0)
-                                                          : Shape::kN1;
+    static constexpr ck_tile::index_t kBlockSize = Problem::kBlockSize;
+    static constexpr bool kUseDoubleKVLdsBuffer  = Problem::kUseDoubleKVLdsBuffer;
+    static constexpr ck_tile::index_t kRows      = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    static constexpr ck_tile::index_t kCols =
+        TensorTag::Id == 0   ? Shape::kSubQKHeaddim
+        : TensorTag::Id == 1 ? (kUseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim : Shape::kK0)
+                             : Shape::kN1;
     static constexpr ck_tile::index_t kRegionOffset = [] {
         if constexpr(TensorTag::Id == 0)
             return Layout::kQOffset;
@@ -598,8 +598,7 @@ struct QrTdmRoundTripKernel
                 make_tuple(kCols, 1),
                 number<8>{},
                 number<1>{});
-            constexpr index_t Windows =
-                kUseDoubleKVLdsBuffer ? Shape::kQKHeaddim / Shape::kK0 : 1;
+            constexpr index_t Windows = kUseDoubleKVLdsBuffer ? Shape::kQKHeaddim / Shape::kK0 : 1;
             static_for<0, Windows, 1>{}([&](auto i) {
                 constexpr auto lengths = make_tuple(number<Shape::kN0>{}, number<Shape::kK0>{});
                 const array<index_t, 2> origin{0, i * Shape::kK0};

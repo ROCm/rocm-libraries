@@ -105,8 +105,8 @@ struct BlockFmhaPipelineProblem
     static constexpr index_t kNumGemm1Warps = BlockFmhaShape::NumGemm1Warps;
     static constexpr index_t kBlockSize     = BlockFmhaShape::NumWarps * get_warp_size();
 
-    static constexpr bool kIsGroupMode = kIsGroupMode_;
-    static constexpr bool kUseTrLoad   = kUseTrLoad_;
+    static constexpr bool kIsGroupMode          = kIsGroupMode_;
+    static constexpr bool kUseTrLoad            = kUseTrLoad_;
     static constexpr bool kUseDoubleKVLdsBuffer = kUseDoubleKVLdsBuffer_;
     static constexpr bool kProgressiveDsLoadK   = kProgressiveDsLoadK_;
 

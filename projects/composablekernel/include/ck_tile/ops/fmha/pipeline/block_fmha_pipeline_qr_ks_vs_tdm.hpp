@@ -293,19 +293,19 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
     run_single_kv_lds_buffer(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
-               const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
-               const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
-               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
-               LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
-               FmhaMask mask,
-               PositionEncoding position_encoding,
-               float scale_s,
-               void* smem_arena,
-               float sink_v,
-               const float* k_descale_ptr,
-               const float* v_descale_ptr,
-               index_t block_scale_size_kv,
-               float v_descale) const
+                             const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+                             const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
+                             const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
+                             LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
+                             FmhaMask mask,
+                             PositionEncoding position_encoding,
+                             float scale_s,
+                             void* smem_arena,
+                             float sink_v,
+                             const float* k_descale_ptr,
+                             const float* v_descale_ptr,
+                             index_t block_scale_size_kv,
+                             float v_descale) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -989,21 +989,21 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
-    CK_TILE_HOST_DEVICE auto
-    run_double_kv_lds_buffer(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
-                const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
-                const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
-                const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
-                LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
-                FmhaMask mask,
-                PositionEncoding position_encoding,
-                float scale_s,
-                void* __restrict__ smem_arena,
-                float sink_v,
-                const float* k_descale_ptr,
-                const float* v_descale_ptr,
-                index_t block_scale_size_kv,
-                float v_descale) const
+    CK_TILE_HOST_DEVICE auto run_double_kv_lds_buffer(
+        const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
+        const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
+        const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp,       // N1*K1 tile
+        const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
+        LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
+        FmhaMask mask,
+        PositionEncoding position_encoding,
+        float scale_s,
+        void* __restrict__ smem_arena,
+        float sink_v,
+        const float* k_descale_ptr,
+        const float* v_descale_ptr,
+        index_t block_scale_size_kv,
+        float v_descale) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -1340,8 +1340,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                     using Gemm0 = remove_cvref_t<decltype(gemm_0)>;
                     if constexpr(Problem::kProgressiveDsLoadK)
                     {
-                        static_assert(std::is_same_v<Policy,
-                                                     BlockFmhaPipelineQRKSVSTdmDefaultPolicy>);
+                        static_assert(
+                            std::is_same_v<Policy, BlockFmhaPipelineQRKSVSTdmDefaultPolicy>);
                         static_assert(Gemm0::MIterPerWarp == 1 || Gemm0::MIterPerWarp == 2);
                         static_assert(Gemm0::NIterPerWarp == 4 && Gemm0::KIterPerWarp == 1);
                         using Window = remove_cvref_t<decltype(k_lds_read_window)>;

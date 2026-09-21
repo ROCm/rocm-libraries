@@ -33,9 +33,7 @@ using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
                                                false,
                                                ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>;
 
-template <ck_tile::index_t M,
-          bool UseDoubleKVLdsBuffer = false,
-          bool ProgressiveDsLoadK   = false>
+template <ck_tile::index_t M, bool UseDoubleKVLdsBuffer = false, bool ProgressiveDsLoadK = false>
 using TestFmhaProblem =
     ck_tile::BlockFmhaPipelineProblem<ck_tile::half_t,
                                       ck_tile::half_t,
@@ -57,11 +55,11 @@ using TestFmhaProblem =
                                       UseDoubleKVLdsBuffer,
                                       ProgressiveDsLoadK>;
 
-using SingleBufferM64Problem     = TestFmhaProblem<64>;
-using DoubleBufferM64Problem     = TestFmhaProblem<64, true>;
-using ProgressiveM64Problem      = TestFmhaProblem<64, true, true>;
-using DoubleBufferM128Problem    = TestFmhaProblem<128, true>;
-using ProgressiveM128Problem     = TestFmhaProblem<128, true, true>;
+using SingleBufferM64Problem  = TestFmhaProblem<64>;
+using DoubleBufferM64Problem  = TestFmhaProblem<64, true>;
+using ProgressiveM64Problem   = TestFmhaProblem<64, true, true>;
+using DoubleBufferM128Problem = TestFmhaProblem<128, true>;
+using ProgressiveM128Problem  = TestFmhaProblem<128, true, true>;
 
 static_assert(!SingleBufferM64Problem::kUseDoubleKVLdsBuffer);
 static_assert(!SingleBufferM64Problem::kProgressiveDsLoadK);
@@ -84,24 +82,24 @@ static_assert(TestPipeline<ProgressiveM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<ProgressiveM128Problem>::kKLoadOnce);
 
 template <typename Problem>
-using TestGemm0 = ck_tile::remove_cvref_t<decltype(
-    ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy::GetQKBlockGemm<Problem>())>;
+using TestGemm0 = ck_tile::remove_cvref_t<
+    decltype(ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy::GetQKBlockGemm<Problem>())>;
 
 static_assert(TestGemm0<ProgressiveM64Problem>::MIterPerWarp == 1);
 static_assert(TestGemm0<ProgressiveM128Problem>::MIterPerWarp == 2);
 static_assert(ProgressiveM64Problem::BlockFmhaShape::kSubQKHeaddim /
-                      ProgressiveM64Problem::BlockFmhaShape::kK0 ==
+                  ProgressiveM64Problem::BlockFmhaShape::kK0 ==
               4);
 static_assert(ProgressiveM128Problem::BlockFmhaShape::kSubQKHeaddim /
-                      ProgressiveM128Problem::BlockFmhaShape::kK0 ==
+                  ProgressiveM128Problem::BlockFmhaShape::kK0 ==
               4);
 
 template <typename Problem>
-using TestEpilogue = ck_tile::Default2DEpilogue<
-    ck_tile::Default2DEpilogueProblem<typename Problem::OaccDataType,
-                                      typename Problem::ODataType,
-                                      false,
-                                      false>>;
+using TestEpilogue =
+    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename Problem::OaccDataType,
+                                                                 typename Problem::ODataType,
+                                                                 false,
+                                                                 false>>;
 
 template <typename Problem>
 using TestKernel = ck_tile::FmhaFwdKernel<TestPipeline<Problem>, TestEpilogue<Problem>>;
@@ -137,16 +135,16 @@ std::vector<ck_tile::half_t> run_kernel(const ck_tile::DeviceMem& q_device,
     output_device.SetBytePattern(0x7f);
 
     typename Kernel::Kargs args{};
-    args.q_ptr          = q_device.GetDeviceBuffer();
-    args.k_ptr          = k_device.GetDeviceBuffer();
-    args.v_ptr          = v_device.GetDeviceBuffer();
-    args.o_ptr          = output_device.GetDeviceBuffer();
-    args.seqlen_q       = seqlen_q;
-    args.seqlen_k       = seqlen_k;
-    args.hdim_q         = kHeadDim;
-    args.hdim_v         = kHeadDim;
-    args.num_head_q     = kHeads;
-    args.nhead_ratio_qk = 1;
+    args.q_ptr              = q_device.GetDeviceBuffer();
+    args.k_ptr              = k_device.GetDeviceBuffer();
+    args.v_ptr              = v_device.GetDeviceBuffer();
+    args.o_ptr              = output_device.GetDeviceBuffer();
+    args.seqlen_q           = seqlen_q;
+    args.seqlen_k           = seqlen_k;
+    args.hdim_q             = kHeadDim;
+    args.hdim_v             = kHeadDim;
+    args.num_head_q         = kHeads;
+    args.nhead_ratio_qk     = 1;
     constexpr float scale_s = 0.08838834764831843f; // 1 / sqrt(128)
 #if CK_TILE_FMHA_FWD_FAST_EXP2
     args.scale_s = scale_s * ck_tile::log2e_v<>;
@@ -168,14 +166,13 @@ std::vector<ck_tile::half_t> run_kernel(const ck_tile::DeviceMem& q_device,
     args.batch_stride_o   = kHeads * args.nhead_stride_o;
 
     const ck_tile::stream_config stream{};
-    ck_tile::launch_kernel(
-        stream,
-        ck_tile::make_kernel<Kernel::kBlockPerCu, ck_tile::gfx125_t>(
-            Kernel{},
-            Kernel::GridSize(kBatch, kHeads, seqlen_q, kHeadDim),
-            Kernel::BlockSize(),
-            0,
-            args));
+    ck_tile::launch_kernel(stream,
+                           ck_tile::make_kernel<Kernel::kBlockPerCu, ck_tile::gfx125_t>(
+                               Kernel{},
+                               Kernel::GridSize(kBatch, kHeads, seqlen_q, kHeadDim),
+                               Kernel::BlockSize(),
+                               0,
+                               args));
     output_device.FromDevice(output.data());
     return output;
 }
@@ -217,8 +214,7 @@ TEST(QrTdmProgressiveKLds, M64BufferingModesProduceEquivalentOutput)
     k_device.ToDevice(k.data());
     v_device.ToDevice(v.data());
 
-    const auto single =
-        run_kernel<SingleBufferM64Problem>(q_device, k_device, v_device, seqlen_q);
+    const auto single = run_kernel<SingleBufferM64Problem>(q_device, k_device, v_device, seqlen_q);
     const auto baseline =
         run_kernel<DoubleBufferM64Problem>(q_device, k_device, v_device, seqlen_q);
     const auto progressive =
@@ -281,7 +277,8 @@ TEST(QrTdmProgressiveKLds, M128MultipleKBlocksProduceEquivalentOutput)
 
     expect_finite_nonzero(baseline);
     expect_finite_nonzero(progressive);
-    expect_close(progressive, baseline, "M128 multi-block progressive output differs from baseline");
+    expect_close(
+        progressive, baseline, "M128 multi-block progressive output differs from baseline");
 }
 
 } // namespace qr_tdm_progressive_k_lds_test

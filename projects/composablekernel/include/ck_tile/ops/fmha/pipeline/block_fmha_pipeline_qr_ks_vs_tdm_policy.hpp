@@ -830,8 +830,8 @@ struct QrTdmLdsArenaLayout
     using Shape = typename Problem::BlockFmhaShape;
 
     static constexpr bool kUseDoubleKVLdsBuffer = Problem::kUseDoubleKVLdsBuffer;
-    static constexpr index_t kArenaAlignment  = 256;
-    static constexpr index_t kRegionAlignment = 256;
+    static constexpr index_t kArenaAlignment    = 256;
+    static constexpr index_t kRegionAlignment   = 256;
     static constexpr index_t kSRequiredAlignment =
         BlockFmhaPipelineQRKSVSTdmDefaultPolicy::template GetSmemNPackS<Problem>() *
         sizeof(typename Problem::SaccDataType);
@@ -844,10 +844,8 @@ struct QrTdmLdsArenaLayout
                                              kQrTdmLdsAccessBytes>();
     static constexpr auto k_descriptor = make_qr_tdm_row_major_lds_descriptor <
                                          typename Problem::KDataType,
-                          Shape::kN0,
-                          kUseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim : Shape::kK0,
-                          KPadding,
-                          kQrTdmLdsAccessBytes > ();
+                          Shape::kN0, kUseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim : Shape::kK0,
+                          KPadding, kQrTdmLdsAccessBytes > ();
     static constexpr auto v_descriptor =
         make_qr_tdm_row_major_lds_descriptor<typename Problem::VDataType,
                                              Shape::kN0,
@@ -867,13 +865,10 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kQOffset  = 0;
     static constexpr index_t kK0Offset = 0;
     static constexpr index_t kK1Offset =
-        kUseDoubleKVLdsBuffer
-            ? integer_least_multiple(kK0Offset + kKBytes, kRegionAlignment)
-            : 0;
+        kUseDoubleKVLdsBuffer ? integer_least_multiple(kK0Offset + kKBytes, kRegionAlignment) : 0;
     static constexpr index_t kSOffset =
-        kUseDoubleKVLdsBuffer
-            ? 0
-            : integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
+        kUseDoubleKVLdsBuffer ? 0
+                              : integer_least_multiple(kK0Offset + kKBytes, kSRequiredAlignment);
     static constexpr index_t kV0Offset = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
         {
@@ -886,9 +881,8 @@ struct QrTdmLdsArenaLayout
         }
     }();
     static constexpr index_t kV1Offset =
-        kUseDoubleKVLdsBuffer
-            ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
-            : kV0Offset;
+        kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
+                              : kV0Offset;
     static constexpr index_t kArenaBytes = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
         {
@@ -1043,15 +1037,14 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_reader_segments()
     using Distribution = remove_cvref_t<decltype(d)>;
 
     constexpr bool UseDoubleKVLdsBuffer = Problem::kUseDoubleKVLdsBuffer;
-    constexpr index_t Rows           = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
-    constexpr index_t Cols           = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
-                                       : TensorTag::Id == 1
-                                           ? (UseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim
-                                                                  : Shape::kK0)
-                                                            : Shape::kN1;
-    constexpr index_t WindowRows     = TensorTag::Id == 2 ? Shape::kK1 : Rows;
-    constexpr index_t WindowCols     = TensorTag::Id == 1 ? Shape::kK0 : Cols;
-    constexpr index_t RowWindows     = TensorTag::Id == 2 ? Rows / WindowRows : 1;
+    constexpr index_t Rows              = TensorTag::Id == 0 ? Shape::kM0 : Shape::kN0;
+    constexpr index_t Cols              = TensorTag::Id == 0 ? Shape::kSubQKHeaddim
+                                          : TensorTag::Id == 1
+                                              ? (UseDoubleKVLdsBuffer ? Shape::kSubQKHeaddim : Shape::kK0)
+                                              : Shape::kN1;
+    constexpr index_t WindowRows        = TensorTag::Id == 2 ? Shape::kK1 : Rows;
+    constexpr index_t WindowCols        = TensorTag::Id == 1 ? Shape::kK0 : Cols;
+    constexpr index_t RowWindows        = TensorTag::Id == 2 ? Rows / WindowRows : 1;
     constexpr index_t ColWindows =
         TensorTag::Id == 1 && UseDoubleKVLdsBuffer ? Cols / WindowCols : 1;
     constexpr index_t VectorElements = kQrTdmLdsAccessBytes / sizeof(DataType);

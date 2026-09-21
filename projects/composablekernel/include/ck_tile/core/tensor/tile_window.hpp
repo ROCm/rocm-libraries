@@ -315,8 +315,8 @@ struct tile_window_with_static_distribution
     }
 
     template <index_t Begin, index_t End, typename DataType, typename StaticTileDistribution>
-    CK_TILE_DEVICE void load_access_range(
-        static_distributed_tensor<DataType, StaticTileDistribution>& dst_tensor) const
+    CK_TILE_DEVICE void
+    load_access_range(static_distributed_tensor<DataType, StaticTileDistribution>& dst_tensor) const
     {
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
@@ -327,15 +327,14 @@ struct tile_window_with_static_distribution
         static_assert(Base::BottomTensorView::buffer_view::get_address_space() ==
                           address_space_enum::lds,
                       "SELECTIVE_LOAD_REQUIRES_LDS");
-        static_assert(!remove_cvref_t<decltype(typename Base::BottomTensorView{}
-                                                   .get_tensor_descriptor())>::
-                          template has_transform<coord_transform_enum::xor_t>(),
-                      "SELECTIVE_LOAD_REQUIRES_NO_XOR");
-        static_assert(std::is_same_v<remove_cvref_t<DataType>,
-                                     remove_cvref_t<typename Base::DataType>> &&
-                          std::is_same_v<remove_cvref_t<StaticTileDistribution>,
-                                         typename Base::TileDstr>,
-                      "SELECTIVE_LOAD_DESTINATION_MISMATCH");
+        static_assert(
+            !remove_cvref_t<decltype(typename Base::BottomTensorView{}.get_tensor_descriptor())>::
+                template has_transform<coord_transform_enum::xor_t>(),
+            "SELECTIVE_LOAD_REQUIRES_NO_XOR");
+        static_assert(
+            std::is_same_v<remove_cvref_t<DataType>, remove_cvref_t<typename Base::DataType>> &&
+                std::is_same_v<remove_cvref_t<StaticTileDistribution>, typename Base::TileDstr>,
+            "SELECTIVE_LOAD_DESTINATION_MISMATCH");
         constexpr auto tile_dstr = typename Base::TileDstr{};
         const index_t linear_off = 0;
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
@@ -344,10 +343,9 @@ struct tile_window_with_static_distribution
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
                 if constexpr(Begin <= iAccess && iAccess < End)
                 {
-                    constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+                    constexpr auto idx_ys_start      = SFC_Ys::get_index(iAccess);
                     constexpr auto lds_access_offset = [&]() {
-                        constexpr auto idx_off_ys =
-                            SFC_Ys::get_step_between(number<0>{}, iAccess);
+                        constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
                         constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
                             tile_dstr.get_ps_ys_to_xs_adaptor(),
                             container_concat(array<index_t, Base::NDimP>{0},
@@ -372,8 +370,8 @@ struct tile_window_with_static_distribution
                             tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
                             Traits::PackedSize;
                         dst_tensor.get_thread_buffer().template at<d>() =
-                            vec_value.template get_as<typename Base::DataType>()
-                                [j / Traits::PackedSize];
+                            vec_value
+                                .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
                     });
                 }
             });
