@@ -196,13 +196,12 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     rocke_value_t* wave_id = rocke_b_div(b, tid, c_wave);
     rocke_value_t* lane = rocke_b_mod(b, tid, c_wave);
 
-    /* Grid: bx=Wi-tile, by=c_in-tile, bz=n*Hi+hi */
+    /* Grid: bx=Wi-tile, by=c_in-tile, bz=n.
+     * Each workgroup loops over all H rows via the scf_for below (grid.z = N). */
     rocke_value_t* bx = rocke_b_block_id_x(b);
     rocke_value_t* by = rocke_b_block_id_y(b);
     rocke_value_t* bz = rocke_b_block_id_z(b);
-    rocke_value_t* c_Hi = rocke_b_const_i32(b, p->H);
-    rocke_value_t* hi = rocke_b_mod(b, bz, c_Hi); /* emitted but unused in body */
-    rocke_value_t* n = rocke_b_div(b, bz, c_Hi);
+    rocke_value_t* n = bz;
 
     rocke_value_t* wi_tile_start = rocke_b_mul(b, bx, rocke_b_const_i32(b, BLOCK_W));
 
@@ -409,7 +408,6 @@ rocke_kernel_def_t* rocke_build_direct_conv_dgrad(rocke_ir_builder_t* b,
     rocke_b_scf_yield(b, hi_yield, 1);
     rocke_b_region_leave(b);
 
-    (void)hi; /* emitted above; unused after (body uses hi_iv from loop) */
     (void)c_total_k; /* emitted above; unused after */
     return rocke_ir_builder_kernel(b);
 }
