@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: MIT
 /* Exercise public catalog queries against stored keys, without normalizing
  * away malformed table entries. Alias queries must find the same atom. */
+#include "mma_family_index.h"
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/wmma_scale_internal.h"
 
+#include <atomic>
 #include <initializer_list>
 #include <stdio.h>
 #include <string.h>
+#include <thread>
 
 static const char* short_dtype(const char* dtype)
 {
@@ -47,6 +50,107 @@ static bool rejects_query(F query)
         return e.code() == ROCKE_ERR_VALUE;
     }
     return false;
+}
+
+static int test_family_index_first_use()
+{
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::thread workers[8];
+    bool passed[8] = {};
+    for(int i = 0; i < 8; ++i)
+        workers[i] = std::thread([&, i] {
+            ++ready;
+            while(!start.load())
+                std::this_thread::yield();
+            int count = 0;
+            const auto* arches = rocke_known_arches(&count);
+            bool ok = true;
+            for(int a = 0; a < count; ++a)
+            {
+                const auto* arch = rocke_arch_target_from_gfx(arches[(a + i) % count]);
+                for(int j = 0; j < arch->mma.num_ops; ++j)
+                {
+                    const auto& op = arch->mma.ops[j];
+                    char copied_id[256];
+                    snprintf(copied_id, sizeof(copied_id), "%s", op.op_id);
+                    const char* family = rocke_arch_mma_op_id_family(copied_id);
+                    ok &= family && strcmp(family, op.family) == 0;
+                    ok &= family == rocke_arch_mma_op_id_family(op.op_id);
+                }
+            }
+            passed[i] = ok && !rocke_arch_mma_op_id_family(NULL) && !rocke_arch_mma_op_id_family("")
+                        && !rocke_arch_mma_op_id_family("unknown");
+        });
+    while(ready.load() != 8)
+        std::this_thread::yield();
+    start = true;
+    for(auto& worker : workers)
+        worker.join();
+    for(bool ok : passed)
+        CHECK(ok);
+    return 0;
+}
+
+static int test_family_index_duplicates()
+{
+    rocke_mma_op_t ops[6] = {};
+    const char* ids[] = {"same", "conflict", "z", "same", "conflict", "a"};
+    const char* families[] = {"wmma", "mma", "wmma_scaled", "wmma", "wmma", "mma"};
+    for(int i = 0; i < 6; ++i)
+    {
+        ops[i].op_id = ids[i];
+        ops[i].family = families[i];
+    }
+    rocke_arch_target_t targets[2] = {};
+    targets[0].mma = {ops, 3};
+    targets[1].mma = {ops + 3, 3};
+    const rocke_ati_arch_row_t registry[]
+        = {{"first", &targets[0]}, {"missing", NULL}, {"second", &targets[1]}};
+    const rocke_ati_mma_family_index index(registry, 3);
+    CHECK(strcmp(index.lookup("same"), "wmma") == 0);
+    CHECK(strcmp(index.lookup("a"), "mma") == 0);
+    CHECK(strcmp(index.lookup("z"), "wmma_scaled") == 0);
+    CHECK(!index.lookup(NULL) && !index.lookup("") && !index.lookup("between"));
+    bool conflict = false;
+    try
+    {
+        index.lookup("conflict");
+    }
+    catch(const ckc::Error& e)
+    {
+        conflict
+            = e.code() == ROCKE_ERR_VALUE
+              && strcmp(e.what(), "arch SSOT drift: op_id has inconsistent family across arches")
+                     == 0;
+    }
+    CHECK(conflict);
+    CHECK(strcmp(index.lookup("a"), "mma") == 0);
+    const rocke_ati_mma_family_index empty(NULL, 0);
+    CHECK(!empty.lookup("same"));
+    return 0;
+}
+
+static int test_mma_result_names()
+{
+    const char* ids[] = {"mfma_f32_16x16x16_f16",
+                         "wmma_f32_16x16x16_f16",
+                         "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+                         "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32",
+                         "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16",
+                         "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32",
+                         "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16"};
+    for(int i = 0; i < 7; ++i)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "mma_names") == ROCKE_OK);
+        auto* value = rocke_b_const_i32(&b, 0);
+        auto* result = rocke_b_mma(&b, ids[i], value, value, value, NULL, 0);
+        CHECK(result && result->name);
+        CHECK(strncmp(result->name, i < 3 ? "%acc" : "%mxacc", i < 3 ? 4 : 6) == 0);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
 }
 
 static int test_scale_contracts()
@@ -253,7 +357,9 @@ static int test_scale_layouts_and_families()
 
 int main()
 {
-    if(test_scale_contracts() || test_scale_layouts_and_families())
+    // Keep this first: no previous query may prime the shared family index.
+    if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
+       || test_scale_contracts() || test_scale_layouts_and_families())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})

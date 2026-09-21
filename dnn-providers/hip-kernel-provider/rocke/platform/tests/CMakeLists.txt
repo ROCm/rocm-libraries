@@ -26,7 +26,10 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_dtypes)
 
   add_executable(rocke_mma_catalog_lookup core/test_mma_catalog_lookup.cpp)
-  target_link_libraries(rocke_mma_catalog_lookup PRIVATE rocke_core)
+  find_package(Threads REQUIRED)
+  target_link_libraries(rocke_mma_catalog_lookup PRIVATE rocke_core Threads::Threads)
+  target_include_directories(rocke_mma_catalog_lookup PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/core/arch")
   add_test(NAME rocke_mma_catalog_lookup COMMAND rocke_mma_catalog_lookup)
   set_tests_properties(rocke_mma_catalog_lookup PROPERTIES LABELS
     "ckc;unit;host")

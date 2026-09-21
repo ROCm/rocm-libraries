@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mma_family_index.h"
+
 #include "rocke/arch_target.h"
 #include "rocke/arch_target_internal.h"
 #include "rocke/error.hpp"
@@ -386,24 +388,11 @@ const char* rocke_arch_mma_op_id_family(const char* op_id)
 {
     if(!op_id)
         return NULL;
-    const char* family = NULL;
-    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
-    {
-        const auto* target = rocke_ati_arch_registry[i].target;
-        if(!target)
-            continue;
-        for(int j = 0; j < target->mma.num_ops; ++j)
-        {
-            const auto& op = target->mma.ops[j];
-            if(strcmp(op.op_id, op_id) != 0)
-                continue;
-            if(family && strcmp(family, op.family) != 0)
-                ckc::raise_status(ROCKE_ERR_VALUE,
-                                  "arch SSOT drift: op_id has inconsistent family across arches");
-            family = op.family;
-        }
-    }
-    return family;
+    // Function-local static initialization publishes the immutable index once,
+    // including when independent builders first query it concurrently.
+    static const rocke_ati_mma_family_index index(rocke_ati_arch_registry,
+                                                  rocke_ati_arch_registry_len);
+    return index.lookup(op_id);
 }
 
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
