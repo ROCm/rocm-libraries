@@ -86,16 +86,16 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 {
     static const std::map<std::string, ExpectedInventory> s_expected = {
 {% for arch, entry in emitted.arches.items() %}
-        {"{{ arch }}",
+        {"{{ arch | cpp_escape }}",
          ExpectedInventory{
              {
 {% for stem in entry.pack_names %}
-                 "{{ config.engine.namespace }}:{{ stem }}",
+                 "{{ config.engine.namespace | cpp_escape }}:{{ stem | cpp_escape }}",
 {% endfor %}
              },
              {
 {% for name in entry.descriptor_names %}
-                 "{{ name }}",
+                 "{{ name | cpp_escape }}",
 {% endfor %}
              },
          }},
@@ -146,10 +146,10 @@ protected:
 
         const auto& sets = discoverDescriptorSets();
         const auto match = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
-            return set.engine.name == "{{ config.engine.name }}";
+            return set.engine.name == "{{ config.engine.name | cpp_escape }}";
         });
         ASSERT_NE(match, sets.end())
-            << "descriptor set '{{ config.engine.name }}' did not load. Either its "
+            << "descriptor set '{{ config.engine.name | cpp_escape }}' did not load. Either its "
                "descriptors were never installed under the tree this binary reads, or "
                "its pack failed to register its native symbols and every descriptor "
                "naming one of them was dropped.";
@@ -216,14 +216,14 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryKernelDeclaresTheEmittedRu
 TEST_F(Test{{ config.engine.pascal_name }}Packs, DeclaresTheConfiguredSdkVersion)
 {
     EXPECT_EQ(_set->engine.sdkVersion,
-              hipdnn_data_sdk::utilities::Version{std::string("{{ emitted.sdk_version }}")});
+              hipdnn_data_sdk::utilities::Version{std::string("{{ emitted.sdk_version | cpp_escape }}")});
 }
 
 TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 {
     ASSERT_EQ(_set->engine.knobs.size(), {{ config.engine.knobs | length }}U);
 {% for knob in config.engine.knobs %}
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "{{ knob }}"),
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "{{ knob | cpp_escape }}"),
               _set->engine.knobs.end());
 {% endfor %}
 }
@@ -235,8 +235,8 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "{{ config.score_symbol }}");
-    EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol }}"));
+    EXPECT_EQ(_set->heuristic->payload, "{{ config.score_symbol | cpp_escape }}");
+    EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
 }
 {% else %}
 /// heuristic: none. The engine ranks on priority then descriptor id, so it must ship no
@@ -246,7 +246,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreS
 TEST_F(Test{{ config.engine.pascal_name }}Packs, ShipsNoHeuristicAndRegistersNoScoreSymbol)
 {
     EXPECT_FALSE(_set->heuristic.has_value());
-    EXPECT_FALSE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol }}"));
+    EXPECT_FALSE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
 }
 {% endif %}
 

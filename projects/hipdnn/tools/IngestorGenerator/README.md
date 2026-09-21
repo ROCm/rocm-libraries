@@ -26,9 +26,33 @@ ordered create/extend procedure.
 
 ```bash
 cd projects/hipdnn/tools/IngestorGenerator
-python3 -m venv .venv
+/absolute/path/to/python3.10+ -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
+
+Name that interpreter by absolute path. `python3` is resolved through `PATH`, which
+selects whichever install happens to come first -- a different minor version than the
+one intended, or on a Windows checkout nothing at all. Every `.venv/bin/<tool>` below
+is `.venv/Scripts/<tool>.exe` on Windows.
+
+### The optional archive dependency
+
+`tests/test_verify_variant_sets.py`'s `TestRealArchiveSelectedConsumer` writes a real
+kpack archive and so needs `rocm_kpack`, which `requirements.txt` cannot carry: it
+lives in the rocm-kpack checkout rather than on PyPI. Point
+`HIPKERNELPROVIDER_ROCM_KPACK_DIR` at that checkout's `python` directory, matching
+what the packaging suite's own `PYTHONPATH` entry and `--kpack-python-dir` name:
+
+```bash
+export HIPKERNELPROVIDER_ROCM_KPACK_DIR=/opt/rocm-kpack/python
+```
+
+Left unset -- or exported empty, which counts as unset -- that class **skips** and
+the rest of the suite is unaffected. A directory that is set but wrong fails loudly
+rather than skipping, because naming one is a request to run the class. The provider
+build's own CTest entry leaves the variable unset by design, so that entry passing is
+not evidence about this class; see `projects/hipdnn/tools/CMakeLists.txt` and the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
 ## Usage
 
@@ -269,6 +293,7 @@ and requires no rocKE installation on the verifying machine.
 | `tools/dispatch_parity.py` | Do the emitted descriptors match what the kernel's real dispatcher resolves? | see `--help` |
 | `tools/reconcile_applicability.py` | Does this engine decline anything the reference library serves? | `reconcile_applicability.py --profile P --shapes S [--declines D]` |
 | `tools/mine_shapes.py` | Build the shape corpus, refusing categoricals it does not recognise. | see `--help` |
+| `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical reference inventory: a referenced field can still sit in dead code or mishandle its own semantics, so this bounds the unchecked set and proves nothing about the rest | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
 
 A green tool proves only the properties it checked. Missing, unsupported or
 mismatched required evidence fails full agreement. Structural-only results must be
@@ -460,7 +485,6 @@ authored_subpath: unit            # REQUIRED for direct_load, naming one of the 
                                     # packaged, defaulting to <kernel_source_kind>/<slug>;
                                     # must be RELATIVE and stay under descriptors/.
 workspace_policy: none | fixed | derived
-delegates_to_existing_plan: false
 
 packs:
   - name: add
@@ -519,11 +543,35 @@ with a generic "no implementation yet".
 .venv/bin/python -m pytest
 ```
 
-`pyproject.toml` sets `fail_under = 80` for `coverage`. The suite exercises
-descriptor identities, declaration carriage, semantic deduplication, emitted
-inventory and CLI outcomes. Source spellings and comment wording do not prove
-native registration, loading or runtime correctness; those require the compiled
-provider and create/extend execution gates.
+That form runs the suite but collects no coverage, so the `fail_under = 80` floor
+`pyproject.toml` configures is never applied. To run the suite and enforce the
+floor:
+
+```bash
+.venv/bin/python -m pip install pytest-cov   # not in requirements.txt
+.venv/bin/python -m pytest --cov --cov-report=term-missing
+```
+
+The floor is a floor on `codegen/` alone, and the percentage is not a statement
+about the rest of the tree:
+
+- The host tools under `tools/` are outside the configured `source`, so no part of
+  the number describes them. They are gated instead by the suites that drive each
+  script as a subprocess -- `tests/test_sweep_tools.py`, `tests/test_launch_surface.py`,
+  `tests/test_coverage_gate.py`, `tests/test_verify_variant_sets.py`,
+  `tests/test_device_probe.py` and `tests/test_dispatch_parity.py`.
+- `generate.py` is outside the configured `source` too, so the CLI contributes no
+  lines. Listing it there would measure nothing: every test reaches the CLI by
+  spawning it as a subprocess, and a subprocess is traced only when
+  `COVERAGE_PROCESS_START` names a coverage config in its environment and
+  `coverage.process_startup()` runs from a `.pth` in the interpreter's
+  `site-packages` -- neither of which is set up here. Naming the module would only
+  add a `Module generate was never imported` warning to every run.
+
+The suite exercises descriptor identities, declaration carriage, semantic
+deduplication, emitted inventory and CLI outcomes. Source spellings and comment
+wording do not prove native registration, loading or runtime correctness; those
+require the compiled provider and create/extend execution gates.
 
 ### Native-stub compilation (`tests/test_native_stub.py`)
 

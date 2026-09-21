@@ -21,13 +21,18 @@ exposes for the op.
     dispatch_parity.py --profile <profile.yaml> --shapes <corpus.json> \\
                        --out configs/<slug>_A.yaml
 
-THE TWO DENOMINATORS. "Does the kernel support this shape?" has two answers and
-they differ by 59 on the published corpus. A support check that only calls the
-predicate misses every shape rejected at SPEC CONSTRUCTION -- those raise
-``ValueError`` before a predicate ever runs, so the constructor must be inside the
-try. Both rejection kinds are reported here, separately and by reason, because
-"uncovered and unexplained" is the state that hides a defect: an uncovered servable
-shape is a defect until proven otherwise, and the proof is this cheap.
+DECLINE VERSUS ABORT. The request constructor and the dispatcher call both sit
+inside the same try. A construction failure is NOT bucketed as a per-shape outcome:
+it means the corpus and the request class disagree about what a shape IS, which
+leaves every other count on the page unsafe to read. It aborts -- ``ParityError``,
+``FAIL`` on stderr, exit 2 -- rather than printing a summary describing only the
+shapes processed before the failure.
+
+That leaves one per-shape explanation for a shape that is not served: a DECLINE,
+the eligibility predicate returning false with a reason. Declines are counted and
+printed with their reasons by ``--report-gaps``, because "uncovered and unexplained"
+is the state that hides a defect: an uncovered servable shape is a defect until
+proven otherwise, and the proof is this cheap.
 
 WHAT IT DELIBERATELY DOES NOT DO. It does not sweep. ``--report-knobs`` partitions
 the spec fields into those that vary across dispatch decisions and those the library
@@ -466,7 +471,6 @@ def build_config(
         "specialization": specialization,
         "kernel_source_kind": profile.get("kernel_source_kind", "rocke"),
         "workspace_policy": profile.get("workspace_policy", "none"),
-        "delegates_to_existing_plan": profile.get("delegates_to_existing_plan", False),
         "packs": [
             {
                 "name": profile.get("pack", slug),
@@ -553,16 +557,14 @@ def main(argv=None) -> int:
 
     served = [r for r in resolutions if r.spec is not None]
     declined = [r for r in resolutions if r.kind == "declined"]
-    rejected = [r for r in resolutions if r.kind == "rejected"]
 
     print("dispatcher parity")
     print(f"  shapes in         {len(resolutions)}")
     print(f"  servable          {len(served)}")
     print(f"  declined          {len(declined)}  (predicate said no)")
-    print(f"  rejected          {len(rejected)}  (spec construction raised)")
 
     if args.report_gaps:
-        for resolution in declined + rejected:
+        for resolution in declined:
             print(f"    [{resolution.kind}] {resolution.shape} -- {resolution.reason}")
 
     if args.report_knobs:

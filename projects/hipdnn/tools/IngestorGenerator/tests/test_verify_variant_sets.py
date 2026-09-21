@@ -36,6 +36,7 @@ import verify_variant_sets as gate_module  # noqa: E402
 sys.path.insert(0, str(gate_module._agreement_python_root()))
 
 from hkp_pack import agreement  # noqa: E402
+from hkp_pack.errors import HkpPackError  # noqa: E402
 from hkp_pack.kpack_resolver import load_kpack  # noqa: E402
 
 _KMD_ID = "11111111-1111-1111-1111-111111111111"
@@ -1080,10 +1081,14 @@ _NO_ROCM_KPACK = (
 )
 
 
-@pytest.fixture
-def real_archive():
-    """Real rocm-kpack serialization; the payload is deliberately non-executable."""
-    python_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
+def _kpack_python_dir() -> str | None:
+    """The rocm-kpack `python` directory an operator named, or None to import
+    `rocm_kpack` from the environment. Skips when neither is available."""
+    # An exported-but-empty variable names no directory and counts as unset. `""` is
+    # not `None`, so left alone it walks past the skip below and resolves to the
+    # working directory, which exists -- the class then dies on a raw import error
+    # instead of naming the dependency it wants.
+    python_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR") or None
 
     # Only a genuinely absent dependency skips. find_spec answers exactly that without
     # executing the package, so a broken rocm_kpack -- a missing msgpack or zstandard, a
@@ -1092,6 +1097,14 @@ def real_archive():
     # to load_kpack unexamined and a stale path fails loudly there.
     if python_dir is None and importlib.util.find_spec("rocm_kpack") is None:
         pytest.skip(_NO_ROCM_KPACK)
+
+    return python_dir
+
+
+@pytest.fixture
+def real_archive():
+    """Real rocm-kpack serialization; the payload is deliberately non-executable."""
+    python_dir = _kpack_python_dir()
 
     kpack, compression = load_kpack(python_dir)
 
@@ -1115,8 +1128,76 @@ def real_archive():
     return write, python_dir
 
 
+class TestTheArchiveDependencyIsResolvedOrSkipped:
+    """An exported-but-empty directory is a variable, not a path.
+
+    `HIPKERNELPROVIDER_ROCM_KPACK_DIR=` survives a shell export and a CMake `-D` that
+    resolved to nothing. The second half of this case pins the other direction, so
+    widening "unset" cannot swallow a stale path an operator deliberately named --
+    that must still fail loudly.
+    """
+
+    @staticmethod
+    def _outcome():
+        try:
+            return ("directory", _kpack_python_dir())
+        except pytest.skip.Exception as skipped:
+            return ("skip", str(skipped))
+
+    def test_an_empty_value_is_unset_while_a_named_one_still_runs(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", raising=False)
+        unset = self._outcome()
+
+        monkeypatch.setenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", "")
+        assert self._outcome() == unset, (
+            "an empty value names no directory, so it has to reach the same outcome "
+            "as an absent one on this machine"
+        )
+
+        stale = tmp_path / "no-such-kpack-checkout"
+        monkeypatch.setenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", str(stale))
+        assert self._outcome() == ("directory", str(stale)), (
+            "a named directory is a request to run this class; a nonexistent one is "
+            "a loud failure in load_kpack, never a skip"
+        )
+
+    def test_a_stale_named_directory_raises_out_of_load_kpack(
+        self, monkeypatch, tmp_path
+    ):
+        """Where "fails loudly" actually happens.
+
+        The case above stops at the resolver's own answer, proving only that the
+        stale path is HANDED ON rather than swallowed by the skip; nothing there
+        follows it into `load_kpack`.
+
+        NOT marked `needs_rocm_kpack`: the directory check precedes any import of the
+        package, so a case proving that a deliberately named path fails must not
+        itself need the dependency it is proving absent.
+        """
+        stale = tmp_path / "no-such-kpack-checkout"
+        monkeypatch.setenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", str(stale))
+
+        with pytest.raises(HkpPackError) as excinfo:
+            load_kpack(_kpack_python_dir())
+
+        # The path is the discriminator: `load_kpack`'s other HkpPackError -- the one
+        # a machine without rocm_kpack installed raises from the import -- names no
+        # directory, so a message carrying this one can only be the stale-path branch.
+        assert str(stale.resolve()) in str(excinfo.value)
+
+
+@pytest.mark.needs_rocm_kpack
 class TestRealArchiveSelectedConsumer:
-    """Selected authority and packed-input gates cannot borrow sibling evidence."""
+    """Selected authority and packed-input gates cannot borrow sibling evidence.
+
+    The marker and the fixture's skip are complementary, not alternatives. The skip
+    keeps a default run green on a checkout without rocm_kpack; the marker is the
+    handle `-m needs_rocm_kpack` and `-m "not needs_rocm_kpack"` select on, which a
+    skip decided inside a fixture cannot offer because the cases are collected
+    unlabelled.
+    """
 
     @staticmethod
     def run(root, python_dir, tmp_path, mode="full", arch=None):

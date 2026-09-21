@@ -33,9 +33,9 @@ from .models import (
 #: It carries U+00A9, which is why every emitted file is written with an EXPLICIT
 #: ``encoding="utf-8"``. ``Path.write_text`` otherwise picks the platform's locale
 #: codec, and a copyright sign written as cp1252 is a lone ``0xa9`` byte that is not
-#: valid UTF-8. `unfilled_placeholders` skips what it cannot decode, so on a
-#: non-UTF-8 locale the whole emitted set is undecodable and the placeholder gate
-#: reports an empty scan -- green because it read nothing.
+#: valid UTF-8. `unfilled_placeholders` REFUSES what it cannot read and names it, so
+#: an emitted set written under a non-UTF-8 locale fails the placeholder gate rather
+#: than passing it on a scan that read nothing.
 CPP_COPYRIGHT_HEADER = (
     "// Copyright \u00a9 Advanced Micro Devices, Inc., or its affiliates.\n"
     "// SPDX-License-Identifier:  MIT\n"
@@ -44,6 +44,48 @@ CMAKE_COPYRIGHT_HEADER = (
     "# Copyright \u00a9 Advanced Micro Devices, Inc., or its affiliates.\n"
     "# SPDX-License-Identifier:  MIT\n"
 )
+
+
+_CPP_NAMED_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+
+
+def cpp_escape(value) -> str:
+    """One value as the BODY of a C++ string literal -- quotes, backslashes and
+    control characters escaped, the surrounding quotes left to the template.
+
+    Applied to every interpolation the templates place inside a ``"..."``, because
+    the values reaching them are not charset-validated: kernel names are checked by
+    no pattern anywhere, and ``engine.sdk_version`` is free-form. An unescaped quote
+    ENDS the literal it was written into, so the emitted census stops compiling; an
+    unescaped backslash is worse, because the file still compiles and the expectation
+    silently names a different string than the descriptor ships.
+
+    Control characters go out as THREE-DIGIT OCTAL rather than ``\\x``: a hex escape
+    in C++ is maximal-munch, so ``"\\x1f32"`` reads as one character and either
+    changes the string or fails to compile, while ``\\001`` is exactly three digits
+    wide and cannot absorb the text after it.
+
+    This is additive. The identifier patterns in `models` still reject a value that
+    would not be a legal C++ identifier or path stem where one is required --
+    escaping makes a literal well-formed, not a symbol name valid.
+    """
+    text = value if isinstance(value, str) else str(value)
+    out = []
+    for character in text:
+        escape = _CPP_NAMED_ESCAPES.get(character)
+        if escape is not None:
+            out.append(escape)
+        elif ord(character) < 0x20 or ord(character) == 0x7F:
+            out.append(f"\\{ord(character):03o}")
+        else:
+            out.append(character)
+    return "".join(out)
 
 
 def mint_ids(config: IngestorConfig) -> dict:
@@ -288,6 +330,59 @@ def _check_metadata_resolved(
         )
 
 
+#: What each declared KMD type accepts, mirroring the runtime's
+#: ``coerceToDeclaredType`` (``DescriptorLoader.hpp``): a value's JSON kind must BE
+#: the declared type, with exactly one widening -- an integer reaching a ``float``
+#: field, because JSON writes ``1`` and ``1.0`` identically. No other conversion is
+#: legal there, and inventing one here would accept a bundle the loader drops.
+#:
+#: A ``bool`` is not an ``int``: the loader reads a JSON boolean onto the ``bool``
+#: alternative, so ``true`` in an ``int`` field is a type error rather than ``1``.
+#: `_canonical_metadata_value` has already projected the legitimate case.
+_METADATA_TYPE_ACCEPTS = {
+    "bool": lambda v: isinstance(v, bool),
+    "int": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "float": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "string": lambda v: isinstance(v, str),
+    "int_list": lambda v: isinstance(v, list)
+    and all(isinstance(item, int) and not isinstance(item, bool) for item in v),
+}
+
+
+def _check_metadata_types(
+    kernel: KernelSpec, metadata: dict, config: IngestorConfig
+) -> None:
+    """Type-check the metadata AS PROJECTED, not as authored.
+
+    The config loader's own check runs over the AUTHORED ``metadata`` block, and
+    `_resolved_metadata` then projects ``kernel_source.spec`` values into that block
+    -- here, inside `build_kdp`, long after ``load_config`` returned. A spec value
+    therefore reaches the emitted descriptor compared against nothing.
+
+    The consequence of shipping one is the loader's: ``coerceKernelMetadata`` refuses
+    the kernel and drops the WHOLE pack, which is why this is a refusal here rather
+    than a note.
+
+    A field the KMD does not declare is left alone -- the config loader rejects that
+    kernel with a diagnostic that names the pack, and repeating it here would replace
+    a better message with a worse one.
+    """
+    declared = {f.name: f.type for f in config.kmd_fields}
+    for name, value in sorted(metadata.items()):
+        accepts = _METADATA_TYPE_ACCEPTS.get(declared.get(name))
+        if accepts is None or accepts(value):
+            continue
+        raise ValueError(
+            f"kernel {kernel.name!r} resolves metadata field '{name}' to {value!r}, "
+            f"which its kmd_fields entry declares as type '{declared[name]}'. The "
+            f"value is projected from kernel_source.spec after the config loader's "
+            f"own type check has run, so nothing before this point compared it with "
+            f"the declared type. At load, coerceKernelMetadata refuses the mismatch "
+            f"and drops the whole pack. Pin the knob in the spec using the field's "
+            f"declared type, or state the matcher-visible value in metadata."
+        )
+
+
 def _completed_metadata(metadata: dict, config: IngestorConfig) -> dict:
     """The metadata tuple AS THE LOADER COMPLETES IT, not as it is written.
 
@@ -491,7 +586,10 @@ def build_kdp(
         # Resolve FIRST, then key on the resolved form: the dedup key and the emitted
         # document are derived from the same values, so they cannot drift apart.
         metadata = _resolved_metadata(kernel, config)
+        # Resolution first: the unset sentinel is an int, so a type check reaching it
+        # first would report "-1 is not a string" for a knob nobody decided.
         _check_metadata_resolved(kernel, metadata, config)
+        _check_metadata_types(kernel, metadata, config)
         key = _dedup_key(metadata, config)
         # A kernel stating no arch inherits its pack's, which is the KDP convention
         # the loader reads. Comparing the authored (often empty) list instead would
@@ -533,7 +631,10 @@ def build_kdp(
                 f"one of the arch lists, or do not ship both."
             )
         if already is not None:
-            duplicates.append((kernel.name, already["name"]))
+            # The prior kernel's OWN pack is carried, not just its name: a drop that
+            # empties this pack is reported against the pack that absorbed it, and
+            # that pack is frequently not this one.
+            duplicates.append((kernel.name, already["name"], already["pack"]))
             continue
         seen_metadata[key].append(
             {
@@ -557,11 +658,46 @@ def build_kdp(
             entry["arch"] = list(kernel.arch)
         kernel_descriptors.append(entry)
     if duplicates:
-        shown = ", ".join(f"{d} == {k}" for d, k in duplicates[:3])
+        shown = ", ".join(f"{d} == {k}" for d, k, _p in duplicates[:3])
         more = f" (+{len(duplicates) - 3} more)" if len(duplicates) > 3 else ""
         print(
             f"  pack '{pack.name}': dropped {len(duplicates)} duplicate "
             f"variant(s) with metadata already emitted: {shown}{more}"
+        )
+    # The one place a pack's descriptor list is FINAL -- after resolution, the
+    # metadata checks and the engine-wide de-duplication, and before the document
+    # that `emitted_inventory` counts exists. Both the written KDP and the census
+    # are built from what this function returns, so the invariant holds for the
+    # artifact and for the count that is asserted against it.
+    #
+    # The loader drops a KDP holding no kernels (`DescriptorLoader.hpp`, "declares
+    # no kernels") while the census counts every KDP written, so an empty pack
+    # ships a generated test asserting one more pack than the runtime holds --
+    # a red test on a bundle this run exited 0 on.
+    #
+    # Refused rather than dropped: whether the de-duplication that emptied it
+    # should have crossed packs at all is not settled here, and silently omitting
+    # the pack would answer it.
+    if not kernel_descriptors:
+        if duplicates:
+            absorbed = ", ".join(
+                f"{name} == {prior} (pack '{prior_pack}')"
+                for name, prior, prior_pack in duplicates
+            )
+            absorbing = sorted({prior_pack for _n, _p, prior_pack in duplicates})
+            cause = (
+                f"all {len(duplicates)} of its kernels de-duplicated against "
+                f"kernels already emitted by pack(s) {absorbing}: {absorbed}"
+            )
+        else:
+            cause = "it contributed no kernels at all"
+        raise ValueError(
+            f"pack {pack.name!r} would ship a KDP with ZERO kernel descriptors: "
+            f"{cause}. The loader drops a pack that declares no kernels, so the "
+            f"emitted census would assert a pack the runtime never holds and the "
+            f"generated test would fail on this bundle. Give the pack at least one "
+            f"kernel the rest of the engine does not already emit, or do not "
+            f"declare it."
         )
     kdp = {
         "version": "1.0",
@@ -635,6 +771,15 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
 
     A descriptor is filed under every arch it names, and each arch reports its
     distinct names, so an engine contributes one entry per arch it covers.
+
+    Every CONCRETE arch row is then unioned with the wildcard row, because a
+    wildcard entry ships on that device too: the generated census selects exactly one
+    row and compares it with what loaded by set equality, so a bundle mixing a
+    wildcard pack with a concrete-arch kernel would otherwise assert a row naming
+    neither the wildcard pack nor its kernels against a loader holding both. The
+    union runs one way only -- folding a concrete entry into the wildcard row would
+    advertise it on every device, including the ones the census falls back to that
+    row for.
     """
     arches: dict[str, dict] = {}
 
@@ -651,6 +796,14 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             total += 1
             for arch in list(descriptor.get("arch") or []) or pack_arch:
                 bucket(arch)["descriptors"].append(descriptor["name"])
+
+    wildcard = arches.get(ARCH_WILDCARD)
+    if wildcard is not None:
+        for arch, entry in arches.items():
+            if arch == ARCH_WILDCARD:
+                continue
+            entry["descriptors"].extend(wildcard["descriptors"])
+            entry["pack_names"].update(wildcard["pack_names"])
 
     return {
         "sdk_version": config.engine.sdk_version,
@@ -691,6 +844,9 @@ class IngestorGenerator:
             # empty string instead of a missing field.
             undefined=StrictUndefined,
         )
+        # JSON is serialized by `json.dumps`, never by a template, so there is no
+        # counterpart filter for it.
+        self.env.filters["cpp_escape"] = cpp_escape
 
     def preview_files(self, config: IngestorConfig) -> list[str]:
         """The file list :meth:`render` would write, without writing anything."""
@@ -926,17 +1082,35 @@ class IngestorGenerator:
         "nothing left to do": a file that was not located is counted by neither
         this nor any caller reading only this. The gate therefore reads
         `locate_emitted`'s missing/ambiguous lists too, and fails on them.
+
+        A located file that cannot be READ is an ERROR here, for the same reason a
+        root that cannot be read is one in `locate_emitted`: skipping it makes a file
+        the scan never decoded indistinguishable from one it decoded and found clean.
+        Every unreadable path is named, not just the first, so one run says how much
+        of the tree is unreadable.
         """
         located, _missing, _ambiguous = cls.locate_emitted(roots, written)
         counts: dict[str, int] = {}
+        unreadable: list[str] = []
         for rel, path in located.items():
             try:
                 text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, OSError) as e:
+                unreadable.append(f"{rel} (at {path}): {e}")
                 continue
             n = text.count(PLACEHOLDER_MARKER)
             if n:
                 counts[rel] = n
+        if unreadable:
+            listed = "; ".join(sorted(unreadable))
+            raise ValueError(
+                f"{len(unreadable)} located file(s) could not be read, so the "
+                f"placeholder scan did not cover them: {listed}. A file the scan "
+                f"skipped reports exactly as a file it read and found clean, which "
+                f"is the false green this gate exists to prevent. Emitted files are "
+                f"written UTF-8; re-generate the bundle, or fix the copy that is "
+                f"not."
+            )
         return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
     def _render_template(

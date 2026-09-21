@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from codegen.generator import mint_ids
+from codegen.generator import cpp_escape, mint_ids
 
 
 def _find_include_dir(name: str) -> Path | None:
@@ -143,9 +143,12 @@ def _compile(compile_env, source: str, tmp_path: Path) -> subprocess.CompletedPr
 
 
 #: A minimal stand-in for the gtest surface the emitted test files use, so parsing
-#: them does not pull googletest into this tool's test environment. Every
-#: expectation macro must NAME each operand: one expanding to ``(void)0`` discards
-#: them, and a typo'd identifier inside an expectation would then parse clean.
+#: them does not pull googletest into this tool's test environment.
+#:
+#: Each expectation macro must instantiate the operation real gtest performs, not
+#: merely name its operands: one that only named them would catch a typo'd identifier
+#: but accept expectations real gtest rejects. ``TestTheGtestStandIn`` holds those
+#: properties directly.
 _GTEST_STUB_HEADER = """#pragma once
 
 struct GTestMsg
@@ -157,9 +160,24 @@ struct GTestMsg
     }
 };
 
-template <typename... Ts>
-GTestMsg gtestNames(const Ts&...)
+template <typename A, typename B>
+GTestMsg gtestEqual(const A& lhs, const B& rhs)
 {
+    (void)static_cast<bool>(lhs == rhs);
+    return GTestMsg();
+}
+
+template <typename A, typename B>
+GTestMsg gtestUnequal(const A& lhs, const B& rhs)
+{
+    (void)static_cast<bool>(lhs != rhs);
+    return GTestMsg();
+}
+
+template <typename T>
+GTestMsg gtestBoolean(const T& value)
+{
+    (void)static_cast<bool>(value);
     return GTestMsg();
 }
 
@@ -184,15 +202,49 @@ protected:
     };                                       \\
     void fixture##_##name##_case::testBody()
 #define GTEST_SKIP() GTestMsg()
-#define EXPECT_TRUE(x) gtestNames((x))
-#define EXPECT_FALSE(x) gtestNames((x))
-#define ASSERT_TRUE(x) gtestNames((x))
-#define ASSERT_FALSE(x) gtestNames((x))
-#define EXPECT_EQ(a, b) gtestNames((a), (b))
-#define EXPECT_NE(a, b) gtestNames((a), (b))
-#define ASSERT_EQ(a, b) gtestNames((a), (b))
-#define ASSERT_NE(a, b) gtestNames((a), (b))
+#define EXPECT_TRUE(x) gtestBoolean((x))
+#define EXPECT_FALSE(x) gtestBoolean((x))
+#define ASSERT_TRUE(x) gtestBoolean((x))
+#define ASSERT_FALSE(x) gtestBoolean((x))
+#define EXPECT_EQ(a, b) gtestEqual((a), (b))
+#define EXPECT_NE(a, b) gtestUnequal((a), (b))
+#define ASSERT_EQ(a, b) gtestEqual((a), (b))
+#define ASSERT_NE(a, b) gtestUnequal((a), (b))
 """
+
+
+@pytest.fixture(scope="module")
+def host_cxx():
+    """A host C++ compiler and nothing else.
+
+    The cases that exercise the gtest stand-in itself compile against the stand-in
+    alone, so they must not inherit ``compile_env``'s skips on SDK headers,
+    flatbuffers and the provider source -- none of which they include.
+    """
+    gxx = shutil.which("g++") or shutil.which("clang++")
+    if gxx is None:
+        pytest.skip("no host C++ compiler (g++/clang++) found on PATH")
+    return gxx
+
+
+def _parse_against_the_stub(
+    gxx: str, body: str, tmp_path: Path, stem: str
+) -> subprocess.CompletedProcess:
+    """``-fsyntax-only`` a fragment written against the stand-in, nothing else."""
+    gtest_dir = tmp_path / "stub" / "gtest"
+    gtest_dir.mkdir(parents=True, exist_ok=True)
+    (gtest_dir / "gtest.h").write_text(_GTEST_STUB_HEADER)
+    src_path = tmp_path / f"{stem}.cpp"
+    src_path.write_text("#include <string>\n#include <gtest/gtest.h>\n\n" + body)
+    cmd = [
+        gxx,
+        "-fsyntax-only",
+        "-std=c++20",
+        "-I",
+        str(tmp_path / "stub"),
+        str(src_path),
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
 
 def _parse_test_stub(
@@ -368,4 +420,195 @@ class TestRealCompile:
         assert result.returncode != 0, (
             "a deliberately broken stub compiled cleanly -- the compile check "
             "is not exercising real errors"
+        )
+
+
+#: Declarations the stand-in cases below are written against. ``ExplicitlyBool``'s
+#: conversion is explicit because that is the form gtest's own contextual conversion
+#: accepts.
+_STAND_IN_PREAMBLE = """
+struct NoBoolConversion
+{
+};
+
+struct ExplicitlyBool
+{
+    explicit operator bool() const { return true; }
+};
+"""
+
+#: Fragments real gtest rejects. Each names the operation the stand-in has to
+#: instantiate for the rejection to happen.
+_REJECTED_BY_REAL_GTEST = {
+    "equality between incomparable types": "EXPECT_EQ(std::string{}, 5);",
+    "asserted equality between incomparable types": "ASSERT_EQ(std::string{}, 5);",
+    "inequality between incomparable types": "EXPECT_NE(std::string{}, 5);",
+    "asserted inequality between incomparable types": "ASSERT_NE(std::string{}, 5);",
+    "truth of a value with no bool conversion": "EXPECT_TRUE(NoBoolConversion{});",
+    "falsity of a value with no bool conversion": "EXPECT_FALSE(NoBoolConversion{});",
+    "an undeclared identifier as an operand": "EXPECT_EQ(noSuchIdentifier, 1);",
+}
+
+#: The other side: everything the emitted files actually do must still parse, or the
+#: stand-in would reject real code instead of bad code.
+_ACCEPTED_BY_REAL_GTEST = """
+EXPECT_EQ(std::string("a"), std::string("a"));
+EXPECT_EQ(std::string("a"), "a");
+EXPECT_NE(std::string("a"), std::string("b"));
+ASSERT_EQ(std::string("a").size(), 1U);
+ASSERT_NE(std::string("a"), std::string("b"));
+EXPECT_TRUE(ExplicitlyBool{});
+EXPECT_FALSE(std::string("a").empty());
+ASSERT_TRUE(ExplicitlyBool{}) << "a chained message still compiles";
+ASSERT_FALSE(false) << "and so does one on an ASSERT_";
+GTEST_SKIP() << "as does the skip form the matcher stubs ship";
+"""
+
+
+class TestTheGtestStandIn:
+    """What the stand-in accepts and rejects, checked directly.
+
+    ``TestRealCompile``'s verdict is only as strong as the operations this header
+    instantiates -- every expectation in an emitted file goes through these macros --
+    so a property missing here is one that class silently stops checking.
+    """
+
+    @pytest.mark.parametrize(
+        "statement",
+        list(_REJECTED_BY_REAL_GTEST.values()),
+        ids=list(_REJECTED_BY_REAL_GTEST),
+    )
+    def test_the_stand_in_rejects_what_real_gtest_rejects(
+        self, host_cxx, statement, tmp_path
+    ):
+        body = f"{_STAND_IN_PREAMBLE}\nvoid subject()\n{{\n    {statement}\n}}\n"
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "StandInRejects")
+        assert result.returncode != 0, (
+            f"{statement} parsed cleanly against the gtest stand-in, so an emitted "
+            "file carrying it would pass this suite and fail the provider's build"
+        )
+
+    def test_the_stand_in_accepts_what_the_emitted_files_write(
+        self, host_cxx, tmp_path
+    ):
+        """The positive control: the rejections above must be discriminating."""
+        statements = "\n    ".join(_ACCEPTED_BY_REAL_GTEST.strip().splitlines())
+        body = f"{_STAND_IN_PREAMBLE}\nvoid subject()\n{{\n    {statements}\n}}\n"
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "StandInAccepts")
+        assert result.returncode == 0, (
+            "well-typed expectations were rejected by the gtest stand-in:\n"
+            f"{result.stderr}"
+        )
+
+
+#: Values that a generated C++ string literal must survive, keyed by what each one
+#: attacks. ``cpp_escape`` is the only thing standing between these and the emitted
+#: census: kernel names are charset-validated by no pattern anywhere, and
+#: ``engine.sdk_version`` is authored free-form.
+#:
+#: ASCII only: each case is checked byte-for-byte against its own code points below,
+#: and a multi-byte character would compare the wrong things.
+_HOSTILE_LITERAL_VALUES = {
+    "quote-ends-the-literal": 'scale_add."f32"',
+    "backslash-changes-the-string": "scale_add" + chr(92) + "path",
+    "trailing-backslash-continues-the-line": "ends_with" + chr(92),
+    "newline-runs-past-the-line": "line\nnext",
+    "carriage-return-runs-past-the-line": "line\rnext",
+    "maximal-munch-hex": "\x1f32",
+    "tab-and-named-escapes": "tab\there",
+    "delete-and-low-controls": "del\x7fsoh\x01end",
+}
+
+#: The subset whose RAW form a C++ front end actually refuses -- each key names the
+#: failure its own escaping prevents.
+#:
+#: The rest -- tab, DEL and the low control characters -- are LEGAL raw inside a C++
+#: string literal and denote the same bytes, as
+#: ``test_a_raw_control_character_is_accepted`` pins. Escaping them keeps the emitted
+#: census readable rather than carrying raw 0x01 bytes; it is not what stops it from
+#: compiling.
+_MUST_BE_ESCAPED_TO_COMPILE = (
+    "quote-ends-the-literal",
+    "backslash-changes-the-string",
+    "trailing-backslash-continues-the-line",
+    "newline-runs-past-the-line",
+    "carriage-return-runs-past-the-line",
+)
+
+
+def _byte_assertions(escaped: str, value: str) -> str:
+    """C++ that fails to compile unless ``escaped`` denotes exactly ``value``.
+
+    Compares against integer code points rather than another string literal: writing
+    the expectation as a literal would need escaping too, and the test would then
+    check ``cpp_escape`` against itself.
+    """
+    lines = [
+        f'constexpr std::string_view kSubject = "{escaped}";',
+        f"static_assert(kSubject.size() == {len(value)}, "
+        '"the escaped literal denotes a different number of characters");',
+    ]
+    lines += [
+        f"static_assert(kSubject[{index}] == {ord(character)}, "
+        f'"character {index} of the escaped literal is not the authored one");'
+        for index, character in enumerate(value)
+    ]
+    return "\n".join(lines)
+
+
+class TestEscapedLiteralsDenoteTheAuthoredBytes:
+    """A real compiler's verdict on ``cpp_escape``, not a string comparison.
+
+    ``test_generator.py``'s ``TestCppStringEscaping`` proves the filter is APPLIED --
+    a check on the call sites only. It cannot prove the filter is CORRECT, and
+    neither can the two value cases beside it, which compare a render against an
+    expected escaping written by the same hand: a filter and a test that share a
+    misunderstanding agree with each other.
+
+    These cases hand the escaped text to a C++ front end instead. The backslash and
+    control-character cases are the dangerous half, because they parse either way and
+    differ only in what the literal MEANS -- an expectation that compiles while
+    naming a string the descriptor never shipped. ``static_assert`` settles that at
+    compile time, so ``-fsyntax-only`` is enough and nothing has to be linked or run.
+    """
+
+    @pytest.mark.parametrize(
+        "value", _HOSTILE_LITERAL_VALUES.values(), ids=_HOSTILE_LITERAL_VALUES.keys()
+    )
+    def test_the_escaped_value_parses_and_means_what_was_authored(
+        self, host_cxx, value, tmp_path
+    ):
+        assert value.isascii(), "byte-for-byte comparison below assumes ASCII"
+        body = "#include <string_view>\n\n" + _byte_assertions(cpp_escape(value), value)
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "EscapedLiteral")
+        assert result.returncode == 0, (
+            f"the escaping of {value!r} does not denote the authored string:\n"
+            f"{result.stderr}"
+        )
+
+    @pytest.mark.parametrize("case", _MUST_BE_ESCAPED_TO_COMPILE)
+    def test_the_same_value_unescaped_is_rejected(self, host_cxx, case, tmp_path):
+        """The control: without it, a ``cpp_escape`` returning its input unchanged
+        would still pass whichever cases happen to need no escaping. The lone
+        backslash is the case that parses, and is caught only by the byte assertions.
+        """
+        value = _HOSTILE_LITERAL_VALUES[case]
+        body = "#include <string_view>\n\n" + _byte_assertions(value, value)
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "RawLiteral")
+        assert result.returncode != 0, (
+            f"the raw form of {value!r} compiled and denoted the authored bytes, so "
+            "the escaped case proves nothing about the escaping"
+        )
+
+    def test_a_raw_control_character_is_accepted(self, host_cxx, tmp_path):
+        """Why the control above covers only part of the table: the opposite is easy
+        to assume, and an assumed rejection here would make the escape-or-fail set
+        look stronger than it is.
+        """
+        value = _HOSTILE_LITERAL_VALUES["delete-and-low-controls"]
+        body = "#include <string_view>\n\n" + _byte_assertions(value, value)
+        result = _parse_against_the_stub(host_cxx, body, tmp_path, "RawControl")
+        assert result.returncode == 0, (
+            "a raw control character was refused inside a string literal, so it "
+            f"belongs in the escape-or-fail set:\n{result.stderr}"
         )

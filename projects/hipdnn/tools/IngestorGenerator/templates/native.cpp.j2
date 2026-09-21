@@ -45,15 +45,15 @@ namespace
    tests/test_config_loader.py compares the two.
 #}
 // The contract with the installed descriptor files, which restate these same strings.
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "{{ config.graph_match_symbol }}";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "{{ config.kernel_match_symbol }}";
+constexpr std::string_view GRAPH_MATCHER_SYMBOL = "{{ config.graph_match_symbol | cpp_escape }}";
+constexpr std::string_view KERNEL_MATCHER_SYMBOL = "{{ config.kernel_match_symbol | cpp_escape }}";
 {% if config.engine.has_heuristic %}
-constexpr std::string_view SCORE_SYMBOL = "{{ config.score_symbol }}";
+constexpr std::string_view SCORE_SYMBOL = "{{ config.score_symbol | cpp_escape }}";
 {% endif %}
-constexpr std::string_view DISPATCH_SYMBOL = "{{ config.dispatch_symbol }}";
+constexpr std::string_view DISPATCH_SYMBOL = "{{ config.dispatch_symbol | cpp_escape }}";
 {% if config.is_multi_pack %}
 {% for pack in config.packs %}
-constexpr std::string_view {{ pack.discriminator.upper() }}_MATCHER_SYMBOL = "{{ config.operation_match_symbol(pack) }}";
+constexpr std::string_view {{ pack.discriminator.upper() }}_MATCHER_SYMBOL = "{{ config.operation_match_symbol(pack) | cpp_escape }}";
 {% endfor %}
 {% endif %}
 
@@ -63,7 +63,7 @@ constexpr std::string_view {{ pack.discriminator.upper() }}_MATCHER_SYMBOL = "{{
 // without the attribute a freshly generated pack fails the build before its author has
 // written a line. Drop the attribute once the bodies read the field.
 {% for f in config.kmd_fields %}
-[[maybe_unused]] constexpr std::string_view {{ f.name.upper() }}_FIELD = "{{ f.name }}";
+[[maybe_unused]] constexpr std::string_view {{ f.name.upper() }}_FIELD = "{{ f.name | cpp_escape }}";
 {% endfor %}
 
 // ---------------------------------------------------------------------------

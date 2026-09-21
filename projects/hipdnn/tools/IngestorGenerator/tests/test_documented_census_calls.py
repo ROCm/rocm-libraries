@@ -165,6 +165,14 @@ def _balanced_args(text: str, open_paren: int):
     return None, text[open_paren:]
 
 
+def _occurrence_from(text: str) -> Occurrence:
+    """An ``Occurrence`` over a call form written out here rather than discovered.
+
+    The path is this file only so ``Occurrence`` has a location to report.
+    """
+    return Occurrence(Path(__file__).resolve(), text, text.index(CALL))
+
+
 def _occurrences():
     found = []
     for path in _source_files():
@@ -261,29 +269,65 @@ class TestEveryDocumentedCensusCallPinsItsCases:
             ]
         )
 
-    def test_bare_mentions_are_recognised_and_exempt(self):
+    def test_both_classes_are_populated_in_the_tree(self):
         """The control: the two classes really are distinguished.
 
-        If this found nothing, ``shows_arguments`` could be a constant ``True`` and
-        the guard above would still be green -- passing for the wrong reason. The
-        exempt sites are prose about how MANY calls to make, not forms to copy.
+        Each side is what stops the other's guard passing for the wrong reason. With
+        no bare mention, ``shows_arguments`` could be a constant ``True``; with no
+        form that shows arguments, it could be a constant ``False`` and the guard
+        above would be green over an empty set. The exempt sites are prose about how
+        MANY calls to make, not forms to copy.
         """
+        occurrences = [occurrence for occurrence in _occurrences() if occurrence.closed]
         mentions = [
-            occurrence
-            for occurrence in _occurrences()
-            if occurrence.closed and not occurrence.shows_arguments
+            occurrence for occurrence in occurrences if not occurrence.shows_arguments
         ]
+        forms = [occurrence for occurrence in occurrences if occurrence.shows_arguments]
         assert mentions, (
             "no bare hkp_register_census_tests() mention found, so nothing proves "
             "this suite distinguishes a form that shows arguments from prose that "
             "merely names the function. If the last bare mention was genuinely "
             "rewritten, delete this test; do not weaken the rule to satisfy it."
         )
-        for occurrence in mentions:
-            assert not occurrence.pinned, (
-                f"{occurrence.rel}:{occurrence.line} was classified as a bare mention "
-                f"yet contains {PIN} -- the argument-detection rule is wrong."
+        assert forms, (
+            "no hkp_register_census_tests( form showing arguments found anywhere "
+            "under the documented roots, so the EXPECTED_CASES guard is checking an "
+            "empty set and would stay green however the documented forms are "
+            "written. Fix the rule or the roots; do not delete this test."
+        )
+
+    def test_the_argument_rule_classifies_written_out_forms(self):
+        """The rule itself, against forms written here rather than discovered.
+
+        The walk can only report how the rule classified the tree; it cannot say
+        whether that classification is right, because every property derived from
+        ``args`` agrees with itself by construction. These forms carry an expectation
+        stated independently of the rule, so a rule that starts treating an elided
+        signature as a form to copy -- or stops recognising a real one -- is named
+        here.
+        """
+        cases = (
+            # text, shows_arguments, pinned
+            (f"{CALL})", False, False),
+            (f"{CALL}{ELISION})", False, False),
+            (f"{CALL}\n    {ELISION}\n)", False, False),
+            (f"{CALL}TARGET t {PIN} 4)", True, True),
+            (f"{CALL}TARGET t {ELISION})", True, False),
+            (f"{CALL}TARGET t {PIN} {ELISION})", True, True),
+            (f"{CALL}TARGET t COST_HINT(4) {PIN} 4)", True, True),
+            (f"{CALL}\n##  TARGET t\n##  {PIN} 4)", True, True),
+            (f"{CALL}\n##  TARGET t\n##  {ELISION})", True, False),
+        )
+        for text, shows_arguments, pinned in cases:
+            occurrence = _occurrence_from(text)
+            assert occurrence.closed, f"{text!r} was not delimited"
+            assert occurrence.shows_arguments is shows_arguments, (
+                f"{text!r} must{'' if shows_arguments else ' not'} count as showing "
+                "arguments"
             )
+            assert (
+                occurrence.pinned is pinned
+            ), f"{text!r} must{'' if pinned else ' not'} count as pinned"
 
     def test_unclassified_surfaces(self):
         """The extension split cannot go stale unnoticed.

@@ -16,8 +16,9 @@
 # head_size) are MANDATORY: hkp_pack hydrates with Spec(**fields), so a missing
 # one is a TypeError at pack time.
 #
-# Verify the builder before packing:
-#     python3 -c "from codegen.sources import introspect; \
+# Verify the builder before packing, from the IngestorGenerator root so
+# `codegen` is importable:
+#     .venv/bin/python -c "from codegen.sources import introspect; \
 #         print(introspect('kernels/gfx950/attention_dense.py', \
 #                          'build_attention_dense').signature_error or 'OK')"
 
@@ -61,7 +62,6 @@ graph_match:
 
 kernel_source_kind: rocke
 workspace_policy: none
-delegates_to_existing_plan: false
 
 packs:
   - name: attention_dense

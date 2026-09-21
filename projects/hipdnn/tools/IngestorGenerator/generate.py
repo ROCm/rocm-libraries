@@ -181,7 +181,13 @@ def main() -> None:
         print(f"  {f}")
 
     # A fresh generation wrote everything into one tree, so that tree is the root.
-    unfilled = generator.unfilled_placeholders([args.output_dir], written)
+    # A file this run just wrote and cannot read back fails the run: the count
+    # printed below would otherwise be read as the whole bundle's.
+    try:
+        unfilled = generator.unfilled_placeholders([args.output_dir], written)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     if unfilled:
         total = sum(unfilled.values())
         print(

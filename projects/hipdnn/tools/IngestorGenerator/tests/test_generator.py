@@ -25,7 +25,21 @@ from codegen.generator import (
     mint_ids,
 )
 from codegen.models import DEFAULT_FIXTURE_ARCH, KmdField
-from tests.helpers import make_kernel, make_minimal_config, make_pack
+from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
+
+
+def _distinct_from(value):
+    """A value of the SAME declared type that is not ``value``.
+
+    Typed, because a metadata value is checked against its KMD field's declared
+    type: a string stand-in for an int field is refused for the type rather than
+    kept apart for the value.
+    """
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 448
+    return f"{value}_other"
 
 
 def emitted_cases(rendered: str, macro: str, suite: str) -> dict:
@@ -213,13 +227,19 @@ class TestVariantDeduplication:
         if optional is None:
             pytest.skip("fixture engine declares no optional KMD field")
 
-        # One kernel pins the field to the schema default; its twin leaves it unset.
+        # One kernel pins the field to the schema default; its twin states it
+        # nowhere in metadata and lets the spec decide. That is the only spelling of
+        # "unset" a bundle can ship: a literal null in metadata is a type the loader
+        # reads nothing onto, and an optional field stated in NEITHER layer is
+        # refused outright (`test_a_knob_stated_in_neither_layer_is_refused`).
         pinned = copy.deepcopy(pack.kernels[0])
         pinned.name = pack.kernels[0].name + "_pinned_to_default"
         pinned.metadata[optional.name] = optional.default_value
         unset = copy.deepcopy(pack.kernels[0])
-        unset.name = pack.kernels[0].name + "_left_unset"
-        unset.metadata[optional.name] = None
+        unset.name = pack.kernels[0].name + "_left_to_the_spec"
+        unset.metadata.pop(optional.name, None)
+        unset.kernel_source.spec = dict(unset.kernel_source.spec or {})
+        unset.kernel_source.spec[optional.name] = _distinct_from(optional.default_value)
         pack.kernels.extend([pinned, unset])
 
         kdp = build_kdp(config, pack, mint_ids(config))
@@ -905,6 +925,74 @@ class TestCatalogIdentity:
         assert emitted == 1 and emitted is not True, f"an int field shipped {emitted!r}"
 
 
+class TestAPackEmptiedByDeduplicationIsRefused:
+    """A KDP holding zero descriptors is not a bundle the loader and the census
+    agree on, so the generator must not exit 0 on one.
+
+    ``DescriptorLoader`` drops a pack that "declares no kernels" at load, while the
+    emitted census counts every KDP the generator wrote. A pack whose kernels were
+    all absorbed by an earlier pack therefore ships a census asserting one more pack
+    than the runtime holds -- a generated test that fails on a bundle its generator
+    called good.
+    """
+
+    @staticmethod
+    def _two_packs(left_kernels, right_kernels):
+        return make_minimal_config(
+            packs=[
+                make_pack(
+                    name="alpha",
+                    discriminator="alpha",
+                    arch=["gfx942"],
+                    kernels=left_kernels,
+                ),
+                make_pack(
+                    name="beta",
+                    discriminator="beta",
+                    arch=["gfx942"],
+                    kernels=right_kernels,
+                ),
+            ]
+        )
+
+    def test_a_pack_whose_every_kernel_was_absorbed_is_refused(self):
+        """The collision: distinct packs, one shared candidate.
+
+        Both kernels complete to the same catalog tuple on the same architecture
+        from the same source at the same priority, so the engine-wide
+        de-duplication keeps the first and drops the second -- emptying ``beta``.
+        """
+        config = self._two_packs(
+            [make_kernel(name="absorbing")], [make_kernel(name="absorbed")]
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            build_kdp_documents(config, mint_ids(config))
+        message = str(excinfo.value)
+        assert "beta" in message, message
+        assert "alpha" in message, message
+        assert "absorbed" in message and "absorbing" in message, message
+
+    def test_two_packs_of_distinct_kernels_still_both_ship(self):
+        """The control: nothing is absorbed, so nothing is refused."""
+        config = self._two_packs(
+            [make_kernel(name="on_alpha")],
+            [
+                make_kernel(
+                    name="on_beta", metadata={"block_size": 128, "dtype": "FLOAT"}
+                )
+            ],
+        )
+
+        inventory = emitted_inventory(
+            config, build_kdp_documents(config, mint_ids(config))
+        )
+        entry = inventory["arches"]["gfx942"]
+        assert entry["pack_names"] == ["test_alpha", "test_beta"]
+        assert entry["pack_count"] == 2
+        assert inventory["total_descriptor_count"] == 2
+
+
 class TestEmittedInventory:
     """The template context's view of what SHIPS, not of what was authored.
 
@@ -1091,27 +1179,77 @@ class TestEmittedInventory:
         inventory = emitted_inventory(config, build_kdp_documents(config, ids))
         assert inventory["source_kind"] == "embedded_source"
 
-    def test_every_template_receives_the_inventory(self, generator, scale_add_config):
+    @staticmethod
+    def _census_row(rendered: str, arch: str) -> str:
+        """The body of ``arch``'s rendered ``ExpectedInventory``.
+
+        Scoped to the ONE row, because the census selects a single row at runtime
+        and compares it by set equality. A name checked against the whole rendered
+        file is found in some other arch's row and says nothing about which device
+        expects it.
+        """
+        match = re.search(
+            r'\{"' + re.escape(arch) + r'",\s*\n\s*ExpectedInventory\{(.*?)\n\s*\}\},',
+            rendered,
+            re.DOTALL,
+        )
+        assert match, f"no census row rendered for {arch}"
+        return match.group(1)
+
+    @staticmethod
+    def _assert_every_inventory_row_is_rendered(generator, config):
+        """Every arch, pack and descriptor name the inventory holds reaches the
+        rendered census. Returns the rendered text."""
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        inventory = emitted_inventory(
+            config, build_kdp_documents(config, mint_ids(config))
+        )
+        assert f'std::string("{inventory["sdk_version"]}")' in rendered
+        assert inventory["arches"], "fixture engine emits no inventory rows"
+        for arch, entry in inventory["arches"].items():
+            row = TestEmittedInventory._census_row(rendered, arch)
+            for stem in entry["pack_names"]:
+                assert f'"{config.engine.namespace}:{stem}",' in row
+            for name in entry["descriptor_names"]:
+                assert f'"{name}",' in row
+        return rendered
+
+    def test_the_inventory_reaches_the_rendered_census(
+        self, generator, scale_add_config
+    ):
         """It is exported through the EXISTING context, beside ``config`` and
-        ``ids`` -- not through a manifest file or a second CMake input."""
-        captured = {}
-        original = generator.env.get_template
+        ``ids`` -- not through a manifest file or a second CMake input.
 
-        class _Recorder:
-            def __init__(self, template):
-                self._template = template
+        Asserted on the RENDERED TEXT rather than on the context dict handed to
+        Jinja: a key present in the context but read by no template is threading
+        with nothing behind it, and a check on the dict passes for a census whose
+        expectations were never written into the file that is compiled and run.
 
-            def render(self, **context):
-                captured.update(context)
-                return self._template.render(**context)
+        Run over the MIXED bundle as well as the shipped single-arch config, because
+        the wildcard/concrete union (`emitted_inventory`) is what a single-arch
+        config cannot exercise: with only one row per name there is nothing for the
+        union to add, so the threading could carry a pre-union inventory and still
+        render every name.
+        """
+        self._assert_every_inventory_row_is_rendered(generator, scale_add_config)
 
-        generator.env.get_template = lambda name: _Recorder(original(name))
-        try:
-            generator._render_template("native.cpp.j2", scale_add_config)
-        finally:
-            generator.env.get_template = original
-        assert "emitted" in captured
-        assert captured["emitted"]["sdk_version"] == scale_add_config.engine.sdk_version
+        mixed = TestWildcardInventoryUnion._mixed_bundle()
+        rendered = self._assert_every_inventory_row_is_rendered(generator, mixed)
+        concrete = self._census_row(rendered, "gfx942")
+        assert '"on_942",' in concrete
+        assert '"anywhere",' in concrete, (
+            "the wildcard kernel loads on gfx942 too, so a gfx942 row without it "
+            "asserts a short set against a loader holding both"
+        )
+        wildcard_pack = f'"{mixed.engine.namespace}:{mixed.kdp_stem(mixed.packs[0])}",'
+        assert wildcard_pack in concrete, (
+            "the pack names no arch, so it loads on gfx942 as well and the row that "
+            "device reads has to name it"
+        )
+        assert '"on_942",' not in self._census_row(rendered, "*"), (
+            "the control: the union runs one way only, so the wildcard row must not "
+            "advertise a concrete-arch kernel on every device"
+        )
 
 
 #: The two cases ``test_matchers.cpp.j2`` must hand every generated engine. Named
@@ -1363,3 +1501,428 @@ class TestMatcherStubDeviceFixture:
         assert 'properties.gcnArchName = "gfx942";' in body
         assert "properties.warpSize = 64;" in body
         assert DEFAULT_FIXTURE_ARCH == "gfx942"
+
+
+#: A kernel name carrying the three things a C++ string literal cannot hold raw: a
+#: double quote, a backslash and a control character. Nothing validates a kernel
+#: name's charset -- the loader's own patterns cover the engine name, the arch ids,
+#: the path stems and the C++ identifiers, never ``kernel.name`` -- so this is a name
+#: a config can really state and a generator can really emit.
+_HOSTILE_KERNEL_NAME = 'scale_add."f32"\\path\x01'
+
+#: The same name as C++ SOURCE TEXT. Octal, not ``\x01``, because a C++ hex escape is
+#: maximal-munch -- see `cpp_escape`.
+_ESCAPED_KERNEL_NAME = 'scale_add.\\"f32\\"\\\\path\\001'
+
+
+#: A Jinja construct of any kind. Masked out before the C++ scan below so that
+#: quotes, slashes and apostrophes belonging to the TEMPLATE language -- ``{% if
+#: config.workspace_policy == "none" %}``, ``{{ {'kpack': 'KPACK'}[...] }}`` -- are
+#: never mistaken for C++ punctuation. DOTALL because an interpolation may be wrapped
+#: across lines.
+_JINJA_CONSTRUCT = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.DOTALL)
+
+#: The subset of the above that EMITS a value, and so is what this check is about.
+_JINJA_INTERPOLATION = re.compile(r"\{\{.*?\}\}", re.DOTALL)
+
+#: ``cpp_escape`` applied as the LAST filter of the chain. Last, not merely present:
+#: a filter running after it could reintroduce exactly the characters it removed.
+_ESCAPE_APPLIED = re.compile(r"\|\s*cpp_escape\s*$")
+
+#: Templates rendering C++ translation-unit text, by name. The ``.cpp.j2``/``.hpp.j2``
+#: suites plus the ``_cpp.j2``/``_hpp.j2`` splice fragments, whose emitted ``.txt``
+#: is prose wrapped around C++ lines a human pastes into a real translation unit.
+_CXX_TEMPLATE_NAME = re.compile(r"[._](cpp|hpp)\.j2$")
+
+#: Templates rendering CMake, which carry no C++ string literal and are out of scope.
+_CMAKE_TEMPLATE_NAME = re.compile(r"^cmake_")
+
+
+def _mask_jinja(text: str) -> tuple[str, list[tuple[int, str]]]:
+    """``text`` with every Jinja construct blanked, plus the interpolations found.
+
+    Blanked to a run of NULs of the SAME LENGTH, so every offset in the masked copy
+    still addresses the same character of the original and an interpolation's
+    recorded offset can be looked up directly in the scan below.
+    """
+    masked = _JINJA_CONSTRUCT.sub(lambda m: "\0" * (m.end() - m.start()), text)
+    sites = [(m.start(), m.group(0)) for m in _JINJA_INTERPOLATION.finditer(text)]
+    return masked, sites
+
+
+def _offsets_inside_a_string_literal(masked: str, name: str) -> bytearray:
+    """One flag per character of ``masked``: is it inside a C++ ``"..."``?
+
+    A real (small) lexer rather than a quote count, because the templates carry
+    every construct that defeats counting: apostrophes in prose comments
+    (``pack's``), a ``'`` INSIDE a literal (``"... architecture '" << _arch``),
+    ``//`` and ``/** */`` comments holding both quote characters, and ``##`` prose
+    lines in the splice fragments, which are not C++ at all.
+
+    Mis-classification is the one failure this must not have -- a site wrongly read
+    as outside a literal is silently exempted -- so the scanner asserts its own
+    assumptions instead of guessing: no literal may stay open across a newline, and
+    none may be a raw literal, whose ``R"delim(`` form this deliberately does not
+    implement.
+    """
+    inside = bytearray(len(masked))
+    state = "code"
+    index = 0
+    line = 1
+    at_line_start = True
+    while index < len(masked):
+        character = masked[index]
+        if character == "\n":
+            assert state in ("code", "block", "line"), (
+                f"{name}:{line}: a {state} literal is still open at end of line. "
+                "The scanner does not model line-spanning literals, and would "
+                "mis-classify every interpolation after this point."
+            )
+            state = "code" if state == "line" else state
+            line, at_line_start, index = line + 1, True, index + 1
+            continue
+        if state == "code" and at_line_start:
+            if character in " \t":
+                index += 1
+                continue
+            at_line_start = False
+            if masked.startswith("##", index):
+                # Splice-fragment prose: rendered into a .txt for a human to read,
+                # never compiled. Its apostrophes are English, not char literals.
+                state = "line"
+                continue
+        if state == "code":
+            if masked.startswith("//", index):
+                state, index = "line", index + 2
+            elif masked.startswith("/*", index):
+                state, index = "block", index + 2
+            elif character == '"':
+                assert index == 0 or masked[index - 1] not in "Ru8L", (
+                    f"{name}:{line}: raw or encoded string literal prefix, whose "
+                    "delimiters this scanner does not model"
+                )
+                state, index = "string", index + 1
+            elif character == "'":
+                state, index = "char", index + 1
+            else:
+                index += 1
+            continue
+        if state == "block":
+            state, index = (
+                ("code", index + 2)
+                if masked.startswith("*/", index)
+                else (state, index + 1)
+            )
+            continue
+        if state == "line":
+            index += 1
+            continue
+        if character == "\\":  # string or char: the escape hides the next character
+            index += 2
+            continue
+        if character == ('"' if state == "string" else "'"):
+            state, index = "code", index + 1
+            continue
+        inside[index] = 1 if state == "string" else 0
+        index += 1
+    assert state in ("code", "line"), f"{name}: template ends inside a {state}"
+    return inside
+
+
+class TestCppStringEscaping:
+    """Values interpolated into a generated C++ string literal must be escaped."""
+
+    def test_every_interpolation_inside_a_literal_applies_the_escape(
+        self, template_dir
+    ):
+        """The general check the two value-specific cases below cannot be.
+
+        Those two pin one interpolation each -- the kernel name and ``sdk_version``.
+        Every OTHER interpolation landing inside a ``"..."`` could lose its
+        ``| cpp_escape`` and nothing would turn red.
+
+        The site list is READ OUT OF the template text at run time, so a template
+        that grows a literal is covered the day it grows one; a pinned count or a
+        pinned list would leave the new line unchecked and still pass.
+
+        Scope is exactly "inside a ``"..."``". Escaping is meaningless for an
+        interpolation elsewhere -- a backslash in a name or a comment is a syntax
+        error the compiler already catches -- and there is deliberately no exemption
+        list for in-literal sites: a new one either applies the filter or fails here.
+        """
+        unclassified = [
+            path.name
+            for path in sorted(template_dir.rglob("*.j2"))
+            if not _CXX_TEMPLATE_NAME.search(path.name)
+            and not _CMAKE_TEMPLATE_NAME.search(path.name)
+        ]
+        assert not unclassified, (
+            f"{unclassified} match neither the C++ nor the CMake naming rule, so "
+            "this check silently skipped them. Name them so one rule claims them."
+        )
+
+        unescaped, scanned = [], {}
+        for path in sorted(template_dir.rglob("*.j2")):
+            if not _CXX_TEMPLATE_NAME.search(path.name):
+                continue
+            text = path.read_text(encoding="utf-8")
+            masked, sites = _mask_jinja(text)
+            inside = _offsets_inside_a_string_literal(masked, path.name)
+            in_literal = [(o, e) for o, e in sites if inside[o]]
+            scanned[path] = (len(in_literal), text)
+            for offset, expression in in_literal:
+                body = expression[2:-2].strip().strip("-").strip()
+                if not _ESCAPE_APPLIED.search(body):
+                    line = text.count("\n", 0, offset) + 1
+                    unescaped.append(f"{path.name}:{line}: {expression.strip()}")
+
+        assert not unescaped, (
+            "these interpolations sit inside a C++ string literal but do not end "
+            "in `| cpp_escape`, so the value they emit reaches the literal raw:\n  "
+            + "\n  ".join(unescaped)
+        )
+        blind = [
+            path.name
+            for path, (count, text) in scanned.items()
+            if count == 0 and "cpp_escape" in text
+        ]
+        assert not blind, (
+            f"{blind} apply `cpp_escape` somewhere, yet the scan found no site "
+            "inside a literal -- the masking or the lexer above has broken and "
+            "this check is passing vacuously."
+        )
+
+    def test_a_kernel_name_is_escaped_into_the_census_expectation(self, generator):
+        config = make_minimal_config(
+            packs=[make_pack(kernels=[make_kernel(name=_HOSTILE_KERNEL_NAME)])]
+        )
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        assert f'"{_ESCAPED_KERNEL_NAME}",' in rendered
+        assert _HOSTILE_KERNEL_NAME not in rendered, (
+            "the raw name reached the file, so the literal it sits in is closed by "
+            "the name's own quote"
+        )
+        assert "\x01" not in rendered
+
+    def test_the_sdk_version_is_escaped_into_the_census_expectation(self, generator):
+        """The second genuinely unvalidated value: ``sdk_version`` is free-form."""
+        config = make_minimal_config(engine=make_engine(sdk_version='1.0.0"); //'))
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        assert 'std::string("1.0.0\\"); //")' in rendered
+        assert 'std::string("1.0.0");' not in rendered
+
+
+class TestWildcardInventoryUnion:
+    """A wildcard descriptor ships on every device, so every concrete row holds it.
+
+    The generated census selects exactly ONE row -- the requested arch's, falling
+    back to the wildcard only when the arch has no row of its own -- and compares it
+    with what loaded by SET EQUALITY.
+    """
+
+    @staticmethod
+    def _mixed_bundle():
+        return make_minimal_config(
+            packs=[
+                make_pack(
+                    arch=[],
+                    kernels=[
+                        make_kernel(
+                            name="anywhere",
+                            metadata={"block_size": 64, "dtype": "FLOAT"},
+                        ),
+                        make_kernel(
+                            name="on_942",
+                            arch=["gfx942"],
+                            metadata={"block_size": 128, "dtype": "FLOAT"},
+                        ),
+                    ],
+                )
+            ]
+        )
+
+    def _inventory(self):
+        config = self._mixed_bundle()
+        ids = mint_ids(config)
+        return config, emitted_inventory(config, build_kdp_documents(config, ids))
+
+    def test_the_concrete_row_carries_the_wildcard_pack_and_kernel(self):
+        config, inventory = self._inventory()
+        row = inventory["arches"]["gfx942"]
+        assert set(row["descriptor_names"]) == {"anywhere", "on_942"}
+        assert row["descriptor_count"] == 2
+        assert row["pack_names"] == [config.kdp_stem(config.packs[0])], (
+            "the pack is arch-independent, so it loads on gfx942 -- a row that "
+            "names no pack asserts an empty pack set against a loader that has one"
+        )
+        assert row["pack_count"] == 1
+
+    def test_the_wildcard_row_keeps_only_what_ships_everywhere(self):
+        """The control: the union runs one way only."""
+        _config, inventory = self._inventory()
+        assert set(inventory["arches"]["*"]["descriptor_names"]) == {"anywhere"}
+        assert inventory["total_descriptor_count"] == 2
+
+
+class TestPlaceholderGateOnUnreadableFiles:
+    """A file the scan could not read is not a file the scan found clean."""
+
+    def test_an_undecodable_located_file_fails_the_scan_naming_it(
+        self, generator, scale_add_config, tmp_path
+    ):
+        written = generator.render(scale_add_config, tmp_path)
+        target = tmp_path / "packs" / "ScaleAddNative.cpp"
+        target.write_bytes(
+            b"// \xff\xfe not utf-8\n// TODO - " + PLACEHOLDER_MARKER.encode() + b"\n"
+        )
+        with pytest.raises(ValueError) as excinfo:
+            generator.unfilled_placeholders([tmp_path], written)
+        assert "packs/ScaleAddNative.cpp" in str(excinfo.value)
+
+    def test_a_readable_tree_still_reports_its_counts(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The control: the failure above must be about the undecodable file, not
+        about any file carrying a marker."""
+        written = generator.render(scale_add_config, tmp_path)
+        unfilled = generator.unfilled_placeholders([tmp_path], written)
+        assert unfilled, "a freshly generated engine must carry unfilled stubs"
+
+    def test_the_cli_does_not_claim_coverage_it_did_not_have(self, tmp_path):
+        """The false green end to end, through the command a reader actually runs."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        tool_root = Path(__file__).parent.parent
+        out = tmp_path / "out"
+
+        def run(*args):
+            return subprocess.run(
+                [sys.executable, str(tool_root / "generate.py"), *args],
+                cwd=tool_root,
+                capture_output=True,
+                text=True,
+            )
+
+        generated = run(
+            "--config",
+            str(tool_root / "configs" / "scale_add.yaml"),
+            "--output-dir",
+            str(out),
+        )
+        assert generated.returncode == 0, generated.stderr
+        # Fill every placeholder, so the only thing between this tree and a clean
+        # gate is the one file the scan cannot read.
+        for path in out.rglob("*"):
+            if path.is_file():
+                text = path.read_text(encoding="utf-8")
+                if PLACEHOLDER_MARKER in text:
+                    path.write_text(
+                        text.replace(PLACEHOLDER_MARKER, "done"), encoding="utf-8"
+                    )
+        target = out / "packs" / "ScaleAddNative.cpp"
+        target.write_bytes(
+            b"// \xff\xfe not utf-8\n// TODO - " + PLACEHOLDER_MARKER.encode() + b"\n"
+        )
+
+        checked = run(
+            "--config",
+            str(tool_root / "configs" / "scale_add.yaml"),
+            "--output-dir",
+            str(out),
+            "--check-placeholders",
+        )
+        assert checked.returncode == 1, checked.stdout
+        assert "No unfilled placeholders" not in checked.stdout
+        assert "packs/ScaleAddNative.cpp" in checked.stdout + checked.stderr
+
+    def test_a_fresh_generation_fails_on_a_file_it_cannot_read_back(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The other CLI arm. ``--check-placeholders`` returns before generation and
+        raises from its own handler, so the case above leaves the fresh-generation
+        run's scan -- the one that reports the count a reader takes for the whole
+        bundle -- with no case at all.
+
+        Driven in-process rather than through ``subprocess`` because the fault has to
+        land BETWEEN the write and the read-back: a fresh run locates only the files
+        it just wrote in UTF-8, and a corrupt copy seeded into the output tree
+        beforehand resolves the relative path TWICE and is discarded as ambiguous,
+        never read. Only ``render`` is substituted; ``locate_emitted``, the scan, the
+        handler and the exit are the real ones.
+        """
+        import sys
+        from pathlib import Path
+
+        import generate
+
+        target = "packs/ScaleAddNative.cpp"
+
+        class GeneratorThatLosesAFileAfterWriting(generate.IngestorGenerator):
+            def render(self, config, output_dir):
+                written = super().render(config, output_dir)
+                (output_dir / target).write_bytes(b"// \xff\xfe not utf-8\n")
+                return written
+
+        tool_root = Path(__file__).parent.parent
+        out = tmp_path / "out"
+        monkeypatch.setattr(
+            generate, "IngestorGenerator", GeneratorThatLosesAFileAfterWriting
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "generate.py",
+                "--config",
+                str(tool_root / "configs" / "scale_add.yaml"),
+                "--output-dir",
+                str(out),
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exit_info:
+            generate.main()
+        captured = capsys.readouterr()
+        assert exit_info.value.code == 1, captured.out
+        assert "Error:" in captured.err
+        assert target in captured.err
+        assert (
+            "unfilled placeholder(s)" not in captured.out
+        ), "a count printed beside an unread file reads as the whole bundle's"
+
+
+class TestProjectedMetadataIsTypeChecked:
+    """A spec value projected into metadata is checked against its declared type."""
+
+    def test_a_spec_pinned_string_for_an_int_field_is_refused(
+        self, gfx950_attention_dense_config
+    ):
+        import copy
+
+        config = copy.deepcopy(gfx950_attention_dense_config)
+        pack = config.packs[0]
+        kernel = pack.kernels[0]
+        field = next(f for f in config.kmd_fields if f.type == "int")
+        kernel.metadata.pop(field.name, None)
+        kernel.kernel_source.spec[field.name] = "128"
+
+        with pytest.raises(ValueError, match=f"declares as type '{field.type}'"):
+            build_kdp(config, pack, mint_ids(config))
+
+    @pytest.mark.parametrize(
+        "config_name", ["variants_example.yaml", "axes_example.yaml"]
+    )
+    def test_an_expansion_path_is_not_double_rejected(
+        self, load_test_config, config_name
+    ):
+        """The control on the check above.
+
+        ``variants`` projects at expansion time and ``axes`` materialises metadata
+        before validation, so both already reach the generator type-correct. A
+        check that rejected them would make the compact forms unusable.
+        """
+        config = load_test_config(config_name)
+        documents = build_kdp_documents(config, mint_ids(config))
+        assert any(document["kernelDescriptors"] for _pack, document in documents)

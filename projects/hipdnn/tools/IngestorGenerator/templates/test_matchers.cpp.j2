@@ -43,7 +43,7 @@ using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 DeviceProperties fixedDeviceProperties()
 {
     DeviceProperties properties;
-    properties.gcnArchName = "{{ config.device_fixture_arch }}";
+    properties.gcnArchName = "{{ config.device_fixture_arch | cpp_escape }}";
     properties.warpSize = {{ config.device_fixture_wave_size }};
     return properties;
 }
@@ -69,7 +69,7 @@ DeviceProperties fixedDeviceProperties()
 TEST({{ config.engine.pascal_name }}Matchers, AcceptsAGraphThisEngineServes)
 {
     GTEST_SKIP() << "TODO - FILL THIS OUT: build a MatchContext this engine SHOULD "
-                    "serve and EXPECT_TRUE({{ config.graph_match_symbol }}). Delete "
+                    "serve and EXPECT_TRUE({{ config.graph_match_symbol | cpp_escape }}). Delete "
                     "this skip. An engine whose accept case is skipped has never been "
                     "shown to match anything.";
 }
@@ -79,14 +79,14 @@ TEST({{ config.engine.pascal_name }}Matchers, DeclinesAGraphOutsideItsApplicabil
     GTEST_SKIP() << "TODO - FILL THIS OUT: take one rule from your RUNBOOK section 2 "
                     "mining "
                     "table, build a MatchContext that VIOLATES it, and "
-                    "EXPECT_FALSE({{ config.graph_match_symbol }}). Delete this skip. "
+                    "EXPECT_FALSE({{ config.graph_match_symbol | cpp_escape }}). Delete this skip. "
                     "Over-acceptance corrupts results rather than reporting them.";
 }
 
 {% if config.engine.has_heuristic %}
 TEST({{ config.engine.pascal_name }}Matchers, ScoreReadsAtLeastOneDescriptorField)
 {
-    GTEST_SKIP() << "TODO - FILL THIS OUT: {{ config.score_symbol }} must vary with "
+    GTEST_SKIP() << "TODO - FILL THIS OUT: {{ config.score_symbol | cpp_escape }} must vary with "
                     "the descriptor it is given -- score two kernels differing in a "
                     "field you rank on and EXPECT_NE the results. A constant score "
                     "makes selection order arbitrary, and nothing else catches it "

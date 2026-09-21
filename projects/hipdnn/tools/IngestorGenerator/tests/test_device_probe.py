@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from tools import device_probe  # noqa: E402
+import device_probe  # noqa: E402
 
 
 def _args(tmp_path: Path) -> list:

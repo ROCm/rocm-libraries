@@ -349,11 +349,6 @@ class IngestorConfig:
     dialect: str = DIALECT_DIRECT_LOAD
     kernel_source_kind: str = KERNEL_SOURCE_KIND_EMBEDDED
     workspace_policy: str = "none"
-    #: PARSED AND NEVER READ: no emitter, template or check consults this, so
-    #: setting it changes nothing about the generated bundle. `workspace_policy`
-    #: immediately above looks alike and IS consumed (it branches in the native
-    #: template).
-    delegates_to_existing_plan: bool = False
     #: Where the bundle is authored, in whichever tree its dialect writes into.
     #: ``packaged``: the subpath under the packager's ONE source root, e.g.
     #: ``rocKE/gfx950_attention_dense``, preserved verbatim into the staged and

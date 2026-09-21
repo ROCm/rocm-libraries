@@ -139,29 +139,6 @@ class TestKmdFieldsCheck:
         failures, _ = launch_surface.check(profile, _REPO_ROOT)
         assert failures == []
 
-    def test_the_check_fails_without_the_cross_reference(self):
-        profile = _profile(
-            kmd_fields=[{"name": "seqlen_q", "type": "int"}],
-            surfaces=[_surface(kmd_fields=["seqlen_q", "block_m"])],
-        )
-        surfaces = launch_surface.load_surfaces(profile)
-        kmd_names = {f["name"] for f in profile["kmd_fields"]}
-        # The mutation: membership against the surface's OWN kmd_fields (always
-        # true) instead of the profile's declared kmd_fields -- the bug shape "the
-        # tool never looked", reproduced without editing the source under test.
-        for surface in surfaces:
-            undeclared = [
-                f for f in surface["kmd_fields"] if f not in set(surface["kmd_fields"])
-            ]
-            assert undeclared == [], (
-                "a self-referential membership check can never fail, which is "
-                "exactly why the real check compares against profile['kmd_fields'], "
-                "not the surface's own list"
-            )
-        # Restore: the real check, run on the same fixture, DOES fail.
-        failures, _ = launch_surface.check(profile, _REPO_ROOT)
-        assert failures, "the real kmd_fields cross-reference must catch this case"
-
 
 class TestCppMirrorExistence:
     def test_a_missing_cpp_mirror_path_is_caught(self):

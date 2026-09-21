@@ -5,3 +5,9 @@ Jinja2>=3.1
 # as the runbook's "Paths and interpreters" section prescribes cannot run them:
 # `No module named pytest` at the checks the runbook then demands of it.
 pytest>=7.0
+
+# rocm_kpack is a real dependency of ONE test class and is deliberately absent from
+# the list above: it ships in the rocm-kpack checkout, not on PyPI. It is supplied by
+# pointing HIPKERNELPROVIDER_ROCM_KPACK_DIR at that checkout's `python` directory --
+# see "Setup" in README.md. Unset, tests/test_verify_variant_sets.py's
+# TestRealArchiveSelectedConsumer skips; it never fails for want of this.
