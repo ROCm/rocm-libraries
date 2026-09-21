@@ -993,7 +993,8 @@ try
     set_device(device_id);
 
     auto perf_monitor = EfficiencyMonitor::create();
-    perf_monitor->setDeviceId(device_id);
+    if(perf_monitor->enabled())
+        perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);

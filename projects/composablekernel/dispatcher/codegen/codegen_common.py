@@ -841,7 +841,18 @@ def normalize_gfx_arch(arch: str) -> str:
     once at the boundary instead of scattering substring tests that happen to
     tolerate the suffix.
 
-    This is the single source of truth for that rule; do not re-implement it.
+    Single source of truth *for the dispatcher tree*: everything under
+    ``dispatcher/`` must call this rather than open-coding ``split(":")``.
+
+    It is deliberately not claimed to be repo-wide, because it is not.
+    ``tile_engine/`` cannot import it: the dependency direction is
+    dispatcher -> tile_engine (``dispatcher/python/gemm_utils.py`` imports
+    ``gemm_validation_utils``), and tile_engine is on the deprecation path, so
+    moving the helper there to collapse the two copies would park new shared
+    infrastructure in the tree that is going away.
+    ``tile_engine/ops/gemm/gemm_validation_utils.py`` therefore keeps its own
+    ``_base_gfx_arch``; the two are pinned to identical behaviour by
+    ``dispatcher/tests/test_codegen_common.py::TestNormalizeGfxArch``.
     """
     return arch.split(":", 1)[0]
 
@@ -1243,6 +1254,43 @@ def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
     if normalize_gfx_arch(gfx_arch) == "gfx1250":
         return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250)
     return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)
+
+
+# Operator-specific support: both bridges require native FP8/BF8. gfx90a
+# belongs to generic GEMM support, but cannot initialize these quant bridges.
+ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES = ("gfx942", "gfx950", "gfx1250")
+
+
+def validate_rowcol_tensor_quant_gfx_arch(gfx_arch: str, *, require_explicit: bool = False) -> str:
+    """Normalize and check a caller-supplied gfx target; return the bare target.
+
+    Raises ``ValueError`` for anything outside
+    ``ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES``. Empty is allowed and means "not
+    specified", which selects the gfx9 MFMA tile -- the behaviour every invocation
+    without the flag had before the flag existed. Custom tile configurations must
+    set ``require_explicit=True`` so their target check cannot be bypassed.
+
+    This exists because ``--gfx-arch`` on the two codegen scripts is the one place a
+    typo is completely silent. Everywhere else a bad target eventually reaches
+    ``--offload-arch`` and hipcc rejects it; here the value only picks a tile, so
+    ``--gfx-arch gfx1205`` quietly generates the gfx9 MFMA tile and the result is a
+    kernel that compiles for gfx1250 and returns garbage -- which is the failure mode
+    this whole branch exists to close, arriving through the front door.
+    """
+    if not gfx_arch:
+        if require_explicit:
+            raise ValueError(
+                "Custom tile_configs require an explicit --gfx-arch (gfx_arch in Python) "
+                "so the generated header can reject a mismatched build target."
+            )
+        return ""
+    base = normalize_gfx_arch(gfx_arch)
+    if base not in ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {gfx_arch!r} (normalized to {base!r}); "
+            f"supported: {', '.join(ROWCOL_TENSOR_QUANT_SUPPORTED_ARCHES)}."
+        )
+    return base
 
 
 # Default traits, shared for the same reason as the tile above. pad_m is enabled

@@ -109,5 +109,34 @@ def test_gate_matches_supported_tuple(mod):
         assert mod.arch_is_supported(f"{arch}:sramecc+:xnack-") is True
 
 
+
+
+@MODULES
+@pytest.mark.parametrize("detected", ["", "gfx90a"])
+def test_standalone_reports_skip_for_unavailable_target(mod, detected, monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "argv", [mod.__file__, "--output-dir", str(tmp_path)])
+    monkeypatch.setattr(mod, "_GFX_ARCH", detected)
+    assert mod.main() == 77
+
+
+@MODULES
+def test_standalone_suffix_override_reaches_all_cases(mod, monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "argv", [mod.__file__, "--gfx", "gfx1250:xnack-",
+                                     "--output-dir", str(tmp_path)])
+    monkeypatch.setattr(mod, "_GFX_ARCH", "")
+    monkeypatch.setattr(mod, "_has_hipcc", lambda: True)
+    monkeypatch.setattr(mod, "_ml_dtypes", object())
+    encoded = []
+    def inputs(M, N, K, dtype, arch):
+        encoded.append((M, N, K, dtype, arch))
+        return ()
+    monkeypatch.setattr(mod, "_make_inputs", inputs)
+    monkeypatch.setattr(mod, "_run_one", lambda *a, **kw: ("PASS", "host test stub"))
+    assert mod.main() == 0
+    assert len(encoded) == 3
+    assert all(case[-1] == "gfx1250" for case in encoded)
+    assert (64, 256, 128, "fp8", "gfx1250") in encoded
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

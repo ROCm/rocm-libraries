@@ -88,10 +88,59 @@ static bool is_supported_arch(const std::string& arch)
     return false;
 }
 
-// True if this .so was compiled for a gfx12-class target (WMMA, wave32).
-// Used to scope the M%4 rejection below to the architecture where the defect is
-// actually observed, so gfx942/gfx950 callers are not restricted by it.
-static bool is_gfx12_arch(const std::string& arch) { return arch.rfind("gfx12", 0) == 0; }
+// ---------------------------------------------------------------------------
+// Generated-target and tile guards. Codegen records an explicit target in the
+// header; a build for another processor must fail before it can run that tile.
+// Headers generated without an explicit target retain the gfx9 default behavior.
+static constexpr bool ct_starts_with(const char* s, const char* prefix)
+{
+    return *prefix == '\0' ? true : (*s == *prefix && ct_starts_with(s + 1, prefix + 1));
+}
+
+static constexpr bool ct_equal(const char* a, const char* b)
+{
+    return *a == *b && (*a == '\0' || ct_equal(a + 1, b + 1));
+}
+
+static_assert(SelectedKernel::GfxArch[0] == '\0' || ct_equal(SelectedKernel::GfxArch, GFX_ARCH),
+              "Generated kernel architecture does not match GFX_ARCH. Regenerate the "
+              "header with --gfx-arch matching the build target.");
+
+static constexpr bool kCompiledForGfx1250 = ct_starts_with(GFX_ARCH, "gfx1250");
+
+// Family-wide companion for the M%4 guard below. That defect is an unpadded AQ view in
+// the shared quant kernel header rather than a gfx1250-specific silicon property, so
+// every gfx12xx part is subject to it. Compile-time, so on gfx9 the guard folds away
+// instead of constructing a std::string per call to test a constant.
+static constexpr bool kCompiledForGfx12 = ct_starts_with(GFX_ARCH, "gfx12");
+
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileM == 16,
+              "gfx1250 has no 32x32 WMMA fragment: warp_tile_m must be 16. This kernel "
+              "would compile and then return wrong results on the device.");
+
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileK == 64 ||
+                  SelectedKernel::WarpTileK == 128,
+              "gfx1250 8-bit WMMA fragments are 16x16x64 and 16x16x128 only: "
+              "warp_tile_k must be 64 or 128.");
+
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpTileN == 16,
+              "gfx1250 8-bit WMMA fragments are 16x16xK: warp_tile_n must be 16.");
+
+// warp_k > 1 is rejected separately from the warps-per-block cap below. The [1,2,2]
+// map has a product of 4 and would pass that cap on its own, but it is measured to
+// compile and then return wrong results (max_rel 1.37). It is the corrupting case,
+// not merely an undependable one, so it gets its own rule.
+static_assert(!kCompiledForGfx1250 || SelectedKernel::WarpPerBlock_K == 1,
+              "gfx1250: warp_k must be 1. A warp_k of 2 (the [1,2,2] map) compiles "
+              "and then returns wrong results.");
+
+static_assert(!kCompiledForGfx1250 ||
+                  (SelectedKernel::WarpPerBlock_M * SelectedKernel::WarpPerBlock_N *
+                   SelectedKernel::WarpPerBlock_K) <= 4,
+              "gfx1250 is wave32: a block of more than four warps is not dependable "
+              "there. Paired with a legal tile in a 14,208-row sweep the 8-warp maps "
+              "aborted at launch 2,168 times and passed 192 times, with no wrong "
+              "answers -- unreliable rather than incorrect, so refused here.");
 
 extern "C" {
 
@@ -282,7 +331,7 @@ int dispatcher_run_gemm(const void* A,
     // converts a silent wrong answer into a clean refusal without touching code paths
     // that other architectures depend on. Remove this guard once the AQ tail is
     // padded upstream.
-    if(is_gfx12_arch(std::string(GFX_ARCH)) && (M % 4) != 0)
+    if(kCompiledForGfx12 && (M % 4) != 0)
     {
         std::cerr << "dispatcher_run_gemm: M must be a multiple of 4 on " << GFX_ARCH
                   << " for RowColQuant; got M=" << M << ". The per-row A-scale (AQ) tile "
@@ -528,6 +577,23 @@ int dispatcher_run_gemm(const void* A,
  * Return the compile-time KERNEL_NAME of the force-included kernel.
  */
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
+
+/**
+ * Return the N-tile of the force-included kernel.
+ *
+ * The shape checks in dispatcher_run_gemm derive their bound from SelectedKernel::TileN
+ * so they survive a tile change. Exporting it lets the Python runner report the same
+ * number instead of hardcoding the value of today's default config.
+ */
+int dispatcher_get_tile_n() { return static_cast<int>(SelectedKernel::TileN); }
+
+/**
+ * Return 1 when the force-included kernel was generated with pad_n=true.
+ *
+ * When padding is on the N % TileN constraint does not apply, so the Python
+ * runner needs this to phrase its diagnostics correctly.
+ */
+int dispatcher_get_pad_n() { return SelectedKernel::kPadN ? 1 : 0; }
 
 // This bridge is one-.so-per-kernel by construction: the build force-includes exactly
 // one generated header via `hipcc -include <kernel.hpp>`, giving one SelectedKernel.

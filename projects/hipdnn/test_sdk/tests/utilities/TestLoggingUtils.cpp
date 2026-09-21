@@ -82,99 +82,105 @@ TEST(TestLoggingUtils, IsLoggingEnabledWithInvalidOrUnsetLevels)
 
 TEST(TestStringToSeverity, ValidOffReturnsOptionalWithOff)
 {
-    auto result = detail::stringToSeverity("off");
+    auto result = hipdnn_data_sdk::logging::detail::stringToSeverity("off");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value(), HIPDNN_SEV_OFF);
 }
 
 TEST(TestStringToSeverity, ValidInfoReturnsOptionalWithInfo)
 {
-    auto result = detail::stringToSeverity("info");
+    auto result = hipdnn_data_sdk::logging::detail::stringToSeverity("info");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value(), HIPDNN_SEV_INFO);
 }
 
 TEST(TestStringToSeverity, ValidWarnReturnsOptionalWithWarn)
 {
-    auto result = detail::stringToSeverity("warn");
+    auto result = hipdnn_data_sdk::logging::detail::stringToSeverity("warn");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value(), HIPDNN_SEV_WARN);
 }
 
 TEST(TestStringToSeverity, ValidErrorReturnsOptionalWithError)
 {
-    auto result = detail::stringToSeverity("error");
+    auto result = hipdnn_data_sdk::logging::detail::stringToSeverity("error");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value(), HIPDNN_SEV_ERROR);
 }
 
 TEST(TestStringToSeverity, ValidFatalReturnsOptionalWithFatal)
 {
-    auto result = detail::stringToSeverity("fatal");
+    auto result = hipdnn_data_sdk::logging::detail::stringToSeverity("fatal");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value(), HIPDNN_SEV_FATAL);
 }
 
 TEST(TestStringToSeverity, InvalidStringReturnsNullopt)
 {
-    EXPECT_FALSE(detail::stringToSeverity("invalid").has_value());
-    EXPECT_FALSE(detail::stringToSeverity("debug").has_value());
-    EXPECT_FALSE(detail::stringToSeverity("trace").has_value());
-    EXPECT_FALSE(detail::stringToSeverity("verbose").has_value());
-    EXPECT_FALSE(detail::stringToSeverity("123").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("invalid").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("debug").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("trace").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("verbose").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("123").has_value());
 }
 
 TEST(TestStringToSeverity, EmptyStringReturnsNullopt)
 {
-    EXPECT_FALSE(detail::stringToSeverity("").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("").has_value());
 }
 
 TEST(TestStringToSeverity, CaseInsensitiveMatching)
 {
     // Uppercase
-    ASSERT_TRUE(detail::stringToSeverity("OFF").has_value());
-    EXPECT_EQ(detail::stringToSeverity("OFF").value(), HIPDNN_SEV_OFF);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("OFF").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("OFF").value(), HIPDNN_SEV_OFF);
 
-    ASSERT_TRUE(detail::stringToSeverity("INFO").has_value());
-    EXPECT_EQ(detail::stringToSeverity("INFO").value(), HIPDNN_SEV_INFO);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("INFO").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("INFO").value(), HIPDNN_SEV_INFO);
 
-    ASSERT_TRUE(detail::stringToSeverity("WARN").has_value());
-    EXPECT_EQ(detail::stringToSeverity("WARN").value(), HIPDNN_SEV_WARN);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("WARN").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("WARN").value(), HIPDNN_SEV_WARN);
 
-    ASSERT_TRUE(detail::stringToSeverity("ERROR").has_value());
-    EXPECT_EQ(detail::stringToSeverity("ERROR").value(), HIPDNN_SEV_ERROR);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("ERROR").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("ERROR").value(),
+              HIPDNN_SEV_ERROR);
 
-    ASSERT_TRUE(detail::stringToSeverity("FATAL").has_value());
-    EXPECT_EQ(detail::stringToSeverity("FATAL").value(), HIPDNN_SEV_FATAL);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("FATAL").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("FATAL").value(),
+              HIPDNN_SEV_FATAL);
 
     // Mixed case
-    ASSERT_TRUE(detail::stringToSeverity("Info").has_value());
-    EXPECT_EQ(detail::stringToSeverity("Info").value(), HIPDNN_SEV_INFO);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("Info").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("Info").value(), HIPDNN_SEV_INFO);
 
-    ASSERT_TRUE(detail::stringToSeverity("WaRn").has_value());
-    EXPECT_EQ(detail::stringToSeverity("WaRn").value(), HIPDNN_SEV_WARN);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("WaRn").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("WaRn").value(), HIPDNN_SEV_WARN);
 }
 
 TEST(TestStringToSeverity, TrimsWhitespace)
 {
     // Leading whitespace
-    ASSERT_TRUE(detail::stringToSeverity("  info").has_value());
-    EXPECT_EQ(detail::stringToSeverity("  info").value(), HIPDNN_SEV_INFO);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("  info").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("  info").value(),
+              HIPDNN_SEV_INFO);
 
     // Trailing whitespace
-    ASSERT_TRUE(detail::stringToSeverity("warn  ").has_value());
-    EXPECT_EQ(detail::stringToSeverity("warn  ").value(), HIPDNN_SEV_WARN);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("warn  ").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("warn  ").value(),
+              HIPDNN_SEV_WARN);
 
     // Both ends
-    ASSERT_TRUE(detail::stringToSeverity("  error  ").has_value());
-    EXPECT_EQ(detail::stringToSeverity("  error  ").value(), HIPDNN_SEV_ERROR);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("  error  ").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("  error  ").value(),
+              HIPDNN_SEV_ERROR);
 
     // Tabs and newlines
-    ASSERT_TRUE(detail::stringToSeverity("\tfatal\n").has_value());
-    EXPECT_EQ(detail::stringToSeverity("\tfatal\n").value(), HIPDNN_SEV_FATAL);
+    ASSERT_TRUE(hipdnn_data_sdk::logging::detail::stringToSeverity("\tfatal\n").has_value());
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverity("\tfatal\n").value(),
+              HIPDNN_SEV_FATAL);
 
     // Whitespace-only still invalid
-    EXPECT_FALSE(detail::stringToSeverity("   ").has_value());
+    EXPECT_FALSE(hipdnn_data_sdk::logging::detail::stringToSeverity("   ").has_value());
 }
 
 // ============================================================================
@@ -183,29 +189,29 @@ TEST(TestStringToSeverity, TrimsWhitespace)
 
 TEST(TestStringToSeverityOrOff, ValidInputsReturnCorrectEnum)
 {
-    EXPECT_EQ(detail::stringToSeverityOrOff("off"), HIPDNN_SEV_OFF);
-    EXPECT_EQ(detail::stringToSeverityOrOff("info"), HIPDNN_SEV_INFO);
-    EXPECT_EQ(detail::stringToSeverityOrOff("warn"), HIPDNN_SEV_WARN);
-    EXPECT_EQ(detail::stringToSeverityOrOff("error"), HIPDNN_SEV_ERROR);
-    EXPECT_EQ(detail::stringToSeverityOrOff("fatal"), HIPDNN_SEV_FATAL);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("off"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("info"), HIPDNN_SEV_INFO);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("warn"), HIPDNN_SEV_WARN);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("error"), HIPDNN_SEV_ERROR);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("fatal"), HIPDNN_SEV_FATAL);
 }
 
 TEST(TestStringToSeverityOrOff, InvalidInputReturnsOff)
 {
-    EXPECT_EQ(detail::stringToSeverityOrOff("invalid"), HIPDNN_SEV_OFF);
-    EXPECT_EQ(detail::stringToSeverityOrOff("debug"), HIPDNN_SEV_OFF);
-    EXPECT_EQ(detail::stringToSeverityOrOff("trace"), HIPDNN_SEV_OFF);
-    EXPECT_EQ(detail::stringToSeverityOrOff("123"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("invalid"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("debug"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("trace"), HIPDNN_SEV_OFF);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("123"), HIPDNN_SEV_OFF);
 }
 
 TEST(TestStringToSeverityOrOff, EmptyStringReturnsOff)
 {
-    EXPECT_EQ(detail::stringToSeverityOrOff(""), HIPDNN_SEV_OFF);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff(""), HIPDNN_SEV_OFF);
 }
 
 TEST(TestStringToSeverityOrOff, CaseInsensitiveAndTrimsWhitespace)
 {
-    EXPECT_EQ(detail::stringToSeverityOrOff("  INFO  "), HIPDNN_SEV_INFO);
-    EXPECT_EQ(detail::stringToSeverityOrOff("\tWARN\n"), HIPDNN_SEV_WARN);
-    EXPECT_EQ(detail::stringToSeverityOrOff("Error"), HIPDNN_SEV_ERROR);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("  INFO  "), HIPDNN_SEV_INFO);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("\tWARN\n"), HIPDNN_SEV_WARN);
+    EXPECT_EQ(hipdnn_data_sdk::logging::detail::stringToSeverityOrOff("Error"), HIPDNN_SEV_ERROR);
 }
