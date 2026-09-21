@@ -264,6 +264,65 @@ class AvailableCpusTest(unittest.TestCase):
                 self.assertGreaterEqual(available_cpus(self._root(files)), 1)
 
 
+class DriftTest(unittest.TestCase):
+    """What `--check` forgives, and what it must not.
+
+    The column embeds the exact ROCm build that measured it, so a byte
+    comparison fails on any host whose patch level differs from the one that
+    blessed the artifact -- which is most of them, and none of them for a
+    reason anyone can act on. But the fields saying *how* the probe was posed
+    are ours, not the host's, and forgiving those would forgive the class of
+    defect they were added to expose.
+    """
+
+    def _doc(self, **toolchain) -> str:
+        tc = {
+            "flavor": "llvm22",
+            "clang": "AMD clang version 22.0.0git (... roc-7.2.4 26084 abc)",
+            "arches": ["gfx942"],
+            "generator": G.GENERATOR,
+            "probe_cflags": ["-O0", "-nogpulib"],
+            "probe_timeout_s": 60,
+        }
+        tc.update(toolchain)
+        return json.dumps(
+            {
+                "schema": G.SCHEMA,
+                "toolchain": tc,
+                "keys": {"a.b": {"gfx942": {"status": G.STATUS_OK}}},
+                "canonical": {},
+            }
+        )
+
+    def test_a_different_compiler_build_is_not_drift(self):
+        other = "AMD clang version 22.0.0git (... roc-7.2.0 26014 def)"
+        self.assertIsNone(G._drift(self._doc(), self._doc(clang=other)))
+
+    def test_a_changed_measurement_is_drift_and_says_which(self):
+        fresh = json.loads(self._doc())
+        fresh["keys"]["a.b"]["gfx942"]["status"] = G.STATUS_ARCH_ABSENT
+        why = G._drift(self._doc(), json.dumps(fresh))
+        self.assertIsNotNone(why)
+        self.assertIn("a.b/gfx942", why)
+        self.assertIn(G.STATUS_ARCH_ABSENT, why)
+
+    def test_a_changed_probe_method_is_drift_even_with_identical_cells(self):
+        """The `-O0` case. Same clang, same cells, different question -- and
+        the cells are identical only because nobody re-ran them yet."""
+        for field, value in (
+            ("probe_cflags", ["-nogpulib"]),
+            ("probe_timeout_s", 5),
+            ("generator", G.GENERATOR + 1),
+        ):
+            with self.subTest(field=field):
+                why = G._drift(self._doc(), self._doc(**{field: value}))
+                self.assertIsNotNone(why, field)
+                self.assertIn("toolchain", why)
+
+    def test_an_unreadable_column_is_drift_not_a_crash(self):
+        self.assertIn("not valid JSON", G._drift("{oops", self._doc()))
+
+
 class ArchDomainRegenerationTest(unittest.TestCase):
     """Re-probe this host's flavor and require the committed column to match."""
 
