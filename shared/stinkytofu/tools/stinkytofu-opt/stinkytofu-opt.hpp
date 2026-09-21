@@ -230,6 +230,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
+         options.enableTensorDescriptorWar = hasPassArg(args, "enableTensorDescriptorWar");
          return createStinkyWaitCntInsertionPass(options);
      }},
     // Gfx1250HazardPass accepts:

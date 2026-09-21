@@ -35,6 +35,13 @@ struct WaitCntInsertionOptions {
     /// sweep, preventing tensor state from propagating through back-edges.
     /// Enable to restore conservative tensor fixed-point iteration.
     bool enableLoopCarriedTokenDeps = false;
+
+    /// Disabled by default: only the cluster-multicast producer re-reads a
+    /// tensor_load_to_lds descriptor after issue, so only it needs the WAR
+    /// drain before the descriptor SGPRs are advanced. Enabling it elsewhere
+    /// serialises the ordinary TDM double-buffer idiom, which issues a load
+    /// and then immediately bumps that same descriptor.
+    bool enableTensorDescriptorWar = false;
 };
 
 /**

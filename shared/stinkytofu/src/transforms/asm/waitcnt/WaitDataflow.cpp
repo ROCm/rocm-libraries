@@ -745,7 +745,7 @@ int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowSta
 // Compute per-counter required waits for `inst` against the live `state`.
 void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                           const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& rawNeedsWait,
-                          int required[CK_Count]) {
+                          bool tensorDescriptorWarEnabled, int required[CK_Count]) {
     // Required wait per counter. -1 = no constraint yet.
     for (int c = 0; c < CK_Count; ++c) required[c] = WaitCountSpec::kUnused;
 
@@ -800,7 +800,10 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     };
 
     // WAR on in-flight tensor_load_to_lds descriptors: drain TDM before s_add/s_xor of src SGPRs.
-    if (!inst->is(InstFlag::IF_WaitCnt) && !inst->is(InstFlag::IF_WaitTensorCnt) &&
+    // Off unless the caller opts in, because the plain TDM double-buffer idiom issues a load and
+    // then immediately advances that same descriptor; draining there would serialise every fill.
+    if (tensorDescriptorWarEnabled && !inst->is(InstFlag::IF_WaitCnt) &&
+        !inst->is(InstFlag::IF_WaitTensorCnt) &&
         !inst->getDestRegs().empty()) {
         for (const auto& q : state.queues[CK_Tensor]) {
             const int qsize = static_cast<int>(q.ops.size());
@@ -975,7 +978,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         if (creditIfObservedWait(*inst, state, emit)) continue;
 
         int required[CK_Count];
-        computeRequiredWaits(inst, state, rawNeedsWait, required);
+        computeRequiredWaits(inst, state, rawNeedsWait, tensorDescriptorWarEnabled, required);
 
         // Decide what to emit (apply redundancy elision) and trim per-pred
         // queues accordingly.
@@ -1167,7 +1170,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 if (creditIfObservedWait(*inst, state, emit)) continue;
 
                 int computed[CK_Count];
-                computeRequiredWaits(inst, state, rawNeedsWait, computed);
+                computeRequiredWaits(inst, state, rawNeedsWait, tensorDescriptorWarEnabled, computed);
 
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.

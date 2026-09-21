@@ -395,7 +395,7 @@ Each RAW contribution is gated by `rawNeedsWait[c](*inst)` — the per-counter p
 Per instruction, `required[c]` starts at `kUnused` and is tightened to the min wait across all contributing deps on counter `c`:
 
 1. **RAW from SSA** — walk `getSources()` as above; gated by `rawNeedsWait[c](*inst)`.
-2. **Tensor-descriptor WAR** — any instruction whose destination overlaps a source of an in-flight `tensor_load_to_lds` tightens `CK_Tensor` (see below).
+2. **Tensor-descriptor WAR** — opt-in (`WaitCntInsertionOptions::enableTensorDescriptorWar`); any instruction whose destination overlaps a source of an in-flight `tensor_load_to_lds` tightens `CK_Tensor` (see below).
 3. **Anti-deps (DS)** — `scanDsAntiDeps` for LDS writers (`tensor_load_to_lds`, `ds_write`) and LDS-fencing barriers with `MemTokenData` token overlap against per-pred DS queues; same-pipeline pairs (`ds_write` vs `ds_read`) skipped.
 4. **Tensor untagged scan** — tensor anchors with tagged tokens still scan for in-flight tensor loads lacking `MemTokenData`.
 5. **Conservative fallbacks** — force wait 0 when disjointness cannot be proved (see table below).
@@ -406,7 +406,9 @@ Per instruction, `required[c]` starts at `kUnused` and is tightened to the min w
 
 The exposure is real because the descriptor SGPRs are precisely what gets updated for the next buffer: an `s_add_u32` to advance the address, an `s_xor_b32` to ping-pong the LDS half. With `ScheduleIterAlg=4` the scheduler is free to hoist those above the `s_wait_tensorcnt`.
 
-`computeRequiredWaits` therefore scans, for every instruction that has destinations and is not itself a wait, the in-flight `CK_Tensor` queues:
+The rule is **off by default** and enabled only for the cluster-multicast producer, via `WaitCntInsertionOptions::enableTensorDescriptorWar` (set from `ModuleOptions::StreamKMulticast` in `Gfx1250Backend`, the same condition that gates `InsertClusterBarrierPass`'s prologue drain). Enabled unconditionally it also fires on the plain single-workgroup TDM double buffer, whose canonical shape is "issue `tensor_load_to_lds`, then advance that very descriptor for the next buffer" — draining there turns every asynchronous fill into a synchronous load, which is what decoupled PGR's early fill exists to avoid.
+
+When enabled, `computeRequiredWaits` scans, for every instruction that has destinations and is not itself a wait, the in-flight `CK_Tensor` queues:
 
 ```cpp
 if (!instWritesSrcOf(*inst, *op)) continue;

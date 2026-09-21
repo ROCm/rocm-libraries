@@ -206,6 +206,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 WaitCntInsertionOptions waitCntOptions;
                 waitCntOptions.enableLoopCarriedTokenDeps =
                     moduleOptions.EnableLoopCarriedTokenDeps;
+                // Only the multicast producer re-reads its tensor descriptor after issue;
+                // InsertClusterBarrierPass gates its prologue drain on the same condition.
+                waitCntOptions.enableTensorDescriptorWar =
+                    moduleOptions.StreamKMulticast >= kStreamKMulticastOn;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }

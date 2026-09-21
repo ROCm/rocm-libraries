@@ -1,8 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass=enableTensorDescriptorWar --print-output
 #
 # Drain tlcnt before s_add/s_xor of an in-flight tensor_load descriptor.
+# The rule is opt-in (cluster-multicast producers only), hence the pass arg.
 # CHECK-LABEL: @waitcnt_insertion_tensor_descriptor_war
 # CHECK: tensor_load_to_lds
 # CHECK-NEXT: s_wait_tensorcnt

@@ -332,7 +332,8 @@ Emitted comment: `retire TDM before LDS ping-pong XOR`.
 The same hazard is modelled generally, for every in-flight descriptor rather than
 just the prologue one, by
 [the tensor-descriptor WAR scan](../user/stinky-waitcnt-insertion-pass.md#tensor-descriptor-war)
-in `StinkyWaitCntInsertionPass`. That pass is region-scoped to `loopWithPrefetch`
+in `StinkyWaitCntInsertionPass`, which is enabled on the same `streamKMulticast >=
+kStreamKMulticastOn` condition. That pass is region-scoped to `loopWithPrefetch`
 and `noLoadLoopBody`, so it does not see the prologue; this rule covers it. Where
 the two do overlap, the guards above suppress the duplicate.
 ## kRule3CrossLoop

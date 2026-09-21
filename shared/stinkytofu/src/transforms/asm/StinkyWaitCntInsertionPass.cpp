@@ -70,6 +70,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         // to IR mutation below.
         WaitDataflow df(func, domInfo, rpo);
         df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
+        df.setTensorDescriptorWarEnabled(options.enableTensorDescriptorWar);
 
         // Tensor drains at WG barriers (not cluster -3) or when there is a single wave.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
