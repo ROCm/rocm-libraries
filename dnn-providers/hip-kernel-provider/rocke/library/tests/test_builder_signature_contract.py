@@ -201,6 +201,13 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    # The KDA chunkwise specs demand nothing: every field, problem shape included,
+    # carries a default, so a descriptor may omit any of them. `KdaTileSpec` is the
+    # nested tiling struct reached through the `tile` field of the other three.
+    "kernels.gfx942.kda_chunkwise.KdaChunkFusedSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaChunkPrepSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaChunkScanSpec": (),
+    "kernels.gfx942.kda_chunkwise.KdaTileSpec": (),
     # Every gfx950-only codegen knob is defaulted.
     "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec": (
         "batch",
@@ -238,8 +245,58 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
         "num_query_heads",
         "num_segments",
     ),
+    "kernels.gfx950.gdn_decode.GdnDecodeSpec": (),
+    # gfx950's KDA specs carry extra fusion / split knobs over gfx942's, all
+    # defaulted, so the required set is empty on this arch too.
+    "kernels.gfx950.kda_chunkwise.KdaChunkFusedSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkPrepSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaChunkScanSpec": (),
+    "kernels.gfx950.kda_chunkwise.KdaTileSpec": (),
     # Reached through a spec field, so a descriptor has to express it too.
     "rocke.helpers.qk_scale.QkScaleSpec": ("layout",),
+    # Convolution specs (migrated from platform to library in AICK-5627).
+    # Required fields are the problem shape; everything else carries a default.
+    "kernels.common._conv_implicit_gemm_common.ConvProblem": (
+        "C",
+        "Hi",
+        "K",
+        "N",
+        "Wi",
+        "X",
+        "Y",
+    ),
+    "kernels.common._conv_implicit_gemm_common.ConvDataSpec": (),
+    "kernels.common._conv_implicit_gemm_common.ConvAccumulatorEpilogue": (),
+    "kernels.common.conv_implicit_gemm.ImplicitGemmConvSpec": ("problem",),
+    "kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec": ("problem",),
+    "kernels.common.conv_wgrad_workspace_reduce.WgradReduceSpec": ("problem",),
+    "kernels.common.conv_implicit_gemm_dgrad.DgradConvSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvProblem": (
+        "H",
+        "N",
+        "W",
+        "cpg",
+        "groups",
+        "kpg",
+    ),
+    "kernels.common.conv_direct_grouped.DirectConv4cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv8cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv16cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConv32cSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseSpatialSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectConvDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectDepthwiseDgradStreamSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectTransposeWeightsDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectReorganizeWeightsSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectCoalescedWeightsDgradSpec": ("problem",),
+    "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
+    "kernels.common.deep_fused_conv_pool.FusedConvPoolProblem": ("conv",),
+    "kernels.common.deep_fused_conv_pool.DeepFusedConvPoolSpec": ("problem",),
+    "kernels.common.img2col.Img2ColSpec": ("problem",),
+    "kernels.gfx1151.deep_fused_conv_pool.Gfx1151DeepFusedConvPoolSpec": ("problem",),
 }
 
 

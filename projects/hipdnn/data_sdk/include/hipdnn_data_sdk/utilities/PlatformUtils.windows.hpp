@@ -5,10 +5,7 @@
 
 #ifdef _WIN32
 
-// Only the macro names must not escape this header, not the lean include itself: define both
-// only if the includer has not already, and undefine only what we defined, right after
-// <windows.h>. This cannot restore min/max in a translation unit where <windows.h> was already
-// processed with NOMINMAX set elsewhere -- the undef does not re-run <windows.h>.
+// Keep caller-defined macros; undefine only those introduced for this include.
 #ifndef NOMINMAX
 #define NOMINMAX
 #define HIPDNN_UNDEF_NOMINMAX
@@ -28,9 +25,9 @@
 #endif
 
 #include <algorithm>
-#include <array>
 #include <cwctype>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -47,38 +44,80 @@ using SharedLibraryHandle = HMODULE;
 
 inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 {
-    // The sizing call counts the terminator, the fetching call does not.
-    const DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
-    if(size == 0)
+    // The sizing call counts the terminator, the fetching call does not, so a fetch that
+    // fits always reports less than it was given -- including zero for a variable that is
+    // set to an empty value, which is a successful read and not an absent one. The
+    // environment block is private to this process, so no other process can reach in
+    // between the two calls, but another thread in this process can replace the value; when
+    // the new value no longer fits, the fetch writes nothing and returns the size it now
+    // requires, terminator included, so retry with that size until the fetch reports a
+    // length that fits.
+    DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
+    while(size != 0)
+    {
+        std::string value(size, '\0');
+        const DWORD copied = GetEnvironmentVariableA(var, value.data(), size);
+        if(copied < size)
+        {
+            value.resize(copied);
+            return value;
+        }
+        size = copied;
+    }
+
+    return defaultValue != nullptr ? defaultValue : "";
+}
+
+/// Reads native UTF-16 without getEnv()'s lossy ANSI conversion.
+/// Use for native Windows paths.
+inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
+{
+    // Sized and retried exactly as getEnv() above; see that comment for the same-process
+    // growth race and for why a zero-length fetch is an empty value rather than an absent
+    // one.
+    DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
+    while(size != 0)
+    {
+        std::wstring value(size, L'\0');
+        const DWORD copied = GetEnvironmentVariableW(var, value.data(), size);
+        if(copied < size)
+        {
+            value.resize(copied);
+            return value;
+        }
+        size = copied;
+    }
+
+    return defaultValue != nullptr ? defaultValue : L"";
+}
+
+/// Always false: an unprivileged invoker's environment does not survive into a privileged
+/// image on Windows. Elevation re-launches the image from the elevating shell and the new
+/// process inherits that shell's environment, so there is no equivalent of a set-user-ID
+/// execve where an attacker-controlled environment crosses a privilege boundary intact.
+inline bool isSecureExecution()
+{
+    return false;
+}
+
+/// Code-loading environment lookup; equivalent to getEnv() on Windows.
+inline std::string getSecureEnv(const char* var, const char* defaultValue = nullptr)
+{
+    if(isSecureExecution())
     {
         return defaultValue != nullptr ? defaultValue : "";
     }
-
-    std::string value(size, '\0');
-    value.resize(GetEnvironmentVariableA(var, value.data(), size));
-    return value;
+    return getEnv(var, defaultValue);
 }
 
-/// Wide sibling of getEnv(): reads through GetEnvironmentVariableW, which hands back the
-/// environment's native UTF-16 verbatim. getEnv() above goes through
-/// GetEnvironmentVariableA instead, which transcodes that same UTF-16 through the
-/// process's ANSI code page -- a lossy, locale-dependent step for any non-ASCII
-/// character. A caller that must feed the result to something UTF-16-native (notably
-/// std::filesystem::path's wstring constructor, or CreateFileW) should read wide from the
-/// start rather than narrow-then-reinterpret.
-inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
+/// Wide counterpart of getSecureEnv(); equivalent to getEnvW() on Windows.
+inline std::wstring getSecureEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
 {
-    // Same two-call sizing convention as getEnv(): the sizing call counts the
-    // terminator, the fetching call does not.
-    const DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
-    if(size == 0)
+    if(isSecureExecution())
     {
         return defaultValue != nullptr ? defaultValue : L"";
     }
-
-    std::wstring value(size, L'\0');
-    value.resize(GetEnvironmentVariableW(var, value.data(), size));
-    return value;
+    return getEnvW(var, defaultValue);
 }
 
 inline void setEnv(const char* var, const char* value)
@@ -94,22 +133,16 @@ inline void unsetEnv(const char* var)
     SetEnvironmentVariableA(var, nullptr);
 }
 
-/// Expands a **leading** `~` or **leading** `%USERPROFILE%` in @p path to the current
-/// user's home directory; see PlatformUtils.linux.hpp's expandUser() for the full
-/// leading-token/fallback contract, which applies here with `%USERPROFILE%` (matched
-/// case-insensitively) accepted alongside `~`.
-///
-/// @param path The path string to expand, e.g. as read from a config value or env var.
-/// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
-///     `%USERPROFILE%`'s value, or @p path unchanged if no leading token qualifies or
-///     `USERPROFILE` is unset/empty. Never throws.
+/// Expands leading `~` or case-insensitive `%USERPROFILE%` to USERPROFILE only
+/// when alone or followed by a path separator. Returns @p path unchanged if no
+/// token qualifies or USERPROFILE is unset/empty. Never throws.
+/// Not secure-execution aware: USERPROFILE is read with getEnv(), not getSecureEnv().
+/// Never use on a path that will subsequently be loaded as code.
 inline std::string expandUser(const std::string& path)
 {
-    // A leading '~' qualifies only alone or followed by a path separator.
     const bool hasLeadingTilde = !path.empty() && path.front() == '~'
                                  && (path.size() == 1 || path[1] == '/' || path[1] == '\\');
 
-    // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
     static const std::string kUserProfileToken = "%userprofile%";
     const std::string lowerPath = toLower(path);
     const bool hasLeadingToken
@@ -133,24 +166,14 @@ inline std::string expandUser(const std::string& path)
     return userProfile + path.substr(tokenLength);
 }
 
-/// Wide sibling of expandUser(): identical leading-token/fallback contract, but composed
-/// entirely in UTF-16 via getEnvW() so a non-ASCII `%USERPROFILE%` value (e.g. a
-/// non-ASCII Windows account name) survives intact. expandUser() above narrows through
-/// getEnv()/GetEnvironmentVariableA, which is lossy for exactly that case -- see getEnvW()
-/// for why -- and callers composing a std::filesystem::path (which MSVC's
-/// std::filesystem interprets as UTF-8, not the ANSI code page) must use this instead.
-///
-/// @param path The path string to expand, as UTF-16.
-/// @return @p path with a qualifying leading `~` or `%USERPROFILE%` replaced by
-///     `%USERPROFILE%`'s value, or @p path unchanged if no leading token qualifies or
-///     `USERPROFILE` is unset/empty. Never throws.
+/// UTF-16 expandUser() with the same leading-token and fallback rules.
+/// Use for native paths to preserve non-ASCII USERPROFILE values. Never throws.
+/// Not secure-execution aware, exactly as expandUser() above.
 inline std::wstring expandUserW(const std::wstring& path)
 {
-    // A leading '~' qualifies only alone or followed by a path separator.
     const bool hasLeadingTilde = !path.empty() && path.front() == L'~'
                                  && (path.size() == 1 || path[1] == L'/' || path[1] == L'\\');
 
-    // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
     static const std::wstring kUserProfileToken = L"%userprofile%";
     std::wstring lowerPath = path;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
@@ -177,29 +200,112 @@ inline std::wstring expandUserW(const std::wstring& path)
 
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
-    return toLower(a.string()) == toLower(b.string());
+    return CompareStringOrdinal(a.native().c_str(),
+                                static_cast<int>(a.native().size()),
+                                b.native().c_str(),
+                                static_cast<int>(b.native().size()),
+                                TRUE)
+           == CSTR_EQUAL;
 }
+
+namespace detail
+{
+/// Full path of @p handle's module, sized to whatever the loader reports it needs.
+/// A null handle names the current executable.
+/// @p what names the lookup being attempted in the failure messages, and @p subject, when
+/// non-empty, names the module; callers that reach a module by handle or by address have
+/// no name to report.
+inline std::wstring moduleFileName(HMODULE handle, const char* what, const char* subject = nullptr)
+{
+    const auto describe = [what, subject] {
+        std::string message = "Failed to get ";
+        message += what;
+        if(subject != nullptr && *subject != '\0')
+        {
+            message += ": ";
+            message += subject;
+        }
+        return message;
+    };
+
+    // Extended-length paths exceed MAX_PATH, and GetModuleFileNameW reports truncation
+    // by filling the buffer rather than failing. Retry with a larger one instead of
+    // discarding a path this module genuinely has.
+    std::wstring modulePath(MAX_PATH, L'\0');
+    DWORD capacity = static_cast<DWORD>(modulePath.size());
+    DWORD length = GetModuleFileNameW(handle, modulePath.data(), capacity);
+    if(length == 0)
+    {
+        const DWORD error = GetLastError();
+        throw std::runtime_error(describe() + " (Error Code: " + std::to_string(error) + ")");
+    }
+
+    while(length >= capacity)
+    {
+        constexpr DWORD MAX_CAPACITY = (std::numeric_limits<DWORD>::max)() / 2;
+        if(capacity > MAX_CAPACITY)
+        {
+            throw std::runtime_error(describe() + ": path is implausibly long");
+        }
+        capacity *= 2;
+
+        modulePath.assign(capacity, L'\0');
+        length = GetModuleFileNameW(handle, modulePath.data(), capacity);
+        if(length == 0)
+        {
+            const DWORD error = GetLastError();
+            throw std::runtime_error(describe() + " (Error Code: " + std::to_string(error) + ")");
+        }
+    }
+
+    modulePath.resize(length);
+    return modulePath;
+}
+} // namespace detail
 
 inline std::filesystem::path getCurrentExecutableDirectory()
 {
-    std::array<wchar_t, MAX_PATH> result{};
-    const DWORD length = GetModuleFileNameW(nullptr, result.data(), MAX_PATH);
-    if(length == 0 || length == MAX_PATH)
-    {
-        throw std::runtime_error("Failed to get executable path");
-    }
-    return std::filesystem::path(result.data()).parent_path();
+    return std::filesystem::path(detail::moduleFileName(nullptr, "executable path")).parent_path();
 }
 
-inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
+namespace detail
 {
-    auto handle = LoadLibraryW(libraryPath.wstring().c_str());
+/// Opens @p libraryPath through @p flags; zero is the plain LoadLibraryW search order.
+inline SharedLibraryHandle openLibraryWithFlags(const std::filesystem::path& libraryPath,
+                                                DWORD flags)
+{
+    HMODULE handle = LoadLibraryExW(libraryPath.c_str(), nullptr, flags);
     if(handle == nullptr)
     {
-        throw std::runtime_error("Failed to load library: " + libraryPath.string()
-                                 + " (Error Code: " + std::to_string(GetLastError()) + ")");
+        const DWORD error = GetLastError();
+        // The error code is captured above, before any formatting that could fail.
+        throw std::runtime_error("Failed to load library: " + pathForDiagnostic(libraryPath)
+                                 + " (Error Code: " + std::to_string(error) + ")");
     }
     return handle;
+}
+} // namespace detail
+
+/// Opens @p libraryPath on the loader's standard search order, which resolves the opened
+/// module's own dependents from the application directory. Libraries that ship in a
+/// subdirectory of the application -- engine and heuristic plugins -- depend on that, since
+/// Windows has no RPATH equivalent to point them back at their dependents.
+inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
+{
+    return detail::openLibraryWithFlags(libraryPath, 0);
+}
+
+/// Opens @p libraryPath with its own directory searched first for its first-level
+/// dependents. The alternate order substitutes that directory for the application
+/// directory rather than adding to it, so a dependent shipped beside the executable and
+/// not beside @p libraryPath resolves through %PATH%; use openLibrary() unless the opened
+/// module is known to sit with its dependents. LOAD_WITH_ALTERED_SEARCH_PATH is documented
+/// as undefined for a relative path, so one stays on the standard order.
+inline SharedLibraryHandle
+    openLibraryWithOwnDirectoryFirst(const std::filesystem::path& libraryPath)
+{
+    return detail::openLibraryWithFlags(
+        libraryPath, libraryPath.is_absolute() ? LOAD_WITH_ALTERED_SEARCH_PATH : 0);
 }
 
 inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& libraryPath)
@@ -210,6 +316,22 @@ inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& librar
         return nullptr;
     }
     return handle;
+}
+
+/// Directory of exactly @p handle's module, without address or name lookup.
+inline std::filesystem::path getLoadedLibraryOrigin(SharedLibraryHandle handle)
+{
+    if(handle == nullptr)
+    {
+        throw std::runtime_error("Failed to get library origin: null handle");
+    }
+
+    const std::wstring modulePath = detail::moduleFileName(handle, "library origin");
+
+    // Resolve symlinks to find siblings; retain the module path on failure.
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(modulePath, failed);
+    return (failed ? std::filesystem::path(modulePath) : resolved).parent_path();
 }
 
 inline void closeLibrary(SharedLibraryHandle handle)
@@ -230,21 +352,12 @@ inline std::filesystem::path getLoadedLibraryDirectory(const char* libraryName)
         throw std::runtime_error("Failed to find loaded library: " + std::string(libraryName));
     }
 
-    std::array<wchar_t, MAX_PATH> result{};
-    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
-    if(length == 0 || length >= result.size())
-    {
-        throw std::runtime_error("Failed to get loaded library path: " + std::string(libraryName));
-    }
-
-    return std::filesystem::path(result.data()).parent_path();
+    return std::filesystem::path(detail::moduleFileName(handle, "loaded library path", libraryName))
+        .parent_path();
 }
 
-/// The directory of the module @p address belongs to -- the Windows counterpart of the
-/// dladdr() form: it works however the module was loaded and needs nothing exported, so
-/// prefer it over the by-name form when asking "where am I loaded from" about the calling
-/// module itself. Uses GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT since the caller isn't
-/// taking ownership.
+/// Directory owning @p address, regardless of exports or how the module was loaded.
+/// Borrows the module handle without changing its reference count.
 inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
 {
     HMODULE handle = nullptr;
@@ -257,18 +370,13 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
         throw std::runtime_error("Failed to find loaded library for address");
     }
 
-    std::array<wchar_t, MAX_PATH> result{};
-    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
-    if(length == 0 || length >= result.size())
-    {
-        throw std::runtime_error("Failed to get loaded library path for address");
-    }
+    const std::wstring modulePath
+        = detail::moduleFileName(handle, "loaded library path for address");
 
-    // Canonicalized so a module reached through a symlink answers with the directory its
-    // siblings actually sit in, same as the dladdr form on Linux.
+    // Resolve symlinks to find siblings; retain the module path on failure.
     std::error_code failed;
-    const auto resolved = std::filesystem::weakly_canonical(result.data(), failed);
-    return (failed ? std::filesystem::path(result.data()) : resolved).parent_path();
+    const auto resolved = std::filesystem::weakly_canonical(modulePath, failed);
+    return (failed ? std::filesystem::path(modulePath) : resolved).parent_path();
 }
 
 } // namespace hipdnn_data_sdk::utilities
