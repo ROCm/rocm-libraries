@@ -1,0 +1,65 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertClusterBarrierPass --print-output
+#
+# Multicast OFF (the gfx1250 v0 regime): a workgroup cluster is launched, so the
+# cluster barrier is still owed, but there is no TDM broadcast (ld_bcst) behind
+# the tensor loads. Every s_wait_tensorcnt this pass plants is a cooperative
+# drain that only a multicast producer retires, so with multicast off none may
+# be emitted -- a wait with nothing to retire is the hang this fixture exists to
+# catch.
+#
+# Both multicast-gated drain sites are in the input:
+#   1. prologue TDM drain before the LDS ping-pong s_xor_b32
+#   2. producer drain after the cooperative tensor_load group in the loop body
+# Neither may fire here. The paired positive control is
+# cluster_barrier_multicast_on_cooperative_drain.stir; with multicast on the
+# same input grows a drain at both sites.
+#
+# The handshake CHECKs are not decoration: without them a pass that silently did
+# nothing would satisfy every CHECK-NOT below and the fixture would be green for
+# the wrong reason.
+
+# CHECK-LABEL: @cluster_barrier_multicast_off_no_cooperative_drain
+
+# Rule 1 posts the prologue arrive below label_GSU_1 ...
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: "st.s_barrier_signal"(-3)
+
+# ... and Rule 2's wait in front of the run-up's first tensor load drinks it.
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: "st.s_barrier_wait"(-3)
+
+# Drain site 1: the prologue load is followed straight by the ping-pong XOR.
+# CHECK-NEXT: "st.tensor_load_to_lds"(s[60:63]
+# CHECK-NEXT: s_xor_b32
+
+# Drain site 2: the loop body's cooperative load is followed straight by the
+# next WMMA, with no producer drain wedged in before the back edge.
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: "st.tensor_load_to_lds"(s[0:3]
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @cluster_barrier_multicast_off_no_cooperative_drain() {
+^entry:
+label_GSU_1:
+  a[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], a[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.tensor_load_to_lds"(s[60:63], s[64:71]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  s1 = "st.s_xor_b32"(s1, 65536) { issueCycles = 1, latencyCycles = 1 }
+label_PreLoopJoin:
+  a[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[16:23], a[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+label_TestLoop:
+  a[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], a[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  a[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[8:15], v[0:7], a[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  SCC0 = "st.s_cmp_eq_u32"(s91, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc1"(label_TestLoopEnd, SCC0) { issueCycles = 1, latencyCycles = 1 }
+  SCC0 = "st.s_cmp_eq_u32"(s92, 0) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_cbranch_scc0"(label_TestLoop, SCC0) { issueCycles = 1, latencyCycles = 1 }
+label_TestLoopEnd:
+  a[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], a[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

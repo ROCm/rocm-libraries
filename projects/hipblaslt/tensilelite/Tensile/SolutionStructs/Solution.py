@@ -37,8 +37,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple, effectiveMatrixInstMN, isPow2, \
-                    clusterEnabled, streamKCluster, streamKMulticast, \
-                    streamK2DCluster, deriveWaveParams, \
+                    clusterEnabled, streamKCluster, deriveWaveParams, \
                     swizzleGeometry
 from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
@@ -2053,20 +2052,17 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
                  "(cluster support is SK3-only)")
-        # Stream-K clustering is cluster-launch-only: SK3 plus ClusterDim not
-        # [1, 1]. Cs == 1 is A-only (N-adjacent peers); Ck == 1 is B-only.
-        #
-        # develop additionally rejected a Y-extent > 1 unless StreamKForceDPOnly=1,
-        # because the Ck rank is folded back into a unique tile index in
-        # StreamK.preLoop and that fold only existed on the FDPO=1 launch. FDPO=0
-        # now performs the same fold over the persisted DP tile space, so the
-        # restriction is lifted rather than carried forward.
-        elif not streamKCluster(state):
-          reject(state, printRejectionReason,
-                 "Stream-K + ClusterDim requires StreamK=3 cluster multicast "
-                 "(got StreamK=%s ClusterDim=%s)"
-                 % (state["StreamK"], state["ClusterDim"]))
         else:
+          # What reaches here is exactly streamKCluster: StreamK is 3 (0 is
+          # excluded above, 4/5 just rejected) and ClusterDim is a cluster
+          # launch. Cs == 1 is A-only (N-adjacent peers); Ck == 1 is B-only.
+          #
+          # develop additionally rejected a Y-extent > 1 unless StreamKForceDPOnly=1,
+          # because the Ck rank is folded back into a unique tile index in
+          # StreamK.preLoop and that fold only existed on the FDPO=1 launch. FDPO=0
+          # now performs the same fold over the persisted DP tile space, so the
+          # restriction is lifted rather than carried forward.
+          #
           # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
           state["StreamKXCCMapping"] = 0
           # WorkGroupMappingXCC is the second WorkGroup0 remap (the wgmXCC CU-count
@@ -2088,6 +2084,12 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "General batch not supported with Stream-K")
       if state["ProblemType"]["GroupedGemm"]:
         reject(state, printRejectionReason, "Grouped gemm not yet supported with Stream-K")
+      if state["ProblemType"]["OutputAmaxD"]:
+        # AmaxD's cross-workgroup reduction counts NumWorkGroups0 * NumWorkGroups1
+        # (a tile count), but Stream-K launches sk.grid workgroups, so the last
+        # arriver is never identified. Stream-K's no-work-workgroup exit also
+        # returns before insertAmaxD, leaving the output stale.
+        reject(state, printRejectionReason, "OutputAmaxD not supported with Stream-K")
       if state["ScheduleGlobalRead"] != 1:
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:

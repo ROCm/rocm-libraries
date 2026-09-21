@@ -803,8 +803,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     // Off unless the caller opts in, because the plain TDM double-buffer idiom issues a load and
     // then immediately advances that same descriptor; draining there would serialise every fill.
     if (tensorDescriptorWarEnabled && !inst->is(InstFlag::IF_WaitCnt) &&
-        !inst->is(InstFlag::IF_WaitTensorCnt) &&
-        !inst->getDestRegs().empty()) {
+        !inst->is(InstFlag::IF_WaitTensorCnt) && !inst->getDestRegs().empty()) {
         for (const auto& q : state.queues[CK_Tensor]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
@@ -1170,7 +1169,8 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 if (creditIfObservedWait(*inst, state, emit)) continue;
 
                 int computed[CK_Count];
-                computeRequiredWaits(inst, state, rawNeedsWait, tensorDescriptorWarEnabled, computed);
+                computeRequiredWaits(inst, state, rawNeedsWait, tensorDescriptorWarEnabled,
+                                     computed);
 
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.

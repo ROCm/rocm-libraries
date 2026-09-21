@@ -2601,6 +2601,36 @@ namespace TensileLite
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
 
+        // WG-cluster launch is StreamK=3-only. SolutionStructs/Solution.py rejects
+        // every other Stream-K mode with a ClusterDim (streamKCluster()), but that
+        // is a generator-side invariant only: library load maps StreamK,
+        // StreamKForceDPOnly and ClusterDim straight out of the logic YAML with no
+        // re-validation, so a hand-edited logic file, a NoReject tuning run or a
+        // custom kernel can still land the combination here. Re-assert it rather
+        // than trust it.
+        //
+        // The failure is silent otherwise: SK4/SK5 schedule from a work queue over
+        // the linear grid set below and never read WorkGroup1, so the cluster
+        // round-up further down would inflate gridY from 1 to clusterDim.y and give
+        // clusterDim.y workgroups the same StreamKIdx -- duplicated work and racing
+        // partial/flag writes. Nothing downstream catches that: HIP only rejects a
+        // grid that is not a multiple of the cluster size, which the round-up has
+        // just made true. Throw here, matching how solve() reports a Stream-K
+        // configuration that cannot be launched.
+        if(enableCluster && sizeMapping.streamK != 0 && sizeMapping.streamK != 3)
+        {
+            throw std::runtime_error(
+                concatenate("hipBLASLt Error: ClusterDim is supported only with StreamK=3; got "
+                            "StreamK=",
+                            sizeMapping.streamK,
+                            " with ClusterDim=[",
+                            sizeMapping.clusterDim.x,
+                            ", ",
+                            sizeMapping.clusterDim.y,
+                            "]. The dynamic (SK4) and hybrid (SK5) schedules have no cluster "
+                            "launch geometry."));
+        }
+
         if(sizeMapping.streamK != 0)
         {
             if(sizeMapping.streamKForceDPOnly != 0 && enableCluster)

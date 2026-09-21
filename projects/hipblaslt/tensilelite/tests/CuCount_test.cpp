@@ -1293,6 +1293,66 @@ TEST(StreamKClusterGrid, BatchedLaunchPersistsOneCompleteTilePlane)
     }
 }
 
+// ClusterDim is StreamK=3-only. The generator rejects every other Stream-K mode
+// with a cluster, but library load re-validates nothing, so generateSingleCall
+// has to re-assert it: the cluster round-up would otherwise inflate gridY from 1
+// to clusterDim.y for SK4/SK5, whose linear work-queue schedule never reads
+// WorkGroup1, handing clusterDim.y workgroups the same StreamKIdx.
+TEST(StreamKClusterGrid, NonSK3ModesRejectClusterLaunch)
+{
+    auto launchWith = [](int streamK, int forceDPOnly, uint32_t cs, uint32_t ck) {
+        StreamK5AnalyticalEnv env;
+        auto& solution = env.solution;
+        solution.sizeMapping.streamK = streamK;
+        solution.sizeMapping.streamKForceDPOnly = forceDPOnly;
+        solution.sizeMapping.streamKAtomic = 0;
+        solution.sizeMapping.clusterDim = TensileLite::dim3(cs, ck, 1);
+        solution.sizeMapping.threadTile = TensileLite::dim3(1, 1, 1);
+        solution.sizeMapping.workGroupMapping = 1;
+        solution.sizeMapping.workGroupMappingXCC = 1;
+        env.device.skFixedGrid = 4;
+        env.device.skDynamicGrid = 0;
+
+        auto problem = makeGemmProblem(8 * 128, 8 * 128, 256);
+        problem.setParams().setGSU(1);
+        StreamKSettings sk;
+        sk.grid = solution.getSKGrid(
+            problem, env.device, problem.getNumTiles(solution.sizeMapping, 1), sk.reduction);
+
+        // Argument packing only; no GPU allocation or launch is needed.
+        ContractionInputs inputs(nullptr, nullptr, nullptr, nullptr, 1.0f, 1.0f);
+        return solution.generateSingleCall<false>(problem, inputs, env.device, sk, GSUSettings{});
+    };
+
+    for(int streamK : {4, 5})
+    {
+        for(int forceDPOnly : {0, 1})
+        {
+            SCOPED_TRACE(::testing::Message()
+                         << "StreamK=" << streamK << ", ForceDPOnly=" << forceDPOnly);
+            EXPECT_THROW(launchWith(streamK, forceDPOnly, 2, 2), std::runtime_error)
+                << "a 2-D cluster on a non-SK3 mode must be rejected, not rounded up";
+            EXPECT_THROW(launchWith(streamK, forceDPOnly, 1, 2), std::runtime_error)
+                << "Ck > 1 alone is what duplicates StreamKIdx across peers";
+            EXPECT_THROW(launchWith(streamK, forceDPOnly, 2, 1), std::runtime_error)
+                << "Cs > 1 alone still launches a cluster the schedule cannot honour";
+            EXPECT_NO_THROW(launchWith(streamK, forceDPOnly, 1, 1))
+                << "the guard is cluster-scoped; unclustered SK4/SK5 is unaffected";
+        }
+    }
+
+    // The PR's whole purpose: SK3 with ForceDPOnly=0 keeps the clustered
+    // persistent launch and its round-up. Guarding must not cost it.
+    for(int forceDPOnly : {0, 1})
+    {
+        SCOPED_TRACE(::testing::Message() << "StreamK=3, ForceDPOnly=" << forceDPOnly);
+        KernelInvocation launch;
+        ASSERT_NO_THROW(launch = launchWith(3, forceDPOnly, 2, 2));
+        EXPECT_EQ(launch.numWorkGroups.x % 2, 0u) << "gridX must stay cluster-aligned";
+        EXPECT_EQ(launch.numWorkGroups.y % 2, 0u) << "gridY must stay cluster-aligned";
+    }
+}
+
 // SKLaunchGridLimitsTest -- tree-fixup must not force skGrid=tiles when that
 // would overflow the uint32_t work-item limit (M=524288, N=98304, K=128 bench).
 
