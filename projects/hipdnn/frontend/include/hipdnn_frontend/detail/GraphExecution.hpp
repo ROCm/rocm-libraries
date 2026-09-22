@@ -69,39 +69,30 @@ inline Error executeWithPlan(hipdnnHandle_t handle,
     return {ErrorCode::OK, ""};
 }
 
-// Run one timed execution using a fresh profiling control descriptor: create
-// descriptor, set handle, optionally arm the stall gate, record START, execute
-// exactly once, record STOP, release any armed stall, finalize, then read back
-// elapsed time plus the stall-used / timed-out flags to classify the
-// measurement. Shared by Graph::execute_timed_ext() (stalled=true, no retry)
-// and autotune's benchmarkOnce() (stalled toggles the unstalled retry).
+// Execute once using a caller-owned profiling context. RESET retains its events and
+// gate between measurements. Autotune owns one context per comparison; public timed
+// execution owns a one-shot context. Neither this helper nor the gate chooses retries.
 //
-// `timing` is reset (empty elapsedMs, INVALID quality) before any validation and
-// is only populated once every step below has succeeded. A bad Error always
-// leaves `timing` at that reset state.
-//
-// A watchdog release means the executed plan blocked the host on its own stream
-// while the stall held it, so the elapsed span contains the timeout instead of a
-// measurement: quality is INVALID (elapsedMs stays empty) even though the Error
-// is OK, because execution itself completed. STALL_USED_EXT distinguishes an
-// active, healthy stall (DEVICE_ONLY) from a declined/skipped one
-// (UNSTALLED) when no timeout occurred.
+// Failure cleanup releases and drains before the next candidate can run. The Error
+// is constructed before cleanup, preserving the original backend diagnostic.
 inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                   const ScopedHipdnnBackendDescriptor& execPlan,
                                   const ScopedHipdnnBackendDescriptor& variantPackDesc,
+                                  const ScopedHipdnnBackendDescriptor& profilingDesc,
                                   ExecutionTiming& timing,
                                   bool stalled = true)
 {
-    timing.elapsedMs.reset();
-    timing.quality = TimingQuality::INVALID;
-
-    // NOLINTNEXTLINE(misc-const-correctness)
-    ScopedHipdnnBackendDescriptor profilingDesc(HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
+    timing = {};
     if(!profilingDesc.valid())
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create profiling control descriptor"};
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Profiling control descriptor is not valid"};
     }
 
+    const bool trigger = true;
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendSetAttribute(
+            profilingDesc.get(), HIPDNN_ATTR_PROFILING_RESET_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trigger),
+        "Failed to reset profiling control descriptor");
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendSetAttribute(profilingDesc.get(),
                                              HIPDNN_ATTR_PROFILING_HANDLE_EXT,
@@ -110,11 +101,25 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                              static_cast<const void*>(&handle)),
         "Failed to set handle on profiling descriptor");
 
-    // Stall the stream before recording start, so the measured span begins when the
-    // device starts the work rather than when the host started submitting it. Arming is
-    // silently skipped on a device without stream-wait-value support, and is skipped
-    // altogether when `stalled` is false (the unstalled retry).
-    bool stallVal = true;
+    struct ResetOnFailure
+    {
+        const ScopedHipdnnBackendDescriptor& descriptor;
+        bool finalized = false;
+        ~ResetOnFailure()
+        {
+            if(!finalized)
+            {
+                const bool reset = true;
+                static_cast<void>(
+                    hipdnnBackend()->backendSetAttribute(descriptor.get(),
+                                                         HIPDNN_ATTR_PROFILING_RESET_EXT,
+                                                         HIPDNN_TYPE_BOOLEAN,
+                                                         1,
+                                                         &reset));
+            }
+        }
+    } guard{profilingDesc};
+
     if(stalled)
     {
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -122,31 +127,20 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                                  HIPDNN_ATTR_PROFILING_STALL_ARM_EXT,
                                                  HIPDNN_TYPE_BOOLEAN,
                                                  1,
-                                                 &stallVal),
+                                                 &trigger),
             "Failed to arm profiling stall");
     }
-
-    bool startVal = true;
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(profilingDesc.get(),
-                                             HIPDNN_ATTR_PROFILING_START_EXT,
-                                             HIPDNN_TYPE_BOOLEAN,
-                                             1,
-                                             &startVal),
-        "Failed to set profiling start");
-
-    // Exactly one execution: no warmup, no replay.
-    HIPDNN_CHECK_ERROR(executeWithPlan(handle, execPlan, variantPackDesc));
-
-    bool stopVal = true;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendSetAttribute(
-            profilingDesc.get(), HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &stopVal),
-        "Failed to set profiling stop");
+            profilingDesc.get(), HIPDNN_ATTR_PROFILING_START_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trigger),
+        "Failed to set profiling start");
 
-    // Release the stall so the queued work runs. An early return before this point
-    // destroys profilingDesc, and the descriptor's StallGate releases and drains; a
-    // return after it leaves nothing armed.
+    HIPDNN_CHECK_ERROR(executeWithPlan(handle, execPlan, variantPackDesc));
+
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendSetAttribute(
+            profilingDesc.get(), HIPDNN_ATTR_PROFILING_STOP_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trigger),
+        "Failed to set profiling stop");
     if(stalled)
     {
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -154,13 +148,12 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                                  HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT,
                                                  HIPDNN_TYPE_BOOLEAN,
                                                  1,
-                                                 &stallVal),
+                                                 &trigger),
             "Failed to release profiling stall");
     }
-
-    // Finalize synchronizes events and computes elapsed time.
     HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(profilingDesc.get()),
                                      "Failed to finalize profiling descriptor");
+    guard.finalized = true;
 
     float elapsedMs = 0.0f;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -171,7 +164,6 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                              nullptr,
                                              &elapsedMs),
         "Failed to get profiling elapsed ms");
-
     bool stallUsed = false;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(profilingDesc.get(),
@@ -181,7 +173,6 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                              nullptr,
                                              &stallUsed),
         "Failed to get profiling stall used flag");
-
     bool timedOut = false;
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendGetAttribute(profilingDesc.get(),
@@ -191,25 +182,18 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                              nullptr,
                                              &timedOut),
         "Failed to get profiling stall timed-out flag");
-
     if(timedOut)
     {
-        // timing.quality is already INVALID and timing.elapsedMs already empty from the
-        // reset above; the watchdog-broken measurement is not published.
+        timing.timedOut = true;
         return {ErrorCode::OK, ""};
     }
-
     if(!std::isfinite(elapsedMs) || elapsedMs < 0.0f)
     {
-        // A malformed elapsed time from the backend/profiling layer must not be published;
-        // timing stays at its INVALID reset state above. Zero is a valid measurement.
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
                 "Backend reported a non-finite or negative profiling elapsed time"};
     }
-
     timing.quality = stallUsed ? TimingQuality::DEVICE_ONLY : TimingQuality::UNSTALLED;
     timing.elapsedMs = elapsedMs;
-
     return {ErrorCode::OK, ""};
 }
 

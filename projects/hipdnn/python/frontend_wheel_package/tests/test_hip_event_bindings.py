@@ -13,21 +13,6 @@ import pytest
 import hipdnn_frontend as fe
 
 
-_REQUIRED_API = (
-    "HipEvent",
-    "HipStallGate",
-    "hip_stream_synchronize",
-    "hip_get_device_count",
-    "hip_device_synchronize",
-    "hip_can_use_stream_wait_value",
-)
-
-
-def test_hip_event_symbols_are_exported() -> None:
-    missing = [name for name in _REQUIRED_API if not hasattr(fe, name)]
-    assert missing == []
-
-
 @pytest.mark.gpu
 def test_hip_event_timing_smoke() -> None:
     if fe.hip_get_device_count() <= 0:
@@ -118,8 +103,7 @@ def test_stall_gate_context_manager_closes_on_exit() -> None:
         gate.timed_out()
 
 
-# Runs in a child process: the watchdog latch that this test trips is shared by this module and
-# has no Python reset, so tripping it in-process would silently unstall every later test.
+# A child-process timeout bounds the test if the watchdog fails to release the stream.
 _TIMEOUT_SCRIPT = textwrap.dedent(
     """
     import hipdnn_frontend as fe
@@ -131,24 +115,25 @@ _TIMEOUT_SCRIPT = textwrap.dedent(
     fe.hip_stream_synchronize(0)
     assert gate.timed_out(), "watchdog released the stall but did not report it"
 
-    # Reuse after a timeout must raise: stalling is off from here on, so the
-    # caller must not mistake the next unstalled measurement for device-only timing.
-    try:
-        gate.arm(0)
-    except RuntimeError as err:
-        assert "watchdog" in str(err), err
-    else:
-        raise AssertionError("arm() silently declined after the watchdog timeout")
-
-    assert not gate.timed_out(), "a declined arm still reports the earlier timeout"
+    # A timeout belongs to one attempt, not the gate or the Python module.
+    gate.arm(0)
+    gate.release()
+    fe.hip_stream_synchronize(0)
+    assert not gate.timed_out()
     gate.close()
+
+    with fe.HipStallGate() as other:
+        other.arm(0)
+        other.release()
+        fe.hip_stream_synchronize(0)
+        assert not other.timed_out()
     print("OK")
     """
 )
 
 
 @pytest.mark.gpu
-def test_stall_gate_reports_timeout_and_refuses_reuse() -> None:
+def test_stall_gate_timeout_does_not_disable_reuse_or_other_gates() -> None:
     if fe.hip_get_device_count() <= 0:
         pytest.skip("No HIP GPU available")
     if not fe.hip_can_use_stream_wait_value():

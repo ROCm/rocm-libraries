@@ -13,13 +13,9 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 #if defined(_WIN32)
-// Only the macro names must not escape this translation unit, not the lean include
-// itself: define both only if not already defined, and undefine only what this block
-// defined, right after <windows.h>. Without NOMINMAX, <windows.h> leaks object-like
-// max/min macros that mangle the max()/min() overloads and std::numeric_limits<T>::max()
-// calls in every hipDNN header included below, including Bfloat16.hpp and Allocators.hpp
-// -- matches the guard in PlatformUtils.windows.hpp.
 #ifndef NOMINMAX
 #define NOMINMAX
 #define HIPDNN_UNDEF_NOMINMAX
@@ -40,15 +36,15 @@
 #else
 #include <unistd.h>
 #endif
-#include <unordered_map>
-#include <vector>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "AutotuneIntegrationFixture.hpp"
+#include "test_plugins/TestPluginEngineIdMap.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -190,27 +186,24 @@ TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
     assertAnySucceeded(results);
 }
 
-// Regression test for the mixed-timing-mode recovery in Graph::autotune()
-// (Graph.hpp, the sweepStalled / sawDeviceOnly / sawUnstalled loop). The
+// Regression test for the comparison-local stall fallback in Graph::autotune()
+// (Graph.hpp's sweepStalled loop + TimedRunLoop's restartUnstalled signal). The
 // test_autotune_plugin's AutotunePluginEngineHostSyncs engine calls
-// hipStreamSynchronize on the plugin's own stream from inside executeOpGraph,
-// so once the autotune stall gate has armed that stream for the timed
-// measurement, the engine deadlocks itself and only the stall watchdog can
-// release it. That is the exact scenario the recovery exists for: engines
-// benchmarked before the timeout are DEVICE_ONLY, engines benchmarked after
-// it (including the retried host-syncing one) are UNSTALLED, and ranking
-// the two populations against each other could hand the win to a slower
-// engine.
+// hipStreamSynchronize on the plugin's own stream from inside executeOpGraph, so once
+// the autotune stall gate has armed that stream for its first timed measurement, the
+// engine deadlocks itself and only the stall watchdog can release it -- a real,
+// self-inflicted stall trip exercised end-to-end.
 //
-// Before the recovery existed, this failed: the first sweep pass was kept
-// as-is, so the earlier engines' DEVICE_ONLY times were ranked directly
-// against the host-syncing engine's UNSTALLED time instead of the whole
-// pass being discarded and re-measured unstalled.
+// There is no cross-call or cross-comparison latch any more (StallGate reports only
+// per-attempt arm/release/timedOut): a timeout must cost at most one stalled attempt at
+// this sweep layer, the whole comparison reruns unstalled exactly once, and a later,
+// independent autotune() call must still be able to arm the stall gate for engines that
+// do not deadlock.
 class IntegrationAutotuneStallRecovery : public hipdnn_tests::AutotuneIntegrationFixture
 {
 protected:
-    // This recovery path requires a usable stall gate. Fail constructor errors loudly;
-    // skip only when the capability query succeeds and reports no support.
+    // This test requires a usable stall gate. Fail constructor errors loudly; skip only
+    // when the capability query succeeds and reports no support.
     static bool stallGateAvailable()
     {
         const hipdnn_data_sdk::utilities::StallGate gate;
@@ -224,88 +217,44 @@ protected:
         return false;
     }
 
-    // libhipdnn_backend.so (the ProfilingControlDescriptor / StallGate that actually
-    // arms and watches the stream) builds with CXX_VISIBILITY_PRESET hidden, so its
-    // copy of StallGate's sticky latch is private to that shared object:
-    // resetStallingDisabledForTesting() called from this executable cannot reach
-    // it, and once one run trips the watchdog it stays sticky for every later test
-    // in this binary -- exactly the "no reset" problem
-    // test_hip_event_bindings.py's HipStallGate child-process test documents for the
-    // same class. Isolating each strategy in a freshly exec'd child, instead of a
-    // fork, guarantees a never-armed gate for that strategy regardless of test order,
-    // and keeps this test's self-inflicted trip from silently disabling stalling for
-    // every later test in this binary. The child is this same test, selected by exact
-    // name, so its own EXPECT/ASSERT failures are the ones that fail the parent.
-    /// Re-runs the calling test in a fresh child process. The child is selected by this
-    /// test's own registered name rather than a literal, because GoogleTest exits 0 when
-    /// a --gtest_filter matches nothing: a stale literal after a rename would make the
-    /// parent report a pass for a child that never ran.
-    void runIsolated(AutotuneStrategy strategy)
+    // Engine discovery is cached across handles. Enable the test-only engine before
+    // startup in a fresh process, not by changing the environment after discovery.
+    template <typename Body>
+    void runIsolated(Body&& body)
     {
-        // std::getenv is unavailable under Windows' -Werror (deprecated in favor of
-        // _dupenv_s); getEnv() is the repo's existing cross-platform wrapper over
-        // whichever safe API each platform wants. Empty means unset here, since this
-        // variable is never intentionally set to "".
-        if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_STALL_RECOVERY_CHILD").empty())
+        if(!hipdnn_data_sdk::utilities::getEnv("HIPDNN_STALL_RECOVERY_CHILD").empty())
         {
-            const ::testing::TestInfo* const info
-                = ::testing::UnitTest::GetInstance()->current_test_info();
-            ASSERT_NE(info, nullptr) << "runIsolated() must be called from a test body";
-            const std::string testId = std::string(info->test_suite_name()) + "." + info->name();
-
-            if(!stallGateAvailable())
-            {
-                GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
-            }
-            // /proc/self/exe and GetModuleFileName both give this process's own
-            // executable path, which is the only reliable way to re-exec exactly this
-            // test binary regardless of where CTest or the CI runner placed it.
-#if defined(_WIN32)
-            std::string selfPath(MAX_PATH, '\0');
-            const DWORD n
-                = GetModuleFileNameA(nullptr, selfPath.data(), static_cast<DWORD>(selfPath.size()));
-            ASSERT_GT(n, 0U) << "could not resolve this test binary's own path via "
-                                "GetModuleFileName";
-            selfPath.resize(n);
-#else
-            std::string selfPath(4096, '\0');
-            const ssize_t n = readlink("/proc/self/exe", selfPath.data(), selfPath.size() - 1);
-            ASSERT_GT(n, 0) << "could not resolve this test binary's own path via "
-                               "/proc/self/exe";
-            selfPath.resize(static_cast<size_t>(n));
-#endif
-
-            // Set in this process, not via shell "VAR=1 cmd" prefix syntax: that syntax
-            // is POSIX-shell-only and cmd.exe does not support it. setEnv() changes this
-            // process's own environment, which std::system()'s child inherits regardless
-            // of which shell it invokes.
-            hipdnn_data_sdk::utilities::setEnv("HIPDNN_STALL_RECOVERY_CHILD", "1");
-            // The host-syncing engine is opt-in because it costs a full watchdog timeout
-            // and disables stalling afterwards. Only this child needs it; leaving it off
-            // in the parent keeps every other autotune test in this binary fast and
-            // stalled.
-            hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE", "1");
-            const std::string command = "\"" + selfPath + "\" --gtest_filter=" + testId;
-            const int rc = std::system(command.c_str());
-
-            // setEnv() changed THIS process's own environment, not only the spawned
-            // child's: unset it now, or the next IntegrationAutotuneStallRecovery test in
-            // this same binary would see it already set, skip its own re-exec, and run
-            // unisolated in this process instead of a fresh one.
-            hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_STALL_RECOVERY_CHILD");
-            hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE");
-
-            ASSERT_EQ(rc, 0) << "isolated child run of " << testId
-                             << " failed (see its gtest output above)";
+            body();
             return;
         }
-
-        runMixedTimingModeRecovery(strategy);
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        ASSERT_NE(info, nullptr);
+        const std::string testId = std::string(info->test_suite_name()) + "." + info->name();
+#if defined(_WIN32)
+        std::string selfPath(MAX_PATH, '\0');
+        const DWORD length
+            = GetModuleFileNameA(nullptr, selfPath.data(), static_cast<DWORD>(selfPath.size()));
+        ASSERT_GT(length, 0U);
+        ASSERT_LT(length, selfPath.size());
+        selfPath.resize(length);
+#else
+        std::string selfPath(4096, '\0');
+        const auto length = readlink("/proc/self/exe", selfPath.data(), selfPath.size() - 1);
+        ASSERT_GT(length, 0);
+        ASSERT_LT(static_cast<size_t>(length), selfPath.size() - 1);
+        selfPath.resize(static_cast<size_t>(length));
+#endif
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter child(
+            "HIPDNN_STALL_RECOVERY_CHILD", "1");
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter hostSync(
+            "HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE", "1");
+        const std::string command = "\"" + selfPath + "\" --gtest_filter=" + testId;
+        ASSERT_EQ(std::system(command.c_str()), 0) << "recovery child failed: " << testId;
     }
 
+    // A timeout must stop the comparison and cause one complete unstalled rerun.
     void runMixedTimingModeRecovery(AutotuneStrategy strategy)
     {
-        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         if(!stallGateAvailable())
         {
             GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
@@ -348,7 +297,16 @@ protected:
             << "run finished in "
             << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
             << " ms; the stall watchdog's ~2s timeout was never waited out, so this "
-               "run did not exercise the mixed-timing-mode recovery";
+               "run did not exercise the comparison-local stall fallback";
+
+        // Proves the timeout cost at most ONE stalled attempt at this sweep layer: the
+        // whole comparison breaks and reruns unstalled immediately, instead of letting
+        // every remaining candidate or iteration of the host-syncing engine retry into
+        // its own fresh watchdog wait. Two full timeouts would clear this bound.
+        constexpr auto MAX_EXPECTED_STALL = std::chrono::milliseconds(3500);
+        EXPECT_LT(elapsed, MAX_EXPECTED_STALL)
+            << "run took " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+            << " ms; a timeout must cost at most one stalled attempt at this sweep layer";
 
         // Every succeeded engine must carry the SAME timing quality: a discarded,
         // re-measured sweep is uniformly UNSTALLED, never a mix of
@@ -389,12 +347,65 @@ protected:
 
 TEST_F(IntegrationAutotuneStallRecovery, FixedAverageDiscardsMixedTimingSweep)
 {
-    runIsolated(AutotuneStrategy::FIXED_AVERAGE);
+    runIsolated([this] { runMixedTimingModeRecovery(AutotuneStrategy::FIXED_AVERAGE); });
 }
 
 TEST_F(IntegrationAutotuneStallRecovery, RunUntilStableDiscardsMixedTimingSweep)
 {
-    runIsolated(AutotuneStrategy::RUN_UNTIL_STABLE);
+    runIsolated([this] { runMixedTimingModeRecovery(AutotuneStrategy::RUN_UNTIL_STABLE); });
+}
+
+// A later comparison on healthy engines must remain eligible for device-only timing.
+// Filter out the deliberately blocking engine rather than changing discovery mid-handle.
+TEST_F(IntegrationAutotuneStallRecovery, LaterIndependentCallIsEligibleToStallAgain)
+{
+    runIsolated([this] {
+        if(!stallGateAvailable())
+        {
+            GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+        }
+
+        runMixedTimingModeRecovery(AutotuneStrategy::FIXED_AVERAGE);
+
+        ConvGraphBundle bundle;
+        createBuiltConvGraph("autotune_stall_recovery_followup_conv", bundle);
+
+        auto result = bundle.graph->add_all_engines();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        int64_t maxWs = 0;
+        result = bundle.graph->get_estimated_max_workspace_size(maxWs);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const Workspace workspace(static_cast<size_t>(maxWs));
+
+        AutotuneConfig config;
+        config.mode = TuneMode::STANDARD;
+        config.warmupIterations = 1;
+        config.timedIterations = 3;
+        config.engineIdFilter = {hipdnn_tests::plugin_constants::engineId<AutotunePlugin>(),
+                                 hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineB>()};
+
+        std::vector<AutotuneResult> results;
+        result = bundle.graph->autotune(
+            _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        bool checkedAnySucceeded = false;
+        for(const auto& r : results)
+        {
+            if(!r.succeeded)
+            {
+                continue;
+            }
+            checkedAnySucceeded = true;
+            EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY)
+                << "engine " << r.engineName
+                << " was not measured device-only; an earlier call's timeout must not "
+                   "disable stalling for this independent comparison";
+        }
+        EXPECT_TRUE(checkedAnySucceeded) << "No engine succeeded for the follow-up autotune call";
+    });
 }
 
 } // namespace

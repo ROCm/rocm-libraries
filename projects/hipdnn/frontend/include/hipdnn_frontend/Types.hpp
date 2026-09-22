@@ -1769,10 +1769,9 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
 enum class TimingQuality
 {
     DEVICE_ONLY, ///< Stream was stalled: elapsed time excludes host submission overhead.
-    UNSTALLED, ///< Stalling was not used (unsupported device, or disabled for this shared
-    ///< object after an earlier watchdog timeout). The measurement was taken without the
-    ///< stall gate; it may or may not include host submission overhead depending on the
-    ///< backend and engine, so it must not be ranked against a DEVICE_ONLY measurement.
+    UNSTALLED, ///< Stalling was not used. This can be a requested unstalled pass or an
+    ///< unavailable gate. Host submission may or may not be included, depending on
+    ///< the runtime and engine. Do not rank against DEVICE_ONLY measurements.
     INVALID ///< No usable measurement: the stall watchdog fired, or execution did not
     ///< complete successfully.
 };
@@ -1790,6 +1789,9 @@ struct ExecutionTiming
 {
     std::optional<float> elapsedMs; ///< Elapsed device time in milliseconds, or empty if invalid.
     TimingQuality quality = TimingQuality::INVALID; ///< How the measurement was obtained.
+    bool timedOut = false; ///< True when the stall watchdog released this measurement instead
+    ///< of the caller: @c quality is INVALID and @c elapsedMs is empty. False on every other
+    ///< outcome, including a bad Error.
 };
 
 } // namespace hipdnn_frontend

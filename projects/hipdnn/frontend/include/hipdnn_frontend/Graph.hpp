@@ -1287,6 +1287,18 @@ private:
             detail::hipdnnBackend()->backendFinalize(variantPackDesc.get()),
             "Failed to finalize variant pack descriptor");
 
+        // One profiling context for the whole comparison: every candidate in every pass
+        // (including a stalled-timeout restart's unstalled rerun) resets and reuses this
+        // same descriptor via executeWithPlanTimed(), instead of allocating a fresh one
+        // per timed iteration.
+        const detail::ScopedHipdnnBackendDescriptor profilingDesc(
+            HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
+        if(!profilingDesc.valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create profiling control descriptor."};
+        }
+
         const std::unordered_set<int64_t> selectedEngineIdFilterSet(config.engineIdFilter.begin(),
                                                                     config.engineIdFilter.end());
 
@@ -1814,19 +1826,20 @@ private:
         size_t benchmarkCount = 0;
         const size_t benchmarkTotal = planBenchmarkDetails.size();
 
-        // One sweep must compare like with like. A stall-gate watchdog timeout turns
-        // device-only timing off from that point on, so candidates measured before it
-        // exclude host submission and candidates after it do not; ranking the two
-        // populations against each other can hand the win to a slower engine. A pass that
-        // mixed them is discarded and every candidate is re-measured unstalled. The second
-        // pass cannot arm, so it cannot mix, and this runs at most twice.
+        // One sweep must compare like with like. A stall-gate watchdog timeout, or a
+        // valid UNSTALLED result during a stalled pass, means the stall could not hold
+        // for this candidate: device-only timing is no longer comparable against
+        // whatever ran before it in this pass. The candidate/sweep loops break
+        // immediately on that signal -- costing at most one stalled attempt -- discard
+        // every score measured so far, and rerun every candidate unstalled. The unstalled
+        // pass never arms, so it cannot itself trigger another restart, and this runs at
+        // most twice.
         bool sweepStalled = true;
         for(;;)
         {
             allResults.clear();
             benchmarkCount = 0;
-            bool sawDeviceOnly = false;
-            bool sawUnstalled = false;
+            bool restartUnstalledRequested = false;
 
             for(const auto& info : planBenchmarkDetails)
             {
@@ -1863,6 +1876,10 @@ private:
                 result.exhaustiveNotRunReason = info.exhaustiveNotRunReason;
 
                 // --- Warmup iterations ---
+                // A candidate that failed or restarted the previous measurement always
+                // leaves the profiling context reset (drained, gate released) before
+                // returning, so this raw-stream warmup can never block on a stall left
+                // over from it.
                 bool warmupFailed = false;
                 for(int w = 0; w < config.warmupIterations; ++w)
                 {
@@ -1903,29 +1920,19 @@ private:
                 // --- Timed iterations ---
                 std::vector<float> timings;
                 bool benchmarkFailed = false;
-
-                // One lambda for both strategies, so the measurement mode is recorded in
-                // exactly one place. candidateQuality is this engine's mode; the sweep-level
-                // flags decide whether the whole pass has to be discarded.
+                bool restartUnstalled = false;
                 auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
-                auto timeOnce = [&](float& elapsed) -> Error {
-                    auto quality = ::hipdnn_frontend::TimingQuality::INVALID;
-                    auto timeErr = autotune::detail::benchmarkOnce(handle,
-                                                                   *plan.executionPlanDesc,
-                                                                   variantPackDesc,
-                                                                   elapsed,
-                                                                   quality,
-                                                                   sweepStalled);
-                    candidateQuality = quality;
-                    if(quality == ::hipdnn_frontend::TimingQuality::DEVICE_ONLY)
-                    {
-                        sawDeviceOnly = true;
-                    }
-                    else if(quality == ::hipdnn_frontend::TimingQuality::UNSTALLED)
-                    {
-                        sawUnstalled = true;
-                    }
-                    return timeErr;
+
+                // One lambda for both strategies: it just runs the reusable profiling
+                // sequence against this comparison's shared context; the loop helpers
+                // classify the result (record / restart-unstalled / malformed).
+                auto timeOnce = [&](::hipdnn_frontend::ExecutionTiming& timing) -> Error {
+                    return ::hipdnn_frontend::detail::executeWithPlanTimed(handle,
+                                                                           *plan.executionPlanDesc,
+                                                                           variantPackDesc,
+                                                                           profilingDesc,
+                                                                           timing,
+                                                                           sweepStalled);
                 };
 
                 if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
@@ -1937,9 +1944,11 @@ private:
                                            << "ms");
                     };
                     auto outcome = autotune::detail::runFixedAverage(
-                        config.timedIterations, timeOnce, onIteration);
+                        config.timedIterations, sweepStalled, timeOnce, onIteration);
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
+                    restartUnstalled = outcome.restartUnstalled;
+                    candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
                         result.errorMessage = outcome.errorMessage;
@@ -1960,16 +1969,30 @@ private:
                     auto outcome = autotune::detail::runUntilStable(config.maxIterations,
                                                                     config.windowSize,
                                                                     config.stabilityThreshold,
+                                                                    sweepStalled,
                                                                     timeOnce,
                                                                     onIteration);
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
+                    restartUnstalled = outcome.restartUnstalled;
+                    candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
                     {
                         result.errorMessage = outcome.errorMessage;
                     }
                     result.iterationsRun = static_cast<int>(timings.size());
                     result.converged = outcome.converged;
+                }
+
+                if(restartUnstalled)
+                {
+                    HIPDNN_FE_LOG_WARN(
+                        "autotune: engine "
+                        << result.engineName
+                        << ": stall watchdog fired or stalling was declined mid-sweep; "
+                           "discarding this pass and re-measuring every candidate unstalled.");
+                    restartUnstalledRequested = true;
+                    break;
                 }
 
                 if(benchmarkFailed)
@@ -2014,15 +2037,10 @@ private:
                 allResults.push_back(std::move(result));
             }
 
-            if(!sawDeviceOnly || !sawUnstalled)
+            if(!restartUnstalledRequested)
             {
                 break;
             }
-
-            HIPDNN_FE_LOG_WARN(
-                "autotune: a stall watchdog timeout ended device-only timing partway through "
-                "the sweep, so this pass mixed device-only and unstalled measurements. "
-                "Discarding it and re-measuring every candidate unstalled.");
             sweepStalled = false;
         }
 
@@ -4742,6 +4760,7 @@ public:
     {
         timing.elapsedMs.reset();
         timing.quality = TimingQuality::INVALID;
+        timing.timedOut = false;
 
         std::unordered_map<int64_t, void*> variantPack;
         HIPDNN_CHECK_ERROR(detail::tensorLookupToVariantPack(tensorLookup, variantPack));
@@ -4758,20 +4777,21 @@ public:
      * -> finalize), and reports the elapsed device time plus how it was obtained. This
      * call blocks until the measurement completes.
      *
-     * `timing` is reset to an empty elapsedMs / TimingQuality::INVALID before any
-     * validation, and is only published once every step below has succeeded; a bad Error
-     * always leaves it at that reset state. Otherwise:
+     * `timing` is reset to an empty elapsedMs / TimingQuality::INVALID / timedOut=false
+     * before any validation, and is only published once every step below has succeeded;
+     * a bad Error always leaves it at that reset state. Otherwise:
      * - TimingQuality::DEVICE_ONLY: the stream was stalled, so elapsedMs excludes host
      *   submission overhead.
-     * - TimingQuality::UNSTALLED: stalling was not used (unsupported device, or
-     *   disabled for this shared object after an earlier watchdog timeout). The
-     *   measurement was taken without the stall gate, so it may or may not include host
-     *   submission overhead, and must not be ranked against a DEVICE_ONLY measurement.
-     * - TimingQuality::INVALID with an OK Error: the stall watchdog fired -- execution
-     *   completed, but the measurement did not, so elapsedMs is empty. This call does not
-     *   retry unstalled; a caller who needs a comparable-cost measurement despite a
-     *   timeout should invoke this method again. autotune() applies its own unstalled
-     *   retry policy internally; that policy is not shared with this public entry point.
+     * - TimingQuality::UNSTALLED: stalling was not used (unsupported device, or declined
+     *   for this one measurement). The measurement was taken without the stall gate, so
+     *   it may or may not include host submission overhead, and must not be ranked
+     *   against a DEVICE_ONLY measurement.
+     * - TimingQuality::INVALID with timedOut=true and an OK Error: the stall watchdog
+     *   fired -- execution completed, but the measurement did not, so elapsedMs is empty.
+     *   This call does not retry unstalled; a caller who needs a comparable-cost
+     *   measurement despite a timeout should invoke this method again. autotune() applies
+     *   its own unstalled-restart policy internally; that policy is not shared with this
+     *   public entry point.
      *
      * @param handle The hipDNN handle
      * @param variantPack Map from tensor UID to device memory pointers
@@ -4797,6 +4817,7 @@ public:
     {
         timing.elapsedMs.reset();
         timing.quality = TimingQuality::INVALID;
+        timing.timedOut = false;
 
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with timing");
 
@@ -4830,7 +4851,18 @@ public:
             detail::hipdnnBackend()->backendFinalize(variantPackDesc->get()),
             "Failed to finalize variant pack descriptor");
 
-        return detail::executeWithPlanTimed(handle, *execPlan, *variantPackDesc, timing);
+        // One-shot local profiling context: this call measures exactly once and never
+        // reuses it, unlike autotuneImpl()'s comparison-scoped descriptor.
+        const detail::ScopedHipdnnBackendDescriptor profilingDesc(
+            HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
+        if(!profilingDesc.valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create profiling control descriptor."};
+        }
+
+        return detail::executeWithPlanTimed(
+            handle, *execPlan, *variantPackDesc, profilingDesc, timing);
     }
 
 #ifdef HIPDNN_ENABLE_SDPA

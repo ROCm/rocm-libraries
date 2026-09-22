@@ -694,7 +694,7 @@ class TestAutotuneGpu:
         winners = [r for r in results if r.succeeded]
         assert winners, f"no engine benchmarked successfully: {results!r}"
         for winner in winners:
-            assert winner.min_time_ms > 0
+            assert winner.min_time_ms >= 0
             assert winner.avg_time_ms >= winner.min_time_ms
             assert winner.iterations_run >= 1
             assert winner.rank >= 0

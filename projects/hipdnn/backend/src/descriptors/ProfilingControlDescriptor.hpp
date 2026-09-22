@@ -46,6 +46,14 @@ using HipEventGuard = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEven
  *   7. setAttribute(PROFILING_STALL_RELEASE_EXT) -- release the stall
  *   8. finalize()                                -- synchronize stop event, compute elapsed time
  *   9. getAttribute(PROFILING_ELAPSED_MS_EXT)    -- read elapsed milliseconds
+ *
+ * setAttribute(PROFILING_RESET_EXT) reuses this context for another measurement: it is
+ * the only attribute accepted once finalized, and is also valid on a fresh or partially
+ * executed descriptor. It releases the gate, drains any outstanding stream work not
+ * already covered by a prior successful finalize(), and clears the finalized/start/
+ * stop/elapsed/stall-used/timed-out state, returning the descriptor to step 3. The
+ * handle, stream, events, and gate are retained; rebinding to a different handle or
+ * stream requires a new descriptor.
  */
 class ProfilingControlDescriptor : public HipdnnBackendDescriptorImpl<ProfilingControlDescriptor>
 {
@@ -78,6 +86,8 @@ public:
 private:
     hipdnnHandle* _handle = nullptr;
     hipStream_t _stream = nullptr;
+    // Events and signal memory stay on the device where the handle was bound.
+    int _device = 0;
     HipEventGuard _startEvent;
     HipEventGuard _stopEvent;
     float _elapsedMs = 0.0F;
@@ -88,12 +98,22 @@ private:
     // it stays readable after release()/finalize() (both of which always release the
     // gate). Exposed via STALL_USED_EXT.
     bool _stallUsed = false;
+    // Latched at finalize() from the gate's per-attempt timedOut(), so a later
+    // measurement that skips STALL_ARM_EXT entirely cannot inherit a stale timeout from
+    // an earlier one that reused this same gate. Exposed via STALL_TIMED_OUT_EXT and
+    // cleared by reset().
+    bool _timedOut = false;
     // Created on the first STALL_ARM_EXT, so a descriptor that only times or only syncs
     // never acquires signal memory or a watchdog thread. Destroyed with the descriptor,
     // which releases the stall if the caller never did.
     std::optional<hipdnn_data_sdk::utilities::StallGate> _stallGate;
 
     void createEvents();
+    void checkBinding() const;
+    // Handles PROFILING_RESET_EXT: releases the gate, drains outstanding stream work
+    // not already covered by a prior successful finalize(), and clears per-measurement
+    // state so the same handle/stream/events/gate can be reused.
+    void reset();
 };
 
 } // namespace hipdnn_backend

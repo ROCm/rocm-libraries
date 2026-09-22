@@ -8,7 +8,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <hip/hip_runtime.h>
-#include <hipdnn_data_sdk/Visibility.hpp>
 #include <mutex>
 #include <system_error>
 #include <thread>
@@ -56,9 +55,9 @@ namespace hipdnn_data_sdk::utilities
  * not identify the cause.
  *
  * A watchdog release invalidates the measurement because device work can proceed
- * before host submission finishes. timedOut() reports this to the caller. A sticky
- * flag conservatively disables later arms in this shared object to bound repeated
- * timeout delays. See isStallingDisabled() for its scope.
+ * before host submission finishes. timedOut() reports this attempt only; later arms
+ * remain available. A benchmarking caller must discard the affected comparison and
+ * retry it unstalled rather than repeatedly arming a workload that may block the host.
  *
  * Not thread-safe for concurrent arm/release: one gate arms one stream at a time.
  */
@@ -159,8 +158,8 @@ public:
 
     /// Reset the signal, then enqueue a wait packet that holds every later item on
     /// `stream` until release() or the watchdog. Returns false when the gate is unusable,
-    /// already armed, disabled after a timeout in this shared object, bound to another
-    /// device, or when a HIP/runtime resource operation fails; the stream is then unstalled.
+    /// already armed, bound to another device, or when a HIP/runtime resource operation
+    /// fails. A declined arm does not alter an already-active wait.
     ///
     /// Before re-arming, the previously armed stream must have drained past its wait
     /// packet. release() satisfies the predicate but does not retire the waiter;
@@ -191,11 +190,6 @@ public:
                 return false;
             }
             _timedOut = false;
-        }
-
-        if(isStallingDisabled())
-        {
-            return false;
         }
 
         // The signal is host memory bound to the constructor's device; a stream on a
@@ -279,38 +273,14 @@ public:
         _cv.notify_all();
     }
 
-    /// True when the watchdog, not the host, released the most recent arm(). The
-    /// measurement from that region contains the timeout and must be discarded.
+    /// True when the watchdog, not the host, released the most recent arm(). Discard
+    /// that measurement. A subsequent arm starts a new attempt with this flag cleared.
     bool timedOut() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         return _timedOut;
     }
 
-    /// Clear the disable for tests so a deliberate timeout cannot affect later cases.
-    /// Production callers retain the conservative backoff until this module unloads.
-    ///
-    /// Reaches only the caller's own copy of the flag; see isStallingDisabled().
-    static void resetStallingDisabledForTesting()
-    {
-        disabledFlag().store(false, std::memory_order_relaxed);
-    }
-
-    /// True once any gate in this shared object has timed out. The sticky backoff
-    /// bounds repeated timeout delays; a timeout does not prove a permanent fault.
-    ///
-    /// The flag is per shared object, not per process. disabledFlag() has hidden
-    /// visibility so each consuming module keeps its own copy independently of its
-    /// build flags. A timeout inside libhipdnn_backend.so therefore does not disable
-    /// stalling inside a provider plugin, and neither can observe the other's flag. That
-    /// is bounded and safe -- each module arms its own gates and reads its own flag, so
-    /// every comparison stays internally consistent, and the cost of the split is at most
-    /// one extra timeout per module. Do not use this to reason about another module's
-    /// state, and reset it in tests from the same module that armed.
-    static bool isStallingDisabled()
-    {
-        return disabledFlag().load(std::memory_order_relaxed);
-    }
     /// The most recent failed HIP call in the constructor or arm(). hipSuccess when
     /// nothing failed, including unsupported-device and cross-device declines.
     hipError_t lastError() const
@@ -364,18 +334,8 @@ private:
                 writeSignal(1U);
                 _armed = false;
                 _timedOut = true;
-                disabledFlag().store(true, std::memory_order_relaxed);
             }
         }
-    }
-
-    // Function-local rather than a static data member: one timeout turns stalling off for
-    // every later gate in this module, including ones created afterwards. Hidden
-    // visibility makes the scope per shared object; see isStallingDisabled().
-    HIPDNN_HIDDEN static std::atomic<bool>& disabledFlag()
-    {
-        static std::atomic<bool> s_disabled{false};
-        return s_disabled;
     }
 
     uint32_t* _signal = nullptr;

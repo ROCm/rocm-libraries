@@ -341,8 +341,8 @@ void graphBindings(nb::module_& m)
             "Allocate workspace before the call.\n"
             "On success, quality is DEVICE_ONLY when the stall removed host submission "
             "overhead, UNSTALLED when the stall was not used, or INVALID when the "
-            "watchdog invalidated timing after execution completed. Invalid timing has "
-            "elapsed_ms=None.\n"
+            "watchdog invalidated timing after execution completed. A watchdog release "
+            "sets timed_out=True and elapsed_ms=None; it does not disable later calls.\n"
             "A bad Error reports execution or profiling failure and invalidates timing. "
             "Profiling can fail after execution; do not assume an error means no work ran.")
         .def("get_execution_plan_count",

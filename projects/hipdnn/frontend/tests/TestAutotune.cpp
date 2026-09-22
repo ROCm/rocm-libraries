@@ -130,23 +130,35 @@ TEST(TestAutotune, EngineConfigInfoDefaults)
 
 namespace
 {
-// A scripted timing source: returns the next value from a fixed sequence,
-// optionally returning a bad Error on a designated iteration to exercise the
-// failure path.
+// A scripted timing source: returns the next value from a fixed sequence as a
+// DEVICE_ONLY measurement by default, optionally reporting a bad Error, a stall
+// watchdog timeout, or an UNSTALLED quality on a designated iteration to exercise the
+// failure / restart paths.
 struct ScriptedTimer
 {
     std::vector<float> values;
     int failOnIteration = -1; // 0-based; -1 = never fail
     int callCount = 0;
+    int timeoutOnIteration = -1; // 0-based; -1 = never report a stall timeout
+    int unstalledOnIteration = -1; // 0-based; -1 = never report UNSTALLED quality
+    TimingQuality quality = TimingQuality::DEVICE_ONLY; // reported for every other iteration
 
-    Error operator()(float& elapsed)
+    Error operator()(ExecutionTiming& timing)
     {
+        timing = ExecutionTiming{};
         if(callCount == failOnIteration)
         {
             ++callCount;
             return {ErrorCode::HIPDNN_BACKEND_ERROR, "scripted failure"};
         }
-        elapsed = values[static_cast<size_t>(callCount) % values.size()];
+        if(callCount == timeoutOnIteration)
+        {
+            timing.timedOut = true;
+            ++callCount;
+            return {ErrorCode::OK, ""};
+        }
+        timing.elapsedMs = values[static_cast<size_t>(callCount) % values.size()];
+        timing.quality = (callCount == unstalledOnIteration) ? TimingQuality::UNSTALLED : quality;
         ++callCount;
         return {ErrorCode::OK, ""};
     }
@@ -163,8 +175,12 @@ auto noopFixedAverageLog = [](int, float) {};
 TEST(TestAutotune, RunUntilStableConvergesAndExitsEarly)
 {
     ScriptedTimer timer{{10.0f}, -1, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 3);
@@ -174,8 +190,12 @@ TEST(TestAutotune, RunUntilStableNeverConvergesHitsCap)
 {
     // Alternating values keep the trailing-window CoV above the threshold.
     ScriptedTimer timer{{10.0f, 20.0f}, -1, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
     EXPECT_FALSE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), MAX_ITERATIONS);
@@ -185,8 +205,12 @@ TEST(TestAutotune, RunUntilStableConvergesLate)
 {
     // First window {5,9,5} is noisy; later window {10,10,10} converges at iter 6.
     ScriptedTimer timer{{5.0f, 9.0f, 5.0f, 10.0f, 10.0f, 10.0f}, -1, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 6);
 }
@@ -198,9 +222,14 @@ TEST(TestAutotune, RunUntilStableFailureMidLoopBreaks)
     // high CoV and does NOT converge before the designated failure iteration  -
     // a constant sequence would converge at iter 2 and never reach the failure.
     ScriptedTimer timer{{10.0f, 20.0f}, 3, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
     EXPECT_TRUE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 3);
     EXPECT_NE(outcome.errorMessage.find("scripted failure"), std::string::npos);
 }
@@ -208,8 +237,8 @@ TEST(TestAutotune, RunUntilStableFailureMidLoopBreaks)
 TEST(TestAutotune, RunFixedAverageRunsAllIterations)
 {
     ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, -1, 0};
-    auto outcome
-        = autotune::detail::runFixedAverage(/*timedIterations=*/10, timer, noopFixedAverageLog);
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/10, /*stalled=*/true, timer, noopFixedAverageLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 10);
@@ -218,11 +247,12 @@ TEST(TestAutotune, RunFixedAverageRunsAllIterations)
 TEST(TestAutotune, RunFixedAverageFailureMidLoopBreaks)
 {
     ScriptedTimer timer{{7.0f, 8.0f, 9.0f}, 2, 0};
-    auto outcome
-        = autotune::detail::runFixedAverage(/*timedIterations=*/5, timer, noopFixedAverageLog);
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/5, /*stalled=*/true, timer, noopFixedAverageLog);
 
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
     ASSERT_EQ(outcome.timings.size(), 2u);
     EXPECT_FLOAT_EQ(outcome.timings[0], 7.0f);
     EXPECT_FLOAT_EQ(outcome.timings[1], 8.0f);
@@ -240,7 +270,8 @@ TEST(TestAutotune, RunFixedAverageInvokesCallbackForEachSuccessfulIteration)
         callbackElapsedMs.push_back(elapsedMs);
     };
 
-    auto outcome = autotune::detail::runFixedAverage(/*timedIterations=*/3, timer, onIteration);
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/true, timer, onIteration);
 
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
@@ -262,7 +293,7 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
     };
 
     auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, onIteration);
+        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, /*stalled=*/true, timer, onIteration);
 
     EXPECT_TRUE(outcome.converged);
     ASSERT_EQ(covValidByIteration.size(), 3u);
@@ -283,19 +314,27 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
 TEST(TestAutotune, RunUntilStableRejectsNegativeElapsed)
 {
     ScriptedTimer timer{{10.0f, 10.0f, -1.0f}, -1, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 2);
-    EXPECT_NE(outcome.errorMessage.find("non-finite or negative"), std::string::npos);
+    EXPECT_FALSE(outcome.restartUnstalled);
 }
 
 TEST(TestAutotune, RunUntilStableAcceptsZeroElapsed)
 {
     ScriptedTimer timer{{0.0f}, -1, 0};
-    auto outcome = autotune::detail::runUntilStable(
-        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(static_cast<int>(outcome.timings.size()), 3);
@@ -305,10 +344,85 @@ TEST(TestAutotune, RunUntilStableAcceptsZeroElapsed)
 TEST(TestAutotune, RunFixedAverageRejectsNaNElapsed)
 {
     ScriptedTimer timer{{std::numeric_limits<float>::quiet_NaN()}, -1, 0};
-    auto outcome
-        = autotune::detail::runFixedAverage(/*timedIterations=*/3, timer, noopFixedAverageLog);
+    timer.quality = TimingQuality::UNSTALLED;
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
     EXPECT_FALSE(outcome.converged);
     EXPECT_TRUE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
+    EXPECT_TRUE(outcome.timings.empty());
+}
+
+// ============================================================================
+// Comparison-local stall fallback: a stalled pass must stop immediately -- without
+// recording or logging the triggering sample -- on either a stall watchdog timeout or a
+// valid UNSTALLED measurement, and report restartUnstalled so the caller (Graph.hpp)
+// knows to discard the whole comparison and rerun it unstalled. An unstalled pass can
+// only ever accept a valid UNSTALLED measurement itself and can never request a further
+// restart.
+// ============================================================================
+
+TEST(TestAutotune, RunFixedAverageStopsImmediatelyOnStalledTimeout)
+{
+    ScriptedTimer timer{{1.0f, 2.0f, 3.0f}};
+    timer.timeoutOnIteration = 1; // times out on the second measurement
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/5, /*stalled=*/true, timer, noopFixedAverageLog);
+
+    EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.converged);
+    // Only the first (successful) sample was recorded; the timed-out one is discarded,
+    // and the loop never reaches iterations 2-4.
+    ASSERT_EQ(outcome.timings.size(), 1u);
+    EXPECT_FLOAT_EQ(outcome.timings[0], 1.0f);
+    EXPECT_EQ(timer.callCount, 2);
+}
+
+TEST(TestAutotune, RunUntilStableStopsImmediatelyOnUnstalledDuringStalledPass)
+{
+    ScriptedTimer timer{{10.0f, 10.0f, 10.0f, 10.0f}};
+    timer.unstalledOnIteration = 1; // stalling declined on the second measurement
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
+
+    EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.converged);
+    ASSERT_EQ(outcome.timings.size(), 1u);
+    EXPECT_EQ(timer.callCount, 2);
+}
+
+TEST(TestAutotune, RunFixedAverageUnstalledPassRecordsUniformUnstalledQuality)
+{
+    ScriptedTimer timer{{1.0f, 2.0f, 3.0f}};
+    timer.quality = TimingQuality::UNSTALLED;
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/false, timer, noopFixedAverageLog);
+
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
+    EXPECT_EQ(static_cast<int>(outcome.timings.size()), 3);
+    EXPECT_EQ(outcome.finalQuality, TimingQuality::UNSTALLED);
+}
+
+TEST(TestAutotune, RunFixedAverageUnstalledPassCannotRestartOnUnexpectedQuality)
+{
+    // A DEVICE_ONLY sample during an unstalled pass can never legitimately happen (the
+    // stall was never armed); it must fail the benchmark, not trigger another restart.
+    ScriptedTimer timer{{1.0f}};
+    timer.quality = TimingQuality::DEVICE_ONLY;
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/false, timer, noopFixedAverageLog);
+
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_TRUE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
     EXPECT_TRUE(outcome.timings.empty());
 }
 

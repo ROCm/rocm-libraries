@@ -8356,8 +8356,10 @@ TEST_F(TestGraph, BuildPlanAtIndexOutOfBounds)
 // ---------------------------------------------------------------------------
 //
 // executeWithPlanTimed() (detail/GraphExecution.hpp) is exercised here through
-// Graph::execute_timed_ext(); autotune's benchmarkOnce() shares the same helper and
-// its own retry policy is covered separately (autotune tests / integration tests).
+// Graph::execute_timed_ext(), which owns its own one-shot local profiling descriptor;
+// Graph::autotuneImpl() shares the same helper against a comparison-scoped descriptor
+// and its own restart-unstalled policy is covered separately (autotune tests /
+// integration tests).
 // injectValidCompiledPlan() installs a fake-but-"valid" active plan so these tests
 // exercise execute_timed_ext()'s own validation and profiling sequence without the
 // full engine-descriptor mock chain that a real build() would need.
@@ -8545,7 +8547,8 @@ TEST_F(TestGraph, TimedExecuteReportsInvalidOnWatchdogTimeoutWithExactlyOneExecu
     graph.injectValidCompiledPlan(1, 0, false);
 
     // Exactly one backendExecute: execute_timed_ext() discards a timed-out measurement
-    // rather than retrying or replaying it (unlike autotune's benchmarkOnce()).
+    // rather than retrying or replaying it (unlike autotuneImpl()'s restart-unstalled
+    // sweep policy).
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
         .Times(1)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
@@ -12691,6 +12694,112 @@ TEST_F(TestGraph, CompiledPlanAutotuneFailurePreservesActivePlanState)
     auto err = graph.serialize(data);
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
+}
+
+// Regression test for the comparison-local stall fallback in Graph::autotuneImpl()
+// (Graph.hpp's sweepStalled loop + TimedRunLoop's restartUnstalled signal): a stall
+// watchdog timeout on the FIRST measurement of the FIRST candidate must break that
+// candidate's own remaining iterations, skip every other candidate for this pass, and
+// rerun every candidate unstalled exactly once -- not per-candidate, and not more than
+// once. A later, independent autotune() call must still be able to arm the stall gate:
+// there is no cross-call latch left over from the first call's timeout.
+TEST_F(TestGraph, AutotuneRestartsUnstalledOnceThenLaterCallCanStallAgain)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(/*engineId=*/-2, /*workspaceSize=*/0, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
+
+    int stallArmCount = 0;
+    bool armed = false;
+    bool timeoutReported = false;
+    ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t attribute,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           const void*) {
+            if(attribute == HIPDNN_ATTR_PROFILING_RESET_EXT)
+            {
+                armed = false;
+            }
+            else if(attribute == HIPDNN_ATTR_PROFILING_STALL_ARM_EXT)
+            {
+                armed = true;
+                ++stallArmCount;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    ON_CALL(
+        *_mockBackend,
+        backendGetAttribute(_, HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<bool*>(out) = armed;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    ON_CALL(*_mockBackend,
+            backendGetAttribute(
+                _, HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+        .WillByDefault([&](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<bool*>(out) = armed && !timeoutReported;
+            timeoutReported = timeoutReported || armed;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    AutotuneConfig config;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 2;
+    config.warmupIterations = 0;
+
+    std::vector<AutotuneResult> results;
+    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)},
+                                                            {2, reinterpret_cast<void*>(0x2)},
+                                                            {3, reinterpret_cast<void*>(0x3)},
+                                                            {4, reinterpret_cast<void*>(0x4)},
+                                                            {5, reinterpret_cast<void*>(0x5)}};
+    auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(results.size(), 2u);
+
+    // Exactly one stalled attempt total: candidate -2's first iteration. Neither its
+    // second iteration nor candidate -3 (in the discarded first pass) nor the unstalled
+    // rerun ever arm again.
+    EXPECT_EQ(stallArmCount, 1);
+
+    // Every succeeded result came from the uniformly-unstalled rerun pass, never a mix.
+    for(const auto& r : results)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::UNSTALLED) << r.engineName;
+    }
+
+    // A later, independent autotune() call starts stalled again and this time every
+    // measurement reports the stall as used: no latch from the first call's timeout
+    // carried over.
+
+    std::vector<AutotuneResult> secondResults;
+    auto secondResult = graph.autotune(_handle, variantPack, nullptr, config, {}, &secondResults);
+    ASSERT_TRUE(secondResult.is_good()) << secondResult.get_message();
+    ASSERT_EQ(secondResults.size(), 2u);
+    EXPECT_EQ(stallArmCount, 1 + 2 * config.timedIterations);
+    for(const auto& r : secondResults)
+    {
+        ASSERT_TRUE(r.succeeded) << r.engineName << ": " << r.errorMessage;
+        EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY) << r.engineName;
+    }
 }
 
 TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)

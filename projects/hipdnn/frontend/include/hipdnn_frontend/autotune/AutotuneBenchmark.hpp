@@ -12,7 +12,6 @@
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -24,78 +23,6 @@
 
 namespace hipdnn_frontend::autotune::detail
 {
-
-// Run one timed iteration and report which method measured it. `stalled` selects the
-// stall gate for this iteration; the sweep turns it off for a whole pass rather than
-// per iteration, so every candidate in one pass is measured the same way.
-//
-// A watchdog release means the executed plan blocked the host on its own stream, which
-// the stall cannot coexist with. That is a property of the engine's code path, not a
-// transient fault, so the retry runs unstalled rather than re-arming. It terminates:
-// the first timeout disables stalling for this shared object, so the retry cannot arm and
-// time out. The engine is measured, just the old way -- a timing method that cannot
-// measure an engine must not be allowed to reject it.
-//
-// `quality` reports how the returned time was obtained: DEVICE_ONLY excludes host
-// submission, UNSTALLED does not necessarily. The caller must not rank the two against
-// each other; an UNSTALLED result during a stalled pass is the signal to re-measure the
-// whole sweep unstalled.
-//
-// Shares the one-shot profiling sequence with Graph::execute_timed_ext() via
-// executeWithPlanTimed(); this retry policy is autotune-only.
-inline Error
-    benchmarkOnce(hipdnnHandle_t handle,
-                  ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& execPlan,
-                  ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& variantPackDesc,
-                  float& elapsedMs,
-                  ::hipdnn_frontend::TimingQuality& quality,
-                  bool stalled = true)
-{
-    elapsedMs = 0.0f;
-    quality = ::hipdnn_frontend::TimingQuality::INVALID;
-
-    ::hipdnn_frontend::ExecutionTiming timing;
-    HIPDNN_CHECK_ERROR(::hipdnn_frontend::detail::executeWithPlanTimed(
-        handle, execPlan, variantPackDesc, timing, stalled));
-    if(timing.quality != ::hipdnn_frontend::TimingQuality::INVALID)
-    {
-        if(!timing.elapsedMs.has_value() || !std::isfinite(*timing.elapsedMs)
-           || *timing.elapsedMs < 0.0f)
-        {
-            elapsedMs = 0.0f;
-            quality = ::hipdnn_frontend::TimingQuality::INVALID;
-            return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                    "executeWithPlanTimed reported a usable quality without a valid elapsed "
-                    "time"};
-        }
-        elapsedMs = *timing.elapsedMs;
-        quality = timing.quality;
-        return {ErrorCode::OK, ""};
-    }
-
-    HIPDNN_FE_LOG_WARN(
-        "autotune: stall watchdog fired; this plan blocks the host on its own stream during "
-        "execution. Re-measuring without the stall.");
-
-    ::hipdnn_frontend::ExecutionTiming retryTiming;
-    HIPDNN_CHECK_ERROR(::hipdnn_frontend::detail::executeWithPlanTimed(
-        handle, execPlan, variantPackDesc, retryTiming, /*stalled=*/false));
-    // The retry cannot time out because nothing was armed, so it must come back UNSTALLED
-    // with a valid elapsed time; anything else is a malformed contract from below.
-    if(retryTiming.quality != ::hipdnn_frontend::TimingQuality::UNSTALLED
-       || !retryTiming.elapsedMs.has_value() || !std::isfinite(*retryTiming.elapsedMs)
-       || *retryTiming.elapsedMs < 0.0f)
-    {
-        elapsedMs = 0.0f;
-        quality = ::hipdnn_frontend::TimingQuality::INVALID;
-        return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Unstalled retry after a stall watchdog timeout did not report a valid "
-                "UNSTALLED measurement"};
-    }
-    elapsedMs = *retryTiming.elapsedMs;
-    quality = retryTiming.quality;
-    return {ErrorCode::OK, ""};
-}
 
 // Initializes an AutotuneResult with the sub-set identity and config fields known
 // before a candidate is benchmarked. The benchmark loop fills the timing, succeeded,

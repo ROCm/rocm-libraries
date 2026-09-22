@@ -52,6 +52,45 @@ hipDNN uses a layered error handling approach designed to be robust across C/C++
 2.  **Backend (C API)**: All public API functions return `hipdnnStatus_t` codes. The backend catches any internal C++ exceptions, converts them to the appropriate status code, and stores the exception message. Users can retrieve descriptive error messages using `hipdnnGetLastErrorString`.
 3.  **Frontend (C++ API)**: The C++ frontend checks `hipdnnStatus_t` codes from the backend. On failure, it retrieves the detailed error message via `hipdnnGetLastErrorString` and returns an `Error` object containing the error code and description. The frontend utilizes **value-based error handling** rather than throwing exceptions.
 
+### Timing and Watchdog Recovery
+
+Timing must compare measurements made with the same method. A successful execution
+does not necessarily produce a valid timing sample.
+
+- **Stall gate**: `StallGate` holds a stream until the host finishes submitting a
+  measurement. Its watchdog restores progress with a host signal write and reports
+  a per-attempt timeout. It does not disable other gates or later attempts.
+- **Profiling context**: `ProfilingControlDescriptor` owns the HIP events and lazily
+  creates a gate. `HIPDNN_ATTR_PROFILING_RESET_EXT` releases and drains an unfinished
+  measurement, clears its results, and retains these resources for reuse. A successful
+  finalization already retires the stop event, so the next reset needs no extra drain.
+  The handle, stream, and device remain fixed for the context's lifetime.
+- **Comparison policy**: Each frontend autotune call and ingestor `BenchmarkPlan`
+  selection starts by attempting device-only timing. A timeout or a valid unstalled
+  sample ends that pass immediately. The caller discards its scores and measures
+  every candidate again without stalling. The unstalled pass cannot request another
+  restart. Execution errors and malformed timings remain failures, not timeout signals.
+- **Resource scope**: Frontend autotune reuses one backend profiling context across
+  both passes. Ingestor selection owns its timer resources locally and frees them
+  before the ordinary selected-plan execution. Neither path retains a handle-wide
+  cache or module-wide disable flag.
+
+`execute_timed_ext()` executes exactly once and never applies the comparison retry
+policy. Its result reports `DEVICE_ONLY`, `UNSTALLED`, or `INVALID`, plus `timedOut`.
+An invalid result has no elapsed value. Zero is a valid elapsed value; negative and
+non-finite values are rejected.
+
+Direct gate users must release and drain the previous wait before re-arming the
+binary signal. Profiling reset and the ingestor timer enforce this ordering on
+success and error paths. Releasing a wait predicate does not prove that the waiter
+has retired; destruction releases first and relies on `hipFree()` to synchronize
+before deallocating the signal.
+
+The comparison owns fallback because a timeout does not identify a permanent engine
+fault. A slow host or missing release can also reach the deadline. A new comparison
+therefore starts fresh. Strike counters, engine blacklists, and epoch-based signaling
+are not required for this serial measurement lifecycle.
+
 ### SDKs
 
 hipDNN provides three header-only SDK libraries that serve as the foundation for communication between different components.

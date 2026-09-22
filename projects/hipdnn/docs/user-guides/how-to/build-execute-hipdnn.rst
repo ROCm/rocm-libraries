@@ -114,3 +114,62 @@ The variant pack specifies which GPU memory address correspond to which tensors.
 The tensors are added to the variant pack using the tensor UID as the key and the GPU memory address as the value.
 It's the responsibility of the application to ensure sufficient GPU memory is allocated for each tensor, and to ensure data is synchronized between the GPU and host memory.
 The Data SDK ``utilities::Tensor`` class assists with tensor host and GPU memory management, though it may not be suitable for all applications.
+
+Measure execution time
+======================
+
+Use ``Graph::execute_timed_ext()`` to execute the active plan once and obtain an
+``ExecutionTiming`` result. Allocate buffers and workspace before the call. The call
+waits for timing to complete, but it does not perform hidden warmups or retries.
+
+Check the returned ``Error`` before using the timing:
+
+* ``DEVICE_ONLY`` means that a stall gate excluded host submission gaps.
+* ``UNSTALLED`` means that the measurement did not use the gate. Depending on the
+  runtime and engine, the event interval may include host submission time.
+* ``INVALID`` means that no usable elapsed value is available.
+
+Do not rank ``DEVICE_ONLY`` and ``UNSTALLED`` samples together. Valid elapsed values
+are finite and non-negative; zero is valid for work below the event timer's resolution.
+
+If the host does not release the gate within its watchdog budget, the watchdog writes
+the release signal. Execution can complete successfully, but ``timedOut`` is true,
+``quality`` is ``INVALID``, and ``elapsedMs`` is empty. This does not disable later
+timed executions. A bad ``Error`` also invalidates the timing; it does not imply
+that no device work ran.
+
+Python returns ``(Error, ExecutionTiming)`` from ``graph.execute_timed_ext()``. The
+corresponding result fields are ``quality``, ``timed_out``, and ``elapsed_ms``.
+
+Autotune and ingestor benchmarking apply a comparison-local recovery policy. If a
+device-only pass times out or obtains an unstalled sample, they stop that pass,
+discard its measurements, and rerun all candidates unstalled once. A later
+independent comparison can attempt device-only timing again.
+
+Reuse a backend profiling context
+--------------------------------
+
+Backend API callers can reuse ``HIPDNN_BACKEND_PROFILING_CONTROL_EXT``:
+
+1. Create the descriptor and set ``HIPDNN_ATTR_PROFILING_HANDLE_EXT``.
+2. Optionally set ``HIPDNN_ATTR_PROFILING_STALL_ARM_EXT`` before recording start.
+3. Set ``HIPDNN_ATTR_PROFILING_START_EXT``, execute on the bound stream, and set
+   ``HIPDNN_ATTR_PROFILING_STOP_EXT``.
+4. Release the stall and finalize the descriptor. Finalization also releases a
+   pending stall before synchronizing the stop event.
+5. Read ``HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT`` and
+   ``HIPDNN_ATTR_PROFILING_STALL_USED_EXT`` before using
+   ``HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT``. No timeout alone does not prove
+   device-only timing.
+6. Set ``HIPDNN_ATTR_PROFILING_RESET_EXT`` before the next measurement.
+
+``RESET_EXT`` is a scalar ``HIPDNN_TYPE_BOOLEAN`` trigger; its value is ignored.
+It is also valid on a fresh or incomplete descriptor. It releases and drains
+unfinished work, clears the old result, and retains the events and gate.
+Result getters remain unavailable until the next successful finalization.
+
+Keep the handle, stream, and current HIP device unchanged while using the context.
+Rebinding requires a new descriptor. Do not reset a descriptor while another thread
+reads it. Direct ``StallGate`` and Python ``HipStallGate`` users must synchronize the
+previously armed stream before re-arming; ``release()`` alone does not guarantee
+that its wait packet has retired.

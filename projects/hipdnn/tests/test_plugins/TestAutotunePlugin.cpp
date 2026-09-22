@@ -39,12 +39,8 @@ constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
 // margin.
 constexpr size_t TIMING_SCRATCH_SIZE = size_t{4} * 1024 * 1024;
 
-// AutotunePluginEngineHostSyncs deadlocks itself against an armed stall gate on purpose.
-// Paying for that costs the stall watchdog's full timeout and then disables stalling for
-// everything linked into this plugin, which would make every unrelated autotune test in
-// the same binary slow and unstalled. Only the stall-recovery tests want it, so it is
-// opt-in: they set this variable in the isolated child they spawn, and every other test
-// sees the six ordinary engines.
+// The host-sync engine deliberately trips the stall watchdog. Only recovery tests
+// enable it, before handle creation discovers and caches the engine list.
 bool hostSyncEngineEnabled()
 {
     return !hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_AUTOTUNE_HOST_SYNC_ENGINE").empty();

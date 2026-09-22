@@ -987,15 +987,21 @@ using BenchmarkPlanBuilder = GenericPlanBuilder<TestHandle, KnobFilterSettings, 
 inline BenchmarkPlan<TestHandle>::Timer
     makeWorkspaceKeyedTimer(std::unordered_map<size_t, double> timesByWorkspaceSize)
 {
-    return
-        [times = std::move(timesByWorkspaceSize)](const hipdnn_plugin_sdk::IPlan<TestHandle>& plan,
-                                                  const TestHandle& handle,
-                                                  const hipdnnPluginDeviceBuffer_t*,
-                                                  uint32_t,
-                                                  void*) -> std::optional<double> {
-            const auto found = times.find(plan.getWorkspaceSize(handle));
-            return found != times.end() ? std::optional<double>(found->second) : std::nullopt;
-        };
+    return [times = std::move(timesByWorkspaceSize)](
+               const hipdnn_plugin_sdk::IPlan<TestHandle>& plan,
+               const TestHandle& handle,
+               const hipdnnPluginDeviceBuffer_t*,
+               uint32_t,
+               void*,
+               bool stalled) -> BenchmarkPlan<TestHandle>::TimingResult {
+        const auto found = times.find(plan.getWorkspaceSize(handle));
+        BenchmarkPlan<TestHandle>::TimingResult result{std::nullopt, stalled, false};
+        if(found != times.end())
+        {
+            result.elapsedMs = found->second;
+        }
+        return result;
+    };
 }
 
 /// With benchmarking on, the plan the context receives reports the workspace max over

@@ -1474,17 +1474,26 @@ typedef enum
     HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT = 60406,
 
     /** @brief True when a stall watchdog timeout, not the caller, released the stall.
-     *  The elapsed time is then invalid, and later arm attempts in the same shared object
-     *  remain disabled until that shared object unloads (HIPDNN_TYPE_BOOLEAN, read-only) */
+     *  The elapsed time is then invalid for this measurement; later arm attempts are
+     *  unaffected (HIPDNN_TYPE_BOOLEAN, read-only) */
     HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT = 60407,
 
     /** @brief Latched result of the most recent STALL_ARM_EXT attempt: true only when
      *  arm() actually stalled the stream for this measurement. Not the current armed
      *  state -- it stays readable after STALL_RELEASE_EXT and finalize() (both of which
-     *  always release the gate). False when STALL_ARM_EXT was never set or arming
-     *  declined (unsupported device, disabled for this shared object, or a HIP failure).
-     *  Read after finalize() (HIPDNN_TYPE_BOOLEAN, read-only) */
+     *  always release the gate). False when STALL_ARM_EXT was never set or the device
+     *  does not support stalling (a HIP call failure during arming is a backend error,
+     *  not a decline). Read after finalize() (HIPDNN_TYPE_BOOLEAN, read-only) */
     HIPDNN_ATTR_PROFILING_STALL_USED_EXT = 60408,
+
+    /** @brief Trigger: reuse this context for another measurement. The only attribute
+     *  accepted once finalized; also valid on a fresh or partially executed descriptor.
+     *  Releases the gate, drains any outstanding stream work not already covered by a
+     *  prior successful finalize(), and clears the finalized/start/stop/elapsed/
+     *  stall-used/timed-out state. The handle, stream, events, and gate are retained;
+     *  rebinding to a different handle/stream requires a new descriptor
+     *  (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_RESET_EXT = 60409,
 
     /** @} */
 

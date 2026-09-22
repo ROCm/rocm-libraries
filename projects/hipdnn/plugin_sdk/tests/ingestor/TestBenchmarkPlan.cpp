@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -281,14 +282,17 @@ TestBenchmarkPlan::Timer
                                     const BenchmarkTestHandle& handle,
                                     const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                     uint32_t numDeviceBuffers,
-                                    void* workspace) -> std::optional<double> {
+                                    void* workspace,
+                                    bool stalled) -> TestBenchmarkPlan::TimingResult {
         const auto found = durations.find(&plan);
+        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
         if(found == durations.end())
         {
-            return std::nullopt;
+            return result;
         }
         plan.execute(handle, deviceBuffers, numDeviceBuffers, workspace);
-        return found->second;
+        result.elapsedMs = found->second;
+        return result;
     };
 }
 
@@ -378,13 +382,19 @@ TEST(TestIngestorBenchmarkPlan, TheReductionIgnoresASingleLuckySample)
               const BenchmarkTestHandle& planHandle,
               const hipdnnPluginDeviceBuffer_t* deviceBuffers,
               uint32_t numDeviceBuffers,
-              void* workspace) -> std::optional<double> {
+              void* workspace,
+              bool stalled) -> TestBenchmarkPlan::TimingResult {
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
         if(&plan == steadyRaw)
         {
-            return STEADY_SAMPLE;
+            result.elapsedMs = STEADY_SAMPLE;
         }
-        return luckySampleIndex++ == 0 ? LUCKY_SAMPLE : LUCKY_TYPICAL;
+        else
+        {
+            result.elapsedMs = luckySampleIndex++ == 0 ? LUCKY_SAMPLE : LUCKY_TYPICAL;
+        }
+        return result;
     };
 
     const BenchmarkTestHandle handle;
@@ -436,13 +446,13 @@ TEST(TestIngestorBenchmarkPlan, TheReductionTrimsASingleSlowOutlier)
               const BenchmarkTestHandle& planHandle,
               const hipdnnPluginDeviceBuffer_t* deviceBuffers,
               uint32_t numDeviceBuffers,
-              void* workspace) -> std::optional<double> {
+              void* workspace,
+              bool stalled) -> TestBenchmarkPlan::TimingResult {
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        if(&plan == steadyRaw)
-        {
-            return STEADY_SAMPLE;
-        }
-        return SPIKY_SAMPLES.at(spikySampleIndex++);
+        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
+        result.elapsedMs
+            = &plan == steadyRaw ? STEADY_SAMPLE : SPIKY_SAMPLES.at(spikySampleIndex++);
+        return result;
     };
 
     const BenchmarkTestHandle handle;
@@ -513,14 +523,17 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
 }
 
 /// A watchdog timeout says the candidate cannot be measured with the stream stalled; it
-/// says nothing about how fast the candidate is. Before the fix the timed-out sample was
-/// scored unusable, so the candidate was dropped from the ranking entirely and a slower
-/// kernel was cached. The sweep now discards the mixed pass and re-measures every
-/// candidate unstalled, so both appear.
+/// says nothing about how fast the candidate is. The comparison aborts sampling the
+/// instant the timeout is seen -- a candidate ordered after the deadlocking one is never
+/// sampled stalled at all -- then re-measures every candidate unstalled from scratch, so
+/// all three end up ranked.
 ///
-/// This is the real default timer against real HIP: the plan below synchronizes the very
-/// stream the gate stalls, which is the self-inflicted deadlock the watchdog exists for.
-TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutRemeasuresEveryCandidateInsteadOfDroppingOne)
+/// This is the real default timer against real HIP: the middle candidate synchronizes
+/// the very stream the gate stalls, which is the self-inflicted deadlock the watchdog
+/// exists for. No module-wide latch is consulted or reset: this policy is local to each
+/// comparison, proven by running a second, independent comparison afterward and seeing
+/// its own gate stall and time out too.
+TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerunsUnstalled)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -534,54 +547,210 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutRemeasuresEveryCandidateInsteadO
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    // The latch is sticky and shared by everything linked into this module, so clear it
-    // first: an earlier case that timed out would otherwise leave this sweep unstalled
-    // and nothing would be proven.
-    hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
-
-    // Mirrors the mandatory-release-on-exception guard in BenchmarkPlan.hpp's default
-    // timer: resets the latch on every exit path, including an ASSERT_* failure or an
-    // exception thrown out of plan.execute() below, so this test can never leave the
-    // sticky latch tripped for every later test in this binary.
-    struct StallingDisabledResetGuard
+    // One run of a [normal, deadlocking, normal] comparison against a fresh stream and
+    // plan: how long plan.execute() took, what the ranking recorded, and how many times
+    // the candidates before/after the deadlocking one launched. Returned by value rather
+    // than through out-params so two calls below cannot share any state.
+    struct ComparisonResult
     {
-        ~StallingDisabledResetGuard()
-        {
-            hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
-        }
-    } const resetLatchOnExit;
+        std::vector<RankedEntry> recorded;
+        std::chrono::milliseconds wallTime;
+        int beforeLaunches;
+        int afterLaunches;
+    };
 
-    hipStream_t rawStream = nullptr;
-    ASSERT_EQ(hipStreamCreate(&rawStream), hipSuccess);
-    // ScopedResource, the same RAII pattern the default HIP-event timer above uses for its
-    // events: destroys the stream on every exit path instead of only the fall-through one.
-    const hipdnn_data_sdk::utilities::ScopedResource<hipStream_t> stream(
-        rawStream, [](hipStream_t s) { static_cast<void>(hipStreamDestroy(s)); });
-    const BenchmarkTestHandle handle{stream.get()};
+    const auto runComparison = []() -> ComparisonResult {
+        hipStream_t rawStream = nullptr;
+        EXPECT_EQ(hipStreamCreate(&rawStream), hipSuccess);
+        // ScopedResource, the same RAII pattern the default HIP-event timer uses for its
+        // events: destroys the stream on every exit path instead of only fall-through.
+        const hipdnn_data_sdk::utilities::ScopedResource<hipStream_t> stream(
+            rawStream, [](hipStream_t s) { static_cast<void>(hipStreamDestroy(s)); });
+        const BenchmarkTestHandle handle{stream.get()};
+
+        auto before = std::make_unique<FakePlan>(64);
+        auto after = std::make_unique<FakePlan>(64);
+        const auto* beforeRaw = before.get();
+        const auto* afterRaw = after.get();
+
+        std::vector<TestBenchmarkPlan::Candidate> candidates;
+        candidates.push_back({testId(0x01), std::move(before), testId(0xF0), testId(0xD0)});
+        candidates.push_back(
+            {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
+        candidates.push_back({testId(0x03), std::move(after), testId(0xF0), testId(0xD0)});
+
+        std::vector<RankedEntry> recorded;
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
+            handle,
+            TestBenchmarkPlan::Timer{},
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        const auto start = std::chrono::steady_clock::now();
+        plan.execute(handle, nullptr, 0U, nullptr);
+        const auto wallTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+
+        return {std::move(recorded), wallTime, beforeRaw->launchCount(), afterRaw->launchCount()};
+    };
+
+    // plan.execute() samples every candidate and then delegates once more to whichever
+    // one the ranking crowned the winner, so that candidate's launch count is one higher
+    // than a pure sampling count. Compare against the actual winner rather than assuming
+    // one, since real HIP timing decides it and any of the three trivial candidates could
+    // win.
+    const auto delegatedBonus
+        = [](const std::vector<RankedEntry>& recorded, DescriptorId id) -> int {
+        return !recorded.empty() && recorded.front().kernelId == id ? 1 : 0;
+    };
+
+    const auto first = runComparison();
+
+    EXPECT_GE(first.wallTime, hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "the watchdog never fired, so this case proved nothing";
+    EXPECT_EQ(first.recorded.size(), 3U)
+        << "the timed-out candidate was dropped instead of re-measured unstalled";
+
+    // Immediate abort: the candidate ordered after the deadlocking one accrues exactly
+    // one pass's launches (the unstalled rerun only), because the stalled pass never
+    // reaches it. The candidate ordered before it finishes its stalled pass normally and
+    // is then resampled unstalled, so it accrues two passes' worth. Either count gains
+    // one more launch if that candidate turned out to be the delegated winner.
+    EXPECT_EQ(first.beforeLaunches,
+              2 * SAMPLING_LAUNCHES + delegatedBonus(first.recorded, testId(0x01)))
+        << "the candidate before the timeout must be sampled once per pass";
+    EXPECT_EQ(first.afterLaunches, SAMPLING_LAUNCHES + delegatedBonus(first.recorded, testId(0x03)))
+        << "the candidate after the timeout must not be sampled during the aborted stalled "
+           "pass, only during the unstalled rerun";
+
+    // A second, wholly independent comparison must still be able to stall and time out:
+    // nothing about the first comparison's fallback may have disabled stalling for it.
+    const auto second = runComparison();
+
+    EXPECT_GE(second.wallTime, hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "a prior comparison's fallback suppressed stalling for this independent one";
+    EXPECT_EQ(second.recorded.size(), 3U);
+    EXPECT_EQ(second.afterLaunches,
+              SAMPLING_LAUNCHES + delegatedBonus(second.recorded, testId(0x03)));
+}
+
+/// A valid measurement without an actual stall, seen during a requested stalled pass, is
+/// treated exactly like a watchdog timeout: it is not about the candidate, so the whole
+/// comparison restarts unstalled, and the pass that saw it aborts immediately rather than
+/// finishing. Deterministic: the injected timer decides stallUsed itself (the equivalent
+/// of a gate that silently failed to arm), so this needs no device.
+TEST(TestIngestorBenchmarkPlan,
+     AValidUnstalledSampleDuringAStalledPassRestartsTheWholeComparisonUnstalled)
+{
+    auto before = std::make_unique<FakePlan>(64);
+    auto trigger = std::make_unique<FakePlan>(64);
+    auto after = std::make_unique<FakePlan>(64);
+    const auto* beforeRaw = before.get();
+    const auto* triggerRaw = trigger.get();
+    const auto* afterRaw = after.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(before), testId(0xF0), testId(0xD0)});
+    candidates.push_back({testId(0x02), std::move(trigger), testId(0xF0), testId(0xD0)});
+    candidates.push_back({testId(0x03), std::move(after), testId(0xF0), testId(0xD0)});
+
+    // Every sample is a plain valid measurement, except triggerRaw's: it reports
+    // stallUsed=false whenever asked to run stalled, as if its gate never armed.
+    const TestBenchmarkPlan::Timer timer
+        = [triggerRaw](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+                       const BenchmarkTestHandle& planHandle,
+                       const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                       uint32_t numDeviceBuffers,
+                       void* workspace,
+                       bool stalled) -> TestBenchmarkPlan::TimingResult {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        TestBenchmarkPlan::TimingResult result;
+        result.elapsedMs = 1.0;
+        result.stallUsed = stalled && &plan != triggerRaw;
+        return result;
+    };
 
     std::vector<RankedEntry> recorded;
-
-    // Declared (and so destroyed) after `stream`: this plan owns the timer's StallGate,
-    // and ~StallGate() synchronizes the stream it armed, which must happen before the
-    // stream is destroyed on every exit path, not only normal fall-through.
-    std::vector<TestBenchmarkPlan::Candidate> candidates;
-    candidates.push_back(
-        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
-    candidates.push_back(
-        {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
-
+    const BenchmarkTestHandle handle;
     const TestBenchmarkPlan plan(
-        std::move(candidates),
-        handle,
-        TestBenchmarkPlan::Timer{},
-        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+        std::move(candidates), handle, timer, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
 
     plan.execute(handle, nullptr, 0U, nullptr);
 
-    EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled())
-        << "the watchdog never fired, so this case proved nothing";
-    EXPECT_EQ(recorded.size(), 2U)
-        << "the timed-out candidate was dropped instead of re-measured unstalled";
+    ASSERT_EQ(recorded.size(), 3U)
+        << "the whole comparison must restart unstalled and re-rank every candidate";
+
+    // Immediate abort, same as the watchdog case: the candidate ordered after the trigger
+    // is never sampled during the aborted stalled pass, only during the unstalled rerun,
+    // while the candidate ordered before it completes both passes. All three samples tie
+    // at 1.0ms, so stable_sort's lowest-index tie-break makes `before` the winner
+    // deterministically; the bonus is still computed from recorded.front() rather than
+    // assumed, matching how a real, timing-driven sweep must be checked.
+    const bool beforeWon = recorded.front().kernelId == testId(0x01);
+    const bool afterWon = recorded.front().kernelId == testId(0x03);
+    EXPECT_EQ(beforeRaw->launchCount(), 2 * SAMPLING_LAUNCHES + (beforeWon ? 1 : 0))
+        << "the candidate before the trigger must be sampled once per pass";
+    EXPECT_EQ(afterRaw->launchCount(), SAMPLING_LAUNCHES + (afterWon ? 1 : 0))
+        << "the candidate after the trigger must not be sampled during the aborted stalled "
+           "pass, only during the unstalled rerun";
+}
+
+/// A timer that reports stalled activity (stallUsed or timedOut) while explicitly asked
+/// to run unstalled is inconsistent, and the comparison has no second restart to fall
+/// back on: the one-shot unstalled retry already ran. That candidate is scored unusable
+/// instead of being trusted, while a well-behaved sibling still wins normally.
+TEST(TestIngestorBenchmarkPlan, AnInconsistentStalledSampleDuringTheUnstalledRetryIsRejected)
+{
+    auto good = std::make_unique<FakePlan>(64);
+    auto bad = std::make_unique<FakePlan>(64);
+    const auto* badRaw = bad.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(good), testId(0xF0), testId(0xD0)});
+    candidates.push_back({testId(0x02), std::move(bad), testId(0xF0), testId(0xD0)});
+
+    // `bad` times out on the stalled pass, forcing the one-shot restart, then falsely
+    // reports stallUsed on the unstalled retry even though stalled=false was requested.
+    // `good` always reports a plain, mode-consistent measurement.
+    const TestBenchmarkPlan::Timer timer
+        = [badRaw](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+                   const BenchmarkTestHandle& planHandle,
+                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                   uint32_t numDeviceBuffers,
+                   void* workspace,
+                   bool stalled) -> TestBenchmarkPlan::TimingResult {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
+        if(&plan == badRaw)
+        {
+            if(stalled)
+            {
+                result.timedOut = true;
+                return result;
+            }
+            result.elapsedMs = 1.0;
+            result.stallUsed = true;
+            return result;
+        }
+        result.elapsedMs = 2.0;
+        result.stallUsed = stalled;
+        return result;
+    };
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(
+        std::move(candidates), handle, timer, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 1U)
+        << "the mode-inconsistent candidate must be scored unusable, not ranked";
+    EXPECT_EQ(recorded.front().kernelId, testId(0x01));
 }
 
 /// A one-candidate composite still samples before delegating to the only candidate.
@@ -704,14 +873,20 @@ inline TestBenchmarkPlan::Timer
                                       const BenchmarkTestHandle&,
                                       const hipdnnPluginDeviceBuffer_t*,
                                       uint32_t,
-                                      void*) -> std::optional<double> {
+                                      void*,
+                                      bool stalled) -> TestBenchmarkPlan::TimingResult {
         const auto found = std::find(order.begin(), order.end(), &plan);
+        TestBenchmarkPlan::TimingResult result{std::nullopt, stalled, false};
         if(found == order.end())
         {
-            return std::nullopt;
+            return result;
         }
         const auto index = static_cast<size_t>(std::distance(order.begin(), found));
-        return index < times.size() ? times[index] : std::nullopt;
+        if(index < times.size())
+        {
+            result.elapsedMs = times[index];
+        }
+        return result;
     };
 }
 

@@ -168,14 +168,9 @@ void armStallGate(StallGate& gate, uintptr_t stream)
     }
 
     throwOnHipError(gate.lastError(), gate.lastOperation());
-    if(gate.lastOperation() != nullptr)
-    {
-        throw std::runtime_error(std::string("HIP stall gate declined arm: ")
-                                 + gate.lastOperation());
-    }
-    // Reached only when no HIP call failed and no per-attempt diagnostic exists,
-    // so an earlier watchdog timeout disabled stalling for this shared object.
-    throw std::runtime_error("HIP stall gate is disabled after a stall watchdog timeout");
+    throw std::runtime_error(
+        std::string("HIP stall gate declined arm: ")
+        + (gate.lastOperation() != nullptr ? gate.lastOperation() : "unknown operation"));
 }
 
 // Binding-local owner for a StallGate. StallGate is non-movable, so the wrapper

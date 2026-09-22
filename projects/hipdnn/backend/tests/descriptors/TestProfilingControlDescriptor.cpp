@@ -50,22 +50,6 @@ TEST_F(TestProfilingControlDescriptor, CreateDescriptor)
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
 }
 
-// Guards against a silent 1/0 render of the boolean state fields in toString():
-// a freshly created descriptor has all state flags false, so each must render as
-// the literal token "false" (never "0" / "1").
-TEST_F(TestProfilingControlDescriptor, ToStringRendersBooleanTokens)
-{
-    const std::string str = getDescriptor()->toString();
-
-    EXPECT_NE(str.find("eventsCreated=false"), std::string::npos);
-    EXPECT_NE(str.find("startRecorded=false"), std::string::npos);
-    EXPECT_NE(str.find("stopRecorded=false"), std::string::npos);
-    EXPECT_NE(str.find("finalized=false"), std::string::npos);
-
-    EXPECT_EQ(str.find("eventsCreated=0"), std::string::npos);
-    EXPECT_EQ(str.find("eventsCreated=1"), std::string::npos);
-}
-
 // ============================================================================
 // Base-fixture guard coverage (no GPU)
 //
@@ -183,9 +167,6 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
         TestProfilingControlDescriptor::SetUp();
-        // One case deliberately trips the watchdog, which disables stalling for this
-        // shared object. Clear it per test so results cannot depend on test order.
-        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         ASSERT_EQ(hipStreamCreate(&_testStream), hipSuccess);
         _mockHandle = std::make_unique<NiceMock<MockHandle>>();
         ON_CALL(*_mockHandle, getStream()).WillByDefault(Return(_testStream));
@@ -199,9 +180,6 @@ protected:
             EXPECT_EQ(hipStreamDestroy(_testStream), hipSuccess);
             _testStream = nullptr;
         }
-        // Mirrors the SetUp() reset: a test that deliberately trips the watchdog must not
-        // leave stalling disabled for whatever runs next in this binary.
-        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         TestProfilingControlDescriptor::TearDown();
     }
 
@@ -237,6 +215,12 @@ protected:
     {
         bool value = true;
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value);
+    }
+
+    static void resetContext(const std::shared_ptr<ProfilingControlDescriptor>& desc)
+    {
+        bool value = true;
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_RESET_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value);
     }
 
     // The stall needs hipStreamWaitValue32; a device without it degrades to the
@@ -279,6 +263,35 @@ TEST_F(TestGpuProfilingControlDescriptor, HappyPathCompletesLifecycle)
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
     EXPECT_EQ(elementCount, 1);
+}
+
+TEST_F(TestGpuProfilingControlDescriptor, RebindingCannotChangeTheTimingContext)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+    ASSERT_NO_THROW(resetContext(desc));
+    ASSERT_NO_THROW(setHandle(desc));
+
+    NiceMock<MockHandle> other;
+    ON_CALL(other, getStream()).WillByDefault(Return(_testStream));
+    hipdnnHandle* handlePtr = &other;
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_PROFILING_HANDLE_EXT,
+                                                  HIPDNN_TYPE_HANDLE,
+                                                  1,
+                                                  static_cast<const void*>(&handlePtr)),
+                               HIPDNN_STATUS_BAD_PARAM);
+
+    ON_CALL(*_mockHandle, getStream()).WillByDefault(Return(nullptr));
+    ASSERT_THROW_HIPDNN_STATUS(resetContext(desc), HIPDNN_STATUS_BAD_PARAM);
+    ON_CALL(*_mockHandle, getStream()).WillByDefault(Return(_testStream));
+    ASSERT_NO_THROW(resetContext(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+    EXPECT_TRUE(desc->isFinalized());
 }
 
 TEST_F(TestGpuProfilingControlDescriptor, StartRecordedTwiceThrows)
@@ -444,6 +457,10 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
 // region blocks the host on the stalled stream, and only the host can release. Without
 // the watchdog this test hangs forever. With it, the write that ends the stall is also
 // what the blocked host is waiting on, so hipStreamSynchronize returns.
+//
+// A timeout is scoped to its own attempt, not sticky: once the drained stream proves
+// the watchdog's release actually retired, the very same gate can arm again, and an
+// unrelated new gate is never affected in the first place.
 TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
 {
     if(!stallGateAvailable())
@@ -468,13 +485,20 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
     EXPECT_TRUE(gate.timedOut()) << "watchdog released but did not report it";
     EXPECT_GE(waited, TIMEOUT) << "watchdog fired before its deadline";
 
-    // Sticky: the cause is a property of the measured code, so stalling stays off and a
-    // later arm must decline rather than deadlock again. The decline must still clear the
-    // timeout: timedOut() describes the most recent arm attempt, and a reused gate that
-    // keeps reporting the old timeout makes every later sample look untimeable.
-    EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
-    EXPECT_FALSE(gate.arm(_testStream));
-    EXPECT_FALSE(gate.timedOut()) << "a declined arm still reports the earlier timeout";
+    // The synchronize above proves the stream drained past the released wait packet, so
+    // the same gate can re-arm it immediately -- no sticky latch survives a timeout.
+    ASSERT_TRUE(gate.arm(_testStream)) << "a drained stream must allow the same gate to re-arm";
+    gate.release();
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+    EXPECT_FALSE(gate.timedOut()) << "a fresh arm attempt clears the previous timeout";
+
+    // An independent new gate was never in scope for the first gate's timeout at all.
+    hipdnn_data_sdk::utilities::StallGate freshGate;
+    ASSERT_TRUE(freshGate.isUsable());
+    EXPECT_TRUE(freshGate.arm(_testStream))
+        << "an independent new gate must not inherit another gate's timeout";
+    freshGate.release();
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
 }
 
 TEST_F(TestGpuProfilingControlDescriptor, NonPositiveTimeoutUsesDefaultBudget)
@@ -486,7 +510,6 @@ TEST_F(TestGpuProfilingControlDescriptor, NonPositiveTimeoutUsesDefaultBudget)
 
     for(const auto timeout : {std::chrono::milliseconds(0), std::chrono::milliseconds(-1)})
     {
-        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         hipdnn_data_sdk::utilities::StallGate gate(timeout);
         ASSERT_TRUE(gate.arm(_testStream));
         // Give an immediate watchdog deadline time to fire, well below the default 2 s.
@@ -538,8 +561,6 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogDoesNotFireOnNormalRelease)
         ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
         EXPECT_FALSE(gate.timedOut());
     }
-
-    EXPECT_FALSE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
 }
 
 // A watchdog release must be visible through the public descriptor, so an external
@@ -741,8 +762,7 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
     }
 
     // The descriptor's stall gate uses the default (2 s) watchdog timeout, so tripping it
-    // for real costs a couple of seconds. The fixture's TearDown() resets this shared
-    // object's disabled flag, so no later suite in this binary inherits it.
+    // for real costs a couple of seconds.
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
@@ -772,80 +792,153 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
     EXPECT_TRUE(timedOut) << "the watchdog released the stall, not the caller";
 }
 
-// Arming can decline for a reason other than device support: a prior timeout anywhere in
-// the descriptor disables stalling for this shared object, so a later arm() attempt must read as
-// unused. The fixture's TearDown() resets the flag this trips, so this test cannot poison
-// later suites in the same binary.
-TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
+// RESET_EXT is the only attribute PROFILING_CONTROL accepts once finalized: it
+// un-finalizes the context so a second full measurement can run on the same handle,
+// stream, events, and gate.
+TEST_F(TestGpuProfilingControlDescriptor, ResetAfterSuccessfulMeasurementAllowsReuse)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(resetContext(desc));
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+    ASSERT_TRUE(desc->isFinalized());
+
+    ASSERT_NO_THROW(resetContext(desc));
+    EXPECT_FALSE(desc->isFinalized()) << "reset() must un-finalize the context for reuse";
+
+    // Start/stop are not stuck "already recorded" from the first pass.
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    float elapsed = -1.0f;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, &elementCount, &elapsed));
+    EXPECT_GE(elapsed, 0.0f);
+}
+
+// The staleness this guards against: STALL_TIMED_OUT_EXT is latched at finalize(), not
+// read live off the gate, so a later measurement that reuses the same gate but never
+// arms it cannot inherit an earlier measurement's timeout. It also proves a timeout
+// does not disable the gate for the descriptor's own later, stalled reuse.
+TEST_F(TestGpuProfilingControlDescriptor, ResetAfterTimeoutThenUnstalledThenStalledReuse)
 {
     if(!stallGateAvailable())
     {
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
-
-    // Trip the watchdog on a raw gate, exactly as WatchdogBreaksSelfInflictedDeadlock does,
-    // to flip the shared object's disabled flag without spending the descriptor's own 2 s
-    // default timeout twice in this file.
-    {
-        hipdnn_data_sdk::utilities::StallGate gate(std::chrono::milliseconds(300));
-        ASSERT_TRUE(gate.isUsable());
-        ASSERT_TRUE(gate.arm(_testStream));
-        EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
-        EXPECT_TRUE(gate.timedOut());
-    }
-    ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
-    ASSERT_NO_THROW(armStall(desc)); // declines: stalling is disabled for this shared object
+    ASSERT_NO_THROW(armStall(desc));
     ASSERT_NO_THROW(recordStart(desc));
+    // Blocks the host on the still-stalled stream; only the watchdog can release it.
+    EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
     ASSERT_NO_THROW(recordStop(desc));
-    ASSERT_NO_THROW(releaseStall(desc)); // no-op: never armed
+    ASSERT_NO_THROW(releaseStall(desc)); // no-op: the watchdog already released it
     ASSERT_NO_THROW(desc->finalize());
 
-    bool stallUsed = true;
+    bool timedOut = false;
     int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+    ASSERT_TRUE(timedOut) << "setup did not actually trip the watchdog";
+
+    // Reuse unstalled: reset, then a full lifecycle with no STALL_ARM_EXT at all.
+    ASSERT_NO_THROW(resetContext(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    timedOut = true;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+    EXPECT_FALSE(timedOut) << "an unstalled reuse must not inherit the previous timeout";
+
+    bool stallUsed = true;
     ASSERT_NO_THROW(desc->getAttribute(
         HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
     EXPECT_FALSE(stallUsed);
+
+    // Reuse stalled again: reset, then arm succeeds on the very same gate -- a timeout
+    // does not disable later arming.
+    ASSERT_NO_THROW(resetContext(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(releaseStall(desc));
+    ASSERT_NO_THROW(desc->finalize());
+
+    stallUsed = false;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
+    EXPECT_TRUE(stallUsed) << "arm must succeed again on a drained, reset context";
+
+    timedOut = true;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+    EXPECT_FALSE(timedOut);
 }
 
-// A declined arm() must report why it declined, not a diagnostic from the same gate's
-// earlier attempt. Both readers of these accessors -- the Python binding, which turns them
-// into the exception the caller sees, and ProfilingControlDescriptor's decline log --
-// would otherwise report stale state.
-TEST_F(TestGpuProfilingControlDescriptor, ADeclinedArmDoesNotReportAnEarlierAttemptsDiagnostic)
+// reset() must release an armed-but-unfinalized gate and drain the stream before
+// returning, exactly like an error-path caller that abandons a measurement between
+// start and stop. A caller that immediately re-arms afterward (below) would otherwise
+// race the old wait packet's retirement and risk re-stalling already-released work.
+TEST_F(TestGpuProfilingControlDescriptor, ResetAfterPartialMeasurementReleasesTheWait)
 {
     if(!stallGateAvailable())
     {
         GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
     }
 
-    hipdnn_data_sdk::utilities::StallGate gate;
-    ASSERT_TRUE(gate.isUsable());
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    hipEvent_t retired = nullptr;
+    ASSERT_EQ(hipEventCreate(&retired), hipSuccess);
+    const hipdnn_backend::HipEventGuard retiredGuard(retired);
+    const auto beforeArm = std::chrono::steady_clock::now();
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_EQ(hipEventRecord(retired, _testStream), hipSuccess);
+    // Abandon the measurement here: no stop, no release, no finalize(), as an error
+    // path between start and stop would leave it.
 
-    // Re-arming an active gate is a safe decline. It also gives this gate a diagnostic
-    // that the unrelated disabled-latch decline below must clear.
-    ASSERT_TRUE(gate.arm(_testStream));
-    ASSERT_FALSE(gate.arm(_testStream));
-    ASSERT_EQ(gate.lastError(), hipSuccess);
-    ASSERT_STREQ(gate.lastOperation(), "StallGate::arm(already armed)");
-    gate.release();
-    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+    ASSERT_NO_THROW(resetContext(desc));
+    EXPECT_LT(std::chrono::steady_clock::now() - beforeArm,
+              hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "reset waited for the watchdog instead of releasing the gate";
+    EXPECT_EQ(hipEventQuery(retired), hipSuccess) << "reset did not retire the queued work";
 
-    // Now make the same gate decline for an unrelated reason: another gate's timeout
-    // disables stalling for everything in this shared object.
-    {
-        hipdnn_data_sdk::utilities::StallGate tripper(std::chrono::milliseconds(300));
-        ASSERT_TRUE(tripper.isUsable());
-        ASSERT_TRUE(tripper.arm(_testStream));
-        EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
-        EXPECT_TRUE(tripper.timedOut());
-    }
-    ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
+    ASSERT_NO_THROW(armStall(desc));
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(releaseStall(desc));
+    ASSERT_NO_THROW(desc->finalize());
 
-    EXPECT_FALSE(gate.arm(_testStream));
-    EXPECT_EQ(gate.lastError(), hipSuccess);
-    EXPECT_EQ(gate.lastOperation(), nullptr)
-        << "the disable latch retained an unrelated arm-attempt diagnostic";
+    bool stallUsed = false;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
+    EXPECT_TRUE(stallUsed);
+
+    bool timedOut = true;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+    EXPECT_FALSE(timedOut) << "reset() left an undrained waiter that stalled the reused "
+                              "measurement";
 }

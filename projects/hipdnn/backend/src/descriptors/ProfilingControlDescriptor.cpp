@@ -48,6 +48,23 @@ void ProfilingControlDescriptor::createEvents()
     _stopEvent = HipEventGuard(stopEvent);
 }
 
+void ProfilingControlDescriptor::checkBinding() const
+{
+    if(_handle == nullptr)
+    {
+        return;
+    }
+    int device = 0;
+    const auto status = hipGetDevice(&device);
+    THROW_IF_NE(status,
+                hipSuccess,
+                HIPDNN_STATUS_INTERNAL_ERROR,
+                "ProfilingControlDescriptor: hipGetDevice failed.");
+    THROW_IF_TRUE(device != _device || _handle->getStream() != _stream,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "ProfilingControlDescriptor: the bound device and stream must not change.");
+}
+
 // ============================================================================
 // finalize
 // ============================================================================
@@ -67,6 +84,7 @@ void ProfilingControlDescriptor::finalize()
     {
         _stallGate->release();
     }
+    checkBinding();
     // If finalize is premature, a later corrected attempt runs after this release and
     // therefore is not a stalled measurement.
     if(_startEvent == nullptr || !_startRecorded || !_stopRecorded)
@@ -103,26 +121,30 @@ void ProfilingControlDescriptor::finalize()
                 "ProfilingControlDescriptor::finalize() failed: "
                 "hipEventElapsedTime failed.");
 
-    const bool timedOut = _stallGate.has_value() && _stallGate->timedOut();
+    // Gated on _stallUsed, not a live/bare query of the gate: _stallUsed is false
+    // whenever this measurement never armed (including after reset() reused a gate that
+    // timed out on an earlier measurement), so a skipped arm cannot inherit a stale
+    // timeout from that earlier attempt.
+    _timedOut = _stallUsed && _stallGate.has_value() && _stallGate->timedOut();
     // A watchdog-broken span is already explicitly invalid and remains readable only so
     // callers can inspect STALL_TIMED_OUT_EXT. For a healthy measurement, HIP success
     // does not guarantee a sane value: reject NaN, Inf, and negative spans before the
     // descriptor becomes finalized. Zero is valid for back-to-back events.
-    THROW_IF_TRUE(!timedOut && (!std::isfinite(_elapsedMs) || _elapsedMs < 0.0F),
+    THROW_IF_TRUE(!_timedOut && (!std::isfinite(_elapsedMs) || _elapsedMs < 0.0F),
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "ProfilingControlDescriptor::finalize() failed: "
                   "hipEventElapsedTime returned a non-finite or negative value.");
 
-    if(timedOut)
+    if(_timedOut)
     {
-        // Loud, because the number below is not a measurement: the watchdog had to
-        // break a deadlock caused by the timed region blocking the host on the stalled
-        // stream, and the elapsed span therefore contains the whole timeout.
+        // Loud, because the number below is not a measurement: the watchdog fired
+        // because the host did not release within the timeout. That alone does not say
+        // why (blocked host, slow host, or a missing release all look the same), only
+        // that the elapsed span is not trustworthy.
         HIPDNN_BACKEND_LOG_ERROR(
-            "ProfilingControlDescriptor: stall watchdog fired; the timed region blocked the "
-            "host on its own stream. Elapsed time {} ms is invalid and must be discarded "
-            "(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT). Stalling is now disabled for this "
-            "component, so later measurements are unstalled.",
+            "ProfilingControlDescriptor: stall watchdog fired for this measurement (host "
+            "did not release within the timeout). Elapsed time {} ms is invalid and must "
+            "be discarded (HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT).",
             _elapsedMs);
     }
 
@@ -138,9 +160,29 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                                               int64_t elementCount,
                                               const void* arrayOfElements)
 {
+    // The sole attribute accepted once finalized: every case in the switch below is
+    // still guarded by the finalized check, since RESET_EXT returns before reaching it.
+    if(attributeName == HIPDNN_ATTR_PROFILING_RESET_EXT)
+    {
+        checkSetArgs(HIPDNN_TYPE_BOOLEAN,
+                     attributeType,
+                     arrayOfElements,
+                     "ProfilingControlDescriptor::setAttribute(RESET)");
+        THROW_IF_NE(elementCount,
+                    static_cast<int64_t>(1),
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "ProfilingControlDescriptor::setAttribute(RESET): elementCount must be 1.");
+        reset();
+        return;
+    }
+
     THROW_IF_TRUE(isFinalized(),
                   HIPDNN_STATUS_NOT_INITIALIZED,
                   "ProfilingControlDescriptor::setAttribute() failed: Already finalized.");
+    if(attributeName != HIPDNN_ATTR_PROFILING_STALL_RELEASE_EXT)
+    {
+        checkBinding();
+    }
 
     switch(attributeName)
     {
@@ -160,8 +202,36 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                       HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                       "ProfilingControlDescriptor::setAttribute(HANDLE): Handle is null.");
 
+        const auto stream = handle->getStream();
+        THROW_IF_TRUE(_handle != nullptr && _handle != handle,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "ProfilingControlDescriptor::setAttribute(HANDLE): "
+                      "Rebinding requires a new descriptor.");
+        int device = 0;
+        const auto status = hipGetDevice(&device);
+        THROW_IF_NE(status,
+                    hipSuccess,
+                    HIPDNN_STATUS_INTERNAL_ERROR,
+                    "ProfilingControlDescriptor::setAttribute(HANDLE): hipGetDevice failed.");
+
+        int streamDevice = device;
+        if(stream != nullptr)
+        {
+            const auto streamStatus = hipStreamGetDevice(stream, &streamDevice);
+            THROW_IF_NE(streamStatus,
+                        hipSuccess,
+                        HIPDNN_STATUS_INTERNAL_ERROR,
+                        "ProfilingControlDescriptor::setAttribute(HANDLE): "
+                        "hipStreamGetDevice failed.");
+        }
+        THROW_IF_NE(streamDevice,
+                    device,
+                    HIPDNN_STATUS_BAD_PARAM,
+                    "ProfilingControlDescriptor::setAttribute(HANDLE): "
+                    "The stream must belong to the current device.");
+        _device = device;
         _handle = handle;
-        _stream = _handle->getStream();
+        _stream = stream;
         createEvents();
         break;
     }
@@ -291,6 +361,15 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
         _stallUsed = _stallGate->arm(_stream);
         if(!_stallUsed)
         {
+            // Failure to acquire an optional gate still permits plain event timing.
+            // An acquired gate that fails a HIP call during arm reports a real error.
+            THROW_IF_TRUE(_stallGate->isUsable() && _stallGate->lastError() != hipSuccess,
+                          HIPDNN_STATUS_INTERNAL_ERROR,
+                          fmt::format("ProfilingControlDescriptor::setAttribute(STALL_ARM): "
+                                      "{} failed.",
+                                      _stallGate->lastOperation() == nullptr
+                                          ? "a HIP call"
+                                          : _stallGate->lastOperation()));
             HIPDNN_BACKEND_LOG_INFO(
                 "ProfilingControlDescriptor: stall gate unavailable ({}); measurement is "
                 "unstalled",
@@ -328,6 +407,41 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
 }
 
 // ============================================================================
+// reset
+// ============================================================================
+
+void ProfilingControlDescriptor::reset()
+{
+    // Release any armed gate before draining below: an unreleased wait would otherwise
+    // make the synchronize block forever (or until the watchdog).
+    if(_stallGate.has_value())
+    {
+        _stallGate->release();
+    }
+    checkBinding();
+
+    // Finalize already retired the stop event. On an error or partial measurement,
+    // release alone is insufficient: retire its wait before the signal is reset.
+    // The handle guard includes the default stream, whose value is nullptr.
+    if(!isFinalized() && _handle != nullptr)
+    {
+        const auto status = hipStreamSynchronize(_stream);
+        THROW_IF_NE(status,
+                    hipSuccess,
+                    HIPDNN_STATUS_INTERNAL_ERROR,
+                    "ProfilingControlDescriptor::setAttribute(RESET): "
+                    "hipStreamSynchronize failed.");
+    }
+
+    _startRecorded = false;
+    _stopRecorded = false;
+    _elapsedMs = 0.0F;
+    _stallUsed = false;
+    _timedOut = false;
+    _finalized = false;
+}
+
+// ============================================================================
 // getAttribute
 // ============================================================================
 
@@ -354,11 +468,10 @@ void ProfilingControlDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
         break;
     case HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT:
     {
-        // Read back after finalize so a caller can discard the sample: a watchdog
-        // release means the elapsed time contains the timeout and the host gap the
-        // stall was supposed to exclude.
-        const bool timedOut = _stallGate.has_value() && _stallGate->timedOut();
-        getScalar<bool>(timedOut,
+        // Latched at finalize() into _timedOut, not read live here: a measurement that
+        // reused this gate but skipped STALL_ARM_EXT must not inherit an earlier
+        // measurement's timeout from the same gate object.
+        getScalar<bool>(_timedOut,
                         HIPDNN_TYPE_BOOLEAN,
                         attributeType,
                         requestedElementCount,
