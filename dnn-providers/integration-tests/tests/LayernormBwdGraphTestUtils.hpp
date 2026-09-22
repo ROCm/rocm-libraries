@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "EpsilonTestUtils.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -42,13 +43,14 @@ inline flatbuffers::FlatBufferBuilder
                             const std::vector<int64_t>& dbiasStrides,
                             const std::optional<std::vector<int64_t>>& meanStrides,
                             const std::optional<std::vector<int64_t>>& invVarianceStrides,
-                            const std::optional<float> epsilon,
+                            const std::optional<double> epsilon,
                             const int64_t normalizedDimCount,
                             const DataType dyDataType,
                             const DataType dxDataType,
                             const DataType scaleBiasDataType,
                             const std::optional<DataType> meanInvVarianceDataType,
-                            const DataType computeDataType)
+                            const DataType computeDataType,
+                            const DataType epsilonDataType)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -67,17 +69,8 @@ inline flatbuffers::FlatBufferBuilder
         builder, dbiasUid, "dbias", scaleBiasDataType, &dbiasStrides, &dbiasDims));
     if(epsilonUid.has_value() && epsilon.has_value())
     {
-        const std::vector<int64_t> epsilonDimsStrides = {1};
-        tensors.push_back(CreateTensorAttributesDirect(
-            builder,
-            epsilonUid.value(),
-            "epsilon",
-            DataType::FLOAT,
-            &epsilonDimsStrides,
-            &epsilonDimsStrides,
-            false,
-            TensorValue::Float32Value,
-            builder.CreateStruct(Float32Value(epsilon.value())).Union()));
+        tensors.push_back(createEpsilonTensorAttributes(
+            builder, epsilonUid.value(), epsilon.value(), epsilonDataType));
     }
     if(meanUid.has_value() && meanDims.has_value() && meanStrides.has_value()
        && meanInvVarianceDataType.has_value())
@@ -143,13 +136,14 @@ inline flatbuffers::FlatBufferBuilder
                             const std::optional<int64_t> invVarianceUid,
                             const std::vector<int64_t>& ioDims,
                             const TensorLayout& layout,
-                            const float epsilon,
+                            const double epsilon,
                             const int64_t normalizedDimCount,
                             const DataType dyDataType,
                             const DataType dxDataType,
                             const DataType scaleBiasDataType,
                             const std::optional<DataType> meanInvVarianceDataType,
-                            const DataType computeDataType)
+                            const DataType computeDataType,
+                            const DataType epsilonDataType)
 {
     const auto normalizedDim = static_cast<int64_t>(ioDims.size()) - normalizedDimCount;
 
@@ -202,7 +196,8 @@ inline flatbuffers::FlatBufferBuilder
                                    dxDataType,
                                    scaleBiasDataType,
                                    meanInvVarianceDataType,
-                                   computeDataType);
+                                   computeDataType,
+                                   epsilonDataType);
 }
 
 } // namespace hipdnn_integration_tests::test_utils
