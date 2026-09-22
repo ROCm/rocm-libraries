@@ -89,6 +89,7 @@ namespace rocsparse
 
     template <rocsparse_int BELL_BLOCK_DIM,
               rocsparse_int BLK_SIZE_Y,
+              bool          GRID_STRIDE,
               typename T,
               typename I,
               typename A,
@@ -150,6 +151,15 @@ namespace rocsparse
                 ldc,
                 order_C,
                 idx_base);
+
+            // A launch whose grid.y was not clamped covers every column panel in
+            // one sweep, so the straight-line variant stops after the first panel
+            // and skips the grid-stride loop's per-panel control cost
+            // (AISPARSE-667).
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
@@ -190,35 +200,45 @@ namespace rocsparse
         // 32; on wave32 it shrinks to fit small block dimensions.
         const rocsparse_int tile = rocsparse::bellmm_general_tile_size(handle, bell_block_dim);
 
-#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                                     \
-    {                                                                             \
-        dim3 bellmm_blocks((mb - 1) / 1 + 1,                                      \
-                           rocsparse::get_batch_grid_size((n - 1) / (TILE) + 1)); \
-        dim3 bellmm_threads((TILE), (TILE), 1);                                   \
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                       \
-            (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), T>),       \
-            bellmm_blocks,                                                        \
-            bellmm_threads,                                                       \
-            0,                                                                    \
-            stream,                                                               \
-            trans_A,                                                              \
-            trans_B,                                                              \
-            mb,                                                                   \
-            n,                                                                    \
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                     \
-            bell_cols,                                                            \
-            bell_block_dim,                                                       \
-            bell_col_ind,                                                         \
-            bell_val,                                                             \
-            dense_B,                                                              \
-            ldb,                                                                  \
-            order_B,                                                              \
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                      \
-            dense_C,                                                              \
-            ldc,                                                                  \
-            order_C,                                                              \
-            descr->base,                                                          \
-            handle->pointer_mode == rocsparse_pointer_mode_host);                 \
+#define ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, GRID_STRIDE)                        \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
+        (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), (GRID_STRIDE), T>), \
+        bellmm_blocks,                                                                 \
+        bellmm_threads,                                                                \
+        0,                                                                             \
+        stream,                                                                        \
+        trans_A,                                                                       \
+        trans_B,                                                                       \
+        mb,                                                                            \
+        n,                                                                             \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                              \
+        bell_cols,                                                                     \
+        bell_block_dim,                                                                \
+        bell_col_ind,                                                                  \
+        bell_val,                                                                      \
+        dense_B,                                                                       \
+        ldb,                                                                           \
+        order_B,                                                                       \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                               \
+        dense_C,                                                                       \
+        ldc,                                                                           \
+        order_C,                                                                       \
+        descr->base,                                                                   \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                                                \
+    {                                                                                        \
+        const int64_t bellmm_panels = (static_cast<int64_t>(n) - 1) / (TILE) + 1;            \
+        dim3 bellmm_blocks((mb - 1) / 1 + 1, rocsparse::get_batch_grid_size(bellmm_panels)); \
+        dim3 bellmm_threads((TILE), (TILE), 1);                                              \
+        if(bellmm_panels > static_cast<int64_t>(bellmm_blocks.y))                            \
+        {                                                                                    \
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, true);                                \
+        }                                                                                    \
+        else                                                                                 \
+        {                                                                                    \
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, false);                               \
+        }                                                                                    \
     }
 
         switch(tile)
