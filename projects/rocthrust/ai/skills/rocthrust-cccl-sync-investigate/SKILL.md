@@ -253,7 +253,38 @@ gh release view "$TAG" --repo NVIDIA/cccl 2>/dev/null \
 
 git shortlog --no-merges "$PREV..$TAG" -- thrust/thrust/
 git diff --name-status --diff-filter=A "$PREV..$TAG" -- thrust/thrust/
+
+# Full commit-subject scan — do not skip this. --diff-filter=A only catches
+# features that arrived as brand-new files; a new algorithm added inside an
+# existing header (thrust::transform_n landed in an existing transform
+# header) or a default-behavior change to an existing policy (cuda::par_nosync
+# switching to async-allocation-by-default) touches zero new files and is
+# invisible to the two commands above. Read every subject line for
+# feature-shaped verbs (Add/Implement/Port/Perform/Deprecate), not just the
+# added-files list:
+git log --no-merges --oneline "$PREV..$TAG" -- thrust/thrust/
 ```
+
+**Confirmed gap, not hypothetical**: a real dogfooding run of this skill
+(`cccl-investigation-v3.1.4.md`) followed only the release-notes-skim +
+added-files-diff steps above and missed `thrust::transform_n`, four
+CUDA-backend iterator ports, the `par_nosync` behavior change, three
+backend/performance commits, and a Thrust-facility deprecation commit — all
+real, in-range, `thrust/thrust/`-scoped commits that simply modified existing
+files. A human cross-checking the report against an independently-written
+summary of the same release caught the gap after the fact. The full
+commit-subject scan above is the fix; do not silently skip it as redundant
+with `git shortlog` — `shortlog` groups by author and elides subjects a human
+skimming for content actually needs to read.
+
+This same full-log scan also surfaces notable **correctness fixes**, not just
+new features — CCCL's own release notes commonly bucket both together, and a
+bug fix to an existing `thrust::` API (e.g. a nullptr-deref fix in
+`device_reference`, or a `malloc<void>` correctness fix) is exactly the kind
+of change rocThrust's HIP backend needs to independently verify or port, the
+same as a genuinely new feature. Record these with a `Fix:`-style note
+distinct from feature bullets rather than filtering them out for not being
+"new."
 
 For each feature record: what it is, how it is turned on (CMake option /
 feature macro / API), and its rocThrust relevance (AMD equivalent? likely
