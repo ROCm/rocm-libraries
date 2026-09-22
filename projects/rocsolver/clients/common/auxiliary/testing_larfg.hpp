@@ -112,9 +112,11 @@ void larfg_getError(const rocblas_handle handle,
                     const I inc,
                     Td& dt,
                     Th& ha,
+                    Th& ha_res,
                     Th& hx,
-                    Th& hxr,
+                    Th& hx_res,
                     Th& ht,
+                    Th& ht_res,
                     double* max_err)
 {
     // initialize data
@@ -123,16 +125,32 @@ void larfg_getError(const rocblas_handle handle,
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dt.data()));
-    CHECK_HIP_ERROR(hxr.transfer_from(dx));
+    CHECK_HIP_ERROR(ha_res.transfer_from(da));
+    CHECK_HIP_ERROR(hx_res.transfer_from(dx));
+    CHECK_HIP_ERROR(ht_res.transfer_from(dt));
+
 
     // CPU lapack
     cpu_larfg(n, ha[0], hx[0], inc, ht[0]);
 
-    // error is ||hx - hxr|| (not necessary to check tau, for now)
+    // error is ||hx - hx_res|| (not necessary to check tau, for now)
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
     // using norm-1 which is infinity norm for this data setup
-    *max_err = norm_error('O', 1, n - 1, inc, hx[0], hxr[0]);
+    *max_err = norm_error('O', 1, n - 1, inc, hx[0], hx_res[0]);
+
+    using std::real, std::imag;
+    fmt::print( "n {}\n\t"
+                "tau   {:7.4f} ?= {:7.4f}\n\t"
+                "alpha {:7.4f} ?= {:7.4f}, v=[\n\t",
+                n,
+                real( *ht[0] ), real( *ht_res[0] ),
+                real( *ha[0] ), real( *ha_res[0] ) );
+    for (int i = 1; i < n; ++i) {
+        fmt::print( "      {:7.4f} ?= {:7.4f}\n\t",
+                    real( *hx[i-1] ), real( *hx_res[i-1] ) );
+    }
+    fmt::print( "]\n" );
 }
 
 template <typename T, typename I, typename Td, typename Th>
@@ -250,9 +268,11 @@ void testing_larfg(Arguments& argus)
 
     // memory allocations
     host_strided_batch_vector<T> hx(size_x, inc, stx, 1);
-    host_strided_batch_vector<T> hxr(size_xr, inc, stxr, 1);
+    host_strided_batch_vector<T> hx_res(size_xr, inc, stxr, 1);
     host_strided_batch_vector<T> ha(1, 1, 1, 1);
+    host_strided_batch_vector<T> ha_res(1, 1, 1, 1);
     host_strided_batch_vector<T> ht(1, 1, 1, 1);
+    host_strided_batch_vector<T> ht_res(1, 1, 1, 1);
     device_strided_batch_vector<T> dx(size_x, inc, stx, 1);
     device_strided_batch_vector<T> da(1, 1, 1, 1);
     device_strided_batch_vector<T> dt(1, 1, 1, 1);
@@ -275,7 +295,7 @@ void testing_larfg(Arguments& argus)
 
     // check computations
     if(argus.unit_check || argus.norm_check)
-        larfg_getError<T>(handle, n, da, dx, inc, dt, ha, hx, hxr, ht, &max_error);
+        larfg_getError<T>(handle, n, da, dx, inc, dt, ha, ha_res, hx, hx_res, ht, ht_res, &max_error);
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
