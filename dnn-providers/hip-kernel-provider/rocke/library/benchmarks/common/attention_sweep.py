@@ -54,10 +54,15 @@ def run_sweep(
     """
     import torch
     from dispatch.attention import AttentionRequest, attention_sweep_space
+    from dispatch.attention.bindings import (
+        validate_tuning_attention_contract,
+        validate_tuning_attention_tensors,
+    )
     from kernels import run_unified_attention_torch
     from rocke.runtime import synchronize_and_release, time_launches
 
     dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
+    problem = bench._problem(shape, sw, is_fp8)
     req = AttentionRequest(
         batch=shape.num_seqs,
         nhead_q=shape.num_query_heads,
@@ -71,6 +76,8 @@ def run_sweep(
         sliding_window=sw,
         kv_block_size=shape.block_size,
         num_cus=bench.num_sms,
+        use_fp8=bool(problem.use_fp8),
+        fp8_fnuz=bool(problem.fp8_fnuz),
     )
 
     specs = attention_sweep_space(
@@ -80,12 +87,12 @@ def run_sweep(
     )
     if limit and len(specs) > limit:
         specs = specs[:limit]
-    problem = bench._problem(shape, sw, is_fp8)
-
     entries = {}
+    tensors_validated = False
     for spec in specs:
         if hasattr(spec, "with_num_kv_blocks"):
             spec = spec.with_num_kv_blocks(int(data["key_cache"].shape[0]))
+            validate_tuning_attention_contract(req, problem, spec)
         path = spec.path
         tuning_id = getattr(spec, "tuning_id", "")
         candidate_name = getattr(spec, "candidate_name", getattr(spec, "name", path))
@@ -102,6 +109,20 @@ def run_sweep(
                 else _sweep_kernel_name(problem, run_backend)
             )
             out = torch.empty_like(data["query"])
+            if not tensors_validated and hasattr(spec, "kernel_spec"):
+                validate_tuning_attention_tensors(
+                    problem,
+                    {
+                        "q": data["query"],
+                        "k": data["key_cache"],
+                        "v": data["value_cache"],
+                        "out": out,
+                        "cu_seqlens_q": data["cu_seqlens_q"],
+                        "seqused_k": data["kv_lens"],
+                        "block_table": data["block_tables"],
+                    },
+                )
+                tensors_validated = True
 
             def call_once(_backend=run_backend, _out=out, _spec=spec):
                 run_unified_attention_torch(

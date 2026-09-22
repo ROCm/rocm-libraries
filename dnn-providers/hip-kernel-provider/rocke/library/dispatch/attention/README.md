@@ -154,6 +154,17 @@ runtime dependency supplied by the ROCm environment.
 The binding layer translates tensors and optional metadata to each runner's
 actual ABI. Callers do not branch on spec classes.
 
+For explicit paged attention, binding validates tensor shapes, dtypes, layouts,
+sequence metadata, and every used physical block ID before creating the launch
+closure. Metadata is a one-time snapshot; callers must rebind after mutation.
+The narrowly scoped `unsafe_skip_paged_value_validation=True` option is only for
+trusted callers that enforce immutable, bounds-checked metadata externally.
+
+Physical K/V cache size is not known during request-only dispatch. Once binding
+sees `k.shape[0]`, it refreshes the explicit kernel spec's i32/i64 addressing
+mode and stable tuning identity before compilation/cache lookup. FP8 OCP versus
+FNUZ encoding is likewise explicit spec state and part of tuning identity.
+
 ## Package layout
 
 - `__init__.py` — registry assembly and public entry points.

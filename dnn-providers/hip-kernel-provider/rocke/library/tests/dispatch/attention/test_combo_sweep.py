@@ -127,6 +127,25 @@ class TestComboSweepLifecycle(unittest.TestCase):
         run.assert_not_called()
         init_torch.assert_not_called()
 
+    def test_no_admitted_candidate_is_explicitly_unsupported(self):
+        emitted = []
+        args = _args()
+        with (
+            mock.patch.object(sweep, "_iter_results", return_value=()),
+            mock.patch.object(
+                sweep,
+                "_emit",
+                side_effect=lambda row, *_args: emitted.append(row),
+            ),
+            mock.patch.object(sweep, "init_torch_first") as init_torch,
+            mock.patch.object(sweep.subprocess, "run") as run,
+        ):
+            rc = sweep.sweep(args)
+        self.assertEqual(rc, 0)
+        self.assertEqual([row["status"] for row in emitted], ["unsupported"])
+        run.assert_not_called()
+        init_torch.assert_not_called()
+
     def test_host_validate_reports_support_failures(self):
         req = _req(algorithm="attention_dense")
         candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")

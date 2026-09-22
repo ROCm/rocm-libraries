@@ -132,6 +132,7 @@ def _semantic_fields(problem: UnifiedAttentionProblem) -> dict:
         "use_qq_bias": bool(problem.use_qq_bias),
         "num_seqs": int(problem.num_seqs),
         "kv_storage_dtype": kv_storage_dtype,
+        "fp8_fnuz": bool(problem.fp8_fnuz),
         "use_i64_kv_addr": use_i64,
     }
 
@@ -150,6 +151,7 @@ _SEMANTIC_FIELDS = frozenset(
         "use_qq_bias",
         "num_seqs",
         "kv_storage_dtype",
+        "fp8_fnuz",
         "use_i64_kv_addr",
     }
 )

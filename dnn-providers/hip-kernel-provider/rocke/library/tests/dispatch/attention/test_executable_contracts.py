@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest import mock
 
 from dispatch.attention import (
@@ -200,6 +201,18 @@ class TestRegistrySplit(unittest.TestCase):
             attention_bindings.validate_tuning_attention_tensors(problem, valid),
             64,
         )
+        row_padded = dict(valid)
+        row_padded["block_table"] = _Tensor(
+            (1, 64),
+            "torch.int32",
+            [list(range(64))],
+            contiguous=False,
+            strides=(80, 1),
+        )
+        self.assertEqual(
+            attention_bindings.validate_tuning_attention_tensors(problem, row_padded),
+            64,
+        )
         cases = {
             "q_shape": ("q", _Tensor((1023, 32, 128), "torch.bfloat16")),
             "k_dtype": ("k", _Tensor((64, 16, 8, 128), "torch.float16")),
@@ -256,6 +269,44 @@ class TestRegistrySplit(unittest.TestCase):
             ),
             64,
         )
+
+    def test_explicit_binding_ignores_invalid_unused_table_columns(self):
+        problem = _problem(_req())
+        tensors = _paged_tensors()
+        tensors["seqused_k"] = _Tensor((1,), "torch.int32", [16])
+        tensors["block_table"] = _Tensor(
+            (1, 64),
+            "torch.int32",
+            [[0] + [999] * 63],
+        )
+        self.assertEqual(
+            attention_bindings.validate_tuning_attention_tensors(problem, tensors),
+            64,
+        )
+
+    def test_explicit_binding_rejects_cpu_and_semantic_mismatches(self):
+        request = _req()
+        problem = _problem(request)
+        tensors = _paged_tensors()
+        for tensor in tensors.values():
+            tensor.device = "cpu"
+        with self.assertRaisesRegex(ValueError, "HIP/CUDA"):
+            attention_bindings.validate_tuning_attention_tensors(problem, tensors)
+
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        )
+        spec = candidate.select_spec(
+            replace(request, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        )
+        with self.assertRaisesRegex(ValueError, "num_query_heads"):
+            attention_bindings.validate_tuning_attention_contract(
+                request,
+                replace(problem, num_query_heads=16),
+                spec,
+            )
 
     def test_explicit_binding_refreshes_large_cache_addressing(self):
         candidate = next(

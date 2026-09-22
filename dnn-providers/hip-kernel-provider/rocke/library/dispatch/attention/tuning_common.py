@@ -713,6 +713,8 @@ def make_tuning_candidate(
             validate_explicit_fp8_encoding,
         )
 
+        if bool(spec.fp8_fnuz) != bool(getattr(spec.kernel_spec, "fp8_fnuz", False)):
+            raise ValueError("tuning wrapper and kernel spec disagree on fp8_fnuz")
         validate_explicit_fp8_encoding(
             arch=arch,
             use_fp8=spec.kernel_spec.kv_storage_dtype == "fp8e4m3",

@@ -57,6 +57,65 @@ def _tolist(tensor, name: str):
     return fn()
 
 
+def validate_tuning_attention_contract(request, problem, spec) -> None:
+    """Ensure request, runtime problem, and explicit specs describe one launch."""
+    request_fields = (
+        ("batch", "num_seqs"),
+        ("nhead_q", "num_query_heads"),
+        ("nhead_k", "num_kv_heads"),
+        ("hdim_q", "head_size"),
+        ("kv_block_size", "block_size"),
+        ("seqlen_q", "max_seqlen_q"),
+        ("seqlen_k", "max_seqlen_k"),
+    )
+    for request_name, problem_name in request_fields:
+        requested = int(getattr(request, request_name))
+        actual = int(getattr(problem, problem_name))
+        if requested != actual:
+            raise ValueError(
+                f"request.{request_name}={requested} disagrees with "
+                f"problem.{problem_name}={actual}"
+            )
+    if str(request.dtype).lower() != str(problem.dtype).lower():
+        raise ValueError("request dtype disagrees with attention problem dtype")
+    if bool(request.use_fp8) != bool(problem.use_fp8) or bool(request.fp8_fnuz) != bool(
+        problem.fp8_fnuz
+    ):
+        raise ValueError("request FP8 encoding disagrees with attention problem")
+
+    kernel_spec = spec.kernel_spec
+    for name, expected in (
+        ("head_size", problem.head_size),
+        ("block_size", problem.block_size),
+        ("num_query_heads", problem.num_query_heads),
+        ("num_kv_heads", problem.num_kv_heads),
+        ("dtype", problem.dtype),
+        ("num_seqs", problem.num_seqs),
+    ):
+        if getattr(kernel_spec, name) != expected:
+            raise ValueError(
+                f"kernel_spec.{name}={getattr(kernel_spec, name)!r} disagrees "
+                f"with problem value {expected!r}"
+            )
+    expected_kv_dtype = "fp8e4m3" if problem.use_fp8 else None
+    if kernel_spec.kv_storage_dtype != expected_kv_dtype:
+        raise ValueError("kernel spec K/V storage dtype disagrees with problem")
+    if bool(getattr(kernel_spec, "fp8_fnuz", False)) != bool(problem.fp8_fnuz):
+        raise ValueError("kernel spec FP8 encoding disagrees with problem")
+    if bool(spec.fp8_fnuz) != bool(problem.fp8_fnuz):
+        raise ValueError("tuning wrapper FP8 encoding disagrees with problem")
+
+    reduce_spec = spec.reduce_spec
+    if reduce_spec is not None:
+        for name in ("head_size", "num_query_heads", "num_kv_heads", "dtype"):
+            if getattr(reduce_spec, name) != getattr(kernel_spec, name):
+                raise ValueError(
+                    f"reduce_spec.{name} disagrees with segment kernel spec"
+                )
+        if int(reduce_spec.num_segments) != int(kernel_spec.num_segments):
+            raise ValueError("reduce spec segment count disagrees with kernel spec")
+
+
 def validate_tuning_attention_tensors(
     problem,
     tensors: Mapping[str, Any],
@@ -129,13 +188,18 @@ def validate_tuning_attention_tensors(
         actual = _dtype_kind(tensor, name)
         if actual != expected:
             raise ValueError(f"{name} dtype must be {expected}, got {actual}")
-        _require_contiguous(tensor, name)
+        if name != "block_table":
+            _require_contiguous(tensor, name)
 
-    devices = {
-        str(getattr(tensor, "device", "")) for tensor in (q, k, v, out, cu, used, table)
-    }
+    device_values = [
+        getattr(tensor, "device", None) for tensor in (q, k, v, out, cu, used, table)
+    ]
+    devices = {str(device) for device in device_values}
     if len(devices) != 1:
         raise ValueError(f"all attention tensors must share one device, got {devices}")
+    device_type = getattr(device_values[0], "type", str(device_values[0]).split(":")[0])
+    if str(device_type).lower() != "cuda":
+        raise ValueError("explicit attention tensors must be on a HIP/CUDA device")
 
     table_shape = _shape(table, "block_table")
     if len(table_shape) != 2 or table_shape[0] != int(problem.num_seqs):
@@ -146,8 +210,14 @@ def validate_tuning_attention_tensors(
     if table_shape[1] <= 0:
         raise ValueError("block_table must have at least one block column")
     stride = getattr(table, "stride", None)
-    if callable(stride) and int(stride(1)) != 1:
+    if not callable(stride):
+        raise ValueError("block_table must expose strides")
+    inner_stride = int(stride(1))
+    row_stride = int(stride(0))
+    if inner_stride != 1:
         raise ValueError("block_table innermost stride must be 1")
+    if row_stride < table_shape[1] or row_stride > 0x7FFF_FFFF:
+        raise ValueError("block_table row stride must be non-overlapping and fit int32")
     if _shape(cu, "cu_seqlens_q") != (int(problem.num_seqs) + 1,):
         raise ValueError("cu_seqlens_q must have shape [num_seqs + 1]")
     if _shape(used, "seqused_k") != (int(problem.num_seqs),):
@@ -165,19 +235,11 @@ def validate_tuning_attention_tensors(
             raise ValueError(
                 "cu_seqlens_q must start at 0, end at total_q, and be monotonic"
             )
-        for seq, row in enumerate(table_values):
-            if len(row) != table_shape[1]:
-                raise ValueError(
-                    f"block_table row {seq} has {len(row)} values, "
-                    f"expected {table_shape[1]}"
-                )
-            for page, physical in enumerate(row):
-                physical = int(physical)
-                if physical < 0 or physical >= num_blocks:
-                    raise ValueError(
-                        f"block_table[{seq}, {page}]={physical} is outside "
-                        f"[0, {num_blocks})"
-                    )
+        query_lengths = [b - a for a, b in zip(cu_values, cu_values[1:])]
+        if any(
+            length < 0 or length > int(problem.max_seqlen_q) for length in query_lengths
+        ):
+            raise ValueError("cu_seqlens_q contains an unsupported per-sequence length")
         for seq, kv_len in enumerate(used_values):
             if kv_len < 0 or kv_len > int(problem.max_seqlen_k):
                 raise ValueError(
@@ -189,6 +251,19 @@ def validate_tuning_attention_tensors(
                     f"block_table row {seq} has {table_shape[1]} entries but "
                     f"seqused_k requires {pages}"
                 )
+            row = table_values[seq]
+            if len(row) != table_shape[1]:
+                raise ValueError(
+                    f"block_table row {seq} has {len(row)} values, "
+                    f"expected {table_shape[1]}"
+                )
+            for page, physical in enumerate(row[:pages]):
+                physical = int(physical)
+                if physical < 0 or physical >= num_blocks:
+                    raise ValueError(
+                        f"block_table[{seq}, {page}]={physical} is outside "
+                        f"[0, {num_blocks})"
+                    )
     return num_blocks
 
 
@@ -250,7 +325,14 @@ def bind_dense_attention_torch(
 def bind_tuning_attention_torch(
     request, spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
-    """Bind an explicit unified 2D/3D tuning spec to paged tensors."""
+    """Bind an explicit unified 2D/3D tuning spec to paged tensors.
+
+    Metadata values are snapshotted once; callers must rebind after mutating
+    sequence lengths or block tables. Trusted callers that enforce those
+    invariants externally may pass
+    ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
+    check; structural ABI validation is never skipped.
+    """
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
         run_unified_attention_torch,
@@ -262,12 +344,17 @@ def bind_tuning_attention_torch(
             "bind_tuning_attention_torch requires tensors['problem'] "
             "(a UnifiedAttentionProblem); dispatch injects it before calling"
         )
-    assert isinstance(problem, UnifiedAttentionProblem)
-    validate_contents = bool(kwargs.pop("validate_paged", True))
+    if not isinstance(problem, UnifiedAttentionProblem):
+        raise TypeError(
+            "tensors['problem'] must be a UnifiedAttentionProblem, got "
+            f"{type(problem).__name__}"
+        )
+    validate_tuning_attention_contract(request, problem, spec)
+    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,
-        validate_contents=validate_contents,
+        validate_contents=not unsafe_skip,
     )
     problem = replace(problem, num_kv_blocks=num_blocks)
     if hasattr(spec, "with_num_kv_blocks"):

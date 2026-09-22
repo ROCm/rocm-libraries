@@ -254,13 +254,17 @@ def iter_shard(args):
     for req in _requests(args):
         abs_index = 0
         taken = 0
+        offered = 0
         for result in _iter_results(req, args):
+            offered += 1
             if abs_index >= args.offset and (not args.limit or taken < args.limit):
                 yield abs_index, req, result
                 taken += 1
             abs_index += 1
             if args.limit and taken >= args.limit and abs_index > args.offset:
                 break
+        if offered == 0:
+            yield 0, req, None
 
 
 def _resolve_pinned(args):
@@ -320,7 +324,7 @@ def _run_result(req, result, args, index: int) -> dict:
                 row = _row_skeleton(req, result.candidate, runtime_spec, index)
         else:
             row.update(
-                status="skipped",
+                status="error",
                 reason=f"no runner for spec type {type(result.spec).__name__}",
             )
             return row
@@ -480,6 +484,9 @@ def list_only(args) -> int:
                 f"\nSq={shape['seqlen_q']} Sk={shape['seqlen_k']} "
                 f"D={shape['head_size']} {shape['dtype']} on {shape['arch']}:"
             )
+        if result is None:
+            print("  unsupported: no executable candidate admits this shape")
+            continue
         total += 1
         shape_count += 1
         if shown < args.list_head:
@@ -511,17 +518,31 @@ def sweep(args) -> int:
     inited = False
     try:
         for index, req, result in iter_shard(args):
-            reason = host_validate(result)
-            if reason:
-                row = _row_skeleton(req, result.candidate, result.spec, index)
-                row.update(status="invalid", reason=reason)
-            elif args.isolate:
-                row = _run_isolated(args, req, result, index)
+            if result is None:
+                row = _shape_fields(req)
+                row.update(
+                    index=index,
+                    candidate="",
+                    algorithm="",
+                    spec_id="",
+                    tuning_id="",
+                    kernel_name="",
+                    kind="",
+                    status="unsupported",
+                    reason="no executable attention candidate admits this shape",
+                )
             else:
-                if not inited:
-                    init_torch_first()
-                    inited = True
-                row = _run_result(req, result, args, index)
+                reason = host_validate(result)
+                if reason:
+                    row = _row_skeleton(req, result.candidate, result.spec, index)
+                    row.update(status="invalid", reason=reason)
+                elif args.isolate:
+                    row = _run_isolated(args, req, result, index)
+                else:
+                    if not inited:
+                        init_torch_first()
+                        inited = True
+                    row = _run_result(req, result, args, index)
             _emit(row, rows, sink, args)
     finally:
         if sink is not None:
@@ -544,7 +565,7 @@ def sweep(args) -> int:
         )
     # host_validate runs only after registry admission. An "invalid" row is
     # therefore a broken registered candidate, not an unsupported request.
-    return 1 if counts.keys() - {"ok", "skipped"} else 0
+    return 1 if counts.keys() - {"ok", "unsupported"} else 0
 
 
 def _emit(row, rows, sink, args):

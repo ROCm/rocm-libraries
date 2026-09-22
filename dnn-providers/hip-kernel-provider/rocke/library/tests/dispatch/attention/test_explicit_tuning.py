@@ -141,6 +141,10 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
         )
         self.assertEqual(gfx942.kv_storage_dtype, "fp8e4m3")
         self.assertEqual(gfx950.kv_storage_dtype, "fp8e4m3")
+        self.assertTrue(gfx942.fp8_fnuz)
+        self.assertFalse(gfx950.fp8_fnuz)
+        self.assertIn("fnuz", gfx942.kernel_name())
+        self.assertNotIn("fnuz", gfx950.kernel_name())
 
     def test_representative_ir_builds_for_both_arches_and_paths(self):
         cases = (

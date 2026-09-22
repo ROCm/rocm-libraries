@@ -175,8 +175,7 @@ def sweep(args) -> list[dict]:
             }
             try:
                 res = _run_result(req, result, run_args, index)
-                ok = res.get("status") == "ok"
-                rec.update(status="ok" if ok else res.get("status", "error"), **res)
+                rec.update(res)
                 print(
                     f"{rec['status'].upper():4} {label} S={s} {result.candidate.name}: "
                     f"{rec.get('tflops', float('nan')):.1f} TF  "
