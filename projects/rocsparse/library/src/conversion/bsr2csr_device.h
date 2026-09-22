@@ -30,7 +30,12 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, typename T, typename I, typename J>
+    template <uint32_t BLOCK_SIZE,
+              uint32_t BLOCK_DIM,
+              bool     GRID_STRIDE,
+              typename T,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_2_7_kernel(rocsparse_direction  direction,
                                           J                    mb,
@@ -96,10 +101,20 @@ namespace rocsparse
                     }
                 }
             }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
-    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, typename T, typename I, typename J>
+    template <uint32_t BLOCK_SIZE,
+              uint32_t BLOCK_DIM,
+              bool     GRID_STRIDE,
+              typename T,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_8_32_kernel(rocsparse_direction  direction,
                                            J                    mb,
@@ -158,12 +173,18 @@ namespace rocsparse
                     csr_val[offset] = bsr_val[block_dim * block_dim * i + block_dim * c + r];
                 }
             }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
     template <uint32_t BLOCK_SIZE,
               uint32_t BLOCK_DIM,
               uint32_t SUB_BLOCK_DIM,
+              bool     GRID_STRIDE,
               typename T,
               typename I,
               typename J>
@@ -238,6 +259,11 @@ namespace rocsparse
                         }
                     }
                 }
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }
