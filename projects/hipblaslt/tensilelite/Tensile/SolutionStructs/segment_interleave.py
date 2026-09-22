@@ -65,6 +65,14 @@ def _footprint(state, tc):
     padElems = state["LdsPad%s" % tc]
     return d + _pad(d, blk, padElems, _bpe(state, tc))
 
+def _tensor_footprint(state, tc):
+    """Full baseline span, whose padding phase does not reset per component."""
+    mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+    d = int(mt * state["DepthU"] * _bpe(state, tc))
+    blk = state["LdsBlockSizePerPad%s" % tc]
+    padElems = state["LdsPad%s" % tc]
+    return d + _pad(d, blk, padElems, _bpe(state, tc))
+
 def _mx_scale_bases(state, mxsaStart):
     """MX scale-block LDS bases, placed after the interleaved A/B region. Returns
     (ldsBaseMXSA, ldsBaseMXSB, end); a base is None when that scale is not LDS-resident."""
@@ -144,7 +152,7 @@ def _evaluate_asymmetric(state):
 
     fAct     = _footprint(state, activeTC)
     fActData = _data_bytes(state, activeTC)
-    fSh      = _footprint(state, sharedTC)
+    sharedSpan = _tensor_footprint(state, sharedTC)
     base     = state["LdsOffsetA"]
     baselineKey = "bBaseline" if activeTC == "A" else "aBaseline"
     sharedBaseKey = "ldsBaseB" if activeTC == "A" else "ldsBaseA"
@@ -154,7 +162,7 @@ def _evaluate_asymmetric(state):
         o = {sharedBaseKey: base + fAct, "ldsBase%s" % activeTC: base,
              "writeStrideBytes": stride, "footprintPacked": True,
              baselineKey: True, "activeTC": activeTC}
-        bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fAct + 2 * fSh)
+        bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fAct + sharedSpan)
         if bMXSA is not None: o["ldsBaseMXSA"] = bMXSA
         if bMXSB is not None: o["ldsBaseMXSB"] = bMXSB
         return o
@@ -165,7 +173,7 @@ def _evaluate_asymmetric(state):
         # VW==WaveTile splits by read port; VW==WaveTile/2 can't (needs >2-way) so it splits by component.
         useCompAxis = _port_split(state, activeTC) and not _coarse(state, activeTC)
         splitKey = "componentSplit" if useCompAxis else ("portSplitA" if activeTC == "A" else "portSplitB")
-        strideAct = fAct + 2 * fSh
+        strideAct = fAct + sharedSpan
         c0end = (base + fActData - 1) // SEG
         c1 = (base + strideAct) // SEG
         if c1 > c0end:
@@ -206,7 +214,7 @@ def _evaluate_asymmetric(state):
     # put the shared tensor between the two active comps. bcontig if that stride already crosses a
     # segment; else aligned (pad to the boundary).
     #   A active: [A0][B][A1] bBaseline    B active: [B0][A][B1] aBaseline
-    strideAct = fAct + 2 * fSh              # comp0 -> comp1 gap
+    strideAct = fAct + sharedSpan            # comp0 -> comp1 gap
 
     c0 = base // SEG
     # comp0 can span 2 segments (unaligned base); comp1 must start past its last one.
@@ -279,12 +287,13 @@ def evaluate(state):
     if not (_coarse(state, "A") or _portSplit):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
+    bBaselineSpan = _tensor_footprint(state, "B")
     base = state["LdsOffsetA"]
 
     # bcontig fallback [A0][B0][B1][A1] (auto-only, not user-forceable): when B can't be split
     # (odd WaveTileB), keep B whole and use it as the gap that pushes A1 into the next segment.
     if not _b_readable(state):
-        strideA = fA + 2 * fB                       # distance A0 -> A1: skip A0 and the whole B block
+        strideA = fA + bBaselineSpan                 # distance A0 -> A1: skip A0 and the whole B block
         a0 = base // SEG
         a1 = (base + strideA) // SEG
         if a1 != a0:
@@ -298,7 +307,7 @@ def evaluate(state):
             if _portSplit:
                 offsets["portSplitA"] = True
             # mxf8: put the scale block after A1 (bf16/fp16 have no scales).
-            bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fA + 2 * fB)
+            bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * fA + bBaselineSpan)
             if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
             if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
             return {"applicable": True, "aligned": False, "offsets": offsets,
