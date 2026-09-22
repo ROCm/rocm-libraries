@@ -295,9 +295,71 @@ constexpr bool validate_production_geometries()
            ck_tile::detail::validate_qr_tdm_reader_segments<VTag, DecodeProblem>();
 }
 
+// Tags that pull the per-head-dim padding config from QrTdmPaddingSelection,
+// instead of the hardcoded 256B QKPad/VPad above (which are d=128 specific).
+// This lets the geometry validators run against the real padding a given head
+// dim would use, so newly supported dims are actually exercised.
+template <typename Problem>
+struct SelQTag
+{
+    using PaddingConfig = typename ck_tile::detail::QrTdmPaddingSelection<Problem>::Q;
+    static constexpr ck_tile::index_t Id = 0;
+    static constexpr bool kTranspose     = false;
+};
+template <typename Problem>
+struct SelKTag
+{
+    using PaddingConfig = typename ck_tile::detail::QrTdmPaddingSelection<Problem>::K;
+    static constexpr ck_tile::index_t Id = 1;
+    static constexpr bool kTranspose     = false;
+};
+template <typename Problem>
+struct SelVTag
+{
+    using PaddingConfig = typename ck_tile::detail::QrTdmPaddingSelection<Problem>::V;
+    static constexpr ck_tile::index_t Id = 2;
+    static constexpr bool kTranspose     = true;
+};
+
+// Full self-consistent shape for a symmetric aligned head dim H (kN1=H, bk0max=H
+// so kSubQKHeaddim == kQKHeaddim == H -- no ceil rounding). M0=128 prefill path.
+template <ck_tile::index_t H>
+using AlignedHeadDimShape = ck_tile::TileFmhaShape<ck_tile::sequence<128, 64, 32, H, 32, H>,
+                                                   ck_tile::sequence<4, 1, 1>,
+                                                   ck_tile::sequence<16, 16, 32>,
+                                                   ck_tile::sequence<4, 1, 1>,
+                                                   ck_tile::sequence<16, 16, 32>,
+                                                   true>;
+
+template <typename DataType, ck_tile::index_t H>
+using AlignedHeadDimProblem =
+    TestProblemWithShape<TestFmhaProblem<DataType, 128>, AlignedHeadDimShape<H>>;
+
+// Validate issue geometry + reader segments for an aligned head dim, using the
+// head-dim-correct padding config. Only meaningful for dims where padding is
+// enabled (kQKHeaddim == kSubQKHeaddim); ceil-rounded dims (80->96, 96->128)
+// are gated off and covered by is_disabled_selection asserts elsewhere.
+template <typename DataType, ck_tile::index_t H>
+constexpr bool validate_aligned_head_dim()
+{
+    using Problem = AlignedHeadDimProblem<DataType, H>;
+    return ck_tile::detail::validate_qr_tdm_issue_geometry<SelQTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<SelKTag<Problem>, Problem, true>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<SelVTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<SelQTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<SelKTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<SelVTag<Problem>, Problem>();
+}
+
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
 static_assert(validate_production_geometries<ck_tile::bf16_t>());
 static_assert(validate_production_geometries<ck_tile::half_t>());
+
+// Lock in the geometry invariants for newly supported aligned head dims.
+static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 160>());
+static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 192>());
+static_assert(validate_aligned_head_dim<ck_tile::half_t, 160>());
+static_assert(validate_aligned_head_dim<ck_tile::half_t, 192>());
 #endif
 
 template <typename Layout>

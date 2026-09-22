@@ -1033,8 +1033,7 @@ CK_TILE_HOST_DEVICE constexpr bool validate_qr_tdm_issue_geometry()
     static_assert(raw_box_dim.size() == 2);
     static_assert(Rows % NumWaves == 0);
 
-    bool valid = Problem::kBlockSize == 128 && Shape::kQKHeaddim == 128 &&
-                 Shape::kSubQKHeaddim == 128 && NumWaves == 4 && raw_box_dim[number<0>{}] == Cols &&
+    bool valid = Problem::kBlockSize == 128 && NumWaves == 4 && raw_box_dim[number<0>{}] == Cols &&
                  raw_box_dim[number<1>{}] == RowsPerWave &&
                  raw_box_dim[number<0>{}] * raw_box_dim[number<1>{}] * sizeof(DataType) ==
                      RowsPerWave * Cols * sizeof(DataType) &&
