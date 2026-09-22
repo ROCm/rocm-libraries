@@ -71,6 +71,17 @@ set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH "Install path for heade
 # hipCUB project
 project(hipcub LANGUAGES CXX)
 
+# NOTE(hipccl3): general-purpose "am I nested" detection. Packaging itself is
+# unconditionally disabled below regardless of this flag (see the Package
+# section) - this is only used by test/CMakeLists.txt to decide where to put
+# the generate_resource_spec binary, so a standalone build of this copy keeps
+# placing it exactly where it does today.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  set(HIPCUB_PROJECT_IS_TOP_LEVEL TRUE)
+else()
+  set(HIPCUB_PROJECT_IS_TOP_LEVEL FALSE)
+endif()
+
 # Set CXX flags
 if (NOT DEFINED CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)

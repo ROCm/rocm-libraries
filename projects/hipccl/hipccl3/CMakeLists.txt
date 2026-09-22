@@ -62,9 +62,9 @@ set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
 set(VERSION_STRING "${HIPCCL_VERSION}" CACHE STRING "Unified hipCCL component version" FORCE)
 
 # --- Component selection ---
-option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)
-option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" ON)
-option(HIPCCL_BUILD_ROCTHRUST "Build rocThrust as part of the unified hipCCL build" ON)
+option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" OFF)
+option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" OFF)
+option(HIPCCL_BUILD_ROCTHRUST "Build rocThrust as part of the unified hipCCL build" OFF)
 
 # NOTE(hipccl3): libhipcxx is present under projects/hipccl/hipccl3/libhipcxx
 # (pinned to ROCm/libhipcxx@5ac455d737937ba2dfd1a4e85ad13f19a775f692) but is

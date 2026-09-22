@@ -69,13 +69,36 @@ function(add_relative_test test_name test_target resource_group)
 endfunction()
 
 # We'll use this small program to detect available GPUs and build the resource JSON file.
-set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
-add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
-set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-target_link_libraries(generate_resource_spec PRIVATE hip::host)
+#
+# NOTE(hipccl router/superbuild): renamed the CMake target from the generic
+# "generate_resource_spec" to a project-prefixed name - rocPRIM, hipCUB, and
+# rocThrust each define one, and CMake target names must be unique across an
+# entire configure, so nesting all three inside hipccl3 previously failed
+# with "add_executable cannot create target ... because another target with
+# the same name already exists". OUTPUT_NAME keeps the produced binary's
+# filename as "generate_resource_spec" (matching testing.md's documented
+# `./generate_resource_spec resources.json` usage) regardless of the
+# internal target name. The source path and output directory also used
+# ${CMAKE_SOURCE_DIR}/${CMAKE_BINARY_DIR} (the outermost project's paths,
+# silently wrong once nested) instead of their CMAKE_CURRENT_* equivalents;
+# HIPCUB_PROJECT_IS_TOP_LEVEL keeps the standalone output location
+# (${CMAKE_BINARY_DIR}, matching today's behavior) unchanged while giving
+# nested builds their own, non-colliding output directory.
+set(GEN_RES_SPEC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/generate_resource_spec.cpp")
+if(HIPCUB_PROJECT_IS_TOP_LEVEL)
+  set(HIPCUB_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_BINARY_DIR}")
+else()
+  set(HIPCUB_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+add_executable(hipcub_generate_resource_spec ${GEN_RES_SPEC_PATH})
+set_target_properties(hipcub_generate_resource_spec PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${HIPCUB_GENERATE_RESOURCE_SPEC_OUTPUT_DIR}"
+  OUTPUT_NAME "generate_resource_spec"
+)
+target_link_libraries(hipcub_generate_resource_spec PRIVATE hip::host)
 # This test may still get the offload-compress flag passed. Since it does not include any kernel
 # code it will give an unused-command-line-argument warning.
-target_compile_options(generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
+target_compile_options(hipcub_generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
 
 # hipCUB tests
 add_subdirectory(hipcub)
