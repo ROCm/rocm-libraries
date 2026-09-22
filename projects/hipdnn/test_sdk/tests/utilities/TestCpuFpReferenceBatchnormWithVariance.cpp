@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "hipdnn_test_sdk/utilities/TestTolerances.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -185,51 +186,105 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
     EXPECT_NEAR(static_cast<double>(outputTensor.getHostValue(0, 0, 1, 1)), 0.5, tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, BatchnormFwdInferenceComputeUpscale)
+TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, ComputeUpscale)
 {
-    // Test with 2D tensor (batch, channel)
-    Tensor<half> inputTensor({4, 3});
-    Tensor<half> outputTensor({4, 3});
-    Tensor<half> scaleTensor({1, 3});
-    Tensor<half> biasTensor({1, 3});
-    Tensor<half> meanTensor({1, 3});
-    Tensor<half> varianceTensor({1, 3});
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
 
-    inputTensor.fillWithValue(safeTestTypeCast<half>(1.0f));
-    for(int i = 0; i < 3; i++)
-    {
-        scaleTensor.setHostValue(safeTestTypeCast<half>(1.0f), 0, i);
-        biasTensor.setHostValue(safeTestTypeCast<half>(0.0f), 0, i);
-        meanTensor.setHostValue(safeTestTypeCast<half>(1.0f), 0, i);
-        varianceTensor.setHostValue(safeTestTypeCast<half>(1.0f), 0, i);
-    }
+    Tensor<half> inputTensor(dims);
+    Tensor<half> outputTensor(dims);
+    Tensor<half> scaleTensor({1, 1});
+    Tensor<half> biasTensor({1, 1});
+    Tensor<half> meanTensor({1, 1});
+    Tensor<half> varianceTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    inputTensor.setHostValue(half{1.0}, 0, 0, 0, 0);
+    inputTensor.setHostValue(half{2.0}, 0, 0, 0, 1);
+    inputTensor.setHostValue(half{3.0}, 0, 0, 1, 0);
+    inputTensor.setHostValue(half{4.0}, 0, 0, 1, 1);
+
+    // fixed scale and bias parameters (one channel)
+    scaleTensor.setHostValue(half{2.0}, 0, 0);
+    biasTensor.setHostValue(half{0.5}, 0, 0);
+
+    // inference uses population statistics per channel:
+    // mean = (1+2+3+4)/4 = 2.5
+    // variance = [(-1.5)^2 + (-0.5)^2 + (0.5)^2 + (1.5)^2] / 4 = 5.0 / 4 = 1.25
+    // inv_variance = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
+    //
+    // With variance input, we compute inv_variance from variance internally
+    meanTensor.setHostValue(half{2.5}, 0, 0);
+    varianceTensor.setHostValue(half{1.25}, 0, 0);
+
+    // output is calculated via a pointwise linear transform on x:
+    // y = scale * (x - mean) * inv_variance + bias = 2 * (x - 2.5) * inv_variance + 0.5
+    const std::vector<float> expectedOutput
+        = {-2.18327084f, -0.39442361f, 1.39442361f, 3.18327084f};
 
     CpuFpReferenceBatchnorm::fwdInferenceWithVariance<half, half, half, half, float>(
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+
+    auto tolerance = batchnorm::getToleranceInferenceWithVariance<half>();
+
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 1)), expectedOutput[1], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 0)), expectedOutput[2], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 1)), expectedOutput[3], tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, BatchnormFwdInferenceComputeUpscale)
+TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, ComputeUpscale)
 {
-    // Test with 2D tensor (batch, channel)
-    Tensor<bfloat16> inputTensor({4, 3});
-    Tensor<bfloat16> outputTensor({4, 3});
-    Tensor<bfloat16> scaleTensor({1, 3});
-    Tensor<bfloat16> biasTensor({1, 3});
-    Tensor<bfloat16> meanTensor({1, 3});
-    Tensor<bfloat16> varianceTensor({1, 3});
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
 
-    inputTensor.fillWithValue(safeTestTypeCast<bfloat16>(1.0f));
-    for(int i = 0; i < 3; i++)
-    {
-        scaleTensor.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, i);
-        biasTensor.setHostValue(safeTestTypeCast<bfloat16>(0.0f), 0, i);
-        meanTensor.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, i);
-        varianceTensor.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, i);
-    }
+    Tensor<bfloat16> inputTensor(dims);
+    Tensor<bfloat16> outputTensor(dims);
+    Tensor<bfloat16> scaleTensor({1, 1});
+    Tensor<bfloat16> biasTensor({1, 1});
+    Tensor<bfloat16> meanTensor({1, 1});
+    Tensor<bfloat16> varianceTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    inputTensor.setHostValue(bfloat16{1.0}, 0, 0, 0, 0);
+    inputTensor.setHostValue(bfloat16{2.0}, 0, 0, 0, 1);
+    inputTensor.setHostValue(bfloat16{3.0}, 0, 0, 1, 0);
+    inputTensor.setHostValue(bfloat16{4.0}, 0, 0, 1, 1);
+
+    // fixed scale and bias parameters (one channel)
+    scaleTensor.setHostValue(bfloat16{2.0}, 0, 0);
+    biasTensor.setHostValue(bfloat16{0.5}, 0, 0);
+
+    // inference uses population statistics per channel:
+    // mean = (1+2+3+4)/4 = 2.5
+    // variance = [(-1.5)^2 + (-0.5)^2 + (0.5)^2 + (1.5)^2] / 4 = 5.0 / 4 = 1.25
+    // inv_variance = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
+    //
+    // With variance input, we compute inv_variance from variance internally
+    meanTensor.setHostValue(bfloat16{2.5}, 0, 0);
+    varianceTensor.setHostValue(bfloat16{1.25}, 0, 0);
+
+    // output is calculated via a pointwise linear transform on x:
+    // y = scale * (x - mean) * inv_variance + bias = 2 * (x - 2.5) * inv_variance + 0.5
+    const std::vector<float> expectedOutput
+        = {-2.18327084f, -0.39442361f, 1.39442361f, 3.18327084f};
 
     CpuFpReferenceBatchnorm::
         fwdInferenceWithVariance<bfloat16, bfloat16, bfloat16, bfloat16, float>(
             inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+
+    auto tolerance = batchnorm::getToleranceInferenceWithVariance<bfloat16>();
+
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 0)), expectedOutput[0], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 0, 1)), expectedOutput[1], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 0)), expectedOutput[2], tolerance);
+    EXPECT_NEAR(
+        static_cast<float>(outputTensor.getHostValue(0, 0, 1, 1)), expectedOutput[3], tolerance);
 }
 
 // ============================================================================

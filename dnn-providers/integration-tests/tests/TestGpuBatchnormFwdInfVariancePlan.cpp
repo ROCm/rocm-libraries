@@ -3,16 +3,16 @@
 
 #include <gtest/gtest.h>
 
+#include "EpsilonTestUtils.hpp"
+#include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <vector>
-
-#include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <vector>
 
 #include "harness/gpu-graph-executor/detail/GpuBatchnormFwdInfVariancePlan.hpp"
 
@@ -20,7 +20,7 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
-
+using namespace hipdnn_integration_tests::test_utils;
 namespace
 {
 
@@ -36,11 +36,12 @@ flatbuffers::FlatBufferBuilder
                                                    const std::vector<int64_t>& channelOnlyDims,
                                                    const std::vector<int64_t>& ioStrides,
                                                    const std::vector<int64_t>& channelOnlyStrides,
-                                                   float epsilon,
+                                                   double epsilon,
                                                    const DataType ioDataType,
                                                    const DataType scaleBiasDataType,
                                                    const DataType meanVarianceDataType,
-                                                   const DataType computeDataType)
+                                                   const DataType computeDataType,
+                                                   const DataType epsilonDataType)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
@@ -61,17 +62,7 @@ flatbuffers::FlatBufferBuilder
                                                    meanVarianceDataType,
                                                    &channelOnlyStrides,
                                                    &channelOnlyDims));
-    const std::vector<int64_t> epsilonDimsStrides = {1};
-    tensors.push_back(
-        CreateTensorAttributesDirect(builder,
-                                     epsilonUid,
-                                     "epsilon",
-                                     DataType::FLOAT,
-                                     &epsilonDimsStrides,
-                                     &epsilonDimsStrides,
-                                     false,
-                                     TensorValue::Float32Value,
-                                     builder.CreateStruct(Float32Value(epsilon)).Union()));
+    tensors.push_back(createEpsilonTensorAttributes(builder, epsilonUid, epsilon, epsilonDataType));
 
     auto attrs = CreateBatchnormInferenceAttributesVarianceExt(
         builder, xUid, meanUid, varianceUid, scaleUid, biasUid, yUid, epsilonUid);
@@ -246,6 +237,30 @@ TEST(TestGpuBatchnormFwdInfVariancePlanBuilder, IsApplicableFalseWhenEpsilonIsRu
     EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()));
 }
 
+TEST(TestGpuBatchnormFwdInfVariancePlanBuilder,
+     IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
+{
+    // Helper uses float for epsilon type, which differs for double type we've passed for compute
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, // input
+        hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE // compute
+    );
+
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuBatchnormFwdInfVariancePlanBuilder<DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::FLOAT,
+                                                DataType::DOUBLE>
+        planBuilder;
+
+    EXPECT_TRUE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
+}
+
 // ====================================================
 // Templated helper for plan execution vs CPU reference
 // ====================================================
@@ -256,7 +271,8 @@ namespace
 template <typename IOType, typename ScaleBiasType, typename MeanVarType, typename ComputeType>
 void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
                             const TensorLayout& layout,
-                            float tolerance)
+                            float tolerance,
+                            DataType epsilonDataType = DataType::UNSET)
 {
 
     const auto ioStrides = generateStrides(dims, layout.strideOrder);
@@ -267,6 +283,10 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     auto scaleBiasDataType = nativeTypeToDataType<ScaleBiasType>();
     auto meanVarianceDataType = nativeTypeToDataType<MeanVarType>();
     auto computeDataType = nativeTypeToDataType<ComputeType>();
+    if(epsilonDataType == DataType::UNSET)
+    {
+        epsilonDataType = computeDataType;
+    }
 
     constexpr int64_t X_UID = 1;
     constexpr int64_t Y_UID = 2;
@@ -276,23 +296,24 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     constexpr int64_t VARIANCE_UID = 6;
     constexpr int64_t EPSILON_UID = 7;
 
-    auto graphBuilder = createValidBatchnormWithVarianceInferenceGraph(
-        X_UID,
-        Y_UID,
-        SCALE_UID,
-        BIAS_UID,
-        MEAN_UID,
-        VARIANCE_UID,
-        EPSILON_UID,
-        dims,
-        perChannelDims,
-        ioStrides,
-        perChannelStrides,
-        static_cast<float>(BATCHNORM_DEFAULT_EPSILON),
-        ioDataType,
-        scaleBiasDataType,
-        meanVarianceDataType,
-        computeDataType);
+    // NOLINTNEXTLINE(readability-suspicious-call-argument)
+    auto graphBuilder = createValidBatchnormWithVarianceInferenceGraph(X_UID,
+                                                                       Y_UID,
+                                                                       SCALE_UID,
+                                                                       BIAS_UID,
+                                                                       MEAN_UID,
+                                                                       VARIANCE_UID,
+                                                                       EPSILON_UID,
+                                                                       dims,
+                                                                       perChannelDims,
+                                                                       ioStrides,
+                                                                       perChannelStrides,
+                                                                       BATCHNORM_DEFAULT_EPSILON,
+                                                                       ioDataType,
+                                                                       scaleBiasDataType,
+                                                                       meanVarianceDataType,
+                                                                       computeDataType,
+                                                                       epsilonDataType);
 
     auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
@@ -323,20 +344,20 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     Tensor<MeanVarType> varianceTensor(perChannelDims, perChannelStrides);
     Tensor<ComputeType> epsilonTensor(std::vector<int64_t>{1}, std::vector<int64_t>{1});
 
-    constexpr float MEAN = 0.5f;
-    constexpr float VARIANCE = 1.f;
+    constexpr float MEAN_RANGE = 0.5f;
     constexpr float SCALE_BIAS_RANGE = 1.0f;
-    constexpr unsigned int SEED = 42;
-    xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), SEED);
+    unsigned int seed = 42;
+    xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), seed++);
     scaleTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
                                      static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                     SEED + 1);
+                                     seed++);
     biasTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
                                     static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                    SEED + 2);
-    meanTensor.fillWithValue(static_cast<MeanVarType>(MEAN));
-    // Variance must be non-negative
-    varianceTensor.fillWithValue(static_cast<MeanVarType>(VARIANCE));
+                                    seed++);
+    meanTensor.fillWithRandomValues(
+        static_cast<MeanVarType>(-MEAN_RANGE), static_cast<MeanVarType>(MEAN_RANGE), seed++);
+    varianceTensor.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.f), seed++);
     epsilonTensor.fillWithValue(static_cast<ComputeType>(BATCHNORM_DEFAULT_EPSILON));
 
     // Run the GPU reference executor
@@ -396,6 +417,17 @@ TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanNhwc)
 
     runPlanExecuteVsCpuRef<float, float, float, float>(
         {2, 3, 4, 4}, TensorLayout::NHWC, batchnorm::getToleranceInferenceWithVariance<float>());
+}
+
+TEST(TestGpuBatchnormFwdInfVariancePlan, ExecutePlanWithDoubleEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<float, float, float, float>(
+        {2, 3, 4, 4},
+        TensorLayout::NHWC,
+        batchnorm::getToleranceInferenceWithVariance<float>(),
+        DataType::DOUBLE);
 }
 
 // ============================================================================

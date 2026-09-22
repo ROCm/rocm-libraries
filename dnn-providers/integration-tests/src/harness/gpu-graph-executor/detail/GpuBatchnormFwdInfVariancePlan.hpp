@@ -85,9 +85,9 @@ public:
             _params.varianceTensor.strides);
         hipdnn_gpu_ref::ShallowGpuTensor<YDataType> yTensor(
             variantPack.at(_params.yTensor.uid), _params.yTensor.dims, _params.yTensor.strides);
-        const auto epsilonValue = static_cast<double>(
-            hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
-                _params.epsilonTensor, variantPack, "Epsilon"));
+        const double epsilonValue
+            = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.epsilonTensor, variantPack, "Epsilon");
 
         hipdnn_gpu_ref::GpuFpReferenceBatchnorm::fwdInferenceWithVariance<XDataType,
                                                                           ScaleBiasDataType,
@@ -122,6 +122,11 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
         if(nodeAttributes == nullptr)
         {
@@ -143,7 +148,6 @@ public:
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->variance_tensor_uid(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), YDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
 
         return !anyOperandIsRuntimePassByValue(tensorMap,
                                                {nodeAttributes->x_tensor_uid(),

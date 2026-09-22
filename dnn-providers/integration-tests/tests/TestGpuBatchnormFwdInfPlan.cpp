@@ -226,20 +226,21 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     Tensor<MeanVarType> meanTensor(perChannelDims, perChannelStrides);
     Tensor<MeanVarType> invVarianceTensor(perChannelDims, perChannelStrides);
 
-    constexpr unsigned int SEED = 42;
-    constexpr float MEAN = 0.5f;
-    constexpr float INV_VARIANCE = 1.0f;
+    unsigned int seed = 42;
+    constexpr float MEAN_RANGE = 0.5f;
     constexpr float SCALE_BIAS_RANGE = 1.0f;
 
-    xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), SEED);
+    xTensor.fillWithRandomValues(static_cast<IOType>(-1), static_cast<IOType>(1), seed++);
     scaleTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
                                      static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                     SEED + 1);
+                                     seed++);
     biasTensor.fillWithRandomValues(static_cast<ScaleBiasType>(-SCALE_BIAS_RANGE),
                                     static_cast<ScaleBiasType>(SCALE_BIAS_RANGE),
-                                    SEED + 2);
-    meanTensor.fillWithValue(static_cast<MeanVarType>(MEAN));
-    invVarianceTensor.fillWithValue(static_cast<MeanVarType>(INV_VARIANCE));
+                                    seed++);
+    meanTensor.fillWithRandomValues(
+        static_cast<MeanVarType>(-MEAN_RANGE), static_cast<MeanVarType>(MEAN_RANGE), seed++);
+    invVarianceTensor.fillWithRandomValues(
+        static_cast<MeanVarType>(0.1f), static_cast<MeanVarType>(1.f), seed++);
 
     // Run the GPU reference executor
     std::unordered_map<int64_t, void*> gpuVariantPack;
