@@ -297,6 +297,13 @@ from .sparse_iter import (
     load_block_count,
     vsa_lut_iter,
 )
+from .tdm import (
+    TdmPadding,
+    tdm_data_size_code,
+    tdm_descriptor_groups,
+    tdm_load_to_lds,
+    tdm_row_major_2d,
+)
 from .pipeline import SoftwarePipeline
 from .i4_dequant import (
     dequant_i4_byte_to_bf8_pair,
@@ -686,4 +693,10 @@ __all__ = [
     "block_sparse_iter",
     "load_block_count",
     "vsa_lut_iter",
+    # gfx1250 tensor-DMA descriptors
+    "TdmPadding",
+    "tdm_data_size_code",
+    "tdm_descriptor_groups",
+    "tdm_load_to_lds",
+    "tdm_row_major_2d",
 ]

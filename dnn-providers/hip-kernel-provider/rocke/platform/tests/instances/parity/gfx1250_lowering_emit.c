@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/helper_helpers.tdm.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -309,6 +310,45 @@ static void build_global_addr_of(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* Row-major 2D TDM descriptor feeding a tensor_load_to_lds. `rows` is a kernel
+ * parameter rather than a constant so the SSA branches of the packer (mask,
+ * shift, or) are exercised, not just the constant-folding path -- that is
+ * where the engines could agree on the bits and still disagree on the emitted
+ * instructions. */
+static void build_tdm_descriptor(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t o;
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f16(), "global"), &o);
+    rocke_value_t* rows = rocke_b_param(b, "rows", rocke_i32(), NULL);
+    const int shape[] = {64 * 64};
+    rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_f16(), shape, 1, "tdm_tile");
+
+    rocke_tdm_desc_args_t a;
+    memset(&a, 0, sizeof(a));
+    /* Keyword-argument evaluation order on the Python side: global_addr first,
+     * then lds_addr. Swapping these renumbers every later value. */
+    a.global_addr = rocke_b_global_addr_of(b, src);
+    a.lds_addr = rocke_b_smem_addr_of(b, smem);
+    a.elem_bytes = 2;
+    a.scalarize = true;
+
+    rocke_tdm_operand_t rows_o = {true, 0, rows};
+    rocke_tdm_operand_t cols_o = {false, 4096, NULL};
+    rocke_tdm_operand_t pitch_o = {false, 4096, NULL};
+
+    rocke_value_t* d[5];
+    if(!rocke_h_tdm_row_major_2d(b, &a, rows_o, cols_o, pitch_o, 64, 64, d))
+        return;
+    rocke_b_tensor_load_to_lds(b, d[0], d[1], d[2], d[3], d[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -342,6 +382,7 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
     {build_global_addr_of, "gfx1250"},
+    {build_tdm_descriptor, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

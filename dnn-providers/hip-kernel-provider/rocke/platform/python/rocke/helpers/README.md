@@ -99,6 +99,12 @@ rocke/helpers/
 ├── loads.py # CoalescedTileLoader + AsyncTileLoader
 ├── layouts.py # LdsLayout: K-padding, packed async layouts, guardrails;
 │ # TransposeLdsReader for CK Tile ds_read_b64_tr_b16 formulas
+├── tdm.py # gfx1250 Tensor-DMA descriptor construction:
+│ # tdm_descriptor_groups packs the five D# groups
+│ # (addresses, shape, stride, LDS padding) that
+│ # tensor_load_to_lds / tensor_store_from_lds take as
+│ # opaque vectors. Rank 1-2, non-gather. Bit layout:
+│ # dsl_docs/optimization/arch/gfx1250.md §21.10
 ├── schedule.py # SchedulePolicy: named sched_group_barrier policies
 ├── pipeline.py # SoftwarePipeline: prologue/steady-state/epilogue
 ├── epilogues.py # DirectEpilogue + CShuffleEpilogue

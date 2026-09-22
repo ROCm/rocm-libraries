@@ -20,6 +20,7 @@
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
+from rocke.helpers.tdm import tdm_row_major_2d
 
 from _emit_common import run_emit
 
@@ -194,6 +195,33 @@ def build_global_addr_of(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_tdm_descriptor(b: IRBuilder) -> None:
+    """Row-major 2D TDM descriptor feeding a ``tensor_load_to_lds``.
+
+    ``rows`` is a kernel parameter rather than a constant so the SSA branches
+    of the packer are exercised -- mask, shift, or -- and not just the
+    constant-folding path, which is where the two engines could agree on the
+    bits while disagreeing on the emitted instructions.
+    """
+    src = b.param("src", PtrType(F16, "global"), noalias=True, align=16)
+    rows = b.param("rows", I32)
+    smem = b.smem_alloc(F16, [64 * 64], name_hint="tdm_tile")
+    d0, d1, d2, d3, d4 = tdm_row_major_2d(
+        b,
+        global_addr=b.global_addr_of(src),
+        lds_addr=b.smem_addr_of(smem),
+        rows=rows,
+        cols=4096,
+        row_pitch=4096,
+        tile_rows=64,
+        tile_cols=64,
+        elem_bytes=2,
+    )
+    b.tensor_load_to_lds(d0, d1, d2, d3, d4, cachepolicy=0)
+    b.s_wait_tensorcnt(0)
+    b.ret()
+
+
 def build_tensor_transfers(b: IRBuilder) -> None:
     d4 = b.zero_vec(I32, 4)
     d8 = b.zero_vec(I32, 8)
@@ -227,6 +255,7 @@ CONFIGS = [
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
     (build_global_addr_of, "gfx1250"),
+    (build_tdm_descriptor, "gfx1250"),
 ]
 
 
