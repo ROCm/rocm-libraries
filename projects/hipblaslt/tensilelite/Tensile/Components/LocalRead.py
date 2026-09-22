@@ -629,8 +629,15 @@ class LocalReadMFMA(LocalRead):
         mx2d             = mxTile > 1
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
-        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
-                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
+        # contigOut: under WaveContiguousOutput a wave owns MIWaveTile CONTIGUOUS M-tiles, so the
+        # per-vector scale step drops the *MIWaveGroup factor (interleaved -> contiguous), mirroring the
+        # non-MX localReadDo path. Without this the swizzled scale advances one wave-group too far and the
+        # lane's scale block no longer matches its A/B data tile.
+        contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
+        waveGroupStride0 = 1 if contigOut else kernel["MIWaveGroup"][0]
+        waveGroupStride1 = 1 if contigOut else kernel["MIWaveGroup"][1]
+        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * waveGroupStride0 * kernel["VectorWidthA"], \
+                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * waveGroupStride1 * kernel["VectorWidthB"]]
         tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)
         mxsTileSpan = tileSpanInfo is not None
         numVectorsPerTile = tileSpanInfo["numGroups"] if mxsTileSpan else kernel["MIWaveTile"][tile01] // vectorWidth
