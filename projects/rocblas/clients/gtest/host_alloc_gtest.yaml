@@ -1,0 +1,46 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Definitions:
+
+# The guard regions are sized in elements, so their byte offsets scale with
+# sizeof(T). Cover the smallest (2 byte) through the largest (16 byte) types.
+Guard precisions: &guard_precisions
+- *half_precision
+- *bf16_precision
+- *single_precision
+- *double_precision
+- *single_precision_complex
+- *double_precision_complex
+
+Tests:
+
+- name: host_alloc_guard_post_overwrite
+  category: quick
+  function: host_alloc_guard_post_overwrite
+  N: [ 1024 ]
+  precision: *guard_precisions
+
+- name: host_alloc_guard_pre_overwrite
+  category: quick
+  function: host_alloc_guard_pre_overwrite
+  N: [ 1024 ]
+  precision: *guard_precisions
+
+- name: host_alloc_guard_clean_alloc
+  category: quick
+  function: host_alloc_guard_clean_alloc
+  N: [ 1024 ]
+  precision: *guard_precisions
+
+# Managed memory only: the harness skips this where the device reports no
+# managed-memory support, and HSA_XNACK=1 runs (ci:extended) are where it bites.
+- name: host_alloc_hmm_count
+  category: HMM
+  function: host_alloc_hmm_count
+  N: [ 1024 ]
+  HMM: true
+  precision: *guard_precisions
+
+...
