@@ -5,10 +5,11 @@
 # tests/parity/conv_direct_grouped_emit.py -- Python reference emitter for the
 # direct grouped convolution parity harness. Selects one of N sampled spec
 # configs by argv[1], builds the DirectConv16cSpec / DirectConv4cSpec /
-# DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec, builds the
-# kernel via the matching build_direct_conv_* function (arch=<cfg arch>) and
-# prints _native_lower(arch=<cfg arch>) to stdout so it can be
-# byte-compared with the C emitter conv_direct_grouped_emit.c.
+# DirectConv8cSpec / DirectConv32cSpec / DirectDepthwiseSpec /
+# DirectConvDgradSpec / DirectDepthwiseDgradSpec, builds the kernel via the
+# matching build_direct_conv_* function (arch=<cfg arch>) and prints
+# _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
+# the C emitter conv_direct_grouped_emit.c.
 import sys
 
 from kernels.common.conv_direct_grouped import (
@@ -19,12 +20,16 @@ from kernels.common.conv_direct_grouped import (
     DirectConv32cSpec,
     DirectDepthwiseSpec,
     DirectDepthwiseSpatialSpec,
+    DirectConvDgradSpec,
+    DirectDepthwiseDgradSpec,
     build_direct_conv_16c,
     build_direct_conv_4c,
     build_direct_conv_8c,
     build_direct_conv_32c,
     build_direct_depthwise,
     build_direct_depthwise_spatial,
+    build_direct_conv_dgrad,
+    build_direct_depthwise_dgrad,
 )
 
 try:
@@ -140,6 +145,56 @@ def _spec(idx: int):
             DirectDepthwiseSpatialSpec(problem=p, block_waves=1),
             "gfx950",
         )
+    if idx == 12:
+        # dgrad: baseline grouped dgrad stride=1
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dgrad",
+            DirectConvDgradSpec(problem=p, block_q=16, block_groups=8),
+            "gfx950",
+        )
+    if idx == 13:
+        # dgrad: larger groups / different block_groups
+        p = DirectConvProblem(
+            N=2, H=8, W=8, groups=8, cpg=32, kpg=32, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dgrad",
+            DirectConvDgradSpec(problem=p, block_q=16, block_groups=4),
+            "gfx950",
+        )
+    if idx == 14:
+        # dgrad: gfx942 target
+        p = DirectConvProblem(
+            N=1, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dgrad",
+            DirectConvDgradSpec(problem=p, block_q=16, block_groups=8),
+            "gfx942",
+        )
+    if idx == 15:
+        # depthwise_dgrad: stride=1
+        p = DirectConvProblem(
+            N=2, H=14, W=14, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "dw_dgrad",
+            DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
+            "gfx950",
+        )
+    if idx == 16:
+        # depthwise_dgrad: stride=2 exercises divisibility checks
+        p = DirectConvProblem(
+            N=2, H=14, W=14, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+        )
+        return (
+            "dw_dgrad",
+            DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -160,6 +215,10 @@ def main() -> int:
         kernel = build_direct_conv_32c(spec, arch=arch)
     elif kind == "spatial":
         kernel = build_direct_depthwise_spatial(spec, arch=arch)
+    elif kind == "dgrad":
+        kernel = build_direct_conv_dgrad(spec, arch=arch)
+    elif kind == "dw_dgrad":
+        kernel = build_direct_depthwise_dgrad(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":

@@ -7,6 +7,8 @@
 #include "ck_tile/ops/common/utils.hpp"
 #include "gemm_common/vector_size_fallback_dispatch.hpp"
 
+#include <type_traits>
+
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout layout_)
 {
