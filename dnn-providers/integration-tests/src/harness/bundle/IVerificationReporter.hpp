@@ -34,6 +34,12 @@ public:
     /// not published here: it is a harness bug, and the caller raises it as a GTest
     /// failure under enforcement and a warning under report mode instead.
     virtual void recordCoverage(const CoverageUpdate& update) = 0;
+
+    /// One claim-bearing graph survived --gtest_filter. Separate from recordCoverage
+    /// because it is published from SetUp(), before there is an observation to build a
+    /// CoverageUpdate from -- which is the point: a graph SetUp() goes on to skip is
+    /// counted here and nowhere else.
+    virtual void recordSelectedWithClaims() = 0;
     virtual void recordVerdict(const SupportResult& record) = 0;
     virtual void recordUnverifiable(const std::string& bundlePath, const std::string& reason) = 0;
     virtual void recordReferenceError(const std::string& bundlePath, const std::string& reason) = 0;
@@ -50,9 +56,9 @@ public:
         {
             supportClaimCoverage().graphsQueried++;
         }
-        if(update.selectedWithClaims)
+        if(update.reachedBody)
         {
-            supportClaimCoverage().graphsSelectedWithClaims++;
+            supportClaimCoverage().graphsReachedBody++;
         }
         if(update.noApplicableClaim)
         {
@@ -62,6 +68,11 @@ public:
         {
             supportClaimCoverage().graphsNotOpened++;
         }
+    }
+
+    void recordSelectedWithClaims() override
+    {
+        supportClaimCoverage().graphsSelectedWithClaims++;
     }
 
     void recordVerdict(const SupportResult& record) override

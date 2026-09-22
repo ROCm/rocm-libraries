@@ -23,16 +23,20 @@ struct SupportClaimCoverage
 {
     size_t graphsFound = 0; // seeded by registration
     size_t graphsWithClaims = 0; // seeded by registration
-    // Of the claim-bearing graphs, how many a test body actually reached. Seeded at
-    // run time, unlike graphsWithClaims above, and that distinction is the whole
-    // reason it exists: registration is blind to --gtest_filter (GTest only applies
-    // the filter inside RUN_ALL_TESTS()), so graphsWithClaims counts every bundle on
-    // disk whether or not this run was ever going to touch it. Anything that divides
-    // a run-time numerator by that registration-time denominator reads a legitimately
-    // narrowed suite as a run that verified nothing. Bumped from the sidecar's
-    // presence on disk and *not* from shouldObserveClaims(), which would go false in
-    // exactly the case the guard exists to catch (engine plugin failed to load).
+    // Of the claim-bearing graphs, how many survived --gtest_filter. Bumped in SetUp(),
+    // the earliest hook GTest runs after the filter has already chosen this test, so
+    // the gap below it is the filter's doing and the gap above it is not. Registration
+    // cannot supply this: GTest only applies the filter inside RUN_ALL_TESTS(), so
+    // graphsWithClaims counts every bundle on disk whether or not this run was ever
+    // going to touch one.
     size_t graphsSelectedWithClaims = 0;
+    // Of the selected graphs, how many reached a test body. The difference against
+    // graphsSelectedWithClaims is exactly the bundles SetUp() skipped -- arch guard,
+    // TOML skip-list, no device -- which is why the two are separate counters rather
+    // than one bumped somewhere in between. Both are bumped from the sidecar's presence
+    // on disk and *not* from shouldObserveClaims(), which goes false in exactly the case
+    // the run-level guard exists to catch (engine plugin failed to load).
+    size_t graphsReachedBody = 0;
     // Bumped once per graph whose sidecar was read, from SupportObservation::sidecar
     // — never from the verdict count. A sidecar naming only engines this build does
     // not load leaves no verdicts and must still count.
@@ -59,7 +63,7 @@ SupportClaimCoverage& supportClaimCoverage();
 struct CoverageUpdate
 {
     bool queried = false; ///< bump graphsQueried
-    bool selectedWithClaims = false; ///< bump graphsSelectedWithClaims
+    bool reachedBody = false; ///< bump graphsReachedBody
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
     bool notOpened = false; ///< bump graphsNotOpened
     /// A sidecar exists and claim checking is on, but the query never happened. The
@@ -142,9 +146,10 @@ private:
 };
 
 // Enforcement that passed having queried nothing is a lie, not a pass (RFC 0015 §7.2).
-// Scoped to the claim-bearing graphs this run actually selected: a suite filtered
-// onto bundles that carry no claims enforced nothing because there was nothing to
-// enforce, which is not the same thing as enforcement failing to look.
+// Scoped to the claim-bearing graphs whose bodies actually ran: a suite filtered onto
+// bundles that carry no claims enforced nothing because there was nothing to enforce,
+// and a bundle SetUp() skipped never got as far as a query it could have made. Neither
+// is enforcement failing to look, which is the only thing this guard is about.
 bool verifiedNothing(const SupportClaimCoverage& coverage);
 
 // `claims` only labels the header. Report and enforce produce byte-identical bodies,

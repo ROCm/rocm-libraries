@@ -116,6 +116,17 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
+        // Before the first skip exit, so a bundle this SetUp() goes on to skip is still
+        // counted as selected. That is the whole point of the counter: the gap between it
+        // and the bodies that ran is exactly what SetUp() skipped, and the gap above it is
+        // --gtest_filter. Keyed on the sidecar being on disk rather than
+        // shouldObserveClaims(), which goes false when the engine plugin fails to load --
+        // the run the coverage guard exists to catch.
+        if(_deps.policy.claims != ClaimMode::OFF && carriesSidecar())
+        {
+            _deps.reporter->recordSelectedWithClaims();
+        }
+
         if(_deps.policy.useDevice() && noHipDevicesAvailable())
         {
             noteSkipBeforeObservation();

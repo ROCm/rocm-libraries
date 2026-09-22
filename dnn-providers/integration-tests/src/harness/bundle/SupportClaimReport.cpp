@@ -31,7 +31,7 @@ CoverageUpdate coverageFor(const SupportObservation& observation,
     // the pair verifiedNothing() compares. Not conditioned on observationExpected:
     // a failed engine load makes that false while leaving the sidecar exactly where
     // it was, and that run is the one that most needs to be caught.
-    update.selectedWithClaims = carriesSidecar;
+    update.reachedBody = carriesSidecar;
     // Read in full, but silent about this arch/platform/case. Counted so "we checked
     // and it holds" reads differently from "we checked and nobody had said anything"
     // — the verdict tallies look the same for both, and only one of them means the
@@ -62,17 +62,16 @@ std::optional<HarnessComplaint>
 
 bool verifiedNothing(const SupportClaimCoverage& coverage)
 {
-    // graphsSelectedWithClaims, not graphsWithClaims: the latter is seeded at
-    // registration and cannot see --gtest_filter, so against it every suite that
-    // selects only unclaimed bundles -- hipblaslt's ffm-quick tier, ASM SDPA's
-    // gpu-reference target -- looks identical to a run whose engine never loaded.
+    // graphsReachedBody, not graphsWithClaims: the latter is seeded at registration
+    // and cannot see --gtest_filter, so against it every suite that selects only
+    // unclaimed bundles -- hipblaslt's ffm-quick tier, ASM SDPA's gpu-reference
+    // target -- looks identical to a run whose engine never loaded.
     //
-    // The cost of the run-time numerator is a blind spot: it is bumped in the test
-    // body, so a bundle skipped in SetUp() (arch guard, TOML skip-list, no device)
-    // bumps neither side of this comparison. A skip-list broad enough to cover every
-    // claim-bearing bundle therefore enforces nothing and exits 0 without tripping
-    // the guard. Closing that needs a counter seeded before SetUp() runs.
-    return coverage.graphsSelectedWithClaims > 0 && coverage.graphsQueried == 0;
+    // Nor graphsSelectedWithClaims, which is bumped before SetUp()'s skip exits: a
+    // lane whose claim-bearing bundles are all arch-skipped would then go from green
+    // to fatal for skipping exactly what it is configured to skip. What this guard is
+    // about is enforcement reaching a body and failing to look, so it counts bodies.
+    return coverage.graphsReachedBody > 0 && coverage.graphsQueried == 0;
 }
 
 namespace
@@ -128,7 +127,8 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
     os << "\n==== SUPPORT CLAIM SUMMARY" << modeLabel(claims) << " ====\n"
        << "  graphs: " << coverage.graphsFound << " found, " << coverage.graphsWithClaims
        << " with claims, " << coverage.graphsSelectedWithClaims << " selected, "
-       << coverage.graphsQueried << " queried (" << records.size() << " verdicts)\n"
+       << coverage.graphsReachedBody << " ran, " << coverage.graphsQueried << " queried ("
+       << records.size() << " verdicts)\n"
        << "  confirmed: " << confirmed << "  accepted: " << accepted
        << "  failed-in-use: " << failedInUse << "  broken: " << broke << "  errored: " << err
        << "  unclaimed: " << unc << "\n"
@@ -146,24 +146,35 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
               "  those tests are already failing on the graph itself.\n";
     }
 
-    // Two different shortfalls, reported separately because they have two different
-    // fixes. Selected-but-unaccounted means SetUp() skipped the bundle before the
-    // query — the arch guard, a TOML skip-list, no device — and the counters cannot
-    // tell which; the remedy is a skip-list edit or a different machine. Rolling it
-    // into the filter line below would blame --gtest_filter for a bundle the filter
-    // let through.
+    // Each remaining shortfall is the difference between two adjacent counters, so it
+    // has exactly one cause and one remedy. Nothing here is a guess: the counters are
+    // bumped at the three points a claim-bearing graph can stop -- discovery, SetUp(),
+    // the test body -- and subtracting neighbours names which one it stopped at.
+
+    // A body ran and neither queried the sidecar nor failed to open the graph. No
+    // configuration produces this; it is the harness losing a query it owed, which
+    // missedQueryComplaint() has already reported per-bundle.
     const size_t accountedFor = coverage.graphsQueried + coverage.graphsNotOpened;
-    if(coverage.graphsSelectedWithClaims > accountedFor)
+    if(coverage.graphsReachedBody > accountedFor)
     {
-        os << "  " << (coverage.graphsSelectedWithClaims - accountedFor)
-           << " claim-bearing graph(s) were selected but skipped before the query "
+        os << "  " << (coverage.graphsReachedBody - accountedFor)
+           << " claim-bearing graph(s) ran without ever being queried;\n"
+              "  this is a harness defect, not a configuration choice.\n";
+    }
+
+    // Selected, then stopped in SetUp(). The remedy is a skip-list edit or different
+    // hardware -- never widening the filter, which already let these through.
+    if(coverage.graphsSelectedWithClaims > coverage.graphsReachedBody)
+    {
+        os << "  " << (coverage.graphsSelectedWithClaims - coverage.graphsReachedBody)
+           << " claim-bearing graph(s) were selected but skipped before running "
               "(arch guard, skip-list, or no device);\n"
               "  their claims are unenforced by this run.\n";
     }
 
-    // Discovery counts every claim-bearing bundle on disk; only selected ones run.
-    // The gap between the two is the filter's doing and is named as such rather than
-    // left as a bare mismatch a reader has to interpret.
+    // Discovery counts every claim-bearing bundle on disk; only selected ones reach
+    // SetUp(). The gap between the two is the filter's doing and is named as such
+    // rather than left as a bare mismatch a reader has to interpret.
     if(coverage.graphsWithClaims > coverage.graphsSelectedWithClaims)
     {
         os << "  " << (coverage.graphsWithClaims - coverage.graphsSelectedWithClaims)

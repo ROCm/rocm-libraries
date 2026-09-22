@@ -548,23 +548,22 @@ int main(int argc, char** argv) noexcept
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {
-            std::cerr
-                << "\nFATAL: --enforce-support-claims is active and "
-                << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsSelectedWithClaims
-                << " graph(s) carrying support\n"
-                   "       claims actually ran, but not one of them was ever queried. "
-                   "Enforcement\n"
-                   "       passed having verified nothing, so the run fails instead. Usual "
-                   "causes:\n"
-                   "         - the GPU or the engine plugin failed to load\n"
-                   "         - every one of them failed to open, so the query was never "
-                   "reachable;\n"
-                   "           those tests are already red on their own account\n"
-                   "\n"
-                   "       A --gtest_filter that selected only unclaimed graphs is *not* a "
-                   "cause:\n"
-                   "       the count above is seeded by the tests that ran, not by what was "
-                   "discovered.\n";
+            std::cerr << "\nFATAL: --enforce-support-claims is active and "
+                      << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsReachedBody
+                      << " graph(s) carrying support\n"
+                         "       claims actually ran, but not one of them was ever queried. "
+                         "Enforcement\n"
+                         "       passed having verified nothing, so the run fails instead. Usual "
+                         "causes:\n"
+                         "         - the GPU or the engine plugin failed to load\n"
+                         "         - every one of them failed to open, so the query was never "
+                         "reachable;\n"
+                         "           those tests are already red on their own account\n"
+                         "\n"
+                         "       A --gtest_filter that selected only unclaimed graphs is *not* a "
+                         "cause:\n"
+                         "       the count above is seeded by the tests that ran, not by what was "
+                         "discovered.\n";
             exitCode = 1;
         }
 

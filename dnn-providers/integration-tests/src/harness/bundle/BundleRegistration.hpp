@@ -410,8 +410,9 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
 inline void registerBundleTests()
 {
     // Either mode needs a named engine to check against, so a run without
-    // --test-engine has nothing to count; seeding the coverage counters anyway
-    // would trip verifiedNothing() on a run that never intended to check claims.
+    // --test-engine has nothing to count; seeding the coverage counters anyway would
+    // print a summary reporting every claim on disk as unenforced by a run that was
+    // never going to enforce one.
     //
     // reportSupportClaims() already folds in enforcement, so this covers both: the
     // counters have to be seeded identically under report mode or graphsFound and

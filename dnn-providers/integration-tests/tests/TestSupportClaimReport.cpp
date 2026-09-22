@@ -226,13 +226,15 @@ TEST_F(TestSupportClaimReport, PrintLevel1ShowsCounters)
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
     const auto output = summary();
 
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
-    EXPECT_NE(output.find("2 found, 1 with claims, 1 selected, 1 queried"), std::string::npos);
+    EXPECT_NE(output.find("2 found, 1 with claims, 1 selected, 1 ran, 1 queried"),
+              std::string::npos);
     EXPECT_NE(output.find("confirmed: 1"), std::string::npos);
     EXPECT_NE(output.find("broken: 0"), std::string::npos);
 }
@@ -342,6 +344,7 @@ TEST_F(TestSupportClaimReport, PrintAttributesUnselectedGraphsToTheFilter)
     supportClaimCoverage().graphsFound = 3;
     supportClaimCoverage().graphsWithClaims = 3;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
@@ -349,34 +352,81 @@ TEST_F(TestSupportClaimReport, PrintAttributesUnselectedGraphsToTheFilter)
 
     EXPECT_NE(output.find("2 claim-bearing graph(s) were discovered but not selected"),
               std::string::npos);
+    // Everything selected ran, so none of it is the skip-list's doing.
+    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
 }
 
 // The other half of the split. These graphs *were* selected -- the filter let them
-// through -- and then SetUp() skipped them before the query. Blaming --gtest_filter
+// through -- and then SetUp() skipped them before running. Blaming --gtest_filter
 // for them would send a reader to edit the one knob that is already correct.
 TEST_F(TestSupportClaimReport, PrintSeparatesSelectedButSkippedFromTheFilterRemainder)
 {
     supportClaimCoverage().graphsFound = 5;
     supportClaimCoverage().graphsWithClaims = 5;
     supportClaimCoverage().graphsSelectedWithClaims = 3;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
     const auto output = summary();
 
-    EXPECT_NE(output.find("2 claim-bearing graph(s) were selected but skipped before the query"),
-              std::string::npos);
+    EXPECT_NE(output.find("2 claim-bearing graph(s) were selected but skipped before running"),
+              std::string::npos)
+        << output;
     EXPECT_NE(output.find("2 claim-bearing graph(s) were discovered but not selected"),
-              std::string::npos);
+              std::string::npos)
+        << output;
+}
+
+// The arch-skipped lane, which is the common case this split exists for: the filter
+// selected everything and SetUp() skipped all of it. One line, naming the skip, and
+// no mention of a filter that did nothing wrong.
+TEST_F(TestSupportClaimReport, PrintBlamesTheSkipWhenTheFilterSelectedEverything)
+{
+    supportClaimCoverage().graphsFound = 4;
+    supportClaimCoverage().graphsWithClaims = 4;
+    supportClaimCoverage().graphsSelectedWithClaims = 4;
+    supportClaimCoverage().graphsReachedBody = 0;
+
+    const auto output = summary();
+
+    EXPECT_NE(output.find("4 claim-bearing graph(s) were selected but skipped before running"),
+              std::string::npos)
+        << output;
+    EXPECT_EQ(output.find("--gtest_filter"), std::string::npos)
+        << "the filter selected every claim-bearing graph; the skip is what stopped them\n"
+        << output;
+}
+
+// A body that ran, opened its graph and still never queried is the one shortfall no
+// configuration can produce. It gets its own line saying so, because sending a reader
+// to the skip-list for a harness bug costs them the afternoon.
+TEST_F(TestSupportClaimReport, PrintNamesAMissedQueryAsAHarnessDefect)
+{
+    supportClaimCoverage().graphsFound = 2;
+    supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsReachedBody = 2;
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
+
+    const auto output = summary();
+
+    EXPECT_NE(output.find("1 claim-bearing graph(s) ran without ever being queried"),
+              std::string::npos)
+        << output;
+    EXPECT_NE(output.find("harness defect"), std::string::npos) << output;
+    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
 }
 
 // A graph that never opened ran and failed; it is already accounted for by its own
-// line, so it must not also be counted as skipped before the query.
+// line, so it must not also be counted as a skip or as a missed query.
 TEST_F(TestSupportClaimReport, PrintDoesNotCountUnopenedGraphsAsSkipped)
 {
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 2;
     supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsReachedBody = 2;
     supportClaimCoverage().graphsQueried = 1;
     supportClaimCoverage().graphsNotOpened = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
@@ -384,21 +434,24 @@ TEST_F(TestSupportClaimReport, PrintDoesNotCountUnopenedGraphsAsSkipped)
     const auto output = summary();
 
     EXPECT_NE(output.find("1 claim-bearing graph(s) could not be opened"), std::string::npos);
-    EXPECT_EQ(output.find("skipped before the query"), std::string::npos);
+    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
+    EXPECT_EQ(output.find("harness defect"), std::string::npos) << output;
 }
 
-TEST_F(TestSupportClaimReport, PrintOmitsBothShortfallNotesWhenEverythingRan)
+TEST_F(TestSupportClaimReport, PrintOmitsEveryShortfallNoteWhenEverythingRan)
 {
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
     const auto output = summary();
 
     EXPECT_EQ(output.find("not selected"), std::string::npos);
-    EXPECT_EQ(output.find("skipped before the query"), std::string::npos);
+    EXPECT_EQ(output.find("skipped before running"), std::string::npos);
+    EXPECT_EQ(output.find("harness defect"), std::string::npos);
 }
 
 // Otherwise invisible: a sidecar read in full that promised nothing for this cell
@@ -408,6 +461,7 @@ TEST_F(TestSupportClaimReport, PrintNamesGraphsWhoseSidecarClaimsNothingHere)
     supportClaimCoverage().graphsFound = 2;
     supportClaimCoverage().graphsWithClaims = 2;
     supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsReachedBody = 2;
     supportClaimCoverage().graphsQueried = 2;
     supportClaimCoverage().graphsWithNoApplicableClaim = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
@@ -423,6 +477,7 @@ TEST_F(TestSupportClaimReport, PrintOmitsTheNoteWhenEveryQueriedGraphWasClaimed)
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
 
@@ -449,19 +504,21 @@ TEST_F(TestSupportClaimReport, PrintIsSilentWhenGraphsFoundButNoSidecars)
 }
 
 // The run that trips the guard must still print. Its summary is all zeros except
-// the discovery and selection counts, and those counts are the only thing that
-// distinguishes it from a run with nothing to enforce. Selected is 1 and queried is
-// 0 because that pair — reached them, asked nothing — is exactly what trips it.
+// the discovery, selection and body counts, and those counts are the only thing that
+// distinguishes it from a run with nothing to enforce. Ran is 1 and queried is 0
+// because that pair — reached them, asked nothing — is exactly what trips it.
 TEST_F(TestSupportClaimReport, PrintShowsDiscoveryCountsWhenNothingWasQueried)
 {
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
 
     const auto output = summary();
 
     EXPECT_NE(output.find("SUPPORT CLAIM SUMMARY"), std::string::npos);
-    EXPECT_NE(output.find("1 with claims, 1 selected, 0 queried"), std::string::npos);
+    EXPECT_NE(output.find("1 with claims, 1 selected, 1 ran, 0 queried"), std::string::npos)
+        << output;
 }
 
 // ---------------------------------------------------------------------------
@@ -474,11 +531,12 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenNothingDiscovered)
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
-TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenSelectedButNoQueries)
+TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenBodiesRanButNoQueries)
 {
     // (N, 0) → true: claim-bearing graphs ran and not one was ever queried.
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     EXPECT_TRUE(verifiedNothing(supportClaimCoverage()));
 }
 
@@ -490,16 +548,31 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenFilterSelectedNoClai
 {
     supportClaimCoverage().graphsWithClaims = 18;
     supportClaimCoverage().graphsSelectedWithClaims = 0;
+    supportClaimCoverage().graphsReachedBody = 0;
+    EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
+}
+
+// The guard counts bodies, not selections, and this is the difference. An
+// arch-guarded lane selects its claim-bearing bundles and then skips every one of
+// them — doing exactly what it is configured to do. Keying the guard on selection
+// would turn that lane from green to fatal, which is why it is keyed on what ran.
+TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenEverySelectedGraphWasSkipped)
+{
+    supportClaimCoverage().graphsWithClaims = 18;
+    supportClaimCoverage().graphsSelectedWithClaims = 4;
+    supportClaimCoverage().graphsReachedBody = 0;
+    supportClaimCoverage().graphsQueried = 0;
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
 
 // The case the guard exists for, and the one that separates it from the test
-// above: the sidecars were selected and sat on disk untouched because no engine
-// was ever there to ask.
-TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenSelectedClaimsWentUnasked)
+// above: the sidecars reached a test body and sat there untouched because no
+// engine was ever there to ask.
+TEST_F(TestSupportClaimReport, EmptyQueryGuardTrippedWhenRunClaimsWentUnasked)
 {
     supportClaimCoverage().graphsWithClaims = 18;
     supportClaimCoverage().graphsSelectedWithClaims = 4;
+    supportClaimCoverage().graphsReachedBody = 4;
     supportClaimCoverage().graphsQueried = 0;
     EXPECT_TRUE(verifiedNothing(supportClaimCoverage()));
 }
@@ -508,6 +581,7 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenQueriesObserved)
 {
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
@@ -520,6 +594,7 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWhenEveryQueryErrored)
 {
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::QUERY_ERRORED));
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
@@ -616,10 +691,10 @@ TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
                                      "not left for the summary to blame on --gtest_filter";
 }
 
-// selectedWithClaims tracks the file on disk and nothing else. Every other flag
-// here is conditioned on observationExpected, and this one deliberately is not:
-// the runs it has to count are precisely the ones where observation was off.
-TEST(TestSupportClaimCoverageRules, SelectedWithClaimsFollowsTheSidecarNotTheObservation)
+// reachedBody tracks the file on disk and nothing else. Every other flag here is
+// conditioned on observationExpected, and this one deliberately is not: the runs
+// it has to count are precisely the ones where observation was off.
+TEST(TestSupportClaimCoverageRules, ReachedBodyFollowsTheSidecarNotTheObservation)
 {
     // Engine plugin never loaded: no observation, sidecar still sitting there. The
     // guard's numerator must see this, or enforcement passes having asked nothing.
@@ -627,14 +702,14 @@ TEST(TestSupportClaimCoverageRules, SelectedWithClaimsFollowsTheSidecarNotTheObs
                                         /*observationExpected=*/false,
                                         /*carriesSidecar=*/true);
     EXPECT_FALSE(unobserved.queried);
-    EXPECT_TRUE(unobserved.selectedWithClaims);
+    EXPECT_TRUE(unobserved.reachedBody);
 
-    // A selected bundle that carries no sidecar promises nothing, so it must not
-    // inflate the denominator a filtered suite is judged against.
+    // A body that carries no sidecar promises nothing, so it must not inflate the
+    // denominator a filtered suite is judged against.
     const auto unclaimed = coverageFor(SupportObservation{SidecarState::NONE, {}},
                                        /*observationExpected=*/false,
                                        /*carriesSidecar=*/false);
-    EXPECT_FALSE(unclaimed.selectedWithClaims);
+    EXPECT_FALSE(unclaimed.reachedBody);
 }
 
 // Its own counter, so the summary can subtract it before attributing the rest of
@@ -645,6 +720,7 @@ TEST(TestSupportClaimSummary, UnopenedGraphsAreNotBlamedOnTheFilter)
     coverage.graphsFound = 4;
     coverage.graphsWithClaims = 4;
     coverage.graphsSelectedWithClaims = 4;
+    coverage.graphsReachedBody = 4;
     coverage.graphsQueried = 3;
     coverage.graphsNotOpened = 1;
 
