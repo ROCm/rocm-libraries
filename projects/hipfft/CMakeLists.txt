@@ -115,7 +115,7 @@ endif()
 option(USE_CUDA "Build hipFFT for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
 # Set internal BUILD_WITH_COMPILER.
-if( USE_CUDA )
+if( USE_CUDA OR BUILD_WITH_LIB STREQUAL "CUDA" )
   set( BUILD_WITH_COMPILER "HIP-nvcc" )
 elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
   set( BUILD_WITH_COMPILER "HOST-default" )
