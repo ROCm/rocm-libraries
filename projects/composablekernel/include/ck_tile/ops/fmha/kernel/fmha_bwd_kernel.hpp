@@ -58,18 +58,22 @@
 #define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
 #endif
 
-// Upper bound on the same gate. Pairing exists to fix the causal load
-// imbalance, and that imbalance only bites while the grid is roughly one pass
-// over the CUs -- once there are several passes the scheduler averages it out
-// by itself and all that is left is the cost of the doubled body. Measured
-// gain from *disabling* pairing at d128 causal, paired_wg / 256 CUs:
-//   1.0x +32.8%   1.5x -0.9%   2.0x +14.4%   3.0x +6.9%
-//   4.0x  +2.3%   6.0x -4.2%   8.0x -12.1%
-// Monotone apart from the 1.5x point, crossing zero between 4x and 6x, so pair
-// up to 4x and stop. Worth -12.1% at seqlen_q 32768, which the lower bound
-// alone never reached.
-#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_CU_MUL
-#define CK_TILE_FMHA_BWD_PAIRING_MAX_CU_MUL 4
+// Upper bound on the same gate, in kv tiles per head -- NOT in workgroups.
+//
+// Pairing binds {x, n-1-x} into one workgroup, so the variable that matters is
+// n = jobs_per_head, the resolution of the causal triangle. batch and nhead
+// carry no imbalance of their own (every head has the identical triangle), and
+// folding them into the test misreads shapes badly: at d128 causal,
+// paired_wg 2048 with jobs_per_head 32 wants pairing (+13%) while paired_wg
+// 2048 with jobs_per_head 256 does not (-9%) -- same workgroup count, same
+// grid, opposite verdict.
+//
+// Measured gain from *disabling* pairing by jobs_per_head:
+//   32 (s=4096) +13..+33%   128 (s=16384) ~0%   192 (s=24576) -4.2%
+//   256 (s=32768) -12.1%
+// Monotone, crossing zero between 128 and 192, so stop pairing above 160.
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD
+#define CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD 160
 #endif
 namespace ck_tile {
 
@@ -1305,9 +1309,8 @@ struct FmhaBwdDQDKDVKernel
             const index_t paired_wg = paired_x * nhead_ * batch_size_;
             const index_t min_wg    = static_cast<index_t>(get_num_cus()) /
                                       CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV;
-            const index_t max_wg    = static_cast<index_t>(get_num_cus()) *
-                                      CK_TILE_FMHA_BWD_PAIRING_MAX_CU_MUL;
-            return (paired_wg > min_wg && paired_wg <= max_wg)
+            return (paired_wg > min_wg &&
+                    jobs_per_head <= CK_TILE_FMHA_BWD_PAIRING_MAX_JOBS_PER_HEAD)
                        ? dim3(paired_x, nhead_, batch_size_)
                        : dim3(jobs_per_head, nhead_, batch_size_);
         }
