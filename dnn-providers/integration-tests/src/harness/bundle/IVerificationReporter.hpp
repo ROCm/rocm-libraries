@@ -40,6 +40,13 @@ public:
     /// CoverageUpdate from -- which is the point: a graph SetUp() goes on to skip is
     /// counted here and nowhere else.
     virtual void recordSelectedWithClaims() = 0;
+
+    /// One claim-bearing graph entered its test body. Same reason it is not part of
+    /// recordCoverage: the fact is already true on the body's first line, and building
+    /// it into the observation's update would lose it whenever reading the sidecar --
+    /// or opening the graph, which happens first -- throws. A body that ran and threw
+    /// must not be attributed to SetUp() skipping it.
+    virtual void recordReachedBody() = 0;
     virtual void recordVerdict(const SupportResult& record) = 0;
     virtual void recordUnverifiable(const std::string& bundlePath, const std::string& reason) = 0;
     virtual void recordReferenceError(const std::string& bundlePath, const std::string& reason) = 0;
@@ -56,10 +63,6 @@ public:
         {
             supportClaimCoverage().graphsQueried++;
         }
-        if(update.reachedBody)
-        {
-            supportClaimCoverage().graphsReachedBody++;
-        }
         if(update.noApplicableClaim)
         {
             supportClaimCoverage().graphsWithNoApplicableClaim++;
@@ -73,6 +76,11 @@ public:
     void recordSelectedWithClaims() override
     {
         supportClaimCoverage().graphsSelectedWithClaims++;
+    }
+
+    void recordReachedBody() override
+    {
+        supportClaimCoverage().graphsReachedBody++;
     }
 
     void recordVerdict(const SupportResult& record) override

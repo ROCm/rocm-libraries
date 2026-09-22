@@ -151,6 +151,16 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
+        // First line of the body, ahead of everything that can throw. The fact is
+        // already true here, and both openGraph() below and the sidecar read inside
+        // the try can throw -- either would otherwise lose it and leave the summary
+        // blaming SetUp() for a skip that never happened. Same key as the selected
+        // counter above, so the two subtract cleanly.
+        if(_deps.policy.claims != ClaimMode::OFF && carriesSidecar())
+        {
+            _deps.reporter->recordReachedBody();
+        }
+
         // One from_binary, one ranked query, one applicability answer. Everything
         // below takes the session as an argument, so nothing re-derives it and
         // nothing caches it on the harness.

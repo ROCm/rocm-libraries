@@ -63,7 +63,6 @@ SupportClaimCoverage& supportClaimCoverage();
 struct CoverageUpdate
 {
     bool queried = false; ///< bump graphsQueried
-    bool reachedBody = false; ///< bump graphsReachedBody
     bool noApplicableClaim = false; ///< bump graphsWithNoApplicableClaim
     bool notOpened = false; ///< bump graphsNotOpened
     /// A sidecar exists and claim checking is on, but the query never happened. The
@@ -73,16 +72,14 @@ struct CoverageUpdate
     bool missedQuery = false;
 };
 
+// Everything here derives from `observation`, so nothing here survives the read
+// throwing. graphsReachedBody deliberately does not: it is true before the read and
+// is published straight to the reporter, ahead of it.
+//
 // `observationExpected` is shouldObserveClaims() -- the observe predicate, not the
 // enforce one, because report mode has to arrive at the same counters enforcement
 // would or it cannot predict it.
-//
-// `carriesSidecar` is the weaker fact that a sidecar is sitting next to this bundle,
-// implying nothing about the engine or the mode. That is why it, and not
-// observationExpected, is what verifiedNothing() counts against.
-CoverageUpdate coverageFor(const SupportObservation& observation,
-                           bool observationExpected,
-                           bool carriesSidecar);
+CoverageUpdate coverageFor(const SupportObservation& observation, bool observationExpected);
 
 /// The complaint owed for a coverage gap, or nullopt when there is none. `fatal` is
 /// the caller's enforce predicate; the wording is the same either way, so a CI log

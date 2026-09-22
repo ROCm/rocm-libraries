@@ -620,8 +620,7 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
 TEST(TestSupportClaimCoverageRules, NoSidecarCountsNothing)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                    /*observationExpected=*/false,
-                                    /*carriesSidecar=*/false);
+                                    /*observationExpected=*/false);
 
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.noApplicableClaim);
@@ -632,8 +631,7 @@ TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
 {
     const auto update = coverageFor(
         SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::CLAIM_ACCEPTED)}},
-        /*observationExpected=*/true,
-        /*carriesSidecar=*/true);
+        /*observationExpected=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_FALSE(update.noApplicableClaim);
@@ -645,8 +643,7 @@ TEST(TestSupportClaimCoverageRules, ReadSidecarWithAVerdictCountsAsQueried)
 TEST(TestSupportClaimCoverageRules, ReadSidecarWithNoVerdictsIsQueriedButUnclaimed)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::CHECKED, {}},
-                                    /*observationExpected=*/true,
-                                    /*carriesSidecar=*/true);
+                                    /*observationExpected=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_TRUE(update.noApplicableClaim);
@@ -659,8 +656,7 @@ TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
 {
     const auto update = coverageFor(
         SupportObservation{SidecarState::CHECKED, {makeResult(SupportVerdict::UNCLAIMED_SUPPORT)}},
-        /*observationExpected=*/true,
-        /*carriesSidecar=*/true);
+        /*observationExpected=*/true);
 
     EXPECT_TRUE(update.queried);
     EXPECT_TRUE(update.noApplicableClaim);
@@ -670,8 +666,7 @@ TEST(TestSupportClaimCoverageRules, DriftAloneStillCountsAsNothingPromised)
 TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                    /*observationExpected=*/true,
-                                    /*carriesSidecar=*/true);
+                                    /*observationExpected=*/true);
 
     EXPECT_FALSE(update.queried);
     EXPECT_TRUE(update.missedQuery);
@@ -683,8 +678,7 @@ TEST(TestSupportClaimCoverageRules, ExpectedButUnreadSidecarIsAHarnessBug)
 TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
 {
     const auto update = coverageFor(SupportObservation{SidecarState::NOT_QUERIED, {}},
-                                    /*observationExpected=*/true,
-                                    /*carriesSidecar=*/true);
+                                    /*observationExpected=*/true);
 
     EXPECT_FALSE(update.queried);
     EXPECT_FALSE(update.missedQuery);
@@ -693,26 +687,10 @@ TEST(TestSupportClaimCoverageRules, UnopenedGraphIsUncoveredButNotAHarnessBug)
                                      "not left for the summary to blame on --gtest_filter";
 }
 
-// reachedBody tracks the file on disk and nothing else. Every other flag here is
-// conditioned on observationExpected, and this one deliberately is not: the runs
-// it has to count are precisely the ones where observation was off.
-TEST(TestSupportClaimCoverageRules, ReachedBodyFollowsTheSidecarNotTheObservation)
-{
-    // Engine plugin never loaded: no observation, sidecar still sitting there. The
-    // guard's numerator must see this, or enforcement passes having asked nothing.
-    const auto unobserved = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                        /*observationExpected=*/false,
-                                        /*carriesSidecar=*/true);
-    EXPECT_FALSE(unobserved.queried);
-    EXPECT_TRUE(unobserved.reachedBody);
-
-    // A body that carries no sidecar promises nothing, so it must not inflate the
-    // denominator a filtered suite is judged against.
-    const auto unclaimed = coverageFor(SupportObservation{SidecarState::NONE, {}},
-                                       /*observationExpected=*/false,
-                                       /*carriesSidecar=*/false);
-    EXPECT_FALSE(unclaimed.reachedBody);
-}
+// graphsReachedBody is deliberately absent from CoverageUpdate: it is true before
+// the observation exists, and deriving it here would lose it whenever the read
+// throws. The harness publishes it directly, and TestSupportClaimEnforcement's
+// ReachedBodyIsCountedEvenWhenTheClaimReadThrows pins that.
 
 // Its own counter, so the summary can subtract it before attributing the rest of
 // the shortfall to --gtest_filter. A graph that never opened did run.

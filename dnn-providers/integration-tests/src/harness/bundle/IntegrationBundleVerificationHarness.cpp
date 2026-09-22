@@ -94,8 +94,8 @@ ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSessio
 {
     ClaimPhase phase;
 
-    // carriesSidecar() below stats the filesystem uncached, once per test body, and
-    // no counter it feeds is read when both claim flags are off.
+    // shouldObserveClaims() below stats the filesystem uncached, once per test body,
+    // and no counter it feeds is read when both claim flags are off.
     if(_deps.policy.claims == ClaimMode::OFF)
     {
         return phase;
@@ -103,10 +103,13 @@ ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSessio
 
     phase.observation = observeSupportClaims(session);
 
+    // Everything from here down derives from the observation, so a throw above loses
+    // only facts that were not yet true. graphsReachedBody is the exception and is
+    // published from TestBody() instead, ahead of anything that can throw.
+    //
     // The observe predicate, not the enforce one: report mode has to reach the same
     // counters enforcement would, or it cannot predict it.
-    const CoverageUpdate update
-        = coverageFor(phase.observation, shouldObserveClaims(), carriesSidecar());
+    const CoverageUpdate update = coverageFor(phase.observation, shouldObserveClaims());
 
     _deps.reporter->recordCoverage(update);
 
