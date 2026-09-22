@@ -3919,51 +3919,6 @@ class IRBuilder:
             result_name_hint="vfence",
         )
 
-    def buffer_load_d16_gather(
-        self, rsrc: Value, voffset: Value, soffsets: "Sequence[Value]"
-    ) -> "list[Value]":
-        """Gather ``N = len(soffsets)//2`` packed dwords (`i32`) in ONE inline-asm
-        block: ``buffer_load_d16_b16`` + ``_hi_b16`` per dword (dword m packs the
-        halves at ``soffsets[2m]`` / ``soffsets[2m+1]``).
-
-        Batching every load into a single node makes them the NEWEST contiguous
-        outstanding VMEM, so :meth:`vmcnt_fence` can gate individual dwords with
-        exact counting-down partial waits (VMEM retires in issue order). Pair
-        with a per-dword :meth:`vmcnt_fence` before each consumer to recover the
-        load/compute overlap the coarse :meth:`vmcnt0_fence` gives up.
-        """
-        soffs = list(soffsets)
-        n = len(soffs) // 2
-        op = self._op(
-            "tile.buffer_load_d16_gather",
-            [rsrc, voffset, *soffs],
-            [I32] * n,
-            result_name_hint="d16g",
-        )
-        return list(op.results)
-
-    def vmcnt_fence(self, value: Value, k: int) -> Value:
-        """Tie ``value`` through a verbatim ``s_waitcnt vmcnt(k)`` inline-asm
-        barrier and return it, forcing every consumer AFTER a wait for "at most
-        ``k`` VMEM outstanding".
-
-        Partial-wait analogue of :meth:`vmcnt0_fence` for inline-asm loads
-        issued via :meth:`buffer_load_d16_gather`: emitting these in a
-        counting-down sequence (k = 2N-2, 2N-4, .., 0) releases dword 0 while
-        dwords 1..N-1 are still in flight, reproducing the backend's fine-grained
-        ``vmcnt(2)``-interleaved-with-WMMA schedule that the typed intrinsic path
-        gets for free. Verbatim asm => the auto-waitcnt pass cannot drop it; the
-        in/out tie => consumers cannot hoist above it.
-        """
-        return self.inline_asm(
-            f"s_waitcnt vmcnt({int(k)})",
-            "=v,0",
-            [value],
-            result_type=value.type,
-            sideeffect=True,
-            result_name_hint="vwait",
-        )
-
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
         """Scalar bf16 buffer load via `raw_ptr_buffer_load_u16` + bitcast.
 

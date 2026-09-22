@@ -4898,55 +4898,6 @@ class _Lowerer:
             f"i32 {self._operand(soffset_hi)})"
         )
 
-    def _op_tile_buffer_load_d16_gather(self, op: Op) -> None:
-        """Emit N packed dwords (2 strided f16 each) as ONE inline-asm block:
-        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` per dword, N ``i32``
-        outputs (literal-struct return, unpacked with extractvalue).
-
-        Batching all 2N loads into a SINGLE sideeffect asm node guarantees they
-        are issued contiguously and are the NEWEST outstanding VMEM, which is
-        the precondition for the caller's counting-down partial ``vmcnt`` waits
-        (:meth:`vmcnt_fence`) to be exact: since VMEM retires in issue order,
-        ``s_waitcnt vmcnt(2N-2-2m)`` gates exactly dword ``m`` regardless of how
-        many OLDER loads are still in flight (they retire first, and cancel).
-
-        operands: (rsrc, voffset, soff_0, .. soff_{2N-1}).  $0..$(N-1) outputs;
-        inputs $N=voff, $(N+1)=rsrc, $(N+2+j)=soff_j.
-        """
-        rsrc, voffset, *soffs = op.operands
-        n = len(op.results)
-        assert len(soffs) == 2 * n, "buffer_load_d16_gather needs 2 soff per dword"
-        voff_i = n
-        rsrc_i = n + 1
-        lines = []
-        for m in range(n):
-            lo_i = n + 2 + 2 * m
-            hi_i = lo_i + 1
-            lines.append(
-                f"buffer_load_d16_b16 ${m}, ${voff_i}, ${rsrc_i}, ${lo_i} offen"
-            )
-            lines.append(
-                f"buffer_load_d16_hi_b16 ${m}, ${voff_i}, ${rsrc_i}, ${hi_i} offen"
-            )
-        template = _escape_llvm_asm_string("\n".join(lines))
-        constraints = ",".join(["=v"] * n + ["v", "s"] + ["s"] * (2 * n))
-        # Build the typed arg list, printing rsrc as the ptr addrspace(8) it
-        # really is (its rocke type is <4 x i32> for display only).
-        args = [
-            f"i32 {self._operand(voffset)}",
-            f"ptr addrspace(8) {self._operand(rsrc)}",
-        ]
-        args += [f"i32 {self._operand(s)}" for s in soffs]
-        arglist = ", ".join(args)
-        struct_ty = "{ " + ", ".join(["i32"] * n) + " }"
-        tmp = self._fresh("d16g")
-        self._current().emit(
-            f'  {tmp} = call {struct_ty} asm sideeffect "{template}", '
-            f'"{constraints}"({arglist})'
-        )
-        for i, r in enumerate(op.results):
-            self._current().emit(f"  {r.name} = extractvalue {struct_ty} {tmp}, {i}")
-
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 

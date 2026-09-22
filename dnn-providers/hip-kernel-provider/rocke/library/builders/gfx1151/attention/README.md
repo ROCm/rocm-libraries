@@ -962,7 +962,7 @@ the test is that the paged kernel reproduces it.
 python -m builders.gfx1151.attention.paged_decode_splitk_verify \
     --batch 1 --seqlen-k 32768 \
     --heads 32 --kv-heads 8 --head-size 128 \
-    --kv-block-size 16 --d-lanes 16 --shuffle-blocks 1
+    --kv-block-size 16 --shuffle-blocks 1
 ```
 
 Reports max abs error against a float64 CPU reference and the achieved GB/s — **not**

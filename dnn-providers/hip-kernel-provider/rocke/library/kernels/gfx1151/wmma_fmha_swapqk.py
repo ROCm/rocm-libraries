@@ -405,8 +405,8 @@ class SwapQKCfg:
     #                          path gets from backend-managed PARTIAL waits
     #                          (vmcnt(2) interleaved with the PV WMMAs); the 64
     #                          v_mov_b16 saved are cheap + already latency-hidden.
-    #   * hand fine-grained partial waits (buffer_load_d16_gather + counting-down
-    #                          vmcnt_fence, mimicking the backend schedule)
+    #   * hand fine-grained partial waits (inline-asm gather + counting-down
+    #                          vmcnt(K) sequence, mimicking the backend schedule)
     #                          -> GPU HANG: with multiple gather blocks pipelined
     #                          the uncounted asm loads make the manual vmcnt(K)
     #                          accounting deadlock-prone. Not safe to enable.
