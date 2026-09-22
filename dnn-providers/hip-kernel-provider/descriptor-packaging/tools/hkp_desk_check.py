@@ -117,9 +117,9 @@ def _parse_args(argv):
         help="A KMD field the matcher keys on; repeatable. This is the "
         "MATCHER-TUPLE identity (invariant 2). Defaults to the fields the "
         "bundle's own specialization_contract declares it specialized on, and "
-        "only falls back to a generic attention-shaped list for a bundle that "
-        "declares no contract. Neither this flag nor that declaration narrows "
-        "--drift-field.",
+        "otherwise to the fields derived from the bundle's own kernel "
+        "metadata -- there is no generic attention-shaped fallback. Neither "
+        "this flag nor that declaration narrows --drift-field.",
     )
     p.add_argument(
         "--drift-field",

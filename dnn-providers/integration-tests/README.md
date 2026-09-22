@@ -250,7 +250,7 @@ compute something wrong, each plan declines the graph up front:
 | dropout | `dropout_probability`, `seed/offset/dropout_mask/dropout_scale/rng_dump_tensor_uid` (node) | both |
 | max / running-sum softmax stats | `max_tensor_uid`, `sum_exp_tensor_uid` (node) | both |
 | softmax/output (de)quantization | `descale_s/scale_s/scale_o/amax_s/amax_o_tensor_uid` (node) | both |
-| FP8 q/k/v descale | `descale_q/k/v_tensor_uid` (node) | `GpuSdpaFwdSignatureKey.hpp` (no FP8 plan registered) |
+| FP8 q/k/v descale | `descale_q/k/v_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp` (explicit `isApplicable` rejection) and `GpuSdpaFwdSignatureKey.hpp` (no FP8 plan registered) |
 
 **A sink-bearing graph requires a sink-capable numerical reference.** A sink is an
 extra per-head logit in the softmax denominator, but neither the current CPU

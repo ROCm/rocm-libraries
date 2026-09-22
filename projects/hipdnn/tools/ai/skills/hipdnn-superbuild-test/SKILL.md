@@ -41,7 +41,12 @@ Infer options from the user request:
      a bare `python` or `python3` off `PATH`.
    - `<GEN>`: the IngestorGenerator root, from the repository root at
      `<repo-root>/projects/hipdnn/tools/IngestorGenerator`.
-   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
+   - Helper scripts: **default to the scripts bundled with the invoked skill**
+     (`<skill-directory>/scripts`). Use the checkout's
+     `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy
+     when developing the skill, when no bundled scripts exist, or for ingestor engine
+     create/extend work. In that workflow, use the checkout being built so the helper
+     revision matches the source.
 
 3. Verify the superbuild exists:
    ```bash

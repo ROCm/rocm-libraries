@@ -144,8 +144,8 @@ EMITTED_ROOT="$GENERATED/descriptors"        # packaged
 ```
 
 Exactly one of those assignments must be live. Leaving both commented passes an empty
-root, which resolves to the current directory instead of failing — the one way to reach
-this gate without the wrong-root protection the paragraph above relies on.
+root, which the descriptor index expands as the recursive glob `/**/*.json` — a walk of
+the entire filesystem from its root rather than a fast wrong-root failure.
 
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
 tuple identity includes schema types/defaults and effective architecture overlap.
@@ -569,7 +569,9 @@ On the allocated target host:
 ```
 
 A missing/invisible installation fails even if early feasibility passed. Use
-`hipdnn-superbuild-test` discovery with component **`hip-kernel`**:
+`hipdnn-superbuild-test` discovery with component **`hip-kernel`**. Ingestor
+create/extend work runs the helper from the checkout being built, as below, so the
+helper revision matches that checkout:
 
 ```bash
 "$PY" "$REPO/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts/discover_test_targets.py" \
