@@ -2663,13 +2663,10 @@ class Solution(collections.abc.Mapping):
     # into vector components (vc0/vc1) of a single (0,0) tile (NotLocalFullTileElementsMFMA), so the store's
     # per-tile trigger never fires. The NT/TT path gets VW=1 for free via enableLDSTr; force it here too so
     # the non-transposed TN/NN path enumerates the same 4x4 tile grid.
-    # TensorStore v1 stages each MI output tile's 8-M block per (tt0,tt1) element; VW>1 would fold those
-    # tiles into vector components so the per-tile staging trigger never fires (same reason WCO forces
-    # VW=1). Force VW=1 on the raw request; SourceSwap=False is required separately by the gate below.
-    if state["enableLDSTrA"] or state["enableGLTrA"] or state["WaveContiguousOutput"] or state.get("TensorStore", False):
+    if state["enableLDSTrA"] or state["enableGLTrA"] or state["WaveContiguousOutput"]:
       state["VectorWidthA"] = 1
 
-    if state["enableLDSTrB"] or state["enableGLTrB"] or state["WaveContiguousOutput"] or state.get("TensorStore", False):
+    if state["enableLDSTrB"] or state["enableGLTrB"] or state["WaveContiguousOutput"]:
       state["VectorWidthB"] = 1
 
     if state["_ScheduleIterAlg"] == 2:
