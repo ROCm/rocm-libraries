@@ -220,9 +220,14 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         paged K/V bound, the ragged k-tail mask and OOB store predicate, the
         non-runtime k-tile trip count -- so they must keep per-shape identity.
         ``persistent`` is excluded for a stronger reason: it is a separate body that
-        declares no shape params at all. Sliding-window attention uses the runtime
-        k-tile trip count while keeping the window size specialized."""
-        return not (self.persistent or self.ragged or self.varlen or self.paged)
+        declares no shape params at all."""
+        return not (
+            self.persistent
+            or self.ragged
+            or self.varlen
+            or self.paged
+            or self.sliding_window > 0
+        )
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -2065,7 +2070,7 @@ def _has_shape_params(spec: AttentionDenseSpec) -> bool:
 
     This is the ABI question. ``spec.runtime_shape`` is the narrower cache-identity
     question (does the body bake the shape *anywhere*), and the two differ for
-    paged / ragged / varlen.
+    paged / ragged / varlen / sliding-window.
     """
     return not spec.persistent
 
