@@ -6091,7 +6091,6 @@ class Solution(collections.abc.Mapping):
             and dtypeOK
             and state["ProblemType"]["HighPrecisionAccumulate"]
             and state["BufferStore"]
-            and not state.get("SourceSwap", False)
             and not state["UseSubtileImpl"]
             and state["GlobalSplitU"] == 1
             and state.get("StoreRemapVectorWidth", 0) == 0

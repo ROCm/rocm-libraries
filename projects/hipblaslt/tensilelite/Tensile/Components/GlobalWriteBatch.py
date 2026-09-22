@@ -4287,14 +4287,12 @@ class GlobalWriteBatchWriter:
     """Hoist the lane-invariant TensorStore LDS base ONCE per batch (before the element loop).
 
     The whole MacroTile lives in LDS column-major (M-inner, NO pad): LDS[N_global*MT0 + M_global].
-    WITHOUT WaveContiguousOutput the wave's output tiles are INTERLEAVED across the MT by MIWaveGroup
-    (see AsmStoreState wtStep = matM*matBM*MIWaveGroup[0] for the non-contigOut path):
-      M_global = (tt0*miwg0 + waveId0)*matM + Mhalf*8   (Mhalf, waveId0 lane-invariant; tt0 per-element)
-      N_global = (tt1*miwg1 + waveId1)*matN + N_local   (N_local, waveId1 lane-invariant; tt1 per-element)
-    The intra-tile lane geometry (N_local = lane&15, Mhalf = lane>>4) is WCO-independent (WMMA fixed).
-    Lane-invariant base = ((waveId1*matN + N_local)*MT0 + waveId0*matM + Mhalf*8)*bpe
-      + TensorStoreLdsByteOffset. Each element adds a compile-time ds_store OFFSET immediate
-      ((tt1*miwg1*matN)*MT0 + tt0*miwg0*matM)*bpe."""
+    This computes the lane-invariant per-thread MT-local base = VWB*(waveId1*matN + Ntp)*MT0 +
+    VWA*(waveId0*matM + Mtp), mirroring ComputeStoreVgprs coord1/coord0InMT. Ntp/Mtp are the lane thread
+    parts: lowPart = lane%mat, highPart = (lane//mat)*MIOutputVectorWidth; SourceSwap moves the MIOVW run
+    from M to N (non-swap N=lowPart/M=highPart; swap N=highPart/M=lowPart). The per-element
+    coordOffset0/coordOffset1 (from AsmStoreState, already VW/swap-aware) is added as the ds_store OFFSET
+    immediate. + TensorStoreLdsByteOffset places the staging after the main-loop LDS (disjoint)."""
     module = Module("TensorStoreSetup")
     bpe   = self.parentWriter.states.bpeCexternal
     ws    = self.kernel["WavefrontSize"]
@@ -4304,32 +4302,44 @@ class GlobalWriteBatchWriter:
     mt0   = self.kernel["MacroTile0"]
     vwa   = self.kernel["VectorWidthA"]
     vwb   = self.kernel["VectorWidthB"]
+    miovw = self.kernel["MIOutputVectorWidth"]
+    swap  = self.kernel["SourceSwap"]
+    # Per-thread MT-local base mirrors ComputeStoreVgprs coord0/coord1InMT (VW-aware). SourceSwap moves
+    # the MIOutputVectorWidth "continuous output" run from M to N, i.e. the two lane thread-parts
+    #   lowPart  = lane % mat           (contiguous unit)
+    #   highPart = (lane // mat) * MIOVW (the MIOVW run)
+    # SWAP between M and N:  non-swap N=lowPart, M=highPart;  swap N=highPart, M=lowPart.
+    #   coord0InMT = VWA*(waveId0*matM + Mtp), coord1InMT = VWB*(waveId1*matN + Ntp).
+    # Per-element coordOffset0/coordOffset1 (already VW/swap-aware from AsmStoreState) is added at store.
+    matMod = matM if swap else matN
     base     = self.cvtVgprStruct.vgprXposeBase
-    vLdsBase = base + 0    # result: hoisted per-batch, consumed by every element
-    vLane    = base + 1    # laneInWave (then reused for waveId0)
+    vLdsBase = base + 0    # result / N-part accumulator (Ntp)
+    vMtp     = base + 1    # M-part accumulator (Mtp)
     vWave    = base + 2    # waveId
-    vHalf    = base + 3    # Mhalf*8 / M-part scratch
-    # Per-thread MT-local base mirrors ComputeStoreVgprs coord0/coord1InMT (VW-aware):
-    #   coord0InMT = VWA*(waveId0*matM + Mhalf*8), coord1InMT = VWB*(waveId1*matN + N_local).
-    # The per-element coordOffset0/coordOffset1 (already VW-scaled) is added at ds_store time.
-    module.addComment1("TensorStore SETUP (per batch): lane-invariant LDS base = (VWB*(waveId1*matN+N_local)*MT0 + VWA*(waveId0*matM+Mhalf*8))*bpe")
-    module.add(VAndB32(dst=vgpr(vLane), src0=ws - 1, src1=vgpr("Serial"), comment="laneInWave = Serial & (ws-1)"))
-    module.add(VAndB32(dst=vgpr(vLdsBase), src0=15, src1=vgpr(vLane), comment="N_local = lane & 15"))
+    vTmp     = base + 3    # scratch
+    module.addComment1("TensorStore SETUP (per batch): base = (VWB*(waveId1*matN+Ntp)*MT0 + VWA*(waveId0*matM+Mtp))*bpe, SourceSwap=%s" % str(swap))
+    module.add(VAndB32(dst=vgpr(vTmp), src0=ws - 1, src1=vgpr("Serial"), comment="laneInWave = Serial & (ws-1)"))
+    if not swap:
+      module.add(VAndB32(dst=vgpr(vLdsBase), src0=matMod - 1, src1=vgpr(vTmp), comment="Ntp = lowPart = lane % mat"))
+      module.add(VLShiftRightB32(dst=vgpr(vMtp), shiftHex=int(log2(matMod)), src=vgpr(vTmp), comment="lane // mat"))
+      module.add(VLShiftLeftB32(dst=vgpr(vMtp), shiftHex=int(log2(miovw)), src=vgpr(vMtp), comment="Mtp = highPart = (lane//mat)*MIOVW"))
+    else:
+      module.add(VLShiftRightB32(dst=vgpr(vLdsBase), shiftHex=int(log2(matMod)), src=vgpr(vTmp), comment="lane // mat"))
+      module.add(VLShiftLeftB32(dst=vgpr(vLdsBase), shiftHex=int(log2(miovw)), src=vgpr(vLdsBase), comment="Ntp = highPart = (lane//mat)*MIOVW"))
+      module.add(VAndB32(dst=vgpr(vMtp), src0=matMod - 1, src1=vgpr(vTmp), comment="Mtp = lowPart = lane % mat"))
     if self.kernel["NumWaves"] > 1:
       module.add(VLShiftRightB32(dst=vgpr(vWave), shiftHex=int(log2(ws)), src=vgpr("Serial"), comment="waveId = Serial >> log2(ws)"))
-      module.add(VLShiftRightB32(dst=vgpr(vHalf), shiftHex=int(log2(miwg0)), src=vgpr(vWave), comment="waveId1 = waveId >> log2(miwg0)"))
-      module.add(VMulLOU32(dst=vgpr(vHalf), src0=vgpr(vHalf), src1=matN, comment="waveId1*matN"))
-      module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vHalf), comment="N cols = waveId1*matN + N_local"))
+      module.add(VLShiftRightB32(dst=vgpr(vTmp), shiftHex=int(log2(miwg0)), src=vgpr(vWave), comment="waveId1 = waveId >> log2(miwg0)"))
+      module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=matN, comment="waveId1*matN"))
+      module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vTmp), comment="N cols = waveId1*matN + Ntp"))
     module.add(VMulLOU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=mt0 * vwb, comment="N part = VWB * N cols * MT0 (column-major)"))
-    module.add(VLShiftRightB32(dst=vgpr(vHalf), shiftHex=4, src=vgpr(vLane), comment="Mhalf = laneInWave >> 4"))
-    module.add(VLShiftLeftB32(dst=vgpr(vHalf), shiftHex=3, src=vgpr(vHalf), comment="Mhalf*8"))
     if self.kernel["NumWaves"] > 1 and miwg0 > 1:
-      module.add(VAndB32(dst=vgpr(vLane), src0=miwg0 - 1, src1=vgpr(vWave), comment="waveId0 = waveId & (miwg0-1)"))
-      module.add(VMulLOU32(dst=vgpr(vLane), src0=vgpr(vLane), src1=matM, comment="waveId0*matM"))
-      module.add(VAddU32(dst=vgpr(vHalf), src0=vgpr(vHalf), src1=vgpr(vLane), comment="M part = waveId0*matM + Mhalf*8"))
+      module.add(VAndB32(dst=vgpr(vTmp), src0=miwg0 - 1, src1=vgpr(vWave), comment="waveId0 = waveId & (miwg0-1)"))
+      module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=matM, comment="waveId0*matM"))
+      module.add(VAddU32(dst=vgpr(vMtp), src0=vgpr(vMtp), src1=vgpr(vTmp), comment="M part = waveId0*matM + Mtp"))
     if vwa > 1:
-      module.add(VMulLOU32(dst=vgpr(vHalf), src0=vgpr(vHalf), src1=vwa, comment="M part *= VWA"))
-    module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vHalf), comment="LDS elem base = VWB*N*MT0 + VWA*M"))
+      module.add(VMulLOU32(dst=vgpr(vMtp), src0=vgpr(vMtp), src1=vwa, comment="M part *= VWA"))
+    module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vMtp), comment="LDS elem base = VWB*N*MT0 + VWA*M"))
     if bpe > 1:
       module.add(VLShiftLeftB32(dst=vgpr(vLdsBase), shiftHex=int(log2(bpe)), src=vgpr(vLdsBase), comment="* bpe -> LDS byte base"))
     module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=self.kernel["TensorStoreLdsByteOffset"], comment="+ TensorStoreLdsByteOffset (staging after main-loop LDS)"))
