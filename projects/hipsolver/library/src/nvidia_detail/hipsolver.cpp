@@ -4080,7 +4080,7 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(m != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
@@ -4109,7 +4109,7 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(m != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
@@ -4138,7 +4138,7 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(m != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
@@ -4167,7 +4167,7 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(m != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;

@@ -300,7 +300,6 @@ TEST_P(GETRF_BATCHED, batched__double_complex)
     run_tests<true, false, hipsolverDoubleComplex>();
 }
 
-#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
 TEST_P(GETRF_NPVT_BATCHED, batched__float)
 {
     run_tests<true, false, float>();
@@ -320,7 +319,6 @@ TEST_P(GETRF_NPVT_BATCHED, batched__double_complex)
 {
     run_tests<true, false, hipsolverDoubleComplex>();
 }
-#endif
 
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          GETRF,
@@ -372,6 +370,4 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, GETRF_BATCHED, ValuesIn(batched_square_range));
 
-#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, GETRF_NPVT_BATCHED, ValuesIn(batched_square_range));
-#endif
