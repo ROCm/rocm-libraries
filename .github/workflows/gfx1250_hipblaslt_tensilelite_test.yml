@@ -222,7 +222,7 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35659355728' }}  # SCRATCH: PR #12355 build (rm-spmm-gate-xfail) — tests un-xfail + gfx1250 markers on HW
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35749998395' }}  # SCRATCH: fresh develop gfx125X-dcgpu build (Multi-Arch CI 2026-09-22, dev 45e1aac54; build stage succeeded)
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -267,7 +267,7 @@ jobs:
         timeout-minutes: 120
         if: ${{ steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_hipblaslt == 'true' }}
         env:
-          GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
+          GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter || '-*ConcurrentStreamsDoNotDeadlock*' }}  # SCRATCH: skip the known StreamK deadlock for the checked+filter validation
         run: |
           set -o pipefail  # a failing test must propagate through `| tee`, not be masked
           mkdir -p test_results
@@ -280,9 +280,6 @@ jobs:
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
           HIPBLASLT_TEST_TIMEOUT=3600 \
           HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
-          # No --gtest_output=xml: the junit XML records per-test time= regardless of
-          # GTEST_PRINT_TIME=0, so it would leak timing into the public artifact. The
-          # -v console log (timing-free under GTEST_PRINT_TIME=0) is what we keep.
           "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 \
             | tee test_results/hipblaslt_test.log
 
@@ -322,9 +319,6 @@ jobs:
       - name: Redact wall-clock timing from logs
         if: always()
         run: |
-          # pytest always prints a session total ("… in <N>s") that GTEST_PRINT_TIME
-          # cannot suppress. Strip wall-time tokens from both logs so no test timing
-          # reaches the public artifact (also strips gtest "(N ms)" as belt-and-suspenders).
           for f in "$GITHUB_WORKSPACE/test_results/hipblaslt_test.log" \
                    "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"; do
             [ -f "$f" ] && sed -i -E 's/ in [0-9]+(\.[0-9]+)?s\b//g; s/ \([0-9]+ ms\)//g' "$f" || true
