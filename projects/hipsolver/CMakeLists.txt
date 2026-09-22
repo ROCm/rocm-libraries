@@ -122,6 +122,13 @@ endif()
 # Replaces the old hipcc/hipconfig-based HIP_PLATFORM flow.
 option(USE_CUDA "Build hipSOLVER for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
+# Legacy compatibility: honour HIP_PLATFORM=nvidia so existing CUDA CI jobs
+# that have not yet been updated to pass -DUSE_CUDA=ON continue to work.
+if(NOT USE_CUDA AND "${HIP_PLATFORM}" STREQUAL "nvidia")
+  set(USE_CUDA ON CACHE BOOL "Build hipSOLVER for the CUDA backend" FORCE)
+  message(STATUS "USE_CUDA: enabled via legacy HIP_PLATFORM=nvidia")
+endif()
+
 find_package(hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
 
 if(USE_CUDA)
