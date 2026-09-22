@@ -453,7 +453,21 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
-        return cfg > 0 ? (cfg < INT_MAX ? cfg : config_.dsReadPerWmma) : config_.dsReadPerWmma;
+        // INT_MAX is the "unset" sentinel and resolves to the arch default. A
+        // non-positive value is not a sentinel and is not a cap anyone can mean:
+        // it used to fall through to the arch default silently, so a caller that
+        // asked for 0 got 3. Reject it rather than guess.
+        if (cfg <= 0) {
+            report_fatal_error(
+                "dagFeatures.dsReadPerWmma must be positive (or INT_MAX to take the arch "
+                "default); got " +
+                std::to_string(cfg) + ".");
+        }
+        const int resolved = cfg < INT_MAX ? cfg : config_.dsReadPerWmma;
+        // The arch default is static data, so a bad one is a build-time mistake
+        // in this file rather than a caller error.
+        assert(resolved > 0 && "arch config dsReadPerWmma must be positive");
+        return resolved;
     }
     int tensorLoadWmmaSpace() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
@@ -472,7 +486,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     //
     // While the cap is anchored (below), entries are retired by the WMMA-issue
     // clear(), never by expiry, so the span is deliberately set past any window
-    // length and never binds. That is what makes this commit a pure refactor.
+    // length and never binds, which is what keeps the CAP behaviour-neutral.
+    // Note this says nothing about the file: the wave-shared ds issue cost
+    // (dsIssueCost) does move the timeline for NumWaves >= 2.
     //
     // TODO(kkyang): unanchor. Set this to a queue-derived span
     // (dsReadThrottleLatency / dsReadQueueDepth), drop capAnchoredToWmma(), and
@@ -487,8 +503,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Anchored: the window is delimited by WMMA issues and is not consulted when
     // no WMMA is pending -- i.e. exactly the pre-refactor per-WMMA counter,
     // including its uncapped region tail. Kept true here so this commit changes
-    // no behaviour; flipping it is the follow-up, so any measured delta has one
-    // cause.
+    // the cap's behaviour; flipping it is the follow-up, so a measured delta
+    // from the cap has one cause. Unrelated to dsIssueCost, which is a separate
+    // and deliberate model change.
     static constexpr bool capAnchoredToWmma() {
         return true;
     }
@@ -1204,8 +1221,13 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // the current window; full() is what the dsInsertedSinceLastWmma_ >=
     // windowCap comparison used to say. Still a veto, still skipped when no
     // WMMA is pending -- this commit swaps the counter for a window object
-    // without moving behaviour. dsTargetPerWindow_ was a flat fill of
+    // without moving the cap's behaviour. dsTargetPerWindow_ was a flat fill of
     // dsReadPerWmma(), so the fixed cap depth matches it.
+    //
+    // It is a CAP, not a quota: dsReadPerWmma may issue back-to-back while the
+    // window has room, so windows stay unevenly filled. The !wmmaQueue.empty()
+    // guard is what leaves the region tail uncapped; it is the guard the
+    // follow-up deletes, together with capAnchoredToWmma().
     const bool dsCapReached = !wmmaQueue.empty() && dsIssueCap_.full();
     // A DS budget is an upper gate, not permission to bypass queue pacing:
     // while pending, DS reads still follow the normal throttle/scheduling-space
@@ -2335,7 +2357,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // Rule (4) ds_load cap: at most dsReadPerWmma ds_loads in any
     // dsIssueCapSpan() cycles of the real timeline. Sliding, so it is defined
     // in the region tail too, where no WMMA remains to delimit a window.
+    // dsReadPerWmma() is guaranteed positive (it rejects anything else), so the
+    // cap always has a real depth. That matters because InFlightQueue::full() is
+    // `depth_ > 0 && size >= depth_`: a depth of 0 would report "not full"
+    // forever and silently disable rule (4) rather than enforce it.
     dsIssueCap_ = InFlightQueue(dsReadPerWmma());
+    assert(dsIssueCap_.depth() > 0 && "rule (4) cap must have a positive depth");
     PASS_DEBUG(std::cerr << "[CDNA5 dsCap] dsReadPerWmma=" << dsReadPerWmma()
                          << " span=" << dsIssueCapSpan() << "\n");
 

@@ -817,6 +817,18 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
            "is the assertion to flip";
 }
 
+// A non-positive dsReadPerWmma is not a cap anyone can mean. It used to fall
+// through to the arch default silently, so a caller asking for 0 got 3; and with
+// the cap held in an InFlightQueue a depth of 0 would make full() report "not
+// full" forever, disabling rule (4) rather than enforcing it. Rejected outright.
+TEST_F(DAGSchedulerPassTest, NonPositiveDsReadPerWmmaIsRejected) {
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/300, /*ldsToken=*/1);
+    EXPECT_DEATH(runPassWithDsReadThrottle(/*queueDepth=*/8, /*throttleLatency=*/32,
+                                           /*perWmma=*/0),
+                 "dsReadPerWmma must be positive");
+}
+
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycles) {
     createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
     StinkyInstruction* wideIssue = createVAddInBlock(bb, arch, /*destReg=*/300, /*src0Reg=*/301,
