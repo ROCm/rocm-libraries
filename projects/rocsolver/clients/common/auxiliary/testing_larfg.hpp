@@ -95,8 +95,11 @@ void larfg_initData(const rocblas_handle handle,
     {
         rocblas_init<T>(ha, true);
         rocblas_init<T>(hx, true);
+
+        // "singular" case sets imag( alpha ) = 0 and x = 0.
         if(singular == 1)
         {
+            ha[0][0] = std::real(ha[0][0]);
             for (int i = 0; i < n-1; ++i)
                 hx[0][i*inc] = 0;
         }
@@ -126,16 +129,16 @@ void larfg_getError(const rocblas_handle handle,
                     Th& htau_res,
                     double* max_err)
 {
-    using std::real, std::imag;
+    using std::real, std::imag, std::abs;
 
     // initialize data
     larfg_initData<true, true, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
 
     if (true) {
         fmt::print( "input, n {}, inc {}, singular {}\n\t"
-                    "alpha {:7.4f}, x=[\n\t",
+                    "alpha {:7.4f} + {:7.4f}i, x=[\n\t",
                     n, inc, singular,
-                    real( ha[0][0] ) );
+                    real( ha[0][0] ), imag( ha[0][0] ) );
         for (int i = 0; i < n-1; ++i) {
             // print 4 boundary elements; skip middle
             if(i == 4 && i < n-1-4)
@@ -143,11 +146,15 @@ void larfg_getError(const rocblas_handle handle,
                 fmt::print( "      ...\n\t" );
                 i = n-1-4;
             }
-            fmt::print( "      {:7.4f}\n\t",
-                        real( hx[0][i*inc] ) );
+            fmt::print( "      {:7.4f} + {:7.4f}i\n\t",
+                        real( hx[0][i*inc] ), imag( hx[0][i*inc] ) );
         }
         fmt::print( "]\n" );
     }
+
+    // Degenerate case counts as "singular", where imag( alpha ) = 0 and x = 0.
+    if(n == 1 && imag(ha[0][0]) == 0)
+        singular = 1;
 
     // execute computations
     // GPU lapack
@@ -155,7 +162,6 @@ void larfg_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(ha_res.transfer_from(da));
     CHECK_HIP_ERROR(hx_res.transfer_from(dx));
     CHECK_HIP_ERROR(htau_res.transfer_from(dtau));
-
 
     // CPU lapack
     cpu_larfg(n, ha[0], hx[0], inc, htau[0]);
@@ -168,20 +174,30 @@ void larfg_getError(const rocblas_handle handle,
     // using norm-1 which is infinity norm for this 1-by-(n-1) data setup
     double err_alpha, err_tau;
     *max_err = norm_error('O', 1, n - 1, inc, hx[0], hx_res[0]);
-    // For "singular" vector where x[1:n] == 0, tau = 2 instead of
-    // LAPACK's convention that tau = 0. Hence alpha = -alpha_lapack.
-    if(n <= 1 || singular == 1)
+    // For "singular" vector, tau = 2 instead of LAPACK's convention that tau = 0.
+    // Hence alpha = -alpha_lapack.
+    if(singular)
     {
-        err_alpha = std::abs(ha[0][0] + ha_res[0][0]);
-        err_tau = std::abs(htau_res[0][0] - 2);
+        err_alpha = abs(ha[0][0] + ha_res[0][0]);
+        fmt::print( "{}: alpha {:7.2e} = ({:7.2e} + {:7.2e}i) + ({:7.2e} + {:7.2e}i)\n",
+                    __LINE__, err_alpha,
+                    real( ha[0][0] ), imag( ha[0][0] ),
+                    real( ha_res[0][0] ), imag( ha_res[0][0] ) );
+
+        err_tau = abs(htau_res[0][0] - 2);
     }
     else
     {
-        err_alpha = std::abs(ha[0][0] - ha_res[0][0]);
-        err_tau = std::abs(htau[0][0] - htau_res[0][0]);
+        err_alpha = abs(ha[0][0] - ha_res[0][0]);
+        fmt::print( "{}: alpha {:7.2e} = ({:7.2e} + {:7.2e}i) - ({:7.2e} + {:7.2e}i)\n",
+                    __LINE__, err_alpha,
+                    real( ha[0][0] ), imag( ha[0][0] ),
+                    real( ha_res[0][0] ), imag( ha_res[0][0] ) );
+
+        err_tau = abs(htau[0][0] - htau_res[0][0]);
     }
-    if(std::abs(ha[0][0]) != 0)
-        err_alpha /= std::abs(ha[0][0]);
+    if(abs(ha[0][0]) != 0)
+        err_alpha /= abs(ha[0][0]);
     fmt::print( "error x     {:7.2e}\n"
                 "      alpha {:7.2e}\n"
                 "      tau   {:7.2e}\n",
@@ -191,11 +207,13 @@ void larfg_getError(const rocblas_handle handle,
 
     if (true) {
         fmt::print( "output\n\t"
-                    "tau   {:7.4f} ?= {:7.4f}\n\t"
-                    "alpha {:7.4f} ?= {:7.4f}, v=[\n\t",
-                    real( htau[0][0] ), real( htau_res[0][0] ),
-                    real( ha[0][0] ), real( ha_res[0][0] ) );
-                    // (n-1) - i - 1
+                    "tau   {:7.4f} + {:7.4f}i ?= {:7.4f} + {:7.4f}i\n\t"
+                    "alpha {:7.4f} + {:7.4f}i ?= {:7.4f} + {:7.4f}i, v=[\n\t",
+                    real( htau[0][0] ),     imag( htau[0][0] ),
+                    real( htau_res[0][0] ), imag( htau_res[0][0] ),
+                    real( ha[0][0] ),       imag( ha[0][0] ),
+                    real( ha_res[0][0] ),   imag( ha_res[0][0] ) );
+
         for (int i = 0; i < n-1; ++i) {
             // print 4 boundary elements; skip middle
             if(i == 4 && i < n-1-4)
@@ -203,8 +221,9 @@ void larfg_getError(const rocblas_handle handle,
                 fmt::print( "      ...\n\t" );
                 i = n-1-4;
             }
-            fmt::print( "      {:7.4f} ?= {:7.4f}\n\t",
-                        real( hx[0][i*inc] ), real( hx_res[0][i*inc] ) );
+            fmt::print( "      {:7.4f} + {:7.4f}i ?= {:7.4f} + {:7.4f}i\n\t",
+                        real( hx[0][i*inc] ), imag( hx[0][i*inc] ),
+                        real( hx_res[0][i*inc] ), imag( hx_res[0][i*inc] ) );
         }
         fmt::print( "]\n" );
     }
