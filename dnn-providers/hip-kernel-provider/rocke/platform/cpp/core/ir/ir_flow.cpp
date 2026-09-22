@@ -601,7 +601,7 @@ rocke_value_t* rocke_b_ds_read_tr16_b64(rocke_ir_builder_t* b,
     if(!dtype)
         dtype = rocke_f16();
     return rocke_flow_ds_read_tr(
-        b, ROCKE_OP_TILE_DS_READ_TR16_B64, smem, indices, num_indices, dtype, 4, "tr16", true);
+        b, ROCKE_OP_TILE_DS_READ_TR16_B64, smem, indices, num_indices, dtype, 4, "dtr16", true);
 }
 
 rocke_value_t* rocke_b_ds_read_tr16_b128(rocke_ir_builder_t* b,
@@ -618,7 +618,7 @@ rocke_value_t* rocke_b_ds_read_tr16_b128(rocke_ir_builder_t* b,
     if(!dtype)
         dtype = rocke_f16();
     return rocke_flow_ds_read_tr(
-        b, ROCKE_OP_TILE_DS_READ_TR16_B128, smem, indices, num_indices, dtype, 8, "tr16w", true);
+        b, ROCKE_OP_TILE_DS_READ_TR16_B128, smem, indices, num_indices, dtype, 8, "dtr16w", true);
 }
 
 rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
@@ -639,7 +639,7 @@ rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "ds_read_tr_b8 needs at least one index");
     return rocke_flow_ds_read_tr(
-        b, ROCKE_OP_TILE_DS_READ_TR_B8, smem, indices, num_indices, dtype, 8, "tr8", false);
+        b, ROCKE_OP_TILE_DS_READ_TR_B8, smem, indices, num_indices, dtype, 8, "dtr8", false);
 }
 
 /* ============================ LDS pointer arithmetic ==================== */

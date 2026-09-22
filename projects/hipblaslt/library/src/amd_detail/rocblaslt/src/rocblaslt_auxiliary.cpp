@@ -44,6 +44,7 @@
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
+#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocroller_host.hpp"
@@ -2656,6 +2657,26 @@ std::string rocblaslt_internal_get_arch_name()
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     return ArchName{}(deviceProperties);
+}
+
+// The GEMM library subtree the current device loads; folds in asicRevision, the
+// only signal telling the gfx1250 revisions apart (see rocblaslt_arch_revision.hpp).
+std::string rocblaslt_internal_get_library_arch_name()
+{
+    int deviceId = 0;
+    static_cast<void>(hipGetDevice(&deviceId));
+    // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
+    hipDeviceProp_t deviceProperties{};
+    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
+#if HIP_VERSION >= 307
+    const int asicRevision = deviceProperties.asicRevision;
+#else
+    // asicRevision doesn't exist before HIP 3.7. Use -1, not 0: 0 is the v0 marker
+    // and would wrongly pick gfx1250v0. gfx1250 needs ROCm 7+, so this only guards
+    // compilation on older HIP.
+    const int asicRevision = -1;
+#endif
+    return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

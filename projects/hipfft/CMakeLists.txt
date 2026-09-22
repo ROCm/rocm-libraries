@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -129,7 +129,7 @@ string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
-  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-unknown-pragmas)
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-deprecated-declarations -Wno-unknown-pragmas)
   if( WERROR )
     set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
   endif()

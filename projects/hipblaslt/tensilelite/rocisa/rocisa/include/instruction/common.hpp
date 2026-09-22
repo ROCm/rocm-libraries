@@ -1406,6 +1406,34 @@ namespace rocisa
         }
     };
 
+    struct SBfmB64 : public CommonInstruction
+    {
+        SBfmB64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B64,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_bfm_b64");
+        }
+
+        SBfmB64(const SBfmB64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBfmB64>(*this);
+        }
+    };
+
     struct SFlbitI32B32 : public CommonInstruction
     {
         SFlbitI32B32(const std::shared_ptr<Container>& dst,
@@ -2680,13 +2708,13 @@ namespace rocisa
 
     // s_wait_xcnt N drains in-flight VMEM ops to defeat XNACK-replay
     // reordering before a subsequent volatile/atomic VMEM op. Required on
-    // archs whose `RequiresXCntForVolatileVMEM` arch capability is set
-    // (e.g. gfx1250). The default `xcnt = 0` ("wait for all in-flight
-    // XNACK-replay tracking to drain") differs from the `-1` sentinel used
-    // by sibling `_SWait*cnt` classes because those are only emitted as
-    // members of the `SWaitCnt` composite (which uses `-1` to mean "skip
-    // this counter"); `SWaitXCnt` is a standalone wait, so the most useful
-    // default is the actual drain-everything immediate.
+    // archs whose `RequiresXCntForVolatileVMEM`/ `EnableXnackReplay` arch
+    // capability is set (e.g. gfx1250). The default `xcnt = 0` ("wait for
+    // all in-flight XNACK-replay tracking to drain") differs from the `-1`
+    // sentinel used by sibling `_SWait*cnt` classes because those are only
+    // emitted as members of the `SWaitCnt` composite (which uses `-1` to
+    // mean "skip this counter"); `SWaitXCnt` is a standalone wait, so the
+    // most usefuldefault is the actual drain-everything immediate.
     struct SWaitXCnt : public Instruction
     {
         SWaitXCnt(int xcnt = 0, const std::string& comment = "")

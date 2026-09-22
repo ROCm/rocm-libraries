@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h" /* arch catalog lookup for the arch seam guard */
 #include "rocke/arena.h"
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
 #include "rocke/ir.h"
@@ -367,6 +368,41 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
     }
     /* Python .get(elem, "f16x") fallback. */
     return "f16x";
+}
+
+/* True iff `name` is one of the element types rocke_h_vec_prefix maps for real
+ * (i.e. would not land on the "f16x" fallback). */
+static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
+{
+    if(strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0)
+    {
+        return true;
+    }
+    if(!full_map)
+    {
+        return false;
+    }
+    return strcmp(name, "f32") == 0 || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0
+           || strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0
+           || strcmp(name, "bf8e5m2") == 0;
+}
+
+const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
+                                       const char* ir_scalar_name,
+                                       bool full_map,
+                                       const char* op_desc)
+{
+    /* Mirrors Python _vec_prefix: an elem_type outside the map is a hard error,
+     * not a silent "f16x" that would reinterpret the bits of another type. */
+    if(!ir_scalar_name || !rocke_h_scalar_in_vec_map(ir_scalar_name, full_map))
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_KEY,
+                     "%s: unsupported element type '%s'",
+                     op_desc,
+                     ir_scalar_name ? ir_scalar_name : "(null)");
+    }
+    return rocke_h_vec_prefix(ir_scalar_name, full_map);
 }
 
 /* Python _type_to_hip(t). Returns arena-owned string; "" + sticky error on an
@@ -849,7 +885,9 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
         a.has_wmma = true;
         a.family = "rdna";
     }
-    /* Anything unrecognised keeps the gfx950 default facts (per the header). */
+    /* Anything unrecognised keeps the gfx950 default facts (per the header).
+     * rocke_lower_kernel_to_hip rejects such a string before it gets here, so
+     * this fallback only serves direct callers of the resolver. */
 
     return a;
 }
@@ -890,6 +928,15 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
             include_prologue = opts->include_prologue;
         }
         arch_name = opts->arch;
+    }
+
+    /* Mirror the Python _Lowerer: an arch that was passed but is empty or is
+     * absent from the arch catalog is a caller bug (ValueError / KeyError
+     * there), so reject it instead of silently lowering with the gfx950
+     * baseline facts. A NULL arch still takes that baseline. */
+    if(arch_name && (arch_name[0] == '\0' || !rocke_arch_target_from_gfx(arch_name)))
+    {
+        return ROCKE_ERR_VALUE;
     }
 
     /* ---- init lowerer ---- */

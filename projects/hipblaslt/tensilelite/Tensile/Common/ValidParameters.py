@@ -27,6 +27,7 @@ from functools import lru_cache
 from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
+from .LdsPaddingLimits import ldsBlockValues, ldsPadValues
 from .Types import IsaVersion
 
 ################################################################################
@@ -145,6 +146,7 @@ validLdsBlockSizePerPad = [-1, 0, 16, 32, 64, 96, 128, 192, 256, 320, 384, 448, 
                            1728, 1792, 1856, 1920, 1984, 2048, 2176, 2304, 2432, 2560, 2688, 2816, 2944,
                            3072, 3200, 3328, 3456, 3584, 3712, 3840, 3968, 4096, 4352, 4608, 4864, 5120,
                            5376, 5632, 6144, 6656, 7168, 7680, 8192]
+validLdsPad = [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64]
 
 @lru_cache
 def makeValidWorkGroups():
@@ -396,13 +398,15 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
-    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
-    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # gfx1250 LDS segment interleave: puts an operand's two components in different 64KiB LDS segments
+    # so the two read ports (one per SIMD pair) read different segments, avoiding a segment conflict
+    # (both ports reading one segment at once).
     #
     # Applies only to gfx1250 wave-separated TDM kernels, and requires:
-    #   - TDMInst=3, MIWaveGroup [2,2], UnrollMajorLDS
+    #   - TDMInst=3, UnrollMajorLDS, MIWaveGroup [2,2], [4,1], [1,4]
     #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
-    #   - VWA = WaveTileA (TDMSplit optional), or WaveTileA/2 (requires TDMSplit)
+    #   - VWA (for [2,2], [4,1]) = WaveTileA or WaveTileA/2; VWB (for [1,4]) = WaveTileB or WaveTileB/2;
+    #     the WaveTile/2 case needs TDMSplit
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
@@ -776,7 +780,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
     "SFCWGM" : -1,
     "MaxOccupancy": list(
-        range(1, 40 + 1)
+        range(1, 64 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
     "MaxLDS": [-1, 65536, 163840, 327680],
     "WorkGroup": makeValidWorkGroups(),  # ( wg0 x wg1 x LocalSplitU ) dimensions of the workgroup which will operate on a tile and share lds
@@ -1009,9 +1013,9 @@ validParameters = { # we need to make sure this matches develop
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
     # With MatrixInstruciton: -1 means max(GRVW,MIInput) if TLU=0
-    "LdsPadA": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadA": validLdsPad,
     "LdsPadMXSA": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
-    "LdsPadB": [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
+    "LdsPadB": validLdsPad,
     "LdsPadMXSB": [ -1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64],
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
@@ -1083,7 +1087,8 @@ validParameters = { # we need to make sure this matches develop
     "KernelLanguage": ["Assembly"],
     # We set validParams["ISA"] in multiple places
     "ISA": validISA,  # arch for assembly kernels
-    # Name of the custom kernel located at `CUSTOM_KERNEL_PATH`.
+    # Name of a bundled custom kernel, or one located in an explicitly supplied
+    # custom-kernel directory.
     # a custom kernel is a user written assembly kernel with its associated configuration parameters included in a custom.config section
     # inside the yaml block between the --- and ... markers.  These parameters are only used for information purposes, not kernel generation.
     # Ex:
@@ -1231,6 +1236,28 @@ validParameters = { # we need to make sure this matches develop
     # 3: Use iterate-mode for both A and B
     "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
+
+
+def validParametersForArch(gfxName: str) -> dict:
+    """validParameters, widened where an architecture needs it.
+
+    Only gfx1250 resolves LdsPad and LdsBlockSizePerPad through a solver, and
+    only a config targeting it may name what that solver reports. Every other
+    architecture reads the table above, so a yaml for one can still name only
+    what it could before.
+
+    Returns a new dict rather than editing the table, which is a module-level
+    object every other reader shares.
+    """
+    if not gfxName.startswith("gfx1250"):
+        return validParameters
+    wider = dict(validParameters)
+    pads = sorted(set(validLdsPad) | ldsPadValues())
+    blocks = sorted(set(validLdsBlockSizePerPad) | ldsBlockValues())
+    wider["LdsPadA"] = wider["LdsPadB"] = pads
+    wider["LdsBlockSizePerPadA"] = wider["LdsBlockSizePerPadB"] = blocks
+    return wider
+
 
 newMIValidParameters = {
     "EnableF32XdlMathOp": [False, True],

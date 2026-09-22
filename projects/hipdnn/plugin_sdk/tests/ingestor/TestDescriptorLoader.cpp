@@ -2356,18 +2356,13 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
 }
 
 /// The shape the build-time descriptor packager emits: `kpack` kind, the archive
-/// coordinates beside it, and a `provenance` block on the kernel entry. It still fails,
-/// because no adapter can dispatch a kpack kernel -- but it must fail naming that, not an
-/// unknown key, or the message sends a reader to fix the packager's vocabulary instead of
-/// waiting for the adapter.
-TEST(TestDescriptorLoader, RejectsAPackagedKernelForTheMissingAdapterNotItsKeys)
+/// coordinates beside it, and a `provenance` block on the kernel entry. It loads, and all
+/// four coordinates survive parsing -- an adapter needs every one of them to name a single
+/// code object, so dropping any of them silently would only surface at dispatch.
+TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
 {
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packaged_kernel"));
-    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
-
-    auto packaged = makeSetDocuments('2', "test:packaged");
+    auto packaged = makeSetDocuments('1', "test:packaged");
     auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
     kernel["kernel_source"] = {{"kind", "kpack"},
                                {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
@@ -2380,10 +2375,199 @@ TEST(TestDescriptorLoader, RejectsAPackagedKernelForTheMissingAdapterNotItsKeys)
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:packaged");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 3u);
+    const auto& source = sets.front().packs.front().kernels.front().source;
+    EXPECT_EQ(source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(source.library, "kpack/hip_kernel_provider_gfx942.kpack");
+    EXPECT_EQ(source.tocKey, "PointwiseAdd/block64");
+    EXPECT_EQ(source.symbol, "PointwiseAdd");
+    EXPECT_EQ(source.sha256, std::string(64, 'a'));
+    // Each kind fills only its own fields, so a consumer may read them under the tag alone.
+    EXPECT_TRUE(source.sourceFile.empty());
+    EXPECT_TRUE(source.entryPoint.empty());
+}
+
+/// The packaged kernel entry key for key, copied from
+/// `descriptor-packaging/python/hkp_pack/pipeline.py::_rewrite_ukd_kpack`. The keys the
+/// loader has no reader for (`provenance` and everything under it) must pass the known-key
+/// gate, and the shard `arch` the packager stamps must survive onto the kernel.
+TEST(TestDescriptorLoader, ParsesTheShapeTheDescriptorPackagerEmits)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packager_shape"));
+    auto documents = makeSetDocuments('1', "test:packager");
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = nlohmann::json::array({"gfx942"});
+    pack.at("kernelDescriptors")[0] = nlohmann::json{
+        {"version", "1.0"},
+        {"id", testUuid('1', '8')},
+        {"name", "pointwise_add"},
+        {"kernel_source",
+         {{"kind", "kpack"},
+          {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+          {"toc_key", "9a1c0e5f7b2d43869a1c0e5f7b2d4386"},
+          {"symbol", "pointwise_add_kernel"},
+          {"sha256", std::string(64, 'b')}}},
+        {"metadata", {{"block_size", 64}, {"dtype", "FLOAT"}}},
+        {"priority", 0},
+        {"provenance",
+         {{"origin_kind", "hip"},
+          {"source", "PointwiseAdd.cpp"},
+          {"entry", "pointwise_add_kernel"},
+          {"build", {{"arch", "gfx942"}, {"flags", nlohmann::json::array({"-O3"})}}}}},
+        {"arch", nlohmann::json::array({"gfx942"})}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.front().name, "pointwise_add");
+    EXPECT_EQ(kernels.front().arch, (std::vector<std::string>{"gfx942"}));
+    EXPECT_EQ(kernels.front().source.kind, KernelSourceKind::KPACK);
+    EXPECT_EQ(kernels.front().source.symbol, "pointwise_add_kernel");
+    EXPECT_EQ(kernels.front().source.sha256, std::string(64, 'b'));
+}
+
+/// The gate widened to `kpack`, not to anything: `hsaco_file` names a real kind with no
+/// adapter behind it, and the message must say so, because the reader's action is to wait
+/// for the adapter rather than to edit the descriptor.
+TEST(TestDescriptorLoader, RejectsAnHsacoKernelForTheMissingAdapter)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("hsaco_kernel"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:hsaco");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "hsaco_file"}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:valid");
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel source kind 'kpack'"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel source kind 'hsaco_file'"))
         << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no implementation yet"));
+}
+
+/// The other unimplemented kind, kept separate from the hsaco case so that implementing
+/// one adapter cannot quietly retire the assertion covering the other.
+TEST(TestDescriptorLoader, RejectsARockeBuilderKernelForTheMissingAdapter)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("rocke_kernel"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:rocke");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "rocke_builder"}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel source kind 'rocke_builder'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no implementation yet"));
+}
+
+/// A kpack `library` is relative, so a kernel is only resolvable beside the file that
+/// declared it. An inline kernel's file is the pack's own, wherever the install put it --
+/// anchoring on a loader root instead would break the moment a root holds two shards.
+TEST(TestDescriptorLoader, ResolvesTheOriginDirectoryOfAnInlineKernel)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_origin"));
+    writeDocuments(dir.path() / "gfx942", makeSetDocuments('1', "test:inline_origin"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_EQ(sets.front().packs.front().kernels.size(), 3u);
+    for(const auto& kernel : sets.front().packs.front().kernels)
+    {
+        EXPECT_EQ(kernel.originDirectory, dir.path() / "gfx942");
+    }
+}
+
+/// A referenced kernel anchors on its own file, not on the pack's: a per-arch shard ships
+/// the standalone UKD beside the archive it names while the pack sits elsewhere, so the two
+/// origins are written into different directories here to keep them from agreeing by
+/// construction.
+TEST(TestDescriptorLoader, ResolvesTheOriginDirectoryOfAReferencedKernel)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("referenced_origin"));
+    auto documents = makeSetDocuments('1', "test:referenced_origin");
+    referenceLastKernel(documents);
+    const Documents standalone{documents.back()};
+    documents.pop_back();
+    writeDocuments(dir.path() / "packs", documents);
+    writeDocuments(dir.path() / "gfx942", standalone);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    EXPECT_EQ(kernels.front().originDirectory, dir.path() / "packs");
+    // Appended last by the resolver, and the only one whose defining file is the UKD.
+    EXPECT_EQ(kernels.back().originDirectory, dir.path() / "gfx942");
+}
+
+/// The two cases above prove `originDirectory` is *stamped*; neither performs the join that
+/// makes it useful. This one reproduces the tree `pipeline.py` emits -- a per-arch shard
+/// directory holding the descriptors, with the archive in a `kpack/` subdirectory beside
+/// them, and `library` written relative to the declaring descriptor -- and asserts that
+/// `originDirectory / library` names the archive on disk.
+///
+/// The resolution under test is a pure path operation, which is why this belongs here and
+/// not behind a device: a staged tree is indistinguishable from an installed one, so no
+/// install, no archive contents, and no GPU are needed. Only the path has to be real, so
+/// the file is created empty -- weakly_canonical resolves an existing path without reading
+/// a byte of it.
+TEST(TestDescriptorLoader, JoinsARelativeLibraryAgainstThePackagerLayout)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packager_layout"));
+    const auto shard = dir.path() / "gfx942";
+    const auto archive = shard / "kpack" / "hip_kernel_provider_gfx942.kpack";
+    std::filesystem::create_directories(archive.parent_path());
+    {
+        const std::ofstream file(archive, std::ios::binary);
+    }
+    ASSERT_TRUE(std::filesystem::exists(archive));
+
+    auto documents = makeSetDocuments('1', "test:packager_layout");
+    auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors").front();
+    kernel["kernel_source"] = {{"kind", "kpack"},
+                               {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+                               {"toc_key", "PointwiseAdd/block64"},
+                               {"symbol", "PointwiseAdd"},
+                               {"sha256", std::string(64, 'a')}};
+    writeDocuments(shard, documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    const auto& packaged = sets.front().packs.front().kernels.front();
+    ASSERT_EQ(packaged.source.kind, KernelSourceKind::KPACK);
+
+    // The join an adapter performs, spelled out here rather than called through one: the
+    // adapter lives in a provider, and this file's subject is what the loader hands it.
+    const auto resolved
+        = std::filesystem::weakly_canonical(packaged.originDirectory / packaged.source.library);
+    EXPECT_EQ(resolved, std::filesystem::weakly_canonical(archive));
+    EXPECT_TRUE(std::filesystem::exists(resolved));
 }
 
 /// A typo in an OPTIONAL key is the case the extension rule exists to catch: `heuristik`

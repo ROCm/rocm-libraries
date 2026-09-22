@@ -556,14 +556,28 @@ bool SdpaBwdPlanBuilder::isApplicable(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
-    // GQA: SdpaBwdPlan packs ratio = nhead_q / nhead_k (integer division) into
-    // the dqdkdv kernarg.  A fractional ratio is a kernel-correctness violation
-    // (silent truncation), not a "no row matches" registry miss, so reject it
-    // here rather than letting buildPlan succeed and execute corrupt dQ/dK/dV.
+    // The AITER dqdkdv kernel indexes dK/dV by q-head: workgroup.y spans nhead_q and
+    // the kernel divides by ratio only for the K/V *reads*, never for the dK/dV
+    // *writes*.  Supporting GQA therefore requires caller-side head expansion -
+    // allocate dK/dV with nhead_q head slots, launch, then sum each ratio-group into
+    // the user's nhead_k tensors - which is what AITER does in asm_mha_bwd.cu via
+    // dk_expanded/dv_expanded plus at::sum_out().
+    //
+    // SdpaBwdPlan does not implement that protocol; it passes the user's nhead_k
+    // buffers straight through.  The kernel then writes
+    // (nhead_q - nhead_k) * head_dim * sizeof(bf16) bytes past the end of dK/dV.
+    // The buffer-descriptor bounds check cannot catch this: num_records is relative
+    // to the already-advanced base pointer, so the overrun faults (observed as
+    // HSA_STATUS_ERROR_MEMORY_FAULT on gfx942) instead of clamping.
+    //
+    // Reject GQA/MQA here rather than letting buildPlan succeed and execute a kernel
+    // that corrupts memory.  Restore the weaker "nhead_q % nhead_k == 0" check once
+    // the expansion and reduction are implemented.
     auto numHeadsQ = qTensor->dims()->Get(1);
     auto numHeadsKv = kTensor->dims()->Get(1);
-    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ % numHeadsKv != 0,
-                               "GQA requires nhead_q % nhead_k == 0 (Actual: nhead_q="
+    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
+                               "GQA/MQA backward requires dK/dV head expansion, which is not "
+                               "implemented (Actual: nhead_q="
                                    + std::to_string(numHeadsQ)
                                    + ", nhead_k=" + std::to_string(numHeadsKv) + ")");
 

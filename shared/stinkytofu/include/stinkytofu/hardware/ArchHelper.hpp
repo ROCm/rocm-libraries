@@ -46,14 +46,18 @@ class STINKYTOFU_EXPORT ArchHelper {
     struct ArchInfo {
         ArchInfo(std::string name, uint32_t major, uint32_t minor, uint32_t stepping,
                  uint32_t waveFrontSize, uint32_t totalVgprPerSimd = 0,
-                 uint32_t vgprAllocGranule = 0)
+                 uint32_t vgprAllocGranule = 0, uint32_t maxVGPR = 0, uint32_t maxSGPR = 0,
+                 uint32_t maxAGPR = 0)
             : name(std::move(name)),
               major(major),
               minor(minor),
               stepping(stepping),
               waveFrontSize(waveFrontSize),
               totalVgprPerSimd(totalVgprPerSimd),
-              vgprAllocGranule(vgprAllocGranule) {}
+              vgprAllocGranule(vgprAllocGranule),
+              maxVGPR(maxVGPR),
+              maxSGPR(maxSGPR),
+              maxAGPR(maxAGPR) {}
 
         virtual ~ArchInfo() = default;
 
@@ -81,6 +85,14 @@ class STINKYTOFU_EXPORT ArchHelper {
 
         const uint32_t totalVgprPerSimd;
         const uint32_t vgprAllocGranule;
+
+        // Directly addressable registers per class, from DEF_ARCH in
+        // <Arch>Formats.def. maxVGPR is the range an operand can name without
+        // VGPR-MSB, which is smaller than totalVgprPerSimd: the physical file can
+        // exceed what one instruction can encode. maxAGPR is 0 on RDNA.
+        const uint32_t maxVGPR;
+        const uint32_t maxSGPR;
+        const uint32_t maxAGPR;
     };
 
    public:
@@ -143,6 +155,28 @@ inline uint32_t getVgprAllocGranule(GfxArchID archID) {
     const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
     assert(archInfo && "Invalid GfxArchID");
     return archInfo->vgprAllocGranule;
+}
+
+// Addressable registers per class, from the architecture's DEF_ARCH. Scalars
+// rather than a RegType lookup, so this layer stays free of the asm IR types;
+// mapping a register class onto them belongs above.
+
+inline uint32_t getMaxVGPR(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->maxVGPR;
+}
+
+inline uint32_t getMaxSGPR(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->maxSGPR;
+}
+
+inline uint32_t getMaxAGPR(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->maxAGPR;
 }
 
 // Waves per SIMD a kernel using `kernelVgprs` per wave can achieve on `archID`.

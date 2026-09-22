@@ -41,7 +41,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
   message(STATUS "Enabling ASAN for Composable Kernel (THEROCK_SANITIZER=${THEROCK_SANITIZER})")
 endif()
 
-set(version 1.2.0)
+set(version 1.3.0)
 project(composable_kernel VERSION ${version} LANGUAGES CXX)
 include(CTest)
 
@@ -215,6 +215,21 @@ endforeach()
 list(JOIN _ck_hex_ids "," _ck_hex_str)
 if(_ck_hex_str)
     add_compile_definitions(CK_CMAKE_GPU_TARGET_IDS=${_ck_hex_str})
+endif()
+
+# ---------------------------------------------------------------------------
+# The new unified ck_tile framework (USE_NEW_UNIFIED_FRAMEWORK) does not yet
+# support gfx1250. Force it OFF for any build that targets gfx1250 so the legacy
+# WarpGemm path is used -- even if the flag would otherwise default to (or be
+# requested as) on. This is applied as a compile definition (rather than a
+# device-only __gfx1250__ guard in a header) so it stays consistent across BOTH
+# the host and device compilation passes: USE_NEW_UNIFIED_FRAMEWORK is consumed
+# by the preprocessor in headers that host code also instantiates (e.g. via
+# getCMakeCompilerTarget()), so a device-pass-only guard would desync host/device.
+# ---------------------------------------------------------------------------
+if(GPU_TARGETS MATCHES "gfx1250")
+    add_compile_definitions(USE_NEW_UNIFIED_FRAMEWORK=0)
+    message(STATUS "gfx1250 target detected: forcing USE_NEW_UNIFIED_FRAMEWORK=0 (unified ck_tile framework not yet supported on gfx1250)")
 endif()
 
 #for f8/bf8_t type

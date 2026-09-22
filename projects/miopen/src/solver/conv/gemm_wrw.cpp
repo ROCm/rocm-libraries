@@ -3,6 +3,7 @@
 
 #include <miopen/conv/solvers.hpp>
 
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/gemm_v2.hpp>
@@ -18,6 +19,12 @@ namespace solver {
 namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
+
+#if MIOPEN_USE_GEMM && MIOPEN_USE_HIPBLASLT
+// Budget, not an exact size: hipBLASLt picks Stream-K only when offered scratch, and the amount
+// it needs scales with the tile it chooses.
+constexpr std::size_t wrw_gemm_stream_k_workspace = std::size_t{32} * 1024 * 1024; // 32 MiB
+#endif
 
 bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
@@ -68,7 +75,8 @@ bool GemmWrwBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.HasNonPackedTensors())
         return false;
 
-    return problem.IsDirectionBackwardWrW() && problem.IsLayoutDefault() &&
+    // Layout is asserted by the derived solvers that need it.
+    return problem.IsDirectionBackwardWrW() &&
            !(gemm::IsAnyBufferBf16(xDesc, dyDesc, dwDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(xDesc, dyDesc, dwDesc) && !gemm::IsFp16Supported);
 #else
@@ -91,14 +99,19 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     int n_Im2ColGPU                      = 0;
 
     std::size_t in_n, in_c;
-    std::tie(in_n, in_c) = tie_pick<0, 1>()(xDesc.GetLengths());
+    std::tie(in_n, in_c)                 = tie_pick<0, 1>()(xDesc.GetLengths());
+    const auto prefer_point_output_shape = miopen::conv::IsWrwPointOutputStrideEqFilter(problem);
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
     // if not 1x1
-    if((miopen::any_of(wei_spatial, [](auto v) { return v != 1; }) ||
-        miopen::any_of(conv.GetConvPads(), [](auto v) { return v != 0; }) ||
-        miopen::any_of(conv.GetConvStrides(), [](auto v) { return v != 1; })))
+    if(prefer_point_output_shape)
+    {
+        n_gemm_runs = 1;
+    }
+    else if((miopen::any_of(wei_spatial, [](auto v) { return v != 1; }) ||
+             miopen::any_of(conv.GetConvPads(), [](auto v) { return v != 0; }) ||
+             miopen::any_of(conv.GetConvStrides(), [](auto v) { return v != 1; })))
     {
         n_Im2ColGPU            = in_n;
         n_gemm_strided_batched = conv.group_count;
@@ -109,8 +122,16 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
             miopen::any_of(conv.GetConvPads(), [](auto v) { return v == 0; }) &&
             miopen::any_of(conv.GetConvStrides(), [](auto v) { return v == 1; }))
     {
-        n_gemm_strided_batched_sequental = conv.group_count;
-        n_gemm_runs                      = in_n;
+        // Channel-last collapses the batch into M, so this is one unbatched GEMM.
+        if(problem.IsLayoutNHWC() && conv.group_count == 1)
+        {
+            n_gemm_runs = 1;
+        }
+        else
+        {
+            n_gemm_strided_batched_sequental = conv.group_count;
+            n_gemm_runs                      = in_n;
+        }
     }
 
     auto wti = 0.7; // Memory overhead for WrW is bigger then for Fwd/Bwd.
@@ -169,6 +190,30 @@ bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
     return false;
 }
 
+#if MIOPEN_USE_GEMM
+static std::size_t NhwcWrwGemmWorkspace(const ProblemDescription& problem)
+{
+#if MIOPEN_USE_HIPBLASLT
+    if(problem.IsLayoutNHWC() && problem.GetConv().group_count == 1)
+        return wrw_gemm_stream_k_workspace;
+#else
+    std::ignore = problem;
+#endif
+    return 0;
+}
+#endif
+
+size_t GemmWrw1x1_stride1::GetWorkspaceSize(const ExecutionContext&,
+                                            const ProblemDescription& problem) const
+{
+#if MIOPEN_USE_GEMM
+    return NhwcWrwGemmWorkspace(problem);
+#else
+    std::ignore = problem;
+    return 0;
+#endif
+}
+
 bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
                                       const ProblemDescription& problem) const
 {
@@ -178,6 +223,16 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
 
     const auto& dwDesc = problem.GetWeights();
     const auto& conv   = problem.GetConv();
+
+    // This solver accepts NHWC only for single-group problems with no cast or f8 types.
+    //
+    // The NHWC branch of GetSolution calls hipBLASLt, whose wrapper dispatches on
+    // gemm_desc.dataType alone and never reads a_cast_type or b_cast_type, and which throws
+    // for f8 on every architecture except gfx942. Grouped NHWC has no branch there at all.
+    const auto nhwc_supported = problem.IsLayoutNHWC() && conv.group_count == 1 &&
+                                !problem.IsTensorsCasted() && !problem.IsFp8() && !problem.IsBfp8();
+    if(!problem.IsLayoutDefault() && !nhwc_supported)
+        return false;
 
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
@@ -247,6 +302,9 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
 
     auto solution = ConvSolution{miopenStatusSuccess};
 
+    // Find reports this to the caller, which allocates it for the real call.
+    solution.workspace_sz = NhwcWrwGemmWorkspace(problem);
+
     solution.invoker_factory = [=](const std::vector<Kernel>&) {
         return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
             const auto& conv_params = primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
@@ -259,6 +317,10 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
             {
                 MIOPEN_LOG_FUNCTION("groupconv, 1x1");
             }
+            else if(problem.IsLayoutNHWC())
+            {
+                MIOPEN_LOG_FUNCTION("conv, 1x1 channel-last");
+            }
             else
             {
                 MIOPEN_LOG_FUNCTION("conv, 1x1");
@@ -269,6 +331,45 @@ ConvSolution GemmWrw1x1_stride1::GetSolution(const ExecutionContext&,
                 tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
                 return tmp;
             }();
+
+            if(problem.IsLayoutNHWC())
+            {
+                // dw[K, C] = dy^T[K, N*spatial] * x[N*spatial, C]. beta = 0 overwrites dw, so
+                // unlike the per-batch loop below it needs no pre-zeroing and never reads dw
+                // back in low precision.
+                auto desc        = gemm_desc;
+                desc.batch_count = 1;
+                desc.strideA     = 0;
+                desc.strideB     = 0;
+                desc.strideC     = 0;
+                desc.m           = static_cast<int>(wei_k);
+                desc.n           = static_cast<int>(in_c);
+                desc.k           = static_cast<int>(in_n * out_spatial_size);
+                desc.transA      = true;
+                desc.transB      = false;
+                desc.lda         = desc.m;
+                desc.ldb         = desc.n;
+                desc.ldc         = desc.n;
+                desc.alpha       = 1.f;
+                desc.beta        = 0.f;
+
+                constexpr auto backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+                const auto ws      = conv_params.workSpace;
+                const auto ws_size = (ws != nullptr) ? conv_params.workSpaceSize : std::size_t{0};
+
+                const auto status =
+                    CallGemm(handle, desc, dy, 0, x, 0, dw, 0, backend, ws, ws_size);
+
+                if(status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmWrw1x1_stride1 execution failure.");
+
+                return;
+            }
 
             // Zeroing out the output buffer
             float zero = 0.0f;
@@ -352,16 +453,28 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
                                    std::multiplies<std::size_t>()) *
                    conv.group_count;
 
+    // Point-output wrw needs no Im2Col buffer, and no fp32 accumulator either: it contracts the
+    // whole batch in a single GEMM whose summation stays in the fp32 accumulator and rounds once
+    // on store. What it does want is scratch for Stream-K, since the reduction is the batch and
+    // the output only K by C*Z*Y*X.
+    if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+    {
+#if MIOPEN_USE_HIPBLASLT
+        return wrw_gemm_stream_k_workspace;
+#else
+        return 0;
+#endif
+    }
+
     // For bf16: extra workspace for fp32 accumulation buffer (same shape as dw)
-    const auto xDesc           = problem.GetOut();
-    const auto in_n            = xDesc.GetLengths()[0];
+    const auto in_n            = problem.GetBatchSize();
     const auto need_fp32_accum = (dyDesc.GetType() == miopenBFloat16) && (in_n > 1);
     if(need_fp32_accum)
     {
-        const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
         // Use padded layout: im2col buffer at offset 0, fp32 accum buffer at offset ws_size
         // (aligned to 256 bytes)
-        ws_size = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
+        const auto fp32_accum_size = GetTypeSize(miopenFloat) * dwDesc.GetElementSize();
+        ws_size                    = ((ws_size + 255) & ~std::size_t{255}) + fp32_accum_size;
     }
 
     if(ws_size > handle.GetMaxMemoryAllocSize())
@@ -418,7 +531,40 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
                                     const ProblemDescription& problem) const
 {
 #if MIOPEN_USE_GEMM
+    if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+    {
+        if(!problem.AllTensorsDimsFitIntoInt())
+            return false;
+        if(problem.HasNonPackedTensors())
+            return false;
+        if(problem.GetGroupCount() != 1)
+            return false;
+        if(!problem.IsDirectionBackwardWrW())
+            return false;
+        // Channel-last works in 2D and 3D alike: x and dw both enumerate C*Z*Y*X in (z,y,x,c)
+        // order instead of (c,z,y,x), so the GEMM pairs the same elements, and dy is contiguous
+        // over K because its spatial extent is 1.
+        if(!(problem.IsLayoutDefault() || problem.IsLayoutNHWC()))
+            return false;
+
+        const auto& dyDesc = problem.GetIn();
+        const auto& dwDesc = problem.GetWeights();
+        const auto& xDesc  = problem.GetOut();
+        if(gemm::IsAnyBufferBf16(xDesc, dyDesc, dwDesc) && !gemm::IsBf16Supported)
+            return false;
+        if(gemm::IsAnyBufferFp16(xDesc, dyDesc, dwDesc) && !gemm::IsFp16Supported)
+            return false;
+
+        // The workspace is a Stream-K budget rather than a requirement, so bf16 no longer has to
+        // check for one: without it the GEMM is slower but still correct.
+        return true;
+    }
+
     if(!GemmWrwBase::IsApplicable(context, problem))
+        return false;
+
+    // Everything below goes through Im2Col, which addresses x as NCHW.
+    if(!problem.IsLayoutDefault())
         return false;
 
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
@@ -458,14 +604,19 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
         return tmp;
     }();
 
-    const auto spatial_dims   = conv.GetSpatialDimension();
-    const auto conv_pads      = conv.GetConvPads();
-    const auto conv_strides   = conv.GetConvStrides();
-    const auto conv_dilations = conv.GetConvDilations();
-    const auto workspace_req  = GetWorkspaceSize(context, problem);
-    const auto in_n           = xDesc.GetLengths()[0];
-    const auto in_c           = xDesc.GetLengths()[1];
-    const auto wei_k          = dwDesc.GetLengths()[0];
+    const auto spatial_dims     = conv.GetSpatialDimension();
+    const auto conv_pads        = conv.GetConvPads();
+    const auto conv_strides     = conv.GetConvStrides();
+    const auto conv_dilations   = conv.GetConvDilations();
+    const auto workspace_req    = GetWorkspaceSize(context, problem);
+    const auto in_n             = problem.GetBatchSize();
+    const auto wei_k            = problem.GetInChannels();
+    const auto in_c             = problem.GetOutChannels();
+    const auto wei_spatial_size = static_cast<std::size_t>(
+        problem.GetWeightsDepth() * problem.GetWeightsHeight() * problem.GetWeightsWidth());
+    const auto dy_spatial_size = static_cast<std::size_t>(
+        problem.GetInDepth() * problem.GetInHeight() * problem.GetInWidth());
+    const auto filter_col_size = in_c * wei_spatial_size * dy_spatial_size;
 
     // bf16: accumulate in fp32 workspace when batch_size > 1
     const auto data_type      = dyDesc.GetType();
@@ -488,8 +639,11 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                conv.group_count;
     }();
     // Offset to fp32 accumulation buffer within workspace (256-byte aligned)
-    const auto fp32_accum_offset =
-        use_fp32_accum ? ((im2col_ws_size + 255) & ~std::size_t{255}) : std::size_t{0};
+    const auto fp32_accum_offset = [&]() {
+        if(!use_fp32_accum)
+            return std::size_t{0};
+        return (im2col_ws_size + 255) & ~std::size_t{255};
+    }();
 
     const auto in_spatial_ =
         xDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
@@ -531,7 +685,10 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                 MIOPEN_LOG_FUNCTION("convolution, non 1x1");
             }
 
-            if(workspace_req > 0 && (workspace == nullptr || workspace_size < workspace_req))
+            // Point-output asks for a Stream-K budget rather than a buffer it has to have, so it
+            // runs with whatever Find granted, including nothing.
+            if(!miopen::conv::IsWrwPointOutputStrideEqFilter(problem) && workspace_req > 0 &&
+               (workspace == nullptr || workspace_size < workspace_req))
             {
                 MIOPEN_THROW("Not enough workspace for GemmWrwUniversal. (" +
                              std::to_string(workspace_size) + " < " +
@@ -543,6 +700,57 @@ ConvSolution GemmWrwUniversal::GetSolution(const ExecutionContext& context,
                 tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
                 return tmp;
             }();
+
+            // Point-output wrw: dW[K,C*Z*Y*X] = dY^T[K,N] * X[N,C*Z*Y*X].
+            if(miopen::conv::IsWrwPointOutputStrideEqFilter(problem))
+            {
+                // The single GEMM below contracts the whole batch (k = N) with beta = 0, so it
+                // overwrites all K * C*Z*Y*X elements of the destination without reading it.
+                // That needs no pre-zeroing, unlike the accumulating per-batch loop further
+                // down, which relies on beta = 1. For the same reason bf16 needs no fp32 output
+                // buffer: the batch is summed inside the fp32 accumulator and rounded once.
+                auto single_gemm_desc        = gemm_desc;
+                single_gemm_desc.batch_count = 1;
+                single_gemm_desc.strideA     = 0;
+                single_gemm_desc.strideB     = 0;
+                single_gemm_desc.strideC     = 0;
+                single_gemm_desc.m           = static_cast<int>(wei_k);
+                single_gemm_desc.n           = static_cast<int>(filter_col_size);
+                single_gemm_desc.k           = static_cast<int>(in_n);
+                single_gemm_desc.transA      = true;
+                single_gemm_desc.transB      = false;
+                single_gemm_desc.lda         = static_cast<int>(wei_k);
+                single_gemm_desc.ldb         = static_cast<int>(filter_col_size);
+                single_gemm_desc.ldc         = static_cast<int>(filter_col_size);
+                single_gemm_desc.alpha       = 1.f;
+                single_gemm_desc.beta        = 0.f;
+
+                constexpr auto point_output_backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+
+                const auto ws      = conv_params.workSpace;
+                const auto ws_size = (ws != nullptr) ? conv_params.workSpaceSize : std::size_t{0};
+
+                const auto gemm_status = CallGemm(handle,
+                                                  single_gemm_desc,
+                                                  dy,
+                                                  0,
+                                                  x,
+                                                  0,
+                                                  dw,
+                                                  0,
+                                                  point_output_backend,
+                                                  ws,
+                                                  ws_size);
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmWrwUniversal point-output GEMM execution failure.");
+
+                return;
+            }
 
             // Zeroing out the output buffer
             float zero = 0.0f;

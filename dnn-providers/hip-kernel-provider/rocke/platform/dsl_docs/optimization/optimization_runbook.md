@@ -1529,8 +1529,11 @@ change a win.
 
 ### 10.2 Common AMD/HIP Flags
 
-The default flag set in `runtime/comgr.py` is `-O3`. Per-spec
-overrides via `compile_kernel(kdef, options=[...])`.
+The default flag set in `runtime/comgr.py` is `-O3`. Durable scheduler
+selection uses the typed per-kernel policy described in
+[`scheduler-policy.md`](./scheduler-policy.md). `compile_kernel()` does not
+accept arbitrary compiler options; use
+`build_hsaco_from_llvm_ir(..., options=[...])` only for isolated diagnostics.
 
 - `--offload-arch=gfx950` (or `gfx942`, `gfx90a`).
 - `-O3`.
@@ -1880,8 +1883,10 @@ stay direct (§9.3, §17.4 register-PV regression analogue).
 
 | Knob | Spec | Default | Effect |
 |---|---|---|---|
+| `lds_k_outer` | conv_implicit_gemm_wgrad | False | Store the A/B LDS tile K-outer (`LDS[k][mn]`) and feed the MFMA with `ds_read_b64_tr_b16` transpose reads, instead of transposing on *store*. The M-outer tile turns each `load_vec`-wide global load into `load_vec` narrow `ds_write_b16` plus their address math, and the resulting register pressure stops the backend keeping the global loads in flight — so every load's latency is exposed. Wgrad only (both operands are contiguous along the GEMM's free axis, strided along its reduction axis). gfx950 + 16-bit A/B + `warp_tile_m/n ∈ (16, 32)` + wave64. **Not a knob:** selected automatically by `WgradConvSpec.default_lds_k_outer(...)`, which both dispatch and the sweep driver call. It is a strict instruction-count win wherever the transpose read exists, so there is nothing to sweep — but it does move the tile/atom/warp optimum, so sweep geometry against a K-outer baseline. |
 | `lds_k_pad` | conv_implicit_gemm | None | K-pad to break bank conflicts (`+8` sync default; `0` async default) |
 | `lds_layout` | conv_implicit_gemm | None | Explicit `LdsLayout` (helpers/layouts.py) — padding, packed-async, transpose-reader |
+| `lds_k_group_pad` | `AttentionDenseSpec` (dense prefill, gfx950 + gfx942) | 8 | Per-K-row-group LDS pad (bytes); must be a multiple of 8 (`smem_load_vN` stamps align 16 unconditionally). Sweepable via `--lds-k-group-pad` on the dense prefill benchmark. See `library/builders/gfx950/attention/prefill/README.md §Tuning` for the full sweep methodology and decision record. |
 | `LdsLayout` swizzle | `helpers/layouts.py` | — | XOR swizzle (zero LDS waste, higher ALU cost) vs padding swizzle (small LDS waste, lower ALU). Architecture-specific rule §6.4a |
 | `TransposeLdsReader` | `helpers/layouts.py` | — | Use `ds_read_tr16_b{64,128}` for transposed BF16/F16 loads |
 | `pad_m` / `pad_n` / `pad_k` | GEMM `TraitSpec` | False | Pad operands to tile boundaries (avoids tail scalar path) |
@@ -1989,13 +1994,15 @@ arch reference §21.4a and §17.4 for the measured occupancy and per-shape numbe
 
 #### 12.1.M Compiler flags
 
-Default flag list from `runtime/comgr.py` is `["-O3"]`. Per-spec
-overrides via `compile_kernel(kdef, options=[...])` or
+Default flag list from `runtime/comgr.py` is `["-O3"]`. Durable scheduler
+selection is a typed per-kernel policy; see
+[`scheduler-policy.md`](./scheduler-policy.md). Raw diagnostic overrides use
 `build_hsaco_from_llvm_ir(..., options=[...])`.
 
 | Flag | Safe? | Effect |
 |---|---|---|
 | `-O3` | ✅ default | LLVM optimization level |
+| `CodegenPolicy(scheduler_strategy=...)` | validate per candidate | Bounded AMDGPU machine-scheduler strategy; sweep the default plus the five supported values |
 | `-DNDEBUG` | ✅ | Disable C++ assertions on device |
 | `-fno-offload-uniform-block` | ✅ | Required for some launch / perf assumptions |
 | `-mllvm -amdgpu-function-calls=false` | ✅ | Force inline |

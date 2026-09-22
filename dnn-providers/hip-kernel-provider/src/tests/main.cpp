@@ -11,10 +11,15 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
+
+    // Keep the ingestor's winner cache out of the developer's ~/.cache/hipdnn: the
+    // dispatch cases benchmark, and benchmarking writes a shard through to disk.
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hip-kernel-provider-unit");
 
 #ifdef HIPDNN_TEST_DESCRIPTOR_DIR
     // Point this binary at the descriptors staged beside the build's plugin. The engine

@@ -38,6 +38,12 @@ module exists so the layering is explicit.
 
 from __future__ import annotations
 
+from .codegen_policy import (
+    CodegenPolicy,
+    SchedulerStrategy,
+    apply_codegen_policy,
+    codegen_policy_for_kernel,
+)
 from .backend import (
     BackendCoverageGap,
     BackendError,
@@ -103,6 +109,10 @@ from .passes import (
 from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
+    "CodegenPolicy",
+    "SchedulerStrategy",
+    "apply_codegen_policy",
+    "codegen_policy_for_kernel",
     "BF16",
     "DEBUG_DESCRIPTION_MAGIC",
     "DEBUG_DESCRIPTION_SCHEMA",
