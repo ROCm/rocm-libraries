@@ -17,6 +17,7 @@ python/
 │   └── src/
 │       ├── module.cpp                     # Main nanobind module entry point
 │       ├── bindings.hpp                   # Shared binding declarations
+│       ├── autotune_bindings.cpp
 │       ├── graph_bindings.cpp
 │       ├── handle_bindings.cpp
 │       ├── memory_bindings.cpp
@@ -143,4 +144,5 @@ python projects/hipdnn/python/frontend_wheel_package/samples/conv_fprop.py
 python projects/hipdnn/python/frontend_wheel_package/samples/conv_dgrad.py
 python projects/hipdnn/python/frontend_wheel_package/samples/conv_wgrad.py
 python projects/hipdnn/python/frontend_wheel_package/samples/matmul.py
+python projects/hipdnn/python/frontend_wheel_package/samples/autotune.py
 ```

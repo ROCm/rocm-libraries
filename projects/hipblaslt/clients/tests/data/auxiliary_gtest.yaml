@@ -89,6 +89,11 @@ Tests:
   function:
     - aux_matmul_streamk_tile_scheduling_ext: *hpa_half_precision
 
+- name: aux_matmul_uniform_summation_order_ext
+  category: pre_checkin
+  function:
+    - aux_matmul_uniform_summation_order_ext: *hpa_half_precision
+
 - name: aux_matmul_pref_sm_count_target
   category: pre_checkin
   function:

@@ -32,7 +32,6 @@ Two layers:
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -190,7 +189,7 @@ requires_gfx942_gpu = pytest.mark.skipif(
 @pytest.mark.parametrize("dtype,tol", [("bf16", 5e-2), ("fp16", 5e-2)])
 @pytest.mark.parametrize("hq,hk", [(32, 8), (16, 16)])
 @pytest.mark.parametrize("sq", [512, 1024, 4096])
-def test_d128_numeric_vs_fp32_oracle_at_magnitude(dtype, tol, hq, hk, sq):
+def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, hk, sq):
     """Launch the production D128 kernel at realistic (unit-variance) magnitude
     and assert max_abs vs the fp32 paged-attn oracle.
 
@@ -207,12 +206,16 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(dtype, tol, hq, hk, sq):
     # Force the arch resolver so the production selector picks the gfx942 path.
     old_arch = au._RESOLVED_ATTENTION_ARCH
     au._RESOLVED_ATTENTION_ARCH = "gfx942"
+    # monkeypatch.delenv, not os.environ.pop: a bare pop leaks the cleared
+    # override into every later gfx942 routing test in the same process. This
+    # test is GPU-gated, so the leak is invisible on a CPU host and only shows up
+    # in the ordering runs the regression guard is meant to cover.
     for var in (
         "HIPDNN_GFX942_K_SLICED_RING",
         "HIPDNN_GFX942_FLASH_WIDE",
         "HIPDNN_GFX942_FLASH_MLIM",
     ):
-        os.environ.pop(var, None)
+        monkeypatch.delenv(var, raising=False)
     try:
         from builders.common.attention_spec_builder import _tiled_spec_from_problem
 

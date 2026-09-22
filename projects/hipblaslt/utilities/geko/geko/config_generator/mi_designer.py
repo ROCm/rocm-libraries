@@ -158,6 +158,9 @@ class MIDesign:
       """
       valid_mfmas: List[MFMA] = []
 
+      search_space = self.config.get("search_space")
+      mt_max_size = get_list_of_mt_max_size(search_space)
+
       hw = HARDWARE_MAP[self.config["ARCH"]]
       allowable_mfma = hw["ONLY_INCLUDE_MIs"][self._gt.data_type]
 
@@ -189,8 +192,8 @@ class MIDesign:
                   waveTileN = 0
 
                   while True:
-                      waveTileM+=1
-                      waveTileN=0
+                      waveTileM += 1
+                      waveTileN = 0
                       MatrixInstM = MI[0] * MIBlockM
                       MT0 = MatrixInstM * waveTileM * wave[0]
                       if MT0 < MIN_MT0:
@@ -199,24 +202,36 @@ class MIDesign:
                           break
 
                       while True:
-                          waveTileN+=1
+                          waveTileN += 1
                           MatrixInstN = MI[1] / MIBlockM * MI[3]
                           MT1 = int(MatrixInstN * waveTileN * wave[1])
 
-                          if MT1< MIN_MT1:
+                          if MT1 < MIN_MT1:
                               continue
                           if MT1 > MAX_MT1:
                               break
 
                           # LDS size check for lsu
-                          LSU = max(1, 4//wave[0]//wave[1])
-                          if LSU > 1 and MT0*MT1*computeDataTypeSize[self._gt.data_type]*LSU > LSUTHRESHOLD:
-                            continue
+                          LSU = max(1, 4 // wave[0] // wave[1])
+                          if LSU > 1 and MT0 * MT1 * computeDataTypeSize[self._gt.data_type] * LSU > LSUTHRESHOLD:
+                              continue
 
-                          if MT0*MT1 > LIST_OF_MT_MAX_SIZE[self._gt.data_type]:
-                            continue
+                          if MT0 * MT1 > mt_max_size[self._gt.data_type]:
+                              continue
 
-                          valid_mfmas.append(MFMA(M=MI[0], N=MI[1], K=MI[2], B=MI[3], MIBlockM=MIBlockM, waveTileM=waveTileM, waveTileN=waveTileN, waveM=wave[0], waveN=wave[1]))
+                          valid_mfmas.append(
+                              MFMA(
+                                  M=MI[0],
+                                  N=MI[1],
+                                  K=MI[2],
+                                  B=MI[3],
+                                  MIBlockM=MIBlockM,
+                                  waveTileM=waveTileM,
+                                  waveTileN=waveTileN,
+                                  waveM=wave[0],
+                                  waveN=wave[1],
+                              )
+                          )
       logger.info(" Total number of valid MatrixInstructions: %s", len(valid_mfmas))
       return valid_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA
 

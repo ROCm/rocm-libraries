@@ -35,7 +35,6 @@
 // rocsparse_handle_create / rocsparse_handle_destroy Tests
 // =============================================================================
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
 {
     hipStream_t      stream;
@@ -86,7 +85,6 @@ TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
     ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
 }
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
@@ -2166,7 +2164,7 @@ TEST(auxiliary_pre_checkin, SpmatGetSetStridedBatch)
     ASSERT_EQ(rocsparse_spmat_set_strided_batch(descr, batch_count), rocsparse_status_success);
 
     // Get strided batch
-    int batch_count_out;
+    rocsparse_int batch_count_out;
     ASSERT_EQ(rocsparse_spmat_get_strided_batch(descr, &batch_count_out), rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
 
@@ -5258,8 +5256,8 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatch)
               rocsparse_status_success);
 
     // Get strided batch
-    int     batch_count_out;
-    int64_t batch_stride_out;
+    rocsparse_int batch_count_out;
+    int64_t       batch_stride_out;
     ASSERT_EQ(rocsparse_dnmat_get_strided_batch(descr, &batch_count_out, &batch_stride_out),
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);
@@ -5287,8 +5285,8 @@ TEST(auxiliary_pre_checkin, DnmatGetSetStridedBatchRowMajor)
               rocsparse_status_success);
 
     // Get strided batch
-    int     batch_count_out;
-    int64_t batch_stride_out;
+    rocsparse_int batch_count_out;
+    int64_t       batch_stride_out;
     ASSERT_EQ(rocsparse_dnmat_get_strided_batch(descr, &batch_count_out, &batch_stride_out),
               rocsparse_status_success);
     EXPECT_EQ(batch_count_out, batch_count);

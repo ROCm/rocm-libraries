@@ -1,11 +1,12 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
 
 #include "clientcommon.hpp"
 #include "hipsolverSp.hpp"
+#include "hipsolver_timer.hpp"
 
 template <bool HOST, typename T>
 void csrlsvqr_checkBadArgs(hipsolverSpHandle_t       handle,
@@ -202,43 +203,79 @@ void csrlsvqr_getError(hipsolverSpHandle_t       handle,
                        Th&                       hXRes,
                        Uh&                       hSingularity,
                        double*                   max_err,
-                       const fs::path            testcase)
+                       const fs::path            testcase,
+                       const bool                use_stream = false,
+                       const int                 num_reps   = 1)
 {
     // input data initialization
     csrlsvqr_initData<true, true, T>(
         handle, n, nnzA, descrA, dptrA, dindA, dvalA, dB, hptrA, hindA, hvalA, hB, hX, testcase);
 
-    // execute computations
-    // GPU lapack
-    CHECK_ROCBLAS_ERROR(hipsolver_csrlsvqr(HOST,
-                                           handle,
-                                           n,
-                                           nnzA,
-                                           descrA,
-                                           dvalA.data(),
-                                           dptrA.data(),
-                                           dindA.data(),
-                                           dB.data(),
-                                           tolerance,
-                                           reorder,
-                                           dX.data(),
-                                           hSingularity.data()));
+    // Restore the handle's stream and destroy the current one on every exit
+    // path. This is intended to follow the RAII pattern.
+    struct stream_guard
+    {
+        hipsolverSpHandle_t handle = nullptr;
+        hipStream_t         stream = nullptr;
 
-    CHECK_HIP_ERROR(hXRes.transfer_from(dX));
+        ~stream_guard()
+        {
+            if(stream)
+            {
+                hipsolverSpSetStream(handle, nullptr);
+                (void)hipStreamDestroy(stream);
+            }
+        }
+    } guard;
 
-    // compare computed results with original result
+    // Check for a cross-stream race: csrlsvqr on a non-default stream must
+    // stay correct. Guard only engages when use_stream is set.
+    if(use_stream)
+    {
+        // Put the handle on a non-default stream. This exposes the
+        // data race.
+        hipStream_t stream = nullptr;
+        CHECK_HIP_ERROR(hipStreamCreate(&stream));
+        guard.handle = handle;
+        guard.stream = stream;
+        CHECK_ROCBLAS_ERROR(hipsolverSpSetStream(handle, stream));
+    }
+
     double err;
     *max_err = 0;
 
-    err      = norm_error('I', n, 1, n, hX[0], hXRes[0]);
-    *max_err = err > *max_err ? err : *max_err;
+    // Run the test num_reps times to catch probabilistic failures
+    for(int rep = 0; rep < num_reps; ++rep)
+    {
+        // execute computations
+        // GPU lapack
+        CHECK_ROCBLAS_ERROR(hipsolver_csrlsvqr(HOST,
+                                               handle,
+                                               n,
+                                               nnzA,
+                                               descrA,
+                                               dvalA.data(),
+                                               dptrA.data(),
+                                               dindA.data(),
+                                               dB.data(),
+                                               tolerance,
+                                               reorder,
+                                               dX.data(),
+                                               hSingularity.data()));
 
-    // TODO: Add singular matrices and check info
-    err = 0;
-    EXPECT_EQ(hSingularity[0][0], -1);
-    if(hSingularity[0][0] != -1)
-        err++;
-    *max_err += err;
+        CHECK_HIP_ERROR(hXRes.transfer_from(dX));
+
+        // compare computed results with original result
+        err      = norm_error('I', n, 1, n, hX[0], hXRes[0]);
+        *max_err = err > *max_err ? err : *max_err;
+
+        // TODO: Add singular matrices and check info
+        err = 0;
+        EXPECT_EQ(hSingularity[0][0], -1);
+        if(hSingularity[0][0] != -1)
+            err++;
+        *max_err += err;
+    }
 }
 
 template <bool HOST, typename T, typename S, typename Td, typename Ud, typename Th, typename Uh>
@@ -306,7 +343,7 @@ void csrlsvqr_getPerfData(hipsolverSpHandle_t       handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
@@ -325,7 +362,7 @@ void csrlsvqr_getPerfData(hipsolverSpHandle_t       handle,
                                           hX,
                                           testcase);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_csrlsvqr(HOST,
                            handle,
                            n,
@@ -339,9 +376,9 @@ void csrlsvqr_getPerfData(hipsolverSpHandle_t       handle,
                            reorder,
                            dX.data(),
                            hSingularity.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool HOST, typename T>
@@ -351,12 +388,14 @@ void testing_csrlsvqr(Arguments& argus)
 
     // get arguments
     hipsolverSp_local_handle handle;
-    int                      n         = argus.get<int>("n");
-    int                      nnzA      = argus.get<int>("nnzA");
-    double                   tolerance = argus.get<double>("tolerance", 0);
-    int                      reorder   = argus.get<int>("reorder", 0);
-    int                      base1     = argus.get<int>("base1", 0);
-    int                      hot_calls = argus.iters;
+    int                      n               = argus.get<int>("n");
+    int                      nnzA            = argus.get<int>("nnzA");
+    double                   tolerance       = argus.get<double>("tolerance", 0);
+    int                      reorder         = argus.get<int>("reorder", 0);
+    int                      base1           = argus.get<int>("base1", 0);
+    int                      hot_calls       = argus.iters;
+    int                      check_streams   = argus.get<int>("stream", 0);
+    constexpr int            num_stream_reps = 25;
 
     // check non-supported values
     // N/A
@@ -479,6 +518,7 @@ void testing_csrlsvqr(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
+        {
             csrlsvqr_getError<HOST, T>(handle,
                                        n,
                                        nnzA,
@@ -498,10 +538,13 @@ void testing_csrlsvqr(Arguments& argus)
                                        hXRes,
                                        hSingularity,
                                        &max_error,
-                                       testcase);
+                                       testcase,
+                                       check_streams != 0,
+                                       check_streams ? num_stream_reps : 1);
+        }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             csrlsvqr_getPerfData<HOST, T>(handle,
                                           n,
                                           nnzA,
@@ -546,6 +589,7 @@ void testing_csrlsvqr(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
+        {
             csrlsvqr_getError<HOST, T>(handle,
                                        n,
                                        nnzA,
@@ -565,10 +609,13 @@ void testing_csrlsvqr(Arguments& argus)
                                        hXRes,
                                        hSingularity,
                                        &max_error,
-                                       testcase);
+                                       testcase,
+                                       check_streams != 0,
+                                       check_streams ? num_stream_reps : 1);
+        }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             csrlsvqr_getPerfData<HOST, T>(handle,
                                           n,
                                           nnzA,

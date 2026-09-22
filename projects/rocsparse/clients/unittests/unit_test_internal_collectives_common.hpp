@@ -65,6 +65,10 @@ namespace rocsparse_ut_collectives
     {
         EXPECT_EQ(a, b);
     }
+    inline void expect_close(uint64_t a, uint64_t b)
+    {
+        EXPECT_EQ(a, b);
+    }
     inline void expect_close(const rocsparse_float_complex& a, const rocsparse_float_complex& b)
     {
         EXPECT_FLOAT_EQ(std::real(a), std::real(b));

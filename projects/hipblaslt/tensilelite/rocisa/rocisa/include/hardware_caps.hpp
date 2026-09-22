@@ -564,6 +564,11 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
         deviceLDS = 327680;
 
     rv["DeviceLDS"]          = deviceLDS;
+    // LDS allocation granule: a workgroup occupies a whole number of granules, so this
+    // rounding can cost a resident workgroup at a boundary. gfx11 allocates 1024 bytes
+    // at a time, other targets 256. TODO: gfx10/gfx12 might also need a different
+    // granularity.
+    rv["LdsGranularity"]     = isaVersion[0] == 11 ? 1024 : 256;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
@@ -604,10 +609,16 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // the flag load.
     rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
 
+    // gfx950 splits L2 across 8 XCDs. StreamK partial-tile fixup needs
+    // VMEM flags with glc+slc and waitcnt fences for cross-XCD coherence;
+    // gfx1250 uses HasInvWbDevFences (global_wb / global_inv) instead.
+    rv["HasXCDSplitL2"]                = checkInList(isaVersion, {{9, 5, 0}});
+
     // XNACK-replay drain. When set, in-flight VMEM ops can be replayed and
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["EnableXnackReplay"]            = checkInList(isaVersion, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
@@ -635,10 +646,13 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     std::map<std::string, int> rv;
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
-    // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
+    // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
+    // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106).
+    rv["MaxSgpr"] = isaVersion[0] >= 10 ? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
-    rv["PhysicalMaxSgpr"]   = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
+    // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
+    rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 1696 : 800;
     rv["maxLDSConstOffset"] = 65536;
     rv["GlobalPrefetchSize"] = 256;
 

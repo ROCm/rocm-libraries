@@ -1,0 +1,21 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass=removeKmcnt --print-output
+#
+# removeKmcnt waives the kmcnt exemption, for a caller whose insertion pass
+# covers the whole kernel so no s_load sits outside its dataflow.
+#
+# xcnt stays kept, pinning the two exemptions as independent.
+#
+# Default policy: remove_waitcnt_test.stir.
+
+# CHECK-LABEL: @strips_kmcnt_keeps_xcnt
+# CHECK: s_wait_xcnt
+# CHECK-NEXT: v_add_f32
+# CHECK-NOT: s_wait_kmcnt
+
+st.func @strips_kmcnt_keeps_xcnt() {
+^entry:
+  "st.s_wait_kmcnt"(0)
+  "st.s_wait_xcnt"(0)
+  "st.s_wait_kmcnt"(0)
+  v0 = "st.v_add_f32"(v1, v2)
+}

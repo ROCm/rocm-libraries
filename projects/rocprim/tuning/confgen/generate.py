@@ -67,7 +67,7 @@ def make_config(
 
     # Select the following type names
     # TODO: derive this from alg name maybe?
-    type_names = ["key_type", "value_type"]
+    type_names = ["key_type", "value_type", "data_type", "flag_type"]
     # Only select relevant types
     type_info = {k: type_data[k] for k in type_names if k in type_data}
     # Annotate with extra info for jinja
@@ -167,8 +167,13 @@ def main():
             # Create hashable key
             target_hash = frozenset(target_info.items())
 
+            # Filter/skip data entries that have no "time" column
+            data_filter = [c for c in data["cache"].values() if "time" in c]
+            filter_dif = len(data["cache"]) - len(data_filter)
+            if filter_dif > 0:
+                log.warning(f"Skipping failed compilations: {filter_dif}")
             # Find best config
-            config_data = min(data["cache"].values(), key=lambda c: c["time"])
+            config_data = min(data_filter, key=lambda c: c["time"])
             # Drop unrelated entries
             config_ignored_names = [
                 "time",

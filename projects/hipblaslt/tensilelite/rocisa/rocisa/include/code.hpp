@@ -245,14 +245,12 @@ namespace rocisa
 
         std::string toString() const override
         {
-            std::string prefix = 0 ? "// " + name + "{\n" : "";
-            std::string suffix = 0 ? "// } " + name + "\n" : "";
             std::string s;
             for(const auto& item : itemList)
             {
                 s += item->toString();
             }
-            return prefix + s + suffix;
+            return s;
         }
 
         void addSpaceLine()
