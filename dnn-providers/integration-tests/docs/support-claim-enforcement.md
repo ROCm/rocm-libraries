@@ -8,15 +8,16 @@ This document covers what a claim asserts, how one graph's claims are checked,
 and the lifecycle inside `TestBody()` that decides when a claim is checked and when
 it is published.
 
-> **Under `ctest`, enforcement is on.** Every lane registered by
-> `add_external_integration_test_target()` passes `--enforce-support-claims`.
-> Reconfigure with `-DHIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF` to turn
-> those lanes down to `--report-support-claims`, which asks the same questions and
-> prints the same summary but never fails a test.
+> **Under `ctest`, claims are reported, not enforced.** Every lane registered by
+> `add_external_integration_test_target()` passes `--report-support-claims`: the same
+> sidecar questions and the same summary, but a broken claim never fails a test. That
+> is what yields the day-one claim-failure count without turning lanes red over a
+> claim the developer did not author. Enforcement lands as a follow-up.
 >
-> Running the binary by hand, neither flag is on unless you pass it. Enforcement
-> requires `--test-engine`: a run with `--enforce-support-claims` and no engine named
-> exits 1 rather than degrading to "enforced nothing, exit 0".
+> Running the binary by hand, neither flag is on unless you pass it, and
+> `--enforce-support-claims` is available there today. Enforcement requires
+> `--test-engine`: a run with `--enforce-support-claims` and no engine named exits 1
+> rather than degrading to "enforced nothing, exit 0".
 
 ---
 
@@ -366,16 +367,13 @@ cannot see.
     --gtest_filter='quick_*'
 ```
 
-The `ctest` lanes pass `--enforce-support-claims`. To run them in report mode
-instead, reconfigure the build:
-
-```bash
-cmake -S . -B build -DHIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF
-```
-
-That swaps the flag on every lane the helper registers. It is a deliberate
-reconfigure and no environment variable can flip it behind your back; running the
-binary by hand, as above, is the other local route and needs no reconfigure.
+The `ctest` lanes pass `--report-support-claims`, so they print this summary and
+never fail on a claim. To enforce, run the binary by hand with
+`--enforce-support-claims` as above. There is no build option that flips the
+registered lanes, and no environment variable that changes the mode behind your
+back: the flag on each lane is whatever
+`HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG` is set to in
+`cmake/HipdnnIntegrationTestHelpers.cmake`.
 
 > Golden `.bin` blobs are DVC-managed. A tree that has not run `dvc pull` in
 > `integration-test-bundles/` registers zero validation tests and says so.

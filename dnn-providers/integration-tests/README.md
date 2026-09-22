@@ -263,9 +263,9 @@ that graph on a given arch and platform. `--enforce-support-claims` (which requi
 `--test-engine`) turns a broken promise into a test failure instead of a silent
 skip; `--report-support-claims` prints the same verdicts without failing. Claims are
 checked for the single engine under test. Neither flag is on when you invoke the
-binary directly, but the CTest registrations pass one of them: enforce by default,
-report when configured with `-DHIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF`.
-See [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
+binary directly; the CTest registrations pass `--report-support-claims`, so those
+lanes print the summary but never fail on a claim. See
+[`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md).
 
 ## Test Tiers
 
