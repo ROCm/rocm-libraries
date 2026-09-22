@@ -41,7 +41,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, PlanConstruction)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -101,7 +101,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicable)
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -184,7 +184,7 @@ TEST(TestGpuLayernormFwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFrom
 
     const std::vector<int64_t> ioDims = {2, 3, 4, 5};
     const TensorLayout layout = TensorLayout::NCHW;
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     const int64_t normalizedDimCount = 2;
 
     auto graphBuilder = createLayernormFwdGraph(X_UID,
@@ -273,7 +273,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         epsilonDataType = computeDataType;
     }
 
-    const auto epsilon = static_cast<float>(LAYERNORM_DEFAULT_EPSILON);
+    const double epsilon = LAYERNORM_DEFAULT_EPSILON;
     auto graphBuilder = createLayernormFwdGraph(X_UID,
                                                 Y_UID,
                                                 SCALE_UID,

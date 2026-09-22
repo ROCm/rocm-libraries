@@ -241,6 +241,11 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
         {

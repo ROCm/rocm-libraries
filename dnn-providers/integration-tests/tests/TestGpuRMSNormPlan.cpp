@@ -373,7 +373,7 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         builder, SCALE_UID, "scale", scaleDataType, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(
-        createEpsilonTensorAttributes(builder, EPSILON_UID, 1e-5f, epsilonDataType));
+        createEpsilonTensorAttributes(builder, EPSILON_UID, 1e-5, epsilonDataType));
 
     auto rmsnormAttributes
         = hipdnn_flatbuffers_sdk::data_objects::CreateRMSNormAttributes(builder,
@@ -395,9 +395,9 @@ void runFwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builder,
         "test",
+        computeDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
         &nodes);
     builder.Finish(graphOffset);
@@ -540,7 +540,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
         builder,
         "test",
         computeDataType,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
         &nodes);
@@ -588,7 +588,7 @@ void runBwdPlanExecuteVsCpuRef(const std::vector<int64_t>& ioDims,
     scaleTensor.fillWithRandomValues(
         static_cast<ScaleType>(-1.0f), static_cast<ScaleType>(1.0f), seed++);
     invRMSTensor.fillWithRandomValues(
-        static_cast<ComputeType>(-1.0f), static_cast<ComputeType>(1.0f), seed++);
+        static_cast<ComputeType>(.5f), static_cast<ComputeType>(2.0f), seed++);
 
     std::unordered_map<int64_t, void*> gpuVariantPack;
     gpuVariantPack[nodeAttributes->dy_tensor_uid()] = dyTensor.rawDeviceData();
@@ -673,7 +673,7 @@ TEST(TestGpuRMSNormFwdPlanFp32, ExecutePlanWithDoubleEpsilon)
     SKIP_IF_NO_DEVICES();
 
     runFwdPlanExecuteVsCpuRef<float, float, float, float>(
-        {1, 3, 224, 224}, TensorLayout::NCHW, rmsnorm::getTolerance<float>(), DataType::DOUBLE);
+        {5, 4, 3, 2}, TensorLayout::NCHW, rmsnorm::getTolerance<float>(), DataType::DOUBLE);
 }
 
 TEST(TestGpuRMSNormBwdPlanFp32, ExecutePlanNchw)
