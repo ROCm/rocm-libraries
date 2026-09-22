@@ -206,7 +206,7 @@ def visibleDeviceCount():
     if counts:
         return min(counts)
 
-    from Tensile.ParallelExecution import detectAvailableGpus
+    from tensilelite.ParallelExecution import detectAvailableGpus
     return detectAvailableGpus()
 
 def commSkipMark(config):
@@ -248,7 +248,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def useGlobalParameters(tensile_args):
     from tensilelite import Common
-    from tensilelite import tensilelite
+    from tensilelite import Tensile as tensilelite
     import argparse
 
     class gpUpdater:
