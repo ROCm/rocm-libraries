@@ -162,8 +162,35 @@ public:
                                 : static_cast<ComputeDataType>(0.0);
                 yVal = std::clamp(yVal, minOutValCompute, maxOutValCompute);
 
-                // Casting already does an RNE under the hood for the allowed IO types
-                y.setHostValue(static_cast<YDataType>(yVal), elementIndices);
+                if constexpr(std::is_integral_v<YDataType>)
+                {
+                    // yVal is already clamped to [minOutValCompute, maxOutValCompute] above, but for
+                    // integral YDataType those bounds themselves may not be exactly representable in
+                    // ComputeDataType (e.g. INT32_MAX rounds up to 2147483648.0f in float), so casting
+                    // a saturated yVal directly to YDataType can still be UB. Here we are routing the
+                    // saturated cases explicitly to the exact integer limits instead of directly
+                    // casting the saturated yVal to YDataType.
+                    YDataType clampedYVal;
+                    if(yVal <= minOutValCompute)
+                    {
+                        clampedYVal = std::numeric_limits<YDataType>::lowest();
+                    }
+                    else if(yVal >= maxOutValCompute)
+                    {
+                        clampedYVal = std::numeric_limits<YDataType>::max();
+                    }
+                    else
+                    {
+                        clampedYVal = static_cast<YDataType>(std::nearbyint(yVal));
+                    }
+
+                    y.setHostValue(clampedYVal, elementIndices);
+                }
+                else
+                {
+                    // Casting already does an RNE under the hood for the allowed float IO types
+                    y.setHostValue(static_cast<YDataType>(yVal), elementIndices);
+                }
             }
         };
 
@@ -183,7 +210,12 @@ private:
         {
             return std::numeric_limits<T>::max();
         }
-        return static_cast<T>(val);
+        auto rounded = static_cast<T>(val);
+        if(static_cast<double>(rounded) < val)
+        {
+            rounded = std::nextafter(rounded, std::numeric_limits<T>::max());
+        }
+        return rounded;
     }
 
     template <typename T>
@@ -193,6 +225,11 @@ private:
                             T>
         quantizeRoundUp(double val)
     {
+        if(val > static_cast<double>(std::numeric_limits<T>::max()))
+        {
+            return std::numeric_limits<T>::max();
+        }
+
         T rounded(val);
 
         if(static_cast<double>(rounded) < val)

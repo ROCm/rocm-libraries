@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleDequantize.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleQuantize.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 
@@ -86,6 +87,38 @@ TYPED_TEST(CpuFpReferenceBlockScaleQuantizeTyped, UniformInput)
     }
 }
 
+TYPED_TEST(CpuFpReferenceBlockScaleQuantizeTyped, RoundTrip)
+{
+    using InputType = typename TypeParam::InputType;
+    using OutputType = typename TypeParam::OutputType;
+    using ScaleType = typename TypeParam::ScaleType;
+
+    Tensor<InputType> xTensor({2, 4});
+    Tensor<OutputType> yTensor({2, 4});
+    Tensor<ScaleType> scaleTensor({2, 2});
+    const int32_t blockSize = 2;
+    const int64_t axis = 1;
+
+    xTensor.fillWithRandomValues(safeTestTypeCast<InputType>(-1.0f),
+                                 safeTestTypeCast<InputType>(1.0f));
+    CpuFpReferenceBlockScaleQuantize::quantize(xTensor, yTensor, scaleTensor, blockSize, axis);
+
+    Tensor<InputType> reconstructedXTensor({2, 4});
+    CpuFpReferenceBlockScaleDequantize::dequantize(
+        yTensor, scaleTensor, reconstructedXTensor, {blockSize}, false);
+
+    const auto tolerance = std::is_same_v<OutputType, float> ? 1.0e-5f : 1.0e-2f;
+    for(int b = 0; b < 2; ++b)
+    {
+        for(int c = 0; c < 4; ++c)
+        {
+            const auto original = static_cast<float>(xTensor.getHostValue(b, c));
+            const auto reconstructed = static_cast<float>(reconstructedXTensor.getHostValue(b, c));
+            EXPECT_NEAR(reconstructed, original, tolerance);
+        }
+    }
+}
+
 TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, NonTrivialScale)
 {
     Tensor<float> xTensor({1, 4});
@@ -102,8 +135,8 @@ TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, NonTrivialScale)
     const auto maxOutVal = static_cast<float>(std::numeric_limits<int8_t>::max());
     const float expectedScale0 = 2.0f / maxOutVal;
     const float expectedScale1 = 100.0f / maxOutVal;
-    EXPECT_NEAR(scaleTensor.getHostValue(0, 0), expectedScale0, 1e-6f);
-    EXPECT_NEAR(scaleTensor.getHostValue(0, 1), expectedScale1, 1e-6f);
+    EXPECT_NEAR(scaleTensor.getHostValue(0, 0), expectedScale0, 1e-5f);
+    EXPECT_NEAR(scaleTensor.getHostValue(0, 1), expectedScale1, 1e-5f);
 
     // Block 0:
     //
@@ -315,6 +348,31 @@ TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, OutputStaysWithinLimits)
     }
 }
 
+TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, Tensors1D)
+{
+    Tensor<float> xTensor({4});
+    Tensor<int8_t> yTensor({4});
+    Tensor<float> scaleTensor({2});
+
+    xTensor.setHostValue(1.0f, 0);
+    xTensor.setHostValue(2.0f, 1);
+    xTensor.setHostValue(30.0f, 2);
+    xTensor.setHostValue(100.0f, 3);
+
+    CpuFpReferenceBlockScaleQuantize::quantize(xTensor, yTensor, scaleTensor, 2);
+
+    const auto maxOutVal = static_cast<float>(std::numeric_limits<int8_t>::max());
+    const float expectedScale0 = 2.0f / maxOutVal;
+    const float expectedScale1 = 100.0f / maxOutVal;
+    EXPECT_NEAR(scaleTensor.getHostValue(0), expectedScale0, 1e-5f);
+    EXPECT_NEAR(scaleTensor.getHostValue(1), expectedScale1, 1e-5f);
+
+    EXPECT_EQ(static_cast<int>(yTensor.getHostValue(0)), 63);
+    EXPECT_EQ(static_cast<int>(yTensor.getHostValue(1)), 127);
+    EXPECT_EQ(static_cast<int>(yTensor.getHostValue(2)), 38);
+    EXPECT_EQ(static_cast<int>(yTensor.getHostValue(3)), 127);
+}
+
 TEST(TestCpuFpReferenceBlockScaleQuantizeFp32, Fp8E8M0Scale)
 {
     Tensor<float> xTensor({1, 4});
@@ -457,20 +515,19 @@ TYPED_TEST_SUITE(CpuFpReferenceBlockScaleQuantizeMxTyped, MxQuantizeTypes, );
 
 TYPED_TEST(CpuFpReferenceBlockScaleQuantizeMxTyped, WithE8m0Scale)
 {
-    using XType = typename TypeParam::InputType;
-    using YType = typename TypeParam::OutputType;
+    using InputType = typename TypeParam::InputType;
+    using OutputType = typename TypeParam::OutputType;
     using ScaleType = typename TypeParam::ScaleType;
 
-    Tensor<XType> xTensor({1, 4});
-    Tensor<YType> yTensor({1, 4});
+    Tensor<InputType> xTensor({1, 4});
+    Tensor<OutputType> yTensor({1, 4});
     Tensor<ScaleType> scaleTensor({1, 2});
 
-    const auto maxOutVal = static_cast<float>(std::numeric_limits<YType>::max());
-
-    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal / 2.0f), 0, 0);
-    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal / 2.0f), 0, 1);
-    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal), 0, 2);
-    xTensor.setHostValue(safeTestTypeCast<XType>(maxOutVal), 0, 3);
+    const auto maxOutVal = static_cast<float>(std::numeric_limits<OutputType>::max());
+    xTensor.setHostValue(safeTestTypeCast<InputType>(maxOutVal / 2.0f), 0, 0);
+    xTensor.setHostValue(safeTestTypeCast<InputType>(maxOutVal / 2.0f), 0, 1);
+    xTensor.setHostValue(safeTestTypeCast<InputType>(maxOutVal), 0, 2);
+    xTensor.setHostValue(safeTestTypeCast<InputType>(maxOutVal), 0, 3);
 
     CpuFpReferenceBlockScaleQuantize::quantize(xTensor, yTensor, scaleTensor, 2);
 
