@@ -525,6 +525,17 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
+    // gemm_1 is handed per-call E8M0 scale operands exactly when V is 8-bit and
+    // the gemm_1 warp tile has K=128. The warp GEMM selected in GetPVBlockGemm()
+    // and the pipeline's scale-operand construction must make the same decision,
+    // or a scaled call lands on a dense MMA (or the reverse); both read this.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool IsPVMxScaled()
+    {
+        return is_any_of<typename Problem::VDataType, fp8_t, bf8_t>::value &&
+               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetPVBlockGemm()
     {
@@ -539,16 +550,22 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                            typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
 
+        constexpr bool kUseMxScale = IsPVMxScaled<Problem>();
+
         using WarpGemm = WarpGemmDispatcher<typename Problem::PDataType,
                                             typename Problem::VDataType,
                                             typename Problem::OaccDataType,
                                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
                                             Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                                            true,
-                                            false,
-                                            false,
-                                            WGAttrNumAccessEnum::Default>;
+                                            true,                         // TransposeC
+                                            false,                        // SwizzleA
+                                            false,                        // UseStructuredSparsity
+                                            WGAttrNumAccessEnum::Default, // AttrNumAccessA
+                                            WGAttrNumAccessEnum::Default, // AttrNumAccessB
+                                            false,                        // IsScale16
+                                            false,                        // UsePackedNumAccess
+                                            kUseMxScale>;                 // UseMxScale
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::PDataType,

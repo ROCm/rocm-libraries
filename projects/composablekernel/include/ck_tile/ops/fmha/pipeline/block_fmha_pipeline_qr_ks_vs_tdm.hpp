@@ -78,8 +78,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
 
-    static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
-                                          BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
+    // Single source of truth, shared with the warp GEMM that GetPVBlockGemm()
+    // selects -- the two must agree or a scaled call lands on a dense MMA.
+    static constexpr bool kHwGemm1Scale = Policy::template IsPVMxScaled<Problem>();
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -280,6 +281,43 @@ struct BlockFmhaPipelineQRKSVSTdm
             p_scale = e8m0_one();
         }
         return p_tile;
+    }
+
+    // Re-wrap the transposed V tile into the encoding gemm_1 asserts on.
+    //
+    // MakeVRegTileDistribution pushes gemm_1's B encoding through
+    // InputTileDistributionTraits, whose normalization splits a terminal K
+    // sub-dim that is a strict multiple of SubtileMinorDimension (the ds_read_tr
+    // width divided by the element width; on gfx1250 that is 8 for both 8- and
+    // 16-bit types, from a 64-bit and a 128-bit instruction respectively). The
+    // fp8 16x16x128 warp tile has 64 there and is split into 8 x 8; the 16-bit
+    // 16x16x32 tile has 16 and is split into 2 x 8. Either way the encoding
+    // gains one Y dim.
+    // load_tile_transpose reverses the transpose but not the split, so the
+    // tile comes back one Y dim finer than BlockGemmARegBRegCRegV2 expects.
+    // The split is a pure refactorization of the same Y order, so the thread
+    // buffer is bit-identical and the re-wrap is a no-op at runtime -- but the
+    // gemm compares encodings by type, so it has to be spelled out.
+    template <typename Gemm1, typename VTensor>
+    CK_TILE_DEVICE static auto MakeVForGemm1(const VTensor& v_tile)
+    {
+        constexpr auto v_dstr =
+            make_static_tile_distribution(Gemm1::MakeBBlockDistributionEncode());
+
+        if constexpr(std::is_same_v<remove_cvref_t<decltype(v_dstr)>,
+                                    remove_cvref_t<decltype(VTensor::get_tile_distribution())>>)
+        {
+            return v_tile;
+        }
+        else
+        {
+            auto v_for_gemm = make_static_distributed_tensor<typename VTensor::DataType>(v_dstr);
+            static_assert(remove_cvref_t<decltype(v_for_gemm)>::get_thread_buffer_size() ==
+                              VTensor::get_thread_buffer_size(),
+                          "qr_tdm pipeline: V re-wrap changed the per-thread element count");
+            v_for_gemm.get_thread_buffer() = v_tile.get_thread_buffer();
+            return v_for_gemm;
+        }
     }
 
     // Decode (single shared-memory buffer)
@@ -878,7 +916,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             // write to fully commit before ds_load_tr reads.
             s_wait_tensorcnt_barrier<0>();
 
-            auto v_tile = load_tile_transpose(v_lds_read_window);
+            auto v_tile = MakeVForGemm1<decltype(gemm_1)>(load_tile_transpose(v_lds_read_window));
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -908,7 +946,8 @@ struct BlockFmhaPipelineQRKSVSTdm
 
                     // loop over along the [V]alue Sequence length
                     move_tile_window(v_lds_read_window, {kK1, 0});
-                    v_tile = load_tile_transpose(v_lds_read_window);
+                    v_tile =
+                        MakeVForGemm1<decltype(gemm_1)>(load_tile_transpose(v_lds_read_window));
                 });
                 // move back to the origin
                 move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
@@ -1419,7 +1458,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             s_wait_tensorcnt_barrier<1>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
-            auto v_tile = load_tile_transpose(v_lds_read_window);
+            auto v_tile = MakeVForGemm1<decltype(gemm_1)>(load_tile_transpose(v_lds_read_window));
 
             // Sink-aware k_origin (prefill path)
             const auto k_origin = [&]() {
@@ -1644,7 +1683,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     // loop over along the [V]alue Sequence length
                     move_tile_window(v_lds_read_window, {kK1, 0});
-                    auto v_tile_switch = load_tile_transpose(v_lds_read_window);
+                    auto v_tile_switch =
+                        MakeVForGemm1<decltype(gemm_1)>(load_tile_transpose(v_lds_read_window));
 
                     gemm_1(o_acc,
                            get_slice_tile(p_tile,
