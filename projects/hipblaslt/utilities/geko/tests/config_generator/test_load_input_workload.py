@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 import yaml
 
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.config_generator.load_input_config import (
     apply_input_config_defaults,
     gemm_configs_from_gemm_dataframe,
@@ -314,6 +315,24 @@ def test_validate_mx_arch_support_accepts_supported_arch() -> None:
     gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
     gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
     validate_mx_arch_support([gc], "gfx950")
+
+
+def test_validate_mx_arch_support_accepts_gfx1250() -> None:
+    from geko.schemas import GemmConfig, GemmType
+
+    gt = GemmType.from_tensile("T", "N", "F8", "S", "S")
+    gc = GemmConfig(gt, [[256, 256, 1, 256]], mx=True)
+    validate_mx_arch_support([gc], "gfx1250")
+
+
+def test_hardware_map_gfx1250_mx_scale_is_three() -> None:
+    assert HARDWARE_MAP["gfx1250"]["mx_scale"] == 3
+
+
+def test_hardware_map_mx_block_size_per_arch() -> None:
+    assert HARDWARE_MAP["gfx950"]["mx_block_size"] == 32
+    assert HARDWARE_MAP["gfx1250"]["mx_block_size"] == 32
+    assert HARDWARE_MAP["gfx942"]["mx_block_size"] is None
 
 
 def test_validate_mx_arch_support_ignores_non_mx_configs_on_unsupported_arch() -> None:

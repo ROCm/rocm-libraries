@@ -44,6 +44,7 @@ from typing import List, Tuple, Iterator
 
 from geko import bench
 from geko.constants import INDEX_TYPE_MAP
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.concurrency import parallel_for
 
 __all__ = ["Library", "LibraryCollection"]
@@ -447,6 +448,11 @@ class Library:
 
         if "F32XdlMathOp" in self.problem and self.problem["F32XdlMathOp"] == 9:  # TF32
             common["math_mode"] = 1
+        
+        if self.problem.get("MXBlockA"):
+            common["scaleA"] = HARDWARE_MAP.get(self.arch, {}).get("mx_scale", 0)
+        if self.problem.get("MXBlockB"):
+            common["scaleB"] = HARDWARE_MAP.get(self.arch, {}).get("mx_scale", 0)
 
         gemms = []
         latency = []

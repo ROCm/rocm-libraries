@@ -108,7 +108,7 @@ def test_mi_opt_fork_pipeline_non_empty(
     # Extract MX block values from ConfigSectionGenerator (same flow as config_generator)
     csg = ConfigSectionGenerator(cfg)
     mx_block_values = None
-    if "MXBlockA" in csg._problem_type and "MXBlockB" in csg._problem_type:
+    if csg._problem_type.get("MXBlockA") and csg._problem_type.get("MXBlockB"):
         mx_block_values = (csg._problem_type["MXBlockA"], csg._problem_type["MXBlockB"])
 
     # Extract subtile_enabled from config

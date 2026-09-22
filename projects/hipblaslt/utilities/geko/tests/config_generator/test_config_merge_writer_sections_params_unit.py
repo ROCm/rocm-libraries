@@ -223,12 +223,12 @@ def test_gfx942_params_branches(monkeypatch) -> None:
 # MX (Microscaling) config_sections_generator tests
 # ---------------------------------------------------------------------------
 
-def _section_cfg_mx(dtype="F4", mx=True, epilogues=True):
+def _section_cfg_mx(dtype="F4", mx=True, epilogues=True, arch="gfx950"):
     dest = "S" if dtype not in ("D",) else "D"
     gt = GemmType.from_tensile("T", "N", dtype, dest, "S")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
-        "ARCH": "gfx950",
+        "ARCH": arch,
         "CUs": 256,
         "XCC": 8,
         "EPILOGUES": epilogues,
@@ -244,6 +244,18 @@ def test_mx_problem_type_emits_mxblock():
     pt = gen._problem_type
     assert pt.get("MXBlockA") == 32
     assert pt.get("MXBlockB") == 32
+
+
+def test_mx_problem_type_emits_mxblock_gfx1250():
+    gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F4", mx=True, arch="gfx1250"))
+    pt = gen._problem_type
+    assert pt.get("MXBlockA") == 32
+    assert pt.get("MXBlockB") == 32
+
+
+def test_mx_problem_type_raises_on_unsupported_arch():
+    with pytest.raises(ValueError, match="MX is not supported on ARCH 'gfx942'"):
+        csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F4", mx=True, arch="gfx942"))
 
 
 def test_mx_problem_type_no_mxblock_when_disabled():

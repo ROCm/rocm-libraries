@@ -56,7 +56,9 @@ def run(
     client_path = None
     if write_shell_scripts:
         client_path = build_tensilelite_client(
-            hipblaslt_path, config.get("BUILD_DIR", None), gpu_targets=config.get("ARCH")
+            hipblaslt_path, 
+            config.get("BUILD_DIR", None), 
+            gpu_targets=config.get("ARCH")
         )
 
     for gp in config["GemmProblems"]:
@@ -108,7 +110,7 @@ def _run_per_gemm_type(
     csg = ConfigSectionGenerator(config)
 
     mx_block_values = None
-    if "MXBlockA" in csg._problem_type and "MXBlockB" in csg._problem_type:
+    if csg._problem_type.get("MXBlockA") and csg._problem_type.get("MXBlockB"):
         mx_block_values = (csg._problem_type["MXBlockA"], csg._problem_type["MXBlockB"])
 
     subtile_enabled = config.get("search_space") == "subtile"
@@ -154,7 +156,9 @@ def _run_per_gemm_type(
 
     if write_shell_scripts and client_path is None:
         client_path = build_tensilelite_client(
-            hipblaslt_path, config.get("BUILD_DIR", None), gpu_targets=config.get("ARCH")
+            hipblaslt_path, 
+            config.get("BUILD_DIR", None), 
+            gpu_targets=config.get("ARCH")
         )
 
     csg = ConfigSectionGenerator(config)

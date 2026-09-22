@@ -85,8 +85,11 @@ class ConfigSectionGenerator:
         pt['ComputeDataType'] = self._convert_type(self._gt.compute_data_type)
         pt['HighPrecisionAccumulate'] = val_HighPrecisionAccumulate
         if self._is_mx():
-            pt['MXBlockA'] = 32
-            pt['MXBlockB'] = 32
+            mx_block_size = HARDWARE_MAP.get(self.config["ARCH"], {}).get("mx_block_size")
+            if mx_block_size is None:
+                raise ValueError(f"MX is not supported on ARCH '{self.config['ARCH']}'")
+            pt['MXBlockA'] = mx_block_size
+            pt['MXBlockB'] = mx_block_size
         pt['TransposeA'] = val_transA
         pt['TransposeB'] = val_transB
         if self._gt.data_type in ("C", "Z"):
