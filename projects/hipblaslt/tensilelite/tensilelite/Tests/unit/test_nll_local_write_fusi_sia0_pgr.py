@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rocisa.code import Module, TextBlock
 
-from Tensile.KernelWriter import KernelWriter
+from tensilelite.KernelWriter import KernelWriter
 
 pytestmark = pytest.mark.unit
 

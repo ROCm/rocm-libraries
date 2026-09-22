@@ -29,7 +29,7 @@ import os
 import tempfile
 import filecmp
 
-from Tensile import TensileLibLogicToYaml
+from tensilelite import TensileLibLogicToYaml
 
 # Test data
 VALID_LIBLOGIC_FILE_CONTENT = """
@@ -468,7 +468,7 @@ def mockLibLogicFile():
 
 
 def findAvailableArchs():
-    from Tensile.Tests.gpu_detection import get_available_archs
+    from tensilelite.Tests.gpu_detection import get_available_archs
     return get_available_archs()
 
 @pytest.mark.skipif(
