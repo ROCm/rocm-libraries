@@ -401,19 +401,6 @@ def is_valid_spec_for_problem(
             f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
         )
 
-    # Reject pipeline="basic" configs that would Python-unroll the K loop
-    # beyond this threshold — above it IR size explodes and comgr compilation
-    # time grows unacceptably.
-    _MAX_BASIC_K_ITERS = 10
-    if spec.pipeline == "basic":
-        _k_iters = (problem.K_gemm + spec.tile_k - 1) // spec.tile_k
-        if _k_iters > _MAX_BASIC_K_ITERS:
-            return False, (
-                f"pipeline='basic' K-loop would unroll to {_k_iters} iterations "
-                f"(K_gemm={problem.K_gemm} tile_k={spec.tile_k}), "
-                f"exceeding the {_MAX_BASIC_K_ITERS}-iteration limit"
-            )
-
     return True, "ok"
 
 
@@ -1628,52 +1615,17 @@ def _build_implicit_gemm_conv_impl(
 
         final_accs = current_accs
     elif spec.pipeline == "basic":
-        # CK pipeline_basic: single-buffer, global-read/compute overlap.
-        #
-        # The buffer_load_vN for tile k+1 is issued before the sync+mfma for
-        # tile k so VMEM latency is hidden behind compute. The LDS write
-        # (smem_store_vN) is deferred until AFTER the second sync (after all
-        # ds_reads for tile k have drained), using the split emit_global_read /
-        # emit_lds_write helpers. Only one LDS buffer is needed.
-        #
-        # Per-iteration instruction order:
-        #   emit_global_read(k+1)         buffer_load_vN (VMEM, in flight)
-        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
-        #                                 (drains prior ds_write; tile k RAW-safe)
-        #   k_off_capture = k             (descriptor uses tile k's offset)
-        #   emit_mfma_phase               ds_read(A_smem,B_smem) + mfma
-        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
-        #                                 (drains ds_reads; A_smem WAR-safe)
-        #   emit_lds_write(staged_k+1)    smem_store_vN (now safe to write)
-        K_iters = (p.K_gemm + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-
-        # Prologue: global read for tile 0 then immediately write to LDS.
-        # (No prior ds_reads to drain, so lds_write can follow immediately.)
-        staged0 = emit_global_read(b.const_i32(0))
-        emit_lds_write(staged0, A_smem, B_smem)
-
-        pending_staged = None  # staged tuple for the tile whose ds_write is next
-
-        for it in range(K_iters):
-            # Issue buffer_load for tile it+1 BEFORE the sync. The VMEM latency
-            # (~300-600 cycles) overlaps with the mfma stream that follows.
-            if it + 1 < K_iters:
-                pending_staged = emit_global_read(b.const_i32((it + 1) * block_k))
-            # Drain the current tile's ds_write (prologue or previous iter's
-            # emit_lds_write), then barrier all waves.
+        # Runtime K-loop (single buffer, no Python unroll). Uses the same
+        # emit_load_phase + sync + emit_mfma_phase + sync structure as the
+        # plain "mem" path so IR size stays bounded regardless of K_gemm.
+        for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            emit_load_phase(k0, A_smem, B_smem)
             b.sync()
-            # Set k offset so descriptors address tile it during mfma.
-            k_off_capture[0] = b.const_i32(it * block_k)
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            # Drain ds_reads before the next ds_write can overwrite A_smem/B_smem.
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
             b.sync()
-            # Now safe to commit the next tile's staged VGPRs to LDS.
-            if pending_staged is not None:
-                emit_lds_write(pending_staged, A_smem, B_smem)
-                pending_staged = None
-
-        final_accs = current_accs
+            b.scf_yield(*new_accs)
+        final_accs = for_op.results
     elif not spec.async_dma:
         for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
