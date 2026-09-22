@@ -68,6 +68,47 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
    ```
    Add `-DROCM_PATH=<path>` when a ROCm path is resolved or provided. On Windows also add `-DCMAKE_PROGRAM_PATH=<clang-path>` and `-DGPU_TARGETS=<arch>`.
 
+   **Generic-kernel-ingestor / rocKE builds** need flags no preset sets:
+
+   | Flag | Default | Needed when |
+   |---|---|---|
+   | `HIPDNN_ENABLE_KERNEL_INGESTOR` | OFF | Any descriptor-backed engine. Also gates `hipdnn_validate_descriptors`, which is why that binary is usually absent. |
+   | `HIPDNN_ENABLE_SDPA` | OFF | Any attention graph. This is the **frontend**: with it off the SDPA API is `#ifdef`-compiled out and plans silently DECLINE. Must be ON for both the SDK and the provider. |
+   | `ENABLE_ASM_SDPA_ENGINE` | ON | Controls the incumbent ASM engine; disabling it is not proof that the intended new engine serves a graph. |
+   | `HIPKERNELPROVIDER_ENABLE_ROCKE` | OFF | **Required ON whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON.** The coupling is unconditional: the provider's top-level check inspects no source kind and no descriptor root, so it also fires for HIP-only and embedded-source bundles and when no rocKE KDP exists anywhere. Ingestor ON with this OFF is a fatal configure error, not a degraded build. |
+   | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` | the in-tree `.../kernel_ingestor_engine/descriptors` | `CACHE PATH` naming the authored tree production packaging compiles from. Packaging requires at least one non-hidden `*.kdp.json`; with none it is dormant. The default root is also dormant when no KDP declares any selected packaging architecture. Dormancy removes any stale product tree and is not an error. Set but not a directory is fatal. |
+   | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
+   | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
+
+   These flags only do anything on a preset that actually builds hip-kernel-provider. The
+   default `hipdnn-providers` preset does **not** include it; the presets that do are
+   `hipdnn-providers-all`, `hip-kernel-provider`, `hipdnn-dev-all` and
+   `miopen-hipdnn-dev-all`.
+
+   **There is no per-producer production switch.** Producer selection is per-UKD on
+   `kernel_source.kind`, so one source root feeds every producer and the descriptors
+   under the root decide what gets built. rocKE is resolved once for *every* root, test
+   roots included, so an unresolvable comgr is fatal at configure even in a hip-only
+   build; `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` names an explicit `libamd_comgr` where a
+   System32 copy would otherwise shadow the ROCm one.
+
+   For an ingestor create/extend task,
+   [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) owns the full sequence.
+   Early device/workspace feasibility has no installation requirement; installed probing
+   follows build and installation. Build production packaging as well as provider,
+   validator and applicable tests; a plugin build alone does not show that current
+   descriptors were packed.
+
+   Declarations travel in UKD `provenance.specialization_contract`. Only the producing
+   compiler writes `provenance.effective_spec`, distinct from authored `provenance.spec`;
+   generic generation is toolchain-free. No packaging `--profile`, CMake `PROFILES` or
+   external root manifest is part of this interface. Read the packaging reference at
+   `dnn-providers/hip-kernel-provider/descriptor-packaging/README.md`, resolved against
+   the `<repo-root>` from step 1 rather than this skill's own directory — an installed
+   skill is copied without the tree above it. A build is not compiler-agreement,
+   native-registration or numerical evidence by itself; the RUNBOOK requires those
+   observations against the final installation.
+
 7. Build with output redirected to a log:
    ```bash
    cmake --build <build-dir> > <log> 2>&1

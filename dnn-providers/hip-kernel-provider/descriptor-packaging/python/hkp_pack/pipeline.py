@@ -511,10 +511,15 @@ def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
 def _compile_one_variant(job):
     """Compile one variant in a worker process, returning a result tuple.
 
-    `(vk, co_path, symbol, None)` on success, `(vk, None, None, "Name: text")`
-    on any failure. Failures are returned rather than raised: rocke and comgr
+    `(vk, co_path, symbol, None, observations, origins)` on success,
+    `(vk, None, None, "Name: text", None, {})` on any failure.
+    Failures are returned rather than raised: rocke and comgr
     exceptions are not guaranteed picklable, and an exception that cannot cross
     the process boundary takes the diagnosis with it.
+
+    `observations` carries the compiler observations checked for every consumer.
+    `origins` is this variant's producer file identities in picklable form, the
+    only route to `OriginObserver.absorb`.
 
     No key is computed here. `job.vk` was computed in the parent, under
     whatever key functions were in force there; a key recomputed in the child
@@ -722,13 +727,15 @@ def _prewarm_variants(
     """Compile this arch's distinct variants concurrently into the caches.
 
     The walk then finds each key already present and skips the expensive call.
-    Records, symbols and doc rewriting stay entirely the walk's: this only
-    populates two dicts.
+    Records, symbols and doc rewriting stay entirely the walk's: this fills the
+    code-object, symbol and observation caches. Returns one producer-origin map
+    per compiled variant, which the caller must fold into the observer spanning
+    the arch, since a prewarmed variant is observed nowhere else.
 
     Fails fast, matching the serial path: the first failing variant in walk
     order raises and the queued jobs are cancelled, so a broken builder costs
     the jobs already in flight rather than the whole pack. Nothing is written
-    into either cache when that happens -- a partly-filled cache would let the
+    into any cache when that happens -- a partly-filled cache would let the
     walk skip compiles whose artefacts were never produced.
     """
     jobs = [

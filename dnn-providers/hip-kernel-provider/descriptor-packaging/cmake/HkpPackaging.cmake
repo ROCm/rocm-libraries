@@ -157,10 +157,9 @@ endfunction()
 #   edge between them, so the generator runs them at once and unbounded pools
 #   multiply. 1 selects the packer's serial path.
 #
-#   NAME is also the source label the packer writes into every descriptor's
-#   provenance. The function records NAME and the absolute SOURCE_ROOT in a
-#   global registry, which hkp_verify_embedded_sources() reads to resolve a
-#   descriptor's authored location.
+#   NAME is the source label written into every descriptor's provenance. NAME, the
+#   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
+#   hkp_verify_embedded_sources() and hkp_register_census_tests().
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR

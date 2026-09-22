@@ -1118,8 +1118,9 @@ def test_scoped_ued_name_loads_clean(main_fixture):
 def test_authored_provenance_cannot_hijack(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # An authored top-level 'provenance' is dropped; the shipped block is the
-    # generated traceability record, not the authored value.
+    # The shipped provenance block is the generated traceability record: an authored
+    # value for a field the producer writes is overwritten, while an authored field
+    # the producer does not write survives.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)
