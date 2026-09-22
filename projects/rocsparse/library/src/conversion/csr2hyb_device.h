@@ -95,9 +95,9 @@ namespace rocsparse
             if(p < ell_width)
             {
                 // Fill ELL part
-                int64_t idx      = ELL_IND(ai, p++, static_cast<int64_t>(m), ell_width);
-                ell_col_ind[idx] = csr_col_ind[aj];
-                ell_val[idx]     = csr_val[aj];
+                const int64_t idx = ELL_IND(ai, p++, static_cast<int64_t>(m), ell_width);
+                ell_col_ind[idx]  = csr_col_ind[aj];
+                ell_val[idx]      = csr_val[aj];
             }
             else
             {

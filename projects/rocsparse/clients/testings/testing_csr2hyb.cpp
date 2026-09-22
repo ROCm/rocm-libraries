@@ -344,10 +344,12 @@ void testing_csr2hyb_extra(const Arguments& arg)
 
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descr, base));
 
-    // Build the half-dense CSR on the host.
-    host_vector<rocsparse_int> hcsr_row_ptr(M + 1);
-    host_vector<rocsparse_int> hcsr_col_ind(csr_nnz);
-    host_vector<float>         hcsr_val(csr_nnz);
+    // Build the half-dense CSR on the host. The row-pointer array is small, so
+    // it uses host_dense_vector to keep its footprint traceable; the two
+    // csr_nnz-sized arrays stay pageable host_vector to avoid pinning ~8.6 GB.
+    host_dense_vector<rocsparse_int> hcsr_row_ptr(M + 1);
+    host_vector<rocsparse_int>       hcsr_col_ind(csr_nnz);
+    host_vector<float>               hcsr_val(csr_nnz);
 
     int64_t acc = 0;
     for(rocsparse_int i = 0; i < M; ++i)
