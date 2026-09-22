@@ -4,11 +4,11 @@
 
 .. _installation:
 
-******************
+*******************
 Install hipThreads
-******************
+*******************
 
-Before you begin, verify that your system is supported.
+Make sure that your system is supported.
 For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 For advanced workflows, source builds, or custom configurations, see :doc:`./source-build`.
@@ -19,7 +19,7 @@ Install the ROCm Core SDK
 =========================
 
 hipThreads is included with the ROCm Core SDK on Linux and Windows.
-For the most complete installation on Linux, we recommend that developers use the ``amdrocm-core-sdk`` meta package.
+On Linux, developers typically install the ``amdrocm-core-sdk`` meta package.
 
 For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`.
 Use the selector panel on that page to view instructions appropriate for your system environment.
@@ -29,32 +29,33 @@ Use the selector panel on that page to view instructions appropriate for your sy
 Install hipThreads as a standalone package on Linux
 ===================================================
 
-Alternatively, if you want to install hipThreads without the full set of ROCm libraries and tools, install the ``amdrocm-threads`` package.
+Alternately, if you want to install hipThreads without the rest of the ROCm libraries and tools, install the ``amdrocm-threads`` package.
 This is a granular subset of the ROCm Core SDK ``amdrocm-core-sdk`` that provides hipThreads on its own.
+
+The ``amdrocm-threads`` standalone packages are available on Linux only. On Windows, install hipThreads with the ROCm Core SDK or the `HIP SDK for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`_.
 
 #. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to install dependencies and configure GPU access permissions.
 
 #. Install the ``amdrocm-threads`` package that matches your desired ROCm version, development package needs, and AMD GPU architecture.
    Package names use the following format:
 
-   .. code-block:: shell-session
+   .. code:: shell
 
-      amdrocm-threads<dev/devel><rocm_version>-<llvm_target>
+      amdrocm-threads-dev-rocm_version-llvm_target
 
    Where:
 
-   * ``<rocm_version>`` is the ROCm Core SDK version to install.
+   * ``rocm_version``: the ROCm Core SDK version to install.
      Omit this suffix to install the latest available version.
 
-   * ``<dev/devel>`` specifies whether to install the library files and headers.
+   * ``dev`` or ``devel``: whether to install the library files and headers.
      Omit this suffix to only install runtime packages.
+     ``-dev`` is used on Debian-based distributions, including Ubuntu.
+     ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
-
-     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
-
-   * ``<llvm_target>`` (starting with ``gfx``) is used if you are installing for a single AMD GPU architecture.
-     Omit this to install for all architectures at the cost of disk space.
+   * ``llvm_target``: an architecture name that starts with ``gfx``.
+     Use this suffix if you are installing for a single AMD GPU architecture.
+     Omit it to install for all architectures at the cost of disk space.
 
    For example, to install the latest hipThreads development package for supported GPU architectures:
 
@@ -62,19 +63,19 @@ This is a granular subset of the ROCm Core SDK ``amdrocm-core-sdk`` that provide
 
       .. tab-item:: Debian-based distros
 
-         .. code-block:: bash
+         .. code:: shell
 
             sudo apt install amdrocm-threads-dev
 
       .. tab-item:: RHEL-based distros
 
-         .. code-block:: bash
+         .. code:: shell
 
             sudo dnf install amdrocm-threads-devel
 
       .. tab-item:: SLES
 
-         .. code-block:: bash
+         .. code:: shell
 
             sudo zypper install amdrocm-threads-devel
 
