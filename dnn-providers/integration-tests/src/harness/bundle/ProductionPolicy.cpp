@@ -9,17 +9,23 @@
 namespace hipdnn_integration_tests::bundle
 {
 
-ClaimMode claimMode()
+ClaimMode claimMode(bool enforce, bool report)
 {
-    if(TestConfig::get().enforceSupportClaims())
+    if(enforce)
     {
         return ClaimMode::ENFORCE;
     }
-    if(TestConfig::get().reportSupportClaims())
+    if(report)
     {
         return ClaimMode::REPORT;
     }
     return ClaimMode::OFF;
+}
+
+ClaimMode claimMode()
+{
+    return claimMode(TestConfig::get().enforceSupportClaims(),
+                     TestConfig::get().reportSupportClaims());
 }
 
 HarnessPolicy productionPolicy(TensorPlacement placement)

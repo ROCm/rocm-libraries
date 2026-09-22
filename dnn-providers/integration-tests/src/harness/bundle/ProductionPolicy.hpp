@@ -21,8 +21,14 @@ HarnessPolicy productionPolicy(TensorPlacement placement);
 /// the collapse happens, and order is the rule: enforcement subsumes reporting, so a
 /// run given both flags enforces.
 ///
-/// Exposed rather than kept private to productionPolicy() because main.cpp needs the
-/// same answer for the summary header and must not re-derive the precedence.
+/// Split in two so the rule itself is testable. TestConfig is a process-wide
+/// singleton initialized once per binary, so a unit test cannot feed the no-arg
+/// version a flag pair; this overload takes them directly and touches nothing else.
+ClaimMode claimMode(bool enforce, bool report);
+
+/// The above, reading TestConfig. Exposed rather than kept private to
+/// productionPolicy() because main.cpp needs the same answer for the summary header
+/// and must not re-derive the precedence.
 ClaimMode claimMode();
 
 } // namespace hipdnn_integration_tests::bundle
