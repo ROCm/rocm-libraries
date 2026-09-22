@@ -514,6 +514,20 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 ################################################################################
 
+def _globalReadFamilySlots(writer):
+    """TDM tensor_load family order aligned with SIA4 ds_load.
+
+    Parent-VALU splat families issue first (MXSA → MXSB), then remaining
+    A → B. Empty MX modules are no-ops.
+    """
+    return (
+        ("MXSA", writer.codes.globalReadMXSA, writer.codes.dtlsM0UpdateMXSA),
+        ("MXSB", writer.codes.globalReadMXSB, writer.codes.dtlsM0UpdateMXSB),
+        ("A", writer.codes.globalReadA, writer.codes.dtlsM0UpdateA),
+        ("B", writer.codes.globalReadB, writer.codes.dtlsM0UpdateB),
+    )
+
+
 def _splitTdmLoad(grCode):
     """Split a globalRead module into (non-TDM items module, TDM-load-only module)."""
     tdmLoadMod = Module("deferredTdmLoad")
@@ -549,43 +563,26 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         imod.addComment1("Global Read IncB")
         imod.add(globalReadIncBCode)
         if tdmDeferLoad:
-            imod.addComment1("Global Read A")
-            imod.add(writer.codes.dtlsM0UpdateA)
-            nonTdmMod, tdmLoadModA = _splitTdmLoad(writer.codes.globalReadA)
-            imod.add(nonTdmMod)
-            imod.addComment1("Global Read MXSA")
-            imod.add(writer.codes.dtlsM0UpdateMXSA)
             # MXSA/MXSB share A/B's XOR double-buffered MX-scale LDS, so their
             # tensor_load_to_lds must defer in lockstep with A/B (after the LDS swap).
             # Emitting them eagerly lets the async TDM overwrite the MX-scale LDS while
             # this wave's own MX ds_loads are still reading it (self-wave WAR; s_wait_dscnt
             # does not gate TDM, which retires on tensorcnt).
-            nonTdmModMXSA, tdmLoadModMXSA = _splitTdmLoad(writer.codes.globalReadMXSA)
-            imod.add(nonTdmModMXSA)
-            imod.addComment1("Global Read MXSB")
-            imod.add(writer.codes.dtlsM0UpdateMXSB)
-            nonTdmModMXSB, tdmLoadModMXSB = _splitTdmLoad(writer.codes.globalReadMXSB)
-            imod.add(nonTdmModMXSB)
-            imod.addComment1("Global Read B")
-            imod.add(writer.codes.dtlsM0UpdateB)
-            nonTdmModB, tdmLoadModB = _splitTdmLoad(writer.codes.globalReadB)
-            imod.add(nonTdmModB)
-            # Defer both A and B tensor_load_to_lds to after the LDS swap (at tdmLoadIter).
-            # This ensures both loads go into the post-swap buffer, matching the ds_load reads.
+            # Issue order matches SIA4 ds_load: MXSA → MXSB → A → B.
+            tdmLoads = []
+            for name, grCode, dtls in _globalReadFamilySlots(writer):
+                imod.addComment1("Global Read %s" % name)
+                imod.add(dtls)
+                nonTdmMod, tdmLoadMod = _splitTdmLoad(grCode)
+                imod.add(nonTdmMod)
+                tdmLoads.append((name, tdmLoadMod))
+            # Defer tensor_load_to_lds to after the LDS swap (at tdmLoadIter).
+            # This ensures loads go into the post-swap buffer, matching the ds_load reads.
             deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
-            if tdmLoadModA.itemsSize() > 0:
-                deferMod.addComment1("Global Read A (TDM deferred after LDS swap)")
-                deferMod.add(tdmLoadModA)
-            if tdmLoadModMXSA.itemsSize() > 0:
-                deferMod.addComment1("Global Read MXSA (TDM deferred after LDS swap)")
-                deferMod.add(tdmLoadModMXSA)
-            if tdmLoadModMXSB.itemsSize() > 0:
-                deferMod.addComment1("Global Read MXSB (TDM deferred after LDS swap)")
-                deferMod.add(tdmLoadModMXSB)
-            if tdmLoadModB.itemsSize() > 0:
-                # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
-                deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
-                deferMod.add(tdmLoadModB)
+            for name, tdmLoadMod in tdmLoads:
+                if tdmLoadMod.itemsSize() > 0:
+                    deferMod.addComment1("Global Read %s (TDM deferred after LDS swap)" % name)
+                    deferMod.add(tdmLoadMod)
             # Metadata TDM also writes to a double-buffered LDS region that is XOR-swapped
             # alongside A's (see s_xor on sgprtdmMetadataGroup0+1). Defer its tensor_load_to_lds
             # to tdmLoadIter so the load lands in the post-swap buffer, matching the
@@ -601,18 +598,10 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.gl2PrefetchIncrement)
             imod.add(writer.codes.gl2Prefetch)
         else:
-            imod.addComment1("Global Read A")
-            imod.add(writer.codes.dtlsM0UpdateA)
-            imod.add(writer.codes.globalReadA)
-            imod.addComment1("Global Read MXSA")
-            imod.add(writer.codes.dtlsM0UpdateMXSA)
-            imod.add(writer.codes.globalReadMXSA)
-            imod.addComment1("Global Read MXSB")
-            imod.add(writer.codes.dtlsM0UpdateMXSB)
-            imod.add(writer.codes.globalReadMXSB)
-            imod.addComment1("Global Read B")
-            imod.add(writer.codes.dtlsM0UpdateB)
-            imod.add(writer.codes.globalReadB)
+            for name, grCode, dtls in _globalReadFamilySlots(writer):
+                imod.addComment1("Global Read %s" % name)
+                imod.add(dtls)
+                imod.add(grCode)
             if kernel["ProblemType"]["Sparse"]:
                 imod.addComment1("Global Read Metadata")
                 imod.add(writer.codes.globalReadMetadata)
@@ -620,14 +609,9 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadA)
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSA)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA)
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateMXSB)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
-        writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
-        writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+        for _name, grCode, dtls in _globalReadFamilySlots(writer):
+            writer.codes.unrollLoopHeader.add(dtls)
+            writer.codes.unrollLoopHeader.add(grCode)
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)
@@ -639,30 +623,23 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     return itemsGRToSchedLater, lastLoadIter
 
 def prepareGRInstToSched(writer, kernel, isNGLL):
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadA.header)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
-    writer.codes.unrollLoopHeader.add(writer.codes.globalReadB.header)
+    for _name, grCode, _dtls in _globalReadFamilySlots(writer):
+        writer.codes.unrollLoopHeader.add(grCode.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata.header) if kernel["ProblemType"]["Sparse"] else None
 
-    # Add all loads from middle as individual schedulable items
+    # Add all loads from middle as individual schedulable items.
+    # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
+    familyMiddles = [list(grCode.middle.items()) for _name, grCode, _dtls in _globalReadFamilySlots(writer)]
+    familyMiddles.append(list(writer.codes.globalReadMetadata.middle.items()))
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
     if isNGLL and (kernel["UnrollLoopSwapGlobalReadOrder"] == 1 and not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
         itemsGRToSched =  []
         itemsGRToSchedLater = []
     elif kernel["PrefetchGlobalRead"] >= 2:
         itemsGRToSched =  []
-        itemsGRToSchedLater = list(writer.codes.globalReadA.middle.items()) + \
-                         list(writer.codes.globalReadMXSA.middle.items()) + \
-                         list(writer.codes.globalReadMXSB.middle.items()) + \
-                         list(writer.codes.globalReadB.middle.items()) + \
-                         list(writer.codes.globalReadMetadata.middle.items())
+        itemsGRToSchedLater = sum(familyMiddles, [])
     else:
-        itemsGRToSched =  list(writer.codes.globalReadA.middle.items()) + \
-                        list(writer.codes.globalReadMXSA.middle.items()) + \
-                        list(writer.codes.globalReadMXSB.middle.items()) + \
-                        list(writer.codes.globalReadB.middle.items()) + \
-                        list(writer.codes.globalReadMetadata.middle.items())
+        itemsGRToSched =  sum(familyMiddles, [])
         itemsGRToSchedLater = []
 
     itemsGRToSchedTemp = []
@@ -819,9 +796,9 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
 
     assert not itemsGRToSched # should have scheduled everything already, itemsGRToSched should be empty
 
-    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadA.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSA.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSB.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadA.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadB.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMetadata.footer)
     return lastLoadIter
