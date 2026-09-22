@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from itertools import product
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
@@ -422,6 +422,7 @@ def _canonical_payload(
     path: str,
     builder_kind: str,
     compile_backend: str,
+    fp8_fnuz: bool,
     kernel_spec,
     reduce_spec,
 ) -> dict:
@@ -438,6 +439,7 @@ def _canonical_payload(
         "path": path,
         "builder_kind": builder_kind,
         "compile_backend": compile_backend,
+        "fp8_fnuz": bool(fp8_fnuz),
         "kernel_spec": _as_payload(kernel_spec),
         "reduce_spec": _as_payload(reduce_spec),
     }
@@ -447,6 +449,8 @@ def _make_tuning_id(
     variant: AttentionGeometryVariant,
     kernel_spec,
     reduce_spec=None,
+    *,
+    fp8_fnuz: bool = False,
 ) -> str:
     wpe = getattr(kernel_spec, "waves_per_eu", None)
     digest = stable_json_hash(
@@ -455,12 +459,57 @@ def _make_tuning_id(
             path=variant.path,
             builder_kind=variant.builder_kind,
             compile_backend=variant.compile_backend,
+            fp8_fnuz=fp8_fnuz,
             kernel_spec=kernel_spec,
             reduce_spec=reduce_spec,
         ),
         n=16,
     )
     return f"{variant.variant_id}_wpe{wpe if wpe is not None else 'none'}@{digest}"
+
+
+def retarget_tuning_spec(
+    spec: AttentionTuningSpec, *, num_kv_blocks: int
+) -> AttentionTuningSpec:
+    """Refresh i32/i64 paged addressing once the physical cache is known."""
+    count = int(num_kv_blocks)
+    if count < 0:
+        raise ValueError("num_kv_blocks must be non-negative")
+    kernel_spec = spec.kernel_spec
+    if not hasattr(kernel_spec, "use_i64_kv_addr"):
+        return replace(spec, num_kv_blocks=count)
+
+    elem_bytes = 1 if kernel_spec.kv_storage_dtype == "fp8e4m3" else 2
+    block_stride = (
+        int(kernel_spec.block_size)
+        * int(kernel_spec.num_kv_heads)
+        * int(kernel_spec.head_size)
+        * elem_bytes
+    )
+    use_i64 = count > 0 and count * block_stride > 0x8000_0000
+    refreshed_kernel = replace(kernel_spec, use_i64_kv_addr=use_i64)
+    if refreshed_kernel == kernel_spec and int(spec.num_kv_blocks) == count:
+        return spec
+
+    prefix = spec.tuning_id.rsplit("@", 1)[0]
+    digest = stable_json_hash(
+        _canonical_payload(
+            arch=spec.arch,
+            path=spec.path,
+            builder_kind=spec.builder_kind,
+            compile_backend=spec.compile_backend,
+            fp8_fnuz=spec.fp8_fnuz,
+            kernel_spec=refreshed_kernel,
+            reduce_spec=spec.reduce_spec,
+        ),
+        n=16,
+    )
+    return replace(
+        spec,
+        tuning_id=f"{prefix}@{digest}",
+        kernel_spec=refreshed_kernel,
+        num_kv_blocks=count,
+    )
 
 
 def _explicit_configs(
@@ -497,8 +546,15 @@ def _explicit_configs(
                 builder_kind="tiled_3d",
                 compile_backend="llvm",
                 candidate_name=variant.candidate_name,
-                tuning_id=_make_tuning_id(variant, segment, reduce),
+                tuning_id=_make_tuning_id(
+                    variant,
+                    segment,
+                    reduce,
+                    fp8_fnuz=bool(problem.fp8_fnuz),
+                ),
                 kernel_spec=segment,
+                fp8_fnuz=bool(problem.fp8_fnuz),
+                num_kv_blocks=int(problem.num_kv_blocks),
                 reduce_spec=reduce,
             )
         return
@@ -564,8 +620,14 @@ def _explicit_configs(
                 builder_kind=variant.builder_kind,
                 compile_backend=variant.compile_backend,
                 candidate_name=variant.candidate_name,
-                tuning_id=_make_tuning_id(variant, kernel_spec),
+                tuning_id=_make_tuning_id(
+                    variant,
+                    kernel_spec,
+                    fp8_fnuz=bool(problem.fp8_fnuz),
+                ),
                 kernel_spec=kernel_spec,
+                fp8_fnuz=bool(problem.fp8_fnuz),
+                num_kv_blocks=int(problem.num_kv_blocks),
             )
 
 
@@ -648,8 +710,14 @@ def make_tuning_candidate(
         from .tuning_specs import (
             build_explicit_attention_2d,
             build_explicit_attention_3d,
+            validate_explicit_fp8_encoding,
         )
 
+        validate_explicit_fp8_encoding(
+            arch=arch,
+            use_fp8=spec.kernel_spec.kv_storage_dtype == "fp8e4m3",
+            fp8_fnuz=spec.fp8_fnuz,
+        )
         if spec.path == "3d":
             return build_explicit_attention_3d(
                 spec.kernel_spec, spec.reduce_spec, arch=arch

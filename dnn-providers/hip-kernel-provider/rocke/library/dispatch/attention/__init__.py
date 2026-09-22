@@ -240,6 +240,11 @@ def attention_sweep_space(
         candidate_prefix=candidate_prefix,
         tuning_id_prefix=tuning_id_prefix,
     ):
+        # This API feeds the unified paged-attention harness, whose input ABI
+        # requires a path-bearing 2D/3D spec. Dense and WMMA remain available
+        # through registered_attention_combos / dispatch_attention_all.
+        if not hasattr(spec, "path"):
+            continue
         h = spec_identity(spec)
         if h not in seen:
             seen.add(h)

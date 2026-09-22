@@ -84,6 +84,8 @@ def run_sweep(
 
     entries = {}
     for spec in specs:
+        if hasattr(spec, "with_num_kv_blocks"):
+            spec = spec.with_num_kv_blocks(int(data["key_cache"].shape[0]))
         path = spec.path
         tuning_id = getattr(spec, "tuning_id", "")
         candidate_name = getattr(spec, "candidate_name", getattr(spec, "name", path))

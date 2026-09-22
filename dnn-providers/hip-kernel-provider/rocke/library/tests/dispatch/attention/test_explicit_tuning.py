@@ -105,6 +105,43 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
                 arch="gfx950",
             )
 
+    def test_explicit_fp8_encoding_must_match_architecture(self):
+        config = ExplicitAttention2DConfig(
+            num_warps=2,
+            block_m_per_warp=16,
+            tile_policy="4x",
+        )
+        with self.assertRaisesRegex(ValueError, "requires FNUZ"):
+            make_explicit_attention_2d_spec(
+                _problem(use_fp8=True, fp8_fnuz=False),
+                config,
+                arch="gfx942",
+            )
+        with self.assertRaisesRegex(ValueError, "requires OCP"):
+            make_explicit_attention_2d_spec(
+                _problem(use_fp8=True, fp8_fnuz=True),
+                config,
+                arch="gfx950",
+            )
+        gfx942, _reduce = make_explicit_attention_3d_specs(
+            _problem(
+                total_q=1,
+                max_seqlen_q=1,
+                max_seqlen_k=4096,
+                use_fp8=True,
+                fp8_fnuz=True,
+            ),
+            ExplicitAttention3DConfig(num_segments=32),
+            arch="gfx942",
+        )
+        gfx950 = make_explicit_attention_2d_spec(
+            _problem(use_fp8=True, fp8_fnuz=False),
+            config,
+            arch="gfx950",
+        )
+        self.assertEqual(gfx942.kv_storage_dtype, "fp8e4m3")
+        self.assertEqual(gfx950.kv_storage_dtype, "fp8e4m3")
+
     def test_representative_ir_builds_for_both_arches_and_paths(self):
         cases = (
             (

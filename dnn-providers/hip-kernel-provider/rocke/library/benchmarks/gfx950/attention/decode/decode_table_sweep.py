@@ -142,6 +142,9 @@ def _run_unified_graph(req, result, args) -> dict:
     from rocke.runtime import synchronize_and_release, time_launches
 
     tensors = _unified_tensors(req, args.seed)
+    if hasattr(result.spec, "with_num_kv_blocks"):
+        runtime_spec = result.spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
+        result = attention_dispatch_result(req, result.candidate, runtime_spec)
     stream = torch.cuda.current_stream().cuda_stream
     binding = result.bind_torch(tensors, stream=stream)
 
@@ -245,11 +248,11 @@ def sweep(args) -> list[dict]:
                 "num_kv_heads": hkv,
                 "head_size": d,
                 "dtype": args.dtype,
-                "status": "unsupported",
+                "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}",
             }
             rows.append(rec)
-            print(f"SKIP {label} Sk={s} registry: {exc}", flush=True)
+            print(f"ERROR {label} Sk={s} registry: {exc}", flush=True)
             traceback.print_exc()
             continue
         if not results:
@@ -318,9 +321,9 @@ def sweep(args) -> list[dict]:
                     )
                 except Exception as exc:  # noqa: BLE001
                     reason = f"{type(exc).__name__}: {exc}"
-                    rec.update(status="unsupported", reason=reason)
+                    rec.update(status="error", reason=reason)
                     print(
-                        f"SKIP {label} Sk={s} {result.candidate.name} cus={cus}: {exc}",
+                        f"ERROR {label} Sk={s} {result.candidate.name} cus={cus}: {exc}",
                         flush=True,
                     )
                     traceback.print_exc()
@@ -383,6 +386,10 @@ def best_table(rows: list[dict]) -> None:
             )
 
 
+def _rows_exit_code(rows: list[dict]) -> int:
+    return 1 if any(r.get("status") not in ("ok", "unsupported") for r in rows) else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dtype", default="bf16")
@@ -436,7 +443,7 @@ def main() -> int:
         with open(args.output_json, "w") as fh:
             json.dump(rows, fh, indent=2)
         print(f"\nwrote {args.output_json}")
-    return 0
+    return _rows_exit_code(rows)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ from dispatch.attention import (
 )
 from benchmarks.common.attention_flops import attention_flops
 from benchmarks.common import attention_combo_sweep as sweep
+from benchmarks.gfx950.attention.decode import decode_table_sweep
+from benchmarks.gfx950.attention.prefill import dense_prefill_table_sweep
 
 
 def _req(**kw) -> AttentionRequest:
@@ -121,7 +123,7 @@ class TestComboSweepLifecycle(unittest.TestCase):
             mock.patch.object(sweep.subprocess, "run") as run,
         ):
             rc = sweep.sweep(args)
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)
         run.assert_not_called()
         init_torch.assert_not_called()
 
@@ -154,6 +156,22 @@ class TestComboSweepLifecycle(unittest.TestCase):
             mock.patch("rocke.core.verify.verify_or_raise"),
         ):
             self.assertIsNone(sweep.host_validate(result))
+
+    def test_table_sweeps_fail_only_for_admitted_execution_failures(self):
+        for module in (dense_prefill_table_sweep, decode_table_sweep):
+            with self.subTest(module=module.__name__):
+                self.assertEqual(
+                    module._rows_exit_code(
+                        [{"status": "ok"}, {"status": "unsupported"}]
+                    ),
+                    0,
+                )
+                for status in ("error", "invalid", "mismatch", "crash", "timeout"):
+                    self.assertEqual(
+                        module._rows_exit_code([{"status": status}]),
+                        1,
+                        status,
+                    )
 
 
 if __name__ == "__main__":

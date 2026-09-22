@@ -4426,6 +4426,10 @@ def run_unified_attention_torch(
         )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
+    if tuning_spec is not None and hasattr(tuning_spec, "with_num_kv_blocks"):
+        # Explicit specs are initially selected before framework tensors exist.
+        # Refresh address-width state and tuning identity from the real cache.
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton

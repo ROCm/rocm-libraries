@@ -312,6 +312,12 @@ def _run_result(req, result, args, index: int) -> dict:
             tensors = _dense_tensors(req, args.seed)
         elif kind == "unified":
             tensors = _unified_tensors(req, args.seed)
+            if hasattr(result.spec, "with_num_kv_blocks"):
+                runtime_spec = result.spec.with_num_kv_blocks(
+                    int(tensors["k"].shape[0])
+                )
+                result = attention_dispatch_result(req, result.candidate, runtime_spec)
+                row = _row_skeleton(req, result.candidate, runtime_spec, index)
         else:
             row.update(
                 status="skipped",
@@ -536,7 +542,9 @@ def sweep(args) -> int:
             f"  {row['us']:9.1f} us  {row['tflops']:7.1f} TF/s  "
             f"{row['candidate']} {row.get('tuning_id') or row['kernel_name']}"
         )
-    return 1 if counts.keys() - {"ok", "skipped", "invalid"} else 0
+    # host_validate runs only after registry admission. An "invalid" row is
+    # therefore a broken registered candidate, not an unsupported request.
+    return 1 if counts.keys() - {"ok", "skipped"} else 0
 
 
 def _emit(row, rows, sink, args):

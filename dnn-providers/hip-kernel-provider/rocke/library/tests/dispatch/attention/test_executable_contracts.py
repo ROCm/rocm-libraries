@@ -14,8 +14,8 @@ from dispatch.attention import (
     attention_execution_candidates,
 )
 from dispatch.attention import bindings as attention_bindings
+from dispatch.attention.common import AttentionTuningSpec, _problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
-from dispatch.attention.common import AttentionTuningSpec
 
 
 def _req(arch="gfx950", **kw) -> AttentionRequest:
@@ -33,6 +33,61 @@ def _req(arch="gfx950", **kw) -> AttentionRequest:
     )
     base.update(kw)
     return AttentionRequest(**base)
+
+
+class _Tensor:
+    def __init__(
+        self,
+        shape,
+        dtype,
+        values=None,
+        *,
+        device="cuda:0",
+        contiguous=True,
+        strides=None,
+    ):
+        self.shape = tuple(shape)
+        self.dtype = dtype
+        self.device = device
+        self._values = values
+        self._contiguous = contiguous
+        self._strides = strides
+
+    def is_contiguous(self):
+        return self._contiguous
+
+    def detach(self):
+        return self
+
+    def stride(self, dim):
+        if self._strides is not None:
+            return self._strides[dim]
+        stride = 1
+        values = [0] * len(self.shape)
+        for index in range(len(self.shape) - 1, -1, -1):
+            values[index] = stride
+            stride *= self.shape[index]
+        return values[dim]
+
+    def cpu(self):
+        return self
+
+    def tolist(self):
+        if self._values is None:
+            raise AssertionError("no host values")
+        return self._values
+
+
+def _paged_tensors(*, num_blocks=64):
+    return {
+        "q": _Tensor((1024, 32, 128), "torch.bfloat16"),
+        "out": _Tensor((1024, 32, 128), "torch.bfloat16"),
+        "k": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
+        "v": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
+        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1024]),
+        "seqused_k": _Tensor((1,), "torch.int32", [1024]),
+        "block_table": _Tensor((1, 64), "torch.int32", [list(range(64))]),
+    }
 
 
 class TestRegistrySplit(unittest.TestCase):
@@ -137,6 +192,96 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertNotIn("block_tables", captured)
         self.assertNotIn("kv_lens", captured)
         self.assertNotIn("sinks", captured)
+
+    def test_explicit_binding_validates_every_paged_input_class(self):
+        problem = _problem(_req())
+        valid = _paged_tensors()
+        self.assertEqual(
+            attention_bindings.validate_tuning_attention_tensors(problem, valid),
+            64,
+        )
+        cases = {
+            "q_shape": ("q", _Tensor((1023, 32, 128), "torch.bfloat16")),
+            "k_dtype": ("k", _Tensor((64, 16, 8, 128), "torch.float16")),
+            "v_shape": ("v", _Tensor((63, 16, 8, 128), "torch.bfloat16")),
+            "cu_dtype": (
+                "cu_seqlens_q",
+                _Tensor((2,), "torch.float16", [0, 1024]),
+            ),
+            "seqused_range": (
+                "seqused_k",
+                _Tensor((1,), "torch.int32", [1025]),
+            ),
+            "block_table_shape": (
+                "block_table",
+                _Tensor((2, 32), "torch.int32", [list(range(32))] * 2),
+            ),
+            "block_table_value": (
+                "block_table",
+                _Tensor(
+                    (1, 64),
+                    "torch.int32",
+                    [[64] + list(range(1, 64))],
+                ),
+            ),
+            "block_table_stride": (
+                "block_table",
+                _Tensor(
+                    (1, 64),
+                    "torch.int32",
+                    [list(range(64))],
+                    strides=(128, 2),
+                ),
+            ),
+        }
+        for label, (name, replacement) in cases.items():
+            with self.subTest(name=label), self.assertRaises(ValueError):
+                tensors = dict(valid)
+                tensors[name] = replacement
+                attention_bindings.validate_tuning_attention_tensors(problem, tensors)
+        tensors = dict(valid)
+        tensors["k"] = _Tensor((64, 16, 8, 128), "torch.bfloat16", contiguous=False)
+        with self.assertRaisesRegex(ValueError, "contiguous"):
+            attention_bindings.validate_tuning_attention_tensors(problem, tensors)
+
+    def test_explicit_binding_can_skip_only_metadata_content_sync(self):
+        problem = _problem(_req())
+        tensors = _paged_tensors()
+        tensors["block_table"] = _Tensor(
+            (1, 64), "torch.int32", [[999] + list(range(1, 64))]
+        )
+        self.assertEqual(
+            attention_bindings.validate_tuning_attention_tensors(
+                problem, tensors, validate_contents=False
+            ),
+            64,
+        )
+
+    def test_explicit_binding_refreshes_large_cache_addressing(self):
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        tensors = _paged_tensors(num_blocks=65537)
+        captured = {}
+
+        def fake_run(**kwargs):
+            captured.update(kwargs)
+            return "ok"
+
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=fake_run,
+        ):
+            binding = candidate.bound_torch(req, spec, tensors)
+            binding.launch()
+        runtime_spec = captured["tuning_spec"]
+        self.assertTrue(runtime_spec.kernel_spec.use_i64_kv_addr)
+        self.assertEqual(runtime_spec.num_kv_blocks, 65537)
+        self.assertNotEqual(runtime_spec.tuning_id, spec.tuning_id)
 
 
 if __name__ == "__main__":

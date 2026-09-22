@@ -139,11 +139,11 @@ def sweep(args) -> list[dict]:
                 "num_kv_heads": hkv,
                 "head_size": d,
                 "dtype": args.dtype,
-                "status": "unsupported",
+                "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}",
             }
             rows.append(rec)
-            print(f"SKIP {label} S={s} registry: {exc}", flush=True)
+            print(f"ERROR {label} S={s} registry: {exc}", flush=True)
             traceback.print_exc()
             continue
         if not results:
@@ -185,8 +185,8 @@ def sweep(args) -> list[dict]:
                 )
             except Exception as exc:  # noqa: BLE001
                 reason = f"{type(exc).__name__}: {exc}"
-                rec.update(status="unsupported", reason=reason)
-                print(f"SKIP {label} S={s} {result.candidate.name}: {exc}", flush=True)
+                rec.update(status="error", reason=reason)
+                print(f"ERROR {label} S={s} {result.candidate.name}: {exc}", flush=True)
                 traceback.print_exc()
             rows.append(rec)
             torch.cuda.empty_cache()
@@ -246,6 +246,10 @@ def best_table(rows: list[dict]) -> None:
             )
 
 
+def _rows_exit_code(rows: list[dict]) -> int:
+    return 1 if any(r.get("status") not in ("ok", "unsupported") for r in rows) else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dtype", default="bf16")
@@ -286,7 +290,7 @@ def main() -> int:
         with open(args.output_json, "w") as fh:
             json.dump(rows, fh, indent=2)
         print(f"\nwrote {args.output_json}")
-    return 0
+    return _rows_exit_code(rows)
 
 
 if __name__ == "__main__":

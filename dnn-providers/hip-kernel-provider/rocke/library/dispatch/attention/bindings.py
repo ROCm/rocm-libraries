@@ -11,9 +11,185 @@ from __future__ import annotations
 
 import inspect
 import math
+from dataclasses import replace
 from typing import Any, Mapping
 
 from rocke.dispatch.core import TorchBinding
+
+
+def _shape(tensor, name: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(v) for v in tensor.shape)
+    except Exception as exc:
+        raise ValueError(f"{name} must expose an integer shape") from exc
+
+
+def _dtype_kind(tensor, name: str) -> str:
+    value = str(getattr(tensor, "dtype", "")).lower()
+    if "float8_e4m3fnuz" in value or value.endswith("fp8e4m3fnuz"):
+        return "fp8_fnuz"
+    if "float8_e4m3fn" in value or value.endswith("fp8e4m3"):
+        return "fp8"
+    if "bfloat16" in value or value.endswith("bf16"):
+        return "bf16"
+    if "float16" in value or value.endswith("fp16"):
+        return "fp16"
+    if "int32" in value or value.endswith("i32"):
+        return "int32"
+    raise ValueError(f"{name} has unsupported dtype {getattr(tensor, 'dtype', None)!r}")
+
+
+def _require_contiguous(tensor, name: str) -> None:
+    predicate = getattr(tensor, "is_contiguous", None)
+    if not callable(predicate) or not bool(predicate()):
+        raise ValueError(f"{name} must be contiguous")
+
+
+def _tolist(tensor, name: str):
+    value = tensor
+    for method in ("detach", "cpu"):
+        fn = getattr(value, method, None)
+        if callable(fn):
+            value = fn()
+    fn = getattr(value, "tolist", None)
+    if not callable(fn):
+        raise ValueError(f"{name} must support tolist() for validation")
+    return fn()
+
+
+def validate_tuning_attention_tensors(
+    problem,
+    tensors: Mapping[str, Any],
+    *,
+    validate_contents: bool = True,
+) -> int:
+    """Validate the paged ABI once before binding an explicit tuning launch.
+
+    ``validate_contents=False`` skips device-to-host metadata checks for trusted
+    graph/hot paths, but structural shape/dtype/layout checks remain mandatory.
+    Returns the physical K/V block count used to refresh address-width state.
+    """
+    required = (
+        "q",
+        "k",
+        "v",
+        "out",
+        "cu_seqlens_q",
+        "seqused_k",
+        "block_table",
+    )
+    missing = [name for name in required if name not in tensors]
+    if missing:
+        raise ValueError("missing attention tensors: " + ", ".join(missing))
+
+    q, k, v, out = (tensors[name] for name in ("q", "k", "v", "out"))
+    cu = tensors["cu_seqlens_q"]
+    used = tensors["seqused_k"]
+    table = tensors["block_table"]
+
+    q_shape = (
+        int(problem.total_q),
+        int(problem.num_query_heads),
+        int(problem.head_size),
+    )
+    kv_tail = (
+        int(problem.block_size),
+        int(problem.num_kv_heads),
+        int(problem.head_size),
+    )
+    if _shape(q, "q") != q_shape:
+        raise ValueError(f"q shape must be {q_shape}, got {_shape(q, 'q')}")
+    if _shape(out, "out") != q_shape:
+        raise ValueError(f"out shape must be {q_shape}, got {_shape(out, 'out')}")
+    k_shape = _shape(k, "k")
+    v_shape = _shape(v, "v")
+    if len(k_shape) != 4 or k_shape[1:] != kv_tail:
+        raise ValueError(f"k shape must be [blocks, {kv_tail}], got {k_shape}")
+    if v_shape != k_shape:
+        raise ValueError(f"v shape must match k shape {k_shape}, got {v_shape}")
+    num_blocks = int(k_shape[0])
+    if num_blocks <= 0:
+        raise ValueError("paged K/V cache must contain at least one physical block")
+
+    q_kind = "bf16" if str(problem.dtype).lower() == "bf16" else "fp16"
+    kv_kind = (
+        "fp8_fnuz"
+        if problem.use_fp8 and problem.fp8_fnuz
+        else "fp8" if problem.use_fp8 else q_kind
+    )
+    for tensor, name, expected in (
+        (q, "q", q_kind),
+        (out, "out", q_kind),
+        (k, "k", kv_kind),
+        (v, "v", kv_kind),
+        (cu, "cu_seqlens_q", "int32"),
+        (used, "seqused_k", "int32"),
+        (table, "block_table", "int32"),
+    ):
+        actual = _dtype_kind(tensor, name)
+        if actual != expected:
+            raise ValueError(f"{name} dtype must be {expected}, got {actual}")
+        _require_contiguous(tensor, name)
+
+    devices = {
+        str(getattr(tensor, "device", "")) for tensor in (q, k, v, out, cu, used, table)
+    }
+    if len(devices) != 1:
+        raise ValueError(f"all attention tensors must share one device, got {devices}")
+
+    table_shape = _shape(table, "block_table")
+    if len(table_shape) != 2 or table_shape[0] != int(problem.num_seqs):
+        raise ValueError(
+            "block_table shape must be "
+            f"[{problem.num_seqs}, max_blocks], got {table_shape}"
+        )
+    if table_shape[1] <= 0:
+        raise ValueError("block_table must have at least one block column")
+    stride = getattr(table, "stride", None)
+    if callable(stride) and int(stride(1)) != 1:
+        raise ValueError("block_table innermost stride must be 1")
+    if _shape(cu, "cu_seqlens_q") != (int(problem.num_seqs) + 1,):
+        raise ValueError("cu_seqlens_q must have shape [num_seqs + 1]")
+    if _shape(used, "seqused_k") != (int(problem.num_seqs),):
+        raise ValueError("seqused_k must have shape [num_seqs]")
+
+    if validate_contents:
+        cu_values = [int(v) for v in _tolist(cu, "cu_seqlens_q")]
+        used_values = [int(v) for v in _tolist(used, "seqused_k")]
+        table_values = _tolist(table, "block_table")
+        if (
+            cu_values[0] != 0
+            or cu_values[-1] != int(problem.total_q)
+            or any(a > b for a, b in zip(cu_values, cu_values[1:]))
+        ):
+            raise ValueError(
+                "cu_seqlens_q must start at 0, end at total_q, and be monotonic"
+            )
+        for seq, row in enumerate(table_values):
+            if len(row) != table_shape[1]:
+                raise ValueError(
+                    f"block_table row {seq} has {len(row)} values, "
+                    f"expected {table_shape[1]}"
+                )
+            for page, physical in enumerate(row):
+                physical = int(physical)
+                if physical < 0 or physical >= num_blocks:
+                    raise ValueError(
+                        f"block_table[{seq}, {page}]={physical} is outside "
+                        f"[0, {num_blocks})"
+                    )
+        for seq, kv_len in enumerate(used_values):
+            if kv_len < 0 or kv_len > int(problem.max_seqlen_k):
+                raise ValueError(
+                    f"seqused_k[{seq}]={kv_len} is outside [0, {problem.max_seqlen_k}]"
+                )
+            pages = (kv_len + int(problem.block_size) - 1) // int(problem.block_size)
+            if pages > table_shape[1]:
+                raise ValueError(
+                    f"block_table row {seq} has {table_shape[1]} entries but "
+                    f"seqused_k requires {pages}"
+                )
+    return num_blocks
 
 
 def _dense_runner(arch: str):
@@ -87,6 +263,15 @@ def bind_tuning_attention_torch(
             "(a UnifiedAttentionProblem); dispatch injects it before calling"
         )
     assert isinstance(problem, UnifiedAttentionProblem)
+    validate_contents = bool(kwargs.pop("validate_paged", True))
+    num_blocks = validate_tuning_attention_tensors(
+        problem,
+        tensors,
+        validate_contents=validate_contents,
+    )
+    problem = replace(problem, num_kv_blocks=num_blocks)
+    if hasattr(spec, "with_num_kv_blocks"):
+        spec = spec.with_num_kv_blocks(num_blocks)
     stream = kwargs.get("stream", 0)
     path = str(getattr(spec, "path", "2d"))
     backend = "tiled" if path == "2d" else path

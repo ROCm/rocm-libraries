@@ -53,7 +53,7 @@ class TestSweepSpace(unittest.TestCase):
         bad = _gfx942_fp16_mha(hdim_v=64)
         self.assertEqual(attention_sweep_space(bad), ())
 
-    def test_covers_executable_dense_and_tuning(self):
+    def test_covers_unified_tuning_but_excludes_dense_specs(self):
         with _PinnedArch("gfx942"):
             req = _gfx942_fp16_mha()
             combos = registered_attention_combos(req)
@@ -65,6 +65,7 @@ class TestSweepSpace(unittest.TestCase):
         self.assertNotIn("attention_gfx942_dense_pipe", names)
         self.assertGreater(len(specs), 1)
         self.assertTrue(any(hasattr(s, "tuning_id") for s in specs))
+        self.assertTrue(all(hasattr(s, "path") for s in specs))
         self.assertTrue(ATTENTION_EXECUTION_REGISTRY.require_build)
         self.assertTrue(ATTENTION_EXECUTION_REGISTRY.require_torch_binding)
 
@@ -79,6 +80,8 @@ class TestSweepSpace(unittest.TestCase):
             manual = []
             seen = set()
             for _candidate, spec in registered_attention_combos(req):
+                if not hasattr(spec, "path"):
+                    continue
                 key = spec_identity(spec)
                 if key not in seen:
                     seen.add(key)

@@ -106,6 +106,51 @@ class TestTuningSpace(unittest.TestCase):
         matching = [r for r in results if r.spec.tuning_id == pinned]
         self.assertEqual(len(matching), 1)
 
+    def test_runtime_cache_size_refreshes_i64_spec_and_id(self):
+        _candidate, _req, specs = _specs_for(
+            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm"
+        )
+        base = specs[0]
+        at_limit = base.with_num_kv_blocks(65536)
+        above_limit = base.with_num_kv_blocks(65537)
+        self.assertFalse(at_limit.kernel_spec.use_i64_kv_addr)
+        self.assertEqual(at_limit.tuning_id, base.tuning_id)
+        self.assertTrue(above_limit.kernel_spec.use_i64_kv_addr)
+        self.assertNotEqual(above_limit.tuning_id, base.tuning_id)
+        self.assertEqual(above_limit.num_kv_blocks, 65537)
+
+        _candidate, _req, split_specs = _specs_for(
+            "attention_gfx950_u3d_splitkv_seg64_t1xb",
+            seqlen_q=1,
+            seqlen_k=4096,
+        )
+        split = split_specs[0]
+        split_i64 = split.with_num_kv_blocks(65537)
+        self.assertTrue(split_i64.kernel_spec.use_i64_kv_addr)
+        self.assertEqual(split_i64.reduce_spec, split.reduce_spec)
+        self.assertNotEqual(split_i64.tuning_id, split.tuning_id)
+
+    def test_tuning_wrapper_preserves_fp8_encoding(self):
+        gfx950_candidate, _req, gfx950_specs = _specs_for(
+            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+            use_fp8=True,
+            fp8_fnuz=False,
+        )
+        _gfx942_candidate, _req, gfx942_specs = _specs_for(
+            "attention_gfx942_u3d_splitkv_seg64_t1xb",
+            arch="gfx942",
+            seqlen_q=1,
+            seqlen_k=4096,
+            use_fp8=True,
+            fp8_fnuz=True,
+        )
+        self.assertTrue(gfx950_specs)
+        self.assertTrue(gfx942_specs)
+        self.assertFalse(gfx950_specs[0].fp8_fnuz)
+        self.assertTrue(gfx942_specs[0].fp8_fnuz)
+        with self.assertRaisesRegex(ValueError, "requires OCP"):
+            gfx950_candidate.built(replace(gfx950_specs[0], fp8_fnuz=True), "gfx950")
+
     def test_narrow_gfx942_never_offers_k_hbm_direct(self):
         _c, _req, specs = _specs_for(
             "attention_gfx942_u2d_narrow_nw2_mw16_t4xb_llvm", arch="gfx942"

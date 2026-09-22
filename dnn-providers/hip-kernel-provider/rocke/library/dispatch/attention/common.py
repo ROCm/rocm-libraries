@@ -398,7 +398,15 @@ class AttentionTuningSpec:
     candidate_name: str
     tuning_id: str
     kernel_spec: Any
+    fp8_fnuz: bool = False
+    num_kv_blocks: int = 0
     reduce_spec: Any = None
 
     def kernel_name(self) -> str:
         return self.kernel_spec.kernel_name()
+
+    def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
+        """Refresh runtime-addressing state after the paged cache is known."""
+        from .tuning_common import retarget_tuning_spec
+
+        return retarget_tuning_spec(self, num_kv_blocks=int(num_kv_blocks))

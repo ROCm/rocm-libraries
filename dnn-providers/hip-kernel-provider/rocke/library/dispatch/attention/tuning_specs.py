@@ -34,6 +34,27 @@ WAVES_PER_EU: Tuple[Optional[int], ...] = (None, 1, 2, 3, 4)
 NUM_SEGMENTS: Tuple[int, ...] = (8, 16, 32, 64, 128)
 
 
+def validate_explicit_fp8_encoding(*, arch: str, use_fp8: bool, fp8_fnuz: bool) -> None:
+    """Reject an explicit spec whose declared FP8 bytes mismatch the target."""
+    if not use_fp8:
+        if fp8_fnuz:
+            raise ValueError("fp8_fnuz=True requires use_fp8=True")
+        return
+
+    from kernels.common.fmha_fwd_fp8 import _FNUZ_FP8_TARGET_FAMILIES
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    target_is_fnuz = target.target_family in _FNUZ_FP8_TARGET_FAMILIES
+    if bool(fp8_fnuz) != target_is_fnuz:
+        expected = "FNUZ" if target_is_fnuz else "OCP"
+        declared = "FNUZ" if fp8_fnuz else "OCP"
+        raise ValueError(
+            f"explicit FP8 tuning spec declares {declared} bytes, but {arch} "
+            f"requires {expected}"
+        )
+
+
 @dataclass(frozen=True)
 class ExplicitAttention2DConfig:
     """A complete, non-heuristic 2D geometry plus codegen setting."""
@@ -155,6 +176,9 @@ def make_explicit_attention_2d_spec(
         raise ValueError(
             f"explicit 2D attention tuning requires gfx942/gfx950, got {arch}"
         )
+    validate_explicit_fp8_encoding(
+        arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
+    )
     if config.num_warps not in NUM_WARPS:
         raise ValueError(f"num_warps must be one of {NUM_WARPS}")
     if config.block_m_per_warp not in BLOCK_M_PER_WARP:
@@ -225,6 +249,9 @@ def make_explicit_attention_3d_specs(
         raise ValueError(
             f"explicit 3D attention tuning requires gfx942/gfx950, got {arch}"
         )
+    validate_explicit_fp8_encoding(
+        arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
+    )
     if config.num_segments not in NUM_SEGMENTS:
         raise ValueError(f"num_segments must be one of {NUM_SEGMENTS}")
     if config.waves_per_eu not in WAVES_PER_EU:
