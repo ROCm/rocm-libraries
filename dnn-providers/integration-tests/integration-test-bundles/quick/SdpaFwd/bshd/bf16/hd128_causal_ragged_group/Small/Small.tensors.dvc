@@ -7,10 +7,6 @@ outs:
   remote: golden-data
 - path: Small.tensor11.bin
   remote: golden-data
-- path: Small.tensor12.bin
-  remote: golden-data
-- path: Small.tensor13.bin
-  remote: golden-data
 - path: Small.tensor2.bin
   remote: golden-data
 - path: Small.tensor3.bin

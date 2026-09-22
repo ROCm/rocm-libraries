@@ -57,7 +57,11 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 #          cumulative; mode derived from --seq-lens-*/--ragged-offsets (no
 #          --variable-seq-lens); ragged+seq-lens packs compactly with small
 #          trailing padding so ragged_offset spacing differs from seq_lens
-GENERATOR_VERSION = "1.2.0"
+# 1.3.0 — Ragged offsets step in TOKEN units (not elements); Q/O share one aux
+#          offset tensor and K/V share another (uids 10/11 only); each ragged
+#          primary emits ragged_offset_multiplier = strides[1] (H*D) to scale
+#          tokens to elements
+GENERATOR_VERSION = "1.3.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -150,16 +154,17 @@ def pack_ragged(tensor_bhsd, seq_lens):
     return torch.cat(slices, dim=0).contiguous()  # [total_tokens, H, D]
 
 
-def ragged_offsets(seq_lens, num_heads, head_dim):
-    """Element-unit start positions [B+1, 1, 1, 1] int32 for a packed BSHD buffer.
+def ragged_offsets(physical_lens):
+    """Token-unit start positions [B+1, 1, 1, 1] int32 for a packed BSHD buffer.
 
-    Offsets step by seq_lens[b] * num_heads * head_dim so ragged_offset[B] equals
-    the total packed element count and each block is a whole number of seq rows.
+    Offsets step by physical_lens[b] tokens so ragged_offset[B] equals the total
+    packed token count. A token is head-dim independent; each primary's own
+    ragged_offset_multiplier scales tokens to elements, so this aux is shared
+    across Q/O and across K/V even when D_qk != D_v.
     """
-    seq_stride = num_heads * head_dim
     offsets = [0]
-    for s in seq_lens:
-        offsets.append(offsets[-1] + s * seq_stride)
+    for s in physical_lens:
+        offsets.append(offsets[-1] + s)
     return torch.tensor(offsets, dtype=torch.int32).reshape(len(offsets), 1, 1, 1)
 
 
@@ -300,8 +305,8 @@ def build_graph_json(
     primaries = [
         (UID_Q, "Q", q_dims, qkv_dtype, UID_RAGGED_OFFSET_Q),
         (UID_K, "K", k_dims, qkv_dtype, UID_RAGGED_OFFSET_K),
-        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_V),
-        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_O),
+        (UID_V, "V", v_dims, qkv_dtype, UID_RAGGED_OFFSET_K),
+        (UID_O, "O", o_dims, o_dtype, UID_RAGGED_OFFSET_Q),
     ]
     for uid, name, dims, dt, ragged_offset_uid in primaries:
         # Ragged primaries declare padded BSHD dims [B, S_max, H, D] (seqAxis=1)
@@ -322,6 +327,7 @@ def build_graph_json(
         }
         if ragged:
             entry["ragged_offset_tensor_uid"] = ragged_offset_uid
+            entry["ragged_offset_multiplier"] = entry_strides[1]
         tensors.append(entry)
 
     if stats:
@@ -371,8 +377,6 @@ def build_graph_json(
         for uid, name in [
             (UID_RAGGED_OFFSET_Q, "RaggedOffsetQ"),
             (UID_RAGGED_OFFSET_K, "RaggedOffsetK"),
-            (UID_RAGGED_OFFSET_V, "RaggedOffsetV"),
-            (UID_RAGGED_OFFSET_O, "RaggedOffsetO"),
         ]:
             tensors.append(
                 {
@@ -911,13 +915,11 @@ def generate_forward_bundle(
             ("DescaleV", descale_v, UID_DESCALE_V, list(descale_v.shape))
         )
     if ragged:
-        for name, uid, physical_lens, num_heads, head_dim in [
-            ("RaggedOffsetQ", UID_RAGGED_OFFSET_Q, physical_q, H_q, D_qk),
-            ("RaggedOffsetK", UID_RAGGED_OFFSET_K, physical_kv, H_kv, D_qk),
-            ("RaggedOffsetV", UID_RAGGED_OFFSET_V, physical_kv, H_kv, D_v),
-            ("RaggedOffsetO", UID_RAGGED_OFFSET_O, physical_q, H_q, D_v),
+        for name, uid, physical_lens in [
+            ("RaggedOffsetQ", UID_RAGGED_OFFSET_Q, physical_q),
+            ("RaggedOffsetK", UID_RAGGED_OFFSET_K, physical_kv),
         ]:
-            offsets = ragged_offsets(physical_lens, num_heads, head_dim)
+            offsets = ragged_offsets(physical_lens)
             tensor_list.append((name, offsets, uid, list(offsets.shape)))
 
     for name, tensor, uid, logical_shape in tensor_list:
