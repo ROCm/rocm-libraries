@@ -228,13 +228,6 @@ function(hkp_wire_pack_target)
     # The authored root is a tree: glob recursively so a descriptor added in any
     # child folder retriggers the pack step. The packer itself walks recursively
     # so a flat glob here would drop the dependency edge for every nested descriptor.
-    #
-    # A descriptor REMOVED from the tree does not retrigger it. CONFIGURE_DEPENDS
-    # re-globs and CMake re-runs, but a shorter DEPENDS list makes no input newer
-    # and changes no command, so the edge stays clean and the wipe below never
-    # fires -- the staged copy of a deleted descriptor survives an incremental
-    # build. A clean configure is always correct. Putting the input set into the
-    # edge, as a digest of the sorted glob, would close it.
     file(GLOB_RECURSE _source_inputs CONFIGURE_DEPENDS
          "${ARG_SOURCE_ROOT}/*")
 
@@ -242,11 +235,28 @@ function(hkp_wire_pack_target)
     # artifacts go stale against the current pipeline code. The resolved
     # rocm_kpack package counts too: kpack_resolver.py imports it and it decides
     # the archive format, so a packer change there must invalidate the stamp.
-    # Deleting one of these sources does not retrigger it either, for the reason
-    # the authored-root glob above records.
     file(GLOB _tool_sources CONFIGURE_DEPENDS
          "${HKP_PYTHON_ROOT}/hkp_pack/*.py"
          "${ARG_ROCM_KPACK_DIR}/rocm_kpack/*.py")
+
+    # The globs above carry each input as its own edge, which covers an added or
+    # edited file but not a REMOVED one: a shorter DEPENDS list makes no input
+    # newer and changes no command, so the edge would stay clean, the wipe below
+    # would never fire, and the staged copy of a deleted descriptor would survive
+    # an incremental build.
+    #
+    # This manifest puts the input SET into the edge. Its content changes when a
+    # path leaves either glob, which makes it newer than the stamp and forces the
+    # pack. COPYONLY rewrites only when the content differs, so an unchanged tree
+    # does not repack on every configure. It lives in the binary dir rather than
+    # under ARG_OUT_ROOT because the pack command wipes that tree -- a dependency
+    # deleted by the command it guards would make every build repack.
+    set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-inputs.txt")
+    set(_manifest_paths ${_source_inputs} ${_tool_sources})
+    list(SORT _manifest_paths)
+    string(REPLACE ";" "\n" _manifest_body "${_manifest_paths}")
+    file(WRITE "${_input_manifest}.in" "${_manifest_body}\n")
+    configure_file("${_input_manifest}.in" "${_input_manifest}" COPYONLY)
 
     hkp_require_kpack_runtime("${_interp}" "the ${_interp_what}")
 
@@ -293,6 +303,7 @@ function(hkp_wire_pack_target)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
+                "${_input_manifest}"
                 ${_interp_dep} ${_wheel_dep}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
