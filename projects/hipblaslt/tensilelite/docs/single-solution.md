@@ -11,9 +11,9 @@ recipes before invoking the same builder once. The explicit YAML entry point
 described here does not perform prediction and retains the normal parameter
 schema. Automatic bundles additionally record ranking, rejected candidates,
 selected parameters, defaults and derived values in `jit_prediction`. Automatic
-prediction supports gfx90a, gfx942, and gfx950 with target-specific matrix
+prediction supports gfx90a, gfx942, gfx950, and gfx1250 with target-specific matrix
 instructions and cache hints. The explicit YAML entry point keeps the normal
-Tensile ISA support surface; it is not restricted to those three targets.
+Tensile ISA support surface; it is not restricted to those four targets.
 
 ```python
 from Tensile.SingleSolution import generateAndBuildSingleSolution

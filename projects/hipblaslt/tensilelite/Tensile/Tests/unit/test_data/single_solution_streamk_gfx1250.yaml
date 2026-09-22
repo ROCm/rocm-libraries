@@ -1,0 +1,47 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Native gfx1250 WMMA/Wave32 adaptation of single_solution_streamk.yaml.
+# Retains the 128x128 tile and deterministic partials shape (256x128x4096).
+# Use TENSILE_STREAMK_FIXED_GRID=16 TENSILE_STREAMK_DYNAMIC_GRID=0.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: true
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: false
+      TransposeB: false
+      UseBeta: true
+      Batched: true
+      StridedBatched: true
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - WavefrontSize: [32]
+        - 1LDSBuffer: [1]
+        - DepthU: [64]
+        - ExpandPointerSwap: [false]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        - MatrixInstruction: [[16, 16, 32, 1, 1, 4, 4, 2, 2]]
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [true]
+        - StoreRemapVectorWidth: [0]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - TransposeLDS: [0]
+        - WorkGroupMapping: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 128, 1, 4096]

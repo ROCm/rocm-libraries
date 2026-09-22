@@ -91,7 +91,7 @@ namespace hipblaslt_ext::experimental
         {
             const auto recommended = hardware.get_recommended_matrix_instruction(dtype);
             require(recommended.m == 16 && recommended.n == 16 && recommended.k != 0,
-                    "no supported square MFMA recommendation for the requested type");
+                    "no supported square matrix-instruction recommendation for the requested type");
             const auto valid    = hardware.get_valid_matrix_instructions(dtype);
             const auto supports = [&](const origami::dim3_t& mi) {
                 return std::any_of(valid.begin(), valid.end(), [&](const auto& item) {
@@ -100,7 +100,8 @@ namespace hipblaslt_ext::experimental
             };
             require(supports(recommended), "Origami recommended an unsupported instruction");
             std::vector<origami::dim3_t> instructions{recommended};
-            // gfx90a/gfx942 recommend K=16 for Half; gfx950 also supports K=32.
+            // Origami provides the native MFMA/WMMA instruction for each architecture.
+            // Add K=16 only if the target also supports it (gfx1250 does not).
             const origami::dim3_t legacyHalf{16, 16, 16};
             if(dtype == origami::data_type_t::Half && recommended.k != 16 && supports(legacyHalf))
                 instructions.push_back(legacyHalf);
@@ -120,10 +121,11 @@ namespace hipblaslt_ext::experimental
                 {256, 256, 2, 2},
                 {128, 16, 4, 1},
             }};
-            // gfx90a has no NT modifier. Modeling bit 4 there would disagree with
-            // Tensile, which strips it while deriving the solution.
+            // gfx90a has no NT modifier; gfx1250 expresses NT via TemporalHint.
+            // Keep both at default hints so the model matches emitted loads.
             std::vector<std::array<int, 2>> hints{{0, 0}};
-            if(hardware.arch != origami::hardware_t::architecture_t::gfx90a)
+            if(hardware.arch != origami::hardware_t::architecture_t::gfx90a
+               && hardware.arch != origami::hardware_t::architecture_t::gfx1250)
             {
                 hints.push_back({4, 0});
                 hints.push_back({0, 4});
@@ -172,8 +174,8 @@ namespace hipblaslt_ext::experimental
         const auto& analytical = *device->analyticalHardware;
         using Arch             = origami::hardware_t::architecture_t;
         require(analytical.arch == Arch::gfx90a || analytical.arch == Arch::gfx942
-                    || analytical.arch == Arch::gfx950,
-                "the predictor supports gfx90a, gfx942, and gfx950");
+                    || analytical.arch == Arch::gfx950 || analytical.arch == Arch::gfx1250,
+                "the predictor supports gfx90a, gfx942, gfx950, and gfx1250");
         require(analytical.N_CU && analytical.NUM_XCD && analytical.lds_capacity
                     && analytical.rf_capacity && analytical.compute_clock_ghz > 0,
                 "actual device resource limits are unavailable");
@@ -258,8 +260,13 @@ namespace hipblaslt_ext::experimental
              << "},\"model_assumptions\":{\"occupancy\":1,\"stream_k\":0,"
                 "\"workgroup_mapping\":\"estimated internally; Tensile uses its default\","
                 "\"vector_widths\":\"Origami defaults; Tensile derives actual widths\","
-                "\"epilogue\":\"output-amax overhead is not modeled\"},"
-                "\"candidates\":[";
+                "\"epilogue\":\"output-amax overhead is not modeled\","
+                "\"architecture_constants\":"
+             << jsonString(analytical.arch == Arch::gfx1250
+                               ? "Origami gfx1250 provisional model: upstream memory constants "
+                                 "reuse gfx950 with gfx1250 overrides; not calibrated for gfx1250"
+                               : "Origami native architecture model")
+             << "},\"candidates\":[";
         size_t count = 0;
         for(const auto& result : ranked)
         {

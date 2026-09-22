@@ -171,16 +171,17 @@ def test_strict_validator_propagates_unexpected_errors(monkeypatch):
 @pytest.mark.parametrize("architecture, dtype, mi_k", [
     ("gfx90a", "h", 16), ("gfx942", "h", 16), ("gfx950", "h", 32),
     ("gfx90a", "s", 4), ("gfx942", "s", 4), ("gfx950", "s", 4),
+    ("gfx1250", "h", 32), ("gfx1250", "s", 4),
 ])
 def test_request_uses_architecture_legal_instruction_and_hints(
     prediction_request, tmp_path, architecture, dtype, mi_k
 ):
-    prediction_request["architecture"] = architecture + ":xnack-"
+    prediction_request["architecture"] = architecture if architecture == "gfx1250" else architecture + ":xnack-"
     prediction_request["problem"]["data_type"] = dtype
     prediction_request["candidates"] = prediction_request["candidates"][:1]
     parameters = prediction_request["candidates"][0]["parameters"]
     parameters["MatrixInstruction"][2] = mi_k
-    parameters["NonTemporalB"] = 0 if architecture == "gfx90a" else 4
+    parameters["NonTemporalB"] = 0 if architecture in ("gfx90a", "gfx1250") else 4
     source = tmp_path / "request.json"
     source.write_text(json.dumps(prediction_request))
     request = JG._readRequest(source)
@@ -193,6 +194,7 @@ def test_request_uses_architecture_legal_instruction_and_hints(
     ("gfx90a", "h", 32, 0), ("gfx942", "h", 32, 0),
     ("gfx90a", "s", 16, 0), ("gfx942", "s", 16, 0), ("gfx950", "s", 16, 0),
     ("gfx90a", "h", 16, 4), ("gfx90a", "s", 4, 4),
+    ("gfx1250", "h", 16, 0), ("gfx1250", "h", 32, 4), ("gfx1250", "s", 4, 4),
 ])
 def test_request_rejects_architecture_incompatible_recipe(
     prediction_request, tmp_path, architecture, dtype, mi_k, hint
@@ -205,7 +207,7 @@ def test_request_rejects_architecture_incompatible_recipe(
     parameters["NonTemporalA"] = hint
     source = tmp_path / "request.json"
     source.write_text(json.dumps(prediction_request))
-    with pytest.raises(SS.SingleSolutionConfigError, match="MFMA depth|cache hint"):
+    with pytest.raises(SS.SingleSolutionConfigError, match="matrix-instruction depth|cache hint"):
         JG._readRequest(source)
 
 
@@ -236,6 +238,7 @@ def test_prediction_rejects_scaling_before_generation(prediction_request, tmp_pa
 @pytest.mark.parametrize("architecture, dtype, mi_k", [
     ("gfx90a", "h", 16), ("gfx942", "h", 16), ("gfx950", "h", 32),
     ("gfx90a", "s", 4), ("gfx942", "s", 4), ("gfx950", "s", 4),
+    ("gfx1250", "h", 32), ("gfx1250", "s", 4),
 ])
 def test_architecture_recipe_cross_compiles_without_gpu(
     prediction_request, tmp_path, architecture, dtype, mi_k
@@ -253,7 +256,7 @@ def test_architecture_recipe_cross_compiles_without_gpu(
     prediction_request["candidates"] = prediction_request["candidates"][:1]
     parameters = prediction_request["candidates"][0]["parameters"]
     parameters.update(MatrixInstruction=[16, 16, mi_k, 1, 1, 1, 1, 2, 2], DepthU=32,
-                      NonTemporalA=0, NonTemporalB=0 if architecture == "gfx90a" else 4)
+                      NonTemporalA=0, NonTemporalB=0 if architecture in ("gfx90a", "gfx1250") else 4)
     source = tmp_path / "request.json"
     source.write_text(json.dumps(prediction_request))
     output = tmp_path / "cross-compiled"
@@ -277,7 +280,9 @@ def test_architecture_recipe_cross_compiles_without_gpu(
     suffix = "f16" if dtype == "h" else "f32"
     # CDNA2 assembly uses the legacy mnemonic without a separating underscore.
     separator = "" if architecture == "gfx90a" else "_"
-    assert f"v_mfma_f32_16x16x{mi_k}{separator}{suffix}" in assembly
+    kind = "wmma" if architecture == "gfx1250" else "mfma"
+    assert f"v_{kind}_f32_16x16x{mi_k}{separator}{suffix}" in assembly
+    assert prediction["resolved_parameters"]["WavefrontSize"] == (32 if architecture == "gfx1250" else 64)
 
 
 def test_amax_batch_predicate_checked_before_compilation(prediction_request):

@@ -5,7 +5,8 @@ recipes. `Tensile.JitGemm` validates them in ranked order, fills the remaining
 parameters from Tensile defaults, and uses the shared `Tensile.SingleSolution`
 builder to compile the first valid solution. It then passes that solution through the
 normal hipBLASLt algorithm support, workspace, and execution paths. Generation
-finishes before correctness checks, warmup, and timing. This experimental feature
+finishes before correctness checks, warmup, and timing. CPU timing mode still
+includes host dispatch for each GEMM. This experimental feature
 targets functional coverage; the predicted solution is not guaranteed to be the
 fastest available kernel.
 
@@ -25,7 +26,7 @@ hipblaslt-bench --jit-gemm -m 256 -n 128 -k 512 \
 The benchmark defaults to FP16 matrices with FP32 computation and the C API.
 FP32 matrices are selected with `-r f32_r`. `--api_method mix` and
 `--api_method cpp` use the existing extension preparation and execution paths.
-Automatic prediction supports gfx90a, gfx942, and gfx950 with matching FP16 or
+Automatic prediction supports gfx90a, gfx942, gfx950, and gfx1250 with matching FP16 or
 FP32 matrix types, FP32 computation, N/T transposes, and strided batches.
 Output-amax is optional and currently requires one
 batch. Other epilogues, datatype combinations, and unsupported descriptor
@@ -35,8 +36,10 @@ prediction does not support C/D scaling.
 
 The actual device selects the Origami hardware model and resource limits. FP16
 recipes use `16x16x16` matrix instructions on gfx90a/gfx942 and may also use
-`16x16x32` on gfx950; FP32 uses `16x16x4`. gfx90a recipes use zero A/B cache hints
-because that architecture has no non-temporal modifier. Tensile validates the
+`16x16x32` on gfx950. gfx1250 uses Wave32 WMMA with `16x16x32` for FP16;
+FP32 uses `16x16x4` on all four targets. gfx90a has no non-temporal modifier; gfx1250 uses separate temporal hints,
+so both keep `NonTemporalA/B` at zero. Origami's gfx1250 entry currently uses provisional memory constants
+with gfx950 values and gfx1250 overrides; its estimates are not calibrated for gfx1250. Tensile validates the
 chosen parameters against the target ISA before compilation. Origami's latency
 estimate does not model the extra output-amax work.
 
@@ -49,7 +52,8 @@ created when rejecting a JIT/tuning conflict.
 Artifacts are retained in a fresh directory under the system temporary directory.
 Use `--jit-output-dir /path/to/artifact-parent` to choose its parent. The recipe,
 manifest, and prediction summary are printed to stderr; benchmark CSV remains on
-stdout. The manifest records the Origami ranking, earlier rejected candidates,
+stdout. Generator and compiler diagnostics remain in the retained generator log.
+The manifest records the Origami ranking, earlier rejected candidates,
 selected parameters, defaults, actual problem and hardware, and generated code
 objects. Only `MatrixInstruction`, `DepthU`, and `NonTemporalA/B` are selected
 by prediction. Other tuning fields start at
@@ -97,7 +101,7 @@ execution. After rebuilding the same build with JIT disabled, `--feature-off`
 checks the unavailable-feature diagnostic. The full numerical matrix includes
 FP16/FP32, all three API modes, odd dimensions, transpose variants, a padded
 strided batch, and single-batch output-amax. Pass `--architecture gfx90a`,
-`gfx942`, or `gfx950` to match the executing device; the test verifies that the
+`gfx942`, `gfx950`, or `gfx1250` to match the executing device; the test verifies that the
 recorded instruction and cache hints are legal for that architecture. Run it
 on each target GPU in shared CI. Cross-compiling an architecture's kernels does
 not establish numerical correctness on that GPU. The two-second compiler-delay
@@ -105,7 +109,7 @@ check is a timing-boundary test, not a kernel performance requirement.
 
 The `hipblaslt-jit-gemm-ci.yml` workflow builds this checkout and runs the full
 benchmark matrix plus standalone and normal-API Stream-K/amax fixtures on native
-gfx90a and gfx942 runners. It installs only SDK dependencies, stages the checkout's
+gfx90a, gfx942, gfx950, and gfx1250 runners. It installs only SDK dependencies, stages the checkout's
 header-only hipblas-common, and uses an empty prebuilt device-library directory.
 The shared driver `.github/scripts/test_hipblaslt_jit.py` accepts `--build`,
 `--architecture`, and a fresh `--output` directory; `--case` selects a single route

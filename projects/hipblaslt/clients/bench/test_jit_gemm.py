@@ -79,12 +79,17 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
         require(math.isfinite(score) and 0 < score < 1e300, 'Invalid Origami score')
         parameters = candidate['parameters']
         mi = parameters['MatrixInstruction']
-        permitted_k = {4} if case['dtype'] == 's' else ({16, 32} if architecture == 'gfx950' else {16})
+        if case['dtype'] == 's':
+            permitted_k = {4}
+        elif architecture == 'gfx1250':
+            permitted_k = {32}
+        else:
+            permitted_k = {16, 32} if architecture == 'gfx950' else {16}
         require(mi[:2] == [16, 16] and mi[2] in permitted_k,
                 f'Unsupported {architecture} matrix instruction: {mi}')
-        if architecture == 'gfx90a':
+        if architecture in ('gfx90a', 'gfx1250'):
             require(parameters['NonTemporalA'] == parameters['NonTemporalB'] == 0,
-                    'gfx90a recipe uses unsupported cache hints')
+                    f'{architecture} recipe uses unsupported cache hints')
     # Origami can reorder near-equal scores using tie-breaking. Preserve its rank order.
     rejected = {item['candidate_id'] for item in prediction['rejections']}
     accepted = next(candidate for candidate in ranked if candidate['id'] not in rejected)
@@ -161,7 +166,7 @@ def main():
     parser.add_argument('--feature-off', action='store_true')
     parser.add_argument('--negative-only', action='store_true')
     parser.add_argument('--timeout', type=int, default=600)
-    parser.add_argument('--architecture', choices=('gfx90a', 'gfx942', 'gfx950'), default='gfx950',
+    parser.add_argument('--architecture', choices=('gfx90a', 'gfx942', 'gfx950', 'gfx1250'), default='gfx950',
                         help='Expected real GPU architecture; does not override the runtime device')
     args = parser.parse_args()
     bench, build = args.bench.resolve(strict=True), args.build_root.resolve(strict=True)

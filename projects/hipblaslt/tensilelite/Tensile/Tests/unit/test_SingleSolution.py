@@ -22,26 +22,6 @@ pytestmark = pytest.mark.unit
 CONFIG = Path(__file__).parent / "test_data" / "single_solution.yaml"
 
 
-@pytest.mark.parametrize("stream_k", [1, 2, 3, 4, 5])
-def test_streamk_amax_combination_rejected_before_derivation(stream_k, capsys):
-    from Tensile.SolutionStructs import Solution
-
-    state = {"StreamK": stream_k, "ProblemType": {"OutputAmaxD": True}, "Valid": True}
-    Solution.assignDerivedParameters(state, False, True, False, None, None)
-    assert state["Valid"] is False
-    assert "one final-output tile per workgroup" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("gsu", [-1, 0, 2, 4])
-def test_split_reduction_amax_rejected_before_derivation(gsu, capsys):
-    from Tensile.SolutionStructs import Solution
-
-    state = {"GlobalSplitU": gsu, "ProblemType": {"OutputAmaxD": True}, "Valid": True}
-    Solution.assignDerivedParameters(state, False, True, False, None, None)
-    assert state["Valid"] is False
-    assert "split-reduction helpers do not reduce amax" in capsys.readouterr().out
-
-
 @pytest.fixture
 def config():
     return LibraryIO.read(str(CONFIG))

@@ -182,9 +182,9 @@ and one batch: its reduction must see final output, and its workgroup reduction
 does not include batch offsets. The shared generator validation and runtime
 predicates enforce these limits for both API routes.
 
-Automatic prediction supports gfx90a, gfx942, and gfx950. Explicit YAML uses the
+Automatic prediction supports gfx90a, gfx942, gfx950, and gfx1250. Explicit YAML uses the
 normal target ISA and solution validators. Cross-compilation tests cover FP16
-and FP32 recipes for all three architectures; runtime correctness must also be
+and FP32 recipes for all four architectures; runtime correctness must also be
 checked on each GPU. Stream capture in the standalone owner and architecture
 aliases not represented by the device's HIP name remain unsupported.
 The owner API has no cache, tuning/benchmarking, transparent fallback, or package

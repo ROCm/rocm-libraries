@@ -25,9 +25,9 @@ from Tensile import SingleSolution as SS
 _PARAMETERS = {"MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB"}
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
 _MAX_CANDIDATES = 192
-# This bounded recipe family uses the native square MFMA instructions in Origami's
-# per-architecture instruction map. It does not retarget gfx950 instructions.
-_HALF_MI_DEPTHS = {"gfx90a": (16,), "gfx942": (16,), "gfx950": (16, 32)}
+# This bounded recipe family uses the native square matrix instructions in Origami's
+# per-architecture instruction map. Tensile derives the native Wave32/64 default for each target.
+_HALF_MI_DEPTHS = {"gfx90a": (16,), "gfx942": (16,), "gfx950": (16, 32), "gfx1250": (32,)}
 
 
 def _require(condition, message):
@@ -57,7 +57,7 @@ def _readRequest(path):
     _require(request.get("model") == "origami.gemm.estimation", "Unexpected prediction model")
     _require(isinstance(request.get("architecture"), str), "Missing target architecture")
     architecture = request["architecture"].split(":", 1)[0]
-    _require(architecture in _HALF_MI_DEPTHS, "Expected gfx90a, gfx942, or gfx950")
+    _require(architecture in _HALF_MI_DEPTHS, "Expected gfx90a, gfx942, gfx950, or gfx1250")
     SS._target(request["architecture"], {})
     problem = request.get("problem")
     _require(isinstance(problem, dict), "Missing problem descriptors")
@@ -96,12 +96,12 @@ def _readRequest(path):
         _require(isinstance(mi, list) and len(mi) == 9
                  and all(_integer(value, 1) for value in mi)
                  and mi[0:2] == [16, 16] and mi[3:5] == [1, 1]
-                 and mi[7] * mi[8] == 4, "Expected a four-wave square MFMA recipe")
+                 and mi[7] * mi[8] == 4, "Expected a four-wave square matrix-instruction recipe")
         depths = _HALF_MI_DEPTHS[architecture] if problem["data_type"] == "h" else (4,)
-        _require(mi[2] in depths, f"Unsupported {architecture} MFMA depth for the input type")
+        _require(mi[2] in depths, f"Unsupported {architecture} matrix-instruction depth for the input type")
         _require(_integer(parameters["DepthU"], 1), "DepthU must be positive")
         for key in ("NonTemporalA", "NonTemporalB"):
-            allowedHints = (0,) if architecture == "gfx90a" else (0, 4)
+            allowedHints = (0,) if architecture in ("gfx90a", "gfx1250") else (0, 4)
             _require(type(parameters[key]) is int and parameters[key] in allowedHints,
                      f"Unsupported {architecture} cache hint")
     return request
@@ -242,7 +242,7 @@ def _select(request, configPath, derive):
             "resolved_parameters": resolved,
             "derived_parameters": {name: value for name, value in resolved.items()
                                    if name not in selected and defaults.get(name) != value},
-            "wave_layout_origin": "Four-wave MFMA recipe; retained with the selected candidate",
+            "wave_layout_origin": "Four-wave matrix-instruction recipe; native wave size from Tensile defaults",
             "problem": copy.deepcopy(request["problem"]),
             "hardware": copy.deepcopy(request.get("hardware", {})),
             "model_assumptions": copy.deepcopy(request.get("model_assumptions", {})),
