@@ -3,11 +3,12 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust x.x.x for ROCm 10.1.0
+## rocThrust 4.7.0 for ROCm 10.1.0
 
 ### Changed
 
 * rocThrust now searches for an existing SQLite3 system library first by default.  SQLITE_USE_SYSTEM_PACKAGE can be set to OFF to force a local download of SQLite3.  The minimum required version of SQLite3 is 3.51.3.
+* Updated the mechanism in which rocThrust looks for and includes libhipcxx to be compliant with libhipcxx packaging changes in ROCm 10.1
 
 ## rocThrust 4.6.0 for ROCm 10.0.0
  

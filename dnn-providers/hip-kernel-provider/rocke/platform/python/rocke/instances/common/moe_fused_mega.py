@@ -55,6 +55,11 @@ from ...helpers.tensor_view import (
     TensorView,
     make_global_view,
 )
+from ._moe_fused_mega_lds import (
+    LdsAlloc,
+    lds_elem_bytes,
+    validate_mega_lds_budget,
+)
 from .gemm_universal import (
     DataSpec,
     TileSpec,
@@ -440,6 +445,32 @@ def _emit_moe_down_kloop_lds_a(
 
 
 # ---------------------------------------------------------------------------
+# LDS budget
+# ---------------------------------------------------------------------------
+
+
+def _lds_allocs(spec: FusedMegaKernelSpec) -> Tuple[LdsAlloc, ...]:
+    """Every LDS buffer :func:`build_moe_fused_mega_gemm` allocates, in order.
+
+    Keep in lock-step with the ``b.smem_alloc`` calls in the builder: this is
+    what the whole-kernel budget in :mod:`._moe_fused_mega_lds` is computed
+    from. All five buffers are declared in the prologue and are all referenced,
+    so the emitted pool is their sum -- the gate/up operands are NOT reused for
+    the down operand (see that module for why the packer cannot alias them).
+    """
+    t = spec.gate_up_tile()
+    td = spec.down_tile()
+    eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+    return (
+        LdsAlloc("A_smem", eb, t.tile_m * t.tile_k),
+        LdsAlloc("Bg_smem", eb, t.tile_n * t.tile_k),
+        LdsAlloc("Bu_smem", eb, t.tile_n * t.tile_k),
+        LdsAlloc("Hidden_smem", eb, t.tile_m * t.tile_n),
+        LdsAlloc("Bd_smem", eb, td.tile_n * td.tile_k),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
 
@@ -458,7 +489,9 @@ def build_moe_fused_mega_gemm(
     arch catalog (e.g. a gfx950-only wide atom requested with ``arch="gfx942"``)
     raises a structured error here instead of crashing comgr at lower time.
     Requires an MFMA (CDNA) target; wave32/WMMA targets (gfx1250) are rejected
-    by the GEMM-spec validator.
+    by the GEMM-spec validator. A tiling whose two GEMMs each fit the per-WG LDS
+    budget but whose fused total does not is rejected too -- the two sub-specs
+    are validated independently and neither sees ``Hidden_smem``.
     """
 
     u_gu = spec.gate_up_universal_spec()
@@ -469,6 +502,9 @@ def build_moe_fused_mega_gemm(
     ok, why = is_valid_gemm_spec(u_down, arch=arch)
     if not ok:
         raise ValueError(f"invalid fused-mega down GEMM spec: {why}")
+    ok, why = validate_mega_lds_budget(_lds_allocs(spec), arch)
+    if not ok:
+        raise ValueError(f"invalid fused-mega spec: {why}")
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
@@ -555,6 +591,8 @@ def build_moe_fused_mega_gemm(
     gu_n_off = b.mul(b.block_id_x(), c_block_n)
 
     # ---- LDS allocations ----------------------------------------------
+    # Mirrored by :func:`_lds_allocs` for the whole-kernel budget above; the two
+    # must stay in lock-step.
     # gate/up GEMM operands (single-buffered; Phase 3 adds the X double-buffer).
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
     Bg_smem = b.smem_alloc(storage_dtype, [block_n, block_k], name_hint="Bg_smem")

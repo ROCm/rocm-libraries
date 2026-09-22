@@ -106,7 +106,7 @@ RamDb& RamDb::GetCached(DbKinds db_kind_, const fs::path& path, bool is_system)
 
     auto& instance =
         *instances.emplace(path, std::make_unique<RamDb>(db_kind_, path, is_system)).first->second;
-    if constexpr(!DisableUserDbFileIO)
+    if(!instance.disable_file_io)
     {
         const auto prefetch_lock = exclusive_lock(instance.GetLockFile(), GetLockTimeout());
         MIOPEN_VALIDATE_LOCK(prefetch_lock);
@@ -137,7 +137,7 @@ bool RamDb::StoreRecord(const DbRecord& record)
     const auto lock = exclusive_lock(GetLockFile(), GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
 
-    if constexpr(!DisableUserDbFileIO)
+    if(!disable_file_io)
     {
         if(!StoreRecordUnsafe(record))
             return false;
@@ -160,7 +160,7 @@ bool RamDb::UpdateRecord(DbRecord& record)
     const auto lock = exclusive_lock(GetLockFile(), GetLockTimeout());
     MIOPEN_VALIDATE_LOCK(lock);
 
-    if constexpr(!DisableUserDbFileIO)
+    if(!disable_file_io)
     {
         if(!UpdateRecordUnsafe(record))
             return false;
@@ -186,7 +186,7 @@ bool RamDb::RemoveRecord(const std::string& key)
     const auto is_valid = ValidateUnsafe();
 #endif
 
-    if constexpr(!DisableUserDbFileIO)
+    if(!disable_file_io)
     {
         if(!RemoveRecordUnsafe(key))
             return false;
@@ -222,7 +222,7 @@ bool RamDb::Remove(const std::string& key, const std::string& id)
     if(!record || !record->EraseValues(id))
         return false;
 
-    if constexpr(!DisableUserDbFileIO)
+    if(!disable_file_io)
     {
         if(!StoreRecordUnsafe(*record))
             return false;
@@ -288,7 +288,7 @@ static void Measure(const std::string& funcName, TFunc&& func)
 
 bool RamDb::ValidateUnsafe()
 {
-    if(DisableUserDbFileIO)
+    if(disable_file_io)
         return true;
     if(!fs::exists(GetFileName()))
         return cache.empty();
@@ -302,7 +302,7 @@ bool RamDb::ValidateUnsafe()
 
 void RamDb::Prefetch()
 {
-    if(DisableUserDbFileIO)
+    if(disable_file_io)
         MIOPEN_THROW("Prefetch should never happen with disabled File IO");
 
     Measure("Prefetch", [this]() {
@@ -352,7 +352,7 @@ void RamDb::UpdateCacheEntryUnsafe(const DbRecord& record)
 {
     const auto is_valid = ValidateUnsafe();
 
-    if constexpr(!DisableUserDbFileIO)
+    if(!disable_file_io)
         UpdateDbModificationTime(GetFileName());
 
     if(is_valid)

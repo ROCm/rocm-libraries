@@ -83,8 +83,11 @@ test_categories:
     test_patterns:
       - "quick/*.level1*"
       - "quick/*.level2*"
-      - "quick/spmv_*"
-      - "quick/spsv_*"
+      - "quick/spmv_csr*"
+      - "quick/spmv_coo*"
+      - "quick/spsv_csr*"
+      - "quick/spsv_coo*"
+      - "quick/spsv_csc*"
     exclude:
       - "*known_bug*"
     labels:
@@ -97,8 +100,11 @@ test_categories:
       - "quick/*.level2*"
       - "quick/*.level3*"
       - "quick/*.conversion*"
-      - "quick/spmv_*"
-      - "quick/spsv_*"
+      - "quick/spmv_csr*"
+      - "quick/spmv_coo*"
+      - "quick/spsv_csr*"
+      - "quick/spsv_coo*"
+      - "quick/spsv_csc*"
     exclude:
       - "*known_bug*"
     labels:
@@ -109,8 +115,11 @@ test_categories:
     test_patterns:
       - "quick/*.level1*"
       - "quick/*.level2*"
-      - "quick/spmv_*"
-      - "quick/spsv_*"
+      - "quick/spmv_csr*"
+      - "quick/spmv_coo*"
+      - "quick/spsv_csr*"
+      - "quick/spsv_coo*"
+      - "quick/spsv_csc*"
     exclude:
       - "*known_bug*"
     labels:
@@ -123,8 +132,11 @@ test_categories:
       - "quick/*.level2*"
       - "quick/*.level3*"
       - "quick/*.conversion*"
-      - "quick/spmv_*"
-      - "quick/spsv_*"
+      - "quick/spmv_csr*"
+      - "quick/spmv_coo*"
+      - "quick/spsv_csr*"
+      - "quick/spsv_coo*"
+      - "quick/spsv_csc*"
     exclude:
       - "*known_bug*"
     labels:

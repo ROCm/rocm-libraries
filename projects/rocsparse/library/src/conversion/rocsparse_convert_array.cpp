@@ -165,7 +165,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(source_indextype_)
+        switch(static_cast<int>(source_indextype_))
         {
         // LCOV_EXCL_START
         case deprecated_rocsparse_indextype_u16:
@@ -198,7 +198,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(target_indextype_)
+        switch(static_cast<int>(target_indextype_))
         {
         // LCOV_EXCL_START
         case deprecated_rocsparse_indextype_u16:
@@ -275,7 +275,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(source_indextype_)
+        switch(static_cast<int>(source_indextype_))
         {
         // LCOV_EXCL_START
         case deprecated_rocsparse_indextype_u16:
@@ -308,7 +308,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        switch(target_indextype_)
+        switch(static_cast<int>(target_indextype_))
         {
         // LCOV_EXCL_START
         case deprecated_rocsparse_indextype_u16:

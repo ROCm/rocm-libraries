@@ -221,6 +221,7 @@ def _make_gfx1250_hhs_params(iim, mi=None, **overrides):
         "GlobalSplitUAlgorithm": "MultipleBuffer",
         "TDMInst": 3,
         "HalfPLR": 1,
+        "LDSTrInst": True,
     }
     params.update(overrides)
     mi_params = matrixInstructionToMIParameters(
@@ -326,18 +327,27 @@ def test_halfplr_rejects_missing_unrollmajorlds_on_gfx1250(
     _gp_gfx1250, gfx1250_iim, assembler
 ):
     """gfx1250 HalfPLR=1, TDMInst=3, MIWaveTile=[2,2], SIA=0, NN orientation:
-    TransposeLDS=1 + TLUA=True → UnrollMajorLDSA=False; no LDSTrA either.
-    HalfPLRA=True → packing check at lines 2306-2309 rejects.
+    TransposeLDS=-1 resolves to 1, leaving UnrollMajorLDSA=False with no LDSTrA.
+    HalfPLRA=True -> packing check at lines 2306-2309 rejects.
+
+    SSS is used because its 4-byte elements have no ds_load_tr* variant.
+    TransposeLDS=-1 keeps both TDM operand layouts compatible while A remains
+    tile-major, allowing this test to reach the HalfPLR packing check.
     """
-    mi = [16, 16, 32, 1, 1, 2, 2, 1, 1]
+    mi = [16, 16, 4, 1, 1, 2, 2, 1, 1]
     params = _make_gfx1250_hhs_params(
-        gfx1250_iim, mi=mi, ScheduleIterAlg=0, TransposeLDS=0,
-        # TransposeLDS=0 -> UnrollMajorLDSA=0 (line 1868)
+        gfx1250_iim, mi=mi, ScheduleIterAlg=0, TransposeLDS=-1,
+        ProblemType={
+            "DataType": "s",
+            "DestDataType": "s",
+            "HighPrecisionAccumulate": False,
+        },
     )
     sol = _derive(params, assembler, gfx1250_iim)
     assert sol.get("MIWaveTileA") == 2
-    # With NN and TransposeLDS=0, UnrollMajorLDSA=0 and enableLDSTrA is False
-    # (gfx1250 does have LDSTr but it depends on VW; with GRVW=1 it may be 0).
+    assert sol.get("HalfPLRA") is True
+    assert sol.get("UnrollMajorLDSA") == 0
+    assert sol.get("enableLDSTrA") is False
     assert sol.get("Valid") is False
 
 
