@@ -20221,9 +20221,13 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
       if mxTile > 1:
-        with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_mxTileStride") as tmpStride:
-          mod.add(SLShiftRightB32(sgpr(tmpStride.idx), hex(int(log2(mxTile))), sgpr(sizeRefName(ti)), f"stride0 = Size / MXBlockFree({mxTile})"))
-          mod.add(comp.setTensorStride0(descSgprName(1), tmpStride.idx, ceil(log2(mxUnit)), True))
+        # 1D stride0 = Size (K-row pitch). 2D compresses M/N by MXBlockFree, so
+        # the same field is Size/MXBlockFree. Tile0 e8s in a row are packed
+        # (implicit stride 1); write Group1+5 directly so the shift does not
+        # reuse the dim0 tmp SGPR (a constant-1 mov into that SGPR was landing
+        # in the middle of dim0 encoding).
+        mod.addComment0(f"MXS 2D: stride0 = Size/MXBlockFree({mxTile}) (K-row pitch)")
+        mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), int(log2(mxTile)), False))
       else:
         mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
     else:

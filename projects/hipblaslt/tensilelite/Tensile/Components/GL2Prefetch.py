@@ -4,12 +4,14 @@ from typing import Mapping
 from rocisa.code import Module
 from rocisa.instruction import SMulI32, SAddU64, VMovB32, VAddU32, VAddCOU32, \
     VAddCCOU32, VAddNCU64, VLShiftRightB32, VMulLOU32, VMulHIU32, GlobalPrefetchB8, \
-    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32, SAndB32
+    VCmpGtU32, VCndMaskB32, SSubI32, SMovB32, SAddU32, SAddCU32, SAndB32, \
+    SLShiftRightB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, VCC, GLOBALModifiers, ContinuousRegister
 from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStaticDivideAndRemainder, \
     scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
+from ..Common.MxScaleLayout import mxFreeTile, mxTdmTileM
 
 class GL2PrefetchLoad(GL2Prefetch):
     asmCaps = {"HasGlobalPrefetch": True}
@@ -44,7 +46,10 @@ class GL2PrefetchLoad(GL2Prefetch):
         bpe: float = tp["bpeGR"]
 
         if isMX:
-            coalescedDim = mt * numTileWGs * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            mxTile = mxFreeTile(kernel, tc)
+            mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            # 1D: MT * numTileWGs * mxUnit. 2D: scale-rows * numTileWGs * mxUnit.
+            coalescedDim = mxTdmTileM(mt, mxTile) * numTileWGs * mxUnit
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
         elif tp.get("isSwizzledTDM"):
             # Swizzled buffer is [tileO, kO, kM, tileI, kI]: each row (tileO) is contiguous in K, so
@@ -71,8 +76,15 @@ class GL2PrefetchLoad(GL2Prefetch):
         bpe: float = tp["bpeGR"]
         du: int = kernel["_DepthU%s" % subTc]
         if tc.startswith("MX"):
+            mxTile = mxFreeTile(kernel, tc)
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
                 round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
+            if mxTile > 1:
+                # 1D inc = Size * (DepthU/MXBlock) * bpe. 2D K-row pitch is
+                # Size/MXBlockFree; without this shift CD4_2 PGL1 walks SizeJ
+                # (65536) through a 6144-byte MXSB buffer.
+                mod.add(SLShiftRightB32(sgpr(f"GL2PrefetchInc{tc}"), hex(int(log2(mxTile))),
+                    sgpr(f"GL2PrefetchInc{tc}"), f"MXS 2D: Size/MXBlockFree({mxTile})"))
         elif tp.get("isSwizzledTDM"):
             swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
             mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(swzMi * du * bpe), comment="swizzle addr increment = MI*DepthU*bpe"))
@@ -119,6 +131,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         tmpVgprCoalIdx = writer.vgprPool.checkOutAligned(1, 1)
         if isMX:
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            mxTile: int = mxFreeTile(kernel, tc)
 
         mod.addComment(f"gl2 prefetch calc start addr of {tc}")
         with writer.allocTmpSgpr(numTmpSgpr, 2) as tmpSgprRes:
@@ -165,11 +178,23 @@ class GL2PrefetchLoad(GL2Prefetch):
             mod.add(SSubI32(sgpr(tmpSgprIdx0), sgpr(sgprTileWgName), sgpr(tmpSgprIdx3), \
                 comment="cluster base tile"))
             if isMX:
-                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit * mt, \
-                    comment=f"clusterBaseTile * mxUnit({mxUnit}) * MT({mt})"))
-                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
-                mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
-                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
+                scaleRowsMT = mxTdmTileM(mt, mxTile)
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit * scaleRowsMT, \
+                    comment=f"clusterBaseTile * mxUnit({mxUnit}) * scaleRowsMT({scaleRowsMT})"))
+                if mxTile > 1:
+                    # Edge in scale-row units: ceil(Size/MXBlockFree)-1, not Size-1.
+                    mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), mxTile - 1,
+                                    comment=f"ceil(Size/MXBlockFree({mxTile}))"))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx1), hex(int(log2(mxTile))),
+                                           sgpr(tmpSgprIdx1), "scale rows"))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), 1))
+                    if mxUnit != 1:
+                        mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
+                else:
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
+                    mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
             else:
                 # Swizzle: one macro-tile step is (mt/MI) rows, later scaled by the MI*paddedK row
                 # stride below; normal path steps mt elements along the tile stride.
@@ -181,7 +206,17 @@ class GL2PrefetchLoad(GL2Prefetch):
             # will we have MX stride later?
             if isMX:
                 perpStride = sgpr(tmpSgprIdx2)
-                mod.add(SMulI32(perpStride, sgpr(sgprSizeFreeName), mxUnit, f"MX perp stride"))
+                if mxTile > 1:
+                    # Host 2D is [K_blocks][scale_rows]; pitch to the next K-block
+                    # is Size/MXBlockFree, not Size (1D M/N).
+                    mod.add(SAddU32(perpStride, sgpr(sgprSizeFreeName), mxTile - 1,
+                                    comment=f"ceil(Size/MXBlockFree({mxTile}))"))
+                    mod.add(SLShiftRightB32(perpStride, hex(int(log2(mxTile))), perpStride,
+                                           "MXS 2D perp stride"))
+                    if mxUnit != 1:
+                        mod.add(SMulI32(perpStride, perpStride, mxUnit, "MX perp stride * mxUnit"))
+                else:
+                    mod.add(SMulI32(perpStride, sgpr(sgprSizeFreeName), mxUnit, f"MX perp stride"))
             elif tp.get("isSwizzledTDM"):
                 # swizzle row (perpendicular) stride = MI_dim * paddedK, paddedK = roundUp(SizeL, swzK)
                 swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
