@@ -11,6 +11,7 @@
 #include "ck_tile/host/device_prop.hpp"
 #include "gemm/gemm_profiler.hpp"
 #include "mx_gemm_benchmark.hpp"
+#include <type_traits>
 
 class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHostArgs>
 {
@@ -97,7 +98,8 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
             throw std::runtime_error("gfx1250 MX GEMM supports only split_k=1");
         if(gemm_problem.k_ % 128 != 0 || gemm_problem.k_ % SelectedKernel::TileK != 0)
             throw std::runtime_error("gfx1250 MX GEMM requires K divisible by 128 and TileK");
-        auto shuffle_scales = [&]<bool IsA>(const ck_tile::HostTensor<ScaleType>& input) {
+        auto shuffle_scales = [&](const ck_tile::HostTensor<ScaleType>& input, auto is_a) {
+            constexpr bool IsA     = decltype(is_a)::value;
             constexpr auto tile_mn = IsA ? SelectedKernel::TileM : SelectedKernel::TileN;
             constexpr auto warp_mn = IsA ? SelectedKernel::WarpTileM : SelectedKernel::WarpTileN;
             const auto mn          = IsA ? gemm_problem.m_ : gemm_problem.n_;
@@ -110,8 +112,8 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
                 padded.data(), shuffled.data(), padded_mn, scale_k_size, warp_mn);
             return shuffled;
         };
-        auto scale_a_shuffled = shuffle_scales.template operator()<true>(scale_a_host);
-        auto scale_b_shuffled = shuffle_scales.template operator()<false>(scale_b_host);
+        auto scale_a_shuffled = shuffle_scales(scale_a_host, std::true_type{});
+        auto scale_b_shuffled = shuffle_scales(scale_b_host, std::false_type{});
 #else
         constexpr ck_tile::index_t m_per_xdl = SelectedKernel::WarpTileM;
         constexpr ck_tile::index_t n_per_xdl = SelectedKernel::WarpTileN;

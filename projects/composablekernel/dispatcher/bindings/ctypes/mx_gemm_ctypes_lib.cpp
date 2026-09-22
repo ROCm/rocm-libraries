@@ -46,6 +46,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 // Kernel header force-included via -include. Brings in ck_tile core + the
@@ -270,7 +271,8 @@ int dispatcher_run_mx_gemm(const void* A,
 
     // The gfx1250 WMMA instruction consumes four consecutive E8M0 scales per
     // lane. Pad MN before reshuffling so a partial output tile has valid storage.
-    auto shuffle_scales = [&]<bool IsA>(const ck_tile::HostTensor<ScaleType>& input) {
+    auto shuffle_scales = [&](const ck_tile::HostTensor<ScaleType>& input, auto is_a) {
+        constexpr bool IsA     = decltype(is_a)::value;
         constexpr auto warp_mn = IsA ? m_per_xdl : n_per_xdl;
         constexpr auto tile_mn = IsA ? SelectedKernel::TileM : SelectedKernel::TileN;
         constexpr auto mn_pack = IsA ? m_xdl_pack : n_xdl_pack;
@@ -296,8 +298,8 @@ int dispatcher_run_mx_gemm(const void* A,
             return shuffled;
         }
     };
-    auto scale_a_shuffled = shuffle_scales.template operator()<true>(scale_a_host);
-    auto scale_b_shuffled = shuffle_scales.template operator()<false>(scale_b_host);
+    auto scale_a_shuffled = shuffle_scales(scale_a_host, std::true_type{});
+    auto scale_b_shuffled = shuffle_scales(scale_b_host, std::false_type{});
 
     // ---- Build A/B/C HostTensors with the SAME descriptors the Old-TE profiler
     // uses, then allocate/copy through ck_tile::DeviceMem. This makes the byte

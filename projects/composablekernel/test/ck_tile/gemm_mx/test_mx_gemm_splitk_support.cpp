@@ -4,10 +4,14 @@
 #include "gtest/gtest.h"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
+#include "ck_tile/ops/epilogue/permuten_epilogue.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 
 namespace {
 
-template <ck_tile::index_t VectorSize>
+template <ck_tile::index_t VectorSize,
+          template <typename...> class PipelineType = ck_tile::GemmPipelineAgBgCrCompAsync,
+          template <typename...> class EpilogueType = ck_tile::CShuffleEpilogue>
 bool supports_split_k(ck_tile::index_t split_k)
 {
     using Row         = ck_tile::tensor_layout::gemm::RowMajor;
@@ -23,7 +27,7 @@ bool supports_split_k(ck_tile::index_t split_k)
             Shape,
             ck_tile::TileGemmUniversalTraits<true, true, false, true, Row, Col, Row, true>,
             ck_tile::GemmPipelineScheduler::Intrawave>;
-    using Pipeline        = ck_tile::GemmPipelineAgBgCrCompAsync<Problem>;
+    using Pipeline        = PipelineType<Problem>;
     using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ck_tile::fp8_t,
                                                              ck_tile::fp8_t,
                                                              ck_tile::tuple<>,
@@ -48,10 +52,8 @@ bool supports_split_k(ck_tile::index_t split_k)
                                                              ck_tile::fp8_t,
                                                              ck_tile::fp8_t,
                                                              true>;
-    using Kernel =
-        ck_tile::MxGemmKernel<Partitioner, Pipeline, ck_tile::CShuffleEpilogue<EpilogueProblem>>;
-    // No launch is needed: these dimensions satisfy all constraints except the
-    // scalar FP16 atomic store when split_k is greater than one.
+    using Kernel = ck_tile::MxGemmKernel<Partitioner, Pipeline, EpilogueType<EpilogueProblem>>;
+    // No launch is needed: these dimensions isolate the epilogue's split-K support.
     const ck_tile::MxGemmHostArgs<> args({nullptr},
                                          {nullptr},
                                          {nullptr},
@@ -79,6 +81,30 @@ TEST(MxGemmSplitKSupport, PairedCShuffleRetainsSplitK)
 {
     EXPECT_TRUE(supports_split_k<2>(1));
     EXPECT_TRUE(supports_split_k<2>(2));
+}
+
+TEST(MxGemmSplitKSupport, TdmV1RejectsSplitK)
+{
+    const auto supports =
+        supports_split_k<1, ck_tile::GemmPipelineAgBgCrCompTDMV1, ck_tile::TdmEpilogue>;
+    EXPECT_TRUE(supports(1));
+    EXPECT_FALSE(supports(2));
+}
+
+TEST(MxGemmSplitKSupport, TdmV2RejectsSplitK)
+{
+    const auto supports =
+        supports_split_k<1, ck_tile::GemmPipelineAgBgCrCompTDMV2, ck_tile::TdmEpilogue>;
+    EXPECT_TRUE(supports(1));
+    EXPECT_FALSE(supports(2));
+}
+
+TEST(MxGemmSplitKSupport, PairedPermuteNRetainsSplitK)
+{
+    const auto supports =
+        supports_split_k<2, ck_tile::GemmPipelineAgBgCrCompAsync, ck_tile::PermuteNEpilogue>;
+    EXPECT_TRUE(supports(1));
+    EXPECT_TRUE(supports(2));
 }
 
 } // namespace

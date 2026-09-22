@@ -27,7 +27,7 @@ Data types (verified against ck_tile headers / example/ck_tile/42_mx_gemm):
   scale: ck_tile::e8m0_t (biased exponent, byte e decodes to 2^(e-127); 127 == 1.0)
 """
 
-from dispatcher_common import unified_framework_flags
+from dispatcher_common import arch_feature_defines, normalize_arch, unified_framework_flags
 import concurrent.futures
 import ctypes
 import functools
@@ -85,6 +85,7 @@ def _get_arch() -> str:
         raise RuntimeError(
             "Could not detect GPU architecture from rocminfo; refusing to default. Pass gfx_arch explicitly."
         )
+    arch = normalize_arch(arch)
     _supported = ("gfx950", "gfx1250")
     if arch not in _supported:
         raise ValueError(
@@ -276,7 +277,7 @@ class MxGemmKernelConfig:
     _name_cache: Optional[str] = field(default=None, repr=False, compare=False)
 
     def to_codegen_config(self) -> dict:
-        arch = self.gpu_target or _get_arch()
+        arch = normalize_arch(self.gpu_target or _get_arch())
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
         epilogue = self.epilogue or (
             "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
@@ -355,18 +356,19 @@ class MxGemmKernelConfig:
           {tileM}x{tileN}x{tileK}_{warpM}x{warpN}x{warpK}_{wtM}x{wtN}x{wtK}
         Only used when the codegen script is absent (never at real build time).
         """
+        arch = normalize_arch(self.gpu_target)
         parts = [
             "mx_gemm",
             self.datatype,
             self.layout,
             self.pipeline
-            or ("comp_tdm" if self.gpu_target == "gfx1250" else "comp_async"),
+            or ("comp_tdm" if arch == "gfx1250" else "comp_async"),
             self.epilogue
             or (
                 "tdm"
                 if (
                     self.pipeline
-                    or ("comp_tdm" if self.gpu_target == "gfx1250" else "comp_async")
+                    or ("comp_tdm" if arch == "gfx1250" else "comp_async")
                 )
                 in ("comp_tdm", "comp_tdm_v2")
                 else "cshuffle"
@@ -846,12 +848,7 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
         *inc,
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
         f"-include{hpp}",
-        "-DCK_TILE_USE_OCP_FP8=1",
-        *(
-            ["-DCK_TILE_USE_WMMA=1", "-DCK_USE_GFX1250", "-DCK_USE_NATIVE_MX_SUPPORT"]
-            if arch == "gfx1250"
-            else []
-        ),
+        *arch_feature_defines(arch),
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={arch}",
         f'-DGFX_ARCH="{arch}"',
@@ -880,11 +877,11 @@ def setup_multiple_mx_gemm_dispatchers(
     `configs` (None on failure). Dedups by .name; per-arch .so cache."""
     if not configs:
         return []
-    arch = gfx_arch or configs[0].gpu_target or _get_arch()
+    arch = normalize_arch(gfx_arch or configs[0].gpu_target or _get_arch())
     if arch not in ("gfx950", "gfx1250"):
         raise ValueError(f"mx_gemm supports gfx950 and gfx1250; requested {arch!r}")
     for config in configs:
-        if gfx_arch is None and config.gpu_target not in (None, arch):
+        if gfx_arch is None and normalize_arch(config.gpu_target) not in ("", arch):
             raise ValueError(
                 "Build MX GEMM configurations for one architecture at a time"
             )
@@ -943,6 +940,7 @@ def setup_multiple_mx_gemm_dispatchers(
 def default_fp8_config(
     gfx_arch: Optional[str] = None, pipeline: Optional[str] = None
 ) -> MxGemmKernelConfig:
+    gfx_arch = normalize_arch(gfx_arch) if gfx_arch else None
     cfg = MxGemmKernelConfig(
         datatype="fp8",
         layout="rcr",

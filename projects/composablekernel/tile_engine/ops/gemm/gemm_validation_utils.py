@@ -1366,6 +1366,9 @@ def validate_gemm_mx(
     if arch == "gfx1250" and pipeline in ("comp_tdm", "comp_tdm_v2"):
         if (warp_m, warp_n, warp_k) != (2, 2, 1):
             return False, "gfx1250 MX GEMM requires 2x2x1 warps"
+        # TdmEpilogue stages the full FP16 output tile in the shared LDS allocation.
+        if tile_m * tile_n * 2 > LDS_SIZE_MAP[arch]:
+            return False, "MX TDM epilogue exceeds the architecture LDS capacity"
         return True, ""
     if (warp_tile_m, warp_tile_n) != (16, 16):
         return False, "MX non-16x16 warp tiles currently require gfx1250 TDM V1/V2"

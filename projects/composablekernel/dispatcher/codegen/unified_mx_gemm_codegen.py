@@ -51,10 +51,11 @@ _THIS_DIR = Path(__file__).resolve().parent
 _GEMM_DIR = (_THIS_DIR / ".." / ".." / "tile_engine" / "ops" / "gemm").resolve()
 _MX_GEMM_DIR = _GEMM_DIR / "mx_gemm"
 
-for _p in (str(_GEMM_DIR), str(_MX_GEMM_DIR)):
+for _p in (str(_THIS_DIR), str(_GEMM_DIR), str(_MX_GEMM_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from codegen_common import normalize_gfx_arch  # noqa: E402
 from gemm_validation_utils import (  # noqa: E402
     GEMM_MX_PIPELINES_BY_ARCH,
     is_tile_config_valid,
@@ -113,7 +114,7 @@ def _validate(cfg: dict) -> None:
     if layout != VALID_LAYOUT:
         raise ValueError(f"layout must be {VALID_LAYOUT!r}, got {layout!r}")
 
-    arch = cfg.get("gpu_target")
+    arch = normalize_gfx_arch(cfg.get("gpu_target") or "")
     if arch not in ARCH_TRAITS:
         raise ValueError("mx_gemm requires explicit gpu_target gfx950 or gfx1250")
     default_pipeline, valid_epilogue = ARCH_TRAITS[arch]
@@ -186,7 +187,7 @@ def _tile_config_from_cfg(cfg: dict) -> dict:
 
 def _trait_combo_from_cfg(cfg: dict) -> Tuple:
     """7-tuple: (pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent)."""
-    valid_pipeline, _ = ARCH_TRAITS[cfg["gpu_target"]]
+    valid_pipeline, _ = ARCH_TRAITS[normalize_gfx_arch(cfg["gpu_target"])]
     pipeline = cfg.get("pipeline", valid_pipeline)
     valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
     return (
@@ -236,7 +237,7 @@ def _make_builder(cfg: dict) -> Iterator["object"]:
         cfg_path = work_dir / "mx_gemm_codegen_config.json"
         cfg_path.write_text(json.dumps(tmp_cfg))
 
-        gpu_target = cfg.get("gpu_target")
+        gpu_target = normalize_gfx_arch(cfg.get("gpu_target") or "")
         if not gpu_target:
             raise ValueError(
                 "mx_gemm codegen requires an explicit 'gpu_target' in the config; "
