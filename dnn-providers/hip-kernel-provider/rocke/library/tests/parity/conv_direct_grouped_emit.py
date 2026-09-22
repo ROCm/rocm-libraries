@@ -282,6 +282,17 @@ def _spec(idx: int):
             DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
             "gfx950",
         )
+    if idx == 25:
+        # dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2.
+        # n_iters = (Ho-1)*stride + KH formula is cross-verified by the C/Python byte-identity gate.
+        p = DirectConvProblem(
+            N=1, H=10, W=10, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=2, stride=2
+        )
+        return (
+            "dwcol",
+            DirectDepthwiseColSpec(problem=p, block_w=4, block_waves=1, dtype="fp16"),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

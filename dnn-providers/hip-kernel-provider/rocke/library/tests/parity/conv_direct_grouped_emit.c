@@ -452,6 +452,27 @@ static int make_cfg(int idx,
         *kind = KIND_DW_DGRAD;
         *arch = "gfx950";
         return 0;
+    case 25:
+        /* dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2.
+         * Cross-verifies the n_iters = (Ho-1)*stride + KH formula. */
+        p.N = 1;
+        p.H = 10;
+        p.W = 10;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 2;
+        p.stride = 2;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

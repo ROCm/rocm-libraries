@@ -1077,6 +1077,52 @@ def build_direct_depthwise_dgrad(
     return _build
 
 
+def build_direct_depthwise_col(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_w=4,
+    block_waves=1,
+    dtype="fp16",
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseColSpec,
+            build_direct_depthwise_col as _build_dwcol,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectDepthwiseColSpec(
+            problem=p,
+            block_w=block_w,
+            block_waves=block_waves,
+            dtype=dtype,
+        )
+        return _build_dwcol(spec, arch=arch)
+
+    return _build
+
+
 def build_grouped_gemm_case(name, arch, m, n, k, e):
     def _build():
         from rocke.instances.gfx950.grouped_gemm import (
@@ -2861,6 +2907,151 @@ def cases():
             PAD=1,
             block_w=16,
             block_waves=1,
+        ),
+    )
+
+    # --- column-streamed depthwise (DirectDepthwiseColSpec) ---
+    # Mirrors library parity emit indices 12-19.  Both gfx950 and gfx942 are covered.
+    # Enforces the repo #1 invariant (byte-identity) for this kernel family.
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s1_fp16",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_s1_fp16",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=128,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            block_w=4,
+            block_waves=2,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_s2_bf16_tail",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_s2_bf16",
+            "gfx950",
+            N=1,
+            H=9,
+            W=9,
+            groups=70,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=2,
+            block_w=4,
+            block_waves=1,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_k31_fp16",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_k31",
+            "gfx950",
+            N=1,
+            H=8,
+            W=8,
+            groups=64,
+            KH=31,
+            KW=31,
+            PAD=15,
+            stride=1,
+            block_w=4,
+            block_waves=1,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_k1_pad0",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_k1",
+            "gfx950",
+            N=2,
+            H=6,
+            W=6,
+            groups=3,
+            KH=1,
+            KW=1,
+            PAD=0,
+            stride=1,
+            block_w=2,
+            block_waves=1,
+            dtype="fp32",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_kh5kw3_bf16",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_kh5kw3",
+            "gfx950",
+            N=1,
+            H=8,
+            W=8,
+            groups=128,
+            KH=5,
+            KW=3,
+            PAD=2,
+            stride=1,
+            block_w=4,
+            block_waves=2,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "conv_direct",
+        "conv_direct/gfx950/dw_col_bw1_tail",
+        "gfx950",
+        build_direct_depthwise_col(
+            "irhash_dwcol_950_bw1",
+            "gfx950",
+            N=1,
+            H=10,
+            W=10,
+            groups=100,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            block_w=1,
+            block_waves=2,
+            dtype="fp32",
+        ),
+    )
+    # gfx942 target — exercises the arch-specific VGPR budget path
+    add(
+        "conv_direct",
+        "conv_direct/gfx942/dw_col_s1_fp16",
+        "gfx942",
+        build_direct_depthwise_col(
+            "irhash_dwcol_942_s1_fp16",
+            "gfx942",
+            N=2,
+            H=8,
+            W=8,
+            groups=128,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            block_w=4,
+            block_waves=2,
+            dtype="fp16",
         ),
     )
 

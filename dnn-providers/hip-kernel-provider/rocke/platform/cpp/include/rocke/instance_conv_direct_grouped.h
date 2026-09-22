@@ -355,8 +355,10 @@ typedef struct rocke_direct_depthwise_col_spec
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
     const char* dtype; /* default "fp16"; one of fp16 / bf16 / fp32 */
-    /* Python's Optional[int] max_live_f32: <= 0 means "unset" (None), i.e. take
-     * the arch VGPR budget as-is. A positive value tightens it via min(). */
+    /* Python's Optional[int] max_live_f32.
+     * 0  = sentinel for Python None: use the arch VGPR budget as-is.
+     * >0 = tighten via min(max_live_f32, arch_budget).
+     * <0 = invalid; is_valid_spec() will reject it. */
     int max_live_f32;
 } rocke_direct_depthwise_col_spec_t;
 

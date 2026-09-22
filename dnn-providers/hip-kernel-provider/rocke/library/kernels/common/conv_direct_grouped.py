@@ -4870,6 +4870,11 @@ class DirectDepthwiseColSpec:
         return kernel_name_join(*parts)
 
     def validate(self) -> None:
+        """Prerequisite check only (cpg=kpg=1).
+
+        Call :func:`is_valid_depthwise_col_spec` for the full constraint set
+        (dtype, geometry, VGPR budget) before dispatch.
+        """
         p = self.problem
         if p.cpg != 1 or p.kpg != 1:
             raise ValueError(
@@ -4936,10 +4941,19 @@ def is_valid_depthwise_col_spec(
             f"stride={p.stride})"
         )
     if p.Ho > p.H:
+        # Over-padded configs (PAD > (KH-1)/2) at stride=1 push Ho > H. They
+        # are geometrically valid at stride > 1 but are rejected here because
+        # the current builder does not need them. Remove this check if a
+        # use-case for full-padding at stride=1 arises (author: jakpiase).
         return False, f"requires Ho <= H (got Ho={p.Ho}, H={p.H})"
 
     if spec.block_w < 1:
         return False, f"block_w must be >= 1 (got {spec.block_w})"
+    if spec.block_w > p.Wo:
+        return False, (
+            f"block_w {spec.block_w} > Wo {p.Wo}; "
+            "reduce block_w to avoid wasted masked loads"
+        )
     if spec.block_waves < 1:
         return False, f"block_waves must be >= 1 (got {spec.block_waves})"
     max_threads = target.limits.max_threads_per_block

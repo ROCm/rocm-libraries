@@ -1288,10 +1288,10 @@ int rocke_direct_depthwise_col_resolve_max_live_f32(const rocke_direct_depthwise
     {
         return 0;
     }
-    budget = target->limits.vgprs * 3 / 8;
-    if(spec->max_live_f32 <= 0)
+    budget = target->limits.vgprs * 3 / 8; /* assumes vgprs % 8 == 0 (holds for all CDNAx) */
+    if(spec->max_live_f32 == 0)
     {
-        return budget; /* Python None -> take the arch budget as-is */
+        return budget; /* 0 is the sentinel for Python None: take the arch budget as-is */
     }
     return (spec->max_live_f32 < budget) ? spec->max_live_f32 : budget;
 }
@@ -1395,6 +1395,9 @@ rocke_status_t rocke_direct_depthwise_col_kernel_name(
     return rocke_kernel_name_join(spec->name, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
 }
 
+/* Prerequisite check only (cpg=kpg=1).
+ * Call rocke_direct_depthwise_col_is_valid_spec() for the full constraint set
+ * (dtype, geometry, VGPR budget) before dispatch. */
 rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_col_spec_t* spec,
                                                    char* reason,
                                                    size_t reason_cap)
@@ -1536,6 +1539,9 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         }
         return false;
     }
+    /* Over-padded configs (PAD > (KH-1)/2) at stride=1 push Ho > H.
+     * They are geometrically valid at stride>1 but are rejected here because
+     * the current builder does not need them. Remove if a use-case arises. */
     if(Ho > p->H)
     {
         if(reason && reason_cap > 0)
@@ -1544,11 +1550,35 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         }
         return false;
     }
+    if(spec->max_live_f32 < 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "max_live_f32 must be 0 (Python None, use arch budget) or positive "
+                     "(got %d)",
+                     spec->max_live_f32);
+        }
+        return false;
+    }
     if(spec->block_w < 1)
     {
         if(reason && reason_cap > 0)
         {
             snprintf(reason, reason_cap, "block_w must be >= 1 (got %d)", spec->block_w);
+        }
+        return false;
+    }
+    if(spec->block_w > Wo)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "block_w %d > Wo %d; reduce block_w to avoid wasted masked loads",
+                     spec->block_w,
+                     Wo);
         }
         return false;
     }

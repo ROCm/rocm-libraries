@@ -79,6 +79,9 @@ _REJECTIONS = [
     # --- block geometry ----------------------------------------------------
     ("block_w_zero", dict(block_w=0), ["block_w", "0"], _ARCH),
     ("block_w_negative", dict(block_w=-2), ["block_w", "-2"], _ARCH),
+    # block_w larger than Wo wastes masked loads with no output contribution.
+    # H=4, W=4, KH=3, PAD=1 -> Wo=4; block_w=6 exceeds Wo but live_f32=4*6+3=27 is within budget.
+    ("block_w_exceeds_wo", dict(H=4, W=4, block_w=6), ["block_w 6", "Wo 4"], _ARCH),
     ("block_waves_zero", dict(block_waves=0), ["block_waves", "0"], _ARCH),
     # 64 waves x 64 lanes = 4096 threads, four times the gfx950 workgroup cap.
     (

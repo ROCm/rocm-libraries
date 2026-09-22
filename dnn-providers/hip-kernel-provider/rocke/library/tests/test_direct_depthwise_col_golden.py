@@ -37,6 +37,7 @@ _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
 _GOLDEN = _TESTS / "golden" / "direct_depthwise_col_ir_sha256.json"
+_GOLDEN_GFX942 = _TESTS / "golden" / "direct_depthwise_col_gfx942_ir_sha256.json"
 _FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCH = "gfx950"
 _SCHEMA = "direct_depthwise_col.ir_golden_sha256/v1"
@@ -152,16 +153,15 @@ def _current_flavor() -> str:
     return _resolve_llvm_flavor()
 
 
-def _sha_for(build: Callable, flavor: str) -> tuple[str, int]:
+def _sha_for(build: Callable, arch: str, flavor: str) -> tuple[str, int]:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-    llvm = _lower_kernel_to_llvm_python(build(), arch=_ARCH, llvm_flavor=flavor)
+    llvm = _lower_kernel_to_llvm_python(build(), arch=arch, llvm_flavor=flavor)
     data = llvm.encode("utf-8")
     return hashlib.sha256(data).hexdigest(), len(data)
 
 
-def _build_doc() -> dict:
-    cases = _cases()
+def _build_doc(cases: dict, arch: str) -> dict:
     return {
         "schema": _SCHEMA,
         "flavors": {
@@ -169,7 +169,7 @@ def _build_doc() -> dict:
                 "cases": {
                     cid: {"sha256": sha, "bytes": nbytes}
                     for cid, build in cases.items()
-                    for sha, nbytes in [_sha_for(build, flavor)]
+                    for sha, nbytes in [_sha_for(build, arch, flavor)]
                 }
             }
             for flavor in _FLAVORS
@@ -177,45 +177,104 @@ def _build_doc() -> dict:
     }
 
 
-def test_direct_depthwise_col_ir_matches_golden():
-    assert _GOLDEN.exists(), (
-        "missing depthwise-col golden fixture; generate it with "
-        f"`python {Path(__file__).name} --write`"
+def _cases_gfx942() -> dict[str, Callable]:
+    """One representative case per key emission branch, targeting gfx942.
+
+    Covers the arch-specific VGPR budget path (512 VGPRs on gfx942) and the
+    gfx942 codegen target, which the gfx950-only golden cases do not exercise.
+    """
+    from kernels.common.conv_direct_grouped import (
+        DirectConvProblem,
+        DirectDepthwiseColSpec,
+        build_direct_depthwise_col,
     )
-    golden = json.loads(_GOLDEN.read_text())
+
+    _arch = "gfx942"
+    cases: dict[str, Callable] = {}
+
+    def add(cid, *, block_w=4, block_waves=2, dtype="fp16", **pkw):
+        problem = DirectConvProblem(cpg=1, kpg=1, **pkw)
+        spec = DirectDepthwiseColSpec(
+            problem=problem,
+            name=f"golden_dwcol_942_{cid}",
+            block_w=block_w,
+            block_waves=block_waves,
+            dtype=dtype,
+        )
+        cases[cid] = lambda spec=spec: build_direct_depthwise_col(spec, arch=_arch)
+
+    # stride=1 fp16 — exercises the gfx942 VGPR budget + codegen target
+    add("s1_k3_h8_bw4", N=2, H=8, W=8, groups=128, KH=3, KW=3, PAD=1)
+    # stride=2 bf16 with both tile guards live — exercises strided tap pruning on gfx942
+    add("s2_bf16_tail", N=1, H=9, W=9, groups=70, KH=3, KW=3, PAD=1, stride=2,
+        block_w=4, block_waves=1, dtype="bf16")
+
+    return cases
+
+
+def _check_golden(golden_path: Path, cases: dict, arch: str) -> None:
+    golden = json.loads(golden_path.read_text())
     assert golden.get("schema") == _SCHEMA
 
     flavor = _current_flavor()
     assert flavor in golden.get("flavors", {}), (
-        f"no depthwise-col golden recorded for LLVM flavor {flavor!r}; "
-        "review and re-bless the fixture"
+        f"no depthwise-col golden recorded for LLVM flavor {flavor!r} "
+        f"(arch={arch}); review and re-bless the fixture"
     )
 
-    cases = _cases()
     recorded = golden["flavors"][flavor]["cases"]
     assert set(recorded) == set(cases), (
-        "depthwise-col golden case set drifted: "
+        f"depthwise-col golden case set drifted (arch={arch}): "
         f"recorded={sorted(recorded)}, current={sorted(cases)}"
     )
 
     drift = []
     for cid, build in cases.items():
         want = recorded[cid]["sha256"]
-        got, nbytes = _sha_for(build, flavor)
+        got, nbytes = _sha_for(build, arch, flavor)
         if got != want:
             drift.append(
                 f"{cid}: {want} -> {got} "
                 f"({recorded[cid]['bytes']} -> {nbytes} bytes)"
             )
     assert not drift, (
-        "depthwise-col LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
+        f"depthwise-col LLVM IR drift vs golden (arch={arch}):\n  "
+        + "\n  ".join(drift)
     )
+
+
+def test_direct_depthwise_col_ir_matches_golden():
+    assert _GOLDEN.exists(), (
+        "missing depthwise-col golden fixture; generate it with "
+        f"`python {Path(__file__).name} --write`"
+    )
+    _check_golden(_GOLDEN, _cases(), _ARCH)
+
+
+def test_direct_depthwise_col_ir_matches_golden_gfx942():
+    if not _GOLDEN_GFX942.exists():
+        import pytest
+
+        pytest.skip(
+            "gfx942 depthwise-col golden not yet blessed; "
+            f"generate with `python {Path(__file__).name} --write-942`"
+        )
+    _check_golden(_GOLDEN_GFX942, _cases_gfx942(), "gfx942")
 
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
         _GOLDEN.parent.mkdir(parents=True, exist_ok=True)
-        _GOLDEN.write_text(json.dumps(_build_doc(), indent=2, sort_keys=True) + "\n")
+        _GOLDEN.write_text(
+            json.dumps(_build_doc(_cases(), _ARCH), indent=2, sort_keys=True) + "\n"
+        )
         print(f"wrote {_GOLDEN}")
+    elif "--write-942" in sys.argv:
+        _GOLDEN_GFX942.parent.mkdir(parents=True, exist_ok=True)
+        _GOLDEN_GFX942.write_text(
+            json.dumps(_build_doc(_cases_gfx942(), "gfx942"), indent=2, sort_keys=True)
+            + "\n"
+        )
+        print(f"wrote {_GOLDEN_GFX942}")
     else:
         test_direct_depthwise_col_ir_matches_golden()
