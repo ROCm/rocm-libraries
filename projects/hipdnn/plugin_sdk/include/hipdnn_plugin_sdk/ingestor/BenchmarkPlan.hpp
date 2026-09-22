@@ -479,9 +479,9 @@ private:
                 candidate.plan->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
             }
 
-            // Drain warmup work before arming. A failed drain is a timing failure,
-            // not permission to reuse the gate with work still pending.
-            if(hipStreamSynchronize(handle.getStream()) != hipSuccess)
+            // Only the default HIP timer needs a warmup drain. Injected timers own
+            // their synchronization and can run without a HIP device.
+            if(!_timer && hipStreamSynchronize(handle.getStream()) != hipSuccess)
             {
                 HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                        << toString(candidate.kernelId)

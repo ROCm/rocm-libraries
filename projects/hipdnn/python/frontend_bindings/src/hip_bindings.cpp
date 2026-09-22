@@ -240,7 +240,9 @@ public:
         return *this;
     }
 
-    void exit(const nb::object&, const nb::object&, const nb::object&)
+    void exit(const nb::object& /*excType*/,
+              const nb::object& /*excValue*/,
+              const nb::object& /*traceback*/)
     {
         closeGate();
     }
@@ -266,7 +268,7 @@ private:
         // the gate without the GIL. Both explicit close() and nanobind deallocation
         // enter here with the GIL held.
         auto gate = std::move(_gate);
-        nb::gil_scoped_release release;
+        const nb::gil_scoped_release release;
         gate.reset();
     }
 
