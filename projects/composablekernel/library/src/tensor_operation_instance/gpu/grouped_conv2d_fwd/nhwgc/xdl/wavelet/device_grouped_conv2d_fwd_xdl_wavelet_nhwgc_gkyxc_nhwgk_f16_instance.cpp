@@ -11,12 +11,12 @@ namespace tensor_operation {
 namespace device {
 namespace instance {
 // Compilation parameters for in[n, hi, wi, g, c] * wei[g, k, y, x, c] = out[n, ho, wo, g, k]
-void add_device_grouped_conv3d_fwd_wavelet_xdl_ndhwgc_gkzyxc_ndhwgk_f16_instances(
-    std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<3,
-                                                                NDHWGC,
-                                                                GKZYXC,
+void add_device_grouped_conv2d_fwd_wavelet_xdl_nhwgc_gkyxc_nhwgk_f16_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
+                                                                NHWGC,
+                                                                GKYXC,
                                                                 Empty_Tuple,
-                                                                NDHWGK,
+                                                                NHWGK,
                                                                 F16,
                                                                 F16,
                                                                 Empty_Tuple,
@@ -27,13 +27,23 @@ void add_device_grouped_conv3d_fwd_wavelet_xdl_ndhwgc_gkzyxc_ndhwgk_f16_instance
 {
     add_device_operation_instances(
         instances,
-        device_grouped_conv_fwd_wavelet_xdl_c_shuffle_instances<3,
-                                                                NDHWGC,
-                                                                GKZYXC,
+        device_grouped_conv_fwd_wavelet_xdl_c_shuffle_instances<2,
+                                                                NHWGC,
+                                                                GKYXC,
                                                                 Empty_Tuple,
-                                                                NDHWGK,
+                                                                NHWGK,
                                                                 F16,
                                                                 ConvFwdDefault>{});
+
+    add_device_operation_instances(
+        instances,
+        device_grouped_conv_fwd_wavelet_xdl_c_shuffle_instances<2,
+                                                                NHWGC,
+                                                                GKYXC,
+                                                                Empty_Tuple,
+                                                                NHWGK,
+                                                                F16,
+                                                                ConvFwdOddC>{});
 }
 
 } // namespace instance
