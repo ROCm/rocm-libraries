@@ -861,6 +861,23 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         COMPONENT tests
     )
 
+    # TheRock runs pytest with this artifact root on PYTHONPATH. Extract the
+    # validated pure-Python wheels so their packages are importable there while
+    # retaining the wheel files for installation tests.
+    install(CODE "
+        execute_process(
+            COMMAND \"${Python3_EXECUTABLE}\"
+                \"${_tensilelite_src}/scripts/install_release_wheels.py\"
+                --destination \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_tensilelite_install_dest}\"
+                \"${_tensilelite_canonical_wheel}\"
+                \"${_tensilelite_compatibility_wheel}\"
+            RESULT_VARIABLE _tensilelite_wheel_install_result
+        )
+        if(NOT _tensilelite_wheel_install_result EQUAL 0)
+            message(FATAL_ERROR \"Failed to install TensileLite wheels into the test artifact\")
+        endif()
+    " COMPONENT tests)
+
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/Tests/"
         DESTINATION "${_tensilelite_install_dest}/tensilelite/Tests"
