@@ -3159,14 +3159,17 @@
         "verified_on": "llvm23"
       },
       "gfx90a": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx942": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx950": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm23"
       }
@@ -3253,14 +3256,17 @@
         "verified_on": "llvm23"
       },
       "gfx90a": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx942": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx950": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm23"
       }
@@ -5638,9 +5644,9 @@
       "gfx942",
       "gfx950"
     ],
-    "clang": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 0bace1908348b840e6aa1b4b6e12151dae208158)",
+    "clang": "AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 8f497e0992fb7513f7f78a6f6b6f1056c375e961)",
     "flavor": "llvm23",
-    "generator": 4,
+    "generator": 5,
     "probe_cflags": [
       "-O0",
       "-nogpulib"
