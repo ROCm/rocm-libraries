@@ -171,6 +171,18 @@ sweep:
       block_m=256. Both 128 and 256 are legal; 256 is the measured-optimal
       value for prefill-length sequences.
 
+# Fields the aligned kernel reads only from kernel arguments, never baked into
+# the binary. kernelMatches() skips these for ragged==0 variants (shape_generic
+# path in Gfx950AttentionDenseNative.cpp). They remain in the KMD so
+# generator.py can populate them into aligned KDs without triggering the
+# "absent from both metadata and spec" guard in _check_metadata_resolved.
+# A future tooling change (ALMIOPEN-2446) will omit them from aligned KDs and
+# rely on KMD defaults, collapsing the 132 aligned KDs to ~11.
+runtime_param_fields:
+  - batch
+  - seqlen_q
+  - seqlen_kv
+
 graph_match:
   shape: shared_shape
   discriminator: none
