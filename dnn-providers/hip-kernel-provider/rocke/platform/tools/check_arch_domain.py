@@ -79,29 +79,14 @@ for _flavor in ("llvm20", "llvm22", "llvm23"):
         )
 del _flavor, _key
 
-# A false negative in the committed llvm20 column, not a kernel defect --
-# measured by hand in the ROCm 7.1 container. These intrinsics take three `i1
-# immarg` operands, but the decl table omits `immarg`, so the generator builds
-# its probe passing them as kernel-argument SSA values. llvm22 rejects that in
-# the verifier with "immarg operand has non-immediate parameter", which
-# gen_arch_domain's _IMMEDIATE_OPERAND_DIAGS recognises, so the literal rescue
-# fires and records the true answer (ok on RDNA). llvm20 has no such verifier
-# check: the same module dies at ISel with "Cannot select: intrinsic", which is
-# also what a genuine negative looks like, so the rescue never fires and the
-# cell is recorded arch_absent. Rebuilt by hand with constant operands, that
-# exact probe compiles on gfx1151 and gfx11-generic under llvm20 and fails only
-# on gfx942 -- the correct answer. Owned by the generator, not by this lane.
-for _key in ("wmma.i32.16x16x16.iu4", "wmma.i32.16x16x16.iu8"):
-    for _arch in ("gfx11-generic", "gfx1151"):
-        EXPECTED_WARNINGS[(_key, _arch, "llvm20")] = (
-            "false arch_absent in the llvm20 column: the decl table omits "
-            "`immarg` on the three i1 operands, so the probe passes variables; "
-            "llvm20 has no verifier check for that and dies at ISel with a "
-            "diagnostic indistinguishable from a real negative, so the literal "
-            "rescue that saves llvm22 never fires. These targets do lower "
-            "integer WMMA on llvm20 when the operands are constants"
-        )
-del _key, _arch
+# `wmma.i32.16x16x16.iu4`/`.iu8` on gfx11-generic and gfx1151 at llvm20 used to
+# be listed here too, as a documented false negative in the artifact rather than
+# a kernel defect. Generator 5 builds each probe from the declare `opt` resolves,
+# so `immarg` now comes from the LLVM being measured instead of the hand-written
+# decl table, the probe passes constants where the intrinsic demands them, and
+# those four cells measure `ok`. The entries are deleted rather than kept,
+# because an allowlist that outlives its defect is the failure this gate reports
+# as STALE.
 
 
 def _harvest(

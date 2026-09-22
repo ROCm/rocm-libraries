@@ -3274,14 +3274,17 @@
         "verified_on": "llvm22"
       },
       "gfx90a": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm22"
       },
       "gfx942": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm22"
       },
       "gfx950": {
+        "probe_imm": 1,
         "status": "ok",
         "verified_on": "llvm22"
       }
@@ -5693,7 +5696,7 @@
     ],
     "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.0 26014 7b800a19466229b8479a78de19143dc33c3ab9b5)",
     "flavor": "llvm22",
-    "generator": 4,
+    "generator": 5,
     "probe_cflags": [
       "-O0",
       "-nogpulib"
