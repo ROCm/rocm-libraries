@@ -87,21 +87,11 @@ jobs:
       # symbol set and SONAME it asserts that the two halves were built together
       # and that the wrapper stubs everything the implementation renamed: a missing
       # stub links fine and fails only when a caller reaches that entry point.
-      # Globbing build/lib*/ keeps staging copies out and covers distros where the
-      # library directory resolves to lib64.
+      # Runs through the same wrapper_abi_check ctest entry TheRock's test job uses,
+      # rather than a bespoke glob-and-invoke here, so the two paths cannot drift apart.
       - name: Wrapper ABI check
         run: |
-          lib=$(ls build/lib*/libMIOpen.so.1.0 2>/dev/null | head -1)
-          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/lib*/"; exit 1; }
-          private=$(ls build/lib*/libMIOpen_private.so.1.0 2>/dev/null | head -1)
-          test -n "$private" || { echo "libMIOpen_private.so.1.0 not found under build/lib*/"; exit 1; }
-          echo "Checking $lib against $private"
-          python3 projects/miopen/script/check_public_abi.py check-wrapper \
-            "$lib" \
-            --baseline projects/miopen/test/public_abi/public_symbols.baseline \
-            --excluded projects/miopen/test/public_abi/wrapper_excluded_symbols.txt \
-            --private-lib "$private" \
-            --public-header projects/miopen/include/miopen/miopen.h
+          ctest --test-dir build -R '^wrapper_abi_check$' --output-on-failure
 
       # The rename is a compile-time trick, so a staged header spelling an entry
       # point by its private name would hand that name to consumers as public API.

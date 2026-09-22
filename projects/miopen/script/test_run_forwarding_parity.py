@@ -8,14 +8,13 @@ install tree, which on a shipping prefix is root-owned and read-only to whoever 
 the tests, so writing the reports beside the working directory fails the whole
 harness on a permission error that has nothing to do with parity.
 
-How it drives the two helpers: which library pair it resolves and names, and that it
+How it drives the comparison: which library pair it resolves and names, and that it
 holds the comparison to this run's binary. That last one is the harness's side of the
 guard against two leftover reports comparing cleanly, and it is invisible from the
 comparator's own tests.
 
 The replays are stood in for by a script that writes a well-formed report, the
-comparison by one that records how it was called, and the ABI check by one that
-passes.
+comparison by one that records how it was called.
 
 Written against the standard library's unittest rather than pytest: this runs as a
 ctest entry in a wrapper-enabled build, and nothing provisions pytest for a machine
@@ -44,8 +43,6 @@ open(out, "w").write(
 )
 """
 
-PASSES = "#!/usr/bin/env python3\n"
-
 # Passes, and leaves behind what it was called with, so the harness's own wiring can
 # be checked rather than assumed.
 RECORDS_ARGV = """#!/usr/bin/env python3
@@ -71,7 +68,6 @@ class ParityRunnerTest(unittest.TestCase):
         for name, body in (
             ("fake_gtest.py", FAKE_GTEST),
             ("fake_compare.py", RECORDS_ARGV),
-            ("fake_abi.py", PASSES),
         ):
             path = self.tree / name
             path.write_text(body)
@@ -90,12 +86,6 @@ class ParityRunnerTest(unittest.TestCase):
                 str(self.tree / "lib"),
                 "--compare",
                 str(self.tree / "fake_compare.py"),
-                "--abi-check",
-                str(self.tree / "fake_abi.py"),
-                "--baseline",
-                os.devnull,
-                "--excluded",
-                os.devnull,
                 *extra,
             ],
             cwd=str(cwd),
@@ -157,7 +147,6 @@ class ParityRunnerTest(unittest.TestCase):
     def test_helpers_run_without_their_exec_bit(self):
         """They are launched through this interpreter, not their shebang lines."""
         (self.tree / "fake_compare.py").chmod(0o644)
-        (self.tree / "fake_abi.py").chmod(0o644)
         result = self.run_harness(self.tree)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
@@ -182,11 +171,13 @@ class ParityRunnerTest(unittest.TestCase):
 
         # Copied in so the harness's default search -- lib* beside its parent directory --
         # lands here. That search is the only way to reach a split pair; --lib-dir names
-        # one directory and cannot express one.
+        # one directory and cannot express one. miopen_wrapper_libs.py comes with it since
+        # the harness imports from it and only its own directory is on sys.path.
         bindir = self.tree / "bin"
         bindir.mkdir(exist_ok=True)
         harness = bindir / HARNESS.name
         shutil.copy(HARNESS, harness)
+        shutil.copy(HARNESS.parent / "miopen_wrapper_libs.py", bindir)
 
         result = subprocess.run(
             [
@@ -198,12 +189,6 @@ class ParityRunnerTest(unittest.TestCase):
                 "*",
                 "--compare",
                 str(self.tree / "fake_compare.py"),
-                "--abi-check",
-                str(self.tree / "fake_abi.py"),
-                "--baseline",
-                os.devnull,
-                "--excluded",
-                os.devnull,
             ],
             cwd=str(self.tree),
             capture_output=True,

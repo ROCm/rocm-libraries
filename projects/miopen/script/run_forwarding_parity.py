@@ -4,14 +4,17 @@
 """Run the hipDNN forwarding parity harness.
 
 This is the command behind a single ctest entry. It replays the shim surface
-twice -- once with forwarding disabled, once with it enabled -- compares the two
-runs test for test, and then checks the wrapper's exported ABI.
+twice -- once with forwarding disabled, once with it enabled -- and compares the
+two runs test for test. The wrapper's exported ABI is a separate concern with its
+own entry, check_wrapper_abi.py: it needs only the two built libraries, not a
+GPU, so tying it to this harness would make it wait on a GPU it does not need.
 
-Three steps in one process rather than three ctest entries tied together by a
-fixture: a sharded ctest run distributes whole entries, so the members of a
-fixture can land in different shards and fail as unsatisfied. Sequencing them
-here also keeps the fixture's best property, that a replay which dies never
-reaches the comparison, without depending on ctest to enforce it.
+The two replays and the comparison run in one process rather than as three
+ctest entries tied together by a fixture: a sharded ctest run distributes whole
+entries, so the members of a fixture can land in different shards and fail as
+unsatisfied. Sequencing them here also keeps the fixture's best property, that a
+replay which dies never reaches the comparison, without depending on ctest to
+enforce it.
 
 The two replays can only diverge for entry points named in kForwardingEntries, in
 src/private/routing.cpp. That array is empty today, so both replays run the same
@@ -31,34 +34,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+from miopen_wrapper_libs import resolve_pair
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-
-
-def find_library(lib_dirs, stem):
-    """Return the one versioned shared object for `stem`, or (None, reason).
-
-    Symlinks are skipped so the versioned file is what gets inspected. A second
-    versioned file beside it is a half-replaced earlier build -- exactly what the
-    co-versioning check downstream exists to catch -- and choosing between them
-    would pick by filename order, which is not version order. So both the zero
-    and the many case are reported rather than resolved.
-    """
-    searched = ", ".join(str(d) for d in lib_dirs) or "<no lib directory>"
-    for lib_dir in lib_dirs:
-        matches = [
-            p
-            for p in sorted(lib_dir.glob(f"{stem}.so.*"))
-            if p.is_file() and not p.is_symlink()
-        ]
-        if len(matches) == 1:
-            return matches[0], None
-        if matches:
-            listed = ", ".join(p.name for p in matches)
-            return None, (
-                f"{lib_dir} holds more than one {stem}.so.*: {listed}. One of them is "
-                "left over from an earlier build; remove it and run again."
-            )
-    return None, f"no {stem}.so.* found under {searched}"
 
 
 def run(argv, what, env=None):
@@ -85,11 +63,6 @@ def main():
         "this script's parent directory",
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
-    parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
-    parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
-    parser.add_argument(
-        "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
-    )
     args = parser.parse_args()
 
     gtest = Path(args.gtest).resolve()
@@ -107,9 +80,7 @@ def main():
     lib_dirs = (
         [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
     )
-    wrapper_lib, wrapper_problem = find_library(lib_dirs, "libMIOpen")
-    private_lib, private_problem = find_library(lib_dirs, "libMIOpen_private")
-    problems = [p for p in (wrapper_problem, private_problem) if p]
+    wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
         # packaging or layout regression rather than a configuration to skip over.
@@ -118,28 +89,13 @@ def main():
         for problem in problems:
             print(f"FAIL: {problem}", flush=True)
         return 1
-    # Named, so a co-versioning failure below can be tied back to the files it is about.
+    # Named, so a load failure below can be tied back to the files it is about.
     print(f"libraries under test: {wrapper_lib}, {private_lib}", flush=True)
 
-    # Each stem is resolved independently, so a tree carrying both lib and lib64 can
-    # split the pair. Only one directory can go first on LD_LIBRARY_PATH, so the
-    # replays would load one half and some other copy of the other -- the mismatch
-    # the paragraph below exists to prevent.
-    if wrapper_lib.parent != private_lib.parent:
-        print(
-            f"FAIL: wrapper and private library are in different directories:\n"
-            f"  {wrapper_lib}\n"
-            f"  {private_lib}\n"
-            "They are halves of one build and must be installed side by side.",
-            flush=True,
-        )
-        return 1
-
-    # The replays have to load the pair the ABI check inspects. An installed test
-    # binary's RUNPATH names the ROCm library directory, not the tree it was
-    # installed into, so without this an install to any other prefix silently
-    # replays some other MIOpen -- or, with no private library beside it, fails
-    # to start at all.
+    # The replays have to load the pair. An installed test binary's RUNPATH names
+    # the ROCm library directory, not the tree it was installed into, so without
+    # this an install to any other prefix silently replays some other MIOpen -- or,
+    # with no private library beside it, fails to start at all.
     ld_path = os.pathsep.join(
         p for p in (str(private_lib.parent), os.environ.get("LD_LIBRARY_PATH")) if p
     )
@@ -174,25 +130,6 @@ def main():
     ok = run(
         [sys.executable, args.compare, *reports, "--newer-than", gtest],
         "forwarding parity comparison",
-    )
-
-    # --public-header is deliberately absent: the check it enables compares the
-    # exclusion list against miopen.h, both source files, so it belongs to the
-    # build and an installed tree has no include directory to point it at.
-    ok &= run(
-        [
-            sys.executable,
-            args.abi_check,
-            "check-wrapper",
-            wrapper_lib,
-            "--baseline",
-            args.baseline,
-            "--excluded",
-            args.excluded,
-            "--private-lib",
-            private_lib,
-        ],
-        "wrapper ABI check",
     )
 
     return 0 if ok else 1
