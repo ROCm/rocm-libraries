@@ -352,14 +352,25 @@ def select_split_k_wgrad(
     grid_no_split = base_grid * int(groups)
     split_k = max(1, capacity // grid_no_split)
 
+    # Clamp BEFORE snapping. A clamp applied afterwards can land the degree off
+    # a multiple of the step and undo the alignment: a shallow wg_K, or a large
+    # group count against the z limit, pulls the snapped value straight back
+    # down to an arbitrary number.
+    cap = max(1, min(wg_K, MAX_GRID_DIM_Z // int(groups)))
+    split_k = min(split_k, cap)
+
     xcds = _ARCH_NUM_XCDS.get(arch, _DEFAULT_NUM_XCDS)
     step = xcds // math.gcd(base_grid, xcds) if xcds > 1 else 1
     if step > 1:
         # Snap down to keep the CTA count under capacity; snap up only when the
         # degree is below one full step, where there is nothing to round down to.
-        split_k = step if split_k < step else (split_k // step) * step
+        snapped = (split_k // step) * step or step
+        # When the cap is itself below one step the stride cannot be aligned at
+        # all; keep the legal degree rather than exceeding the cap for it.
+        if snapped <= cap:
+            split_k = snapped
 
-    split_k = min(split_k, wg_K, max(1, MAX_GRID_DIM_Z // int(groups)))
+    split_k = max(1, min(split_k, cap))
 
     return SplitKDecision(
         split_k,

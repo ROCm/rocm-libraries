@@ -1004,17 +1004,6 @@ def wgrad_group_merge_available(
             f"group_merge is MFMA-only (wave_size 64); got wave_size="
             f"{spec.wave_size}"
         )
-    # Group merging and split-K are alternative ways to spend the same
-    # parallelism, and they are mutually exclusive here: merging raises the work
-    # per workgroup and divides the grid by Gm, while split-K multiplies the grid
-    # and needs a reduction. A depthwise problem is swept both ways -- merged
-    # instances at split_k=1, and two-stage split-K instances unmerged -- and the
-    # faster one wins, so neither needs to subsume the other.
-    #
-    # Mechanically this also keeps the merged tile off every epilogue that
-    # cannot drop an off-diagonal group pair: the packed-atomic split-K store
-    # would accumulate garbage into a real dW element rather than skipping it,
-    # and the two-stage workspace store would need the same mask a second time.
     # Merging and split-K fix different things -- merging widens the loads and
     # divides the grid by Gm, split-K multiplies the grid back -- so they
     # compose, and the best depthwise configuration generally uses both. What a

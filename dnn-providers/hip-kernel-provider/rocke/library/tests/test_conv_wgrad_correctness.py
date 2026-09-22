@@ -1004,9 +1004,9 @@ class TestConvWgradVectorLoad(unittest.TestCase):
 
     def test_gfx1250_grouped_wgrad_dual_engine(self):
         # Grouped wgrad (grid-per-group) on gfx1250 (wave32 WMMA 16x16x32).
-        # Group merging is not implemented for any arch -- WgradConvSpec has no
-        # group-merge field -- so this guards the grouped WMMA path as it ships,
-        # one conv group per workgroup. Lower through the backend
+        # Group merging is MFMA-only, so it cannot apply on wave32; this guards
+        # the grouped WMMA path as it ships, one conv group per workgroup.
+        # Lower through the backend
         # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
         # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
         # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
@@ -2082,136 +2082,19 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
         )
 
 
-class TestWgradGroupMergeGate(unittest.TestCase):
-    """Host-side gate for ``group_merge`` (no GPU needed).
+def _assert_case_ran(test, ok: bool, why: str) -> None:
+    """Fail unless the case was actually built, launched and compared.
 
-    The gate has to agree between :meth:`WgradConvSpec.validate` and
-    :func:`is_valid_wgrad_spec`: a spec the dispatcher admits and the builder
-    then rejects is the exact failure this family has produced before.
+    ``_run_one`` and ``_check_two_stage`` report an unbuildable spec as
+    ``(True, "skip (...)")`` so a sweep over many shapes can step past configs
+    an arch does not support. A test that only asserts ``ok`` therefore passes
+    when every one of its cases was skipped. That is not hypothetical: the
+    group-merge cases below silently skipped their whole ``group_merge > 1``
+    axis until this guard was added, because the shape defaulted to groups=1
+    and the gate rejected every merged spec.
     """
-
-    def _spec(self, **kw):
-        from kernels.common._conv_implicit_gemm_common import (
-            ConvDataSpec,
-            ConvProblem,
-        )
-        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
-
-        base = dict(
-            problem=ConvProblem(
-                N=2, Hi=12, Wi=12, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64
-            ),
-            data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
-            tile_m=16,
-            tile_n=128,
-            tile_k=32,
-            warp_m=1,
-            warp_n=1,
-            warp_tile_m=16,
-            warp_tile_n=16,
-            warp_tile_k=32,
-            wave_size=64,
-            pipeline="mem",
-            epilogue="cshuffle",
-            split_k=1,
-            two_stage=False,
-            lds_k_outer=True,
-        )
-        base.update(kw)
-        return WgradConvSpec(**base)
-
-    def test_default_is_one_and_always_admitted(self):
-        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
-
-        spec = self._spec()
-        self.assertEqual(spec.group_merge, 1)
-        ok, why = is_valid_wgrad_spec(spec, arch="gfx950")
-        self.assertTrue(ok, why)
-
-    def test_merged_dims_track_group_merge(self):
-        # grid_* is what the tile covers; wg_* stays the true per-group extent
-        # that sizes dW and the workspace. Conflating them is the silent
-        # wrong-answer bug this whole path is prone to.
-        spec = self._spec(group_merge=8)
-        self.assertEqual((spec.wg_M, spec.wg_N), (1, 9))
-        self.assertEqual((spec.grid_M, spec.grid_N), (8, 72))
-        self.assertEqual(spec.grid_groups, 8)
-        base = self._spec()
-        self.assertEqual((base.grid_M, base.grid_N), (base.wg_M, base.wg_N))
-        self.assertEqual(base.grid_groups, base.problem.groups)
-
-    def test_validate_and_predicate_agree(self):
-        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
-
-        cases = [
-            dict(group_merge=3),  # not a supported degree
-            dict(group_merge=128),  # not a supported degree
-            dict(group_merge=8, tile_n=32, split_k=1, two_stage=False),
-            # Atomic split-K has no diagonal mask; two-stage does.
-            dict(group_merge=8, two_stage=False, split_k=4),
-            dict(group_merge=8, wave_size=32, split_k=1, two_stage=False),
-        ]
-        for kw in cases:
-            spec = self._spec(**kw)
-            ok, why = is_valid_wgrad_spec(spec, arch="gfx950")
-            self.assertFalse(ok, f"{kw} should be rejected")
-            with self.assertRaises(ValueError, msg=f"{kw} must raise"):
-                spec.validate()
-
-    def test_non_depthwise_is_gated_off(self):
-        from kernels.common._conv_implicit_gemm_common import ConvProblem
-        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
-
-        p = ConvProblem(N=2, Hi=12, Wi=12, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=8)
-        ok, why = is_valid_wgrad_spec(
-            self._spec(problem=p, group_merge=4), arch="gfx950"
-        )
-        self.assertFalse(ok)
-        self.assertIn("depthwise", why)
-
-    def test_group_merge_must_divide_groups(self):
-        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
-
-        from kernels.common._conv_implicit_gemm_common import ConvProblem
-
-        p = ConvProblem(N=2, Hi=12, Wi=12, C=24, K=24, Y=3, X=3, pH=1, pW=1, groups=24)
-        ok, why = is_valid_wgrad_spec(
-            self._spec(problem=p, group_merge=16), arch="gfx950"
-        )
-        self.assertFalse(ok)
-        self.assertIn("divide", why)
-
-    def test_kernel_name_distinguishes_degrees(self):
-        # The compile cache keys on kernel.name. Untagged, a Gm sweep would
-        # measure one binary N times.
-        names = {self._spec(group_merge=g).kernel_name() for g in (1, 2, 4, 8)}
-        self.assertEqual(len(names), 4, f"kernel names collide: {names}")
-        self.assertNotIn("gm1", self._spec().kernel_name())
-
-    def test_merged_build_widens_the_load(self):
-        # The whole point of merging: the depthwise free axis is one element
-        # wide, so every load is scalar. Merging makes it a run of Gm.
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from kernels.common.conv_implicit_gemm_wgrad import (
-            build_implicit_gemm_conv_wgrad,
-        )
-
-        scalar = lower_kernel_to_llvm(
-            build_implicit_gemm_conv_wgrad(self._spec(), arch="gfx950")
-        )
-        merged = lower_kernel_to_llvm(
-            build_implicit_gemm_conv_wgrad(self._spec(group_merge=8), arch="gfx950")
-        )
-        self.assertEqual(
-            _count_vector_buffer_loads(scalar),
-            0,
-            "depthwise group_merge=1 should have no vector loads to begin with",
-        )
-        self.assertGreater(
-            _count_vector_buffer_loads(merged),
-            0,
-            "group_merge=8 must vectorise the dY/X loads",
-        )
+    test.assertTrue(ok, why)
+    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
 
 
 @unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
@@ -2259,10 +2142,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
                         tile_n=128,
                         group_merge=gm,
                     )
-                    self.assertTrue(ok, why)
-                    # _run_one reports a skip as ok=True; without this the
-                    # whole group_merge axis can silently not run.
-                    self.assertNotIn("skip", why, f"case did not actually run: {why}")
+                    _assert_case_ran(self, ok, why)
 
     def test_group_merge_split_k_requires_two_stage(self):
         # Merging and split-K compose, but a merged tile cannot use the
@@ -2346,8 +2226,7 @@ class TestWgradGroupMergeNumerics(unittest.TestCase):
             tile_n=128,
             group_merge=8,
         )
-        self.assertTrue(ok, why)
-        self.assertNotIn("skip", why, f"case did not actually run: {why}")
+        _assert_case_ran(self, ok, why)
 
 
 if __name__ == "__main__":

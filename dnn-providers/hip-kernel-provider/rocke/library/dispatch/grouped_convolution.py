@@ -1464,9 +1464,10 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
     requires split_k=1 and the direct-store ('default') epilogue, so both are
     forced here regardless of the request. Grouped convolution is supported and
     runs grid-per-group (the kernel is validated dual-engine by
-    test_gfx1250_grouped_wgrad_dual_engine). Group merging is not implemented
-    for any arch -- WgradConvSpec has no group-merge field, so there is nothing
-    for is_valid_wgrad_spec to reject.
+    test_gfx1250_grouped_wgrad_dual_engine). Group merging (``group_merge > 1``)
+    is MFMA-only and additionally needs split_k > 1 on the two-stage path, so it
+    is unreachable here on both counts: is_valid_wgrad_spec rejects it for
+    wave32 and for the split_k=1 this candidate forces.
     """
     name = "implicit_gemm_conv_wgrad_gfx1250"
     spec_id = "igemm_conv_wgrad_gfx1250_32x32"

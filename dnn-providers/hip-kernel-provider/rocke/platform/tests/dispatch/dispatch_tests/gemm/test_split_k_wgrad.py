@@ -32,6 +32,11 @@ _SHAPES = {
     "dw_g512_s1": (1, 9, 42 * 30 * 40, 512),
     "grouped_cpg8": (8, 72, 42 * 60 * 80, 32),
     "ungrouped": (256, 2304, 64 * 28 * 28, 1),
+    # Shallow wg_K: the cap (min(wg_K, z-limit)) binds, which is where a clamp
+    # applied after the XCD snap would silently undo the alignment.
+    "dw_shallow_k_g8": (1, 9, 4, 8),
+    "dw_shallow_k_g16": (1, 9, 5, 16),
+    "dw_shallow_k_g8b": (1, 9, 12, 8),
 }
 
 _TILES = [(64, 64, 64), (16, 16, 32), (32, 32, 32), (128, 128, 32), (16, 128, 32)]
@@ -133,11 +138,37 @@ class TestGroupedPath(unittest.TestCase):
             for tile in _TILES:
                 d = _pick(shape, tile, groups=groups, block_size=256)
                 stride = d.base_grid * d.split_k
+                step = 8 // math.gcd(d.base_grid, 8)
+                cap = min(_SHAPES[shape][2], MAX_GRID_DIM_Z // groups)
+                if step > cap:
+                    # One XCD step does not fit under the cap, so alignment is
+                    # unreachable; the degree just has to stay legal.
+                    self.assertLessEqual(d.split_k, cap)
+                    continue
                 if d.split_k > 1:
                     self.assertEqual(
                         stride % 8,
                         0,
                         f"{shape} {tile}: group stride {stride} not XCD-aligned",
+                    )
+
+    def test_cap_is_applied_before_the_snap(self):
+        # Clamping after snapping would pull the degree back off a multiple of
+        # the step. Every shape whose cap admits at least one full step must
+        # come back aligned, shallow wg_K included.
+        for shape, (_, _, wg_K, groups) in _SHAPES.items():
+            if groups <= 1:
+                continue
+            for tile in _TILES:
+                d = _pick(shape, tile, groups=groups, block_size=256)
+                cap = min(wg_K, MAX_GRID_DIM_Z // groups)
+                self.assertLessEqual(d.split_k, cap, f"{shape} {tile} over cap")
+                step = 8 // math.gcd(d.base_grid, 8)
+                if step <= cap and d.split_k > 1:
+                    self.assertEqual(
+                        (d.base_grid * d.split_k) % 8,
+                        0,
+                        f"{shape} {tile}: cap undid the XCD snap",
                     )
 
     def test_never_overflows_grid_dim_z(self):
