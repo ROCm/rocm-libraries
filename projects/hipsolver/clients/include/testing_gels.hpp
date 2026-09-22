@@ -26,21 +26,21 @@
 #include "clientcommon.hpp"
 #include "hipsolver_timer.hpp"
 
-template <testAPI_t API, typename U>
+template <testAPI_t API, bool INPLACE, typename Td, typename TdWork>
 void gels_checkBadArgs(const hipsolverHandle_t handle,
                        const int               m,
                        const int               n,
                        const int               nrhs,
-                       U                       dA,
+                       Td                      dA,
                        const int               lda,
                        const int               stA,
-                       U                       dB,
+                       Td                      dB,
                        const int               ldb,
                        const int               stB,
-                       U                       dX,
+                       Td                      dX,
                        const int               ldx,
                        const int               stX,
-                       U                       dWork,
+                       TdWork                  dWork,
                        const size_t            lwork,
                        int*                    niters,
                        int*                    info,
@@ -48,7 +48,7 @@ void gels_checkBadArgs(const hipsolverHandle_t handle,
 {
     // handle
     EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
-                                         false,
+                                         INPLACE,
                                          nullptr,
                                          m,
                                          n,
@@ -75,12 +75,12 @@ void gels_checkBadArgs(const hipsolverHandle_t handle,
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
     // pointers
     EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
-                                         false,
+                                         INPLACE,
                                          handle,
                                          m,
                                          n,
                                          nrhs,
-                                         (U) nullptr,
+                                         (Td) nullptr,
                                          lda,
                                          stA,
                                          dB,
@@ -96,7 +96,7 @@ void gels_checkBadArgs(const hipsolverHandle_t handle,
                                          bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
-                                         false,
+                                         INPLACE,
                                          handle,
                                          m,
                                          n,
@@ -104,7 +104,7 @@ void gels_checkBadArgs(const hipsolverHandle_t handle,
                                          dA,
                                          lda,
                                          stA,
-                                         (U) nullptr,
+                                         (Td) nullptr,
                                          ldb,
                                          stB,
                                          dX,
@@ -116,29 +116,30 @@ void gels_checkBadArgs(const hipsolverHandle_t handle,
                                          info,
                                          bc),
                           HIPSOLVER_STATUS_INVALID_VALUE);
+    if(!INPLACE)
+        EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
+                                             INPLACE,
+                                             handle,
+                                             m,
+                                             n,
+                                             nrhs,
+                                             dA,
+                                             lda,
+                                             stA,
+                                             dB,
+                                             ldb,
+                                             stB,
+                                             (Td) nullptr,
+                                             ldx,
+                                             stX,
+                                             dWork,
+                                             lwork,
+                                             niters,
+                                             info,
+                                             bc),
+                              HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
-                                         false,
-                                         handle,
-                                         m,
-                                         n,
-                                         nrhs,
-                                         dA,
-                                         lda,
-                                         stA,
-                                         dB,
-                                         ldb,
-                                         stB,
-                                         (U) nullptr,
-                                         ldx,
-                                         stX,
-                                         dWork,
-                                         lwork,
-                                         niters,
-                                         info,
-                                         bc),
-                          HIPSOLVER_STATUS_INVALID_VALUE);
-    EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
-                                         false,
+                                         INPLACE,
                                          handle,
                                          m,
                                          n,
@@ -161,44 +162,6 @@ void gels_checkBadArgs(const hipsolverHandle_t handle,
 #endif
 }
 
-template <testAPI_t API, typename U>
-void gelsBatched_checkBadArgs(const hipsolverHandle_t handle,
-                              const int               m,
-                              const int               n,
-                              const int               nrhs,
-                              U                       dA,
-                              const int               lda,
-                              U                       dB,
-                              const int               ldb,
-                              void*                   dWork,
-                              const size_t            lwork,
-                              int*                    info,
-                              const int               bc)
-{
-    // handle
-    EXPECT_ROCBLAS_STATUS(
-        hipsolver_gelsBatched(API, nullptr, m, n, nrhs, dA, lda, dB, ldb, dWork, lwork, info, bc),
-        HIPSOLVER_STATUS_NOT_INITIALIZED);
-
-    // values
-    // N/A
-
-#if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
-    // pointers
-    EXPECT_ROCBLAS_STATUS(
-        hipsolver_gelsBatched(
-            API, handle, m, n, nrhs, (U) nullptr, lda, dB, ldb, dWork, lwork, info, bc),
-        HIPSOLVER_STATUS_INVALID_VALUE);
-    EXPECT_ROCBLAS_STATUS(
-        hipsolver_gelsBatched(
-            API, handle, m, n, nrhs, dA, lda, (U) nullptr, ldb, dWork, lwork, info, bc),
-        HIPSOLVER_STATUS_INVALID_VALUE);
-    EXPECT_ROCBLAS_STATUS(
-        hipsolver_gelsBatched(API, handle, m, n, nrhs, dA, lda, dB, ldb, dWork, lwork, nullptr, bc),
-        HIPSOLVER_STATUS_INVALID_VALUE);
-#endif
-}
-
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T>
 void testing_gels_bad_arg()
 {
@@ -218,6 +181,7 @@ void testing_gels_bad_arg()
     if(BATCHED)
     {
         // memory allocations (batched uses array of pointers)
+        host_strided_batch_vector<int>   hInfo(1, 1, 1, 1);
         device_batch_vector<T>           dA(1, 1, bc);
         device_batch_vector<T>           dB(1, 1, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
@@ -226,25 +190,32 @@ void testing_gels_bad_arg()
         CHECK_HIP_ERROR(dInfo.memcheck());
 
         size_t size_W;
-        hipsolver_gelsBatched_bufferSize(
-            API, handle, m, n, nrhs, dA.data(), lda, dB.data(), ldb, &size_W, bc);
-        device_strided_batch_vector<T> dWork(size_W, 1, size_W, 1);
+        hipsolver_gels_bufferSize(
+            API, handle, m, n, nrhs, dA.data(), lda, dB.data(), ldb, dB.data(), ldb, &size_W, bc);
+        size_t                         size_W_elems = (size_W + sizeof(T) - 1) / sizeof(T);
+        device_strided_batch_vector<T> dWork(size_W_elems, 1, size_W_elems, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
 
         // check bad arguments
-        gelsBatched_checkBadArgs<API>(handle,
-                                      m,
-                                      n,
-                                      nrhs,
-                                      dA.data(),
-                                      lda,
-                                      dB.data(),
-                                      ldb,
-                                      dWork.data(),
-                                      size_W,
-                                      dInfo.data(),
-                                      bc);
+        gels_checkBadArgs<API, true>(handle,
+                                     m,
+                                     n,
+                                     nrhs,
+                                     dA.data(),
+                                     lda,
+                                     stA,
+                                     dB.data(),
+                                     ldb,
+                                     stB,
+                                     dB.data(),
+                                     ldb,
+                                     stB,
+                                     dWork.data(),
+                                     size_W,
+                                     hInfo.data(),
+                                     dInfo.data(),
+                                     bc);
     }
     else
     {
@@ -261,30 +232,30 @@ void testing_gels_bad_arg()
 
         size_t size_W;
         hipsolver_gels_bufferSize(
-            API, handle, m, n, nrhs, dA.data(), lda, dB.data(), ldb, dX.data(), ldx, &size_W);
+            API, handle, m, n, nrhs, dA.data(), lda, dB.data(), ldb, dX.data(), ldx, &size_W, bc);
         device_strided_batch_vector<T> dWork(size_W, 1, size_W, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
 
         // check bad arguments
-        gels_checkBadArgs<API>(handle,
-                               m,
-                               n,
-                               nrhs,
-                               dA.data(),
-                               lda,
-                               stA,
-                               dB.data(),
-                               ldb,
-                               stB,
-                               dX.data(),
-                               ldx,
-                               stX,
-                               dWork.data(),
-                               size_W,
-                               hNIters.data(),
-                               dInfo.data(),
-                               bc);
+        gels_checkBadArgs<API, false>(handle,
+                                      m,
+                                      n,
+                                      nrhs,
+                                      dA.data(),
+                                      lda,
+                                      stA,
+                                      dB.data(),
+                                      ldb,
+                                      stB,
+                                      dX.data(),
+                                      ldx,
+                                      stX,
+                                      dWork.data(),
+                                      size_W,
+                                      hNIters.data(),
+                                      dInfo.data(),
+                                      bc);
     }
 }
 
@@ -346,247 +317,12 @@ void gels_initData(const hipsolverHandle_t handle,
     }
 }
 
-template <bool CPU, bool GPU, typename T, typename Td, typename Th>
-void gelsBatched_initData(const hipsolverHandle_t handle,
-                          const int               m,
-                          const int               n,
-                          const int               nrhs,
-                          Td&                     dA,
-                          const int               lda,
-                          Td&                     dB,
-                          const int               ldb,
-                          const int               bc,
-                          Th&                     hA,
-                          Th&                     hB,
-                          Th&                     hX)
-{
-    if(CPU)
-    {
-        rocblas_init<T>(hA, true);
-        rocblas_init<T>(hB, true);
-
-        const int ldxCPU = max(m, n);
-
-        for(int b = 0; b < bc; ++b)
-        {
-            // scale A to avoid singularities
-            for(int i = 0; i < m; i++)
-            {
-                for(int j = 0; j < n; j++)
-                {
-                    if(i == j)
-                        hA[b][i + j * lda] += 400;
-                    else
-                        hA[b][i + j * lda] -= 4;
-                }
-            }
-
-            // populate hX with values from hB
-            for(int i = 0; i < m; i++)
-                for(int j = 0; j < nrhs; j++)
-                    hX[b][i + j * ldxCPU] = hB[b][i + j * ldb];
-        }
-    }
-
-    if(GPU)
-    {
-        // copy matrices to the GPU
-        CHECK_HIP_ERROR(dA.transfer_from(hA));
-        CHECK_HIP_ERROR(dB.transfer_from(hB));
-    }
-}
-
-template <testAPI_t API,
-          typename T,
-          typename Td,
-          typename Twork,
-          typename Ud,
-          typename Th,
-          typename Uh>
-void gelsBatched_getError(const hipsolverHandle_t handle,
-                          const int               m,
-                          const int               n,
-                          const int               nrhs,
-                          Td&                     dA,
-                          const int               lda,
-                          Td&                     dB,
-                          const int               ldb,
-                          Twork&                  dWork,
-                          const size_t            lwork,
-                          Ud&                     dInfo,
-                          const int               bc,
-                          Th&                     hA,
-                          Th&                     hB,
-                          Th&                     hBRes,
-                          Th&                     hX,
-                          Uh&                     hInfo,
-                          Uh&                     hInfoRes,
-                          double*                 max_err)
-{
-    int            sizeW = max(1, min(m, n) + max(min(m, n), nrhs));
-    std::vector<T> hW(sizeW);
-
-    // input data initialization
-    gelsBatched_initData<true, true, T>(handle, m, n, nrhs, dA, lda, dB, ldb, bc, hA, hB, hX);
-
-    // execute computations
-    // GPU lapack - call gelsBatched (always in-place: result overwrites B)
-    CHECK_ROCBLAS_ERROR(hipsolver_gelsBatched(API,
-                                              handle,
-                                              m,
-                                              n,
-                                              nrhs,
-                                              dA.data(),
-                                              lda,
-                                              dB.data(),
-                                              ldb,
-                                              dWork.data(),
-                                              lwork,
-                                              dInfo.data(),
-                                              bc));
-    CHECK_HIP_ERROR(hBRes.transfer_from(dB));
-    CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
-
-    // CPU lapack
-    for(int b = 0; b < bc; ++b)
-    {
-        cpu_gels(
-            HIPSOLVER_OP_N, m, n, nrhs, hA[b], lda, hX[b], max(m, n), hW.data(), sizeW, hInfo[b]);
-    }
-
-    // error is ||hX - hBRes|| / ||hX||
-    // using vector-induced infinity norm
-    double err;
-    *max_err = 0;
-    for(int b = 0; b < bc; ++b)
-    {
-        if(hInfo[b][0] == 0)
-        {
-            err      = norm_error('I', n, nrhs, max(m, n), hX[b], hBRes[b], ldb);
-            *max_err = err > *max_err ? err : *max_err;
-        }
-    }
-
-    // also check info for singularities
-    err = 0;
-    for(int b = 0; b < bc; ++b)
-    {
-        EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
-        if(hInfo[b][0] != hInfoRes[b][0])
-            err++;
-    }
-    *max_err += err;
-}
-
-template <testAPI_t API,
-          typename T,
-          typename Td,
-          typename Twork,
-          typename Ud,
-          typename Th,
-          typename Uh>
-void gelsBatched_getPerfData(const hipsolverHandle_t handle,
-                             const int               m,
-                             const int               n,
-                             const int               nrhs,
-                             Td&                     dA,
-                             const int               lda,
-                             Td&                     dB,
-                             const int               ldb,
-                             Twork&                  dWork,
-                             const size_t            lwork,
-                             Ud&                     dInfo,
-                             const int               bc,
-                             Th&                     hA,
-                             Th&                     hB,
-                             Th&                     hX,
-                             Uh&                     hInfo,
-                             double*                 gpu_time_used,
-                             double*                 cpu_time_used,
-                             const int               hot_calls,
-                             const bool              perf)
-{
-    int            sizeW = max(1, min(m, n) + max(min(m, n), nrhs));
-    std::vector<T> hW(sizeW);
-
-    if(!perf)
-    {
-        gelsBatched_initData<true, false, T>(handle, m, n, nrhs, dA, lda, dB, ldb, bc, hA, hB, hX);
-
-        // cpu-lapack performance (only if not in perf mode)
-        *cpu_time_used = get_time_us_no_sync();
-        for(int b = 0; b < bc; ++b)
-        {
-            cpu_gels(HIPSOLVER_OP_N,
-                     m,
-                     n,
-                     nrhs,
-                     hA[b],
-                     lda,
-                     hX[b],
-                     max(m, n),
-                     hW.data(),
-                     sizeW,
-                     hInfo[b]);
-        }
-        *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
-    }
-
-    gelsBatched_initData<true, false, T>(handle, m, n, nrhs, dA, lda, dB, ldb, bc, hA, hB, hX);
-
-    // cold calls
-    for(int iter = 0; iter < 2; iter++)
-    {
-        gelsBatched_initData<false, true, T>(handle, m, n, nrhs, dA, lda, dB, ldb, bc, hA, hB, hX);
-
-        CHECK_ROCBLAS_ERROR(hipsolver_gelsBatched(API,
-                                                  handle,
-                                                  m,
-                                                  n,
-                                                  nrhs,
-                                                  dA.data(),
-                                                  lda,
-                                                  dB.data(),
-                                                  ldb,
-                                                  dWork.data(),
-                                                  lwork,
-                                                  dInfo.data(),
-                                                  bc));
-    }
-
-    // gpu-lapack performance
-    hipStream_t stream;
-    CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
-
-    for(int iter = 0; iter < hot_calls; iter++)
-    {
-        gelsBatched_initData<false, true, T>(handle, m, n, nrhs, dA, lda, dB, ldb, bc, hA, hB, hX);
-
-        start = get_time_us_sync(stream);
-        hipsolver_gelsBatched(API,
-                              handle,
-                              m,
-                              n,
-                              nrhs,
-                              dA.data(),
-                              lda,
-                              dB.data(),
-                              ldb,
-                              dWork.data(),
-                              lwork,
-                              dInfo.data(),
-                              bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
-    }
-    *gpu_time_used /= hot_calls;
-}
-
 template <testAPI_t API,
           bool      INPLACE,
           typename T,
           typename Td,
           typename Ud,
+          typename TdWork,
           typename Th,
           typename Uh>
 void gels_getError(const hipsolverHandle_t handle,
@@ -602,7 +338,7 @@ void gels_getError(const hipsolverHandle_t handle,
                    Td&                     dX,
                    const int               ldx,
                    const int               stX,
-                   Td&                     dWork,
+                   TdWork&                 dWork,
                    const size_t            lwork,
                    Ud&                     dInfo,
                    const int               bc,
@@ -701,6 +437,7 @@ template <testAPI_t API,
           typename T,
           typename Td,
           typename Ud,
+          typename TdWork,
           typename Th,
           typename Uh>
 void gels_getPerfData(const hipsolverHandle_t handle,
@@ -716,7 +453,7 @@ void gels_getPerfData(const hipsolverHandle_t handle,
                       Td&                     dX,
                       const int               ldx,
                       const int               stX,
-                      Td&                     dWork,
+                      TdWork&                 dWork,
                       const size_t            lwork,
                       Ud&                     dInfo,
                       const int               bc,
@@ -868,19 +605,27 @@ void testing_gels(Arguments& argus)
     {
         if(BATCHED)
         {
-            EXPECT_ROCBLAS_STATUS(hipsolver_gelsBatched(API,
-                                                        handle,
-                                                        m,
-                                                        n,
-                                                        nrhs,
-                                                        (T**)nullptr,
-                                                        lda,
-                                                        (T**)nullptr,
-                                                        ldb,
-                                                        (void*)nullptr,
-                                                        0,
-                                                        (int*)nullptr,
-                                                        bc),
+            host_strided_batch_vector<int> hInfo(1, 1, 1, 1);
+            EXPECT_ROCBLAS_STATUS(hipsolver_gels(API,
+                                                 INPLACE,
+                                                 handle,
+                                                 m,
+                                                 n,
+                                                 nrhs,
+                                                 (T**)nullptr,
+                                                 lda,
+                                                 stA,
+                                                 (T**)nullptr,
+                                                 ldb,
+                                                 stB,
+                                                 (T**)nullptr,
+                                                 ldx,
+                                                 stX,
+                                                 (T*)nullptr,
+                                                 0,
+                                                 hInfo.data(),
+                                                 (int*)nullptr,
+                                                 bc),
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }
         else
@@ -918,13 +663,35 @@ void testing_gels(Arguments& argus)
     size_t size_W;
     if(BATCHED)
     {
-        hipsolver_gelsBatched_bufferSize(
-            API, handle, m, n, nrhs, (T**)nullptr, lda, (T**)nullptr, ldb, &size_W, bc);
+        hipsolver_gels_bufferSize(API,
+                                  handle,
+                                  m,
+                                  n,
+                                  nrhs,
+                                  (T**)nullptr,
+                                  lda,
+                                  (T**)nullptr,
+                                  ldb,
+                                  (T**)nullptr,
+                                  ldx,
+                                  &size_W,
+                                  bc);
     }
     else
     {
-        hipsolver_gels_bufferSize(
-            API, handle, m, n, nrhs, (T*)nullptr, lda, (T*)nullptr, ldb, (T*)nullptr, ldx, &size_W);
+        hipsolver_gels_bufferSize(API,
+                                  handle,
+                                  m,
+                                  n,
+                                  nrhs,
+                                  (T*)nullptr,
+                                  lda,
+                                  (T*)nullptr,
+                                  ldb,
+                                  (T*)nullptr,
+                                  ldx,
+                                  &size_W,
+                                  bc);
     }
 
     if(argus.mem_query)
@@ -936,15 +703,18 @@ void testing_gels(Arguments& argus)
     if(BATCHED)
     {
         // memory allocations (batched uses array of pointers)
-        // Note: gelsBatched is always in-place (result overwrites B), no separate X needed
+        // Note: hNIters is used to store the output of hInfo.
         host_batch_vector<T>             hA(size_A, 1, bc);
         host_batch_vector<T>             hB(size_B, 1, bc);
         host_batch_vector<T>             hBRes(size_BRes, 1, bc);
         host_batch_vector<T>             hX(max(m, n) * nrhs, 1, bc);
+        host_batch_vector<T>             hXRes(size_XRes, 1, stXRes, bc);
+        host_strided_batch_vector<int>   hNIters(1, 1, 1, 1);
         host_strided_batch_vector<int>   hInfo(1, 1, 1, bc);
         host_strided_batch_vector<int>   hInfoRes(1, 1, 1, bc);
         device_batch_vector<T>           dA(size_A, 1, bc);
         device_batch_vector<T>           dB(size_B, 1, bc);
+        device_batch_vector<T>           dX(size_X, 1, stX, bc);
         device_strided_batch_vector<int> dInfo(1, 1, 1, bc);
         device_strided_batch_vector<T>   dWork(size_W, 1, size_W, 1); // size_W accounts for bc
         if(size_A)
@@ -958,48 +728,61 @@ void testing_gels(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelsBatched_getError<API, T>(handle,
-                                         m,
-                                         n,
-                                         nrhs,
-                                         dA,
-                                         lda,
-                                         dB,
-                                         ldb,
-                                         dWork,
-                                         size_W,
-                                         dInfo,
-                                         bc,
-                                         hA,
-                                         hB,
-                                         hBRes,
-                                         hX,
-                                         hInfo,
-                                         hInfoRes,
-                                         &max_error);
+            gels_getError<API, INPLACE, T>(handle,
+                                           m,
+                                           n,
+                                           nrhs,
+                                           dA,
+                                           lda,
+                                           stA,
+                                           dB,
+                                           ldb,
+                                           stB,
+                                           dX,
+                                           ldx,
+                                           stX,
+                                           dWork,
+                                           size_W,
+                                           dInfo,
+                                           bc,
+                                           hA,
+                                           hB,
+                                           hBRes,
+                                           hX,
+                                           hXRes,
+                                           hNIters,
+                                           hInfo,
+                                           hInfoRes,
+                                           &max_error);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
-            gelsBatched_getPerfData<API, T>(handle,
-                                            m,
-                                            n,
-                                            nrhs,
-                                            dA,
-                                            lda,
-                                            dB,
-                                            ldb,
-                                            dWork,
-                                            size_W,
-                                            dInfo,
-                                            bc,
-                                            hA,
-                                            hB,
-                                            hX,
-                                            hInfo,
-                                            &gpu_time_used,
-                                            &cpu_time_used,
-                                            hot_calls,
-                                            argus.perf);
+            gels_getPerfData<API, INPLACE, T>(handle,
+                                              m,
+                                              n,
+                                              nrhs,
+                                              dA,
+                                              lda,
+                                              stA,
+                                              dB,
+                                              ldb,
+                                              stB,
+                                              dX,
+                                              ldx,
+                                              stX,
+                                              dWork,
+                                              size_W,
+                                              dInfo,
+                                              bc,
+                                              hA,
+                                              hB,
+                                              hX,
+                                              hNIters,
+                                              hInfo,
+                                              &gpu_time_used,
+                                              &cpu_time_used,
+                                              hot_calls,
+                                              argus.perf);
     }
     else
     {
