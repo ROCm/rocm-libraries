@@ -64,6 +64,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from ..core.arch import arch_from_isa
 from ..core.lower_llvm import lower_kernel_to_llvm
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
@@ -496,7 +497,8 @@ def _build_spec(
     try:
         t0 = time.perf_counter()
         kernel = adapter.build_kernel(spec)
-        ll = lower_kernel_to_llvm(kernel)
+        # Lower for the same target the compile below uses, not a fixed one.
+        ll = lower_kernel_to_llvm(kernel, arch=arch_from_isa(isa))
         hsaco, _ = build_hsaco_from_llvm_ir(ll, isa=isa)
         out_path.write_bytes(hsaco)
         rec.ok = True
