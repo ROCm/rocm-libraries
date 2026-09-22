@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 import copy
+import importlib
 from unittest.mock import MagicMock
 
 import pytest
 
-from tensilelite.TensileCreateLibrary.Run import _includeGemmA2AFusionProblemType
+from tensilelite.tensilelite_create_library.run import _includeGemmA2AFusionProblemType
 
 
 pytestmark = pytest.mark.unit
@@ -50,7 +51,7 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     still passed as a successful build.
     """
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    RunModule = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
     parsed = [
         LibraryIO.LibraryLogic(

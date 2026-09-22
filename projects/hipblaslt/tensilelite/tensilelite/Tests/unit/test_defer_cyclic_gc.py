@@ -1,10 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import importlib
 import unittest
 from unittest.mock import patch
 
-import tensilelite.TensileCreateLibrary.Run as run_module
+
+run_module = importlib.import_module("tensilelite.tensilelite_create_library.run")
 
 
 class RecordingGC:
