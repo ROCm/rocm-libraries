@@ -257,6 +257,48 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 completed.stdout,
             )
 
+    def test_variant_directory_bundle_keeps_variant_in_canonical_path_and_suite(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small"),
+                metadata={"generator": "manual", "reference_source": "manual"},
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "canonical_path: quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small/",
+                completed.stdout,
+            )
+            self.assertIn(
+                "full_test_name: "
+                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+                completed.stdout,
+            )
+
+    def test_tier_named_ancestor_directory_is_excluded_from_suite(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "quick" / "checkout"
+            self.write_bundle(
+                root,
+                Path("quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged/Small"),
+                metadata={"generator": "manual", "reference_source": "manual"},
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "full_test_name: "
+                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+                completed.stdout,
+            )
+
     def test_nan_output_tensor_fails(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
