@@ -167,22 +167,6 @@ inline __device__ __host__ std::complex<double> negate(std::complex<double> x)
     return std::complex<double>(-x. real(), -x. imag());
 }
 
-// Helper function to reduce intermediate precision and the output type are the same as the input type.
-template <typename TxDLi, typename TxDLo, typename Ti>
-inline void type_to_xdl_math_op_type(Ti* in, size_t s)
-{
-    //To filter out the case that input type is not supported by xDL Math Op.
-    //Currently, xDL Math Op supports in:float -> intermediat:xf32 -> out:float
-    constexpr bool needCast = !std::is_same<TxDLi, Ti>() && std::is_same<TxDLo, Ti>();
-    if(!needCast)
-        return;
-
-    //Cast input type to xDl math op type, using type alians to avoid the casting error.
-    using castType = std::conditional_t<needCast, TxDLi, Ti>;
-    for(size_t i = 0; i < s; i++)
-        in[i] = static_cast<Ti>(static_cast<castType>(in[i]));
-}
-
 template <typename T>
 inline __host__ __device__ bool hipblaslt_isnan(std::complex<T> arg,
                                                 std::enable_if_t<!std::is_integral<T>::value, int> = 0)
