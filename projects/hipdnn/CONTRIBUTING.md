@@ -27,7 +27,7 @@ which also defines the code of conduct.
 ### Licensing
 
 Code contributions to this project are covered under the terms of the
-[LICENSE](./LICENSE.md) file.
+[LICENSE](./LICENSE) file.
 
 ### Communication channels
 

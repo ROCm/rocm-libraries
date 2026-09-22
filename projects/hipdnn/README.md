@@ -131,4 +131,4 @@ Please follow [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
 
 ## License
 
-This project is licensed under the terms described in [LICENSE.md](./LICENSE.md).
+This project is licensed under the terms described in [LICENSE](./LICENSE).
