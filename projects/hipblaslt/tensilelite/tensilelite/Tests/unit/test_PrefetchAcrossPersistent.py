@@ -1404,9 +1404,9 @@ def test_every_grouping_row_answers_without_a_new_branch(row, shares):
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -1418,8 +1418,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -1428,7 +1428,7 @@ def assembler():
 
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
-    from Tensile.Common.GlobalParameters import assignGlobalParameters
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -1447,8 +1447,8 @@ def _gp_gfx1250(gfx1250_iim):
 
 def _make_params(gfx1250_iim, mi=None, **overrides):
     """Smallest PAP+TDM shape: TN MXF8F4 StreamK=3, StreamKForceDPOnly=1."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -1487,7 +1487,7 @@ def _make_params(gfx1250_iim, mi=None, **overrides):
 
 
 def _derive(gfx1250_iim, assembler, capsys, **overrides):
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
     sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
                    assembler, gfx1250_iim)
     return sol, capsys.readouterr().out
@@ -1594,12 +1594,12 @@ def _emit_asm(gfx1250_iim, assembler, **overrides):
     """(solution, assembly text or None). CPU-only; no GPU is touched."""
     import shutil
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
-    from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
     sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
                    assembler, gfx1250_iim)

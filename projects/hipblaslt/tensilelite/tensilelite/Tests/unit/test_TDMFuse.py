@@ -10,15 +10,15 @@ import types
 
 import pytest
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components import DecouplePGR as DP
-from Tensile.Components import TDMFuse as TF
-from Tensile.Components.DecouplePGR import decouplePGRBlocks
-from Tensile.Components.TDMFuse import (TDM_FUSE_GROUPING, tdmBothTensors,
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components import DecouplePGR as DP
+from tensilelite.Components import TDMFuse as TF
+from tensilelite.Components.DecouplePGR import decouplePGRBlocks
+from tensilelite.Components.TDMFuse import (TDM_FUSE_GROUPING, tdmBothTensors,
                                         tdmFusePaired, tdmGrouping,
                                         tdmWaveComponents, tdmWavePartition)
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = pytest.mark.unit
 
@@ -97,9 +97,9 @@ def test_paired_only_swaps_scale_parity_against_default():
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -111,8 +111,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -121,7 +121,7 @@ def assembler():
 
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -139,9 +139,9 @@ def _gp_gfx1250(gfx1250_iim):
 
 
 def _derive(gfx1250_iim, assembler, capsys, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 

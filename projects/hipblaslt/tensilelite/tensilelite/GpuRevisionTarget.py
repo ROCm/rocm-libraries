@@ -1,7 +1,7 @@
 # Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""gfx1250 v0/v1 ASIC-revision -> Tensile --gpu-targets detection.
+"""gfx1250 v0/v1 ASIC-revision -> TensileLite --gpu-targets detection.
 
 gfx1250 ships as two silicon revisions (v0 and v1) that share the same ISA and
 compiler arch name "gfx1250", so rocm_agent_enumerator/amdgpu-arch cannot tell
@@ -10,7 +10,7 @@ them apart. The only in-process signal is hipDeviceProp_t::asicRevision
 kernels on a v0 machine while defaulting to v1 everywhere else.
 
 This module deliberately carries no invoke dependency and lives inside the
-packaged Tensile tree so the ROCm test artifacts can exercise the mapping and
+packaged TensileLite tree so the ROCm test artifacts can exercise the mapping and
 probe-fallback logic directly; tensilelite/tasks.py only wraps it in invoke
 @task entry points.
 """
@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 
-# Tensile/GpuRevisionTarget.py -> Tensile -> tensilelite root.
+# tensilelite/GpuRevisionTarget.py -> tensilelite root.
 _TENSILELITE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _REVISION_PROBE_SRC = _TENSILELITE_ROOT / "tools" / "gpu_revision_probe.cpp"
 
@@ -30,7 +30,7 @@ _REVISION_PROBE_SRC = _TENSILELITE_ROOT / "tools" / "gpu_revision_probe.cpp"
 def detect_gpu_arch():
     """First non-gfx000 gfx arch rocm_agent_enumerator reports, or None.
 
-    Kept rocisa-free (no Tensile.Common import) so the invoke build path never
+    Kept rocisa-free (no tensilelite.Common import) so the invoke build path never
     pulls in rocisa just to probe the arch.
     """
     try:
@@ -53,7 +53,7 @@ def detect_gpu_arch():
 
 
 def _revision_to_gpu_target(base_arch, asic_revision):
-    """Map a detected base arch + ASIC revision to a Tensile --gpu-targets value.
+    """Map a detected base arch + ASIC revision to a TensileLite --gpu-targets value.
 
     Only gfx1250 revision 0 is the pre-production v0. Everything else -- the
     v1 (revision 1), an unknown revision (-1 when HIP is too old to
@@ -133,7 +133,7 @@ def _probe_asic_revision(build_dir=None, device_id=0):
 
 
 def detect_gpu_revision_target(build_dir=None, device_id=0):
-    """Detect the Tensile --gpu-targets value, distinguishing gfx1250 v0 from v1.
+    """Detect the TensileLite --gpu-targets value, distinguishing gfx1250 v0 from v1.
 
     Non-gfx1250 arches are returned unchanged without probing. For gfx1250, the
     ASIC revision is probed via HIP: revision 0 -> gfx1250v0, otherwise (and on

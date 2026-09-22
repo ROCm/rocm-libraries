@@ -348,7 +348,7 @@ def _applyCustomKernelDefToSol(sol, result):
     ckDef = getattr(result, 'customKernelDef', None)
     if ckDef is not None:
         sol.originalSolution._state["CustomKernel"] = ckDef
-        from Tensile.Contractions import CustomKernel as CK
+        from ..Contractions import CustomKernel as CK
         sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
@@ -1096,7 +1096,7 @@ def run():
     start = timer()
     print1("")
     print1(HR)
-    print1("# Tensile Create Library")
+    print1("# TensileLite Create Library")
     print2(HR)
     print2("")
 
@@ -1363,7 +1363,7 @@ def run():
         else:
             printWarning(f"Cannot remove build_tmp")
 
-    print("# Tensile Library Writer DONE")
+    print("# TensileLite Library Writer DONE")
     print(HR)
     print("")
 

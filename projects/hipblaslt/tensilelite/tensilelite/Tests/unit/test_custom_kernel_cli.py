@@ -14,8 +14,8 @@ from textwrap import dedent, indent
 
 import pytest
 
-import Tensile.AddCustomConfig as acc
-import Tensile.ValidateMetadata as vm
+import tensilelite.AddCustomConfig as acc
+import tensilelite.ValidateMetadata as vm
 
 pytestmark = pytest.mark.unit
 

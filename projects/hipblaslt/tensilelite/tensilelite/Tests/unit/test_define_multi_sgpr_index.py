@@ -19,7 +19,7 @@ import pytest
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = pytest.mark.unit
 
