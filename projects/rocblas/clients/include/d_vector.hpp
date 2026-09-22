@@ -181,6 +181,8 @@ public:
         // GOOGLE_TEST builds; the base allocation otherwise). teardown calls
         // free_ptr_use on the same pointer before adjusting it, so the map
         // entry is always found and mem_used returns to its pre-setup value.
+        // m_bytes includes guard pad bytes in GOOGLE_TEST builds; alloc and free
+        // are symmetric (both use m_bytes) so the ceiling delta is always zero.
         if(use_HMM)
             alloc_ptr_use(d, m_bytes);
 
@@ -211,22 +213,46 @@ public:
             return;
         }
 
+        // Called only when memcmp detected a difference; scans byte-by-byte to report the
+        // count and the index of the first differing byte, without paying the scan cost on
+        // the common (clean) path.
+        auto report_guard_corruption
+            = [](const unsigned char* host, const T* ref, size_t guard_bytes, const char* tag) {
+                  const auto* r         = reinterpret_cast<const unsigned char*>(ref);
+                  size_t      differing = 0, first = 0;
+                  for(size_t i = 0; i < guard_bytes; ++i)
+                      if(host[i] != r[i])
+                      {
+                          if(!differing) // record index of first differing byte only once
+                              first = i;
+                          ++differing;
+                      }
+                  // memcmp detected corruption before this lambda was called, so differing
+                  // must be > 0 and first is valid. The check defends against any future
+                  // caller that violates the precondition.
+                  if(differing > 0)
+                      ADD_FAILURE()
+                          << differing << " " << tag << "-guard byte(s) corrupted; first at byte "
+                          << first << " of " << guard_bytes << " (expected 0x" << std::hex
+                          << static_cast<unsigned>(r[first]) << ", got 0x"
+                          << static_cast<unsigned>(host[first]) << std::dec << ")";
+              };
+
         // Post-guard first, because d still points at the user allocation. Each comparison is
         // gated on its own copy succeeding, so a failed read cannot leave the other region's
         // bytes behind to be compared a second time.
         hipError_t status = hipMemcpy(host_guard.get(), d + m_size, m_guard_len, hipMemcpyDefault);
         EXPECT_EQ(status, hipSuccess)
             << "cannot read the guard after the allocation: " << hipGetErrorName(status);
-        if(status == hipSuccess)
-            EXPECT_EQ(memcmp(host_guard.get(), m_guard, m_guard_len), 0)
-                << "post-guard overwritten";
+        if(status == hipSuccess && memcmp(host_guard.get(), m_guard, m_guard_len) != 0)
+            report_guard_corruption(host_guard.get(), m_guard, m_guard_len, "post");
 
         // Pre-guard sits m_pad elements below the user pointer.
         status = hipMemcpy(host_guard.get(), d - m_pad, m_guard_len, hipMemcpyDefault);
         EXPECT_EQ(status, hipSuccess)
             << "cannot read the guard before the allocation: " << hipGetErrorName(status);
-        if(status == hipSuccess)
-            EXPECT_EQ(memcmp(host_guard.get(), m_guard, m_guard_len), 0) << "pre-guard overwritten";
+        if(status == hipSuccess && memcmp(host_guard.get(), m_guard, m_guard_len) != 0)
+            report_guard_corruption(host_guard.get(), m_guard, m_guard_len, "pre");
 #endif
     }
 
