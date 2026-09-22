@@ -4,16 +4,16 @@ installed toolchain.
 
 # Why this exists
 
-rocke resolves an intrinsic `declare` on ONE axis: the LLVM flavor. The target
-arch is consumed only to pick an ISA backend (`lower_llvm.py`, `backend_for(arch
-or "gfx950")`) and never reaches the decl table -- so "is this intrinsic
-available on this GPU" is checked nowhere at build time. See
+rocke used to resolve an intrinsic `declare` on ONE axis: the LLVM flavor. The
+target arch was consumed only to pick an ISA backend (`lower_llvm.py`,
+`backend_for`) and never reached the decl table -- so "is this intrinsic
+available on this GPU" was checked nowhere at build time. See
 `dsl_docs/development/arch_axis_proposal.md`.
 
 This tool measures the missing axis instead of hand-maintaining it, and commits
-the result as a data file. Nothing consumes the artifact yet; landing the data
-first is deliberate (it cannot break anything, and it surfaces the defects that
-justify the rest).
+the result as a data file. The read side is `rocke.core.arch.domain`, which the
+lowerer's `_need` chokepoint consults on every intrinsic demand and
+`tools/check_arch_domain.py` gates the corpus against.
 
 # Two stages, because the two axes are answered by different tools
 
@@ -87,7 +87,24 @@ from _hostcaps import available_cpus
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
 
-SCHEMA = "rocke.intrinsic_arch_domain/v1"
+
+def _bootstrap_sys_path() -> None:
+    """Import rocke from the checkout without an external PYTHONPATH, matching
+    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
+    the decl table lives entirely in platform."""
+    path = ROCKE / "python"
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+
+# At import time, not in main(): the status vocabulary and the schema string
+# below come from the read side, so `rocke` has to be importable before the
+# module body finishes.
+_bootstrap_sys_path()
+
+from rocke.core.arch import domain as _domain
+
+SCHEMA = _domain.SCHEMA
 DATA_DIR = ROCKE / "python" / "rocke" / "core" / "arch" / "data"
 
 
@@ -103,13 +120,17 @@ def default_out(flavor: str) -> Path:
     return DATA_DIR / f"intrinsic_arch_domain.{flavor}.json"
 
 
-STATUS_OK = "ok"
-STATUS_NAME_ABSENT = "name_absent"
-STATUS_ARCH_ABSENT = "arch_absent"
-STATUS_TARGET_UNSUPPORTED = "target_unsupported"
-STATUS_TOOLCHAIN_CRASH = "toolchain_crash"
-STATUS_TOOLCHAIN_TIMEOUT = "toolchain_timeout"
-STATUS_PROBE_ERROR = "probe_error"
+# The status vocabulary is owned by the READ side -- `rocke.core.arch.domain`,
+# which is what consumers import -- and re-exported here. Two copies of a
+# seven-value enum, one in the writer and one in the readers, is exactly the
+# drift this whole artifact exists to prevent.
+STATUS_OK = _domain.STATUS_OK
+STATUS_NAME_ABSENT = _domain.STATUS_NAME_ABSENT
+STATUS_ARCH_ABSENT = _domain.STATUS_ARCH_ABSENT
+STATUS_TARGET_UNSUPPORTED = _domain.STATUS_TARGET_UNSUPPORTED
+STATUS_TOOLCHAIN_CRASH = _domain.STATUS_TOOLCHAIN_CRASH
+STATUS_TOOLCHAIN_TIMEOUT = _domain.STATUS_TOOLCHAIN_TIMEOUT
+STATUS_PROBE_ERROR = _domain.STATUS_PROBE_ERROR
 
 # Bumped when the probe *semantics* change -- not when this file is merely
 # edited -- and recorded into every column so a committed answer can be told
@@ -146,15 +167,6 @@ PROBE_CFLAGS = ("-O0", "-nogpulib")
 # as an error rather than a verdict -- one unlucky key takes down the gate for
 # every host running that flavor.
 PROBE_TIMEOUT_S = 60
-
-
-def _bootstrap_sys_path() -> None:
-    """Import rocke from the checkout without an external PYTHONPATH, matching
-    tests/conftest.py. Unlike check_ir_validity this needs no library/ reach --
-    the decl table lives entirely in platform."""
-    path = ROCKE / "python"
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 
 # --------------------------------------------------------------------------
@@ -659,7 +671,6 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
-    _bootstrap_sys_path()
     sys.path.insert(0, str(HERE))
     from check_ir_validity import _llvm_tool  # same resolution order, one owner
     from rocke.core import lower_llvm as L
