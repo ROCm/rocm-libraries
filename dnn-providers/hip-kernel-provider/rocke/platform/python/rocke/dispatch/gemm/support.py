@@ -200,12 +200,25 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
         )
 
     if family == "wmma":
-        if q.warp_tile != (16, 16, 16):
-            return False, f"WMMA path supports only 16x16x16, got {q.warp_tile}"
-        if q.pipeline != "mem":
+        # Mirror of the authoritative gate in
+        # ``instances/common/gemm_universal.py::is_valid_spec``. gfx1250's fp16
+        # WMMA atom is the K=32 16x16x32 form, not gfx11/gfx12's 16x16x16, and
+        # the WMMA body also accepts the scheduled 'wmma_v1' pipeline. Keeping
+        # this copy narrower than the builder makes a legal spec undispatchable.
+        supported_atoms = {(16, 16, 32)} if q.arch == "gfx1250" else {(16, 16, 16)}
+        if q.warp_tile not in supported_atoms:
+            supported = ", ".join(f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms))
             return (
                 False,
-                f"WMMA path supports only the 'mem' pipeline, got {q.pipeline!r}",
+                f"WMMA path supports only {supported}, got {q.warp_tile} on {q.arch}",
+            )
+        if q.pipeline not in ("mem", "wmma_v1"):
+            return (
+                False,
+                (
+                    f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline, "
+                    f"got {q.pipeline!r}"
+                ),
             )
         if q.epilogue != "default":
             return (
@@ -251,7 +264,9 @@ def request_shape_supported(
         if not padded and dim % tile:
             return (
                 False,
-                f"{name}={dim} is not divisible by tile_{name.lower()}={tile} "
-                f"and pad_{name.lower()} is disabled",
+                (
+                    f"{name}={dim} is not divisible by tile_{name.lower()}={tile} "
+                    f"and pad_{name.lower()} is disabled"
+                ),
             )
     return True, "ok"

@@ -104,15 +104,22 @@ def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpe
     """Return ``spec`` with a split-K degree chosen for ``req`` on its arch.
 
     Split-K is engaged only for skinny / tall-N decode shapes whose base grid
-    leaves the CU-rich CDNA device idle, and only on the MFMA (CDNA) family the
-    kernel's atomic-add epilogue supports. For any shape that already fills the
-    device -- and on RDNA, where the split-K epilogue is not wired -- the chosen
-    degree is ``1`` and this returns the spec **unchanged** (so the default /
-    square-GEMM path stays byte-identical). The ``ROCKE_GEMM_SPLIT_K`` env flag
-    overrides the heuristic (see :mod:`rocke.helpers.split_k`).
+    leaves the CU-rich CDNA device idle, and only on the MFMA path the kernel's
+    atomic-add epilogue supports. For any shape that already fills the device --
+    and on every WMMA target, where the split-K epilogue is not wired -- the
+    chosen degree is ``1`` and this returns the spec **unchanged** (so the
+    default / square-GEMM path stays byte-identical). The ``ROCKE_GEMM_SPLIT_K``
+    env flag overrides the heuristic (see :mod:`rocke.helpers.split_k`).
+
+    The gate is the **matrix path**, not the arch family. Those coincided until
+    gfx1250, which is ``family="cdna"`` at wave32 with ``matrix_path="wmma"``:
+    gating on the family alone let split-K engage there and emit specs that
+    ``gemm_universal.is_valid_spec`` then rejects with "split_k > 1 is CDNA-only
+    (got family 'wmma')" -- a dispatch-time build failure on exactly the skinny
+    decode shapes split-K targets.
     """
     target = ArchTarget.from_gfx(req.arch)
-    if target.family != "cdna":
+    if not target.has_mfma:
         return spec
     t = spec.tile
     decision = select_split_k(

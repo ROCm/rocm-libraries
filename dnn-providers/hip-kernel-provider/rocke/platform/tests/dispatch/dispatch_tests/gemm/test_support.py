@@ -59,10 +59,39 @@ class TestGemmSupportPredicates(unittest.TestCase):
         q = support_query_from_universal_spec(rdna.spec, arch="gfx1151")
         ok, why = gemm_config_supported(replace(q, pipeline="compv4"))
         self.assertFalse(ok)
-        self.assertIn("WMMA path supports only the 'mem' pipeline", why)
+        # Matched as a prefix: the WMMA path also accepts the scheduled
+        # 'wmma_v1' pipeline, so the message names both. What this asserts is
+        # that a CDNA pipeline like compv4 is refused, not the exact phrasing.
+        self.assertIn("WMMA path supports only the 'mem'", why)
         ok, why = gemm_config_supported(replace(q, epilogue="cshuffle"))
         self.assertFalse(ok)
         self.assertIn("WMMA path supports only the 'default' epilogue", why)
+
+    def test_gfx1250_wmma_atom_and_pipeline(self):
+        """gfx1250's WMMA atom is the K=32 16x16x32 form, not gfx11's 16x16x16.
+
+        This predicate duplicates the gate in
+        ``gemm_universal.is_valid_spec``; when the copies drift, a legal spec
+        becomes undispatchable. gfx1250 is also ``family="cdna"`` at wave32, so
+        it must not be admitted to the wave64 MFMA rules.
+        """
+        res = dispatch_gemm_fp16(GemmRequest(M=4096, N=4096, K=4096, arch="gfx1250"))
+        q = support_query_from_universal_spec(res.spec, arch="gfx1250")
+        self.assertEqual(q.warp_tile, (16, 16, 32))
+        ok, why = gemm_config_supported(q)
+        self.assertTrue(ok, why)
+
+        # The gfx11-era atom is not legal here. It is refused by the atom
+        # catalog before the WMMA gate is even reached, because gfx1250's
+        # MmaCatalog carries no 16x16x16 fp16 entry at all.
+        ok, why = gemm_config_supported(replace(q, warp_tile=(16, 16, 16)))
+        self.assertFalse(ok)
+        self.assertIn("(16, 16, 16)", why)
+        self.assertIn("gfx1250", why)
+
+        # ... and the scheduled WMMA pipeline is.
+        ok, why = gemm_config_supported(replace(q, pipeline="wmma_v1"))
+        self.assertTrue(ok, why)
 
     def test_request_shape_support_respects_padding_flags(self):
         result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))

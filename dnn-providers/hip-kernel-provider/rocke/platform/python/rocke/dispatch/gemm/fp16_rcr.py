@@ -163,6 +163,211 @@ def _spec_rdna_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
+def _spec_gfx1250_wmma(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    """gfx1250 fp16 RCR: wave32 WMMA on the K=32 ``16x16x32`` atom.
+
+    Geometry and traits are the winner of an exhaustive step-0 sweep over every
+    lever the gfx1250 WMMA path leaves reachable (432 geometries x the live
+    trait product), correctness-gated against the fp32 reference and confirmed
+    over fresh-process repeats at 2048/4096/8192 cubed.
+
+    Notes on the fixed fields, all forced rather than chosen:
+
+    * ``epilogue="default"`` and the absent DTL / preshuffle / chiplet flags are
+      the only legal settings on this path (``gemm_universal.py`` WMMA gate).
+    * ``lds_swizzle`` stays **off**: on gfx1250 it produces numerically wrong
+      results on every geometry tested, and nothing in the validator rejects it.
+    * ``pad_*`` stays off; it costs VGPRs and buys nothing on aligned shapes.
+    * ``pipeline="mem"``: ``wmma_v1`` is roughly competitive at ``tile_k=32``
+      but collapses to about a quarter of the throughput at ``tile_k=64`` --
+      its schedule does not scale to the larger K step.
+
+    ``tile_k=64`` + ``lds_k_pad=8`` are a **pair**, and the order they were
+    found in matters. A first sweep ranked geometry at ``lds_k_pad=0``, where
+    every top config had ``tile_k=32``. Re-ranking the same geometries at
+    ``lds_k_pad=8`` inverted that completely -- the whole leaderboard became
+    ``tile_k=64``. The pad is not a small correction here: at ``tile_k=64`` the
+    unpadded variant runs ~2.9x slower, and the response across pad values
+    {0, 8, 16, 24, 32} is non-monotonic (a bank-aliasing signature), so the pad
+    cannot be tuned by hill-climbing from 0. ``kpad=24`` measures within noise
+    of 8; 8 is chosen for the smaller LDS footprint and tighter run-to-run
+    spread.
+    """
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=128,
+            tile_n=128,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+        ),
+        trait=TraitSpec(
+            pipeline="mem",
+            scheduler="intrawave",
+            epilogue="default",
+            lds_k_pad=8,
+            # Tensor-DMA fill at this tile measures ~1.09x the cooperative copy.
+            # Depth stays at 2: depth 3 *regresses* here (~0.97x) -- the third
+            # buffer only pays once there is enough compute per tile to hide the
+            # extra transfers behind, which this tile does not have. See
+            # ``_spec_gfx1250_wmma_tdm`` for the tile that does.
+            tdm_lds=True,
+            tdm_prefetch=True,
+            tdm_prefetch_depth=2,
+        ),
+    )
+
+
+def _spec_gfx1250_wmma_tdm(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    """gfx1250 fp16 RCR, large square shapes: 256x256 tile on tensor-DMA.
+
+    Admits only shapes divisible by its 256x256 tile (``pad_*`` is off);
+    everything else falls through to the candidates below.
+
+    **Registered geometry is not the fastest one measured.** The fastest
+    configuration on this part is ``w4x2`` at ``tdm_prefetch_depth=3``
+    (**~1.40x** the previous tuned candidate, ``_spec_gfx1250_wmma``), and the
+    lever analysis below describes *that* configuration. It is not what this
+    function returns, because it does not currently reproduce: built fresh from
+    this tree it faults at launch with an HSA aperture violation, on every
+    8-wave (``w4x2``) TDM geometry tried and at ``w2x2`` depth 3, while the
+    stored artifact from the tuning run still runs correctly. Same sources,
+    same three ROCm installs, deterministic -- the cause is not yet identified,
+    so the difference is real but unexplained.
+
+    Registering a candidate the dispatcher cannot build is worse than
+    registering a slower one, so this returns the nearest configuration that
+    was *verified to build and validate from a fresh tree*: ``w2x2`` at depth
+    2. By the component ratios below that costs roughly ``0.98x`` for the warp
+    grid and ~10% for the depth. The direct A/B re-measurement is still
+    outstanding (the tuning host was unavailable), so treat the cost as
+    estimated, not measured.
+
+    Restore ``warp_m=4`` / ``tdm_prefetch_depth=3`` once the fault is
+    understood; the analysis below is the record of why those are the target.
+
+    Three levers compound here, and the order they were found in matters
+    because each one invalidated the reasoning behind the previous stopping
+    point:
+
+    * ``tdm_lds`` replaces the cooperative global->LDS copy with one
+      wave-uniform descriptor per operand. **Alone it is a small net loss**
+      (~0.99x): the descriptor is issued and immediately waited on, so the
+      transfer overlaps nothing. It must be paired with the prefetch.
+    * ``tdm_prefetch`` double-buffers AB and issues tile N+1 before computing
+      tile N, which is what turns the loss into ~1.09x at the old 128x128 tile.
+    * The geometry then had to be re-swept, because the fill cost had changed:
+      ``256x256`` was previously *rejected* by a double-buffer affordability
+      test that both ignored ``lds_k_pad`` and demanded headroom for a second
+      workgroup per CU that VGPR pressure (253/256) already prevents.
+
+    ``tdm_prefetch_depth=3`` keeps two tiles in flight. Depth 4 measures
+    *identically* at this warp grid, so 3 is chosen for the smaller footprint
+    (221 KB vs 295 KB of LDS for the same throughput); depth 2 costs ~10% and
+    depth 5 exceeds the 320 KiB per-workgroup LDS ceiling. Ablating the wait
+    entirely (numerically invalid, diagnostic only) measures ~1.10x above this
+    point, so the residual DMA stall is small and not reachable by deeper
+    pipelining.
+
+    ``warp_n=2`` rather than 4 is register blocking: a 64x128 per-warp tile is
+    a 4x8 grid of atoms, which drops LDS reads per WMMA from 1.00 to 0.75 by
+    reusing each hoisted A fragment across twice as many matrix ops. It is
+    worth ~1.02x and it does **not** generalise in either direction:
+
+    * Pushing further *loses*. 8x8 (``w2x2``, ratio 0.50) needs 512 accumulator
+      registers and measures 0.98x; ``w4x1`` (ratio 0.625) measures 0.96x. The
+      ratio keeps improving while throughput turns over, because the >255-index
+      VGPR latency (§21.4) and the lost occupancy overtake it.
+    * **Orientation is not symmetric.** ``w2x4`` has the identical atom count,
+      accumulator size and ratio, and measures **0.93x** -- a ~10% gap the
+      ratio formula cannot see. Spills track it (154 vs 48).
+
+    Do not tune this by spill count. ``w4x2`` at depth 2 is the only nearby
+    configuration that spills *nothing* (452 VGPR, 0 spills) and it is ~10%
+    slower than this one, which spills 48.
+
+    ``lds_k_pad=8`` is unchanged and still a sharp optimum -- it survived the
+    re-sweep across seven geometries and four depths. TDM makes the pad free to
+    *apply* (a descriptor field, not instructions), which is not the same as
+    making it unnecessary: its job is bank-conflict avoidance on ``ds_read``,
+    which TDM does not touch, and ``ds_read`` is now the dominant traffic.
+    """
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=256,
+            tile_n=256,
+            tile_k=64,
+            # w2x2 / depth 2, not the measured-best w4x2 / depth 3: see the
+            # note at the top of this docstring. Every 8-wave TDM geometry
+            # faults at launch when built fresh from this tree.
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+        ),
+        trait=TraitSpec(
+            pipeline="mem",
+            scheduler="intrawave",
+            epilogue="default",
+            lds_k_pad=8,
+            tdm_lds=True,
+            tdm_prefetch=True,
+            tdm_prefetch_depth=2,
+        ),
+    )
+
+
+def _spec_gfx1250_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    """gfx1250 fp16 RCR coverage candidate for shapes the 128x128 tile can't take.
+
+    The tuned candidate above has ``pad_*`` off, so it only admits shapes
+    divisible by its 128x128 tile. Without this companion, every skinny /
+    decode shape would fall off the end of the registry and
+    ``dispatch_gemm_fp16`` would raise -- the same two-candidate split the CDNA
+    and RDNA entries already use.
+
+    This is a **coverage** choice, not a tuned one: the step-0 sweep behind
+    ``_spec_gfx1250_wmma`` covered square-large shapes only. Of five padded
+    small-tile geometries verified correct on decode shapes (M = 1, 2, 8), this
+    was the fastest, but it has not been swept as a decode optimum. Re-tune it
+    against a real decode shape set before treating its geometry as settled.
+    """
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=64,
+            tile_n=128,
+            tile_k=32,
+            warp_m=1,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+        ),
+        trait=TraitSpec(
+            pipeline="mem",
+            scheduler="intrawave",
+            epilogue="default",
+            pad_m=True,
+            pad_n=True,
+            pad_k=True,
+            lds_k_pad=8,
+        ),
+    )
+
+
 def _make_candidate(
     *,
     name: str,
@@ -231,6 +436,9 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 # a target the candidate was never built or run against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 _RDNA_WMMA = ("gfx11-generic", "gfx1151", "gfx1201")
+# gfx1250 gets its own list: cdna family, wave32, WMMA path, and a K=32 atom
+# (16x16x32) that none of the above share.
+_GFX1250_WMMA = ("gfx1250",)
 
 GEMM_FP16_REGISTRY = CandidateRegistry(
     _FAMILY,
@@ -267,6 +475,27 @@ GEMM_FP16_REGISTRY.extend(
             priority=20,
             spec_fn=_spec_rdna_wmma_small,
             arches=_RDNA_WMMA,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1250_wmma_tdm",
+            spec_id="gfx1250_wmma_tdm_256x256x64_d4",
+            priority=5,
+            spec_fn=_spec_gfx1250_wmma_tdm,
+            arches=_GFX1250_WMMA,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1250_wmma",
+            spec_id="gfx1250_wmma_128x128x64",
+            priority=10,
+            spec_fn=_spec_gfx1250_wmma,
+            arches=_GFX1250_WMMA,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1250_wmma_small",
+            spec_id="gfx1250_wmma_64x128x32_padded",
+            priority=20,
+            spec_fn=_spec_gfx1250_wmma_small,
+            arches=_GFX1250_WMMA,
         ),
     )
 )
