@@ -243,7 +243,9 @@ def _reference_gfx942_generic(problem):
         block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx942"),
         use_mfma_32x32=_enable_mfma_32x32(problem, "gfx942"),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem, "gfx942"),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem, "gfx942"),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(
+            problem, "gfx942"
+        ),
         use_transposed_scalar_state=scalar_state,
         use_transposed_mask_once=mask_opts,
         use_transposed_mask_limit=mask_opts,
@@ -310,7 +312,9 @@ def _reference_gfx950_generic(problem):
         block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx950"),
         use_mfma_32x32=_enable_mfma_32x32(problem, "gfx950"),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem, "gfx950"),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem, "gfx950"),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(
+            problem, "gfx950"
+        ),
         use_transposed_scalar_state=scalar_state,
         use_transposed_mask_once=mask_opts,
         use_transposed_mask_limit=mask_opts,

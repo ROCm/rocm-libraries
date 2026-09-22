@@ -472,7 +472,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(problem, arch or _resolve_attention_arch())
+        rejected = _reject_fp8_format_arch_mismatch(
+            problem, arch or _resolve_attention_arch()
+        )
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -623,9 +625,7 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
     )
 
 
-def _enable_d128_small_tile(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
+def _enable_d128_small_tile(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """d128 occupancy lever: select T = block_size (small tile) + nw=2 for
     the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
 
@@ -674,9 +674,7 @@ def _enable_d128_small_tile(
     )
 
 
-def _enable_k_single_buffer(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
+def _enable_k_single_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
 
     For the same single-batch d128 cohort that ``_enable_d128_small_tile`` gates,
@@ -1747,9 +1745,7 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
     return True
 
 
-def _enable_v_double_buffer(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
+def _enable_v_double_buffer(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Enable the V[i+1] double-buffer prefetch on the single-batch combo.
 
     SHORT single-batch combo prefill (max_seqlen_q <= 1024) on **d64** stacks
@@ -1785,9 +1781,7 @@ def _enable_v_double_buffer(
     return problem.max_seqlen_q <= 1024
 
 
-def _enable_sched_barrier(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
+def _enable_sched_barrier(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Enable the lever-3 sched_barrier fence (CK-Tile-derived).
 
     A ``__builtin_amdgcn_sched_barrier`` is placed between the QK MFMA cluster
@@ -1814,9 +1808,7 @@ def _enable_sched_barrier(
     return problem.head_size == 128
 
 
-def _enable_early_v_schedule(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
+def _enable_early_v_schedule(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Enable the early-V issue schedule on the single-batch combo.
 
     LONG d64 single-batch combo prefill (head_size == 64, max_seqlen_q >= 2048)
@@ -2285,9 +2277,7 @@ def _gfx942_flash_kv_cache_policy(problem: UnifiedAttentionProblem) -> str:
     return "all"
 
 
-def _enable_gfx942_flash_q_direct(
-    problem: UnifiedAttentionProblem, arch: str
-) -> bool:
+def _enable_gfx942_flash_q_direct(problem: UnifiedAttentionProblem, arch: str) -> bool:
     return (
         _enable_gfx942_fp16_flash(problem, arch)
         or _enable_gfx942_bf16_flash(problem, arch)
