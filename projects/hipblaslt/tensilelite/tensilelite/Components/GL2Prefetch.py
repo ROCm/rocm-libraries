@@ -11,6 +11,7 @@ from rocisa.functions import vectorMultiply64Bpe, scalarMultiplyBpe, vectorStati
     scalarStaticRemainder
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
+from ..Common.MxScaleLayout import mxFreeTile, mxTdmTileM
 
 # Bit 15 of the packed GSU kernel argument selects how the summation loop is cut
 # up between the GSU groups, and the two layouts need different start offsets and
@@ -54,7 +55,10 @@ class GL2PrefetchLoad(GL2Prefetch):
         bpe: float = tp["bpeGR"]
 
         if isMX:
-            coalescedDim = mt * numTileWGs * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            mxTile = mxFreeTile(kernel, tc)
+            mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            # 1D: MT * numTileWGs * mxUnit. 2D: scale-rows * numTileWGs * mxUnit.
+            coalescedDim = mxTdmTileM(mt, mxTile) * numTileWGs * mxUnit
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
         else:
             du: int = kernel["_DepthU%s" % subTc]
@@ -148,8 +152,15 @@ class GL2PrefetchLoad(GL2Prefetch):
         bpe: float = tp["bpeGR"]
         du: int = kernel["_DepthU%s" % subTc]
         if tc.startswith("MX"):
+            mxTile = mxFreeTile(kernel, tc)
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
                 round(kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"] * bpe), comment="addr increment"))
+            if mxTile > 1:
+                # 1D inc = Size * (DepthU/MXBlock) * bpe. 2D K-row pitch is
+                # Size/MXBlockFree; without this shift CD4_2 PGL1 walks SizeJ
+                # (65536) through a 6144-byte MXSB buffer.
+                mod.add(SLShiftRightB32(sgpr(f"GL2PrefetchInc{tc}"), hex(int(log2(mxTile))),
+                    sgpr(f"GL2PrefetchInc{tc}"), f"MXS 2D: Size/MXBlockFree({mxTile})"))
         elif tp["tlu"]:
             perpStride: str | RegisterContainer = writer.strideRef(subTc, 3)
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(du * bpe), comment="addr increment"))
@@ -199,6 +210,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         tmpVgprCoalIdx = writer.vgprPool.checkOutAligned(1, 1)
         if isMX:
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            mxTile: int = mxFreeTile(kernel, tc)
 
         mod.addComment(f"gl2 prefetch calc start addr of {tc}")
         with writer.allocTmpSgpr(numTmpSgpr, 2) as tmpSgprRes:
@@ -245,11 +257,23 @@ class GL2PrefetchLoad(GL2Prefetch):
             mod.add(SSubI32(sgpr(tmpSgprIdx0), sgpr(sgprTileWgName), sgpr(tmpSgprIdx3), \
                 comment="cluster base tile"))
             if isMX:
-                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit * mt, \
-                    comment=f"clusterBaseTile * mxUnit({mxUnit}) * MT({mt})"))
-                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
-                mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
-                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
+                scaleRowsMT = mxTdmTileM(mt, mxTile)
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mxUnit * scaleRowsMT, \
+                    comment=f"clusterBaseTile * mxUnit({mxUnit}) * scaleRowsMT({scaleRowsMT})"))
+                if mxTile > 1:
+                    # Edge in scale-row units: ceil(Size/MXBlockFree)-1, not Size-1.
+                    mod.add(SAddU32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), mxTile - 1,
+                                    comment=f"ceil(Size/MXBlockFree({mxTile}))"))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx1), hex(int(log2(mxTile))),
+                                           sgpr(tmpSgprIdx1), "scale rows"))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), 1))
+                    if mxUnit != 1:
+                        mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
+                else:
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
+                    mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
+                    mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt, comment=f"clusterBaseTile * MT({mt})"))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
@@ -258,7 +282,17 @@ class GL2PrefetchLoad(GL2Prefetch):
             # will we have MX stride later?
             if isMX:
                 perpStride = sgpr(tmpSgprIdx2)
-                mod.add(SMulI32(perpStride, sgpr(sgprSizeFreeName), mxUnit, f"MX perp stride"))
+                if mxTile > 1:
+                    # Host 2D is [K_blocks][scale_rows]; pitch to the next K-block
+                    # is Size/MXBlockFree, not Size (1D M/N).
+                    mod.add(SAddU32(perpStride, sgpr(sgprSizeFreeName), mxTile - 1,
+                                    comment=f"ceil(Size/MXBlockFree({mxTile}))"))
+                    mod.add(SLShiftRightB32(perpStride, hex(int(log2(mxTile))), perpStride,
+                                           "MXS 2D perp stride"))
+                    if mxUnit != 1:
+                        mod.add(SMulI32(perpStride, perpStride, mxUnit, "MX perp stride * mxUnit"))
+                else:
+                    mod.add(SMulI32(perpStride, sgpr(sgprSizeFreeName), mxUnit, f"MX perp stride"))
             for i in range(nl):
                 vgprAddrName = f"{vgprAddrBaseName}_{i}"
                 vgprAddrNameHi = vgprAddrName + "+1"
