@@ -247,10 +247,7 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_BFlatBytesDramTileDistribution()
     {
-        constexpr index_t K1          = WaveSize;
-        constexpr index_t KWavePerBlk = 1;
-        constexpr index_t K0          = KWavePerBlk;
-
+        constexpr index_t K1         = WaveSize;
         constexpr index_t WaveRepeat = WaveNum / TileShape::flatNPerWarp;
 
 #if defined(CK_USE_GFX1250) && CK_TILE_USE_WMMA
@@ -264,6 +261,7 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
                 sequence<2, 2>,
                 sequence<1, 2>>{});
 #else
+        constexpr index_t K0 = 1;
         if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             return make_static_tile_distribution(
                 tile_distribution_encoding<

@@ -141,8 +141,11 @@ struct MxGemmKernel
     // emit atomic_add for fp16/bf16 outputs when the C vector size is even. For an odd vector
     // size that combination is not instantiated, so such a config cannot run split-K.
     // Epilogues with a different store mechanism, such as TDM, retain their own rules.
+    template <typename T>
+    using AtomicAddRequiresEvenVectorSize = decltype(T::kAtomicAddRequiresEvenVectorSize);
+
     static constexpr bool kSplitKAtomicAddSupported = [] {
-        if constexpr(requires { EpiloguePipeline::kAtomicAddRequiresEvenVectorSize; })
+        if constexpr(is_detected<AtomicAddRequiresEvenVectorSize, EpiloguePipeline>::value)
             return !EpiloguePipeline::kAtomicAddRequiresEvenVectorSize ||
                    EpiloguePipeline::GetVectorSizeC() % 2 == 0;
         else

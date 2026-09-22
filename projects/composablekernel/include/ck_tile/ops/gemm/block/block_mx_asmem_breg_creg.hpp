@@ -57,7 +57,6 @@ struct BlockMXGemmASmemBRegCReg
     {
         constexpr index_t K_Lane   = get_warp_size() / 16;
         constexpr index_t K_Thread = WarpGemm::kK / K_Lane;
-        constexpr index_t AK1      = 16 * APackedSize;
 
         static_assert(BlockGemmShape::WarpTile::at(I0) == 16 &&
                       BlockGemmShape::WarpTile::at(I1) == 16);
@@ -75,6 +74,7 @@ struct BlockMXGemmASmemBRegCReg
                                        sequence<2, 2>,
                                        sequence<0, 2>>{});
 #else
+        constexpr index_t AK1 = 16 * APackedSize;
         if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             return make_static_tile_distribution(
                 tile_distribution_encoding<sequence<NWarp>,

@@ -375,12 +375,6 @@ struct BlockGemmARegBRegCRegEightWavesV1
                     constexpr auto mIter = impack * MXdlPack + imxdl;
                     constexpr auto nIter = inpack * NXdlPack + inxdl;
 
-                    // OpSel for A: selects byte within packed int32_t
-                    constexpr index_t kOpSelA = ikxdl * MXdlPack + imxdl;
-
-                    // OpSel for B: selects byte within packed int32_t
-                    constexpr index_t kOpSelB = ikxdl * NXdlPack + inxdl;
-
                     // read A warp tensor from A Block window
                     AWarpTensor a_warp_tensor;
                     a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
@@ -408,6 +402,9 @@ struct BlockGemmARegBRegCRegEightWavesV1
                             BScaleDataType<
                                 ScaleDataTypeToEnum<typename Problem::BScaleDataType>::value>>(
 #else
+                    // OpSel selects a byte within each packed int32_t scale.
+                    constexpr index_t kOpSelA = ikxdl * MXdlPack + imxdl;
+                    constexpr index_t kOpSelB = ikxdl * NXdlPack + inxdl;
                     WarpGemm{}.template operator()<OpSelA<kOpSelA>, OpSelB<kOpSelB>>(
 #endif
                             c_warp_tensor,

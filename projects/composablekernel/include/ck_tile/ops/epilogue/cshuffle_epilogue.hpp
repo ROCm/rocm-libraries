@@ -136,8 +136,11 @@ struct CShuffleEpilogue
 #if defined(__gfx9__)
     static constexpr bool EightWave = (MWave * NWave == 8);
 #else
+    template <typename T>
+    using UseEightWaveLayout = decltype(T::UseEightWaveLayout);
+
     static constexpr bool EightWave = [] {
-        if constexpr(requires { Problem::UseEightWaveLayout; })
+        if constexpr(is_detected<UseEightWaveLayout, Problem>::value)
             return Problem::UseEightWaveLayout;
         else
             return false;
