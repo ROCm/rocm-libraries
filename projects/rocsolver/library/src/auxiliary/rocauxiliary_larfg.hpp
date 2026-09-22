@@ -44,7 +44,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 //      alpha is x[0]
 //      norms is norm( x[1:n-1] )^2
 // On exit:
-//      tau   is Householder scalar, tau = (beta - x[0]) / beta = 2 / v^H v.
+//      tau   is Householder scalar, tau = (beta - x[0]) / beta.
+//            For real x, this is 2 / (v^T v).
 //      norms is scaling factor, 1 / (alpha - norm( x )), to normalize v[0] = 1.
 //      if beta is null:
 //          Like LAPACK, store beta in place over alpha.
@@ -57,7 +58,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 // If norms == 0 and imag(alpha) == 0 on input, LAPACK sets tau = 0, so
 // Householder reflector H = I and triangular factor T is singular,
 // which causes issues in larft_inverse. Instead, we set tau = 2,
-// so H = -I and T is non-singular.
+// so H = [ -1  0 ], and T is non-singular.
+//        [  0  I ]
 //
 template <typename T, typename S, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
@@ -88,7 +90,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     else
     {
 #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
-        // Let H = -I, tau = 2. Differs from LAPACK, which has H = I, tau = 0.
+        // Let tau = 2. Differs from LAPACK, which has tau = 0, H = I.
         norms[0] = 1;
         tau[0] = 2;
 
@@ -157,7 +159,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     else
     {
 #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
-        // Let H = -I, tau = 2. Differs from LAPACK, which has H = I, tau = 0.
+        // Let tau = 2. Differs from LAPACK, which has tau = 0, H = I.
         norms[0] = 1;
         tau[0] = 2;
 

@@ -340,6 +340,10 @@ void geqrf_getError(const hipsolverHandle_t   handle,
     *max_err = 0;
     for(int b = 0; b < bc; ++b)
     {
+        // Expect success; all failures here are bugs or system failures
+        // (out of memory, no kernel, etc.).
+        EXPECT_EQ(hInfoRes[b][0], 0) << "where b = " << b;
+
         // Copy R: upper trapezoid of A, zero elsewhere.
         std::vector<T> hC(lda * n, T(0));
         cpu_lacpy(HIPSOLVER_FILL_MODE_UPPER, min_mn, n, hARes[b], lda, hC.data(), lda);
@@ -359,10 +363,7 @@ void geqrf_getError(const hipsolverHandle_t   handle,
                         hW.data(),
                         hW.size(),
                         &info);
-        if(info != 0)
-        {
-            max_err[0] += 1;
-        }
+        EXPECT_EQ(info, 0) << "where b = " << b;
 
         // Compute Q*R - A.
         for(I j = 0; j < n; ++j)
@@ -643,7 +644,6 @@ void testing_geqrf(Arguments& argus)
         //                               hot_calls,
         //                               argus.perf);
     }
-
     else
     {
         // memory allocations
