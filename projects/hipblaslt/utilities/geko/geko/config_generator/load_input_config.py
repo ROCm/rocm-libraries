@@ -154,7 +154,7 @@ def get_gemm_problem(config: dict) -> None:
 
     Expects validate_input_config and apply_input_config_defaults to have run.
     Resolves sizes via get_sizes (explicit list or grid). Builds GemmType
-    with from_tensile from the YAML dtype strings.
+    with from_tensilelite from the YAML dtype strings.
 
     Legacy keys (DataType, Sizes, …) stay on config for defaults; the
     generator consumes GemmProblems (and per-iteration GemmProblem in
@@ -163,7 +163,7 @@ def get_gemm_problem(config: dict) -> None:
     Args:
         config: Mutable config dict; updated in place.
     """
-    gemm_type = GemmType.from_tensile(
+    gemm_type = GemmType.from_tensilelite(
         config["TRANSA"],
         config["TRANSB"],
         str(config["DataType"]),
@@ -212,7 +212,7 @@ def validate_input_config(config: Dict[str, Any]) -> None:
     Call on a dict loaded from YAML before apply_input_config_defaults.
     Optional fields may be missing; defaults are applied later.
 
-    When SIZE_OPTION is 2, GEMM_LOG_PATH is required and Tensile dtype /
+    When SIZE_OPTION is 2, GEMM_LOG_PATH is required and TensileLite dtype /
     layout keys from REQUIRED_CONFIG_FIELDS are not. Otherwise all
     REQUIRED_CONFIG_FIELDS must be present.
 

@@ -34,17 +34,12 @@ except ImportError:
         return None
 
 testdir = os.path.dirname(__file__)
-moddir = os.path.dirname(testdir)
-rootdir = os.path.dirname(moddir)
 if testdir not in sys.path:
     sys.path.insert(0, testdir)
-sys.path.append(rootdir)
 
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
-    parser.addoption("--prebuilt-client")
-    parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
     parser.addoption("--gpu-targets", default=None,
@@ -160,10 +155,6 @@ def clear_ffm_memfile_per_test():
      print(f"warn: could not unlink {memfile}: {e}", file=sys.stderr)
 
 @pytest.fixture
-def tensile_script_path():
-    return os.path.join(moddir, 'bin', 'Tensile')
-
-@pytest.fixture
 def worker_lock_instance(worker_lock_path):
     if not worker_lock_path:
         return open(os.devnull)
@@ -182,10 +173,6 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         rv += extraOptions.split(",")
     if pytestconfig.getoption("--global-parameters"):
         rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
-    if not pytestconfig.getoption("--no-common-build"):
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
-
     # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
     # --use-cache here — those are hardcoded in each test function's args.
     if pytestconfig.getoption("--gpu-targets"):
