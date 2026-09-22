@@ -448,6 +448,20 @@ class ProblemType:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
 
+def extractDimPredicate(cls, key, value, predicateName):
+    """
+    Extract dimension-indexed predicates from an assertion dictionary.
+    """
+    predicates = []
+    for pos,val in value.items():
+        if val != -1:
+            predicates.append(cls(predicateName, index=pos, value=val))
+    if len(predicates) == 1:
+        return predicates[0]
+    elif len(predicates) > 1:
+        return cls.And(predicates)
+
+
 class TaskPredicate(Properties.Predicate):
     @classmethod
     def FromOriginalKeyPair(cls, pair):
@@ -483,6 +497,11 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+
+        if key == "AssertSizeEqual":
+            return extractDimPredicate(cls, key, value, "SizeEqual")
+        if key == "AssertSizeGreaterThan":
+            return extractDimPredicate(cls, key, value, "SizeGreaterThan")
 
         if key.endswith('Multiple'):
             if value == 1:
