@@ -17,6 +17,11 @@ ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
 
+ADVISORY_LAYOUT_ERROR = (
+    "cannot derive advisory path; expected "
+    "{Tier}/{Operation}/{Layout}/{DataType}/[{Variant}/...]/{Name}/{Name}.json"
+)
+
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{case\.([A-Za-z0-9_.]+)\}$")
 TEMPLATE_TENSOR_FIELDS = ("dims", "strides", "data_type")
@@ -459,41 +464,42 @@ def derive_advisory(
         return None
 
     parts = path.parts
+    # Anchor on the last tier segment: an enclosing directory may itself be named
+    # after a tier, and everything before the bundle root must stay out of the suite name.
     tier_index = next(
-        (index for index, part in enumerate(parts) if part in ALLOWED_TIERS), None
+        (
+            index
+            for index in range(len(parts) - 1, -1, -1)
+            if parts[index] in ALLOWED_TIERS
+        ),
+        None,
     )
 
     if tier_index is None:
         result.warning(
             path,
-            f"no tier directory found; using default tier '{default_tier}' for advisory output",
+            f"no tier directory found; using default tier '{default_tier}' for advisory"
+            " output, and any variant directories cannot be recovered",
         )
         if len(parts) < 5:
-            result.error(
-                path,
-                "cannot derive advisory path; expected {Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json",
-            )
+            result.error(path, ADVISORY_LAYOUT_ERROR)
             return None
         tier = default_tier
-        operation, layout, data_type, name, file_name = parts[-5:]
+        bundle_parts = parts[-5:]
     else:
         trailing_parts = parts[tier_index:]
         if len(trailing_parts) < 6:
-            result.error(
-                path,
-                "cannot derive advisory path; expected {Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json",
-            )
+            result.error(path, ADVISORY_LAYOUT_ERROR)
             return None
-        tier, operation, layout, data_type, name, file_name = trailing_parts[:6]
+        tier = trailing_parts[0]
+        bundle_parts = trailing_parts[1:]
 
-    if file_name != f"{name}.json":
-        result.error(path, "graph files must be named <BundleName>/<BundleName>.json")
-        return None
+    operation, layout, data_type = bundle_parts[:3]
+    *variants, name, _ = bundle_parts[3:]
 
-    canonical_path = f"{tier}/{operation}/{layout}/{data_type}/{name}/"
-    test_suite = sanitize_gtest_name(
-        "_".join((tier, operation, layout, data_type, name))
-    )
+    suite_segments = (tier, operation, layout, data_type, *variants, name)
+    canonical_path = "/".join(suite_segments) + "/"
+    test_suite = sanitize_gtest_name("_".join(suite_segments))
     test_case = sanitize_gtest_name(name)
     return Advisory(
         path, canonical_path, test_suite, test_case, f"{test_suite}.{test_case}"

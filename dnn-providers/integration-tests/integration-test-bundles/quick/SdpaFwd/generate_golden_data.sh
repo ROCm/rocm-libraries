@@ -185,6 +185,18 @@ if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
         --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
 
+    # hd192x128 ragged. Dims are deliberately smaller than the hd128 ragged
+    # bundles above: D_qk=192 grows the Q/K payload 1.5x, and 3x2x256 keeps
+    # the bundle under the 2 MiB per-bundle budget while still spanning two
+    # ts_qo=128 Q-tiles. Q and O share offset uid 10 with different
+    # ragged_offset_multipliers (H*192 vs H*128) - token-unit offsets make that work.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd192_nomask_ragged"
+    generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
+        --q-dims 3 2 256 192 --v-dims 3 2 256 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd192_causal_ragged"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
+        --q-dims 3 2 256 192 --v-dims 3 2 256 128 --seed 42
+
     echo ""
 fi
 
