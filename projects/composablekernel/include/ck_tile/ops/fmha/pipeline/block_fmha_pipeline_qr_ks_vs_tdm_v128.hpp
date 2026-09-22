@@ -841,7 +841,8 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                                 const auto col = k_origin.at(I0) + tile_idx.at(I1);
                                 if constexpr(kHasSink)
                                     return mask.IsOutOfSinkBound(row, col);
-                                else if constexpr(kQKHeaddim == 128 &&
+                                else if constexpr((kQKHeaddim == 128 ||
+                                                   std::is_same_v<Geometry, LegacyD192Geometry>) &&
                                                   std::is_same_v<
                                                       FmhaMask,
                                                       SimplifiedGenericAttentionMask<true>>)
