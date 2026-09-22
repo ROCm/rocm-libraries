@@ -235,8 +235,9 @@ def getSlcBitName() -> str:
 # Module-level counting / analysis functions
 # ==========================================================================
 # Mirrors ``rocisa/src/count.cpp``. The C++ uses dynamic_cast to traverse
-# a Module tree and count instructions by type. Here we use isinstance()
-# against tuples of concrete adaptor classes.
+# a Module tree and count instructions by type. Local writes match
+# ``countX<LocalWriteInstruction>`` (any subclass); other counters still
+# use tuples of concrete adaptor classes.
 
 def _count_recursive(item, type_tuple, weights=None):
     """Recursively count instructions matching *type_tuple* in *item* tree."""
@@ -311,8 +312,14 @@ def countLocalRead(item):
 
 
 def countLocalWrite(item):
-    """Count DSStore* instructions (mirrors ``countX<LocalWriteInstruction>``)."""
-    return _count_recursive(item, _local_write_types())
+    """Count every ``LocalWriteInstruction`` (mirrors ``countX<LocalWriteInstruction>``).
+
+    Must use the base class, not a mnemonic whitelist: SIA's
+    ``writesPerItem`` is this count, and packed LDS stores such as
+    ``DSStoreB8HID16`` were dropped from the old tuple.
+    """
+    from .instruction import LocalWriteInstruction as _LW
+    return _count_recursive(item, _LW)
 
 
 def countWeightedLocalRead(item):
@@ -326,7 +333,7 @@ def countWeightedLocalWrite(item):
     """Count local writes with weights: DSStoreB192/B256 count as 2."""
     from . import instruction as _inst
     weights = {_inst.DSStoreB192: 2, _inst.DSStoreB256: 2}
-    return _count_recursive(item, _local_write_types(), weights)
+    return _count_recursive(item, _inst.LocalWriteInstruction, weights)
 
 
 def countDSStoreB128(item):
@@ -426,17 +433,6 @@ def _local_read_types():
         _inst.DSLoadB128TrB16, _inst.DSLoadB64TrB8,
         _inst.DSLoadB128, _inst.DSLoadB192,
         _inst.DSLoad2B32, _inst.DSLoad2B64,
-    )
-
-
-def _local_write_types():
-    from . import instruction as _inst
-    return (
-        _inst.DSStoreB8, _inst.DSStoreB16,
-        _inst.DSStoreB32, _inst.DSStoreB64,
-        _inst.DSStoreB96, _inst.DSStoreB128,
-        _inst.DSStoreB192, _inst.DSStoreB256,
-        _inst.DSStore2B32, _inst.DSStore2B64,
     )
 
 
