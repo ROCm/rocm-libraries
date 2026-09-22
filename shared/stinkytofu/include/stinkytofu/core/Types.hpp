@@ -101,6 +101,16 @@ struct PassFeatureConfig {
         /// means one queue depth.
         int dsReadThrottleTransitionEntries = 0;
         int dsReadPerWmma = INT_MAX;
+        /// Cycle span the dsReadPerWmma ceiling applies over: at most
+        /// dsReadPerWmma ds_loads may issue in any dsIssueCapSpanCycles of the
+        /// real timeline. Tuned alongside dsReadPerWmma -- the pair is the cap,
+        /// and neither means anything without the other.
+        ///
+        /// 0 = use the per-arch default (CDNA5Config::dsIssueCapSpanCycles).
+        /// Deliberately not derived from a WMMA in the region: the cap has to
+        /// hold where none is in flight -- a region's tail, and a region with
+        /// no matrix op at all.
+        int dsIssueCapSpanCycles = 0;
         int tensorLoadWmmaSpace = 0;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token

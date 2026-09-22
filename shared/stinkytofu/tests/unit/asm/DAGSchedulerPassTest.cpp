@@ -134,9 +134,24 @@ class DAGSchedulerPassTest : public ::testing::Test {
     AnalysisManager am;
 
     void SetUp() override {
+        // Reset both wholesale. Some tests call SetUp() again mid-test to get a
+        // fresh block (DsIssueCostSharesThePipeBetweenWaves runs three
+        // configurations that way), so anything not cleared here leaks from one
+        // run into the next.
+        //
+        // am in particular: analyses are cached by BasicBlock*, and the old
+        // Function is freed just below before the new one is allocated, so the
+        // new "entry" block frequently lands on the address the previous one
+        // had. Reusing the manager then serves that stale cache entry for a
+        // block that only looks like the old one. Whether the address is
+        // actually recycled depends on the allocation history of everything
+        // that ran before, which is why it surfaced as an order-dependent
+        // failure rather than a reliable one.
+        config = GemmTileConfig{};
         config.arch[0] = 12;
         config.arch[1] = 5;
         config.arch[2] = 0;
+        am = AnalysisManager{};
         func = std::make_unique<Function>("dag_sched_test");
         setFunctionArch(*func, arch);
         bb = func->createBasicBlock("entry");
@@ -336,13 +351,23 @@ class DAGSchedulerPassTest : public ::testing::Test {
 
     // Run with the cluster-barrier SCC rule on/off. distributeGlobalRead mirrors
     // the gfx1250 pipeline so tensor loads take their normal queue.
-    void runPassWithClusterBarrier(bool clusterBarrier) {
+    // A ds_load ceiling far above any count these tests place, so rule (4)
+    // never binds. Not INT_MAX: that is the "take the arch default" sentinel
+    // (see CDNA5ReadyQueue::dsReadPerWmma), which resolves to 3.
+    static constexpr int kDsCapOff = 1 << 20;
+
+    // dsReadPerWmmaOverride lifts the rule (4) ceiling for tests whose subject
+    // is the SCC rule but whose setup needs a burst of ds_loads to displace the
+    // chain under test. Both halves of a positive/negative control pair must
+    // pass the same value, or the pair stops comparing like with like.
+    void runPassWithClusterBarrier(bool clusterBarrier, int dsReadPerWmmaOverride = 0) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.distributeGlobalRead = true;
         pfc.dagFeatures.clusterBarrier = clusterBarrier;
+        if (dsReadPerWmmaOverride > 0) pfc.dagFeatures.dsReadPerWmma = dsReadPerWmmaOverride;
         ctx.setPassFeatureConfig(pfc);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (clusterBarrier=" << (clusterBarrier ? "on" : "off")
@@ -1378,6 +1403,72 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_VALUInterleaveAfter3) {
                                    << " consecutive ds_loads (max 3 per WMMA window)";
 }
 
+// Longest run of back-to-back ds_loads in a block.
+static int maxConsecutiveDsLoads(const BasicBlock& block) {
+    int run = 0;
+    int longest = 0;
+    for (const IRBase& ir : block) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        if (std::string_view(hw->mnemonic).find("ds_load") != std::string_view::npos) {
+            longest = std::max(longest, ++run);
+        } else {
+            run = 0;
+        }
+    }
+    return longest;
+}
+
+// The cap holds in the region tail -- after the last WMMA has issued, where
+// nothing is left to delimit a per-WMMA window.
+//
+// The pre-change cap was gated on "WMMAs still pending", so once the single
+// WMMA below had issued the ceiling switched off and every remaining ds_load
+// flushed back-to-back, at exactly the point the LDS return queue is least
+// able to absorb them. The window now slides on the real timeline, so it is
+// defined here too.
+TEST_F(DAGSchedulerPassTest, DSWindowCap_HoldsInTheRegionTail) {
+    const int addrReg = 80;
+    // More ds_loads than the cap allows in one window, so several must land
+    // after the WMMA has gone.
+    for (int i = 0; i < 8; i++) createMovableDsLoad(i * 4, addrReg, i + 1);
+    // Non-ds work to interleave once the cap binds. Without it the tail has
+    // nothing else to place and the run length says nothing.
+    for (int i = 0; i < 6; i++) createVAddInBlock(bb, arch, 60 + i, 100 + i, 120 + i);
+    // A single WMMA: it issues early, so everything after it is tail.
+    createWmmaF32_16x16x16_bf16(20, 28);
+
+    runPassWithUnrollGemm();
+
+    EXPECT_LE(maxConsecutiveDsLoads(*bb), 3)
+        << "the cap must still bind after the last WMMA has issued; found "
+        << maxConsecutiveDsLoads(*bb) << " consecutive ds_loads";
+}
+
+// The cap also holds in a block with no matrix op at all. That is the same
+// situation as the tail -- no WMMA in flight to delimit a window -- and the
+// LDS return queue it protects cannot tell the two apart.
+//
+// This is also the case that shows why the cap must yield a WAIT rather than a
+// veto. As a veto it dropped the ds_load from the candidate set once the window
+// filled, so the scheduler reached for whatever else was ready instead of
+// waiting for the window to free; with only ds_loads to run, that meant
+// hoisting unrelated work into a hazard shadow (see
+// SgprToTensorLoadHazard_AtLeast8CycleGap).
+TEST_F(DAGSchedulerPassTest, DSWindowCap_HoldsInABlockWithNoWmma) {
+    const int addrReg = 80;
+    for (int i = 0; i < 8; i++) createMovableDsLoad(i * 4, addrReg, i + 1);
+    for (int i = 0; i < 6; i++) createVAddInBlock(bb, arch, 60 + i, 100 + i, 120 + i);
+
+    runPassWithUnrollGemm();
+
+    EXPECT_LE(maxConsecutiveDsLoads(*bb), 3)
+        << "the cap must bind with no WMMA in the block; found "
+        << maxConsecutiveDsLoads(*bb) << " consecutive ds_loads";
+}
+
 // ---------------------------------------------------------------------------
 // Property: all original instructions are preserved.
 // ---------------------------------------------------------------------------
@@ -2394,7 +2485,12 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_GuardingBarrierNeverSplitsCha
     createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
 
     const int beforeCount = countStinkyInstructions(*body);
-    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
+    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerWmmaOverride=*/kDsCapOff);
     ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
     EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
@@ -2423,7 +2519,12 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLetsBarrierSplitChain
     createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
     createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
 
-    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
+    runPassWithClusterBarrier(/*clusterBarrier=*/false, /*dsReadPerWmmaOverride=*/kDsCapOff);
 
     const int signalPos = firstBarrierSignalPosition(*body);
     const int waitPos = lastBarrierWaitPosition(*body);
@@ -2455,7 +2556,12 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierStaysWhole)
     StinkyInstruction* reader1 = createSCselectReadingScc(body, /*destSgpr=*/91, /*srcSgpr=*/92);
     StinkyInstruction* reader2 = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/94);
 
-    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
+    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerWmmaOverride=*/kDsCapOff);
 
     EXPECT_FALSE(barrierSplitsChain(*body, {sccDef, reader1, reader2}))
         << "hoisting the chain above the barrier is allowed, but only as a whole";
@@ -2486,7 +2592,12 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledSplitsChainBehindBarr
     StinkyInstruction* tensorLoad = createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48,
                                                             /*ldsToken=*/1);
 
-    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
+    runPassWithClusterBarrier(/*clusterBarrier=*/false, /*dsReadPerWmmaOverride=*/kDsCapOff);
 
     const std::string order = scheduleOrder(*body);
     // The compare hoists above the barrier and leaves its reader behind, so the
@@ -2517,7 +2628,12 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_ChainBehindBarrierHoistsWhole
                                                             /*ldsToken=*/1);
 
     const int beforeCount = countStinkyInstructions(*body);
-    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+    // The 6 ds_loads above are setup, not subject: they give the scheduler
+    // enough movable work to displace the SCC chain. Rule (4) now caps ds_load
+    // issue across the whole region, which no longer lets that burst through,
+    // so lift the ceiling here. Its interaction with the SCC rule is not what
+    // these tests are about, and the matching control uses the same override.
+    runPassWithClusterBarrier(/*clusterBarrier=*/true, /*dsReadPerWmmaOverride=*/kDsCapOff);
     ASSERT_EQ(countStinkyInstructions(*body), beforeCount);
 
     const std::string order = scheduleOrder(*body);
