@@ -230,11 +230,11 @@ ONLY_INCLUDE_MIs_GFX942 = {
 
 from geko.constants import SUPPORTED_ARCH
 
-# Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
+# TensileLite LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
 
-# Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
+# Shared TensileLite LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
     "ScheduleName": '"gfx950"',
     "ArchitectureName": '"gfx950"',
@@ -246,7 +246,7 @@ _LIBRARY_LOGIC_FIELDS_GFX942 = {
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX942,
 }
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, TensileLite LibraryLogic fields
 # (keys align with geko.constants.SUPPORTED_ARCH).
 _ARCH_SPECS = {
     "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
