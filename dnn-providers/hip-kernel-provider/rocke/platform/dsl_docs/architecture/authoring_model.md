@@ -32,6 +32,9 @@ and validate the operation's wave and layout contract. The exact catalog is
 listed in [`kernel_taxonomy.md`](./kernel_taxonomy.md). For operand metadata,
 scale layouts, query semantics, and migration details, see
 [MMA metadata and queries](../reference/mma_metadata.md).
+Native builders can use `rocke_archtarget_op_for_shape`; see
+[native C/C++ atom lookup](../reference/mma_metadata.md#native-cc-atom-lookup)
+for the helper's contract and a complete example.
 
 Kernel definitions in
 [`<platform_root>/python/rocke/instances/`](../../python/rocke/instances/) and

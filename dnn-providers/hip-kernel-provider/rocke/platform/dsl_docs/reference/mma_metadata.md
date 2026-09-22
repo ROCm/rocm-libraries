@@ -74,6 +74,48 @@ sentinel. Scale value formats are `e8m0`, `e4m3`, and `e5m3`, with
 `fp8e4m3` accepted as an alias for `e4m3`; actual target support comes from the
 catalog.
 
+### Native C/C++ Atom Lookup
+
+When holding an `ArchTarget`, use `rocke_archtarget_op_for_shape` from
+`rocke/helper_rocke.core.arch.h`. It forwards to
+`rocke_mma_catalog_op_for_shape(&target->mma, ...)`, which is also available
+directly from `rocke/arch_target.h`. Both select the same catalog record.
+Kernel builders use that record's operation ID, fragment sizes, and layouts;
+support checks use the lookup to establish whether the requested atom exists.
+The `(m, n, k)` arguments describe one instruction atom, not the full GEMM.
+
+This C++ example selects the gfx1250 FP8 atom with E8M0 scales shared over K32:
+
+```cpp
+#include "rocke/error.hpp"
+#include "rocke/helper_rocke.core.arch.h"
+
+int main()
+{
+    try
+    {
+        const auto* target = rocke_archtarget_from_gfx("gfx1250");
+        const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
+        const auto* atom = rocke_archtarget_op_for_shape(
+            target, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &scales);
+        return atom ? 0 : 1;
+    }
+    catch(const ckc::Error&)
+    {
+        return 2;
+    }
+}
+```
+
+The helper requires the trailing filter argument in both C and C++.
+Pass `NULL` (`nullptr` in C++) for unconstrained scales, or a pointer to
+`{NULL, NULL, ROCKE_MMA_SCALE_NONE}` to select only unscaled atoms.
+The scale-contract rules above apply. No match, or a null target, returns
+`NULL`; invalid filters and ambiguous matches raise `ckc::Error`. Handle those
+errors at a C++ boundary before returning to C. In particular, the scaled
+FP8/BF8 `16x16x128` shapes have both K16 and K32 records, so an unconstrained
+lookup is ambiguous.
+
 ## Operation IDs and Migration
 
 Scaled-WMMA IDs have the form
