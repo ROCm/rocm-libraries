@@ -354,20 +354,6 @@ std::string RocBlasLt_TestName_to_string(std::unordered_map<std::string, size_t>
     return name;
 }
 
-static const char* const validCategories[]
-    = {"smoke", "quick", "pre_checkin", "nightly", "multi_gpu", "HMM", "known_bug", NULL};
-
-static bool valid_category(const char* category)
-{
-    int i = 0;
-    while(validCategories[i])
-    {
-        if(!strcmp(category, validCategories[i++]))
-            return true;
-    }
-    return false;
-}
-
 bool hipblaslt_client_global_filters(const Arguments& args)
 {
     int             deviceId;
@@ -423,9 +409,6 @@ bool match_test_category(const Arguments& arg, const char* category)
     // we are now bypassing the category key
     // Return whether arg.category matches the requested category
     // return !strcmp(arg.category, category);
-
-    // valid_category can be used if we add unused category
-    // return valid_category(arg.category);
 
     return true;
 }
