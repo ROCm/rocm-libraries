@@ -25,7 +25,6 @@
 from __future__ import print_function
 
 import shutil
-from pathlib import Path
 
 import pytest
 
