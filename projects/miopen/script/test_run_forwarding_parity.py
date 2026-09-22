@@ -16,21 +16,21 @@ comparator's own tests.
 The replays are stood in for by a script that writes a well-formed report, the
 comparison by one that records how it was called, and the ABI check by one that
 passes.
+
+Written against the standard library's unittest rather than pytest: this runs as a
+ctest entry in a wrapper-enabled build, and nothing provisions pytest for a machine
+that builds MIOpen.
+
+    python3 -m unittest test_run_forwarding_parity
 """
 
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
-
-import pytest
-
-# Before anything here touches os.geteuid(), which off POSIX would fail collection
-# rather than skip.
-pytestmark = pytest.mark.skipif(
-    os.name != "posix", reason="the harness under test is POSIX-only"
-)
 
 HARNESS = Path(__file__).resolve().parent / "run_forwarding_parity.py"
 
@@ -54,166 +54,173 @@ pathlib.Path(__file__).with_suffix(".argv").write_text("\\n".join(sys.argv[1:]))
 """
 
 
-@pytest.fixture
-def tree(tmp_path):
-    """A stand-in install tree: the libraries the harness resolves, plus its helpers."""
-    lib = tmp_path / "lib"
-    lib.mkdir()
-    (lib / "libMIOpen.so.1.0").touch()
-    (lib / "libMIOpen_private.so.1.0").touch()
-    for name, body in (
-        ("fake_gtest.py", FAKE_GTEST),
-        ("fake_compare.py", RECORDS_ARGV),
-        ("fake_abi.py", PASSES),
-    ):
-        path = tmp_path / name
-        path.write_text(body)
-        path.chmod(0o755)
-    return tmp_path
+# Checked before anything here touches os.geteuid(), which off POSIX would fail at
+# import rather than skip.
+@unittest.skipUnless(os.name == "posix", "the harness under test is POSIX-only")
+class ParityRunnerTest(unittest.TestCase):
+    def setUp(self):
+        """A stand-in install tree: the libraries the harness resolves, plus its helpers."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.tree = Path(holder.name)
 
+        lib = self.tree / "lib"
+        lib.mkdir()
+        (lib / "libMIOpen.so.1.0").touch()
+        (lib / "libMIOpen_private.so.1.0").touch()
+        for name, body in (
+            ("fake_gtest.py", FAKE_GTEST),
+            ("fake_compare.py", RECORDS_ARGV),
+            ("fake_abi.py", PASSES),
+        ):
+            path = self.tree / name
+            path.write_text(body)
+            path.chmod(0o755)
 
-def run(tree, cwd, *extra):
-    return subprocess.run(
-        [
-            sys.executable,
-            str(HARNESS),
-            "--gtest",
-            str(tree / "fake_gtest.py"),
-            "--filter",
-            "*",
-            "--lib-dir",
-            str(tree / "lib"),
-            "--compare",
-            str(tree / "fake_compare.py"),
-            "--abi-check",
-            str(tree / "fake_abi.py"),
-            "--baseline",
-            os.devnull,
-            "--excluded",
-            os.devnull,
-            *extra,
-        ],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
+    def run_harness(self, cwd, *extra):
+        return subprocess.run(
+            [
+                sys.executable,
+                str(HARNESS),
+                "--gtest",
+                str(self.tree / "fake_gtest.py"),
+                "--filter",
+                "*",
+                "--lib-dir",
+                str(self.tree / "lib"),
+                "--compare",
+                str(self.tree / "fake_compare.py"),
+                "--abi-check",
+                str(self.tree / "fake_abi.py"),
+                "--baseline",
+                os.devnull,
+                "--excluded",
+                os.devnull,
+                *extra,
+            ],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+        )
+
+    def test_nothing_is_written_into_the_working_directory(self):
+        workdir = self.tree / "bin" / "MIOpen"
+        workdir.mkdir(parents=True)
+        result = self.run_harness(workdir)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(list(workdir.iterdir()), [])
+
+    @unittest.skipIf(
+        os.name == "posix" and os.geteuid() == 0,
+        "root writes through the mode bits, so the read-only case cannot be created",
     )
+    def test_a_read_only_working_directory_still_passes(self):
+        """The shipping case: an artifact the runner may not write to."""
+        workdir = self.tree / "bin" / "MIOpen"
+        workdir.mkdir(parents=True)
+        workdir.chmod(0o555)
+        try:
+            result = self.run_harness(workdir)
+        finally:
+            workdir.chmod(0o755)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_reports_land_where_output_dir_names(self):
+        """The build tree passes one explicitly and keeps its reports."""
+        out = self.tree / "test_results"
+        result = self.run_harness(self.tree, "--output-dir", str(out))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            sorted(p.name for p in out.iterdir()),
+            [
+                "fake_gtest.py_forwarding_disabled.xml",
+                "fake_gtest.py_forwarding_enabled.xml",
+            ],
+        )
+
+    def test_the_report_directory_is_reported(self):
+        """A failing replay is only diagnosable if its reports can be found."""
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("replay reports:", result.stdout)
+
+    def test_the_comparison_is_held_to_this_run_s_binary(self):
+        """--newer-than is what stops a leftover pair of reports comparing cleanly."""
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_compare.argv").read_text().splitlines()
+        self.assertIn("--newer-than", argv)
+        self.assertEqual(
+            argv[argv.index("--newer-than") + 1], str(self.tree / "fake_gtest.py")
+        )
+
+    def test_helpers_run_without_their_exec_bit(self):
+        """They are launched through this interpreter, not their shebang lines."""
+        (self.tree / "fake_compare.py").chmod(0o644)
+        (self.tree / "fake_abi.py").chmod(0o644)
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_two_versioned_libraries_are_refused_rather_than_picked_between(self):
+        """One of them is an earlier build, and filename order is not version order."""
+        (self.tree / "lib" / "libMIOpen.so.10.0").touch()
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("more than one libMIOpen.so.*", result.stdout)
+
+    def test_a_pair_split_across_two_directories_is_refused(self):
+        """lib and lib64 both present, with one half of the pair in each.
+
+        Only one directory can go first on LD_LIBRARY_PATH, so the replays would load
+        mismatched halves -- what the co-versioning check exists to catch.
+        """
+        lib64 = self.tree / "lib64"
+        lib64.mkdir()
+        (self.tree / "lib" / "libMIOpen_private.so.1.0").rename(
+            lib64 / "libMIOpen_private.so.1.0"
+        )
+
+        # Copied in so the harness's default search -- lib* beside its parent directory --
+        # lands here. That search is the only way to reach a split pair; --lib-dir names
+        # one directory and cannot express one.
+        bindir = self.tree / "bin"
+        bindir.mkdir(exist_ok=True)
+        harness = bindir / HARNESS.name
+        shutil.copy(HARNESS, harness)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(harness),
+                "--gtest",
+                str(self.tree / "fake_gtest.py"),
+                "--filter",
+                "*",
+                "--compare",
+                str(self.tree / "fake_compare.py"),
+                "--abi-check",
+                str(self.tree / "fake_abi.py"),
+                "--baseline",
+                os.devnull,
+                "--excluded",
+                os.devnull,
+            ],
+            cwd=str(self.tree),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("different directories", result.stdout)
+
+    def test_the_libraries_under_test_are_named(self):
+        """A co-versioning failure downstream has to be tied back to concrete files."""
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(str(self.tree / "lib" / "libMIOpen.so.1.0"), result.stdout)
+        self.assertIn(
+            str(self.tree / "lib" / "libMIOpen_private.so.1.0"), result.stdout
+        )
 
 
-def test_nothing_is_written_into_the_working_directory(tree):
-    workdir = tree / "bin" / "MIOpen"
-    workdir.mkdir(parents=True)
-    result = run(tree, workdir)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert list(workdir.iterdir()) == []
-
-
-@pytest.mark.skipif(
-    os.geteuid() == 0,
-    reason="root writes through the mode bits, so the read-only case cannot be created",
-)
-def test_a_read_only_working_directory_still_passes(tree):
-    """The shipping case: an artifact the runner may not write to."""
-    workdir = tree / "bin" / "MIOpen"
-    workdir.mkdir(parents=True)
-    workdir.chmod(0o555)
-    try:
-        result = run(tree, workdir)
-    finally:
-        workdir.chmod(0o755)
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_reports_land_where_output_dir_names(tree):
-    """The build tree passes one explicitly and keeps its reports."""
-    out = tree / "test_results"
-    result = run(tree, tree, "--output-dir", str(out))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert sorted(p.name for p in out.iterdir()) == [
-        "fake_gtest.py_forwarding_disabled.xml",
-        "fake_gtest.py_forwarding_enabled.xml",
-    ]
-
-
-def test_the_report_directory_is_reported(tree):
-    """A failing replay is only diagnosable if its reports can be found."""
-    result = run(tree, tree)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "replay reports:" in result.stdout
-
-
-def test_the_comparison_is_held_to_this_run_s_binary(tree):
-    """--newer-than is what stops a leftover pair of reports comparing cleanly."""
-    result = run(tree, tree)
-    assert result.returncode == 0, result.stdout + result.stderr
-    argv = (tree / "fake_compare.argv").read_text().splitlines()
-    assert "--newer-than" in argv
-    assert argv[argv.index("--newer-than") + 1] == str(tree / "fake_gtest.py")
-
-
-def test_helpers_run_without_their_exec_bit(tree):
-    """They are launched through this interpreter, not their shebang lines."""
-    (tree / "fake_compare.py").chmod(0o644)
-    (tree / "fake_abi.py").chmod(0o644)
-    result = run(tree, tree)
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_two_versioned_libraries_are_refused_rather_than_picked_between(tree):
-    """One of them is an earlier build, and filename order is not version order."""
-    (tree / "lib" / "libMIOpen.so.10.0").touch()
-    result = run(tree, tree)
-    assert result.returncode == 1
-    assert "more than one libMIOpen.so.*" in result.stdout
-
-
-def test_a_pair_split_across_two_directories_is_refused(tree):
-    """lib and lib64 both present, with one half of the pair in each.
-
-    Only one directory can go first on LD_LIBRARY_PATH, so the replays would load
-    mismatched halves -- what the co-versioning check exists to catch.
-    """
-    lib64 = tree / "lib64"
-    lib64.mkdir()
-    (tree / "lib" / "libMIOpen_private.so.1.0").rename(
-        lib64 / "libMIOpen_private.so.1.0"
-    )
-
-    # Copied in so the harness's default search -- lib* beside its parent directory --
-    # lands here. That search is the only way to reach a split pair; --lib-dir names
-    # one directory and cannot express one.
-    bindir = tree / "bin"
-    bindir.mkdir(exist_ok=True)
-    harness = bindir / HARNESS.name
-    shutil.copy(HARNESS, harness)
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(harness),
-            "--gtest",
-            str(tree / "fake_gtest.py"),
-            "--filter",
-            "*",
-            "--compare",
-            str(tree / "fake_compare.py"),
-            "--abi-check",
-            str(tree / "fake_abi.py"),
-            "--baseline",
-            os.devnull,
-            "--excluded",
-            os.devnull,
-        ],
-        cwd=str(tree),
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "different directories" in result.stdout
-
-
-def test_the_libraries_under_test_are_named(tree):
-    """A co-versioning failure downstream has to be tied back to concrete files."""
-    result = run(tree, tree)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert str(tree / "lib" / "libMIOpen.so.1.0") in result.stdout
-    assert str(tree / "lib" / "libMIOpen_private.so.1.0") in result.stdout
+if __name__ == "__main__":
+    unittest.main()

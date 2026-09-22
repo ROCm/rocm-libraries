@@ -10,19 +10,26 @@ crashed replay left half-written, a pair of reports left over from an earlier
 build, and two runs that skipped everything. Comparing two well-formed, agreeing
 files only ever exercises the passing path.
 
-Everything here works on string fixtures, so no build, toolchain or GPU is
-needed and the module runs in a lint lane:
+Written against the standard library's unittest rather than pytest: this runs as
+a ctest entry in a wrapper-enabled build, and nothing provisions pytest for a
+machine that builds MIOpen.
 
-    python -m pytest projects/miopen/script/test_compare_forwarding_runs.py
+Everything here works on string fixtures, so no build, toolchain or GPU is
+needed:
+
+    python3 -m unittest test_compare_forwarding_runs
 """
 
+import contextlib
+import io
 import os
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 
-# Colocated with the script under test. pytest's default import mode already
-# puts this directory on sys.path; do it explicitly so the module also runs
-# under a bare `python -m pytest` from any working directory.
+# Colocated with the script under test, so the module also runs under a bare
+# `python3 -m unittest` from any working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import compare_forwarding_runs as cmp  # noqa: E402
@@ -47,20 +54,6 @@ def suite(*cases):
     return '<?xml version="1.0"?><testsuites>{}</testsuites>'.format("".join(body))
 
 
-def write(tmp_path, name, text):
-    path = tmp_path / name
-    path.write_text(text)
-    return str(path)
-
-
-def run(tmp_path, disabled_xml, enabled_xml, newer_than=None):
-    return cmp.main(
-        write(tmp_path, "disabled.xml", disabled_xml),
-        write(tmp_path, "enabled.xml", enabled_xml),
-        newer_than,
-    )
-
-
 def aged(path, seconds):
     """Backdate a file, so freshness can be tested without waiting for the clock."""
     stamp = os.path.getmtime(path) - seconds
@@ -68,111 +61,126 @@ def aged(path, seconds):
     return path
 
 
-def test_identical_runs_agree(tmp_path, capsys):
-    xml = suite(("A", "passed"), ("B", "skipped"))
-    assert run(tmp_path, xml, xml) == 0
-    assert "2 tests identical" in capsys.readouterr().out
+class ComparatorTest(unittest.TestCase):
+    def setUp(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        self.tmp_path = Path(holder.name)
 
+    def write(self, name, text):
+        path = self.tmp_path / name
+        path.write_text(text)
+        return str(path)
 
-def test_status_divergence_is_reported(tmp_path, capsys):
-    rc = run(
-        tmp_path,
-        suite(("A", "passed")),
-        suite(("A", "failed")),
-    )
-    assert rc == 1
-    assert "disabled=passed enabled=failed" in capsys.readouterr().err
+    def compare(self, disabled_xml, enabled_xml, newer_than=None):
+        """Run the comparator on two fixtures, returning (exit code, stdout, stderr)."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cmp.main(
+                self.write("disabled.xml", disabled_xml),
+                self.write("enabled.xml", enabled_xml),
+                newer_than,
+            )
+        return rc, out.getvalue(), err.getvalue()
 
+    def test_identical_runs_agree(self):
+        xml = suite(("A", "passed"), ("B", "skipped"))
+        rc, out, _ = self.compare(xml, xml)
+        self.assertEqual(rc, 0)
+        self.assertIn("2 tests identical", out)
 
-def test_duplicate_name_divergence_is_not_collapsed(tmp_path, capsys):
-    # Same name twice in each run, disagreeing on one of the two. Keyed by name
-    # alone, the second entry would overwrite the first and the two runs would
-    # look identical.
-    rc = run(
-        tmp_path,
-        suite(("A", "passed"), ("A", "passed")),
-        suite(("A", "passed"), ("A", "failed")),
-    )
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "2 entries" in err
-    assert "failed" in err
+    def test_status_divergence_is_reported(self):
+        rc, _, err = self.compare(suite(("A", "passed")), suite(("A", "failed")))
+        self.assertEqual(rc, 1)
+        self.assertIn("disabled=passed enabled=failed", err)
 
+    def test_duplicate_name_divergence_is_not_collapsed(self):
+        # Same name twice in each run, disagreeing on one of the two. Keyed by name
+        # alone, the second entry would overwrite the first and the two runs would
+        # look identical.
+        rc, _, err = self.compare(
+            suite(("A", "passed"), ("A", "passed")),
+            suite(("A", "passed"), ("A", "failed")),
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("2 entries", err)
+        self.assertIn("failed", err)
 
-def test_duplicate_name_agreement_still_passes(tmp_path):
-    # Emission order is not part of the claim, so the same outcomes in the other
-    # order are agreement, not a divergence.
-    assert (
-        run(
-            tmp_path,
+    def test_duplicate_name_agreement_still_passes(self):
+        # Emission order is not part of the claim, so the same outcomes in the other
+        # order are agreement, not a divergence.
+        rc, _, _ = self.compare(
             suite(("A", "passed"), ("A", "failed")),
             suite(("A", "failed"), ("A", "passed")),
         )
-        == 0
-    )
+        self.assertEqual(rc, 0)
 
+    def test_truncated_xml_gives_a_diagnostic_not_a_traceback(self):
+        good = suite(("A", "passed"))
+        rc, _, err = self.compare(good, good[: len(good) // 2])
+        self.assertEqual(rc, 1)
+        self.assertIn("not well-formed XML", err)
+        self.assertIn("crashed partway", err)
 
-def test_truncated_xml_gives_a_diagnostic_not_a_traceback(tmp_path, capsys):
-    good = suite(("A", "passed"))
-    truncated = good[: len(good) // 2]
-    rc = run(tmp_path, good, truncated)
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "not well-formed XML" in err
-    assert "crashed partway" in err
+    def test_two_empty_runs_do_not_pass(self):
+        empty = suite()
+        rc, _, err = self.compare(empty, empty)
+        self.assertEqual(rc, 1)
+        self.assertIn("neither run executed a test", err)
 
+    def test_two_all_skipped_runs_do_not_pass(self):
+        # Non-empty and identical, so every other check here is satisfied. Nothing ran,
+        # so the agreement says nothing about forwarding.
+        skipped = suite(("A", "skipped"), ("B", "skipped"))
+        rc, _, err = self.compare(skipped, skipped)
+        self.assertEqual(rc, 1)
+        self.assertIn("neither run executed a test", err)
 
-def test_two_empty_runs_do_not_pass(tmp_path, capsys):
-    empty = suite()
-    assert run(tmp_path, empty, empty) == 1
-    assert "neither run executed a test" in capsys.readouterr().err
+    def test_one_executed_test_is_enough(self):
+        xml = suite(("A", "passed"), ("B", "skipped"))
+        rc, out, _ = self.compare(xml, xml)
+        self.assertEqual(rc, 0)
+        self.assertIn("1 executed, 1 skipped", out)
 
+    def test_a_missing_report_is_not_agreement(self):
+        disabled = self.write("disabled.xml", suite(("A", "passed")))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cmp.main(disabled, str(self.tmp_path / "never_written.xml"))
+        self.assertEqual(rc, 1)
+        self.assertIn("did not run", err.getvalue())
 
-def test_two_all_skipped_runs_do_not_pass(tmp_path, capsys):
-    # Non-empty and identical, so every other check here is satisfied. Nothing ran,
-    # so the agreement says nothing about forwarding.
-    skipped = suite(("A", "skipped"), ("B", "skipped"))
-    assert run(tmp_path, skipped, skipped) == 1
-    assert "neither run executed a test" in capsys.readouterr().err
+    def test_reports_older_than_the_binary_are_rejected(self):
+        # The harness's worst failure mode: both files are well-formed and agree, but
+        # they are the previous build's output and neither replay ran this time.
+        xml = suite(("A", "passed"))
+        binary = self.tmp_path / "miopen_gtest"
+        binary.touch()
+        rc, _, _ = self.compare(xml, xml, newer_than=str(binary))
+        self.assertEqual(rc, 0, "a report written after the binary is current")
 
+        aged(self.tmp_path / "disabled.xml", 60)
+        aged(self.tmp_path / "enabled.xml", 60)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cmp.main(
+                str(self.tmp_path / "disabled.xml"),
+                str(self.tmp_path / "enabled.xml"),
+                str(binary),
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("left over from an earlier build", err.getvalue())
 
-def test_one_executed_test_is_enough(tmp_path, capsys):
-    xml = suite(("A", "passed"), ("B", "skipped"))
-    assert run(tmp_path, xml, xml) == 0
-    assert "1 executed, 1 skipped" in capsys.readouterr().out
-
-
-def test_a_missing_report_is_not_agreement(tmp_path, capsys):
-    disabled = write(tmp_path, "disabled.xml", suite(("A", "passed")))
-    rc = cmp.main(disabled, str(tmp_path / "never_written.xml"))
-    assert rc == 1
-    assert "did not run" in capsys.readouterr().err
-
-
-def test_reports_older_than_the_binary_are_rejected(tmp_path, capsys):
-    # The harness's worst failure mode: both files are well-formed and agree, but
-    # they are the previous build's output and neither replay ran this time.
-    xml = suite(("A", "passed"))
-    binary = tmp_path / "miopen_gtest"
-    binary.touch()
-    rc = run(tmp_path, xml, xml, newer_than=str(binary))
-    assert rc == 0, "a report written after the binary is current"
-
-    aged(tmp_path / "disabled.xml", 60)
-    aged(tmp_path / "enabled.xml", 60)
-    assert (
-        cmp.main(
-            str(tmp_path / "disabled.xml"), str(tmp_path / "enabled.xml"), str(binary)
+    def test_a_missing_newer_than_target_is_rejected(self):
+        # Nothing to date the reports against means their freshness is unknown, which
+        # is not the same as fresh.
+        xml = suite(("A", "passed"))
+        rc, _, err = self.compare(
+            xml, xml, newer_than=str(self.tmp_path / "no_such_binary")
         )
-        == 1
-    )
-    assert "left over from an earlier build" in capsys.readouterr().err
+        self.assertEqual(rc, 1)
+        self.assertIn("cannot be shown to be current", err)
 
 
-def test_a_missing_newer_than_target_is_rejected(tmp_path, capsys):
-    # Nothing to date the reports against means their freshness is unknown, which
-    # is not the same as fresh.
-    xml = suite(("A", "passed"))
-    rc = run(tmp_path, xml, xml, newer_than=str(tmp_path / "no_such_binary"))
-    assert rc == 1
-    assert "cannot be shown to be current" in capsys.readouterr().err
+if __name__ == "__main__":
+    unittest.main()

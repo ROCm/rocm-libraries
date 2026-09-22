@@ -426,6 +426,26 @@ set(MIOPEN_FORWARDING_PARITY_LABELS
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
   include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
+
+  # The harness's own scripts: three failure modes that are silent rather than loud --
+  # a comparison that reports agreement which is not there, reports written somewhere
+  # unwritable, and a mis-derived architecture label that leaves ctest selecting nothing
+  # and calling it a pass. String and cmake -P fixtures only, so no GPU and no build
+  # artifacts, which is why this carries the tier labels alone and lands in the
+  # architecture-excluding lane.
+  #
+  # Nothing provisions pytest for a machine that builds MIOpen, so these are written
+  # against the standard library's unittest.
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME test_forwarding_parity_scripts
+    COMMAND ${Python3_EXECUTABLE} -m unittest -v
+            test_compare_forwarding_runs
+            test_run_forwarding_parity
+            test_forwarding_parity_gpu_labels)
+  set_tests_properties(test_forwarding_parity_scripts PROPERTIES
+    LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
+    TIMEOUT 300
+    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/script:${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )

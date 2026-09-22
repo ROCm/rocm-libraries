@@ -22,8 +22,6 @@ or GPU is needed and the module runs in a lint lane:
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
 
-import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -455,134 +453,116 @@ def test_read_tracked_source_rejects_paths_outside_the_root(tmp_path):
     assert "outside the repository root" in "".join(reasons.values())
 
 
-needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+# run_git() is the script's single shell-out, so the cases below are built by
+# replacing it rather than by standing up a real repository. An earlier version did
+# the latter, and `git init` in a temporary directory turned out to be unsafe here:
+# git exports GIT_DIR into the hooks it runs and GIT_DIR outranks -C, so under the
+# pre-commit hook these tests run from, the init reached the surrounding repository
+# and left it marked bare, which refuses every later commit.
 
 
-def _git(root: Path, *args: str) -> str:
-    # GIT_DIR overrides -C, and git exports it to hooks -- so under a hook-invoked run
-    # every call here would reach the surrounding repository instead of `root`. The
-    # `git init` below would then re-initialise it, and with no GIT_WORK_TREE alongside
-    # it would come back bare, disabling every later git command in that checkout.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    done = subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        text=True,
-        check=True,
-        env=env,
-    )
-    return done.stdout.strip()
+def _completed(returncode=0, stdout=b"", stderr=b""):
+    return subprocess.CompletedProcess(["git"], returncode, stdout, stderr)
 
 
-def _repo_with_unreadable_blob(tmp_path: Path) -> tuple[Path, Path]:
-    """Build the exact shape a failed promisor fetch leaves behind.
+def _unreadable_blob_git(tracked: bool, cat_file_stderr: bytes = b"fatal: bad object"):
+    """Stand in for the shape a failed promisor fetch leaves behind.
 
-    The commit's tree still names the file -- so ls-tree answers -- while the
-    blob it points at is gone, so cat-file cannot produce the content. Deleting
-    the loose object reproduces that locally without needing a partial clone or
-    a network.
+    The commit's tree still names the file, so ls-tree answers, while the blob it
+    points at is gone, so cat-file cannot produce the content.
     """
-    root = tmp_path / "repo"
-    root.mkdir()
-    target = root / "tracked.hpp"
-    target.write_text("#pragma once\n", encoding="utf-8")
-    _git(root, "init", "-q")
-    assert (root / ".git").is_dir(), (
-        f"git init did not create {root}/.git -- it reached some other repository, "
-        "and the git calls below are about to write to it"
-    )
-    _git(root, "config", "user.email", "nobody@example.invalid")
-    _git(root, "config", "user.name", "Test")
-    _git(root, "add", "tracked.hpp")
-    _git(root, "commit", "-qm", "add tracked.hpp")
-    blob = _git(root, "rev-parse", "HEAD:tracked.hpp")
-    target.unlink()
-    (root / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
-    return root, target
+
+    def run_git(repo_root, *args):
+        if args[0] == "cat-file":
+            return _completed(1, stderr=cat_file_stderr)
+        if args[0] == "ls-tree":
+            return _completed(0, stdout=b"tracked.hpp\n" if tracked else b"")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    return run_git
 
 
-@needs_git
-def test_the_scratch_repo_stays_inside_tmp_path(tmp_path, monkeypatch):
-    """Stands in for a suite run from a git hook, which inherits GIT_DIR.
-
-    The damage would land on whoever ran it rather than on this test, and would show
-    up as an unrelated repository going unusable, so nothing here would report it.
-    """
-    outer = tmp_path / "outer"
-    outer.mkdir()
-    _git(outer, "init", "-q")
-    monkeypatch.setenv("GIT_DIR", str(outer / ".git"))
-
-    root, _ = _repo_with_unreadable_blob(tmp_path)
-
-    assert (root / ".git").is_dir(), "the scratch repo was never created"
-    config = (outer / ".git" / "config").read_text(encoding="utf-8")
-    assert "nobody@example.invalid" not in config
-    assert "bare = true" not in config
-
-
-@needs_git
-def test_tracked_but_unreadable_file_is_a_hard_failure(tmp_path):
+def test_tracked_but_unreadable_file_is_a_hard_failure(tmp_path, monkeypatch):
     """A checkout that carries the file but cannot produce it must not go green.
 
     Skipping here would drop a file that is under test out of the comparison
     while still reporting success, which is the one outcome this gate cannot
     afford: the drift it catches links cleanly and only misbehaves at run time.
     """
-    root, target = _repo_with_unreadable_blob(tmp_path)
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=True))
     with pytest.raises(abi.AbiError) as caught:
-        abi.read_tracked_source(target, root, {})
+        abi.read_tracked_source(tmp_path / "tracked.hpp", tmp_path, {})
     assert "tracked.hpp" in str(caught.value)
 
 
-@needs_git
-def test_the_hard_failure_carries_git_stderr(tmp_path):
+def test_the_hard_failure_carries_git_stderr(tmp_path, monkeypatch):
     """Whatever git said is the only evidence of why the checkout is broken."""
-    root, target = _repo_with_unreadable_blob(tmp_path)
+    monkeypatch.setattr(
+        abi,
+        "run_git",
+        _unreadable_blob_git(tracked=True, cat_file_stderr=b"fatal: missing blob abc"),
+    )
     with pytest.raises(abi.AbiError) as caught:
-        abi.read_tracked_source(target, root, {})
+        abi.read_tracked_source(tmp_path / "tracked.hpp", tmp_path, {})
     message = str(caught.value)
     assert "git cat-file said:" in message
+    assert "fatal: missing blob abc" in message
     assert "(git printed nothing)" not in message
 
 
-@needs_git
-def test_a_file_absent_from_the_commit_is_still_only_a_skip(tmp_path):
+def test_a_file_absent_from_the_commit_is_still_only_a_skip(tmp_path, monkeypatch):
     """The escalation must stay narrow.
 
     A sparse checkout legitimately lacks whole subtrees the commit never
     carried, and failing on those would break every partial-checkout lane
     instead of catching drift.
     """
-    root, _ = _repo_with_unreadable_blob(tmp_path)
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
     reasons: dict[str, str] = {}
-    assert abi.read_tracked_source(root / "never_added.hpp", root, reasons) is None
+    assert (
+        abi.read_tracked_source(tmp_path / "never_added.hpp", tmp_path, reasons) is None
+    )
     assert "not tracked at HEAD" in "".join(reasons.values())
 
 
-def test_a_non_checkout_is_a_skip_not_a_failure(tmp_path):
+def test_a_non_checkout_is_a_skip_not_a_failure(tmp_path, monkeypatch):
     """Source tarballs have no git at all; that is not a broken checkout."""
+    monkeypatch.setattr(
+        abi,
+        "run_git",
+        lambda root, *args: _completed(
+            128,
+            stderr=b"fatal: not a git repository (or any of the parent directories)",
+        ),
+    )
     reasons: dict[str, str] = {}
     assert abi.read_tracked_source(tmp_path / "absent.hpp", tmp_path, reasons) is None
     assert "not a git checkout" in "".join(reasons.values())
 
 
-@needs_git
-def test_an_ambient_git_environment_does_not_redirect_the_read(tmp_path, monkeypatch):
+def test_run_git_strips_an_ambient_git_environment(tmp_path, monkeypatch):
     """Stands in for the pre-commit hook this runs as, which exports GIT_DIR.
 
-    Redirected, every read here answers from the repository that invoked the hook,
-    so a file absent from the tree under test is reported on some other tree's
-    contents -- and the answer looks ordinary either way.
+    Left in place, GIT_DIR outranks -C and every read answers from the repository
+    that invoked the hook, so a file absent from the tree under test is reported on
+    some other tree's contents -- and the answer looks ordinary either way.
     """
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    _git(elsewhere, "init", "-q")
-    monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+    monkeypatch.setenv("GIT_DIR", "/nowhere/.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "/nowhere")
+    monkeypatch.setenv("GIT_INDEX_FILE", "/nowhere/index")
 
-    reasons: dict[str, str] = {}
-    assert abi.read_tracked_source(tmp_path / "absent.hpp", tmp_path, reasons) is None
-    assert "not a git checkout" in "".join(reasons.values())
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["env"] = kwargs["env"]
+        return _completed()
+
+    monkeypatch.setattr(abi.subprocess, "run", fake_run)
+    abi.run_git(tmp_path, "cat-file", "-p", "HEAD:x")
+
+    assert [key for key in seen["env"] if key.startswith("GIT_")] == []
+    assert seen["cmd"][:3] == ["git", "-C", str(tmp_path)]
 
 
 # --------------------------------------------------------------------------
