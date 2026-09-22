@@ -1005,11 +1005,10 @@ namespace
                       rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        // bad args. Note: Xgemvi_buffer_size unconditionally reports success
-        // (buffer size is a fixed 0), so it has no handle/argument guards.
+        // bad args
         UT_EXPECT_ROC(ut_gemvi_buffer_size(
                           nullptr, rocsparse_operation_none, 3, 3, 2, &buffer_size, scalar<T>(0)),
-                      rocsparse_status_success);
+                      rocsparse_status_invalid_handle);
         UT_EXPECT_ROC(ut_gemvi(nullptr,
                                rocsparse_operation_none,
                                3,

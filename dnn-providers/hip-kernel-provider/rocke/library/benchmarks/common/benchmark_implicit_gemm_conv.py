@@ -50,6 +50,12 @@ import sys
 from dataclasses import dataclass
 from typing import List
 
+# hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
+# is the only launch in this driver that can reach the limit. Mirrors
+# dispatch.grouped_convolution._MAX_GRID_DIM_Z -- this file is a standalone
+# sweep driver that deliberately does not import the dispatcher.
+_MAX_GRID_DIM_Z = 65535
+
 # Suppress the "fell back to Python lowerer" warning — expected in environments
 # where the C++ engine extension is not built.
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
@@ -1422,6 +1428,13 @@ def _build_wgrad_one(args_tuple):
     else:
         # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
         resolved_split_k = split_k
+    if resolved_split_k > 1:
+        # See the note in _build_wgrad_two_stage_one: groups*split_k must fit
+        # gridDim.z, and the clamp belongs with the spec so the baked degree and
+        # the launch geometry cannot disagree.
+        resolved_split_k = max(
+            1, min(resolved_split_k, _MAX_GRID_DIM_Z // max(1, problem.groups))
+        )
 
     spec = WgradConvSpec(
         problem=problem,
@@ -1461,6 +1474,10 @@ def _build_wgrad_two_stage_one(args_tuple):
     Must live at module level for pickle.
     """
     combo, problem, dtype, arch = args_tuple
+    # Must unpack the same 10-field combo as _build_wgrad_one. This branch is
+    # only reachable when C/groups is odd, which nothing in CI exercises, so it
+    # silently kept a stale 9-field unpack after async_dma was added and raised
+    # "too many values to unpack" the moment a depthwise shape reached it.
     (
         tile_m,
         tile_n,
@@ -1470,6 +1487,7 @@ def _build_wgrad_two_stage_one(args_tuple):
         warp_tile_mn,
         pipeline,
         epilogue,
+        async_dma,
         split_k,
     ) = combo
 
@@ -1518,6 +1536,15 @@ def _build_wgrad_two_stage_one(args_tuple):
     else:
         resolved_split_k = split_k
 
+    # The group and the K-slice share gridDim.z (z = groups*split_k), and the
+    # CK formula sizes split_k from the per-group GEMM without seeing the groups
+    # factor. On a grouped problem it therefore asks for a degree that overflows
+    # the z limit and the launch fails with hipErrorInvalidValue. Clamp with the
+    # spec, not at the grid, so the baked degree and the launch geometry agree.
+    resolved_split_k = max(
+        1, min(resolved_split_k, _MAX_GRID_DIM_Z // max(1, problem.groups))
+    )
+
     # Two-stage only makes sense for split_k > 1.
     if resolved_split_k <= 1:
         return None
@@ -1541,6 +1568,10 @@ def _build_wgrad_two_stage_one(args_tuple):
         epilogue=epilogue,
         split_k=resolved_split_k,
         two_stage=True,
+        # Carried for the same comparability reason as lds_k_outer below: the
+        # two legs must differ only in the epilogue, or the side-by-side
+        # timings are measuring two different kernels.
+        async_dma=async_dma,
         # Same per-combo K-outer gate the single-stage leg uses
         # (_build_wgrad_one). Without it the two-stage leg builds M-outer
         # kernels while the atomic leg builds K-outer ones, so the two sets of
@@ -1564,10 +1595,17 @@ def _build_wgrad_two_stage_one(args_tuple):
         return None
 
     s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype, groups=problem.groups)
-    try:
-        s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
-    except (ValueError, Exception):
-        return None
+    # WgradReduceSpec carries no tile configuration -- it is a function of
+    # (problem, dtype_d, groups) alone -- so every combo in a sweep produces a
+    # bit-identical Stage-2 kernel. Memoise it; see _S2_IR_CACHE.
+    _s2_key = (arch, s2_spec.kernel_name())
+    s2_kernel = _S2_IR_CACHE.get(_s2_key)
+    if s2_kernel is None:
+        try:
+            s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
+        except (ValueError, Exception):
+            return None
+        _S2_IR_CACHE[_s2_key] = s2_kernel
 
     return combo, spec, resolved_split_k, s1_kernel, s2_kernel
 
@@ -1678,6 +1716,109 @@ def _build_dgrad_one(args_tuple):
     return combo, spec, resolved_split_k, kernel
 
 
+# Process-local memo for the two-stage Stage-2 (workspace-reduce) kernel.
+#
+# WgradReduceSpec is a function of (problem, dtype_d, groups) only -- it carries
+# no tile/warp/pipeline configuration -- so every combination in a wgrad sweep
+# produces the same Stage-2 kernel. Building and compiling it per combination
+# costs one redundant compile per combination (over a thousand on a large
+# sweep) for a kernel that is bit-identical every time, and the two-stage leg is
+# exactly the deterministic path taken by odd-cpg/depthwise shapes.
+#
+# Keyed by (arch, kernel_name) so a run that sweeps several shapes or arches in
+# one process cannot alias them. These live for the lifetime of a pool worker;
+# with N workers the kernel is built and compiled N times rather than once per
+# combination.
+_S2_IR_CACHE: dict = {}
+_S2_ART_CACHE: dict = {}
+
+
+def _build_and_compile_fwd_one(args_tuple):
+    """Merged worker: validate + build IR + compile for one fwd combo.
+
+    Returns ``(combo, spec, artifact)`` on success, or ``None`` if the combo is
+    invalid (allowing other pool workers to continue uninterrupted).
+    """
+    result = _build_fwd_one(args_tuple)
+    if result is None:
+        return None
+    combo, spec, kernel = result
+    from rocke import compile_kernel as _compile_kernel
+
+    artifact = _compile_kernel(kernel, arch=args_tuple[3])
+    return combo, spec, artifact
+
+
+def _build_and_compile_wgrad_one(args_tuple):
+    """Merged worker: validate + build IR + compile for one wgrad combo.
+
+    Returns ``(combo, spec, resolved_split_k, artifact)`` on success, or ``None``.
+    """
+    result = _build_wgrad_one(args_tuple)
+    if result is None:
+        return None
+    combo, spec, resolved_split_k, kernel = result
+    from rocke import compile_kernel as _compile_kernel
+
+    artifact = _compile_kernel(kernel, arch=args_tuple[3])
+    return combo, spec, resolved_split_k, artifact
+
+
+def _build_and_compile_wgrad_two_stage_one(args_tuple):
+    """Merged worker: validate + build IR + compile Stage1+Stage2 for one wgrad combo.
+
+    Returns ``(combo, spec, resolved_split_k, s1_artifact, s2_artifact)`` on success,
+    or ``None``.
+    """
+    result = _build_wgrad_two_stage_one(args_tuple)
+    if result is None:
+        return None
+    combo, spec, resolved_split_k, s1_kernel, s2_kernel = result
+    from rocke import compile_kernel as _compile_kernel
+
+    arch = args_tuple[3]
+    s1_artifact = _compile_kernel(s1_kernel, arch=arch)
+    # Stage 2 is identical for every combo -- see _S2_CACHE.
+    _s2_key = (arch, s2_kernel.name)
+    s2_artifact = _S2_ART_CACHE.get(_s2_key)
+    if s2_artifact is None:
+        s2_artifact = _compile_kernel(s2_kernel, arch=arch)
+        _S2_ART_CACHE[_s2_key] = s2_artifact
+    return combo, spec, resolved_split_k, s1_artifact, s2_artifact
+
+
+def _build_and_compile_dgrad_one(args_tuple):
+    """Merged worker: validate + build IR + compile for one dgrad combo.
+
+    Returns ``(combo, spec, resolved_split_k, artifact)`` on success, or ``None``.
+    """
+    result = _build_dgrad_one(args_tuple)
+    if result is None:
+        return None
+    combo, spec, resolved_split_k, kernel = result
+    from rocke import compile_kernel as _compile_kernel
+
+    artifact = _compile_kernel(kernel, arch=args_tuple[3])
+    return combo, spec, resolved_split_k, artifact
+
+
+def _worker_pool(max_workers: int):
+    """A ProcessPoolExecutor whose workers do NOT inherit this process's heap.
+
+    Uses forkserver so workers start from a clean snapshot rather than a
+    copy-on-write fork of the parent. This avoids CPython refcount writes
+    privatising shared pages and keeps per-worker RSS low.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    try:
+        ctx = multiprocessing.get_context("forkserver")
+    except ValueError:  # platform without forkserver
+        ctx = multiprocessing.get_context("spawn")
+    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+
+
 def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     """Run *worker_fn* over *work* items in parallel, returning non-None results.
 
@@ -1693,7 +1834,7 @@ def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     max_workers = os.cpu_count() if jobs == 0 else jobs
     results = []
     n_killed = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with _worker_pool(max_workers) as pool:
         futures = {pool.submit(worker_fn, item): i for i, item in enumerate(work)}
         done = 0
         total = len(work)
@@ -1757,7 +1898,7 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
         flush=True,
     )
 
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with _worker_pool(max_workers) as pool:
         futures = {pool.submit(_compile_one, item): item[0].name for item in work}
         done = 0
         for fut in as_completed(futures):
@@ -1860,8 +2001,9 @@ def _run_sweep(
 
     _tile_mn = _TILE_MN_GFX1250 if arch == "gfx1250" else _TILE_MN
     _warp_mn = _WARP_MN_GFX1250 if arch == "gfx1250" else _WARP_MN
-    combos = list(
-        itertools.product(
+    combos = [
+        c
+        for c in itertools.product(
             _tile_mn,
             _tile_mn,
             _TILE_K,
@@ -1871,7 +2013,10 @@ def _run_sweep(
             _PIPELINES,
             _EPILOGUES,
         )
-    )
+        # geometry pre-filter: warp warps must fit inside the tile before spawning
+        # subprocesses — combos that fail this are rejected by is_valid_spec anyway.
+        if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
+    ]
 
     if args.sample is not None:
         total = len(combos)
@@ -1889,23 +2034,20 @@ def _run_sweep(
     )
 
     # ---------------------------------------------------------------------------
-    # Phase 1 – filter + IR build: validate every combo and build KernelDef IR.
+    # Phase 1+2 – filter, build IR, and compile in one parallel sweep.
+    # Workers that fail is_valid return None immediately, freeing the slot for
+    # the next combo without blocking the rest of the pool.
     # ---------------------------------------------------------------------------
     if jobs != 1:
-        print(f"Building IR for {len(combos)} combos in parallel ...", flush=True)
+        print(
+            f"Building IR + compiling {len(combos)} combos in parallel ...", flush=True
+        )
     work = [
         (combo, problem, dtype, arch, _mma_family, target.wave_size) for combo in combos
     ]
-    pending = _build_ir_parallel(work, _build_fwd_one, jobs)
+    pending = _build_ir_parallel(work, _build_and_compile_fwd_one, jobs)
     n_skipped = len(combos) - len(pending)
-
-    # ---------------------------------------------------------------------------
-    # Phase 2 – compile: fan out compile_kernel across processes (or serial).
-    # ---------------------------------------------------------------------------
-    artifact_map = _compile_kernels_parallel(
-        [k for _, _, k in pending], compile_kernel, arch, jobs
-    )
-    n_built = len(artifact_map)
+    n_built = len(pending)
 
     # ---------------------------------------------------------------------------
     # Phase 3 – GPU run: load modules and time each kernel serially.
@@ -1945,10 +2087,9 @@ def _run_sweep(
             )
 
     n_run = 0
-    for combo, spec, kernel in pending:
+    for combo, spec, artifact in pending:
         tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue = combo
         warp_tile_k = spec.warp_tile_k
-        artifact = artifact_map[kernel.name]
 
         try:
             launcher = KernelLauncher(
@@ -2172,14 +2313,21 @@ def _run_wgrad_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
+    # dW is the PyTorch grouped-weight layout [K, (Z,) Y, X, C/groups]: the filter
+    # of output channel k spans only its own group's input channels, so the inner
+    # dim is cpg, not the dense C. Using C here over-allocates by a factor of
+    # `groups` AND gives the comparison a different stride from the reference
+    # (wgrad_reference returns [K, Y, X, cpg]), so --verify reported a constant
+    # large rel_err for every grouped shape regardless of kernel correctness.
+    _cpg = p.C // p.groups
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=_torch_dtype_d)
+        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, _cpg, dtype=_torch_dtype_d)
     else:
         _X_f32 = _make(p.N, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype_d)
+        dW_t = torch.empty(p.K, p.Y, p.X, _cpg, dtype=_torch_dtype_d)
 
     X_t = _X_f32.to(_torch_dtype)
     dY_t = _dY_f32.to(_torch_dtype)
@@ -2213,7 +2361,19 @@ def _run_wgrad_sweep(
             return (args.split_k,)
         if async_dma or pipeline == "basic":
             return _SPLIT_K_AUTO
-        return (0,)
+        # Fixed degrees first, then the runtime-degree variant.
+        #
+        # Returning only (0,) here used to make --split-k 0 a near no-op for any
+        # shape that takes the two-stage deterministic path: Stage 2 needs a
+        # compile-time slice count, so _build_wgrad_two_stage_one rejects a
+        # runtime degree, and the deterministic leg silently collapsed to just
+        # the basic/async pipelines. An odd-cpg (depthwise) shape therefore swept
+        # thousands of tile combinations against a handful of degrees on two
+        # pipelines. Sweeping the ladder on every pipeline is the only way the
+        # deterministic leg sees the same degrees the atomic leg does; 0 is kept
+        # last because the runtime kernel is a genuinely different variant worth
+        # measuring on the atomic leg.
+        return _SPLIT_K_AUTO + (0,)
 
     # async_dma is a swept axis rather than a flag: unlike lds_k_outer it is not
     # deducible from (arch, spec). It removes the register staging of the tile,
@@ -2234,6 +2394,8 @@ def _run_wgrad_sweep(
         for _geom in itertools.product(
             _TILE_MN, _TILE_MN, _TILE_K, _WARP_MN, _WARP_MN, _WARP_TILE_MN
         )
+        # geometry pre-filter: warp warps must fit inside the tile.
+        if _geom[3] * _geom[5] <= _geom[0] and _geom[4] * _geom[5] <= _geom[1]
         for _epilogue in _EPILOGUES
         for _pipeline, _async_dma in _legs
         for _sk in _split_k_values_for(_pipeline, _async_dma)
@@ -2259,36 +2421,24 @@ def _run_wgrad_sweep(
         print("  (pointwise 1x1/s1/p0 — using explicit GEMM descriptors)", flush=True)
 
     # ---------------------------------------------------------------------------
-    # Phase 1 – filter + IR build: validate every combo and build KernelDef IR.
+    # Phase 1+2 – filter, build IR, and compile in one parallel sweep.
+    # Workers that fail is_valid return None immediately, freeing the slot for
+    # the next combo without blocking the rest of the pool.
     # ---------------------------------------------------------------------------
     if jobs != 1:
-        print(f"Building IR for {len(combos)} wgrad combos in parallel ...", flush=True)
-    work = [
-        (
-            combo,
-            problem,
-            dtype,
-            arch,
+        print(
+            f"Building IR + compiling {len(combos)} wgrad combos in parallel ...",
+            flush=True,
         )
-        for combo in combos
-    ]
-    pending = _build_ir_parallel(work, _build_wgrad_one, jobs)
-    # _build_ir_parallel returns results in as_completed order (non-deterministic).
+    work = [(combo, problem, dtype, arch) for combo in combos]
+    pending = _build_ir_parallel(work, _build_and_compile_wgrad_one, jobs)
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
     # so _SPLIT_K_AUTO order (128, 64, ..., 1) is preserved for --split-k-prune.
     pending.sort(key=lambda r: (r[0][:9], -r[2]))
     n_skipped = len(combos) - len(pending)
+    n_built = len(pending)
 
-    # Two-stage path: build Stage 1 (two_stage=True) + Stage 2 (workspace-reduce).
-    # Enabled when:
-    #   --two-stage always  → force regardless of C/groups parity
-    #   --two-stage auto    → only when C/groups is odd (atomics require even channel
-    #                         pairing: the packed 16-bit atomic pairs (c, c+1) within
-    #                         one filter position and silently produces wrong results
-    #                         for odd cpg; two-stage is the correct path there)
-    #   --two-stage never   → skip
-    # Runtime split-K (split_k=0) is atomic-only; _build_wgrad_two_stage_one filters
-    # those out regardless.
+    # Two-stage path: build + compile Stage 1 and Stage 2 in one pass.
     _cpg_is_odd = (p.C // p.groups) % 2 != 0
     _run_two_stage = args.two_stage == "always" or (
         args.two_stage == "auto" and _cpg_is_odd
@@ -2299,27 +2449,13 @@ def _run_wgrad_sweep(
                 f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
                 flush=True,
             )
-        pending_2s = _build_ir_parallel(work, _build_wgrad_two_stage_one, jobs)
+        pending_2s = _build_ir_parallel(
+            work, _build_and_compile_wgrad_two_stage_one, jobs
+        )
         pending_2s.sort(key=lambda r: (r[0][:8], -r[2]))
+        n_built += len(pending_2s)
     else:
         pending_2s = []
-
-    # ---------------------------------------------------------------------------
-    # Phase 2 – compile: fan out compile_kernel across processes (or serial).
-    # ---------------------------------------------------------------------------
-    artifact_map = _compile_kernels_parallel(
-        [k for _, _, _, k in pending], compile_kernel, arch, jobs
-    )
-    n_built = len(artifact_map)
-
-    # Compile both Stage 1 and Stage 2 kernels for the two-stage path.
-    _all_2s_kernels = [k for _, _, _, k, _ in pending_2s] + [
-        k for _, _, _, _, k in pending_2s
-    ]
-    artifact_map_2s = _compile_kernels_parallel(
-        _all_2s_kernels, compile_kernel, arch, jobs
-    )
-    n_built += len(artifact_map_2s)
 
     # ---------------------------------------------------------------------------
     # Phase 3 – GPU run: load modules and time each kernel serially.
@@ -2367,7 +2503,7 @@ def _run_wgrad_sweep(
     _pruned_configs: set = set()
 
     n_run = 0
-    for combo, spec, resolved_split_k, kernel in pending:
+    for combo, spec, resolved_split_k, artifact in pending:
         (
             tile_m,
             tile_n,
@@ -2381,7 +2517,6 @@ def _run_wgrad_sweep(
             _,
         ) = combo
         warp_tile_k = spec.warp_tile_k
-        artifact = artifact_map[kernel.name]
         _is_rt = resolved_split_k == 0  # runtime split-K kernel
 
         if _do_prune:
@@ -2603,7 +2738,8 @@ def _run_wgrad_sweep(
         ws_dev = None
         ws_nbytes_cur = 0
 
-        for combo, spec, resolved_split_k, s1_kernel, s2_kernel in pending_2s:
+        for combo, spec, resolved_split_k, s1_art, s2_art in pending_2s:
+            # 10-field combo, same as the single-stage leg.
             (
                 tile_m,
                 tile_n,
@@ -2613,15 +2749,10 @@ def _run_wgrad_sweep(
                 warp_tile_mn,
                 pipeline,
                 epilogue,
+                _async_dma,
                 _,
             ) = combo
             warp_tile_k = spec.warp_tile_k
-
-            s1_art = artifact_map_2s.get(s1_kernel.name)
-            s2_art = artifact_map_2s.get(s2_kernel.name)
-            if s1_art is None or s2_art is None:
-                n_skipped += 1
-                continue
 
             ws_nbytes = wgrad_two_stage_workspace_nbytes(spec)
             if ws_dev is None or ws_nbytes > ws_nbytes_cur:
@@ -2869,8 +3000,9 @@ def _run_dgrad_sweep(
 
     split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
 
-    combos = list(
-        itertools.product(
+    combos = [
+        c
+        for c in itertools.product(
             _TILE_MN,
             _TILE_MN,
             _TILE_K,
@@ -2881,7 +3013,9 @@ def _run_dgrad_sweep(
             _EPILOGUES,
             split_k_values,
         )
-    )
+        # geometry pre-filter: warp warps must fit inside the tile.
+        if c[3] * c[5] <= c[0] and c[4] * c[5] <= c[1]
+    ]
 
     if args.sample is not None:
         total = len(combos)
@@ -2902,19 +3036,18 @@ def _run_dgrad_sweep(
     from kernels.common.conv_implicit_gemm_dgrad import pack_sub_gemm_buffer
     import struct as _struct
 
-    # ---- Phase 1: build + validate all specs, collect kernels (parallel) ----
+    # ---- Phase 1+2: build IR + compile in one parallel sweep ----
+    # Workers that fail is_valid return None immediately, freeing the slot for
+    # the next combo without blocking the rest of the pool.
     if jobs != 1:
-        print(f"Building IR for {len(combos)} dgrad combos in parallel ...", flush=True)
+        print(
+            f"Building IR + compiling {len(combos)} dgrad combos in parallel ...",
+            flush=True,
+        )
     work = [(combo, problem, dtype, arch, vec_a, vec_b, vec_c) for combo in combos]
-    pending = _build_ir_parallel(work, _build_dgrad_one, jobs)
+    pending = _build_ir_parallel(work, _build_and_compile_dgrad_one, jobs)
     n_skipped = len(combos) - len(pending)
-
-    # ---- Phase 2: compile in parallel ----
-    artifact_map = _compile_kernels_parallel(
-        [k for _, _, _, k in pending], compile_kernel, arch, jobs
-    )
-    n_built = len(artifact_map)
-    n_skipped += len(pending) - n_built
+    n_built = len(pending)
 
     print(
         f"Compiled {n_built}/{len(pending)} dgrad kernels "
@@ -2956,11 +3089,7 @@ def _run_dgrad_sweep(
             )
 
     n_measured = 0
-    for _combo, spec, resolved_split_k, kernel in pending:
-        artifact = artifact_map.get(kernel.name)
-        if artifact is None:
-            continue
-
+    for _combo, spec, resolved_split_k, artifact in pending:
         sub_gemms = spec.compute_sub_gemms()
         buf_i32 = pack_sub_gemm_buffer(sub_gemms, spec.tile_m, spec.tile_n)
         buf_bytes = _struct.pack(f"{len(buf_i32)}i", *buf_i32)
