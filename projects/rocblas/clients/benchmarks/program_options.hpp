@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,14 @@
 
 #pragma once
 
-#if __GLIBC__ < 3 && __GLIBC__MINOR__ < 39
+// Older glibc did not expose the SCN* macros to C++ unless __STDC_FORMAT_MACROS was
+// defined, so they are supplied here and <cinttypes> is kept from providing its own.
+// defined(__GLIBC__) matters: on a non-glibc toolchain __GLIBC__ is not a macro and so
+// evaluates to 0, which would satisfy the version test and apply the workaround there too.
+#if defined(__GLIBC__) && __GLIBC__ < 3 && __GLIBC_MINOR__ < 39
 #define SCNd32 "d"
 #define SCNu32 "u"
-#define SCNd64 "l"
+#define SCNd64 "ld"
 #define SCNu64 "lu"
 #undef _GLIBCXX_USE_C99_INTTYPES_TR1
 #endif
