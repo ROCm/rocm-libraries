@@ -106,8 +106,9 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
 
 int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves) {
     const int share = hw.lds.wavesPerDsIssuePipe;
-    // numWaves <= 0 is "unset" (GemmTileConfig::NumWaves default): model no
-    // sharing rather than guessing an occupancy, so the ISA cost stands.
+    // GemmTileConfig::NumWaves defaults to 1, so an unconfigured caller lands on
+    // single-wave behaviour naturally. The <= 0 guard is for a caller that
+    // explicitly passes a nonsense count.
     if (issueCycles <= 0 || share <= 1 || numWaves <= 0) return issueCycles;
     // Waves pair onto a pipe as soon as there are enough to fill one, so the
     // contending count saturates at the share. See the header for the

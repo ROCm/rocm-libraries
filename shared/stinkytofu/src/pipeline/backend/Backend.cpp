@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include <iostream>
+
 #include "stinkytofu/pipeline/Backend.hpp"
 
 #include "stinkytofu/bindings/python/Module.hpp"
@@ -59,6 +61,26 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     gemmTileConfig.NumGRB = opts.NumGRB;
     gemmTileConfig.NumGRM = opts.NumGRM;
     gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
+
+    // Entry-point sanity check on the tile config. 0 is not a valid tile size,
+    // so TileA0 == 0 means the module options never carried one and every pass
+    // downstream is about to work from defaults rather than from this kernel's
+    // shape. Warn rather than abort: a caller may legitimately drive a non-GEMM
+    // module through here, and a hard failure would take it down with it.
+    if (gemmTileConfig.TileA0 == 0) {
+        std::cerr << "[StinkyTofu] warning: GemmTileConfig has TileA0 == 0, so the tile "
+                     "configuration was never set. Scheduling passes will fall back to "
+                     "defaults and will not reflect this kernel.\n";
+    }
+    // WaveGroup0 * WaveGroup1 is 0 when neither was set, which is not an
+    // occupancy any kernel runs at. Passes branch on this (TDMLoadWaveSyncPass
+    // skips at <= 1, the CDNA5 ds issue-cost model reads it), so pin it to a
+    // single wave rather than letting 0 propagate.
+    if (gemmTileConfig.NumWaves == 0) {
+        std::cerr << "[StinkyTofu] warning: WaveGroup0 * WaveGroup1 == 0; assuming 1 wave.\n";
+        gemmTileConfig.NumWaves = 1;
+    }
+
     pm.setGemmTileConfig(gemmTileConfig);
 
     AsmCapsConfig asmCapsConfig;
