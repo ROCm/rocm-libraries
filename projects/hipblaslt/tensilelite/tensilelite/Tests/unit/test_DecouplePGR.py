@@ -15,7 +15,7 @@ import pytest
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
-from tensilelite.Components import DecouplePGR as DP
+from tensilelite.Components import DecouplePGR as DP, TDMFuse as TF
 from tensilelite.Components import TDMFuse as TF
 from tensilelite.Components.DecouplePGR import (
     _asDataType,
@@ -44,6 +44,16 @@ from tensilelite.Components.DecouplePGR import (
 )
 from tensilelite.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
 
+pytestmark = pytest.mark.unit
+
+
+################################################################################
+#
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+################################################################################
+"""Unit tests for tensilelite.Components.DecouplePGR."""
 pytestmark = pytest.mark.unit
 
 
