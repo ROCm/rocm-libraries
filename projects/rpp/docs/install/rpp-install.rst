@@ -14,7 +14,7 @@ Starting with ROCm 10.1, RPP is built and delivered as part of `TheRock <https:/
 
 .. note::
 
-    RPP packages built by TheRock are currently built with audio augmentations disabled (``RPP_AUDIO_SUPPORT=OFF``). Build :doc:`from source <./rpp-build-and-install>` to enable audio augmentation support.
+    RPP packages built by TheRock are currently built with audio augmentations disabled (``RPP_AUDIO_SUPPORT=OFF``). Build :doc:`from source <./rpp-build>` to enable audio augmentation support.
 
 Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.

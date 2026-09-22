@@ -78,14 +78,11 @@ Use sparse checkout when cloning the RPP project:
   git sparse-checkout init --cone
   git sparse-checkout set projects/rpp
 
-Then use ``git checkout`` to check out the branch you need.
+Then use ``git checkout`` to check out the branch you need. For example, to check out the develop branch:
 
-The develop branch is intended for users who want to preview new features or
-contribute to the RPP code base.
+.. code:: shell
 
-If you don't intend to contribute to the RPP code base and won't be previewing
-features, use a branch that matches the version of ROCm installed on your
-system.
+   git checkout develop
 
 .. _rpp-build-linux:
 

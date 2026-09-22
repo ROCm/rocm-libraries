@@ -6,7 +6,7 @@
 ROCm Performance Primitives functionality and variant example outputs
 ****************************************************************************
 
-The following table shows example outputs of some ROCm Performance Primitives (RPP) functionalities and variants.
+The following table shows example outputs of some ROCm Performance Primitives (RPP) functionalities and variants. For call syntax, see :doc:`Run an RPP tensor augmentation <../how-to/rpp-run-tensor-augmentation>`.
 
 
 .. csv-table::

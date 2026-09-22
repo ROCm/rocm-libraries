@@ -13,6 +13,11 @@ subtrees:
   - file: install/rpp-build.rst
     title: Build from source
 
+- caption: How to
+  entries:
+  - file: how-to/rpp-run-tensor-augmentation.rst
+    title: Run a tensor augmentation
+
 - caption: Reference
   entries:
   - file: reference/rpp-env-variables.rst
