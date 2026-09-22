@@ -139,18 +139,18 @@ void larfg_getError(const rocblas_handle handle,
     // using norm-1 which is infinity norm for this data setup
     *max_err = norm_error('O', 1, n - 1, inc, hx[0], hx_res[0]);
 
-    using std::real, std::imag;
-    fmt::print( "n {}\n\t"
-                "tau   {:7.4f} ?= {:7.4f}\n\t"
-                "alpha {:7.4f} ?= {:7.4f}, v=[\n\t",
-                n,
-                real( *ht[0] ), real( *ht_res[0] ),
-                real( *ha[0] ), real( *ha_res[0] ) );
-    for (int i = 1; i < n; ++i) {
-        fmt::print( "      {:7.4f} ?= {:7.4f}\n\t",
-                    real( *hx[i-1] ), real( *hx_res[i-1] ) );
-    }
-    fmt::print( "]\n" );
+    // using std::real, std::imag;
+    // fmt::print( "n {}\n\t"
+    //             "tau   {:7.4f} ?= {:7.4f}\n\t"
+    //             "alpha {:7.4f} ?= {:7.4f}, v=[\n\t",
+    //             n,
+    //             real( *ht[0] ), real( *ht_res[0] ),
+    //             real( *ha[0] ), real( *ha_res[0] ) );
+    // for (int i = 1; i < n; ++i) {
+    //     fmt::print( "      {:7.4f} ?= {:7.4f}\n\t",
+    //                 real( hx[0][i-1] ), real( hx_res[0][i-1] ) );
+    // }
+    // fmt::print( "]\n" );
 }
 
 template <typename T, typename I, typename Td, typename Th>
