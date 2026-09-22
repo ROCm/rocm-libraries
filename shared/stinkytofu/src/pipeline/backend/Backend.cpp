@@ -61,14 +61,38 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     gemmTileConfig.NumGRA = opts.NumGRA;
     gemmTileConfig.NumGRB = opts.NumGRB;
     gemmTileConfig.NumGRM = opts.NumGRM;
+    // Assigned as-is, including 0, and deliberately not defaulted to 1 here.
+    //
+    // TensileLite's production kernel generation (KernelWriter.kernelBody ->
+    // KernelWriterAssembly.getSourceFileString) does not set WaveGroup0/1, so
+    // this product is 0 for real hipblaslt kernels even though their tile
+    // dimensions are all set. Substituting the struct's single-wave default
+    // would look harmless and is not: StinkyWaitCntInsertionPass drains the
+    // tensor counter on `isBarrier(i) || numWaves == 1`, so flipping 0 to 1
+    // starts emitting s_wait_tensorcnt on every kernel in the library. That is
+    // a codegen and performance change to all of hipblaslt, unrelated to the
+    // ds_load cap this PR is about, so it is not smuggled in here.
+    //
+    // The 1 default on GemmTileConfig still does its job: it fixes the
+    // uninitialised read for callers that default-construct the struct (.stir
+    // parsing, tests). This path explicitly assigns, so there is nothing
+    // indeterminate to protect against -- only a real value or a real 0.
+    //
+    // Wiring WaveGroup0/1 through from TensileLite, and then deciding what the
+    // tensorcnt rule should be for a genuinely multi-wave kernel, is a separate
+    // change that needs its own hardware numbers.
     gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
 
     // Entry-point validation. This is the GEMM backend: a kernel arriving here
-    // without a tile configuration is misconfigured, not merely unusual. 0 is
-    // not a valid tile size and 0 waves is not an occupancy anything runs at,
-    // so both mean the module options never carried the values. Fail loudly
-    // instead of letting every downstream pass silently work from defaults and
-    // schedule for a kernel shape that does not exist.
+    // without a tile configuration is misconfigured, not merely unusual: 0 is
+    // not a valid tile size, so it means the module options never carried the
+    // values. Fail loudly instead of letting every downstream pass silently
+    // work from defaults and schedule for a kernel shape that does not exist.
+    //
+    // Tile dimensions only. NumWaves is deliberately NOT gated: production
+    // TensileLite does not set WaveGroup0/1 (see above), so requiring it here
+    // would reject every real hipblaslt kernel. It has a meaningful default;
+    // a tile size does not.
     //
     // Deliberately NOT in PassContext::setGemmTileConfig: that is the generic
     // config setter and has legitimate non-GEMM callers, notably
@@ -100,11 +124,6 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     rejectUnsetTile("TileA0", gemmTileConfig.TileA0);
     rejectUnsetTile("TileB0", gemmTileConfig.TileB0);
     rejectUnsetTile("TileM0", gemmTileConfig.TileM0);
-    if (tileConfigIsUsed && gemmTileConfig.NumWaves == 0) {
-        report_fatal_error(
-            "GemmTileConfig::NumWaves is 0 at the backend entry (WaveGroup0 * WaveGroup1). Set "
-            "WaveGroup0 and WaveGroup1 in the module options before running the backend.");
-    }
 
     pm.setGemmTileConfig(gemmTileConfig);
 

@@ -138,29 +138,30 @@ TEST(BackendTileConfigDeathTest, UnsetThirdTileDimensionAborts) {
         "TileM0 is 0");
 }
 
-TEST(BackendTileConfigDeathTest, UnsetWaveGroupsAbort) {
-    EXPECT_DEATH(
-        {
-            StinkyAsmModule::ModuleOptions opts{};
-            opts.OptLevel = 3;
-            opts.TileA0 = 128;
-            opts.TileB0 = 128;
-            opts.TileM0 = 32;
-            // WaveGroup0/1 left at 0, so NumWaves comes out 0.
-            StinkyAsmModule module("test", kArch, opts);
-            Backend backend(module);
-            backend.runOptimization();
-        },
-        "NumWaves is 0");
+// NumWaves is deliberately neither gated nor defaulted. TensileLite's
+// production kernel generation does not set WaveGroup0/1, so the product is 0
+// for every real hipblaslt kernel even though its tile dimensions are all set
+// -- aborting on it took down the whole library build (KernelWriter.kernelBody,
+// Math CI precheckin). Substituting 1 instead is not a safe "fix" either:
+// StinkyWaitCntInsertionPass drains the tensor counter on `numWaves == 1`, so
+// it would start emitting s_wait_tensorcnt across all of hipblaslt. The 0 is
+// passed through unchanged, which is what develop does.
+//
+// This asserts only that the entry does not abort -- the resolved NumWaves is
+// not observable from here, since runOptimization builds its own pass manager.
+// The pass-through itself is pinned by HWModelDsIssue and the waitcnt tests.
+TEST(BackendTest, UnsetWaveGroupsDoNotAbort) {
+    StinkyAsmModule::ModuleOptions opts{};
+    opts.OptLevel = 3;
+    opts.TileA0 = 128;
+    opts.TileB0 = 128;
+    opts.TileM0 = 32;
+    // WaveGroup0/1 left at 0, exactly as production TensileLite leaves them.
+    StinkyAsmModule module("test", kArch, opts);
+    Backend backend(module);
+    EXPECT_TRUE(backend.runOptimization());
 }
 
-// At O0 the DAG scheduler does not run (Gfx1250Backend:
-// `runScheduler = optLevel != O0`), so nothing downstream reads the tile shape
-// and an unconfigured module is not an error. This is not a loophole -- it is
-// the case rocisa actually drives: test_mubuf.py, test_streamk_fences.py and
-// test_pass_plugin.py all push bare, non-GEMM instruction modules through the
-// backend at OptLevel 0, and so does stinkytofu-opt on raw asm. Making that
-// fatal aborted those callers for omitting something no pass was going to read.
 TEST(BackendTest, UnconfiguredModuleIsAllowedAtO0) {
     auto module = makeUnconfiguredModule(/*optLevel=*/0);
     Backend backend(*module);
