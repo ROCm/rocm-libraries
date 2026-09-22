@@ -16,11 +16,11 @@ wider ROCm/LLVM/gfx problem; this doc is its §4 R1+R2 written out),
 > argument that motivated S1** — they are not the data. The data is the generated
 > artifact, one column per flavor, under
 > `python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json`; each column
-> records the clang identity that produced it. Committed so far: `llvm20`
-> (ROCm 7.1) and `llvm22` (ROCm 7.2). **No `llvm23` column has been generated**,
-> so nothing below can currently be reproduced end-to-end; where §3 and the
-> artifacts disagree, the artifacts win. See §3.2 for the rows that did not
-> survive.
+> records the clang identity that produced it. All three flavors are now
+> committed: `llvm20` (ROCm 7.1), `llvm22` (ROCm 7.2) and `llvm23` (ROCm 10.0),
+> the last measured in a container rather than on a host. So §3 is reproducible
+> end-to-end, and where §3 and the artifacts disagree, the artifacts win. See
+> §3.2 for the rows that did not survive.
 
 ---
 

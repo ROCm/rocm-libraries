@@ -20,9 +20,9 @@ strategy** for scaling to more toolchains and more targets.
 > **Superseded in part.** §4's R1 has since shipped as
 > `tools/gen_arch_domain.py`, and the §2.4 hand-probes are no longer the data —
 > the generated columns under
-> `python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json` are. Two
-> flavors are committed (`llvm20`, `llvm22`); **`llvm23` is not**, so the survey
-> above is the one flavor with no machine-checked column behind it. Where §2.4
+> `python/rocke/core/arch/data/intrinsic_arch_domain.<flavor>.json` are. All
+> three flavors are committed (`llvm20`, `llvm22`, `llvm23`), so the survey
+> above now has a machine-checked column behind it. Where §2.4
 > and the artifacts disagree, the artifacts win — see
 > [`arch_axis_proposal.md`](arch_axis_proposal.md) §3.2 for the rows that changed.
 

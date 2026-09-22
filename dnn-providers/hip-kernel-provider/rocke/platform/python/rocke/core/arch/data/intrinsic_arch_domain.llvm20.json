@@ -5831,7 +5831,7 @@
     ],
     "clang": "AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.1.1 25444 27682a16360e33e37c4f3cc6adf9a620733f8fe1)",
     "flavor": "llvm20",
-    "generator": 3,
+    "generator": 4,
     "probe_cflags": [
       "-O0",
       "-nogpulib"

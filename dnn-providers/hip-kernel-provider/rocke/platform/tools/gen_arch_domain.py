@@ -127,7 +127,8 @@ STATUS_PROBE_ERROR = "probe_error"
 #   1 -- initial, probes at -O3
 #   2 -- probes at -O0, per-probe timeout, provenance recorded
 #   3 -- immarg values swept on a negative, winning value recorded
-GENERATOR = 3
+#   4 -- llvm23 diagnostics understood; the sweep also runs on probe_error
+GENERATOR = 4
 
 # Hoisted out of `_probe` so the artifact can record the flags that actually
 # ran rather than a hand-copied list that drifts from them. `-O0` is the one
@@ -219,20 +220,27 @@ _LITERAL_PROBE_VALUES = (0, 4)
 # negative. See `_probe_module`'s `imm_int` and the sweep in `run`.
 #
 # Chosen to cover the operand kinds that actually appear in this decl table
-# rather than to be exhaustive: 1/2/4 are the byte counts a transfer-size
-# operand accepts, and 16 is the wider one gfx950 added. A selector operand
-# (an MFMA cbsz/blgp, say) is legal at 0 and so never reaches the sweep at
-# all. The list is ordered smallest-first so the recorded winner is the least
-# surprising legal value rather than whichever we happened to try first.
-_IMMARG_PROBE_VALUES = (1, 2, 4, 16)
+# rather than to be exhaustive: these are exactly the byte counts a
+# load-to-LDS transfer size accepts, as llvm23's verifier enumerates them. A
+# selector operand (an MFMA cbsz/blgp, say) is legal at 0 and so never reaches
+# the sweep at all. The list is ordered smallest-first so the recorded winner
+# is the least surprising legal value rather than whichever we happened to try
+# first.
+_IMMARG_PROBE_VALUES = (1, 2, 4, 12, 16)
 
-# The two ways LLVM reports "that operand had to be an immediate". llvm22
-# rejects the call in the verifier; llvm20 has no such check and instead dies
-# during type legalisation, which is why the same decl-table gap reads as a
-# frontend error on one vintage and a backend error on the other.
+# The ways LLVM reports "that operand had to be an immediate, and not that
+# one". llvm22 rejects the call in the verifier; llvm20 has no such check and
+# instead dies during type legalisation, which is why the same decl-table gap
+# reads as a frontend error on one vintage and a backend error on the other.
+#
+# llvm23 added the third: a verifier check on the load-to-LDS transfer size
+# that names the legal values outright. It is the same complaint as the first
+# two -- the operand we synthesised is not an acceptable constant -- and it is
+# the only one of the three that says what would have been acceptable.
 _IMMEDIATE_OPERAND_DIAGS = (
     "immarg operand has non-immediate parameter",
     "do not know how to expand this operator's operand",
+    "invalid data size for load-to-lds intrinsic",
 )
 
 
@@ -417,10 +425,15 @@ def _classify(rc: int, diag: str) -> tuple[str, str]:
     # not have. All three are reached only *after* the name resolved, so the
     # flavor axis is already settled by _name_exists() and cannot be confused
     # with them here.
+    # A fourth, added in llvm23: the backend says so in words rather than by
+    # failing. It is the clearest of the four and the only one that cannot be
+    # confused with a malformed probe, so it is worth matching on its own
+    # rather than waiting for the selection failure it replaces.
     if (
         "cannot select" in low
         or "do not know how to expand this operator's operand" in low
         or "no libcall available for" in low
+        or "intrinsic not supported on subtarget" in low
     ):
         return STATUS_ARCH_ABSENT, _first_error(diag)
     # The compiler died rather than answered. This is NOT arch_absent: we did
@@ -804,24 +817,42 @@ def main() -> int:
         # still costs one probe -- and only on the ~1 key in 6 whose declare
         # has an integer immarg at all.
         #
-        # `arch_absent` and nothing else. It is the only status this can
-        # explain: a crash, a timeout or an unsupported target say nothing
+        # Two statuses, and only these two. `arch_absent` is the one the sweep
+        # was built for: the backend could not select, and the operand value is
+        # one reason why. `probe_error` is the same defect caught earlier --
+        # llvm23's verifier rejects an illegal transfer size before codegen
+        # runs, and "our module was malformed" is exactly what the sweep
+        # repairs. A crash, a timeout or an unsupported target say nothing
         # about the operand value, and re-asking would just pay for the same
-        # answer four more times.
+        # answer five more times.
         #
         # Any legal value wins, because the question the artifact answers is
         # "can this target lower this intrinsic", not "can it lower it with
         # the operand our probe happened to pick". A 0 that is out of range is
         # our defect, not the target's limit.
-        if status == STATUS_ARCH_ABSENT and key in imm_modules:
+        if status in (STATUS_ARCH_ABSENT, STATUS_PROBE_ERROR) and key in imm_modules:
+            settled_imm: tuple[str, str] | None = None
             for imm, imm_path in imm_modules[key]:
                 imm_out = Path(ir_dir) / f"{path.stem}.imm{imm}.{arch}.hsaco"
-                imm_status, _ = _probe(clang, imm_path, arch, imm_out)
+                imm_status, imm_evidence = _probe(clang, imm_path, arch, imm_out)
                 if imm_status == STATUS_OK:
                     return key, arch, STATUS_OK, "", imm
-            # Every candidate failed. That is the target speaking, and the
-            # original evidence is kept rather than the last candidate's:
-            # the cell describes the probe as posed by default.
+                if settled_imm is None and imm_status != STATUS_PROBE_ERROR:
+                    settled_imm = (imm_status, imm_evidence)
+            # Every candidate failed, so the operand value was not the
+            # obstacle. Where we started from `arch_absent` the original
+            # evidence already says so and is kept -- the cell should describe
+            # the probe as posed by default.
+            #
+            # Where we started from `probe_error` it does not. "Our module was
+            # malformed" was true of the default probe and is now known not to
+            # be the whole story, because a legal value fails too. Leaving it
+            # would commit a `probe_error` -- the one status that means the
+            # generator is broken -- for a target that simply cannot lower the
+            # intrinsic. So the first candidate that produced a real
+            # classification speaks instead.
+            if status == STATUS_PROBE_ERROR and settled_imm is not None:
+                status, evidence = settled_imm
 
         return key, arch, status, evidence, None
 
