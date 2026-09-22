@@ -4125,6 +4125,9 @@ class GlobalWriteBatchWriter:
       module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=vgpr(vTmp), comment="+ waveLdsBase (elements)"))
     if bpe > 1:
       module.add(VLShiftLeftB32(dst=vgpr(vLdsBase), shiftHex=int(log2(bpe)), src=vgpr(vLdsBase), comment="* bpe -> LDS byte base"))
+    # Place the TDM staging region AFTER the main-loop LDS (disjoint) so per-wave staging writes
+    # never overwrite the shared main-loop LDS buffer. Must match the tensor_store descriptor lds_addr.
+    module.add(VAddU32(dst=vgpr(vLdsBase), src0=vgpr(vLdsBase), src1=self.kernel["TDMStoreLdsByteOffset"], comment="+ TDMStoreLdsByteOffset: staging AFTER main-loop LDS (disjoint)"))
     return module
 
   def _emitWaveTDMStore(self, elementIdx: int, tt0: int, tt1: int, isLast: bool):
@@ -4175,7 +4178,11 @@ class GlobalWriteBatchWriter:
 
     # --- Last element: flush the whole (Mfull x Nfull) wave tile with ONE TDM store. ---
     module.addComment1("TDM store: flush whole wave tile (Mfull=%d x Nfull=%d) in one DMA" % (Mfull, Nfull))
-    module.add(SWaitCnt(dscnt=0, comment="wait own-wave LDS staging writes (self WAR)"))
+    # 'stinky-keep' marks this wait non-removable for StinkyRemoveWaitCntPass: the
+    # tensor_store_from_lds that consumes these staging writes is lowered in a separate
+    # region, so WaitCntInsertion never re-derives this dscnt -- stripping it would let
+    # the reverse DMA read stale LDS on real hw (invisible on FFM).
+    module.add(SWaitCnt(dscnt=0, comment="wait own-wave LDS staging writes (self WAR) [stinky-keep]"))
 
     tdm = TensorDataMoverStore()
     tdm.setMemToken([self.parentWriter.states.memTokenLdsBuffer0])
@@ -4192,12 +4199,17 @@ class GlobalWriteBatchWriter:
         # WaveIdx sgpr is freed by epilogue -> recompute waveId from Serial (lane 0's tid >> log2(ws)).
         module.add(VReadfirstlaneB32(sgpr(wId), vgpr("Serial"), comment="first tId"))
         module.add(SLShiftRightB32(dst=sgpr(wId), shiftHex=int(log2(ws)), src=sgpr(wId), comment="waveId = fTid >> log2(ws)"))
-        # lds_addr = waveId * waveTileBytes (per-wave staging region; matches the staging write base).
+        # lds_addr = LdsNumBytes + waveId*waveTileBytes. The +LdsNumBytes places the TDM staging
+        # region AFTER the main-loop LDS (disjoint) so staging never overwrites the shared main-loop
+        # LDS buffer that other waves may still be finishing with — matches the staging write base.
+        ldsBytes = self.kernel["TDMStoreLdsByteOffset"]
         if self.kernel["NumWaves"] > 1:
           module.add(SMulI32(dst=sgpr(aLo), src0=sgpr(wId), src1=waveTileBytes, comment="waveLdsBase = waveId*waveTileBytes"))
+          module.add(SAddU32(dst=sgpr(aLo), src0=sgpr(aLo), src1=ldsBytes, comment="+ LdsNumBytes: TDM staging AFTER main-loop LDS (disjoint)"))
           module.add(tdm.setLdsAddr(g0, sgpr(aLo)))
         else:
-          module.add(tdm.setLdsAddr(g0, 0))
+          module.add(SMovB32(dst=sgpr(aLo), src=ldsBytes, comment="TDM staging AFTER main-loop LDS (disjoint)"))
+          module.add(tdm.setLdsAddr(g0, sgpr(aLo)))
         with kw.allocTmpSgpr(1, tag="tdmStoreDim") as dimRes:
           module.add(SMovB32(dst=sgpr(dimRes.idx), src=Mfull, comment="tensor_dim0 = tile_dim0 = Mfull"))
           module.add(tdm.setTensorDim0(g1, dimRes.idx, kw))

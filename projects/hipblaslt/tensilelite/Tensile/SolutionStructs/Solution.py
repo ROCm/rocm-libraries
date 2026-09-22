@@ -6037,6 +6037,18 @@ class Solution(collections.abc.Mapping):
       ldsAmaxDBytes = 4 * (num_workItems // half_wave_size) * amaxBPE
       ldsNumBytes += ldsAmaxDBytes
 
+    # TDM store staging gets its OWN LDS region AFTER the main-loop/epilogue LDS (disjoint) so
+    # per-wave staging writes never overwrite the shared main-loop buffer (which other waves may
+    # still be finishing with). Record the start offset (= current ldsNumBytes) for
+    # _emitWaveTDMStore, then grow the reservation by all waves' staging tiles.
+    if state.get("WaveTransposeStoreTDM", 0):
+      Mfull = state["MIWaveTile"][0] * state["MatrixInstM"]
+      Nfull = state["MIWaveTile"][1] * state["MatrixInstN"]
+      numWaves = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+      stagingBytes = numWaves * Mfull * Nfull * int(state["ProblemType"]["DestDataType"].numBytes())
+      state["TDMStoreLdsByteOffset"] = ldsNumBytes
+      ldsNumBytes += stagingBytes
+
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
     if ldsSize > state["MaxLDS"]:

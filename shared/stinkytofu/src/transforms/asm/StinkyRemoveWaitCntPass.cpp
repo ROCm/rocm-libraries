@@ -59,6 +59,13 @@ bool shouldRemove(const StinkyInstruction& inst, const RemoveWaitCntOptions& opt
     // IF_WaitTensorCnt is disjoint from IF_WaitCnt, so isWaitCnt() alone would
     // miss s_wait_tensorcnt.
     if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+    // Honor an explicit keep-marker in the comment: some hand-emitted waits guard a
+    // hazard the reconstruction machinery cannot re-derive. The TDM-store staging-guard
+    // dscnt is such a case -- the tensor_store_from_lds that consumes it is lowered in a
+    // separate region (globalWriteEpilogue), so WaitCntInsertion never re-adds this wait;
+    // stripping it lets the reverse DMA read stale LDS on real hardware.
+    if (const auto* c = inst.getModifier<CommentData>())
+        if (c->comment.find("stinky-keep") != std::string::npos) return false;
     return isLegalToRemove(inst) && isRemovalWanted(inst, options);
 }
 
