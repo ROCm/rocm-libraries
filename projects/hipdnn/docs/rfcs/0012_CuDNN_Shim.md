@@ -1100,11 +1100,23 @@ shim.
 
 ### 8.4 Performance / overhead testing
 
-- Microbenchmarks comparing native `hipdnn_frontend` Graph construction +
-  execute vs. the shim equivalent for a handful of representative graphs.
-- **Gate (from §2)**: CI fails when the shim adds more than **1 %** to
-  `build()` time or more than **1 µs** per `execute()` call relative to
-  the native `hipdnn_frontend` baseline, measured on the same graphs.
+- `tests/frontend/IntegrationCudnnShimOverhead.cpp` runs matmul and conv-fprop
+  through both APIs from one templated graph description, and covers three
+  things: that the aliased type surface is the hipDNN types (compile-time), that
+  a shim-built graph lowers to the same backend work as a native one, and the
+  added host time for `build()` and `execute()`.
+- **Gate**: `execute()` is gated at the §2 value, **1 µs** added per call.
+  `build()` is gated on **added time (10 µs)** rather than the §2 percentage.
+  The percentage is not portable: `build()` against the in-tree test plugin
+  costs ~20 µs because that plugin compiles nothing, so the same fixed shim cost
+  reads anywhere from 11 % to 14 % purely as the denominator moves. Against a
+  provider that compiles kernels, `build()` is milliseconds and the §2 budget is
+  met with orders of magnitude to spare. Both the added time and the percentage
+  are reported on every run.
+- Measured on the test plugin: `build()` +2.4 µs (3-tensor graphs, and the shim
+  re-validates every owned tensor once per `validate()` and again per
+  `build_operation_graph()`, so this grows with tensor count); `execute()`
+  within a few nanoseconds of native, below the measurement floor.
 - Baselines re-captured on every hipDNN minor-version bump.
 
 ### 8.5 Install / package testing

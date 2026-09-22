@@ -343,7 +343,11 @@ def main() -> int:
             print(f"{test_name:<50} {status:<10}")
             if issues:
                 for issue in issues:
-                    print(f"  → {issue}")
+                    # ASCII only: this report is the build gate's diagnostic, and a
+                    # Windows console defaults to cp1252, where a non-ASCII character
+                    # raises UnicodeEncodeError mid-report -- hiding the very names
+                    # the report exists to name.
+                    print(f"  -> {issue}")
 
     print(f"\nWarning: {invalid_count} test(s) have non-conforming names")
     print(
