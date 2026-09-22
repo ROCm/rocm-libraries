@@ -151,9 +151,10 @@ ComparisonReport compareAllCloseOnlyKnown(const Tensor& observed, const Tensor& 
     const auto run = [&]<typename Predicate>(Predicate predicate) {
         ComparisonReport result;
         result.allCloseEvaluated = true;
-        if ((options.selection.selectsAll() ||
-             (options.selection.first() == 0 && options.selection.stride() == 1)) &&
-            options.selection.indexOrder() == IndexOrder::FirstDimensionFastest &&
+        const bool selectsContiguousPrefix =
+            options.selection.kind() == OutputSelectionKind::Strided &&
+            options.selection.first() == 0 && options.selection.stride() == 1;
+        if ((options.selection.selectsAll() || selectsContiguousPrefix) &&
             observed.shape().rank() != 0) {
             const Shape& shape = observed.shape();
             const size_t selectedTotal =

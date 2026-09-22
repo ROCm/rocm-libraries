@@ -455,5 +455,30 @@ void testComparisonProgram() {
         compare(largeObservedTensor, largeExpectedTensor, allCloseOnly);
     require(!exactParallelResult.passed() && exactParallelResult.mismatches == 3,
             "Parallel all-close comparison lost mismatches.");
+
+    const Layout largeLastDimensionLayout =
+        Layout::contiguousLastDimensionFastest(largeLayout.shape());
+    const Tensor largeLastDimensionObserved =
+        Tensor::copyNativeStorage(largeLastDimensionLayout, std::span<const float>(largeObserved));
+    const Tensor largeLastDimensionExpected =
+        Tensor::copyNativeStorage(largeLastDimensionLayout, std::span<const float>(largeExpected));
+    allCloseOnly.selection = OutputSelection::all(IndexOrder::LastDimensionFastest);
+    const ComparisonReport lastDimensionParallelResult =
+        compare(largeLastDimensionObserved, largeLastDimensionExpected, allCloseOnly);
+    require(!lastDimensionParallelResult.passed() &&
+                lastDimensionParallelResult.compared == largeComparisonElements &&
+                lastDimensionParallelResult.mismatches == 3,
+            "Last-dimension-fast parallel all-close comparison lost mismatches.");
+
+    const std::array<float, 4> explicitlySelectedObserved{9.0f, 1.0f, 2.0f, 3.0f};
+    const std::array<float, 4> explicitlySelectedExpected{0.0f, 1.0f, 2.0f, 3.0f};
+    allCloseOnly.selection =
+        OutputSelection::explicitIndices({1, 2}, IndexOrder::FirstDimensionFastest);
+    const ComparisonReport explicitSelectionResult =
+        compare(Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedObserved)),
+                Tensor::copyNativeStorage(std::span<const float>(explicitlySelectedExpected)),
+                allCloseOnly);
+    require(explicitSelectionResult.passed() && explicitSelectionResult.compared == 2,
+            "All-close comparison treated explicit indices as a contiguous prefix.");
 }
 }  // namespace host_numerics_test
