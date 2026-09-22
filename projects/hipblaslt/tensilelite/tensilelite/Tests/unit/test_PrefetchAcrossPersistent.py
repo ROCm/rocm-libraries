@@ -1597,7 +1597,7 @@ def _emit_asm(gfx1250_iim, assembler, **overrides):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.tensilelite_create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 

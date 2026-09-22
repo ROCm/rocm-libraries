@@ -57,7 +57,7 @@ from tensilelite.Common.Types import IsaVersion
 from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
 )
-from tensilelite.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
+from tensilelite.tensilelite_logic.valid_matrix_instruction import _validateMatrixInstruction
 
 pytestmark = pytest.mark.unit
 

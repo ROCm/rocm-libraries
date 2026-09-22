@@ -36,7 +36,7 @@ from copy import deepcopy
 from . import LibraryIO
 
 from . import ClientWriter
-from .TensileCreateLibrary import tensileLibraryFile
+from .tensilelite_create_library import tensileLibraryFile
 from .Common import ensurePath, printExit
 from .Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
 from .Common.GlobalParameters import assignGlobalParameters
