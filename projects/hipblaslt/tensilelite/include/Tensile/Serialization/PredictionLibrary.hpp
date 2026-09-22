@@ -137,6 +137,10 @@ namespace TensileLite
                                 .cluster_dim               = {solution->sizeMapping.clusterDim.x,
                                                               solution->sizeMapping.clusterDim.y,
                                                               solution->sizeMapping.clusterDim.z},
+                                .backend                   = origami::tensile_params_t{
+                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
+                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                },
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
