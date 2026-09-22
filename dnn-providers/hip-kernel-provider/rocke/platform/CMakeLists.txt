@@ -288,8 +288,9 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
 
     # The harness above builds LIBRARY kernels for its attention, attention_dense,
-    # attention_d256 and kda_chunkwise families (the one platform -> library
-    # exception), so the `kernels` and `builders` packages must be importable by
+    # attention_d256, kda_chunkwise and lightning_indexer families (the one
+    # platform -> library exception), so the `kernels` and `builders` packages
+    # must be importable by
     # both runners. Without them those cases degrade to expected failures and
     # rocke_golden_static reports drift instead of passing.
     #

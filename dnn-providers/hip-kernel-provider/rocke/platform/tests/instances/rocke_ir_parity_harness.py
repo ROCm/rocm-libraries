@@ -524,6 +524,32 @@ def build_kda_chunkwise_gfx942(kind, arch, **over):
     return _build
 
 
+def build_lightning_indexer_gfx942(arch, **over):
+    """Build one representative gfx942 lightning-indexer kernel.
+
+    Overrides are plain ``IndexerSpec`` fields; ``block_size`` is lifted into the
+    tile spec so the case table stays flat.
+    """
+
+    def _build():
+        from kernels.gfx942.lightning_indexer import (
+            IndexerSpec,
+            IndexerTileSpec,
+            build_lightning_indexer,
+        )
+
+        opts = dict(over)
+        block_size = opts.pop("block_size", None)
+        tile = (
+            IndexerTileSpec(block_size=block_size)
+            if block_size is not None
+            else IndexerTileSpec()
+        )
+        return build_lightning_indexer(IndexerSpec(tile=tile, **opts), arch=arch)
+
+    return _build
+
+
 def _d256_problem():
     """Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16)."""
     from kernels.common.attention_unified import UnifiedAttentionProblem
@@ -3068,6 +3094,20 @@ def cases():
             f"kda_chunkwise/gfx942/{_case_id}",
             "gfx942",
             build_kda_chunkwise_gfx942(_kind, "gfx942", **_over),
+        )
+
+    # gfx942 lightning indexer (DSA scoring, scalar-v1 bf16): two model-shaped
+    # cases (DeepSeek H_I=64, GLM H_I=32) at D_I=128, plus a small case.
+    for _case_id, _over in (
+        ("deepseek_hi64", {"n_index_heads": 64, "index_head_dim": 128, "seqlen_q": 8, "seqlen_k": 64}),
+        ("glm_hi32", {"n_index_heads": 32, "index_head_dim": 128, "seqlen_q": 8, "seqlen_k": 64}),
+        ("small", {"n_index_heads": 4, "index_head_dim": 16, "seqlen_q": 8, "seqlen_k": 32, "block_size": 64}),
+    ):
+        add(
+            "lightning_indexer",
+            f"lightning_indexer/gfx942/{_case_id}",
+            "gfx942",
+            build_lightning_indexer_gfx942("gfx942", **_over),
         )
 
     return out
