@@ -60,9 +60,14 @@ function(add_thrust_benchmark BENCHMARK_SOURCE)
 
     target_link_libraries(${BENCHMARK_TARGET} PRIVATE roc::rocrand)
 
+    # NOTE(hipccl2): two extra ".." vs upstream
+    # (rocm-libraries/projects/rocthrust) - this copy lives two directory
+    # levels deeper (rocm-libraries/projects/hipccl/hipccl2/rocthrust), so the
+    # relative path to the shared rocm-libraries/shared/primbench directory
+    # needs two more "..".
     target_include_directories(${BENCHMARK_TARGET} PRIVATE
       "${PROJECT_SOURCE_DIR}/benchmark"
-      "${PROJECT_SOURCE_DIR}/../../shared/primbench")
+      "${PROJECT_SOURCE_DIR}/../../../../shared/primbench")
 
     target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
     target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")

@@ -46,8 +46,14 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set(CMAKE_HIP_EXTENSIONS OFF)
 
+# NOTE(hipccl2): two extra ".." vs upstream (rocm-libraries/projects/rocthrust)
+# - this copy lives two directory levels deeper
+# (rocm-libraries/projects/hipccl/hipccl2/rocthrust). Without this, the
+# ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake existence check in
+# test/CMakeLists.txt silently resolves to a nonexistent path and skips the
+# shared CTest category labeling with no error.
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
-  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 endif()
 
 # NOTE(hipccl router): unlike rocPRIM, rocThrust had no "am I nested"

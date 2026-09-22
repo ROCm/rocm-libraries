@@ -202,45 +202,56 @@ function(fetch_dep method repo_name repo_path download_branch)
   elseif(${method_value} STREQUAL "MONOREPO")
     message(STATUS "Searching for ${repo_name} in the parent monorepo directory")
 
-    # Check if this looks like a monorepo checkout
-    find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}/" NO_CACHE NO_DEFAULT_PATH)
+    # NOTE(hipccl2): the upstream path "../../projects/${repo_name}/" assumes
+    # this file lives at rocm-libraries/projects/hipcub (two levels below the
+    # monorepo root, so ".." twice reaches it, then back down into
+    # "projects/<repo_name>"). This hipccl2 copy instead lives at
+    # rocm-libraries/projects/hipccl/hipccl2/hipcub, where rocPRIM is a direct
+    # sibling (hipccl2/rocprim), not nested another "projects/" layer down -
+    # so the corrected path is just "../${repo_name}/".
+    find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../${repo_name}/" NO_CACHE NO_DEFAULT_PATH)
 
     # If not, see if the local monorepo is a sparse-checkout.
     # If it is a sparse-checkout, try to add the dependency to the sparse-checkout list.
     # If it's not a sparse-checkout (or adding to the sparse-checkout list fails), fallback to downloading the dependency.
     if(${found_path} STREQUAL "found_path-NOTFOUND")
       set(FALLBACK_TO_DOWNLOAD ON)
-      message(WARNING "Unable to locate ${repo_name} in parent monorepo (it's not at \"${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}/\").")
+      message(WARNING "Unable to locate ${repo_name} in parent monorepo (it's not at \"${CMAKE_CURRENT_SOURCE_DIR}/../${repo_name}/\").")
       message(STATUS "Checking if local monorepo is a sparse-checkout that we can add ${repo_name} to.")
 
       if(NOT(GIT_PATH))
         message(FATAL_ERROR "Git could not be found on the system. Since ${repo_name} could not be found in the local monorepo, git is required to download it.")
       endif()
 
+      # NOTE(hipccl2): the monorepo root is four levels up from here
+      # (hipcub -> hipccl2 -> hipccl -> projects -> rocm-libraries), not two
+      # as upstream assumes, and this hipccl2 copy of rocPRIM lives at
+      # "projects/hipccl/hipccl2/${repo_name}" within the monorepo, not
+      # "projects/${repo_name}".
       if(USE_SPARSE_CHECKOUT)
         execute_process(COMMAND ${GIT_PATH} "sparse-checkout" "list" OUTPUT_VARIABLE sparse_list ERROR_VARIABLE git_error RESULT_VARIABLE git_result
-          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../)
+          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../../)
 
         if(NOT(git_result EQUAL 0) OR git_error)
           message(STATUS "The local monorepo does not appear to be a sparse-checkout.")
         else()
-          message(STATUS "The local monorepo appears to be a sparse checkout. Attempting to add \"projects/${repo_name}\" to the checkout list.")
+          message(STATUS "The local monorepo appears to be a sparse checkout. Attempting to add \"projects/hipccl/hipccl2/${repo_name}\" to the checkout list.")
 
           # Check if the dependency is already present in the checkout list.
           # Git lists sparse checkout directories each on a separate line.
-          # Take care not to match something in the middle of a path, eg. "other_dir/projects/${repo_name}/sub_dir".
-          string(REGEX MATCH "(^|\n)projects/${repo_name}($|\n)" find_result ${sparse_list})
+          # Take care not to match something in the middle of a path, eg. "other_dir/projects/hipccl/hipccl2/${repo_name}/sub_dir".
+          string(REGEX MATCH "(^|\n)projects/hipccl/hipccl2/${repo_name}($|\n)" find_result ${sparse_list})
 
           if(find_result)
-            message(STATUS "Found existing entry for \"projects/${repo_name}\" in sparse-checkout list - has the directory structure been modified?")
+            message(STATUS "Found existing entry for \"projects/hipccl/hipccl2/${repo_name}\" in sparse-checkout list - has the directory structure been modified?")
           else()
-            # Add project/${repo_name} to the sparse checkout
-            execute_process(COMMAND ${GIT_PATH} "sparse-checkout" "add" "projects/${repo_name}" RESULT_VARIABLE sparse_checkout_result
-              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../)
+            # Add projects/hipccl/hipccl2/${repo_name} to the sparse checkout
+            execute_process(COMMAND ${GIT_PATH} "sparse-checkout" "add" "projects/hipccl/hipccl2/${repo_name}" RESULT_VARIABLE sparse_checkout_result
+              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../../)
 
             # Note that in this case, we are forced to checkout the same branch that the sparse-checkout was created with.
             execute_process(COMMAND ${GIT_PATH} "checkout" RESULT_VARIABLE checkout_result
-              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../)
+              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../../)
 
             if(sparse_checkout_result EQUAL 0 AND checkout_result EQUAL 0)
               message(STATUS "Added new checkout list entry.")
@@ -250,7 +261,7 @@ function(fetch_dep method repo_name repo_path download_branch)
             endif()
 
             # Save the monorepo path in the parent scope
-            set(${repo_path} "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}" PARENT_SCOPE)
+            set(${repo_path} "${CMAKE_CURRENT_SOURCE_DIR}/../${repo_name}" PARENT_SCOPE)
           endif()
         endif()
       else()

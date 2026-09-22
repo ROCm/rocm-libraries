@@ -68,8 +68,14 @@ endif()
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
+# NOTE(hipccl2): two extra ".." vs upstream (rocm-libraries/projects/rocprim)
+# - this copy lives two directory levels deeper
+# (rocm-libraries/projects/hipccl/hipccl2/rocprim). Without this, the
+# ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake existence check in
+# test/CMakeLists.txt silently resolves to a nonexistent path and skips the
+# shared CTest category labeling with no error.
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
-  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 endif()
 
 include(CheckLanguage)

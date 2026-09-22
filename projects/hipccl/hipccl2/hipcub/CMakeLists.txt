@@ -27,8 +27,14 @@ cmake_policy(VERSION 3.19...3.25)
 # Only set the default when not already defined (e.g. by superproject /
 # rocm-libraries). The default assumes the standard
 # rocm-libraries/projects/hipcub layout.
+# NOTE(hipccl2): two extra ".." vs upstream (rocm-libraries/projects/hipcub)
+# - this copy lives two directory levels deeper
+# (rocm-libraries/projects/hipccl/hipccl2/hipcub). Without this, the
+# ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake existence check in
+# test/CMakeLists.txt silently resolves to a nonexistent path and skips the
+# shared CTest category labeling with no error.
 if(NOT DEFINED ROCM_LIBRARIES_ROOT)
-  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 endif()
 
 # --------------------------------------
