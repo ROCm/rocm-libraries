@@ -64,7 +64,15 @@ def from_pack(path: Path, min_candidates: int, max_bytes: int) -> tuple[list[Can
         metadata = descriptor.get("metadata") or {}
         counts[tuple(metadata.get(name) for name in graphs.GEOMETRY)] += 1
 
+    # The densest geometry in the pack, and whether any geometry has a choice at all.
+    # Recorded because `too_few_candidates` alone cannot distinguish the two ways a pack
+    # empties: a threshold set one too high for a pack that does rank (the gfx950 dense
+    # pack carries two block_m variants, so --min-candidates 3 discards all of it), and a
+    # pack where every geometry is served by exactly one kernel and no threshold would
+    # have helped. The first wants a lower gate; the second wants L1.
+    densest = max(counts.values(), default=0)
     stats = {"pack": str(path), "kernels": len(descriptors), "geometries": len(counts),
+             "max_candidates": densest, "deterministic": bool(counts) and densest <= 1,
              "no_geometry": 0, "unsupported_dtype": 0, "too_few_candidates": 0,
              "over_byte_budget": 0, "eligible": 0}
     candidates: list[Candidate] = []
@@ -99,7 +107,35 @@ def from_pack(path: Path, min_candidates: int, max_bytes: int) -> tuple[list[Can
         stats["eligible"] += 1
         candidates.append(Candidate(shape=shape, source="kernel",
                                     origin=f"{path.name}:{kernels} kernels"))
+    stats["shut_out"] = _shut_out(stats, min_candidates)
     return candidates, stats
+
+
+def _shut_out(stats: dict, min_candidates: int) -> str | None:
+    """Why this pack contributed nothing, when it had geometries to contribute.
+
+    A pack that contributes nothing is invisible in the corpus that results -- the graphs
+    simply come from the other sources -- and the operator finds out an eight-hour sweep
+    later, at `held-out corpus has no evaluable candidate ranking`. The two causes want
+    opposite responses, so they are distinguished here rather than summed into
+    `too_few_candidates`.
+
+    Neither case lowers the gate on its own. Admitting single-candidate geometries would
+    build a corpus that trains a ranker on problems with nothing to rank, and a corpus
+    must not decide the contest; the operator picks the role.
+    """
+    if stats["eligible"] or not stats["geometries"]:
+        return None
+    if stats["deterministic"]:
+        return (f"every one of its {stats['geometries']} geometries is served by exactly "
+                "one kernel, so it has nothing to rank at any --min-candidates. An engine "
+                "built on this pack wants a predict_engine_tflops model, not a "
+                "sort_kernel_catalog one.")
+    if stats["too_few_candidates"] == stats["geometries"]:
+        return (f"--min-candidates {min_candidates} dropped all {stats['geometries']} of "
+                f"its geometries, though its densest carries {stats['max_candidates']} "
+                f"kernels. Lower the gate to {stats['max_candidates']} to admit it.")
+    return None
 
 
 def collect(paths: list[Path], min_candidates: int, max_bytes: int

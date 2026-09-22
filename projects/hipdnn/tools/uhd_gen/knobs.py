@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .catalog import candidate_density
 from .corpus_io import read_corpus_frame
 from .evaluate import regret_of, resolve_grouping
 
@@ -542,6 +543,16 @@ def run_knobs(args: argparse.Namespace) -> int:
     except (OSError, ValueError, ImportError) as error:
         logger.error("cannot read corpus %s: %s", args.input, error)
         return 1
+    # Answered before the per-field tables rather than through them. On a deterministic
+    # catalog every field comes back MATCHED or PINNED -- true, and a page of it reads as
+    # a list of knobs to go and pin, when the finding is that the engine offers no choice
+    # to pin anything about. Exit 0: the question "which knobs are worth keeping" was
+    # answered, and the answer is none.
+    density = candidate_density(df, device_column=args.device_column)
+    if density.deterministic:
+        print(f"\nKnob value over {density.problems} problem(s)")
+        print(f"  {density.diagnosis()}")
+        return 0
     try:
         report = analyse_knobs(df, args.target, args.objective, args.device_column)
     except (KeyError, ValueError) as error:

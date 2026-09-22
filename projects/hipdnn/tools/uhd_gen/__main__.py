@@ -55,6 +55,7 @@ import numpy as np
 import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
+from .catalog import require_rankable
 from .evaluate import add_evaluate_arguments, run_evaluate
 from .corpus_io import read_corpus_frame
 from .coverage import device_field_coverage, enforce_device_coverage
@@ -509,6 +510,17 @@ def _run_train(args: argparse.Namespace) -> int:
                     f"§11.2); got {args.timing_statistic!r}")
         if df.empty:
             raise ValueError("No valid rows to train on")
+        if not immediate:
+            # After the row filtering above, so the census sees exactly the rows that would
+            # train -- a candidate that failed to run is not a candidate the ranker gets to
+            # choose between, and counting it would report ranking density that measurement
+            # already destroyed. `generate` checks the same thing earlier and at greater
+            # value, before a GPU sweep rather than after; this catches the corpus handed
+            # to `train` directly, which is the route a re-train off collected data takes.
+            density = require_rankable(df, engine=args.engine)
+            thin = density.near_deterministic_warning()
+            if thin:
+                logger.warning("%s", thin)
         signature = (
             json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
             if args.feature_signature else build_features_signature(args.features)

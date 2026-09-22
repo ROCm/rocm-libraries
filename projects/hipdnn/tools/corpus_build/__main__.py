@@ -104,6 +104,13 @@ def report(manifest: dict) -> None:
     for skipped in manifest["reports"]["model"]:
         for entry in skipped.get("skipped", []):
             print(f"  model skipped: {entry['model']:<10} {entry['reason']}")
+    # A pack that had geometries and contributed none of them. Printed last and prefixed,
+    # because the corpus above looks entirely healthy without it: the other sources made
+    # up the count, and nothing else on this page says a pack fell out.
+    for pack in manifest["reports"]["kernel"]:
+        if pack.get("shut_out"):
+            print(f"NOTE: {Path(pack['pack']).name} contributed no geometry -- "
+                  f"{pack['shut_out']}")
 
 
 def main(argv=None) -> int:
