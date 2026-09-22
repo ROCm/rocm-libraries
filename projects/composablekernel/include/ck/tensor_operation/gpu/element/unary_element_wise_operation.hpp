@@ -826,7 +826,7 @@ struct Clamp
     static constexpr const char* name = "Clamp";
 
     Clamp(float floor = 0.f, float ceil = NumericLimits<float>::Max())
-        : floor_(floor), ceil_(ceil) {};
+        : floor_(floor), ceil_(ceil){};
 
     template <typename Y, typename X>
     __host__ __device__ constexpr void operator()(Y& y, const X& x) const;
@@ -1524,7 +1524,7 @@ struct SoftRelu
 {
     static constexpr const char* name = "SoftRelu";
 
-    SoftRelu(float alpha = 1.f) : alpha_(alpha) {};
+    SoftRelu(float alpha = 1.f) : alpha_(alpha){};
 
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
@@ -1570,7 +1570,7 @@ struct Power
     static constexpr const char* name = "Power";
 
     Power(float alpha = 0.f, float beta = 1.f, float gamma = 2.f)
-        : alpha_(alpha), beta_(beta), gamma_(gamma) {};
+        : alpha_(alpha), beta_(beta), gamma_(gamma){};
 
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
@@ -1619,7 +1619,7 @@ struct ClippedRelu
 {
     static constexpr const char* name = "ClippedRelu";
 
-    ClippedRelu(float alpha = 0.f, float beta = 1.f) : alpha_(alpha), beta_(beta) {};
+    ClippedRelu(float alpha = 0.f, float beta = 1.f) : alpha_(alpha), beta_(beta){};
 
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
@@ -1662,7 +1662,7 @@ struct LeakyRelu
 {
     static constexpr const char* name = "LeakyRelu";
 
-    LeakyRelu(float alpha = 0.01f) : alpha_(alpha) {};
+    LeakyRelu(float alpha = 0.01f) : alpha_(alpha){};
 
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
@@ -1703,7 +1703,7 @@ struct Elu
 {
     static constexpr const char* name = "Elu";
 
-    Elu(float alpha = 1.f) : alpha_(alpha) {};
+    Elu(float alpha = 1.f) : alpha_(alpha){};
 
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const
@@ -1744,7 +1744,7 @@ struct Logistic
 {
     static constexpr const char* name = "Logistic";
 
-    Logistic(float alpha = 1.f) : alpha_(alpha) {};
+    Logistic(float alpha = 1.f) : alpha_(alpha){};
 
     template <typename T>
     __host__ __device__ void operator()(T& y, const T& x) const

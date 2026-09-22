@@ -25,7 +25,7 @@ using ::ck::Tensor;
 
 struct AlphaBetaAdd
 {
-    AlphaBetaAdd(int alpha, int beta) : alpha_(alpha), beta_(beta) {};
+    AlphaBetaAdd(int alpha, int beta) : alpha_(alpha), beta_(beta){};
 
     template <typename E, typename C, typename D>
     __host__ __device__ constexpr void operator()(E& e, const C& c, const D& d) const;
