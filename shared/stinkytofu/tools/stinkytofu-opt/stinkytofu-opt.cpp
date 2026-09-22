@@ -181,6 +181,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-read-throttle-transition-factor=") ||
                 arg.starts_with("--ds-read-throttle-transition-entries=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--ds-issue-cap-span-cycles=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
@@ -521,6 +522,12 @@ int main(int argc, char** argv) {
                 std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
         } else if (a.starts_with("--ds-read-per-wmma=")) {
             passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--ds-issue-cap-span-cycles=")) {
+            // The other half of the rule (4) cap: the ceiling is
+            // dsReadPerWmma ds_loads per this many cycles. Neither number means
+            // anything alone, so both are reachable from the CLI.
+            passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
+                std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--global-read-queue-depth=")) {
@@ -795,6 +802,21 @@ int main(int argc, char** argv) {
             moduleOpts.OptLevel = optLevel;
             moduleOpts.EnableRemarks = enableRemarks;
             moduleOpts.VerifyEach = verifyEach;
+            // The --Tile*/--NumGR*/--NumWaves flags are parsed for both modes but
+            // used to be applied only in individual-pass mode, so pipeline mode
+            // silently ran every kernel with a zeroed tile config. Backend's entry
+            // gate now rejects that, which is the right answer for a real kernel
+            // but would make these flags unusable here. Forward them instead.
+            // GemmTileConfig::NumWaves is WaveGroup0 * WaveGroup1 downstream, so a
+            // flat --NumWaves goes in as WaveGroup0 with WaveGroup1 = 1.
+            moduleOpts.TileA0 = static_cast<int>(gemmTileConfig.TileA0);
+            moduleOpts.TileB0 = static_cast<int>(gemmTileConfig.TileB0);
+            moduleOpts.TileM0 = static_cast<int>(gemmTileConfig.TileM0);
+            moduleOpts.NumGRA = gemmTileConfig.NumGRA;
+            moduleOpts.NumGRB = gemmTileConfig.NumGRB;
+            moduleOpts.NumGRM = gemmTileConfig.NumGRM;
+            moduleOpts.WaveGroup0 = static_cast<int>(gemmTileConfig.NumWaves);
+            moduleOpts.WaveGroup1 = 1;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();

@@ -99,6 +99,14 @@ constexpr std::array<int, 3> kArch{12, 5, 0};
 std::unique_ptr<StinkyAsmModule> makeModule() {
     StinkyAsmModule::ModuleOptions opts{};
     opts.OptLevel = 0;
+    // Backend's entry gate rejects a zeroed tile config, so a test that cares
+    // about something else still has to look like a configured kernel. The
+    // values are arbitrary -- only "not 0" is load-bearing.
+    opts.TileA0 = 128;
+    opts.TileB0 = 128;
+    opts.TileM0 = 64;
+    opts.WaveGroup0 = 2;
+    opts.WaveGroup1 = 2;
     return std::make_unique<StinkyAsmModule>("api_test", kArch, opts);
 }
 }  // namespace

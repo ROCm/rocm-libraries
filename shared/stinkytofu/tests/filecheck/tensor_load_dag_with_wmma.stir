@@ -4,24 +4,42 @@
 #
 # Both tensor_loads issue first (own in-flight queue). Loads then take priority
 # over compute while no WMMA is ready: ds_loads drain ahead of the independent
-# v_add rather than the address-calc/independent VALU front-running them. Each
-# WMMA issues once its source ds_loads complete, so the two WMMAs interleave with
-# the remaining ds_loads instead of both being deferred to the end.
+# v_add rather than the address-calc/independent VALU front-running them. All six
+# ds_loads issue before either WMMA, and the rule (4) cap paces them on the
+# timeline rather than vetoing them.
 #
 # tensor_loads use tokens 1/2 (independent of ds_loads on token 0).
 # Extends dag_dsread_wmma_no_consecutive with tensor_load_to_lds.
 #
+# Both WMMAs land at the end, back to back. That is a change from when the cap
+# was a veto, which dropped the ds_load from the candidate set once the window
+# was full and so forced the first WMMA out early, between the ds_loads. Early
+# was not sooner: WMMA1 reads v[8:15] and v[24:31], so it cannot retire before
+# those four 56-cycle ds_loads return no matter where it is placed, and issuing
+# it at cycle ~4 only pushed the remaining ds_loads -- WMMA2's operands -- behind
+# it, serialising two 56-cycle latencies instead of overlapping them. Draining
+# all six first overlaps every ds_load latency and both WMMAs then issue against
+# ready operands. The cap still binds, as a wait: it admits dsReadPerWmma (3)
+# ds_loads before the v_add gets a turn, and --ds-read-per-wmma=1/2/6 moves that
+# boundary to 1/2/6 -- textual adjacency after that point is not cycle
+# adjacency, since the wait advances the real timeline between issues.
+#
 # Both tensor_loads first
 # CHECK: tensor_load_to_lds
 # CHECK: tensor_load_to_lds
-# ds_loads drain before the independent VALU (loads prioritized, no WMMA ready)
+# ds_loads drain before the independent VALU (loads prioritized, no WMMA ready).
+# Exactly dsReadPerWmma (3) of them fit in the cap window before the v_add.
 # CHECK: ds_load_b128
-# CHECK: v_add_f32
-# first WMMA issues once its sources are ready
-# CHECK: v_wmma_f32_16x16x16_bf16
-# remaining ds_loads fill the gap before the second WMMA
-# CHECK: ds_load_b128
-# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: v_add_f32
+# the remaining ds_loads follow, paced by the cap window rather than vetoed
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# CHECK-NEXT: ds_load_b128
+# both WMMAs issue once every operand is in flight
+# CHECK-NEXT: v_wmma_f32_16x16x16_bf16
+# CHECK-NEXT: v_wmma_f32_16x16x16_bf16
 # No tensor_load after WMMAs
 # CHECK-NOT: tensor_load_to_lds
 
