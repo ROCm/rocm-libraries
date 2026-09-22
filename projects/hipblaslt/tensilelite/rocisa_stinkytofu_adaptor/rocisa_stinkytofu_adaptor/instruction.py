@@ -406,6 +406,20 @@ _SPECIAL_REG_TYPE = {
 }
 
 
+def _as_rocisa_i32(value: int) -> int:
+    """Wrap ``value`` to signed 32-bit, matching rocisa ``InstructionInput`` ``int``.
+
+    rocisa stores immediates as C++ ``int``. Python ``int`` is unbounded, so a
+    magic number such as ``(1 << 33) // 3 + 1`` (``0xAAAAAAAB`` / 2863311531)
+    stays positive in the adaptor but overflows to ``-1431655765`` in C++.
+    Take the low 32 bits and interpret them as ``int32_t``.
+    """
+    value &= 0xFFFFFFFF
+    if value >= 0x80000000:
+        value -= 0x100000000
+    return value
+
+
 def _to_stinky_register(arg: Any) -> Any:
     """Convert a rocisa-side instruction operand to a stinkytofu Register.
 
@@ -426,7 +440,7 @@ def _to_stinky_register(arg: Any) -> Any:
     if isinstance(arg, bool):
         return _st.Register(int(arg))
     if isinstance(arg, int):
-        return _st.Register(arg)
+        return _st.Register(_as_rocisa_i32(arg))
     if isinstance(arg, float):
         return _st.Register(arg)
     if isinstance(arg, str):

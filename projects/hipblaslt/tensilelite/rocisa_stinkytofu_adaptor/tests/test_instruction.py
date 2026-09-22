@@ -297,6 +297,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SWaitTensorcnt,
     SWaitAlu,
     SSchedulingFence,
+    _as_rocisa_i32,
     _to_stinky_register,
 )
 
@@ -724,6 +725,28 @@ class TestMacroInstructionDeepcopy(unittest.TestCase):
 
 
 # ===========================================================================
+# _as_rocisa_i32 -- signed-32 wrap matching rocisa InstructionInput int.
+# ===========================================================================
+
+
+class TestAsRocisaI32(unittest.TestCase):
+    def test_in_range_positive(self):
+        self.assertEqual(_as_rocisa_i32(42), 42)
+
+    def test_in_range_negative(self):
+        self.assertEqual(_as_rocisa_i32(-1), -1)
+        self.assertEqual(_as_rocisa_i32(-2147483648), -2147483648)
+
+    def test_uint32_magic_wraps_like_cpp_int(self):
+        # (1<<33)//3 + 1 == 2863311531 == 0xAAAAAAAB; C++ int stores -1431655765.
+        self.assertEqual(_as_rocisa_i32(2863311531), -1431655765)
+        self.assertEqual(_as_rocisa_i32(0xAAAAAAAB), -1431655765)
+
+    def test_drops_bits_above_32(self):
+        self.assertEqual(_as_rocisa_i32(0x1AAAAAAAA), -1431655766)
+
+
+# ===========================================================================
 # _to_stinky_register coercion table.
 # ===========================================================================
 
@@ -762,6 +785,13 @@ class TestToStinkyRegister(unittest.TestCase):
     def test_int_literal(self):
         reg = _to_stinky_register(42)
         self.assertTrue(reg.is_literal)
+
+    def test_uint32_magic_literal_wraps_to_signed_i32(self):
+        # Match rocisa C++ `int` overflow so emit is `v_mov_b32 v0, -1431655765`.
+        reg = _to_stinky_register(2863311531)
+        self.assertTrue(reg.is_literal)
+        self.assertFalse(reg.is_literal_string)
+        self.assertIn("-1431655765", repr(reg))
 
     def test_bool_routed_through_int(self):
         # bool is int subclass; ensure we don't crash on it.
