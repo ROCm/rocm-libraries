@@ -141,6 +141,15 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                                     arrayOfElements,
                                     "TensorDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER:
+        getScalar(_data.ragged_offset_multiplier,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "TensorDescriptor::getAttribute: attributeName not supported");
@@ -226,6 +235,14 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                                     elementCount,
                                     arrayOfElements,
                                     "TensorDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER:
+        setScalar(_data.ragged_offset_multiplier,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

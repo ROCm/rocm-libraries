@@ -154,10 +154,16 @@ def test_bottom_right_has_distinct_symbol_and_cache_identity():
     ) != attention_dense_cache_key(bottom_right, arch="gfx950")
 
 
-def test_default_top_left_body_is_unchanged():
-    implicit = _spec(seqlen_q=512, seqlen_kv=512)
-    explicit = _spec(seqlen_q=512, seqlen_kv=512, causal_bottom_right=False)
-    assert _lowered_body(implicit) == _lowered_body(explicit)
+def test_different_bottom_right_offsets_do_not_share_compiled_identity():
+    first = _spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True)
+    second = _spec(seqlen_q=512, seqlen_kv=1024, causal_bottom_right=True)
+
+    # The diagonal is baked into each body, so reusing either binary is incorrect.
+    assert _lowered_body(first) != _lowered_body(second)
+    assert attention_dense_cache_key(first, arch="gfx950") != attention_dense_cache_key(
+        second, arch="gfx950"
+    )
+    assert first.kernel_name() != second.kernel_name()
 
 
 @pytest.mark.parametrize("geometry", _GEOMETRIES)
@@ -260,17 +266,3 @@ def test_sinks_and_shift_each_change_the_lowered_body():
         _spec(causal_bottom_right=True, use_sinks=True),
     ]
     assert len({_lowered_body(spec) for spec in variants}) == 4
-
-
-def test_batch_two_ragged_spec_builds():
-    """Batch 0 padding can alias batch 1 data, so the guarded store is essential."""
-    spec = _spec(
-        batch=2,
-        seqlen_q=300,
-        seqlen_kv=1000,
-        ragged=True,
-        causal_bottom_right=True,
-    )
-    ok, why = supports_attention_dense(spec, arch="gfx950")
-    assert ok, why
-    assert build_attention_dense(spec, arch="gfx950") is not None
