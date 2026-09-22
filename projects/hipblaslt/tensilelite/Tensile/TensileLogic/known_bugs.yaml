@@ -8,6 +8,5 @@
 # should be pruned; `run_tensile_logic_check.py` reports such stale entries.
 #
 # You may use YAML comments (#) and/or the optional "ticket" field for Jira keys.
-
 version: 1
-skips: []
+skips:
