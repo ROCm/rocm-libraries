@@ -59,6 +59,25 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# NOTE(hipccl router): unlike rocPRIM, hipCUB had no "am I nested" detection
+# at all - it always called rocm_create_package() unconditionally. That is
+# safe on its own, but fatal if hipCUB is add_subdirectory()'d alongside
+# another project that also calls rocm_create_package() in the same
+# configure (each triggers include(CPack), and a second include(CPack) fails
+# trying to redefine the "package" target) - exactly what the
+# projects/hipccl/CMakeLists.txt HIPCCL_BUILD_LEGACY route does by nesting
+# rocprim + hipcub + rocthrust together. Guarded the same way as rocPRIM,
+# including the NOT DEFINED wrapper so a parent can still opt back in.
+# Standalone builds (nothing pre-set) are unaffected - always top-level,
+# packaging always runs, exactly as before.
+if(NOT DEFINED HIPCUB_PROJECT_IS_TOP_LEVEL)
+  if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(HIPCUB_PROJECT_IS_TOP_LEVEL TRUE)
+  else()
+    set(HIPCUB_PROJECT_IS_TOP_LEVEL FALSE)
+  endif()
+endif()
+
 if (CMAKE_CXX_STANDARD EQUAL 14)
   message(WARNING "C++14 will be deprecated in the next major release")
 elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
@@ -323,20 +342,22 @@ set(CPACK_RPM_PACKAGE_LICENSE "BSD")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
-if(HIP_COMPILER STREQUAL "clang")
-  rocm_create_package(
-    NAME hipcub
-    DESCRIPTION "hipCUB (rocPRIM backend)"
-    MAINTAINER "hipcub-maintainer@amd.com"
-    HEADER_ONLY
-  )
-else()
-  rocm_create_package(
-    NAME hipcub_nvcc
-    DESCRIPTION "hipCUB (CUB backend)"
-    MAINTAINER "hipcub-maintainer@amd.com"
-    HEADER_ONLY
-  )
+if(HIPCUB_PROJECT_IS_TOP_LEVEL)
+  if(HIP_COMPILER STREQUAL "clang")
+    rocm_create_package(
+      NAME hipcub
+      DESCRIPTION "hipCUB (rocPRIM backend)"
+      MAINTAINER "hipcub-maintainer@amd.com"
+      HEADER_ONLY
+    )
+  else()
+    rocm_create_package(
+      NAME hipcub_nvcc
+      DESCRIPTION "hipCUB (CUB backend)"
+      MAINTAINER "hipcub-maintainer@amd.com"
+      HEADER_ONLY
+    )
+  endif()
 endif()
 
 # Print configuration summary

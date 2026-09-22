@@ -50,6 +50,25 @@ if(NOT DEFINED ROCM_LIBRARIES_ROOT)
   set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 endif()
 
+# NOTE(hipccl router): unlike rocPRIM, rocThrust had no "am I nested"
+# detection at all - it always called rocm_create_package() unconditionally.
+# That is safe on its own, but fatal if rocThrust is add_subdirectory()'d
+# alongside another project that also calls rocm_create_package() in the
+# same configure (each triggers include(CPack), and a second include(CPack)
+# fails trying to redefine the "package" target) - exactly what the
+# projects/hipccl/CMakeLists.txt HIPCCL_BUILD_LEGACY route does by nesting
+# rocprim + hipcub + rocthrust together. Guarded the same way as rocPRIM,
+# including the NOT DEFINED wrapper so a parent can still opt back in.
+# Standalone builds (nothing pre-set) are unaffected - always top-level,
+# packaging always runs, exactly as before.
+if(NOT DEFINED ROCTHRUST_PROJECT_IS_TOP_LEVEL)
+  if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(ROCTHRUST_PROJECT_IS_TOP_LEVEL TRUE)
+  else()
+    set(ROCTHRUST_PROJECT_IS_TOP_LEVEL FALSE)
+  endif()
+endif()
+
 include(CheckLanguage)
 include(CMakeDependentOption)
 
@@ -312,12 +331,14 @@ set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
-rocm_create_package(
-  NAME rocthrust
-  DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
-  MAINTAINER "rocthrust-maintainer@amd.com"
-  HEADER_ONLY
-)
+if(ROCTHRUST_PROJECT_IS_TOP_LEVEL)
+  rocm_create_package(
+    NAME rocthrust
+    DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
+    MAINTAINER "rocthrust-maintainer@amd.com"
+    HEADER_ONLY
+  )
+endif()
 
 # Print configuration summary
 include(cmake/Summary.cmake)

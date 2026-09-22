@@ -141,6 +141,13 @@ endif()
 # previously declared only by rocprim's own now-skipped block) and creates
 # the single combined package.
 #
+# NOTE(hipccl3): unconditional (not guarded by a "top-level" check). This
+# root CMakeLists.txt is never meant to be add_subdirectory()'d as a mere
+# sub-component of something else the way rocprim/hipcub/rocthrust are - so
+# the unified package should always be produced whenever this file runs,
+# regardless of what (if anything) sits above it (e.g. the
+# projects/hipccl/CMakeLists.txt layout selector).
+#
 # NOT YET DONE / needs real review before treating this as more than a
 # starting point:
 #  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ./LICENSE) is a
@@ -148,23 +155,21 @@ endif()
 #  - libhipcxx isn't part of this package yet (not wired into the build at
 #    all - see HIPCCL_BUILD_LIBHIPCXX above).
 #  - Maintainer email is a placeholder, not a real assigned address/alias.
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(HIP_RUNTIME_MINIMUM 4.5.0)
-    rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")
-    rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
-    rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
+set(HIP_RUNTIME_MINIMUM 4.5.0)
+rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")
+rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
+rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
 
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-    set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
-    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
-    rocm_create_package(
-        NAME hipccl
-        DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package"
-        MAINTAINER "hipccl-maintainer@amd.com"
-        HEADER_ONLY
-    )
-endif()
+rocm_create_package(
+    NAME hipccl
+    DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package"
+    MAINTAINER "hipccl-maintainer@amd.com"
+    HEADER_ONLY
+)
 
 # --- Unified CMake package config (find_package(hipccl)) ---
 # NOTE(hipccl3): mirrors NVIDIA CCCL's find_package(CCCL COMPONENTS [Thrust]
@@ -179,29 +184,31 @@ endif()
 # etc. working. See cmake/package/hipccl-config.cmake.in for the delegation
 # logic (find_dependency() into each component's own config) and the
 # hipccl::hipccl umbrella target.
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    include(CMakePackageConfigHelpers)
+#
+# NOTE(hipccl3): unconditional for the same reason as the packaging block
+# above - this file is never "just a sub-component", so find_package(hipccl)
+# support should always be generated whenever this CMakeLists.txt runs.
+include(CMakePackageConfigHelpers)
 
-    set(HIPCCL_PACKAGE_CONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/hipccl")
+set(HIPCCL_PACKAGE_CONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/hipccl")
 
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/package/hipccl-config.cmake.in"
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/package/hipccl-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
+    INSTALL_DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
+    VERSION "${HIPCCL_VERSION}"
+    COMPATIBILITY AnyNewerVersion
+    ARCH_INDEPENDENT
+)
+
+install(
+    FILES
         "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
-        INSTALL_DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
-    )
-
-    write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
-        VERSION "${HIPCCL_VERSION}"
-        COMPATIBILITY AnyNewerVersion
-        ARCH_INDEPENDENT
-    )
-
-    install(
-        FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
-            "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
-        DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
-        COMPONENT devel
-    )
-endif()
+    DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
+    COMPONENT devel
+)

@@ -45,10 +45,18 @@ if(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
-if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
-else()
-  set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
+# NOTE(hipccl router): wrapped in NOT DEFINED so a parent CMakeLists.txt
+# (projects/hipccl/CMakeLists.txt's HIPCCL_BUILD_LEGACY route) can pre-set
+# ROCPRIM_PROJECT_IS_TOP_LEVEL before add_subdirectory()-ing this project, to
+# opt back into standalone-style packaging even though it is technically
+# nested. Standalone builds (nothing pre-set) are unaffected - this still
+# auto-detects exactly as before.
+if(NOT DEFINED ROCPRIM_PROJECT_IS_TOP_LEVEL)
+  if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
+  else()
+    set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
+  endif()
 endif()
 
 #Adding CMAKE_PREFIX_PATH
@@ -97,10 +105,18 @@ if(BUILD_OFFLOAD_COMPRESS)
   endif()
 endif()
 
-if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
-else()
-  set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
+# NOTE(hipccl router): wrapped in NOT DEFINED so a parent CMakeLists.txt
+# (projects/hipccl/CMakeLists.txt's HIPCCL_BUILD_LEGACY route) can pre-set
+# ROCPRIM_PROJECT_IS_TOP_LEVEL before add_subdirectory()-ing this project, to
+# opt back into standalone-style packaging even though it is technically
+# nested. Standalone builds (nothing pre-set) are unaffected - this still
+# auto-detects exactly as before.
+if(NOT DEFINED ROCPRIM_PROJECT_IS_TOP_LEVEL)
+  if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(ROCPRIM_PROJECT_IS_TOP_LEVEL TRUE)
+  else()
+    set(ROCPRIM_PROJECT_IS_TOP_LEVEL FALSE)
+  endif()
 endif()
 
 #Adding CMAKE_PREFIX_PATH
