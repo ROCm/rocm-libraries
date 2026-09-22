@@ -33,10 +33,27 @@ namespace {
 
 constexpr std::array<int, 3> kArch{12, 5, 0};
 
+// Dummy but VALID tile options. The backend entry rejects a zeroed tile config
+// (see configurePassManager), so a test that only cares about something else
+// still has to look like a configured kernel. The values are arbitrary; only
+// "not zero" is load-bearing.
 std::unique_ptr<StinkyAsmModule> makeModule(const std::array<int, 3>& arch = kArch) {
     StinkyAsmModule::ModuleOptions opts{};
     opts.OptLevel = 0;
+    opts.TileA0 = 128;
+    opts.TileB0 = 128;
+    opts.TileM0 = 32;
+    opts.WaveGroup0 = 2;
+    opts.WaveGroup1 = 2;
     return std::make_unique<StinkyAsmModule>("test", arch, opts);
+}
+
+// A module whose tile options were never filled in, i.e. what a caller that
+// forgot to configure the backend actually produces.
+std::unique_ptr<StinkyAsmModule> makeUnconfiguredModule() {
+    StinkyAsmModule::ModuleOptions opts{};
+    opts.OptLevel = 0;
+    return std::make_unique<StinkyAsmModule>("test", kArch, opts);
 }
 
 }  // namespace
@@ -60,6 +77,47 @@ TEST(BackendTest, RunOptimizationWithNoPipelineSucceeds) {
     // branch (BackendRegistry returns nullptr) is exercised.
     std::array<int, 3> arch{0, 0, 0};
     auto module = makeModule(arch);
+    Backend backend(*module);
+    EXPECT_TRUE(backend.runOptimization());
+}
+
+// ---------------------------------------------------------------------------
+// Tile-config validation at the backend entry.
+//
+// A kernel reaching the GEMM backend without a tile configuration is
+// misconfigured: 0 is not a valid tile size, and 0 waves is not an occupancy
+// anything runs at. Both used to sail through and leave every downstream pass
+// scheduling for a kernel shape that does not exist, so both now abort.
+// ---------------------------------------------------------------------------
+
+TEST(BackendTileConfigDeathTest, UnsetTileSizeAborts) {
+    EXPECT_DEATH(
+        {
+            auto module = makeUnconfiguredModule();
+            Backend backend(*module);
+            backend.runOptimization();
+        },
+        "TileA0 is 0");
+}
+
+TEST(BackendTileConfigDeathTest, UnsetWaveGroupsAbort) {
+    EXPECT_DEATH(
+        {
+            StinkyAsmModule::ModuleOptions opts{};
+            opts.OptLevel = 0;
+            opts.TileA0 = 128;
+            opts.TileB0 = 128;
+            opts.TileM0 = 32;
+            // WaveGroup0/1 left at 0, so NumWaves comes out 0.
+            StinkyAsmModule module("test", kArch, opts);
+            Backend backend(module);
+            backend.runOptimization();
+        },
+        "NumWaves is 0");
+}
+
+TEST(BackendTest, ConfiguredModuleRunsOptimization) {
+    auto module = makeModule();
     Backend backend(*module);
     EXPECT_TRUE(backend.runOptimization());
 }
