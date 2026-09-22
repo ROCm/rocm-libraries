@@ -67,6 +67,7 @@ struct heuristic_defaults_t {
   static constexpr double L2_AMP_CEILING_SKINNY            = 0.6;
   static constexpr double L2_DEPTH_PENALTY                 = 0.9;
   static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.7;
+  static constexpr double DS_WR_STALL_FACTOR               = 0.11;
   static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 8.0;
   static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.9;
   static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 6.0;
@@ -137,6 +138,7 @@ struct ORIGAMI_EXPORT heuristic_params_t {
   double l2_amp_ceiling_skinny            = heuristic_defaults_t::L2_AMP_CEILING_SKINNY;
   double l2_depth_penalty                 = heuristic_defaults_t::L2_DEPTH_PENALTY;
   double l1_hit_rate_ceiling_skinny       = heuristic_defaults_t::L1_HIT_RATE_CEILING_SKINNY;
+  double ds_wr_stall_factor               = heuristic_defaults_t::DS_WR_STALL_FACTOR;
   double epilogue_cycles_per_acc_read     = heuristic_defaults_t::EPILOGUE_CYCLES_PER_ACC_READ;
   double epilogue_acc_read_parallelism    = heuristic_defaults_t::EPILOGUE_ACC_READ_PARALLELISM;
   double epilogue_cycles_per_bounds_check = heuristic_defaults_t::EPILOGUE_CYCLES_PER_BOUNDS_CHECK;

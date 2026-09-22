@@ -134,6 +134,10 @@ namespace TensileLite
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
+                                .backend                   = origami::tensile_params_t{
+                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
+                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                },
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);

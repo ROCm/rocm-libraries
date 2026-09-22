@@ -179,6 +179,7 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   l2_amp_ceiling_skinny               = other.l2_amp_ceiling_skinny;
   l2_depth_penalty                    = other.l2_depth_penalty;
   l1_hit_rate_ceiling_skinny          = other.l1_hit_rate_ceiling_skinny;
+  ds_wr_stall_factor                  = other.ds_wr_stall_factor;
   epilogue_cycles_per_acc_read        = other.epilogue_cycles_per_acc_read;
   epilogue_acc_read_parallelism       = other.epilogue_acc_read_parallelism;
   epilogue_cycles_per_bounds_check    = other.epilogue_cycles_per_bounds_check;

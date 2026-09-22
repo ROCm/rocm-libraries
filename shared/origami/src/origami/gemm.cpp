@@ -1736,8 +1736,13 @@ double compute_tile_latency(const problem_t& problem,
       L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
     }
   }
+
+  // DS write stall
+  bool has_dtl = config.backend.direct_to_lds_a && config.backend.direct_to_lds_b; 
+  double L_ds_wr = has_dtl ? 0.0 : heuristic.ds_wr_stall_factor * L_mem; // α ~ 0.08–0.15 from SQTT
+
   double L_tile_single =
-      std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
+      std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory + L_ds_wr);
   L_tile_single *= (splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency;
   L_tile_single *= effective_tile_penalty;
   L_tile_single += L_cvt;
