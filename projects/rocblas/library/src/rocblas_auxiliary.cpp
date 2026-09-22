@@ -1019,9 +1019,9 @@ bool rocblas_internal_is_strict_target(int deviceId)
     if(force_strict)
         return true;
 
-    // Revision-gated: the strict device library targets a specific silicon
-    // revision, compared numerically against asicRevision. The threshold value
-    // carries no codename and must be confirmed against the target hardware.
+    // Revision-gated: the strict device library targets the earliest gfx1250
+    // silicon revision, which reports asicRevision 0 (confirmed against ROCr
+    // agent enumeration); later revisions use the regular library.
     static constexpr int c_strict_asic_revision = 0;
     return deviceProperties.asicRevision == c_strict_asic_revision;
 }
