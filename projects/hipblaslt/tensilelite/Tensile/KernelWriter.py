@@ -10183,8 +10183,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # EnableWGMDebug and KernelWriterAssembly.wgmDebugStoreValues().
     if kernel.get("EnableWGMDebug", 0):
       self.defineSgpr("WGMDebugOrigWG0", 1)
-      self.defineSgpr("WGMDebugOrigWG1", 1)
-      self.defineSgpr("WGMDebugOrigWGM", 1)
 
     if kernel["LocalSplitU"] > 1:
       self.defineSgpr("LSUTailLoopOffset", 1)

@@ -696,25 +696,32 @@ class KernelWriterAssembly(KernelWriter):
     """
     module = Module("DebugWGM store values")
     module.addComment1("@DebugWGM: overwrite D store data with WG-mapping info (origWG, packedNewWG, XCC, WGM)")
-    with self.allocTmpSgpr(2, tag="wgmDebugStoreValues") as tmpSgprRes:
-      tmpXCC  = tmpSgprRes.idx
-      tmpPack = tmpSgprRes.idx + 1
-      module.add(SGetRegB32(dst=sgpr(tmpXCC), src="hwreg(HW_REG_XCC_ID)",
-                            comment="DebugWGM: read XCC id"))
-      module.add(SLShiftLeftB32(dst=sgpr(tmpPack), shiftHex=16, src=sgpr("WorkGroup0"),
-                                comment="DebugWGM: post-WGM WorkGroup0 << 16"))
-      module.add(SAddU32(dst=sgpr(tmpPack), src0=sgpr(tmpPack), src1=sgpr("WorkGroup1"),
-                         comment="DebugWGM: | post-WGM WorkGroup1"))
+    # Use a single temp sgpr (these tuned F4BS kernels are sgpr-tight): compute
+    # each value into the temp and immediately move it to its store VGPR.
+    with self.allocTmpSgpr(1, tag="wgmDebugStoreValues") as tmpSgprRes:
+      tmp = tmpSgprRes.idx
       # sumIdx is an absolute VGPR index (== ss.elementSumIdx[elementIdx]); the
       # fp32 D store reads vgpr(sumIdx, rpv) directly, so write absolute VGPRs.
+      # dword2: XCC id
+      module.add(SGetRegB32(dst=sgpr(tmp), src="hwreg(HW_REG_XCC_ID)",
+                            comment="DebugWGM: read XCC id"))
+      module.add(VMovB32(dst=vgpr(sumIdx+2), src=sgpr(tmp),
+                         comment="DebugWGM: XCC id"))
+      # dword1: packed post-WGM (WorkGroup0 << 16) | WorkGroup1 (live regs)
+      module.add(SLShiftLeftB32(dst=sgpr(tmp), shiftHex=16, src=sgpr("WorkGroup0"),
+                                comment="DebugWGM: post-WGM WorkGroup0 << 16"))
+      module.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WorkGroup1"),
+                         comment="DebugWGM: | post-WGM WorkGroup1"))
+      module.add(VMovB32(dst=vgpr(sumIdx+1), src=sgpr(tmp),
+                         comment="DebugWGM: packed (newWG0<<16)|newWG1"))
+      # dword0/3: original 1D WG id and packed WGM (from persistent snapshot sgprs)
       module.add(VMovB32(dst=vgpr(sumIdx+0), src=sgpr("WGMDebugOrigWG0"),
                          comment="DebugWGM: original 1D workgroup id"))
-      module.add(VMovB32(dst=vgpr(sumIdx+1), src=sgpr(tmpPack),
-                         comment="DebugWGM: packed (newWG0<<16)|newWG1"))
-      module.add(VMovB32(dst=vgpr(sumIdx+2), src=sgpr(tmpXCC),
-                         comment="DebugWGM: XCC id"))
-      module.add(VMovB32(dst=vgpr(sumIdx+3), src=sgpr("WGMDebugOrigWGM"),
-                         comment="DebugWGM: original packed WGM data"))
+      # dword3 (WGM value) intentionally 0: the WGM sgpr symbol is not live at the
+      # epilogue and a 2nd persistent snapshot sgpr overflows the tight MT320x256
+      # kernels. The WGM value is already encoded in each kernel's name.
+      module.add(VMovB32(dst=vgpr(sumIdx+3), src=0,
+                         comment="DebugWGM: WGM slot unused (see kernel name)"))
     return module
 
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
@@ -3073,13 +3080,9 @@ class KernelWriterAssembly(KernelWriter):
       # mutates WorkGroup0/WorkGroup1/WGM. These are written into the D output
       # at the epilogue store for workgroup-mapping visualization.
       if kernel.get("EnableWGMDebug", 0):
-        module.addComment1("@DebugWGM: snapshot pre-WGM workgroup ids and WGM value")
+        module.addComment1("@DebugWGM: snapshot pre-WGM workgroup id (WGM sgpr is preserved by DefaultWGM)")
         module.add(SMovB32(dst=sgpr("WGMDebugOrigWG0"), src=sgpr("WorkGroup0"),
                            comment="DebugWGM: original 1D workgroup id (pre-WGM)"))
-        module.add(SMovB32(dst=sgpr("WGMDebugOrigWG1"), src=sgpr("WorkGroup1"),
-                           comment="DebugWGM: original WorkGroup1 (pre-WGM)"))
-        module.add(SMovB32(dst=sgpr("WGMDebugOrigWGM"), src=sgpr("WGM"),
-                           comment="DebugWGM: original packed WGM sgpr data"))
 
       # Reorder WGIDs
       module.add(wgmXCC(self, kernel, tmpSgprNumWorkGroups))
