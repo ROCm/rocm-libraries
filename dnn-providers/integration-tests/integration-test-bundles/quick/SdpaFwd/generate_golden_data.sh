@@ -185,16 +185,6 @@ if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
         --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
 
-    # Ragged + variable seq-lens (group), compact per-batch padding
-    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_nomask_ragged_group"
-    generate_bundle "$OUTDIR" "Small" --ragged-offsets --layout bshd \
-        --seq-lens-q 256 384 448 --seq-lens-kv 256 384 448 \
-        --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
-    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged_group"
-    generate_bundle "$OUTDIR" "Small" --causal bottom_right --ragged-offsets --layout bshd \
-        --seq-lens-q 256 384 448 --seq-lens-kv 256 384 448 \
-        --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
-
     echo ""
 fi
 
