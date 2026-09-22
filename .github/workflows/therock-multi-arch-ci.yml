@@ -97,11 +97,6 @@ jobs:
       baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
       linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
-      # changed_files for skip-ci evaluation in TheRock
-      # null = unknown (schedule, workflow_dispatch, API error) -> must run CI
-      # [] = no changes -> can skip CI
-      # [...] = known files -> evaluate against skip patterns
-      changed_files: ${{ steps.changed-files.outputs.changed_files }}
     steps:
       - name: Checkout ci-env action
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -112,49 +107,6 @@ jobs:
       - name: Load CI environment
         id: ci-env
         uses: ./.github/actions/ci-env
-
-      - name: Get changed files
-        id: changed-files
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Get changed files for skip-ci evaluation
-          # TheRock's configure_multi_arch_ci.py evaluates these against skip patterns
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            echo "Getting PR diff: ${BASE_SHA}...${HEAD_SHA}"
-            CHANGED_FILES=$(gh api "repos/${{ github.repository }}/compare/${BASE_SHA}...${HEAD_SHA}" \
-              --jq '[.files[].filename]' 2>/dev/null || echo "null")
-            # Check for truncation (GitHub API returns max 300 files)
-            FILE_COUNT=$(echo "$CHANGED_FILES" | jq 'if type == "array" then length else 0 end')
-            if [[ "$FILE_COUNT" -ge 300 ]]; then
-              echo "Warning: API returned 300+ files, result may be truncated"
-              CHANGED_FILES="null"
-            fi
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
-            BEFORE_SHA="${{ github.event.before }}"
-            # Null SHA indicates branch creation - no prior commit to diff against
-            if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
-              echo "Branch creation push - no base to diff against"
-              CHANGED_FILES="null"
-            else
-              HEAD_SHA="${{ github.sha }}"
-              echo "Getting push diff: ${BEFORE_SHA}...${HEAD_SHA}"
-              CHANGED_FILES=$(gh api "repos/${{ github.repository }}/compare/${BEFORE_SHA}...${HEAD_SHA}" \
-                --jq '[.files[].filename]' 2>/dev/null || echo "null")
-              FILE_COUNT=$(echo "$CHANGED_FILES" | jq 'if type == "array" then length else 0 end')
-              if [[ "$FILE_COUNT" -ge 300 ]]; then
-                echo "Warning: API returned 300+ files, result may be truncated"
-                CHANGED_FILES="null"
-              fi
-            fi
-          else
-            # schedule, workflow_dispatch: unknown changes
-            echo "Event ${{ github.event_name }} - no diff available"
-            CHANGED_FILES="null"
-          fi
-          echo "changed_files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
   setup:
     needs: [ci-env]
@@ -198,12 +150,8 @@ jobs:
       repository: ROCm/TheRock
       ref: users/geomin12/path-based-external-2
       # Pass external repo info for stage-impact analysis and path-based CI skip.
-      # - changed_files: List of files changed in this PR/push (null for unknown)
-      # - skip_ci_config: Path to TOML config file with skip patterns
-      # - extra_cmake_options: Appended to cmake configure for this repo's CI runs
-      #
-      # TheRock reads skip_ci_config TOML file and evaluates changed_files
-      # against the patterns to determine if CI can be skipped.
+      # TheRock checks out the external repo and runs git diff to get changed files,
+      # then evaluates against skip_ci_config patterns to determine if CI can be skipped.
       #
       # Keep extra_cmake_options constant: the flag state file participates in
       # every subproject's configure fingerprint, and stage reuse does not key
@@ -212,7 +160,7 @@ jobs:
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
-          "changed_files": ${{ needs.ci-env.outputs.changed_files || 'null' }},
+          "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
