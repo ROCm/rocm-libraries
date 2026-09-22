@@ -5,6 +5,7 @@
 #include "mma_family_index.h"
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
+#include "rocke/helper_rocke.core.arch.h"
 #include "rocke/wmma_scale_internal.h"
 
 #include <atomic>
@@ -420,6 +421,9 @@ int main()
                                                          op->n,
                                                          op->k,
                                                          &scales)
+                              != op
+                       || rocke_archtarget_op_for_shape(
+                              arch, op->family, a, b, op->c_dtype, op->m, op->n, op->k, &scales)
                               != op
                        || rocke_mma_catalog_select_largest_k(&arch->mma,
                                                              op->family,

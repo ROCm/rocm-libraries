@@ -104,7 +104,8 @@ const rocke_mmaop_t* rocke_archtarget_op_for_shape(const rocke_archtarget_t* t,
                                                    const char* c_dtype,
                                                    int m,
                                                    int n,
-                                                   int k);
+                                                   int k,
+                                                   const rocke_mma_scale_filter_t* scales);
 
 /* target.mma.by_op_id(op_id): the catalog atom whose op_id handle matches
  * `op_id` (the backend's MMA key, e.g. "mfma_f32_16x16x16_f16"), or NULL if the

@@ -81,7 +81,8 @@ static const rocke_mmaop_t* rocke_gemm_resolve_mma_op(const rocke_gemm_universal
                                          "fp32",
                                          t->warp_tile_m,
                                          t->warp_tile_n,
-                                         t->warp_tile_k);
+                                         t->warp_tile_k,
+                                         nullptr);
 }
 
 /* _storage_dtype(spec): validate homogeneous A/B/C + fp32 acc + RCR layout,
