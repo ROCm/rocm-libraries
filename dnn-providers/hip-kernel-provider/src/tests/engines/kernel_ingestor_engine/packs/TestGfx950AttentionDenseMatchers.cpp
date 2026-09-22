@@ -727,18 +727,22 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherDtype)
     EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherBatch)
+TEST(TestGfx950AttentionDenseKernelMatch, AlignedCandidateAcceptsDifferentBatch)
 {
+    // Aligned (ragged=0) kernels are shape-generic: batch/seqlen equality is not
+    // enforced. A KD compiled with batch=BATCH+1 serves a graph with batch=BATCH.
     KernelSpec kernel;
     kernel.batch = BATCH + 1;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, kernel));
 }
 
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherSeqLen)
+TEST(TestGfx950AttentionDenseKernelMatch, AlignedCandidateAcceptsDifferentSeqLen)
 {
+    // Same shape-generic rule: seqlen mismatch is not a rejection for aligned kernels.
+    // The graph has seqLenKv=SEQ (default); kernel was compiled with SEQ*2.
     KernelSpec kernel;
     kernel.seqLenKv = SEQ * 2;
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, kernel));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, kernel));
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherHeadCount)
