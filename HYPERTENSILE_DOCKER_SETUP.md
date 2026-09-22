@@ -92,6 +92,47 @@ assert torch.cuda.is_available() and torch.cuda.device_count() > 0
 '
 ```
 
+## Install LLVM development files for `build-client`
+
+The image includes the `rocm-llvm` compiler package, which supplies
+`amdclang` and `amdclang++`, but that package alone does not supply
+`LLVMConfig.cmake`, `llvm-config`, or the complete LLVM development headers.
+The TensileLite client preset enables `HIPBLASLT_ENABLE_YAML=ON`, which makes
+hipBLASLt call `find_package(LLVM REQUIRED)` and link `LLVMObjectYAML`.
+
+Install the matching ROCm development package rather than Ubuntu's generic
+`llvm-dev` package:
+
+```bash
+docker exec vllm-rcm-a bash -lc '
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y rocm-llvm-dev
+'
+```
+
+Confirm that the package installed the LLVM CMake configuration:
+
+```bash
+docker exec vllm-rcm-a \
+  find /opt/rocm -name LLVMConfig.cmake -print
+```
+
+The configuration is normally beneath `/opt/rocm/lib/llvm`. Include that
+prefix when building the TensileLite client:
+
+```bash
+docker exec vllm-rcm-a bash -lc '
+cd /work/worktrees/users-alvasile-hypertensile/projects/hipblaslt/tensilelite
+
+CMAKE_PREFIX_PATH="/opt/rocm/lib/llvm:/opt/rocm" \
+  invoke build-client --clean
+'
+```
+
+Packages installed with `apt-get` are stored in the container's writable
+layer. They survive ordinary container restarts, but must be installed again
+if the container is removed and recreated from the original image.
+
 ## Create the cached sparse clone inside Docker
 
 ```bash
