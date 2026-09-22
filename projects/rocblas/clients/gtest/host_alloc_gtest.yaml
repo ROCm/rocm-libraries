@@ -34,6 +34,26 @@ Tests:
   N: [ 1024 ]
   precision: *guard_precisions
 
+# Byte-level corruption detail: differing-byte count, first differing byte, and
+# both guards being reported independently.
+- name: host_alloc_guard_reports_byte_count
+  category: quick
+  function: host_alloc_guard_reports_byte_count
+  N: [ 1024 ]
+  precision: *guard_precisions
+
+- name: host_alloc_guard_reports_first_byte_index
+  category: quick
+  function: host_alloc_guard_reports_first_byte_index
+  N: [ 1024 ]
+  precision: *guard_precisions
+
+- name: host_alloc_guard_detects_both_guards
+  category: quick
+  function: host_alloc_guard_detects_both_guards
+  N: [ 1024 ]
+  precision: *guard_precisions
+
 # Managed memory only: the harness skips this where the device reports no
 # managed-memory support, and HSA_XNACK=1 runs (ci:extended) are where it bites.
 - name: host_alloc_hmm_count
