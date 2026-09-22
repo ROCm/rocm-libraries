@@ -492,6 +492,11 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
             }
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
+            constexpr bool kStreamOutputRescale = std::is_same_v<Geometry, LegacyD192Geometry> &&
+                                                  Policy::kUseOutputFragments &&
+                                                  Policy::kUseSplitSoftmax;
+            [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
+            [[maybe_unused]] float pv_output_scale_m1 = 1.0f;
             if constexpr(Policy::kUseCustomQkStageSchedule)
             {
                 v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
@@ -520,6 +525,20 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                     constexpr auto b_warp_y_index_zeros =
                         uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
 
+                    auto rescale_fragment = [&](auto ordinal) {
+                        constexpr index_t d_msb =
+                            decltype(ordinal)::value / Policy::OutputFragments::kNumN;
+                        const float scale = d_msb < 2 ? pv_output_scale_m0 : pv_output_scale_m1;
+                        auto& fragment    = o_acc.at(ordinal);
+                        static_for<0, Policy::OutputFragments::kElementsPerFragment, 1>{}(
+                            [&](auto element) { fragment[decltype(element)::value] *= scale; });
+                    };
+                    if constexpr(kStreamOutputRescale && decltype(stage)::value == 0)
+                    {
+                        rescale_fragment(number<0>{});
+                        rescale_fragment(number<1>{});
+                    }
+
                     auto emit_wmma = [&](auto, auto wmma) {
                         constexpr index_t ordinal     = decltype(wmma)::value;
                         constexpr index_t d_msb       = ordinal / Policy::OutputFragments::kNumN;
@@ -545,6 +564,13 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                         o_acc.at(wmma) =
                             c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(
                                 number<0>{});
+                        if constexpr(kStreamOutputRescale && decltype(stage)::value == 0 &&
+                                     ordinal + 2 < Policy::OutputFragments::kNumFragments)
+                        {
+                            // Keep the next accumulator ready two PV fragments ahead.
+                            __builtin_amdgcn_sched_barrier(0);
+                            rescale_fragment(number<ordinal + 2>{});
+                        }
                     };
 
                     Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value>(
@@ -892,8 +918,27 @@ struct BlockFmhaPipelineQRKSVSTdmV128 : BlockFmhaPipelineQRKSVSTdm<Problem_, Pol
                                   std::is_same_v<SMPLComputeDataType, float>);
                     if constexpr(Policy::kUseOutputFragments)
                     {
-                        Policy::template RunSplitSoftmaxFragments<Problem, kDeferTensorReady>(
-                            s_new, m, l, o_acc, scale_s);
+                        if constexpr(kStreamOutputRescale)
+                        {
+                            float delta_m0;
+                            float delta_m1;
+                            Policy::template RunSplitSoftmaxPart01<Problem>(
+                                s_new, m, scale_s, delta_m0, delta_m1);
+                            Policy::template RunSplitSoftmaxPart2AndGetScale<Problem>(
+                                s_new,
+                                m,
+                                l,
+                                scale_s,
+                                delta_m0,
+                                delta_m1,
+                                pv_output_scale_m0,
+                                pv_output_scale_m1);
+                        }
+                        else
+                        {
+                            Policy::template RunSplitSoftmaxFragments<Problem, kDeferTensorReady>(
+                                s_new, m, l, o_acc, scale_s);
+                        }
                     }
                     else
                     {
