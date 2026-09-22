@@ -15,7 +15,7 @@ them.
   it as `$ROCTHRUST_REPO` — have it ready, or be ready to answer when asked.
   Nothing here guesses a path.
 
-## The five skills, in pipeline order
+## The four skills, in pipeline order
 
 1. **`rocthrust-cccl-sync-investigate`** — Step 0. Read-only. Works out
    which CCCL version rocThrust currently tracks (via `THRUST_VERSION` plus
@@ -23,17 +23,14 @@ them.
    catalogs new features, new CMake options/macros, test/benchmark coverage
    gaps, and commits likely to be risky for rocThrust. Produces
    `cccl-investigation-<tag>.md` at the repo root.
-2. **`rocthrust-cccl-sync-tickets`** *(optional, independent)* — turns an
-   investigation report's work breakdown into JIRA Epic/Story/Task tickets.
-   Can be run before, during, or never; nothing downstream depends on it.
-3. **`rocthrust-cccl-sync`** — the driver. Creates the sync branch and
+2. **`rocthrust-cccl-sync`** — the driver. Creates the sync branch and
    writes `todo.md` at the repo root: the ordered, checkbox list of every
    upstream commit that needs porting. Does not port any code itself.
-4. **`rocthrust-cccl-sync-resolve`** — the workhorse. Works through
+3. **`rocthrust-cccl-sync-resolve`** — the workhorse. Works through
    `todo.md` one commit at a time, **strictly in order** (never skip ahead
    or batch), porting each commit's Thrust changes by hand and ticking it
    off. Everything ported stays staged (`git add`), never committed.
-5. **`rocthrust-cccl-sync-finalize`** — run once every `todo.md` item is
+4. **`rocthrust-cccl-sync-finalize`** — run once every `todo.md` item is
    ticked. Runs a readiness/lint gate, bumps `THRUST_VERSION`, writes the
    CHANGELOG entry, runs `rmake.py`/`ctest` build+test verification, and
    creates the single landing commit.
@@ -50,7 +47,6 @@ its own trigger phrasing. For example:
   `rocthrust-cccl-sync-resolve`
 - *"Everything in todo.md is ticked, land it."* →
   `rocthrust-cccl-sync-finalize`
-- *"File tickets for this sync."* → `rocthrust-cccl-sync-tickets`
 
 There's no need to name a skill explicitly or read `SKILL.md` yourself
 first — reference it by describing the task, and it will be picked up from
@@ -88,8 +84,6 @@ ai/skills/
   rocthrust-cccl-sync-investigate/   Step 0: scope + version delta
     SKILL.md, scripts/, sensitive-files.md, version-fingerprints.tsv,
     report.md.template
-  rocthrust-cccl-sync-tickets/       optional JIRA planning bridge
-    SKILL.md
   rocthrust-cccl-sync/               driver: branch + todo.md
     SKILL.md, scripts/, todo.md.template
   rocthrust-cccl-sync-resolve/       per-commit port loop

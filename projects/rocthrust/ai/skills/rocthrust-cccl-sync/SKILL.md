@@ -34,9 +34,6 @@ stages, each with their own skill:
 - **`rocthrust-cccl-sync-finalize`** — once every item in `todo.md` is
   ticked, bumps `thrust/version.h`, updates the CHANGELOG, runs build/test
   verification, and creates the single landing commit.
-- **`rocthrust-cccl-sync-tickets`** — an optional planning bridge that turns
-  an investigation report into JIRA tickets. Independent of the three skills
-  above; can be run before, during, or not at all.
 
 ## Conventions
 
