@@ -1936,19 +1936,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+0+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+0+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+0+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+0+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+1]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -1959,19 +1959,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+4+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+4+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+4+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+4+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+2]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -1982,19 +1982,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+8+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+8+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+8+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+8+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+3]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2005,19 +2005,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+12+0], v232, v234          // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+12+1], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+12+2], v232, v234          // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+12+3], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+0], v237, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+1], v238, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+2], v239, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+3], v240, v234          // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write b */
@@ -2248,19 +2248,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+0+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+0+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+0+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+0+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS1
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+1]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2271,19 +2271,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+4+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+4+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+4+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+4+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS1
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+2]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2294,19 +2294,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+8+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+8+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+8+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+8+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS1
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+3]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2317,19 +2317,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+12+0], v232, v234          // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+12+1], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+12+2], v232, v234          // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+12+3], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+0], v237, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+1], v238, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+2], v239, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+3], v240, v234          // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS1
 
 /* local write MXSA */
@@ -2662,19 +2662,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+0+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+0+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+0+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+0+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+0+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+1]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2685,19 +2685,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+4+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+4+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+4+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+4+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+4+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+2]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2708,19 +2708,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+8+0], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+8+1], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+8+2], v232, v234           // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+8+3], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+0], v237, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+1], v238, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+2], v239, v234           // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+8+3], v240, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
 v_and_b32 v234, 0xffff, v[vgprG2LScaleA+3]         // scaleA: drop the stale high half of the d16 load
 v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
@@ -2731,19 +2731,19 @@ v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halv
 v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
 v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+12+0], v232, v234          // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+12+1], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v237, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_and_or_b32 v238, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
 v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
-v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
-v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
-v_pk_mul_f16 v[vgprG2LA+12+2], v232, v234          // w4a16: (q - z)*s, packed
-v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
-v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
-v_pk_mul_f16 v[vgprG2LA+12+3], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v239, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_and_or_b32 v240, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v237, v237, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v238, v238, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_add_f16 v239, v239, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_add_f16 v240, v240, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+0], v237, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+1], v238, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+2], v239, v234          // w4a16: (q - z)*s, packed
+v_pk_mul_f16 v[vgprG2LA+12+3], v240, v234          // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write MXSA */
