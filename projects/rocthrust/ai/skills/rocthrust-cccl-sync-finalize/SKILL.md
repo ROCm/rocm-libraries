@@ -93,7 +93,7 @@ counterpart file substantively behind its sibling).
 
 ## Step 4 — Test/example CMake-wiring check
 
-`rocthrust-cccl-sync`'s widened commit scope (`thrust/testing/`,
+`rocthrust-cccl-sync-todo`'s widened commit scope (`thrust/testing/`,
 `thrust/examples/`, not just `thrust/thrust/`) means this sync can add new
 test or example source files, not just header changes. Upstream always
 registers a new test/example file in the sibling CMake list in the same

@@ -23,7 +23,7 @@ them.
    catalogs new features, new CMake options/macros, test/benchmark coverage
    gaps, and commits likely to be risky for rocThrust. Produces
    `cccl-investigation-<tag>.md` at the repo root.
-2. **`rocthrust-cccl-sync`** — the driver. Creates the sync branch and
+2. **`rocthrust-cccl-sync-todo`** — the driver. Creates the sync branch and
    writes `todo.md` at the repo root: the ordered, checkbox list of every
    upstream commit that needs porting. Does not port any code itself.
 3. **`rocthrust-cccl-sync-resolve`** — the workhorse. Works through
@@ -42,7 +42,7 @@ its own trigger phrasing. For example:
 
 - *"What changed in the next CCCL release we haven't synced yet?"* →
   `rocthrust-cccl-sync-investigate`
-- *"Kick off a CCCL sync into rocThrust."* → `rocthrust-cccl-sync`
+- *"Kick off a CCCL sync into rocThrust."* → `rocthrust-cccl-sync-todo`
 - *"Continue the sync"* / *"work the next todo.md item"* →
   `rocthrust-cccl-sync-resolve`
 - *"Everything in todo.md is ticked, land it."* →
@@ -84,7 +84,7 @@ ai/skills/
   rocthrust-cccl-sync-investigate/   Step 0: scope + version delta
     SKILL.md, scripts/, sensitive-files.md, version-fingerprints.tsv,
     report.md.template
-  rocthrust-cccl-sync/               driver: branch + todo.md
+  rocthrust-cccl-sync-todo/          driver: branch + todo.md
     SKILL.md, scripts/, todo.md.template
   rocthrust-cccl-sync-resolve/       per-commit port loop
     SKILL.md, scripts/, porting-categories.md

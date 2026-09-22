@@ -1,5 +1,5 @@
 ---
-name: rocthrust-cccl-sync
+name: rocthrust-cccl-sync-todo
 description: Sets up a sync branch and enumerates the upstream CCCL/Thrust commits that need to be ported into rocThrust. Does not port any code itself. Use when asked to start, kick off, or set up a CCCL sync into rocThrust.
 ---
 

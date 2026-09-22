@@ -1,12 +1,12 @@
 ---
 name: rocthrust-cccl-sync-resolve
-description: Works through a rocthrust-cccl-sync todo.md one upstream commit at a time, porting each commit's Thrust changes by hand into rocThrust. Use when asked to continue, resume, or work the next item of a CCCL-into-rocThrust sync.
+description: Works through a rocthrust-cccl-sync-todo todo.md one upstream commit at a time, porting each commit's Thrust changes by hand into rocThrust. Use when asked to continue, resume, or work the next item of a CCCL-into-rocThrust sync.
 ---
 
 # CCCL → rocThrust Sync (per-commit port loop)
 
 This is the workhorse stage of the CCCL → rocThrust sync pipeline. It
-consumes the `todo.md` produced by `rocthrust-cccl-sync` and ports upstream
+consumes the `todo.md` produced by `rocthrust-cccl-sync-todo` and ports upstream
 commits into `projects/rocthrust/` one at a time, in the exact order listed.
 
 ## Assumptions to verify before starting (STOP if any are false)

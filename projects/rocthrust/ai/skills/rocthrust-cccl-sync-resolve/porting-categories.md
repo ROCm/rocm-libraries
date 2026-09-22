@@ -86,7 +86,7 @@ git show "$TO_TAG:thrust/thrust/<path>" | grep -n '<identifier>'
 If it's still there at `$TO_TAG`, a subsequent commit in the ordered
 `todo.md` list — not this one — is responsible for removing or moving it.
 Porting out of order to "clean up early" breaks the strict-ordering
-guarantee `rocthrust-cccl-sync`'s `todo.md` depends on.
+guarantee `rocthrust-cccl-sync-todo`'s `todo.md` depends on.
 
 ### 6. Widened commit scope: testing/ and examples/, not just headers
 `rocthrust-commit-list.sh` (and `rocthrust-show-upstream-commit.sh`) scan
