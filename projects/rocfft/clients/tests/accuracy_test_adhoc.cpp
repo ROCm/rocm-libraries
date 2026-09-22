@@ -669,8 +669,8 @@ INSTANTIATE_TEST_SUITE_P(adhoc_kint_index_boundary,
 // Test cases for 64-bit index kernels that require large twiddle arrays.
 const auto adhoc_64_bit_idx_twiddle_large_tokens = {
     // clang-format off
-    // CS_L1D_TRTRT
-    "complex_forward_len_8589934592_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8589934592_odist_8589934592_ioffset_0_0_ooffset_0_0",
+    // CS_L1D_TRTRT twl 5
+    "complex_forward_len_8589934592_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8589934592_odist_8589934592_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
     // Bluestein PAD_MUL / FFT_MUL count boundary. count = lengthBlue * batch,
     // lengthBlue = 524288, so batch 8192 => count = 2^32 (last U32 case) and
     // batch 8193 => count = 4295491584 (first U64 case).
@@ -692,6 +692,9 @@ const auto adhoc_64_bit_idx_twiddle_large_tokens = {
     "complex_forward_len_8388617_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8388617_odist_8388617_ioffset_0_0_ooffset_0_0",
     // twl 4
     "complex_forward_len_25165813_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_25165813_odist_25165813_ioffset_0_0_ooffset_0_0",
+    // twl 4 / twl 5 boundary: large1D 4294967294 vs 4294967318, either side of 2^32
+    "complex_forward_len_2147483647_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483647_odist_2147483647_ioffset_0_0_ooffset_0_0", // ~176GiB VRAM
+    "complex_forward_len_2147483659_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_2147483659_odist_2147483659_ioffset_0_0_ooffset_0_0", // ~320GiB VRAM
     // clang-format on
 };
 INSTANTIATE_TEST_SUITE_P(
