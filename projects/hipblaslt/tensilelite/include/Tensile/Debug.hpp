@@ -99,10 +99,7 @@ namespace TensileLite
 
         bool skipKernelLaunch() const;
 
-        // TENSILE_STREAMK_DATA_PARALLEL: -1 = unset (per-arch default), 0 = off, 1 = on.
-        // The environment variable uses this same encoding, so an explicit -1 is equivalent
-        // to leaving it unset. Any other non-zero integer is on; non-numeric is ignored.
-        int streamKDataParallelOverride() const;
+        bool useStreamKDataParrallel() const;
 
         // SK5 hybrid mode debug override.
         // Return value semantics:
@@ -128,9 +125,7 @@ namespace TensileLite
 
         bool printStreamKGridInfo() const;
 
-        // TENSILE_GRIDBASED_KDTREE: -1 = unset (per-arch default), 0 = off, 1 = on.
-        // Same encoding as the environment variable; see streamKDataParallelOverride().
-        int gridBasedKDTreeOverride() const;
+        bool gridBasedKDTree() const;
 
         bool gridBasedBatchExp() const;
 
@@ -178,16 +173,14 @@ namespace TensileLite
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
-        // Tri-state so an explicit 0 can force OFF on a part whose default is ON.
-        int         m_dataParallel        = -1;
+        bool        m_dataParallel        = false;
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
         bool        m_predictionLib       = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;
-        // Tri-state; unset resolves per-arch at library load (see MatchingLibrary.hpp).
-        int         m_gridbasedKdTree     = -1;
+        bool        m_gridbasedKdTree     = false;
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;

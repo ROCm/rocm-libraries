@@ -597,6 +597,7 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = data["IndexOrder"]
         data["Library"]["table"] = data["ExactLogic"]
         data["Library"]["distance"] = libraryType
+        data["Library"]["useKdTree"] = bool(data.get("UseKdTree", False))
 
 
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
@@ -829,9 +830,12 @@ def parseLibraryLogicList(data, srcFile="?"):
     if isinstance(data[2], dict):
         rv["ArchitectureName"] = data[2]["Architecture"]
         rv["CUCount"] = data[2]["CUCount"]
+        # Optional, so files written before this key keep their existing behaviour.
+        rv["UseKdTree"] = bool(data[2].get("UseKdTree", False))
     else:
         rv["ArchitectureName"] = data[2]
         rv["CUCount"] = None
+        rv["UseKdTree"] = False
 
     rv["DeviceNames"] = data[3]
     rv["ProblemType"] = data[4]
@@ -871,6 +875,7 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["Library"]["indexOrder"] = data[6]
         rv["Library"]["table"] = data[7]
         rv["Library"]["distance"] = libraryType
+        rv["Library"]["useKdTree"] = rv["UseKdTree"]
 
     return rv
 
@@ -883,8 +888,12 @@ def rawLibraryLogic(data):
 
         architectureName = data.get("ArchitectureName")
         cuCount = data.get("CUCount")
-        if cuCount is not None:
+        useKdTree = data.get("UseKdTree", False)
+        if cuCount is not None or useKdTree:
             architectureName = {"Architecture": architectureName, "CUCount": cuCount}
+            # Emitted only when set, so unaffected files round-trip byte-identically.
+            if useKdTree:
+                architectureName["UseKdTree"] = True
 
         deviceNames = data.get("DeviceNames")
         problemTypeState = data.get("ProblemType")

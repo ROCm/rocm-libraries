@@ -87,7 +87,7 @@ class PlaceholderLibrary:
 
 class MatchingLibrary:
     Tag = "Matching"
-    StateKeys = [("type", "tag"), "properties", "table", "distance"]
+    StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
     def FromOriginalState(cls, d, solutions):
@@ -136,7 +136,7 @@ class MatchingLibrary:
 
         table.sort(key=lambda r: r["key"])
 
-        return cls(properties, table, distance)
+        return cls(properties, table, distance, d.get("useKdTree", False))
 
     @property
     def tag(self):
@@ -149,15 +149,22 @@ class MatchingLibrary:
 
         self.table += other.table
 
+        # useKdTree is a property of the merged table, not of either contributor. OR rather
+        # than assert: logic files that share a key are written independently, and requiring
+        # them to agree on an index-only flag would make adding the key to one of them a
+        # build error rather than an opt-in.
+        self.useKdTree = self.useKdTree or other.useKdTree
+
         self.table.sort(key=lambda r: r["key"])
 
     def remapSolutionIndices(self, indexMap):
         pass
 
-    def __init__(self, properties, table, distance):
+    def __init__(self, properties, table, distance, useKdTree=False):
         self.properties = properties
         self.table = table
         self.distance = distance
+        self.useKdTree = useKdTree
 
 class FreeSizeLibrary:
     Tag = "FreeSize"

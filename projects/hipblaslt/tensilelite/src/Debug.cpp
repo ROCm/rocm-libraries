@@ -135,7 +135,7 @@ namespace TensileLite
         return m_value2 & 0x1;
     }
 
-    int Debug::streamKDataParallelOverride() const
+    bool Debug::useStreamKDataParrallel() const
     {
         return m_dataParallel;
     }
@@ -180,7 +180,7 @@ namespace TensileLite
         return m_gridbasedTopSols;
     }
 
-    int Debug::gridBasedKDTreeOverride() const
+    bool Debug::gridBasedKDTree() const
     {
         return m_gridbasedKdTree;
     }
@@ -221,19 +221,9 @@ namespace TensileLite
         if(naive)
             m_naivePropertySearch = strtol(naive, nullptr, 0) != 0;
 
-        // Tri-state (-1=per-arch default, 0=off, 1=on), using the same encoding as the member
-        // it writes: an explicit -1 round-trips to the "no override" sentinel and behaves
-        // exactly like leaving the variable unset. Every other non-zero integer keeps its
-        // historical meaning (on). A non-numeric value is ignored rather than coerced --
-        // 0 now means "force off", so coercing would invert the caller's intent.
         const char* exp_streamkDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
         if(exp_streamkDP)
-        {
-            char*      end = nullptr;
-            const long val = strtol(exp_streamkDP, &end, 0);
-            if(end != exp_streamkDP && *end == '\0')
-                m_dataParallel = (val == -1) ? -1 : ((val != 0) ? 1 : 0);
-        }
+            m_dataParallel = strtol(exp_streamkDP, nullptr, 0) != 0;
 
         // StreamK=5 hybrid-mode debug override (-1=respect API, 0=static, 1=dynamic).
         // Non-numeric or out-of-range values are ignored (not silently coerced to 0).
@@ -274,15 +264,9 @@ namespace TensileLite
         if(tensile_benchmark)
             m_benchmark = strtol(tensile_benchmark, nullptr, 0) != 0;
 
-        // Tri-state, parsed as for TENSILE_STREAMK_DATA_PARALLEL above (-1 == unset).
         const char* tensile_gridbased_kdtree = std::getenv("TENSILE_GRIDBASED_KDTREE");
         if(tensile_gridbased_kdtree)
-        {
-            char*      end = nullptr;
-            const long val = strtol(tensile_gridbased_kdtree, &end, 0);
-            if(end != tensile_gridbased_kdtree && *end == '\0')
-                m_gridbasedKdTree = (val == -1) ? -1 : ((val != 0) ? 1 : 0);
-        }
+            m_gridbasedKdTree = strtol(tensile_gridbased_kdtree, nullptr, 0) != 0;
 
         const char* tensile_gridbased_batch_exp = std::getenv("TENSILE_GRIDBASED_BATCH_EXP");
         if(tensile_gridbased_batch_exp)

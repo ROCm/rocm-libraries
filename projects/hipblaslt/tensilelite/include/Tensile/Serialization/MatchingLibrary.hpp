@@ -26,12 +26,10 @@
 
 #pragma once
 
-#include <Tensile/AMDGPU.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/Distance.hpp>
 #include <Tensile/MatchingLibrary.hpp>
 #include <Tensile/SingleSolutionLibrary.hpp>
-#include <Tensile/hip/HipHardware.hpp>
 
 #include <cstddef>
 #include <tuple>
@@ -43,32 +41,6 @@ namespace TensileLite
 {
     namespace Serialization
     {
-        /// Should the GridBased matching table carry a kd-tree index?
-        ///
-        /// TENSILE_GRIDBASED_KDTREE decides when set. Unset, the default is ON for MI300A only:
-        /// its GridBased tables are the ones large enough for the linear scan to dominate
-        /// selection cost, and every other part keeps its existing behaviour. Resolved here,
-        /// once per library load, rather than per lookup -- the lookup reads the resulting
-        /// `useKdTree` flag on the table, so the two can never disagree.
-        inline bool resolveGridBasedKDTree()
-        {
-            int const override_ = Debug::Instance().gridBasedKDTreeOverride();
-            if(override_ >= 0)
-                return override_ == 1;
-
-            // Deserialization can run without a device (CPU-only tooling and tests); fall back
-            // to the pre-existing behaviour rather than letting the probe abort the load.
-            try
-            {
-                auto hardware = hip::GetCurrentDevice();
-                return hardware != nullptr && isMI300A(*hardware);
-            }
-            catch(...)
-            {
-                return false;
-            }
-        }
-
         template <typename Key,
                   typename MyProblem,
                   typename Element,
@@ -87,6 +59,18 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "table", table.table);
 
+                /// Should this GridBased matching table carry a kd-tree index?
+                ///
+                /// Declared by the logic file (`UseKdTree` in the library-logic header), so a
+                /// table that wants the kd-tree says so itself. Absent, mapOptional leaves the
+                /// member at its `false` default and behaviour is unchanged -- which is every
+                /// logic file that predates this key.
+                ///
+                /// Keeping it on the table rather than deciding at load time means library
+                /// deserialization no longer has to probe for a device: it can legitimately run
+                /// with none (CPU-only tooling and tests).
+                iot::mapOptional(io, "useKdTree", table.useKdTree);
+
                 if(!iot::outputting(io))
                 {
                     using Entry  = typename Table::Entry;
@@ -99,7 +83,11 @@ namespace TensileLite
 
                     if constexpr(std::is_same<Distance, Matching::GridBasedDistance<Key>>{})
                     {
-                        table.useKdTree = resolveGridBasedKDTree();
+                        // TENSILE_GRIDBASED_KDTREE can only add: it turns the index on for
+                        // every table, and never off for one that asked for it. Resolved here,
+                        // once per table, so the query path reads a single settled member.
+                        table.useKdTree = table.useKdTree || Debug::Instance().gridBasedKDTree();
+
                         if(table.useKdTree)
                         {
                             // Creating K map

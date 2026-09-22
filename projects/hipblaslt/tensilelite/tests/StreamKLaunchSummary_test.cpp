@@ -148,7 +148,9 @@ namespace
     //
     // reloadDebugBitsForTest() refreshes exactly TENSILE_DB, TENSILE_DB2 and
     // TENSILE_STREAMK5_FORCE_MODE. It deliberately does NOT refresh
-    // TENSILE_STREAMK_DATA_PARALLEL, so nothing here can toggle that flag.
+    // TENSILE_STREAMK_DATA_PARALLEL, so the env override cannot be exercised from
+    // here. Its declared counterpart can: set sizeMapping.streamKDataParallel (see
+    // StreamKDataParallelDeclaredBySolutionSuppressesWorkspace).
     class ScopedTensileDb
     {
     public:
@@ -348,6 +350,77 @@ TEST(StreamKLaunchSummaryTest, ForceDpOnlyIsDpOnlyNoWorkspace)
     EXPECT_EQ(d.skGrid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(d.finalGrid, static_cast<size_t>(_CPX_CU));
     EXPECT_EQ(d.finalGrid, d.selectedGrid);
+}
+
+// ---------------------------------------------------------------------------
+// StreamK data-parallel is declared by the SOLUTION, not inferred from the part.
+//
+// These two tests are the equivalence contract for the logic-file-declared flag.
+// streamKDP must follow sizeMapping.streamKDataParallel on whatever device the
+// problem lands on, and must not be re-derived from the device identity. While the
+// default was derived from the device (gfx942 at 228 CUs) the first case was
+// unreachable off the MI300A and the second was unreachable on it, so neither
+// could be asserted here at all -- the
+// flag was only observable through TENSILE_STREAMK_DATA_PARALLEL, which this
+// binary deliberately cannot toggle (see ScopedTensileDb).
+//
+// Mirrors ForceDpOnlyIsDpOnlyNoWorkspace on the same shape so the two DP sources
+// can be read side by side: 4096x4224 over a 128x128 tile is 32*33 = 1056 tiles,
+// and 1056 % 64 != 0, so the partial-tile workspace reservation is live and its
+// suppression is what the assertions below actually observe.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, StreamKDataParallelDeclaredBySolutionSuppressesWorkspace)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    solution.sizeMapping.streamKDataParallel = 1;
+
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    // Not an MI300A: under the old device-derived default this device could never
+    // produce streamKDP, so the flag being set here is attributable to the solution.
+    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+
+    auto d = solution.computeStreamKDecisions(problem, device);
+
+    EXPECT_TRUE(d.streamKDP);
+    EXPECT_TRUE(d.dpOnly);
+    // The declared flag is a param source, like forceDPOnly -- not the runtime
+    // workspace fallback, and not the compile-time StreamKForceDPOnly param.
+    EXPECT_FALSE(d.forceDPOnly);
+    EXPECT_FALSE(d.workspaceDPFallbackFired);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
+}
+
+TEST(StreamKLaunchSummaryTest, StreamKDataParallelAbsentLeavesDpOffOnMI300A)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3); // leaves streamKDataParallel at 0
+    ASSERT_EQ(solution.sizeMapping.streamKDataParallel, 0);
+
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    // gfx942 at 228 CUs is the MI300A, the part that used to take data-parallel as
+    // an architectural default. makeDevice() is hardwired to gfx950, so the device
+    // is built directly here.
+    AMDGPU device(AMDGPU::Processor::gfx942, 228, "mi300a");
+    ASSERT_EQ(device.processor, AMDGPU::Processor::gfx942);
+    ASSERT_EQ(device.computeUnitCount, 228);
+    device.skDynamicGrid = 0;
+
+    auto d = solution.computeStreamKDecisions(problem, device);
+
+    // The behaviour change this PR comment asks for: being an MI300A no longer
+    // implies data-parallel. An undeclared solution keeps the StreamK path and the
+    // partial-tile workspace that goes with it.
+    EXPECT_FALSE(d.streamKDP);
+    EXPECT_FALSE(d.forceDPOnly);
+    EXPECT_GT(d.requiredWorkspaceBytes, 0u);
+    EXPECT_TRUE(d.workspaceAllocated);
 }
 
 // ---------------------------------------------------------------------------
@@ -962,7 +1035,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     // among the variables reloadDebugBitsForTest() refreshes, so it can only be
     // cleared before the process starts. Fail loudly rather than silently asserting
     // something else if it is set.
-    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     auto d = solution.computeStreamKDecisions(problem, env.device);
@@ -1056,7 +1129,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedNoUniformOrderReconcil
         << "uniform summation order must default to off, otherwise this test is "
            "a duplicate of the variant below";
 
-    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     // Anti-vacuity: the pre-reconcile reduction really is parallel. getSKReduction
@@ -1127,7 +1200,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspaceStarvedUniformOrderReconciles
     problem.setWorkspaceSize(0); // no workspace at all
     problem.setParams().setUniformSummationOrder(true);
 
-    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     // Anti-vacuity: the pre-reconcile reduction really is parallel. With the mode on,
@@ -1204,7 +1277,7 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelFixedGridWorkspaceDpFallbackFires)
     // alone.
     env.device.skFixedGrid = 128;
 
-    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel)
@@ -1370,7 +1443,7 @@ TEST(StreamKLaunchSummaryTest, TreeBoundsFallbackWinsGridAttribution)
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
 
-    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     auto d = solution.computeStreamKDecisions(problem, device);
@@ -1470,7 +1543,7 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
     device.skDynamicGrid = 0;
     device.skFixedGrid   = 32;
 
-    ASSERT_LT(Debug::Instance().streamKDataParallelOverride(), 0)
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
         << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
 
     auto d = solution.computeStreamKDecisions(problem, device);

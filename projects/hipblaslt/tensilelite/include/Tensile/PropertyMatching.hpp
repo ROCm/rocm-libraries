@@ -420,7 +420,8 @@ namespace TensileLite
             mutable KDTree<int32_t, 2>                                  kdTree;
             std::map<std::tuple<int32_t, int32_t>, std::vector<KBEntry>> kSolutionMap;
 
-            // Set at deserialization; kdTree/kSolutionMap are only populated when true.
+            // Declared by the logic file (`UseKdTree`) and read at deserialization;
+            // kdTree/kSolutionMap are only populated when true.
             bool useKdTree = false;
         };
 

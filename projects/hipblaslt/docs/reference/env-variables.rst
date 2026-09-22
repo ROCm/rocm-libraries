@@ -118,20 +118,16 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
 
     * - | ``TENSILE_STREAMK_DATA_PARALLEL``
         | Runs Stream-K kernels in data-parallel mode.
-      - | Unset or -1: Default, enabled on the AMD Instinct™ MI300A only; disabled on every other device.
-        | 0: Force off, including on the MI300A
-        | 1: Force on, on every device
-        | Any other non-zero integer is treated as 1.
-        | Non-numeric values are ignored and the default applies.
+      - | Unset or 0: Use the ``StreamKDataParallel`` value each solution declares in its library-logic file. Solutions that do not declare it run Stream-K normally.
+        | Non-zero: Enable data-parallel mode for every Stream-K solution, including those that do not declare it.
+        | For a solution that declares ``StreamKDataParallel: 1``, this variable cannot turn data-parallel mode off. Set the key to ``0`` in the logic file and rebuild the device library instead.
 
     * - | ``TENSILE_GRIDBASED_KDTREE``
         | Indexes grid-based solution-selection tables with a k-d tree instead of a linear scan.
         | Affects which kernel is selected, not the result it computes.
-      - | Unset or -1: Default, enabled on the AMD Instinct™ MI300A only; disabled on every other device.
-        | 0: Force off, including on the MI300A
-        | 1: Force on, on every device
-        | Any other non-zero integer is treated as 1.
-        | Non-numeric values are ignored and the default applies.
+      - | Unset or 0: Use the ``UseKdTree`` value each grid-based table declares in its library-logic file. Tables that do not declare it use a linear scan.
+        | Non-zero: Enable the k-d tree index for every table, including those that do not declare it.
+        | For a table that declares ``UseKdTree: true``, this variable cannot turn the index off. Set the key to ``false`` in the logic file and rebuild the device library instead.
 
     * - | ``TENSILE_STREAMK_FIXED_GRID``
         | Overrides default grid size with specified number of workgroups for Stream-K kernels.
