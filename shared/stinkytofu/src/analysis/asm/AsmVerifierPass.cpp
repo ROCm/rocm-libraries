@@ -69,6 +69,9 @@ static RegType fieldTypeToRegType(FieldType ft) {
 static bool isScalarRegType(RegType type) {
     switch (type) {
         case RegType::S:
+        // FieldType::sreg_m0 means "an sreg or m0", and fieldTypeToRegType folds it
+        // to RegType::S, so the actual m0 register has to be accepted here too.
+        case RegType::M:
         case RegType::SCC:
         case RegType::VCC:
         case RegType::VCC_LO:

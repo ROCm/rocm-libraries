@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API,
           typename I,
@@ -639,7 +640,7 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
@@ -662,7 +663,7 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
                                              hIpiv_cpu,
                                              hB);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_getrs(API,
                         NPVT,
                         handle,
@@ -682,9 +683,9 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
                         lwork,
                         (!BATCHED ? dInfo.data() : hInfo.data()),
                         bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -880,7 +881,7 @@ void testing_getrs(Arguments& argus)
                                                   &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrs_getPerfData<API, BATCHED, NPVT, T>(handle,
                                                      params,
                                                      trans,
@@ -963,7 +964,7 @@ void testing_getrs(Arguments& argus)
                                                   &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrs_getPerfData<API, BATCHED, NPVT, T>(handle,
                                                      params,
                                                      trans,
