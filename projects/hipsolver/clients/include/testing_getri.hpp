@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <bool BATCHED,
           bool NPVT,
@@ -351,14 +352,14 @@ void getriBatched_getPerfData(const hipsolverHandle_t handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         getriBatched_initData<NPVT, false, true, T>(
             handle, n, dA, lda, dC, ldc, dIpiv, stP, dInfo, bc, hA, hC, hIpiv, hInfo);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_getriBatched(handle,
                                n,
                                dA.data(),
@@ -371,9 +372,9 @@ void getriBatched_getPerfData(const hipsolverHandle_t handle,
                                stP,
                                dInfo.data(),
                                bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -506,7 +507,7 @@ void testing_getri(Arguments& argus)
                                                                   &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getriBatched_getPerfData<NPVT,
                                      T,
                                      I,
