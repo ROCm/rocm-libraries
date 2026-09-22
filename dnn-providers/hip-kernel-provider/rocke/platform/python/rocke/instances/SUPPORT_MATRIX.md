@@ -102,6 +102,16 @@ as described in the notes.
 | `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
 | `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
 
+## Sparse attention (DSA lightning indexer)
+
+Added with the DSA lightning-indexer family. The gfx942 ✅ is compile- and
+golden-verified (spec, wiring, and IR sha); on-GPU numeric parity runs on a
+gfx942 device and is not implied by the ✅ here.
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `lightning_indexer` | ✅ | ❌ | ❌ | bf16 only; score-only DSA scorer (no softmax/value); scalar-reduction v1; MFMA score body and fp8 are later phases; gfx950 not yet |
+
 ## Linear attention / recurrent-state decode
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |

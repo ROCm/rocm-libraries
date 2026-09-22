@@ -160,6 +160,22 @@ allowed_block_sizes = (64, 128, 256, 512, 1024)
 allowed_vecs = (2, 4, 8)
 ```
 
+## Sparse Attention Family (DSA)
+
+The DeepSeek Sparse Attention scorer. A score-only kernel: it rates every allowed
+key against the query so a later top-k can keep the highest-scoring subset. No
+softmax and no value output, and the index-key is shared across heads (MQA-style,
+one D_I vector per token).
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `gfx942/lightning_indexer.py` | `IndexerSpec`, `IndexerTileSpec` | `instances/dsa.md` |
+
+One kernel today: the scalar-reduction v1 (bf16, gfx942). The MFMA score body and
+the fp8 phase are later additions. Dispatch is `library/dispatch/dsa/`
+(`dispatch_lightning_indexer`) in its own registry, so a DSA request never selects
+a standard-attention kernel and vice versa.
+
 ## Cross-Family Capability Matrix
 
 From `helpers/README.md`:
@@ -182,6 +198,7 @@ From `helpers/README.md`:
 | attention_tiled_2d | - | Q + output + paged-KV | - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | attention_tiled_3d | - | Q + workspace + paged-KV| - | - | - | yes | - | `TransposeLdsReader`, `OnlineSoftmaxState`, MFMA helpers |
 | kda_chunkwise | - | - | - | - | yes (grouped cumsum) | yes | - | `MfmaAtom` (bf16 16x16x16 / 32x32x8), `SignatureBuilder` |
+| lightning_indexer | - | - | - | - | yes (dot + head sum) | yes | - | scalar FMA reduction (bf16), `SignatureBuilder` |
 
 ## Building Any Instance
 
