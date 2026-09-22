@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -1867,6 +1868,57 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
         << "a record measured on another device must not decide this one's kernel";
+}
+
+TEST(TestIngestorGenericPlanBuilder, DevicesDifferingOnlyInLdsCapacitySelectTheirOwnCachedWinner)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const auto lowerCapacity = testDeviceProperties();
+    auto higherCapacity = lowerCapacity;
+    higherCapacity.ldsSize *= 2;
+    const TestDeviceResolver lowerResolver(lowerCapacity, 0);
+    const TestDeviceResolver higherResolver(higherCapacity, 1);
+    const TestPlanBuilder lowerBuilder(engine, *manager, lowerResolver);
+    const TestPlanBuilder higherBuilder(engine, *manager, higherResolver);
+    const TestGraph graph(makeGraphId(0xDE));
+    const auto catalog = catalogFor(*manager, graph, lowerCapacity);
+    ASSERT_EQ(catalog.size(), 3U);
+
+    for(const auto& [properties, winnerBlockSize] :
+        {std::pair{lowerCapacity, 128}, std::pair{higherCapacity, 256}})
+    {
+        WinnerRecord record;
+        for(const auto& kernel : catalog)
+        {
+            record.push_back(rankedEntryFor(
+                kernel, kernel.getIntMetadata(BLOCK_SIZE) == winnerBlockSize ? 0.1 : 9.0));
+        }
+        std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.timeMs < rhs.timeMs;
+        });
+        manager->recordWinner(
+            winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
+    }
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    for(const auto& [builder, expectedBlockSize] : {std::pair{&lowerBuilder, 128},
+                                                    std::pair{&higherBuilder, 256},
+                                                    std::pair{&lowerBuilder, 128}})
+    {
+        KnobFilterSettings settings;
+        builder->initializeExecutionSettings(0, graph, engineConfig, settings);
+        ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+        KnobFilterContext context;
+        context.setExecutionSettings(settings);
+        builder->buildPlan(0, graph, engineConfig, context);
+        EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), expectedBlockSize);
+    }
 }
 
 /// The graph-half counterpart of the device test above. `TestGraph` carries no content,

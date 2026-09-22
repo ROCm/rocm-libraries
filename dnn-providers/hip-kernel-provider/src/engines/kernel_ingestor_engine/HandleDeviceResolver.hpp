@@ -5,6 +5,10 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
+#include <cstdint>
+#include <iterator>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -68,6 +72,9 @@ public:
         }
 
         hipDeviceProp_t properties{};
+        // Zero is valid, so use a sentinel to detect an unwritten capacity.
+        properties.sharedMemPerBlock
+            = std::numeric_limits<decltype(properties.sharedMemPerBlock)>::max();
         const auto status = queryDeviceProperties(&properties, deviceId);
         if(status != hipSuccess)
         {
@@ -77,11 +84,26 @@ public:
                     + hipGetErrorString(status));
         }
 
-        // HIP's fields narrow to the ingestor's `$device.*` namespace.
-        hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
-        resolved.gcnArchName = properties.gcnArchName;
-        resolved.warpSize = properties.warpSize;
-        resolved.multiProcessorCount = properties.multiProcessorCount;
+        const auto archEnd
+            = std::find(std::begin(properties.gcnArchName), std::end(properties.gcnArchName), '\0');
+        if(archEnd == std::begin(properties.gcnArchName)
+           || archEnd == std::end(properties.gcnArchName) || properties.warpSize <= 0
+           || properties.multiProcessorCount <= 0
+           || properties.sharedMemPerBlock
+                  > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "hipGetDeviceProperties returned invalid device facts for device "
+                    + std::to_string(deviceId));
+        }
+
+        // Cache only complete, validated properties.
+        hipdnn_plugin_sdk::ingestor::DeviceProperties resolved{
+            std::string(std::begin(properties.gcnArchName), archEnd),
+            properties.warpSize,
+            properties.multiProcessorCount,
+            static_cast<int64_t>(properties.sharedMemPerBlock)};
 
         return _properties.emplace(deviceId, std::move(resolved)).first->second;
     }

@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,7 +25,11 @@ struct DeviceProperties
     /// `hipdnn_plugin_sdk::archMatches`, not `==`.
     std::string gcnArchName;
     int warpSize = 0; ///< Threads per wavefront; 0 if unresolved.
-    int multiProcessorCount = 0; ///< Compute units; 0 if unresolved.
+    /// Raw HIP count: compute units in CU mode, workgroup processors in WGP mode.
+    /// Zero means unresolved.
+    int multiProcessorCount = 0;
+    /// Local data share (LDS) capacity in bytes per block: [0, INT64_MAX]; -1 if unresolved.
+    int64_t ldsSize = -1;
 };
 
 /// Does @p arch (a KDP's supported-target list; empty admits everything) admit

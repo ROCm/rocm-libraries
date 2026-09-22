@@ -23,27 +23,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <variant>
 #include <vector>
 
 namespace hipdnn_plugin_sdk::ingestor::jsonexpr
 {
-/// How deeply a Value handed back by a data source may nest.
+/// Maximum nesting depth for values returned by a data source.
 ///
-/// A Value is a tree, and every consumer of one walks it recursively:
-/// containsUnresolved, dump, toNumber over an array, variant equality, and the
-/// destructor. None of those can bound their own depth after the fact, so the
-/// bound belongs where a Value is built.
+/// Reading or freeing nested arrays can recurse, so data sources must check
+/// depth when building a Value to avoid stack overflow. Copying an array Value does not recurse.
 ///
-/// MAX_EXPRESSION_DEPTH bounds a *rule*; this bounds a *document*. The two are
-/// separate limits on separate inputs that happen to share a magnitude, and a
-/// document is no more trusted than a rule: both are read off disk. A data
-/// source must not build a Value deeper than this. JsonDataSource stops at the
-/// bound and yields null, which the language reads as unresolved, so the
-/// enclosing predicate declines rather than the process overflowing its stack.
+/// This limit applies to document values, not rules (see MAX_EXPRESSION_DEPTH).
+/// JsonDataSource returns null for values nested too deeply, so predicates decline.
 inline constexpr std::size_t MAX_VALUE_DEPTH = 256;
 
 // ---- runtime value --------------------------------------------------------
@@ -85,9 +81,31 @@ public:
         : _v(std::move(s))
     {
     }
+    /// Stores an array in shared, read-only storage. Lvalues are copied; rvalues
+    /// transfer ownership. After moving an array here, discard pointers, references,
+    /// or iterators that allow changes to its elements.
     Value(Array a)
-        : _v(std::move(a))
+        : _v(std::make_shared<const Array>(std::move(a)))
     {
+    }
+
+    Value(const Value&) = default;
+    Value& operator=(const Value&) = default;
+
+    /// Moves leave the source null; self-move assignment leaves it unchanged.
+    Value(Value&& other) noexcept
+        : _v(std::move(other._v))
+    {
+        other._v = nullptr;
+    }
+    Value& operator=(Value&& other) noexcept
+    {
+        if(this != &other)
+        {
+            _v = std::move(other._v);
+            other._v = nullptr;
+        }
+        return *this;
     }
 
     /// Build a numeric value, storing an integer when the double is exactly
@@ -131,7 +149,7 @@ public:
     }
     bool isArray() const
     {
-        return std::holds_alternative<Array>(_v);
+        return std::holds_alternative<ArrayStorage>(_v);
     }
 
     /// True when this value is null, or is an array holding a null anywhere
@@ -175,7 +193,7 @@ public:
     }
     const Array& asArray() const
     {
-        return std::get<Array>(_v);
+        return *std::get<ArrayStorage>(_v);
     }
 
     /// Truthiness: false, 0, "", null and the empty array are falsy.
@@ -187,7 +205,7 @@ public:
                                                 [](std::int64_t i) { return i != 0; },
                                                 [](double d) { return d != 0.0; },
                                                 [](const std::string& s) { return !s.empty(); },
-                                                [](const Array& a) { return !a.empty(); }},
+                                                [](const ArrayStorage& a) { return !a->empty(); }},
             _v);
     }
 
@@ -201,14 +219,14 @@ public:
                               [](std::int64_t i) { return static_cast<double>(i); },
                               [](double d) { return d; },
                               [](const std::string& s) { return stringToNumber(s); },
-                              [](const Array& a) {
-                                  if(a.empty())
+                              [](const ArrayStorage& a) {
+                                  if(a->empty())
                                   {
                                       return 0.0;
                                   }
-                                  if(a.size() == 1)
+                                  if(a->size() == 1)
                                   {
-                                      return a.front().toNumber();
+                                      return a->front().toNumber();
                                   }
                                   return std::nan("");
                               }},
@@ -240,8 +258,11 @@ public:
         {
             return toNumber() == o.toNumber();
         }
-        // Otherwise this is exactly variant equality: differing alternatives are
-        // unequal, and each alternative compares with its own operator==.
+        if(isArray() && o.isArray())
+        {
+            // Compare elements, not pointers: NaN is not equal to itself.
+            return asArray() == o.asArray();
+        }
         return _v == o._v;
     }
     bool operator!=(const Value& o) const
@@ -335,11 +356,11 @@ public:
                               [](std::int64_t i) { return std::to_string(i); },
                               [](double d) { return std::to_string(d); },
                               [](const std::string& s) { return "\"" + s + "\""; },
-                              [](const Array& a) {
+                              [](const ArrayStorage& a) {
                                   std::string s = "[";
-                                  for(std::size_t i = 0; i < a.size(); ++i)
+                                  for(std::size_t i = 0; i < a->size(); ++i)
                                   {
-                                      s += ((i != 0u) ? "," : "") + a[i].dump();
+                                      s += ((i != 0u) ? "," : "") + (*a)[i].dump();
                                   }
                                   return s + "]";
                               }},
@@ -353,6 +374,8 @@ public:
     }
 
 private:
+    using ArrayStorage = std::shared_ptr<const Array>;
+
     static constexpr double INT64_UPPER_EXCLUSIVE_AS_DOUBLE = 9223372036854775808.0;
 
     static bool doubleRepresentsInt64(double d)
@@ -499,7 +522,7 @@ private:
 
     // std::visit selects an alternative by type, so the order here does not
     // matter.
-    std::variant<std::nullptr_t, bool, std::int64_t, double, std::string, Array> _v;
+    std::variant<std::nullptr_t, bool, std::int64_t, double, std::string, ArrayStorage> _v;
 };
 } // namespace hipdnn_plugin_sdk::ingestor::jsonexpr
 

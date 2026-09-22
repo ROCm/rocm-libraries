@@ -279,6 +279,15 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 - The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<arch>/winners.jsonl`, not the `winners-<base-arch>-v<N>.jsonl` naming the original design specified: the engine level was added so two engines in one process do not share a shard, and the version moved from the file name into a directory so a version bump leaves a whole subtree to delete rather than sibling files to filter. The engine component is passed through `sanitizeForPath()`, which the original design rejected as inventing a naming scheme -- but engine names are provider-supplied and reach the filesystem directly, so a name carrying `:` (every current name does, e.g. `test:CrossInstance`) is not a legal Windows path component. `sanitizeForPath()`'s hash suffix makes a collision between two sanitized engine names improbable, not impossible (a 64-bit FNV-1a collision, ~2^-64 per pair), which is a fact worth knowing when eyeballing the engine directory name. The arch component is deliberately **not** sanitized: it is validated by `isPlainArchComponent()` and kept verbatim, so `gfx942` reads as `gfx942`.
 - Deleting the cache root at any time is safe on both Linux and Windows: `writeBackToShard()` recreates the directory and file and registers a fresh inode/handle on every write-back, so the registry keeps appending correctly after a mid-run delete. On Windows this relies on `FILE_SHARE_DELETE`, added so another process can delete a shard's parent directory while this process still holds the shard open; `TestLineStore.AShardsParentDirectoryCanBeRemovedWhileTheRegistryHoldsItOpen` confirms on Windows CI that NTFS reclaims the deleted directory's name while this process keeps running, even though the registry never closes that handle.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
+- Ingestor winner-cache keys include the architecture name with feature suffixes,
+  warp size, raw HIP multiprocessor count, and local data share (LDS) capacity in
+  bytes per block. HIP reports compute units (CUs) in CU mode or workgroup processors
+  (WGPs) in WGP mode. The cache uses that count without converting it to physical CUs.
+- Cached records need a nonempty architecture name, positive warp size and
+  multiprocessor count, and integer LDS capacity in `[0, INT64_MAX]`. Zero LDS
+  capacity is valid. The cache skips records with missing or invalid values, even
+  when version stamps match. A cache miss uses normal kernel ranking.
+  Benchmarking runs only when requested.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
 - A lookup alone can create a file: `openLineStore()` opens (creating it if absent) the shard
   file and writes its version-stamp line before the caller learns whether the key it is querying

@@ -22,10 +22,6 @@ namespace hipdnn_plugin_sdk::ingestor
 /// bytes, and the struct has unspecified padding.
 ///
 /// `DeviceId` is absent -- it identifies a slot, not a device.
-///
-/// Widening `DeviceProperties` does not extend the key on its own; a new field is
-/// hashed only once `fold()` below emits it. `TestDeviceKey.cpp` pins the field set
-/// with a structured binding that fails to compile when the struct grows.
 struct DeviceKey
 {
     DeviceKey() = default;
@@ -52,7 +48,8 @@ struct DeviceKey
     {
         return _hash == other._hash && _properties.gcnArchName == other._properties.gcnArchName
                && _properties.warpSize == other._properties.warpSize
-               && _properties.multiProcessorCount == other._properties.multiProcessorCount;
+               && _properties.multiProcessorCount == other._properties.multiProcessorCount
+               && _properties.ldsSize == other._properties.ldsSize;
     }
 
     bool operator!=(const DeviceKey& other) const
@@ -75,12 +72,14 @@ private:
     static uint64_t fold(const DeviceProperties& properties)
     {
         std::vector<uint8_t> stream;
-        stream.reserve(properties.gcnArchName.size() + sizeof(size_t) + 2 * sizeof(int));
+        stream.reserve(properties.gcnArchName.size() + sizeof(size_t) + 2 * sizeof(int)
+                       + sizeof(int64_t));
 
         appendTrivial(stream, properties.gcnArchName.size());
         stream.insert(stream.end(), properties.gcnArchName.begin(), properties.gcnArchName.end());
         appendTrivial(stream, properties.warpSize);
         appendTrivial(stream, properties.multiProcessorCount);
+        appendTrivial(stream, properties.ldsSize);
 
         return hipdnn_data_sdk::utilities::fnv1aHash(stream.data(), stream.size());
     }
