@@ -24,7 +24,9 @@ Each header is compiled per-kernel via force-include:
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
 and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
 pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue.
-Both use intrawave scheduling and a 16x16x128 warp tile.
+Both use intrawave scheduling. The default warp tile is 16x16x128;
+gfx1250 TDM V1/V2 also expose 32x32x128 and FP4 32x16x128. Native pipeline
+compilation determines instruction support; codegen does not distinguish A0/B0.
 """
 
 import argparse
@@ -56,6 +58,7 @@ for _p in (str(_GEMM_DIR), str(_MX_GEMM_DIR)):
 from gemm_validation_utils import (  # noqa: E402
     GEMM_MX_PIPELINES_BY_ARCH,
     is_tile_config_valid,
+    validate_gemm_mx_warp_tile_combination,
 )
 
 
@@ -85,7 +88,6 @@ ARCH_TRAITS = {
     "gfx1250": ("comp_tdm", "tdm"),
 }
 VALID_SCHEDULER = "intrawave"
-FIXED_WARP_TILE = (16, 16, 128)
 
 _REQUIRED_TILE_KEYS = (
     "tile_m",
@@ -141,12 +143,6 @@ def _validate(cfg: dict) -> None:
     if missing:
         raise ValueError(f"tile_config missing keys: {missing}")
 
-    warp_tile = (tc["warp_tile_m"], tc["warp_tile_n"], tc["warp_tile_k"])
-    if tuple(warp_tile) != FIXED_WARP_TILE:
-        raise ValueError(
-            f"mx_gemm warp tile is fixed at {FIXED_WARP_TILE}, got {tuple(warp_tile)}"
-        )
-
     for block, waves, warp in (
         ("tile_m", "warp_m", "warp_tile_m"),
         ("tile_n", "warp_n", "warp_tile_n"),
@@ -173,7 +169,14 @@ def _validate(cfg: dict) -> None:
         arch,
         KERNEL_NAME_PREFIX,
     ):
-        raise ValueError(f"unsupported MX tile configuration for {arch}/{pipeline}")
+        # Preserve the shared validator's architecture/dtype-specific diagnostic.
+        _, warp_error = validate_gemm_mx_warp_tile_combination(
+            tc["warp_tile_m"], tc["warp_tile_n"], tc["warp_tile_k"],
+            datatype, datatype, "fp16", arch,
+        )
+        raise ValueError(
+            warp_error or f"unsupported MX tile configuration for {arch}/{pipeline}"
+        )
 
 
 def _tile_config_from_cfg(cfg: dict) -> dict:

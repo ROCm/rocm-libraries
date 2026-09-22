@@ -482,6 +482,75 @@ class TestMxArchitectureKernels(unittest.TestCase):
                             code,
                         )
 
+    def test_gfx1250_tdm_optional_warp_tiles(self):
+        import contextlib
+        import io
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _generate, _make_builder, _trait_combo_from_cfg
+
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            for make_config, warp_n in (
+                (default_fp4_config, 16),
+                (default_fp4_config, 32),
+                (default_fp8_config, 32),
+            ):
+                cfg = replace(
+                    make_config("gfx1250", pipeline), warp_tile_m=32, warp_tile_n=warp_n
+                )
+                with self.subTest(pipeline=pipeline, dtype=cfg.datatype, warp_n=warp_n):
+                    self.assertTrue(cfg.is_valid())
+                    config = cfg.to_codegen_config()
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        name, code = _generate(config)
+                        with _make_builder(config) as builder:
+                            builder.config["tile_config"] = {
+                                key: {"values": [value]}
+                                for key, value in config["tile_config"].items()
+                            }
+                            builder.config["trait_config"] = {
+                                key: {"values": [config[key]]}
+                                for key in (
+                                    "pipeline", "epilogue", "scheduler",
+                                    "pad_m", "pad_n", "pad_k", "persistent",
+                                )
+                            }
+                            sampled = builder._get_sampled_kernel_list()
+                            self.assertEqual(len(sampled), 1)
+                            self.assertEqual(sampled[0]["tile_config"], config["tile_config"])
+                            native = builder._generate_kernel_instance(
+                                config["tile_config"], _trait_combo_from_cfg(config)
+                            )
+                    self.assertEqual((name, code), native)
+                    self.assertIn(f"_32x{warp_n}x128", name)
+                    self.assertIn("WarpTileM = 32;", code)
+                    self.assertIn(f"WarpTileN = {warp_n};", code)
+                    self.assertIn("MxGemmPipelineProblem", code)
+
+    def test_32x32_rejected_outside_gfx1250_tdm(self):
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _validate
+
+        for arch in ("gfx950", "gfx1250"):
+            for pipeline in ("comp_async", "comp_async_eight_waves", "weight_preshuffle"):
+                for make_config in (default_fp4_config, default_fp8_config):
+                    cfg = replace(
+                        make_config(arch, pipeline), warp_tile_m=32, warp_tile_n=32
+                    )
+                    with self.subTest(arch=arch, pipeline=pipeline, dtype=cfg.datatype):
+                        self.assertFalse(cfg.is_valid())
+                        diagnostic = "gfx950:.*16, 16, 128" if arch == "gfx950" else arch
+                        with self.assertRaisesRegex(ValueError, diagnostic):
+                            _validate(cfg.to_codegen_config())
+
+    def test_fp4_32x16_rejected_on_gfx950(self):
+        from dataclasses import replace
+        from unified_mx_gemm_codegen import _validate
+
+        cfg = replace(default_fp4_config("gfx950"), warp_tile_m=32)
+        self.assertFalse(cfg.is_valid())
+        with self.assertRaisesRegex(ValueError, "gfx950:.*16, 16, 128"):
+            _validate(cfg.to_codegen_config())
+
     def test_pipeline_architecture_and_tile_rejections(self):
         from dataclasses import replace
         from unified_mx_gemm_codegen import _validate

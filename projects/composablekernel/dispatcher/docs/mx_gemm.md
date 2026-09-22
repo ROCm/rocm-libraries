@@ -25,7 +25,12 @@ CK-Tile also has a separate `MXFlatmmKernel` family, including
 `WeightPreshufflePipelineAGmemBGmemCRegTDM`. Those MXFlatMM paths are not
 currently exposed by the old Tile Engine or this bridge.
 
-All use intrawave scheduling and a 16 × 16 × 128 warp tile. The default remains
+All use intrawave scheduling. The default warp tile is 16 × 16 × 128;
+gfx1250 TDM V1/V2 also expose 32 × 32 × 128 with either input type and
+32 × 16 × 128 for FP4. Set `warp_tile_m=32` and `warp_tile_n=32` or `16`
+in `MxGemmKernelConfig`, or in a custom Tile Engine JSON configuration.
+gfx950 and the three CShuffle pipelines retain the 16 × 16 × 128 warp tile.
+The default pipeline remains
 `comp_async` on gfx950 and `comp_tdm` on gfx1250. Select another pipeline with
 `default_fp8_config("gfx950", pipeline="weight_preshuffle")`,
 `default_fp4_config("gfx950", pipeline="comp_async_eight_waves")`, or
@@ -48,7 +53,22 @@ M and N may include partial tiles subject to the weight-preshuffle N alignment;
 the host pads their scale buffers before
 reshuffling. K must be divisible by both 128 and the selected block tile K.
 Split-K, persistent execution, and K padding are not supported by this bridge's
-gfx1250 path. The separate 32 × 32 packed-FP4 instruction is not selected.
+gfx1250 path.
+
+The FP8 32 × 32 warp tile is implemented by four 16 × 16 × 128 WMMA operations.
+The dedicated FP4 32 × 32 specialization uses two scaled 32 × 16 × 128 FP4
+operations. A 32 × 32 warp tile uses 32 FP32 accumulators per lane, compared
+with eight for 16 × 16. Total register use depends on the block shape and
+compiler; a larger warp tile does not guarantee higher throughput.
+
+FP4 32 × 16 × 128 is an opt-in configuration to request the native
+`v_wmma_scale_f32_32x16x128_f4` path. Tile Engine and the bridge do not
+distinguish gfx1250 A0/B0 revisions; instruction support is left to the native
+pipeline. The current C++ 32 × 16 trait has only the unscaled operation, and
+both TDM V1/V2 reject MX builds with a missing scaled `wmma_intrinsic`
+overload. Exposing the configuration does not imply a successful device
+build. It is excluded from the default and CI sweeps.
+All exposed warp tiles retain E8M0 scales per 32 K elements.
 
 The dispatcher generator reuses `MxGemmKernelBuilder` from Tile Engine. Both
 entry points use the same generated kernel, while their host code chooses the
@@ -110,8 +130,9 @@ python3 -m unittest discover -s dispatcher/tests -p test_mx_gemm_bridge.py -v
 ```
 
 The GPU suite builds all 16 gfx1250 TDM CI configurations, four larger TDM
-configurations whose LDS allocation exceeds 64 KiB, and six configurations
-covering async, eight-wave async, and weight preshuffle in FP4 and FP8. It tests
+configurations whose LDS allocation exceeds 64 KiB, six configurations covering
+async, eight-wave async, and weight preshuffle in FP4 and FP8, and four TDM
+configurations with the 32 × 32 × 128 warp tile: 30 configurations total. It tests
 partial tiles and one through five and eight K-loop iterations with two seeds,
 varies scales across rows and K blocks, and repeats eight-wave launches to catch
 buffer-reuse races. It checks K-tail/split-K rejection and weight-preshuffle N

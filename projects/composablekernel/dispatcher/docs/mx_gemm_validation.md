@@ -5,6 +5,49 @@ the dispatcher bridge and old Tile Engine. These results cover RCR, FP4 E2M1
 and FP8 OCP E4M3 inputs, E8M0 scales per 32 K elements, FP32 accumulation and
 FP16 output. Each pipeline uses its own native implementation.
 
+## Optional gfx1250 warp tiles
+
+The shared Tile Engine validator now exposes 32x32x128 for FP4/FP8 and
+32x16x128 for FP4 with TDM V1/V2. The bridge no longer imposes a second,
+fixed-16x16 gate. Defaults remain 16x16x128: all 128 gfx1250 default headers,
+344 gfx950 default headers and 16 gfx1250 CI headers are unchanged.
+
+The 32x32 matrix uses 2x2x1 warps and block tiles 64x64x128, 128x128x128,
+128x256x256, 256x128x256, 192x256x128 and 256x256x256, with both input types:
+
+| Pipeline | Configurations | Bridge builds | Tile Engine builds | Bridge reference comparisons | Tile Engine reference comparisons |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `comp_tdm` | 12 | 12/12 | 12/12 | 480/480 | 144/144 |
+| `comp_tdm_v2` | 12 | 12/12 | 12/12 | 480/480 | 144/144 |
+| **Total** | **24** | **24/24** | **24/24** | **960/960** | **288/288** |
+
+All **48 bridge rejection checks** passed. The matrix uses the independent
+CPU decoding, varied E8M0 scales, raw input codes, partial tiles, K-loop cases
+and repeated launches described below. Maximum normalized bridge error was
+**0.000949956244**, below the unchanged 0.05 threshold. All **5,662 recorded
+C++ source/header hashes** and **24 generated-header pairs** match the final
+source. These additions bring the three matrices to **216 configurations**
+and **11,136 numerical comparisons**.
+
+The updated checked-in GPU suite passed **492 comparisons across 30
+configurations**, covering all five pipelines and both input types. Four
+configurations exercise the optional 32x32 TDM warp tile.
+
+The latest focused CPU regression passed **225 tests and 965 subtests**,
+including **49 MX bridge tests**, with five local compiler-dependent skips.
+The new tests verify Tile Engine enumeration and exact bridge/Tile Engine
+header parity for both optional shapes, FP4-only selection for 32x16, and
+architecture/pipeline rejection. Ruff, full-tree clang-format **18.1.3**, ASCII,
+CRLF and whitespace checks passed. No C++ kernel source changed for this update.
+
+FP4 32x16 is exposed without Python A0/B0 revision checks, but it is not a
+working MX kernel in the current native stack. Both TDM V1/V2 build probes,
+through both host paths, fail with `no matching function for call to
+'wmma_intrinsic'`: the current 32x16 FP4 trait implements only the unscaled
+operation. Instruction support is left to native compilation as requested;
+this shape is excluded from default/CI sweeps and the GPU numerical suite.
+This compile failure does not establish A0/B0 hardware instruction support.
+
 ## LDS capacity review correction
 
 PR #12173 corrected the dispatcher's `ArchFilter` capacity table. MX GEMM uses
@@ -126,7 +169,7 @@ The gfx1250 tests used ROCm 10.0.0a20260729 / HIP 7.15.26306. gfx950 used
 ROCm 7.2.1. The gfx1250 runtime emitted rocjitsu translation warnings; these
 results make no performance claim.
 
-The 192 configurations across both matrices are a finite set, not every possible
+The 216 configurations across the three matrices are a finite set, not every possible
 native configuration. MXFlatMM, other layouts/output types, cluster launch,
 and a full rocm-libraries build are outside this validation. The gfx1250 bridge
 rejects split-K, K padding and persistent execution. Weight preshuffle requires

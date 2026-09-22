@@ -118,6 +118,13 @@ class TestMxGemmGpu(unittest.TestCase):
                 )
                 for pipeline in ("comp_tdm", "comp_tdm_v2")
             ]
+            configs += [
+                MxGemmKernelConfig(
+                    datatype=dtype, gpu_target=self.ARCH, pipeline=pipeline,
+                    warp_tile_m=32, warp_tile_n=32,
+                )
+                for pipeline in ("comp_tdm", "comp_tdm_v2")
+            ]
         so_paths = setup_multiple_mx_gemm_dispatchers(
             configs,
             output_dir=Path(build_dir.name),

@@ -271,8 +271,8 @@ GEMM_WARP_TILE_SUPPORTED_COMBINATIONS = {
 
 GEMM_MX_WARP_TILE_SUPPORTED_COMBINATIONS = {
     "gfx1250": {
-        "fp4_fp4_fp16": [[16, 16, 128]],
-        "fp8_fp8_fp16": [[16, 16, 128]],
+        "fp4_fp4_fp16": [[16, 16, 128], [32, 16, 128], [32, 32, 128]],
+        "fp8_fp8_fp16": [[16, 16, 128], [32, 32, 128]],
     },
     "gfx950": {
         "fp4_fp4_fp16": [[16, 16, 128]],
@@ -1367,6 +1367,8 @@ def validate_gemm_mx(
         if (warp_m, warp_n, warp_k) != (2, 2, 1):
             return False, "gfx1250 MX GEMM requires 2x2x1 warps"
         return True, ""
+    if (warp_tile_m, warp_tile_n) != (16, 16):
+        return False, "MX non-16x16 warp tiles currently require gfx1250 TDM V1/V2"
     if pipeline != "weight_preshuffle":
         # Both async MX epilogues pack the full output tile into LDS. Mirror
         # CShuffle's gfx950 FP16 row descriptor, including bank-word padding.
