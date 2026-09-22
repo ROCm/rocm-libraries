@@ -350,7 +350,7 @@ class TestBf16FlashGate(unittest.TestCase):
     def test_bf16_mask_limit_enabled_for_prefill(self):
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
-            self.assertTrue(au._enable_gfx942_flash_mask_limit(p))
+            self.assertTrue(au._enable_gfx942_flash_mask_limit(p, "gfx942"))
 
     def test_bf16_q_direct_enabled_for_d64(self):
         # q_direct is unblocked for bf16 D64.
@@ -366,13 +366,13 @@ class TestBf16FlashGate(unittest.TestCase):
                 max_seqlen_k=2048,
                 dtype="bf16",
             )
-            self.assertTrue(au._enable_gfx942_flash_q_direct(p))
+            self.assertTrue(au._enable_gfx942_flash_q_direct(p, "gfx942"))
 
     def test_bf16_q_direct_disabled_for_d128(self):
         # q_direct is D64-only.
         with _Gfx942Arch():
             p = self._bf16_problem(seqlen_q=2048, seqlen_k=2048)
-            self.assertFalse(au._enable_gfx942_flash_q_direct(p))
+            self.assertFalse(au._enable_gfx942_flash_q_direct(p, "gfx942"))
 
 
 class TestFp16FlashGate(unittest.TestCase):

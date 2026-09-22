@@ -241,14 +241,14 @@ def _reference_gfx942_generic(problem):
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size=_select_2d_tile_size(problem, "gfx942"),
         block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx942"),
-        use_mfma_32x32=_enable_mfma_32x32(problem),
+        use_mfma_32x32=_enable_mfma_32x32(problem, "gfx942"),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem, "gfx942"),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem, "gfx942"),
         use_transposed_scalar_state=scalar_state,
         use_transposed_mask_once=mask_opts,
         use_transposed_mask_limit=mask_opts,
         use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
-        use_early_v_schedule=_enable_early_v_schedule(problem),
+        use_early_v_schedule=_enable_early_v_schedule(problem, "gfx942"),
         use_fast_paged_kv_desc=(
             combo_no_sw
             and not problem.use_fp8
@@ -256,7 +256,7 @@ def _reference_gfx942_generic(problem):
             and problem.num_kv_heads == 8
             and _select_2d_tile_size(problem, "gfx942") == 64
         ),
-        use_register_pv=_enable_register_pv(problem),
+        use_register_pv=_enable_register_pv(problem, "gfx942"),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, "gfx942"),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
@@ -308,14 +308,14 @@ def _reference_gfx950_generic(problem):
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size=_select_2d_tile_size(problem, "gfx950"),
         block_m_per_warp=_select_2d_block_m_per_warp(problem, "gfx950"),
-        use_mfma_32x32=_enable_mfma_32x32(problem),
+        use_mfma_32x32=_enable_mfma_32x32(problem, "gfx950"),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem, "gfx950"),
-        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem, "gfx950"),
         use_transposed_scalar_state=scalar_state,
         use_transposed_mask_once=mask_opts,
         use_transposed_mask_limit=mask_opts,
         use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
-        use_early_v_schedule=_enable_early_v_schedule(problem),
+        use_early_v_schedule=_enable_early_v_schedule(problem, "gfx950"),
         use_fast_paged_kv_desc=(
             combo_no_sw
             and not problem.use_fp8
@@ -323,7 +323,7 @@ def _reference_gfx950_generic(problem):
             and problem.num_kv_heads == 8
             and _select_2d_tile_size(problem, "gfx950") == 64
         ),
-        use_register_pv=_enable_register_pv(problem),
+        use_register_pv=_enable_register_pv(problem, "gfx950"),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, "gfx950"),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
         **sched,

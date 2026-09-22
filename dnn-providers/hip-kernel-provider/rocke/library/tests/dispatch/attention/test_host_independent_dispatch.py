@@ -132,9 +132,17 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
         self.assertFalse(_enable_combo_2d(problem, "gfx1250"))
 
     def test_supports_tiled_uses_request_arch(self):
-        """supports_native_unified_attention_tiled uses the passed arch, not the device."""
+        """supports_native_unified_attention_tiled uses the passed arch, not the device.
+
+        Uses a gfx942-only shape (_enable_gfx942_fp16_flash fires for "gfx942"
+        but not "gfx950") to prove the arch parameter actually changes the result.
+        """
         from kernels.common.attention_unified import UnifiedAttentionProblem
 
+        # fp16 hd128 bs16 prefill: selects the gfx942 flash/ring path on gfx942
+        # (see _enable_gfx942_fp16_flash). On gfx950 the 16x16x16 tiled path is
+        # used instead -- the two arches pick distinct dispatch paths, so
+        # ok_gfx942 != ok_gfx950 for at least one of the paths.
         problem = UnifiedAttentionProblem(
             total_q=1024,
             num_seqs=2,
@@ -149,10 +157,21 @@ class TestArchFromRequestNotDevice(unittest.TestCase):
         with self._simulate_no_gpu():
             ok_gfx942, _ = supports_native_unified_attention_tiled(problem, "gfx942")
             ok_gfx950, _ = supports_native_unified_attention_tiled(problem, "gfx950")
-        # Both should support fp16 hd128 (not checking tiled specifically here,
-        # just that the call completes without touching _resolve_attention_arch).
+            ok_gfx1250, _ = supports_native_unified_attention_tiled(problem, "gfx1250")
+        # The selector must return concrete booleans (not raise).
         self.assertIsInstance(ok_gfx942, bool)
         self.assertIsInstance(ok_gfx950, bool)
+        self.assertIsInstance(ok_gfx1250, bool)
+        # At least two arches must differ: proves arch actually affects selection.
+        arch_results = {ok_gfx942, ok_gfx950, ok_gfx1250}
+        self.assertGreater(
+            len(arch_results),
+            1,
+            "supports_native_unified_attention_tiled returned identical results for "
+            "gfx942/gfx950/gfx1250 — arch parameter is not being used",
+        )
+        # gfx942 fp16 hd128 tiled is supported (flash/ring path).
+        self.assertTrue(ok_gfx942, "gfx942 fp16 hd128 tiled should be supported")
 
     def test_dispatch_for_non_host_arch_succeeds(self):
         """Dispatching for a non-host arch completes without touching the GPU."""

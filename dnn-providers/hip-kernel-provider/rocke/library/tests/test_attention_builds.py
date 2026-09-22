@@ -762,12 +762,12 @@ class TestAttentionHelpers(unittest.TestCase):
                 # bs32 was an uncaught ValueError at spec build; must now build.
                 p32 = _p(32, dtype)
                 self.assertEqual(p32.select_path(), "2d")
-                self.assertFalse(au._enable_k_single_buffer(p32))
+                self.assertFalse(au._enable_k_single_buffer(p32, "gfx950"))
                 spec32 = au._tiled_spec_from_problem(p32, "gfx950")  # must NOT raise
                 self.assertFalse(spec32.use_k_single_buffer)
                 # bs64 still satisfies block_m <= tile_size -> K-single stays on.
                 p64 = _p(64, dtype)
-                self.assertTrue(au._enable_k_single_buffer(p64))
+                self.assertTrue(au._enable_k_single_buffer(p64, "gfx950"))
                 spec64 = au._tiled_spec_from_problem(p64, "gfx950")
                 self.assertTrue(spec64.use_k_single_buffer)
 

@@ -472,7 +472,7 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(problem, arch or "gfx950")
+        rejected = _reject_fp8_format_arch_mismatch(problem, arch or _resolve_attention_arch())
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -624,7 +624,7 @@ def _cache_key(problem: UnifiedAttentionProblem) -> Tuple:
 
 
 def _enable_d128_small_tile(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """d128 occupancy lever: select T = block_size (small tile) + nw=2 for
     the single-batch d128 combo so the kernel drops from 1 -> 2 WG/CU.
@@ -675,7 +675,7 @@ def _enable_d128_small_tile(
 
 
 def _enable_k_single_buffer(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """d128 long-context lever: K single-buffer at T=64 (== 2*block_size).
 
@@ -784,7 +784,7 @@ def _d256_gfx950_spec_overrides() -> dict:
 
 
 def _enable_softmax_mfma_interleave(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """gfx950 single-batch d128 prefill: interleave the softmax VALU into the
     MFMA window via ``iglp_opt(1)`` and widen to num_warps=4.
@@ -1521,8 +1521,8 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
             )
             else None
         ),
-        _enable_gfx942_flash_q_direct(problem),
-        _enable_gfx942_flash_mask_limit(problem),
+        _enable_gfx942_flash_q_direct(problem, arch),
+        _enable_gfx942_flash_mask_limit(problem, arch),
         _enable_gfx942_flash_k_sliced_ring(problem, arch),
         # Ring pipeline depth (fp16 D128 uses depth-2, everything else depth-3):
         # depth-2 and depth-3 are distinct schedules (different slot map / LDS
@@ -1748,7 +1748,7 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
 
 
 def _enable_v_double_buffer(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """Enable the V[i+1] double-buffer prefetch on the single-batch combo.
 
@@ -1786,7 +1786,7 @@ def _enable_v_double_buffer(
 
 
 def _enable_sched_barrier(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """Enable the lever-3 sched_barrier fence (CK-Tile-derived).
 
@@ -1815,7 +1815,7 @@ def _enable_sched_barrier(
 
 
 def _enable_early_v_schedule(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """Enable the early-V issue schedule on the single-batch combo.
 
@@ -1834,7 +1834,7 @@ def _enable_early_v_schedule(
     return problem.head_size == 64 and problem.max_seqlen_q >= 2048
 
 
-def _enable_mfma_32x32(problem: UnifiedAttentionProblem, arch: str = "gfx950") -> bool:
+def _enable_mfma_32x32(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Enable the in-kernel 32x32x16 migration on shapes where it wins.
 
     The transposed 32x32 path (``use_mfma_32x32=True`` +
@@ -2286,7 +2286,7 @@ def _gfx942_flash_kv_cache_policy(problem: UnifiedAttentionProblem) -> str:
 
 
 def _enable_gfx942_flash_q_direct(
-    problem: UnifiedAttentionProblem, arch: str = "gfx942"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     return (
         _enable_gfx942_fp16_flash(problem, arch)
@@ -2295,7 +2295,7 @@ def _enable_gfx942_flash_q_direct(
 
 
 def _enable_gfx942_flash_mask_limit(
-    problem: UnifiedAttentionProblem, arch: str = "gfx942"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     if not (
         _enable_gfx942_fp16_flash(problem, arch)
@@ -2465,7 +2465,7 @@ def _enable_gfx942_l4(problem: UnifiedAttentionProblem, arch: str) -> bool:
 
 
 def _enable_transposed_half_local_pv(
-    problem: UnifiedAttentionProblem, arch: str = "gfx950"
+    problem: UnifiedAttentionProblem, arch: str
 ) -> bool:
     """Enable the half-local PV optimization for the transposed 32x32 path.
 
@@ -2483,7 +2483,7 @@ def _enable_transposed_half_local_pv(
     return _enable_transposed_qk_32x32(problem, arch)
 
 
-def _enable_register_pv(problem: UnifiedAttentionProblem, arch: str = "gfx950") -> bool:
+def _enable_register_pv(problem: UnifiedAttentionProblem, arch: str) -> bool:
     """Enable register-resident P for the existing 16x16x32 2D path.
 
     P73: enable for ``dtype == "bf16"`` when the gate conditions hold
@@ -3933,6 +3933,7 @@ def _attention_3d_workspace_specs(
 def attention_3d_workspace_nbytes(
     problem: UnifiedAttentionProblem,
     *,
+    arch: Optional[str] = None,
     device=None,
 ) -> int:
     """Return required split-KV 3D workspace bytes for `problem`.
@@ -3940,10 +3941,14 @@ def attention_3d_workspace_nbytes(
     Public helper for tests/bench harnesses that want to report scratch
     usage before dispatch. The `device` value only matters for the
     eventual allocation, not byte accounting.
+
+    Pass ``arch`` to compute workspace for a specific target arch without
+    reading the live GPU device (cross-arch planning, AOT dispatch). When
+    omitted, falls back to the live device arch via ``_resolve_attention_arch()``.
     """
     return WorkspacePool.required_nbytes(
         _attention_3d_workspace_specs(
-            problem, _num_segments(problem, _resolve_attention_arch()), device
+            problem, _num_segments(problem, arch or _resolve_attention_arch()), device
         )
     )
 
