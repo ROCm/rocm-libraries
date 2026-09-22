@@ -189,8 +189,6 @@ namespace rocsparse
                                                     T* __restrict__ output,
                                                     T pad_value)
     {
-        // The bound is block uniform, so the barrier inside the device function
-        // stays convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_transpose_and_pad_array_shared_device<BLOCKSIZE, BLOCKDIM>(
@@ -199,35 +197,6 @@ namespace rocsparse
                 load_pointer(input, bidy, stride),
                 load_pointer(output, bidy, m_pad),
                 pad_value);
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_transpose_and_pad_array_kernel(rocsparse_int m,
-                                             rocsparse_int m_pad,
-                                             rocsparse_int stride,
-                                             const T* __restrict__ input,
-                                             T* __restrict__ output,
-                                             T pad_value)
-    {
-        rocsparse_int tidx = hipThreadIdx_x;
-        rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
-
-        rocsparse_int gidx = tidx + BLOCKSIZE * bidx;
-
-        rocsparse_int i = (gidx * BLOCKDIM) % m_pad;
-        rocsparse_int j = (gidx * BLOCKDIM) / m_pad;
-        rocsparse_int k = i + j;
-
-        if(k < m)
-        {
-            output[gidx + bidy * m_pad] = input[k + bidy * stride];
-        }
-        else if(k < m_pad)
-        {
-            output[gidx + bidy * m_pad] = pad_value;
         }
     }
 
@@ -1028,8 +997,6 @@ namespace rocsparse
                                        T* __restrict__ w_scratch,
                                        T* __restrict__ v_scratch)
     {
-        // The bound is block uniform, so the barriers inside the device function stay
-        // convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_spike_block_level_device<BLOCKSIZE, BLOCKDIM>(
@@ -1154,8 +1121,6 @@ namespace rocsparse
                                             const T* __restrict__ w_scratch,
                                             const T* __restrict__ v_scratch)
     {
-        // The bound is block uniform, so the barriers inside the device function stay
-        // convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_solve_spike_grid_level_device<BLOCKSIZE>(
@@ -1258,8 +1223,6 @@ namespace rocsparse
                                            const T* __restrict__ v,
                                            const T* __restrict__ rhs_scratch)
     {
-        // The bound is block uniform, so the barriers inside the device function stay
-        // convergent.
         for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
         {
             rocsparse::gtsv_solve_spike_propagate_device<BLOCKSIZE, BLOCKDIM>(
