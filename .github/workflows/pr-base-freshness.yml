@@ -110,9 +110,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      # SECURITY: only fixed, trusted dependencies — never installed from the PR.
-      - name: Install deps
-        run: python -m pip install --upgrade pip requests
+      # SECURITY: no dependency install step, deliberately. This job holds
+      # `statuses: write`, so any package it pulls is code running at that
+      # privilege, and an unpinned `pip install` would make that a moving
+      # target on every run. The script uses only the standard library.
 
       - name: Evaluate base freshness
         env:

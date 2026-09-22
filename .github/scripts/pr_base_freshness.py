@@ -62,17 +62,30 @@ Usage:
 
 import argparse
 import concurrent.futures
+import http.client
+import json
 import os
 import sys
 import threading
 import time
-from dataclasses import dataclass
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 
-import requests
-
 API_ROOT = "https://api.github.com"
+
+# Deliberately no third-party HTTP client. This runs in a
+# `pull_request_target` job holding `statuses: write`, so anything it installs
+# is code running at that privilege, and an unpinned install is a standing
+# invitation. The workload is a handful of JSON GETs and POSTs, which the
+# standard library does perfectly well. The only cost is the lost connection
+# pooling, measured at about 1.3x per request against the real API, which over
+# a full sweep is seconds against a 20 minute timeout.
+TIMEOUT_SECONDS = 60
+USER_AGENT = "rocm-libraries-pr-base-freshness"
 
 # GitHub truncates commit status descriptions past this length.
 MAX_DESCRIPTION_LENGTH = 140
@@ -94,6 +107,12 @@ POSTS_PER_MINUTE = 70
 # unless all three can be paid for, so we never evaluate a PR and then fail to
 # publish the answer.
 REQUESTS_PER_PR = 3
+
+# Of those, the one spent in the serial write phase, long after the reads are
+# done. Its share of the claim has to outlive the assessment that took it;
+# releasing the whole claim when the reads finish would leave every write in
+# the sweep outside the reserve those reads were careful to respect.
+REQUESTS_PER_WRITE = 1
 
 # The dating call that turns "over the limit" into "6.0 days" is cosmetic, so
 # it is only spent when there is this much slack left. Under pressure the
@@ -152,14 +171,12 @@ class GitHub:
 
     def __init__(self, repo: str, token: str, reserve: int = 0) -> None:
         self.repo = repo
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            }
-        )
+        self._headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": USER_AGENT,
+        }
         self.reserve = reserve
         self.request_count = 0
         self.rate_limit_limit: Optional[int] = None
@@ -208,30 +225,54 @@ class GitHub:
         with self._lock:
             self._in_flight = max(0, self._in_flight - cost)
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _note_rate_limit(self, headers: Any) -> None:
+        """Records the allowance the server just reported, error or not."""
+        with self._lock:
+            self.rate_limit_limit = _header_int(headers, "x-ratelimit-limit")
+            self.rate_limit_remaining = _header_int(headers, "x-ratelimit-remaining")
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        params: Optional[dict] = None,
+        payload: Optional[dict] = None,
+    ) -> Any:
         with self._lock:
             self.request_count += 1
+        url = f"{API_ROOT}/repos/{self.repo}/{path}"
+        if params:
+            url = f"{url}?{urllib.parse.urlencode(params)}"
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = urllib.request.Request(
+            url, data=body, method=method, headers=dict(self._headers)
+        )
+        if body is not None:
+            request.add_header("Content-Type", "application/json")
         try:
-            response = self.session.request(
-                method, f"{API_ROOT}/repos/{self.repo}/{path}", timeout=60, **kwargs
-            )
-        except requests.RequestException as e:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+                self._note_rate_limit(response.headers)
+                raw = response.read()
+        except urllib.error.HTTPError as e:
+            # An error response still carries the rate-limit headers, and for
+            # a secondary limit it is the only place Retry-After shows up.
+            self._note_rate_limit(e.headers)
+            detail = e.read()[:200].decode("utf-8", "replace")
+            raise GitHubError(
+                f"{method} {path} -> {e.code} {detail}",
+                status_code=e.code,
+                retry_after=_header_int(e.headers, "retry-after"),
+            ) from e
+        except (OSError, http.client.HTTPException) as e:
             # A timeout or connection reset has to look like every other API
             # failure. Callers only handle GitHubError, and an exception that
             # escapes them aborts the whole run before any status is posted,
             # which is exactly what the fail-open contract forbids.
             raise GitHubError(f"{method} {path} -> {e}") from e
-        with self._lock:
-            self.rate_limit_limit = _header_int(response, "x-ratelimit-limit")
-            self.rate_limit_remaining = _header_int(response, "x-ratelimit-remaining")
-        if not response.ok:
-            raise GitHubError(
-                f"{method} {path} -> {response.status_code} {response.text[:200]}",
-                status_code=response.status_code,
-                retry_after=_header_int(response, "retry-after"),
-            )
+        if not raw:
+            return None
         try:
-            return response.json() if response.content else None
+            return json.loads(raw)
         except ValueError as e:
             raise GitHubError(f"{method} {path} -> malformed response body") from e
 
@@ -239,12 +280,13 @@ class GitHub:
         return self._request("GET", path, params=params)
 
     def post(self, path: str, payload: dict) -> Any:
-        return self._request("POST", path, json=payload)
+        return self._request("POST", path, payload=payload)
 
 
-def _header_int(response: "requests.Response", name: str) -> Optional[int]:
+def _header_int(headers: Any, name: str) -> Optional[int]:
+    """Reads an integer header, tolerating absent, empty and malformed ones."""
     try:
-        return int(response.headers[name])
+        return int(headers[name])
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -313,6 +355,11 @@ class Assessment:
 
     verdict: Verdict
     published: Optional[tuple[str, str]] = None
+    # Whether this assessment is still holding the request it claimed for its
+    # status write. That write happens in the serial phase after the whole
+    # pool has finished, so the claim outlives the assessment and the writer
+    # hands it back, whichever way the PR ends up going.
+    holds_write_claim: bool = False
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -332,30 +379,26 @@ def find_cutoff_commit(
 
 
 def evaluate(gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str) -> Verdict:
-    """Decides whether ``pr`` contains the cutoff commit."""
-    # Only start a PR we can also publish the answer for, and hold the claim
-    # so the other workers cannot admit themselves against the same headroom.
-    if not gh.claim_budget(REQUESTS_PER_PR):
-        return Verdict(fresh=True, skipped=True)
-    try:
-        return _evaluate(gh, pr, base_branch, cutoff_sha)
-    finally:
-        gh.release_budget(REQUESTS_PER_PR)
+    """Decides whether ``pr`` contains the cutoff commit.
 
+    Assumes the caller has already claimed the budget for this PR; see
+    ``assess``, which is the only thing that should be calling it.
 
-def _evaluate(
-    gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str
-) -> Verdict:
+    Never raises. A verdict this cannot reach comes back as an error verdict,
+    because an exception escaping here travels out through ``pool.map`` and
+    ends the run before anything at all is published.
+    """
     try:
         comparison = gh.get(f"compare/{cutoff_sha}...{pr.head_sha}", per_page=1)
-    except GitHubError as e:
+        # "identical" or "ahead" means the cutoff is an ancestor of the head.
+        fresh = comparison["status"] in ("identical", "ahead")
+        missing = comparison["behind_by"]
+    except (GitHubError, KeyError, TypeError) as e:
         return Verdict(fresh=True, error=str(e))
 
-    # "identical" or "ahead" means the cutoff is an ancestor of the PR head.
-    if comparison["status"] in ("identical", "ahead"):
+    if fresh:
         return Verdict(fresh=True, missing_commits=0)
 
-    missing = comparison["behind_by"]
     oldest_missing = None
     if gh.has_budget(COSMETIC_SLACK):
         try:
@@ -379,15 +422,19 @@ def _evaluate(
 def current_status(
     gh: GitHub, head_sha: str, context: str
 ) -> Optional[tuple[str, str]]:
-    """Returns the ``(state, description)`` already published for ``context``."""
+    """Returns the ``(state, description)`` already published for ``context``.
+
+    Never raises, for the same reason ``evaluate`` does not. Anything it
+    cannot read is reported as nothing published, which costs a redundant
+    write rather than a missing status.
+    """
     try:
         combined = gh.get(f"commits/{head_sha}/status", per_page=100)
-    except GitHubError:
-        # Unknown, so assume nothing is published and let the post go ahead.
+        for status in combined["statuses"]:
+            if status.get("context") == context:
+                return status.get("state", ""), status.get("description") or ""
+    except (GitHubError, KeyError, TypeError):
         return None
-    for status in combined.get("statuses", []):
-        if status.get("context") == context:
-            return status.get("state", ""), status.get("description") or ""
     return None
 
 
@@ -398,11 +445,23 @@ def assess(
     cutoff_sha: str,
     context: str,
 ) -> Assessment:
-    """Evaluates ``pr`` and reads back whatever status it already carries."""
+    """Evaluates ``pr`` and reads back whatever status it already carries.
+
+    Admission happens here, for the whole PR at once: the compare, the
+    read-back, and the write that comes later. Claiming all three up front is
+    what makes "never evaluate a PR we cannot publish for" true, and holding
+    the claim rather than merely checking it is what stops the other workers
+    admitting themselves against headroom this one already spoke for.
+
+    The read share is given back as it is spent. The write share is not, since
+    the write has not happened yet; the caller releases that one.
+    """
+    if not gh.claim_budget(REQUESTS_PER_PR):
+        return Assessment(Verdict(fresh=True, skipped=True))
     verdict = evaluate(gh, pr, base_branch, cutoff_sha)
-    if verdict.skipped:
-        return Assessment(verdict)
-    return Assessment(verdict, current_status(gh, pr.head_sha, context))
+    published = current_status(gh, pr.head_sha, context)
+    gh.release_budget(REQUESTS_PER_PR - REQUESTS_PER_WRITE)
+    return Assessment(verdict, published, holds_write_claim=True)
 
 
 def describe(
@@ -486,9 +545,23 @@ def publish_status(
     return last
 
 
+@dataclass
+class Listing:
+    """The PRs a sweep will look at, and why the list stops where it does.
+
+    Both truncations leave real PRs with no status at all from the run, which
+    under enforcement is a block, so neither is allowed to be inferred from a
+    suspiciously round count.
+    """
+
+    prs: list[PullRequest] = field(default_factory=list)
+    truncated_at_limit: bool = False
+    truncated_by_reserve: bool = False
+
+
 def list_open_prs(
     gh: GitHub, base_branch: str, include_drafts: bool, limit: int
-) -> list[PullRequest]:
+) -> Listing:
     """Lists open PRs targeting ``base_branch``, least recent activity first.
 
     Ordering matters when the reserve cuts a sweep short. The PR-event trigger
@@ -496,10 +569,20 @@ def list_open_prs(
     has an accurate one. The PRs whose statuses are most likely to be wrong are
     the ones nothing has touched in days, so they go first and the freshly
     evaluated ones are what gets dropped.
+
+    Paging deliberately runs one PR past ``limit`` so that hitting the cap can
+    be reported rather than guessed at: a list that stops exactly on the cap
+    looks identical whether or not there was more behind it.
+
+    Listing is only a handful of requests, but the reserve is a promise about
+    the shared allowance as a whole, so the pages are checked against it too
+    rather than treated as overhead that does not count.
     """
     prs: list[PullRequest] = []
     page = 1
-    while len(prs) < limit:
+    while len(prs) <= limit:
+        if not gh.has_budget(1):
+            return Listing(prs[:limit], truncated_by_reserve=True)
         batch = gh.get(
             "pulls",
             state="open",
@@ -516,7 +599,7 @@ def list_open_prs(
                 continue
             prs.append(PullRequest(item["number"], item["head"]["sha"], item["draft"]))
         page += 1
-    return prs[:limit]
+    return Listing(prs[:limit], truncated_at_limit=len(prs) > limit)
 
 
 def fetch_pr(gh: GitHub, number: int) -> PullRequest:
@@ -620,14 +703,30 @@ def main() -> int:
             # Single-PR mode evaluates drafts too, so the status is already
             # present if the PR is marked ready and merged before the next
             # scheduled run.
-            prs = [fetch_pr(gh, args.pr)]
+            listing = Listing([fetch_pr(gh, args.pr)])
         else:
-            prs = list_open_prs(
+            listing = list_open_prs(
                 gh, args.base_branch, include_drafts=False, limit=args.max_prs
             )
     except GitHubError as e:
         print(f"::warning::could not list pull requests, skipping run: {e}")
         return 0
+    prs = listing.prs
+
+    if listing.truncated_at_limit:
+        # Same class of problem as the reserve below: PRs that exist, target
+        # develop, and get nothing from this run. Raising --max-prs is the
+        # fix, and it has to happen before enforcement rather than after.
+        print(
+            f"::warning::more open PRs target {args.base_branch} than the "
+            f"--max-prs cap of {args.max_prs}; the remainder were not "
+            f"evaluated and have no status from this run"
+        )
+    if listing.truncated_by_reserve:
+        print(
+            "::warning::rate-limit reserve reached while listing pull "
+            "requests; this sweep is working from a partial list"
+        )
 
     target_url = None
     server, run_id = os.environ.get("GITHUB_SERVER_URL"), os.environ.get(
@@ -661,23 +760,34 @@ def main() -> int:
         print(f"PR #{pr.number}: {state} - {description}")
         if not verdict.fresh and not verdict.error:
             stale.append((pr, verdict))
-        if args.dry_run:
-            continue
-        if assessment.published == (state, description):
-            # Re-posting an identical status would change nothing on the PR
-            # and spend from the much tighter write budget. In steady state
-            # this is most of the queue, since a fresh PR's description is a
-            # constant string.
-            unchanged += 1
-            continue
-        payload = {"state": state, "context": args.context, "description": description}
-        if target_url:
-            payload["target_url"] = target_url
-        error = publish_status(gh, pacer, retries, pr.head_sha, payload)
-        if error:
-            unpublished.append((pr, error))
-        else:
-            posted += 1
+        try:
+            if args.dry_run:
+                continue
+            if assessment.published == (state, description):
+                # Re-posting an identical status would change nothing on the
+                # PR and spend from the much tighter write budget. In steady
+                # state this is most of the queue, since a fresh PR's
+                # description is a constant string.
+                unchanged += 1
+                continue
+            payload = {
+                "state": state,
+                "context": args.context,
+                "description": description,
+            }
+            if target_url:
+                payload["target_url"] = target_url
+            error = publish_status(gh, pacer, retries, pr.head_sha, payload)
+            if error:
+                unpublished.append((pr, error))
+            else:
+                posted += 1
+        finally:
+            # The claim this PR has been holding since it was admitted. It is
+            # given back here whether the write happened, was unnecessary, or
+            # failed, so the headroom does not leak away over a long sweep.
+            if assessment.holds_write_claim:
+                gh.release_budget(REQUESTS_PER_WRITE)
 
     if unpublished:
         # An annotation rather than a non-zero exit, because the run did its
@@ -711,6 +821,19 @@ def main() -> int:
         + (f" {len(skipped)} skipped for rate-limit reserve." if skipped else ""),
         "",
     ]
+    if listing.truncated_at_limit:
+        summary += [
+            f"**The queue is longer than the `--max-prs` cap of "
+            f"{args.max_prs}.** The PRs past the cap were not evaluated and "
+            f"have no status from this run.",
+            "",
+        ]
+    if listing.truncated_by_reserve:
+        summary += [
+            "**Listing stopped at the rate-limit reserve.** This sweep ran "
+            "against a partial list of open PRs.",
+            "",
+        ]
     if stale:
         # The age belongs here rather than in the status description: this
         # table is rebuilt every run anyway, so a drifting number costs

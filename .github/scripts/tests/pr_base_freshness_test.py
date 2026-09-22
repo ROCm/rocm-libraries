@@ -2,15 +2,17 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import email
+import io
 import os
 import sys
 import threading
 import time
 import unittest
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-import requests
+from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import pr_base_freshness as pbf
@@ -34,6 +36,9 @@ class FakeGitHub:
         self._failures = failures
         self._budget = budget
         self.paths: list[str] = []
+        # Claimed but not yet released, so a test can assert who is holding
+        # what after a call returns.
+        self.outstanding = 0
 
     def has_budget(self, cost: int = 1) -> bool:
         return self._budget >= cost
@@ -42,10 +47,12 @@ class FakeGitHub:
         if self._budget < cost:
             return False
         self._budget -= cost
+        self.outstanding += cost
         return True
 
     def release_budget(self, cost: int) -> None:
         self._budget += cost
+        self.outstanding -= cost
 
     def get(self, path: str, **params):
         self.paths.append(path)
@@ -104,26 +111,68 @@ class EvaluateTest(unittest.TestCase):
         self.assertTrue(verdict.fresh)
         self.assertIsNotNone(verdict.error)
 
+    def test_a_malformed_body_fails_open_rather_than_raising(self):
+        # An exception here would leave pool.map with nothing to return and
+        # end the run before a single status was posted.
+        for body in ({"unexpected": "shape"}, None, []):
+            gh = FakeGitHub({f"compare/{CUTOFF}": body})
+            verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
+            self.assertTrue(verdict.fresh)
+            self.assertIsNotNone(verdict.error)
+
 
 class BudgetTest(unittest.TestCase):
     def test_pr_is_not_started_without_budget_to_publish_it(self):
         gh = FakeGitHub({f"compare/{CUTOFF}": comparison("ahead")}, budget=1)
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
-        self.assertTrue(verdict.skipped)
+        assessment = pbf.assess(gh, PR, "develop", CUTOFF, "base-freshness")
+        self.assertTrue(assessment.verdict.skipped)
+        self.assertFalse(assessment.holds_write_claim)
         self.assertEqual(gh.paths, [])
 
     def test_cosmetic_dating_call_is_dropped_first(self):
-        # Enough budget to answer the question, not enough for the day count.
+        # Exactly enough to answer the question and publish it, which leaves
+        # nothing for the day count.
         gh = FakeGitHub(
-            {f"compare/{CUTOFF}": comparison("diverged", behind_by=7)},
+            {
+                f"compare/{CUTOFF}": comparison("diverged", behind_by=7),
+                "commits/": {"statuses": []},
+            },
             budget=pbf.REQUESTS_PER_PR,
         )
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
+        assessment = pbf.assess(gh, PR, "develop", CUTOFF, "base-freshness")
+        verdict = assessment.verdict
         self.assertFalse(verdict.skipped)
         self.assertFalse(verdict.fresh)
         self.assertEqual(verdict.missing_commits, 7)
         self.assertIsNone(verdict.oldest_missing)
-        self.assertEqual(len(gh.paths), 1)
+
+    def test_the_write_claim_outlives_the_assessment(self):
+        # The write happens in the serial phase, long after this returns, so
+        # releasing its share here would leave every post in the sweep
+        # outside the reserve the reads were careful to respect.
+        gh = FakeGitHub(
+            {
+                f"compare/{CUTOFF}": comparison("ahead"),
+                "commits/": {"statuses": []},
+            },
+            budget=100,
+        )
+        assessment = pbf.assess(gh, PR, "develop", CUTOFF, "base-freshness")
+        self.assertTrue(assessment.holds_write_claim)
+        self.assertEqual(gh.outstanding, pbf.REQUESTS_PER_WRITE)
+        gh.release_budget(pbf.REQUESTS_PER_WRITE)
+        self.assertEqual(gh.outstanding, 0)
+
+    def test_the_read_back_is_inside_the_claim(self):
+        # Budget for the compare alone must not admit the PR, since the
+        # read-back would then be spent outside the reserve.
+        gh = FakeGitHub(
+            {f"compare/{CUTOFF}": comparison("ahead")},
+            budget=pbf.REQUESTS_PER_PR - 1,
+        )
+        assessment = pbf.assess(gh, PR, "develop", CUTOFF, "base-freshness")
+        self.assertTrue(assessment.verdict.skipped)
+        self.assertEqual(gh.paths, [])
 
     def test_reserve_governs_has_budget(self):
         gh = pbf.GitHub("o/r", "t", reserve=200)
@@ -164,20 +213,42 @@ class BudgetTest(unittest.TestCase):
             t.join()
         self.assertEqual(sum(admitted), 10)
 
-    def test_request_exceptions_become_github_errors(self):
+    def test_transport_failures_become_github_errors(self):
         gh = pbf.GitHub("o/r", "t")
 
-        class ExplodingSession:
-            def request(self, *args, **kwargs):
-                raise requests.ConnectTimeout("connection timed out")
+        def explode(request, timeout=None):
+            raise TimeoutError("connection timed out")
 
-        gh.session = ExplodingSession()
-        # A bare RequestException here would escape evaluate() and abort the
-        # whole run, so it must arrive as GitHubError with the cause kept.
-        with self.assertRaises(pbf.GitHubError) as caught:
-            gh.get("compare/a...b")
-        self.assertIsInstance(caught.exception.__cause__, requests.RequestException)
+        # A bare transport exception here would escape evaluate() and abort
+        # the whole run, so it must arrive as GitHubError with the cause kept.
+        with mock.patch.object(pbf.urllib.request, "urlopen", explode):
+            with self.assertRaises(pbf.GitHubError) as caught:
+                gh.get("compare/a...b")
+        self.assertIsInstance(caught.exception.__cause__, OSError)
         self.assertEqual(gh.request_count, 1)
+
+    def test_http_errors_keep_the_status_code_and_retry_after(self):
+        # publish_status decides whether to retry from these two, so losing
+        # them in translation would turn a retryable 403 into a hard failure.
+        gh = pbf.GitHub("o/r", "t")
+        headers = email.message_from_string(
+            "Retry-After: 30\nx-ratelimit-limit: 5000\nx-ratelimit-remaining: 12"
+        )
+
+        def explode(request, timeout=None):
+            raise urllib.error.HTTPError(
+                "https://example/x", 403, "Forbidden", headers, io.BytesIO(b"slow down")
+            )
+
+        with mock.patch.object(pbf.urllib.request, "urlopen", explode):
+            with self.assertRaises(pbf.GitHubError) as caught:
+                gh.post("statuses/abc", {})
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(caught.exception.retry_after, 30)
+        self.assertTrue(caught.exception.retryable)
+        self.assertIn("slow down", str(caught.exception))
+        # An error response still reports the allowance, so it must be read.
+        self.assertEqual(gh.rate_limit_remaining, 12)
 
 
 class PublishedStatusTest(unittest.TestCase):
@@ -210,6 +281,11 @@ class PublishedStatusTest(unittest.TestCase):
         gh = FakeGitHub({}, failures=("commits/",))
         self.assertIsNone(pbf.current_status(gh, "deadbeef", "base-freshness"))
 
+    def test_a_malformed_body_reads_as_nothing_published(self):
+        for body in ({"unexpected": "shape"}, None, []):
+            gh = FakeGitHub({"commits/": body})
+            self.assertIsNone(pbf.current_status(gh, "deadbeef", "base-freshness"))
+
     def test_skipped_pr_is_not_read_back(self):
         gh = FakeGitHub({}, budget=0)
         assessment = pbf.assess(gh, PR, "develop", CUTOFF, "base-freshness")
@@ -238,6 +314,71 @@ class PacerTest(unittest.TestCase):
         start = time.monotonic()
         pacer.wait()
         self.assertLess(time.monotonic() - start, 0.1)
+
+
+class PagingFakeGitHub:
+    """Serves ``pulls`` pages from a list, counting requests spent."""
+
+    def __init__(self, numbers: list[int], budget: int = 10_000):
+        self._numbers = numbers
+        self._budget = budget
+        self.pages_fetched = 0
+
+    def has_budget(self, cost: int = 1) -> bool:
+        return self._budget >= cost
+
+    def get(self, path: str, **params):
+        assert path == "pulls", path
+        self.pages_fetched += 1
+        self._budget -= 1
+        per_page, page = params["per_page"], params["page"]
+        window = self._numbers[(page - 1) * per_page : page * per_page]
+        return [
+            {"number": n, "head": {"sha": f"sha{n}"}, "draft": False} for n in window
+        ]
+
+
+class ListOpenPRsTest(unittest.TestCase):
+    def test_a_short_queue_is_not_reported_as_truncated(self):
+        gh = PagingFakeGitHub(list(range(150)))
+        listing = pbf.list_open_prs(gh, "develop", include_drafts=False, limit=1000)
+        self.assertEqual(len(listing.prs), 150)
+        self.assertFalse(listing.truncated_at_limit)
+        self.assertFalse(listing.truncated_by_reserve)
+
+    def test_a_queue_longer_than_the_cap_is_reported(self):
+        # The PRs past the cap get no status at all, so a sweep that stops on
+        # a round number has to say whether it was the cap or the queue.
+        gh = PagingFakeGitHub(list(range(250)))
+        listing = pbf.list_open_prs(gh, "develop", include_drafts=False, limit=120)
+        self.assertEqual(len(listing.prs), 120)
+        self.assertTrue(listing.truncated_at_limit)
+
+    def test_a_queue_exactly_at_the_cap_is_not_truncated(self):
+        # The boundary the old loop could not tell apart: stopping because
+        # the queue ran out looks the same as stopping because of the cap.
+        gh = PagingFakeGitHub(list(range(120)))
+        listing = pbf.list_open_prs(gh, "develop", include_drafts=False, limit=120)
+        self.assertEqual(len(listing.prs), 120)
+        self.assertFalse(listing.truncated_at_limit)
+
+    def test_listing_stops_at_the_reserve(self):
+        # Discovery is only a few requests, but the reserve is a promise
+        # about the whole allowance, not just the per-PR part of it.
+        gh = PagingFakeGitHub(list(range(500)), budget=2)
+        listing = pbf.list_open_prs(gh, "develop", include_drafts=False, limit=1000)
+        self.assertTrue(listing.truncated_by_reserve)
+        self.assertEqual(gh.pages_fetched, 2)
+        self.assertEqual(len(listing.prs), 200)
+
+    def test_drafts_are_filtered_without_being_counted_against_the_cap(self):
+        gh = PagingFakeGitHub(list(range(10)))
+        gh.get = lambda path, **p: [
+            {"number": n, "head": {"sha": f"sha{n}"}, "draft": n % 2 == 0}
+            for n in ([] if p["page"] > 1 else range(10))
+        ]
+        listing = pbf.list_open_prs(gh, "develop", include_drafts=False, limit=1000)
+        self.assertEqual([pr.number for pr in listing.prs], [1, 3, 5, 7, 9])
 
 
 class RetryableErrorTest(unittest.TestCase):
