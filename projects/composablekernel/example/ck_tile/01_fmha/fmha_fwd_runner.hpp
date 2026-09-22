@@ -747,7 +747,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
        q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
        qscale.type != quant_scale_enum::mx)
     {
-        if(qscale.type == quant_scale_enum::perhead)
+        // sink is one logit per logical Q head, but packing folds those heads into seqlen and
+        // the kernel indexes sink_ptr by its own head index, which is the K head. Alibi and the
+        // perhead descale are per-Q-head for the same reason and are excluded as well.
+        if(init_sink_value != 0)
+        {
+            std::cerr << "pack_gqa is not supported with a sink. ignoring the 'pack_gqa' option"
+                      << std::endl;
+        }
+        else if(qscale.type == quant_scale_enum::perhead)
         {
             std::cerr << "pack_gqa is not supported with the perhead quant scale. ignoring the "
                          "'pack_gqa' option"
