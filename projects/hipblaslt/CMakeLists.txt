@@ -66,6 +66,11 @@ option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
+option(HIPBLASLT_ENABLE_JIT_GEMM "Build experimental single-solution JIT GEMM API and numeric sample." OFF)
+if(HIPBLASLT_ENABLE_JIT_GEMM AND (NOT HIPBLASLT_ENABLE_HOST OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_JIT_GEMM requires the host library and Linux")
+endif()
+
 option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
 
 if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_HOST)

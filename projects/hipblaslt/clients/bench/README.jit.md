@@ -1,0 +1,88 @@
+# Generate and benchmark one GEMM solution
+
+`hipblaslt-bench --jit-gemm` uses Origami to rank a small set of kernel parameter
+recipes. `Tensile.JitGemm` validates them in ranked order, fills the remaining
+parameters from Tensile defaults, and uses the shared `Tensile.SingleSolution`
+builder to compile the first valid solution. It then passes that solution through the
+normal hipBLASLt algorithm support, workspace, and execution paths. Generation
+finishes before correctness checks, warmup, and timing. This experimental feature
+targets functional coverage; the predicted solution is not guaranteed to be the
+fastest available kernel.
+
+Build the local host library and benchmark with
+`HIPBLASLT_ENABLE_JIT_GEMM=ON` and `HIPBLASLT_ENABLE_CLIENT=ON`. The benchmark uses
+the Python interpreter, Tensile source, local rocisa module, compiler, and offload
+bundler selected by CMake. No project installation or prebuilt device library is
+needed for JIT execution. The option remains visible in feature-disabled builds
+and reports that JIT must be enabled when used.
+
+```bash
+hipblaslt-bench --jit-gemm -m 256 -n 128 -k 512 \
+  -r f16_r --compute_type f32_r --alpha 1.25 --beta 0.5 \
+  --verify --iters 3 --cold_iters 1 --print_kernel_info
+```
+
+The benchmark defaults to FP16 matrices with FP32 computation and the C API.
+FP32 matrices are selected with `-r f32_r`. `--api_method mix` and
+`--api_method cpp` use the existing extension preparation and execution paths.
+The initial prediction scope is gfx950, plain non-grouped GEMM with matching
+FP16 or FP32 matrix types, FP32 computation, N/T transposes, and strided batches. Other
+epilogues, datatype combinations, and unsupported descriptor attributes fail
+explicitly. Leading dimensions, strides, alpha, beta, and transpose requests are
+carried by the normal descriptors.
+
+JIT selects exactly one generated algorithm. It cannot be combined with
+`--algo_method all`, `--algo_method index`, an explicit `--solution_index`,
+`--requested_solution` other than 1, nonzero `--splitk` or `--wgm`, datafile mode,
+grouped GEMM, pointer-array batches, or `HIPBLASLT_TUNING_FILE`. No tuning file is
+created when rejecting a JIT/tuning conflict.
+
+Artifacts are retained in a fresh directory under the system temporary directory.
+Use `--jit-output-dir /path/to/artifact-parent` to choose its parent. The recipe,
+manifest, and prediction summary are printed to stderr; benchmark CSV remains on
+stdout. The manifest records the Origami ranking, earlier rejected candidates,
+selected parameters, defaults, actual problem and hardware, and generated code
+objects. Only `MatrixInstruction`, `DepthU`, and `NonTemporalA/B` are selected
+by prediction. Other tuning fields start at
+`Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters`; the
+manifest distinguishes those defaults from values derived by Tensile. Invalid
+recipes are skipped before compilation; compiler or resource failures stop the
+request. The initial automatic recipes use `GlobalSplitU: 1` and `StreamK: 0`.
+Generated algorithms and their modules remain registered until process exit;
+there is no eviction. They are valid only on their original device in that
+process and have no reusable prebuilt solution index. Replay the YAML rather
+than persisting the opaque algorithm value.
+
+For an exact recipe, keep using the standalone
+[`hipblaslt-jit-gemm` sample](../samples/29_hipblaslt_jit_gemm/README.md) or
+`python -m Tensile.SingleSolution`. Explicit YAML bypasses prediction. The same
+bundle representation retains any helpers required by that solution.
+
+The optional `HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
+`HIPBLASLT_JIT_PYTHONPATH`, `HIPBLASLT_JIT_CXX`, and
+`HIPBLASLT_JIT_OFFLOAD_BUNDLER` environment variables override build-configured
+tool paths for local development. `HIPBLASLT_JIT_PYTHONPATH` contains additional
+Python import directories separated by colons. These are source/build paths;
+the experimental API header is not installed.
+
+The benchmark's current `--verify` reports numerical errors without necessarily
+returning a failing exit status. Check `norm_error` and the reported `atol`/`rtol`;
+`failed` denotes an allclose failure. The accompanying `test_jit_gemm.py` checks
+those CSV fields, retained candidate provenance, local linkage, one generation
+across repeated runs, compilation outside timing, and option conflicts. Run it
+with the existing configured virtual environment and local build:
+
+```bash
+.venv/bin/python projects/hipblaslt/clients/bench/test_jit_gemm.py \
+  --bench projects/hipblaslt/build/release/clients/hipblaslt-bench \
+  --build-root projects/hipblaslt/build/release \
+  --python .venv/bin/python --output /tmp/hipblaslt-jit-checks
+```
+
+Use a fresh `--output` path for each run. `--case half-c-default` limits numerical
+coverage to a smoke case; `--negative-only` checks parser conflicts without GPU
+execution. After rebuilding the same build with JIT disabled, `--feature-off`
+checks the unavailable-feature diagnostic. The full numerical matrix includes
+FP16/FP32, all three API modes, odd dimensions, transpose variants, and a padded
+strided batch on gfx950. The two-second compiler-delay check is a timing-boundary
+test, not a kernel performance requirement.

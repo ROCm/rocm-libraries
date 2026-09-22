@@ -27,6 +27,9 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+#include "hipblaslt-jit-gemm-tag.hpp"
+#endif
 #include <Debug.hpp>
 #include <algorithm>
 #include <hip/hip_runtime.h>
@@ -1484,6 +1487,11 @@ namespace hipblaslt_ext
 
     int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo)
     {
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+        if(experimental::detail::isJitAlgo(
+               *reinterpret_cast<const rocblaslt_matmul_algo*>(&algo)))
+            return -1;
+#endif
         int* algo_ptr = (int*)algo.data;
 
         return *algo_ptr;

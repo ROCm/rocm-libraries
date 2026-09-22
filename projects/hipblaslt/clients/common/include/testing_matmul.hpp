@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -2031,7 +2032,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             stride_a[i] = do_batched[i] ? arg.stride_a[i] : lda[i] * A_col[i];
             stride_b[i] = do_batched[i] ? arg.stride_b[i] : ldb[i] * B_col[i];
             stride_c[i] = do_batched[i] ? arg.stride_c[i] : ldc[i] * N[i];
-            stride_d[i] = do_batched[i] ? arg.stride_c[i] : ldd[i] * N[i];
+            stride_d[i] = do_batched[i] ? arg.stride_d[i] : ldd[i] * N[i];
             stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
         }
         else
@@ -3297,14 +3298,21 @@ void testing_matmul_with_bias(const Arguments& arg,
             //// copy data from CPU to device end
             if(size_D_copy[i])
             {
+                // BLAS computes in place in D_gold, so seed beta*C using D's
+                // layout even when C and D have different leading dimensions or strides.
+                const size_t elementBytes = realDataTypeSize(To);
+                std::memset(hD_gold[i].buf(), 0, hD_gold[i].getNumBytes());
+                hipblaslt_copy_matrix(hC[i].as<char>(),
+                                       hD_gold[i].as<char>(),
+                                       M[i] * elementBytes,
+                                       N[i],
+                                       ldc[i] * elementBytes,
+                                       ldd[i] * elementBytes,
+                                       stride_c[i] * elementBytes,
+                                       stride_d[i] * elementBytes,
+                                       num_batches[i]);
                 if(epilogue_on[i])
-                {
-                    transform_buf(hC[i], hD_gold_epl[i], To, Talpha);
-                }
-                else
-                {
-                    copy_buf(hC[i], hD_gold[i], To);
-                }
+                    transform_buf(hD_gold[i], hD_gold_epl[i], To, Talpha);
             }
             if(epilogue_on[i])
             {
@@ -4118,6 +4126,35 @@ void testing_matmul_with_bias(const Arguments& arg,
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+    // Preparation runs once during selection, before reference, warmup, or timing.
+    auto generate_jit_algo = [&]() {
+        hipblasLtMatmulHeuristicResult_t result{};
+        hipblaslt_ext::experimental::JitGemmInfo info;
+        const auto options = hipblaslt_bench_options::jit_generate_options();
+        const auto status = hipblaslt_ext::experimental::getJitGemmAlgo(
+            handle,
+            matmul[0][0],
+            alpha_in[0],
+            dA[0].buf(), matA[0],
+            dB[0].buf(), matB[0],
+            &h_beta[0],
+            dC[0].buf(), matC[0],
+            (*dDp)[0].buf(), matD[0],
+            options,
+            max_workspace_size,
+            result,
+            info);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            throw std::invalid_argument("JIT preparation failed: " + info.error
+                                        + " (artifacts: " + options.outputPath + ")");
+        hipblaslt_cerr << "JIT recipe: " << info.configPath << std::endl;
+        hipblaslt_cerr << "JIT manifest: " << info.manifestPath << std::endl;
+        hipblaslt_cerr << "JIT prediction: " << info.prediction << std::endl;
+        return result;
+    };
+#endif
+
     if(arg.algo_method == 2)
     {
         heuristicResult.clear();
@@ -4730,8 +4767,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                             ((*dDp)[0].as<char>()) + b * size_D[0] * realDataTypeSize(To),
                             matD[0]));
                 }
-                CHECK_HIPBLASLT_ERROR(
-                    gemmVec[0].algoGetHeuristic(requestAlgoCount, gemmPref, tmpAlgo));
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+                if(hipblaslt_bench_options::jit_gemm())
+                    tmpAlgo.push_back(generate_jit_algo());
+                else
+#endif
+                {
+                    CHECK_HIPBLASLT_ERROR(
+                        gemmVec[0].algoGetHeuristic(requestAlgoCount, gemmPref, tmpAlgo));
+                }
                 heuristicResult.clear();
                 heuristicTuningIndex.clear();
                 for(int j = 0; j < tmpAlgo.size(); j++)
@@ -4759,17 +4803,27 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
 
                 std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo(requestAlgoCount);
-                EXPECT_HIPBLAS_STATUS((hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                                       matmul[0][0],
-                                                                       matA[0],
-                                                                       matB[0],
-                                                                       matC[0],
-                                                                       matD[0],
-                                                                       pref,
-                                                                       requestAlgoCount,
-                                                                       tmpAlgo.data(),
-                                                                       &returnedAlgoCount)),
-                                      HIPBLAS_STATUS_SUCCESS);
+#ifdef HIPBLASLT_ENABLE_JIT_GEMM
+                if(hipblaslt_bench_options::jit_gemm())
+                {
+                    tmpAlgo[0] = generate_jit_algo();
+                    returnedAlgoCount = 1;
+                }
+                else
+#endif
+                {
+                    EXPECT_HIPBLAS_STATUS((hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                                           matmul[0][0],
+                                                                           matA[0],
+                                                                           matB[0],
+                                                                           matC[0],
+                                                                           matD[0],
+                                                                           pref,
+                                                                           requestAlgoCount,
+                                                                           tmpAlgo.data(),
+                                                                           &returnedAlgoCount)),
+                                          HIPBLAS_STATUS_SUCCESS);
+                }
                 heuristicResult.clear();
                 for(int32_t i = 0; i < returnedAlgoCount; i++)
                 {

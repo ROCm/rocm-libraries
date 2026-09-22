@@ -109,6 +109,7 @@ def buildSourceCodeObjectFiles(
         kernelPath: Union[Path, str],
         cmdlineArchs: List[str],
         outputArchNames: Optional[Dict[str, str]]=None,
+        useCache: bool=True,
     ) -> List[str]:
     """Compiles a HIP source code file into a code object file.
 
@@ -123,13 +124,14 @@ def buildSourceCodeObjectFiles(
         outputArchNames: base arch -> output subtree; a stepping routes into
             destRoot/<stepping>/ keeping the compiler-target filename. Identity
             for ordinary.
+        useCache: reuse previously built helper objects when enabled.
 
     Returns:
         List of paths to the created code objects.
     """
     start = timer()
     outArchNames = outputArchNames or {}
-    cache = HelperKernelCache()
+    cache = HelperKernelCache() if useCache else None
 
     with timing_context("python_kernel_build_src_co.setup"):
         tmpObjDir = Path(ensurePath(tmpObjDir))
@@ -144,7 +146,7 @@ def buildSourceCodeObjectFiles(
     # On a hit we skip compilation/unbundling entirely and return early.
     # The cache restore routes each file to its per-base subdir under destRoot.
     with timing_context("python_kernel_build_src_co.cache_check"):
-        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot, outArchNames)
+        hit, coPaths = cache.restore(kernelPath, includeDir, cmdlineArchs, compiler, destRoot, outArchNames) if cache else (False, [])
     if hit:
         stop = timer()
         print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
@@ -175,7 +177,8 @@ def buildSourceCodeObjectFiles(
     # Save the freshly built code objects into the cache so subsequent
     # builds with the same inputs can skip recompilation.
     with timing_context("python_kernel_build_src_co.cache_populate"):
-        cache.store(coPaths, outArchNames)
+        if cache:
+            cache.store(coPaths, outArchNames)
 
     stop = timer()
     print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")

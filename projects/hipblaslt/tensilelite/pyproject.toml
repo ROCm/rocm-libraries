@@ -94,6 +94,7 @@ dependencies = [
 [project.scripts]
 Tensile = "Tensile.Tensile:main"
 TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
+TensileGenerateSingleSolution = "Tensile.SingleSolution:main"
 TensileVerifyStinkyElfText = "Tensile.verify_stinky_comment_vs_elf_text:main"
 TensileGetPath = "Tensile:PrintTensileRoot"
 TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"

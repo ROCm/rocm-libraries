@@ -67,9 +67,9 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         Executable version
     """
     executable = validateToolchain(executable)
-    args = f'"{executable}" "{versionFlag}"'
+    args = [str(executable), versionFlag]
     try:
-        output = run(args, stdout=PIPE, shell=True).stdout.decode().strip()
+        output = run(args, stdout=PIPE, check=True).stdout.decode().strip()
         match = search(regex, output, IGNORECASE)
         if match:
             result = match.group(1)

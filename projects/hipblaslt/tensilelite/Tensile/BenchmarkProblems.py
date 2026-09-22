@@ -195,7 +195,7 @@ def _resetCacheDir(cacheDir):
 
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap,
-                              rocIsaData=None):
+                              rocIsaData=None, *, strictErrors=False):
     """Helper function to generate a single solution from a permutation.
 
     This function handles standard permutations without group_ parameter expansion.
@@ -216,10 +216,12 @@ def _generate_single_solution(perm, problemType, constantParams, assembler, debu
     solution.update(constantParams)
     solution.update(perm)
 
-    return _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap)
+    return _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap,
+                                        strictErrors=strictErrors)
 
 
-def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, silent=False):
+def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, silent=False,
+                                 *, strictErrors=False):
     """Build and validate a solution from a parameterized dict.
     
     This is the core logic used by both fork and GA solution generation.
@@ -260,6 +262,8 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
         # Re-raise so this is not swallowed by the generic except below.
         raise
     except Exception as e:
+        if strictErrors:
+            raise
         if not silent:
             print(f"Error processing permutation: {e}")
     return None

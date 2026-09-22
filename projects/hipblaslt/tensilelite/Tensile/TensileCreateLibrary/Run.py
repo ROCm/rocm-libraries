@@ -436,7 +436,8 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     return path, isa, wfsize, minResult
 
 def writeHelpers(
-    outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H
+    outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H,
+    strict: bool=False,
 ):
     kernelSourceFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_CPP)
     kernelHeaderFilename = os.path.join(os.path.normcase(outputPath), KERNEL_HELPER_FILENAME_H)
@@ -456,6 +457,8 @@ def writeHelpers(
             kernelName = ko.getKernelName()
             (err, src) = ko.getSourceFileString()
 
+            if err and strict:
+                raise RuntimeError(f"Failed to generate helper {kernelName}: error {err}")
             kernelSourceFile.write(src)
             if err:
                 print("*** warning: invalid kernel#%u" % kernelName)
@@ -478,6 +481,8 @@ def writeSolutionsAndKernels(
     generateSourcesAndExit: bool=False,
     compress: bool=True,
     removeTemporaries: bool=True,
+    strict: bool=False,
+    assemblyTarget: Optional[str]=None,
 ):
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
@@ -544,10 +549,14 @@ def writeSolutionsAndKernels(
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
         try:
-            asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+            asmToolchain.assembler(assemblyTarget or isaToGfx(isa), wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
+            if strict:
+                raise
             printWarning(f"Failed to assemble {p}: {e}")
             return
+        if strict and (not o_path.is_file() or o_path.stat().st_size == 0):
+            raise RuntimeError(f"Assembler did not produce a nonempty object: {o_path}")
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(p, o_path, p.stem)
         if removeTemporaries:
@@ -572,8 +581,11 @@ def writeSolutionsAndKernels(
                         if getKernelFileBase(splitGSU, s.getKernels()[0]) not in failedBases]
         asmKernels[:] = [k for k in asmKernels if k.get("BaseName", None) not in failedBases]
 
-    with timing_context("python_kernel_write_helpers"):
-        writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+    buildHelpers = bool(kernelHelperObjs) or not strict
+    if buildHelpers:
+        with timing_context("python_kernel_write_helpers"):
+            helperOptions = {"strict": True} if strict else {}
+            writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H, **helperOptions)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
 
     if globalParameters["PythonProfile"]:
@@ -596,16 +608,30 @@ def writeSolutionsAndKernels(
                 compress,
             )
 
-        with timing_context("python_kernel_build_src_co"):
-            buildSourceCodeObjectFiles(
-                srcToolchain.compiler,
-                srcToolchain.bundler,
-                destRoot,
-                objectTmpPath,
-                outputPath,
-                srcKernelFile,
-                cmdlineArchs,
-            )
+        if buildHelpers:
+            with timing_context("python_kernel_build_src_co"):
+                sourceOptions = {"useCache": False} if strict else {}
+                helperCodeObjects = buildSourceCodeObjectFiles(
+                    srcToolchain.compiler,
+                    srcToolchain.bundler,
+                    destRoot,
+                    objectTmpPath,
+                    outputPath,
+                    srcKernelFile,
+                    cmdlineArchs,
+                    **sourceOptions,
+                )
+                if strict:
+                    if not helperCodeObjects:
+                        raise RuntimeError("Helper build produced no code objects")
+                    codeObjectFiles += helperCodeObjects
+
+        if strict:
+            if not solutions or not codeObjectFiles:
+                raise RuntimeError("Kernel build produced no valid solutions or code objects")
+            for path in codeObjectFiles:
+                if not Path(path).is_file() or Path(path).stat().st_size == 0:
+                    raise RuntimeError(f"Linker did not produce a nonempty code object: {path}")
 
     if removeTemporaries and not generateSourcesAndExit:
         buildTmp = outputPath / "build_tmp"

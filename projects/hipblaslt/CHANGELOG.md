@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Experimental runtime GEMM generation through `HIPBLASLT_ENABLE_JIT_GEMM` (default `OFF`), a build-only algorithm selection API, and `hipblaslt-bench --jit-gemm`. Origami ranks plain gfx950 FP16/FP32 recipes; generated solutions execute through the normal C and extension paths. `Tensile.SingleSolution` also generates one complete solution from explicit YAML without benchmarking.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.
@@ -35,6 +36,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed `hipblaslt-bench` using C's batch stride for D and computing its CPU reference with the wrong layout when C and D have different leading dimensions or batch strides.
 * Fixed incorrect results (`beta` applied twice) for `AdaptiveGemmGSUA` GEMMs that resolve to MultipleBuffer accumulation with a non-zero `beta`.
 * Fixed out-of-bounds tensor loads in the single-wave TDM kernel for edge (non-tile-aligned) `M`/`N` sizes on gfx1250, which could produce incorrect results.
 * Fixed a Stream-K flag-region overrun on dynamic-queue paths (`StreamK=4` and the SK4 sub-path of `StreamK=5`) where a grid scaled via `TENSILE_STREAMK_GRID_MULTIPLIER` could write past its own region.
