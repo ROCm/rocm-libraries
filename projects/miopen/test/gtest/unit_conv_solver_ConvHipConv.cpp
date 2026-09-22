@@ -40,6 +40,21 @@ auto GetConvSmokeTestCases(miopenDataType_t datatype,
     };
 }
 
+// Dense wgrad shapes whose channel count leaves a partial tile, which is where the
+// direct_wgrad epilogue's channel guard splits a wave. The defect these cover (ROCM-31508)
+// appeared only on non-default perf configs, which GetTestParams()'s Tunable(5) sweeps, and
+// only on channel counts that are not a multiple of the 32-wide wave tile.
+auto GetConvWrwDenseTestCases(miopenDataType_t datatype, miopenTensorLayout_t layout)
+{
+    return std::vector<TestCase>{
+        // clang-format off
+        TestCase{{datatype, layout, {1,  40,  8, 32}}, {datatype, layout, { 70,  40, 5, 5}}, datatype, {{0, 0}, {1, 1}, {1, 1}}}, // C(40)
+        TestCase{{datatype, layout, {9, 100, 12, 32}}, {datatype, layout, {128, 100, 5, 5}}, datatype, {{2, 2}, {1, 1}, {1, 1}}}, // C(100)
+        TestCase{{datatype, layout, {6, 162,  8,  8}}, {datatype, layout, {128, 162, 5, 5}}, datatype, {{2, 2}, {1, 1}, {1, 1}}}, // C(162)
+        // clang-format on
+    };
+}
+
 const auto& GetTestParams()
 {
     static const auto params = [] {
@@ -308,5 +323,33 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvSmokeTestCases(
                                               miopenFloat, miopenTensorNCHW, true))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeDenseWrw,
+    GPU_UnitTestConvSolverConvHipConvWrwNhwc_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvWrwDenseTestCases(miopenHalf, miopenTensorNHWC))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeDenseWrw,
+    GPU_UnitTestConvSolverConvHipConvWrwNchw_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvWrwDenseTestCases(miopenHalf, miopenTensorNCHW))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeDenseWrw,
+                         GPU_UnitTestConvSolverConvHipConvWrwNhwc_BFP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvWrwDenseTestCases(
+                                              miopenBFloat16, miopenTensorNHWC))));
+
+INSTANTIATE_TEST_SUITE_P(SmokeDenseWrw,
+                         GPU_UnitTestConvSolverConvHipConvWrwNchw_BFP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvWrwDenseTestCases(
+                                              miopenBFloat16, miopenTensorNCHW))));
 
 #endif // MIOPEN_USE_HIPCONV
