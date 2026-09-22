@@ -543,6 +543,13 @@ private:
 
     double GetDefaultTolerance() const
     {
+        constexpr bool is_fp8  = std::is_same<Tgpu, float8_fnuz>::value;
+        constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
+
+        // hip_f8 is one byte, so fp8/bf8 would otherwise take the int8 constant below.
+        if(is_fp8 || is_bfp8)
+            return is_bfp8 ? 2.0e-3 : 1.0e-3;
+
         // Computation error of fp16 is ~2^13 (=8192) bigger than
         // the one of fp32 because mantissa is shorter by 13 bits.
         auto tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 1) ? 1.5e-6 : 8.2e-3;
@@ -550,9 +557,7 @@ private:
         // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
         if(std::is_same<Tgpu, bfloat16>::value)
             tolerance *= 8.0;
-        constexpr bool is_fp8  = std::is_same<Tgpu, float8_fnuz>::value;
-        constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
-        if(is_bfp8 || is_fp8 || TensorsCasted())
+        if(TensorsCasted())
             tolerance *= 37.0;
 
         { // tf32 has same mantissa length as fp16
@@ -562,6 +567,17 @@ private:
                 tolerance = 8.2e-3;
         }
         return tolerance;
+    }
+
+    // The GPU stores its result as fp8/bf8 but the CPU reference keeps it in float, so round the
+    // reference the same way before comparing. Otherwise the GPU's rounding looks like an error.
+    void RoundRefToGpuStorage(std::vector<Tref>& v) const
+    {
+        if constexpr(std::is_same_v<Tgpu, float8_fnuz> || std::is_same_v<Tgpu, bfloat8_fnuz>)
+        {
+            for(auto& x : v)
+                x = static_cast<Tgpu>(x);
+        }
     }
 
     enum class Direction
@@ -1758,10 +1774,10 @@ bool ConvDriver<Tgpu, Tref>::UseGPUReference()
 {
     if(!env::disabled(MIOPEN_DRIVER_USE_GPU_REFERENCE))
     {
+        // GpuConvReference does not support fp8/bf8, so those types use the CPU reference.
         if((miopen_type<Tref>{} == miopenFloat &&
             (miopen_type<Tgpu>{} == miopenFloat || miopen_type<Tgpu>{} == miopenHalf ||
-             miopen_type<Tgpu>{} == miopenBFloat16 || miopen_type<Tgpu>{} == miopenFloat8_fnuz ||
-             miopen_type<Tgpu>{} == miopenBFloat8_fnuz)) ||
+             miopen_type<Tgpu>{} == miopenBFloat16)) ||
            (miopen_type<Tref>{} == miopenInt32 && miopen_type<Tgpu>{} == miopenInt8))
             return true;
         else
@@ -2625,6 +2641,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
 
         if(inflags.GetValueInt("bias") != 0)
         {
+            RoundRefToGpuStorage(outhost.data);
             cpu_bias_forward(outhost, b.GetTensor());
         }
     }
@@ -2641,6 +2658,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
 
         if(inflags.GetValueInt("bias") != 0)
         {
+            RoundRefToGpuStorage(outhost.data);
             outhost.par_for_each([&](auto out_n_id, auto out_k_id, auto... out_spatial_id_pack) {
                 outhost(out_n_id, out_k_id, out_spatial_id_pack...) =
                     double(outhost(out_n_id, out_k_id, out_spatial_id_pack...)) +
@@ -2648,6 +2666,11 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
             });
         }
     }
+
+    // The GPU applies bias as a separate kernel, so it rounds twice: once when the conv kernel
+    // stores its output and once when the bias kernel stores its own. The rounds above match
+    // the first; this one matches the second, and is a no-op when bias is off.
+    RoundRefToGpuStorage(outhost.data);
 
     if(inflags.GetValueInt("dump_output"))
     {
@@ -3940,6 +3963,8 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWeightsCPU()
                                         miopen::deref(convDesc).GetGroupCount());
     }
 
+    RoundRefToGpuStorage(dwei_host.data);
+
     if(inflags.GetValueInt("dump_output"))
     {
         dumpBufferToFile<Tref>(
@@ -3976,6 +4001,11 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataCPU()
                                       miopen::deref(convDesc).GetGroupCount());
     }
 
+    // Needed for the transpose branch above, which stores through tensor<Tref>. The non-
+    // transpose branch already quantizes, since cpu_convolution_backward_data deduces its
+    // store type from dout (tensor<Tgpu>); rounding is idempotent, so this covers both.
+    RoundRefToGpuStorage(din_host.data);
+
     if(inflags.GetValueInt("dump_output"))
     {
         dumpBufferToFile<Tref>("dump_bwd_din_cpu.bin", din_host.data.data(), din_host.data.size());
@@ -3989,6 +4019,8 @@ template <typename Tgpu, typename Tref>
 int ConvDriver<Tgpu, Tref>::RunBackwardBiasCPU()
 {
     cpu_bias_backward_data(dout.GetTensor(), db_host);
+
+    RoundRefToGpuStorage(db_host.data);
 
     if(inflags.GetValueInt("dump_output"))
     {
