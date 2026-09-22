@@ -61,6 +61,7 @@ namespace TensileLite
                     lib.masterSolutions      = ctx->solutions;
                     lib.solutionsGuard       = ctx->solutionsGuard;
                     lib.loadedFiles          = ctx->loadedFiles;
+                    lib.solutionSources      = ctx->solutionSources;
                     lib.indexLoadedLibraries = static_cast<
                         std::map<std::string,
                                  std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*>(
