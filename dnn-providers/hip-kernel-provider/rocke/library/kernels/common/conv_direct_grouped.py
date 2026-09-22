@@ -2942,7 +2942,6 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                     b_rsrc,
                                     b.mul(elem_off_rk, c_half_bytes),
                                     c0,
-                                    io_type,
                                     LOAD_VEC // 2,
                                 )
                                 if FOLD_K32:
