@@ -1,5 +1,8 @@
 # Packaged gfx950 forward convolution
 
+Read the [brief summary](SUMMARY.md) for purpose and benefits, or follow
+[the setup and demo guide](SETUP.md) to use this branch on another machine.
+
 `hipkernel:Gfx950ConvFwd` runs rocKE's implicit-GEMM forward convolution through
 the HIP Kernel Provider. It accepts plain 2D cross-correlation with dense
 channels-last storage, groups=1, FP16 or BF16 storage, FP32 accumulation, and
@@ -38,6 +41,7 @@ export AMD_COMGR_CACHE_DIR="$CONV_BUILD/comgr-cache"
 
 cmake --preset hip-kernel-provider -B "$CONV_BUILD" \
     -DCMAKE_INSTALL_PREFIX="$CONV_INSTALL" \
+    -DCMAKE_PROJECT_INCLUDE="$PWD/dnn-providers/hip-kernel-provider/docs/gfx950_conv_fwd/kpack_dependencies.cmake" \
     '-DROCM_LIBS_ENABLE_COMPONENTS=hipdnn;hipdnn-python;hipdnn-integration-tests;hip-kernel-provider' \
     -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
     -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
@@ -48,6 +52,8 @@ cmake --preset hip-kernel-provider -B "$CONV_BUILD" \
     -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="<rocm-kpack Python source directory>" \
     '-DCMAKE_PREFIX_PATH=<rocm-kpack install prefix>;/opt/rocm' \
     -DGPU_TARGETS=gfx950 -DAMDGPU_TARGETS=gfx950 \
+    -DENABLE_CLANG_FORMAT=OFF \
+    -DENABLE_CLANG_TIDY=OFF \
     -DENABLE_ASM_SDPA_ENGINE=OFF
 cmake --build "$CONV_BUILD" --parallel
 cmake --install "$CONV_BUILD"
@@ -136,6 +142,10 @@ and convolution attributes from that request, verifies the exact packaged UUID,
 and records the source provenance. Custom requests use an independent PyTorch
 FP32 GPU reference on the quantized inputs with TF32 disabled; the small smoke
 tests use a CPU reference. The probe checks both results before timing.
+
+A request with both packaged `tile_k` choices also supports `--mode auto` and
+then `--mode reuse` in another process with the same cache; omit `--tile-k`.
+The 51 headline requests each have only tile 64 and use forced mode.
 
 Default timing measures HIP graph replay with GPU events. Use
 `--timing-mode events` to include ordinary Python submission gaps in a separate
