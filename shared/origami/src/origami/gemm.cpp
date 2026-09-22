@@ -1738,7 +1738,9 @@ double compute_tile_latency(const problem_t& problem,
   }
 
   // DS write stall
-  bool has_dtl = config.backend.direct_to_lds_a && config.backend.direct_to_lds_b; 
+  bool direct_to_lds_a = std::get<tensile_params_t>(config.backend).direct_to_lds_a;
+  bool direct_to_lds_b = std::get<tensile_params_t>(config.backend).direct_to_lds_b;
+  bool has_dtl = direct_to_lds_a && direct_to_lds_b;
   double L_ds_wr = has_dtl ? 0.0 : heuristic.ds_wr_stall_factor * L_mem; // α ~ 0.08–0.15 from SQTT
 
   double L_tile_single =
