@@ -102,7 +102,7 @@ def make_fp8_input(num_rows: int, num_cols: int, seed: int = 42) -> np.ndarray:
 def generate_mfma_pairs(tileInfoA, tileInfoB, writer):
     """Enumerate MFMA pairs in (mma1 × mma0) order and allocate 4-AGPR accumulators.
 
-    Matches the loop order in emitMfmaCode:
+    Matches the scheduler's MFMA loop order:
       for mmak in range(localMMATileGrid[1]):   # K-loop (=1 for FP8 DU128)
         for mma1 in range(localMMATileGrid[0]): # N tiles (B dimension)
           for mma0 in range(localMMATileGrid[0]): # M tiles (A dimension)
@@ -118,7 +118,7 @@ def generate_mfma_pairs(tileInfoA, tileInfoB, writer):
     for mmak in range(tileInfoA.localMMATileGrid[1]):
         for mma1 in range(tileInfoB.localMMATileGrid[0]):
             for mma0 in range(tileInfoA.localMMATileGrid[0]):
-                # A tile index (matches emitMfmaCode's atileId formula)
+                # A tile index (matches the scheduler's atileId formula)
                 lrGridA0 = tileInfoA.localMMATileGrid[0] // lrSubtileShapeA[0]
                 numPerA  = int(lrSubtileShapeA[0]) * int(lrSubtileShapeA[1])
                 aSId0    = mma0 // lrSubtileShapeA[0]
