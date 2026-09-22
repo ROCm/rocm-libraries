@@ -209,9 +209,9 @@ rocm_install(
 # Install the executable using the standard install command instead of rocm_install
 # since we want to put it in a custom DESTINATION (rocm_install does not support
 # the DESTINATION option for TARGETS).
-set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+set_property(TARGET hipcub_generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
 install(
-    TARGETS generate_resource_spec
+    TARGETS hipcub_generate_resource_spec
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
 )
