@@ -284,7 +284,8 @@ rocm_export_targets(
 
 if(ROCBLAS_ENABLE_TENSILE)
   rocm_install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library/"
-               DESTINATION "${ROCBLAS_TENSILE_INSTALL_DIR}" COMPONENT runtime)
+               DESTINATION "${ROCBLAS_TENSILE_INSTALL_DIR}" COMPONENT runtime
+               PATTERN "*gfx000*" EXCLUDE)
 endif()
 
 if(ROCBLAS_ENABLE_CLIENT)

@@ -35,7 +35,7 @@ CMake ``GPU_TARGETS`` (offload architectures) are always used when compiling the
 ``ROCBLAS_TENSILE_ARCH_SKIPLIST`` removes selected targets from Tensile library generation only
 (default ``gfx1250``). If every ``GPU_TARGETS`` entry is skipped, Tensile is still enabled and
 builds its stub ``gfx000`` target when the selected logic tree provides one (HIP fallback or
-``gfx000`` YAML). A skipped architecture still receives rocBLAS device
+``gfx000`` YAML). Stub ``gfx000`` catalogs are not packaged. A skipped architecture still receives rocBLAS device
 code. When Tensile is present, GEMM on a skipped architecture uses hipBLASLt or
 source kernels instead of aborting Tensile initialization.
 
