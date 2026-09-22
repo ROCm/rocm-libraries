@@ -10,10 +10,32 @@ matrix atom / unsupported path).
 | gfx942 | CDNA3 | MFMA | 64 | 16x16x16, 32x32x8 |
 | gfx950 | CDNA4 | MFMA | 64 | 16x16x16, 16x16x32, 32x32x8, 32x32x16 |
 | gfx1151 | RDNA3.5 | WMMA | 32 | 16x16x16 (`wmma_f32_16x16x16_{f16,bf16}`) |
+| gfx1250 | CDNA family, GFX12 model | WMMA | 32 | **16x16x32** only (`wmma_gfx1250_f32_16x16x32_{f16,bf16}`) |
 
 Matrix-core instances below were exercised with a portable f16 **16x16x16**
 atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`,
 `wave_size=32`). Generated 2026-05-29; cross-compiled on a gfx1151 box.
+
+**gfx1250 has no column below**, because the sweep that generated those tables
+predates it and re-running it per instance is a separate exercise — an empty
+column would read as "unsupported" rather than "not yet measured". What *is*
+established: `universal_gemm` builds, verifies bit-exact against the fp32
+reference, and is registered in the fp16 RCR dispatcher on gfx1250 (two
+candidates, `dispatch/gemm/fp16_rcr.py`). gfx1250 cannot reuse the portable
+16x16x16 atom used for the other columns — its only fp16 atom is **16x16x32** —
+so each instance needs its own pass. See
+[`optimization/arch/gfx1250.md`](../../../dsl_docs/optimization/arch/gfx1250.md)
+for the per-arch facts and the known defects.
+
+`universal_gemm` additionally carries two gfx1250-only tensor-DMA traits,
+`tdm_lds` and `tdm_prefetch` (Python engine only — no C++ instance mirror, same
+as `wmma_async_lds`, so the byte-identity gate is unaffected as long as no
+parity family enables them). **Enable them together**: `tdm_lds` alone measures
+slightly *slower* than the cooperative copy, because the descriptor is issued
+and immediately waited on and so overlaps nothing. With `tdm_prefetch` the
+transfer hides under the WMMA work and the pair is the fastest configuration
+measured on this part. Ratios, geometry findings, and the LDS-budget correction
+are in `arch/gfx1250.md` §21.10.
 
 ---
 
