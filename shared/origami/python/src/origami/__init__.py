@@ -7,7 +7,13 @@ Origami: Analytical GEMM Solution Selection
 Python bindings for the Origami C++ library.
 """
 
+import os
+import sys
+
 try:
+    # Place lookup scope of the symbols in shared object ahead of global scope
+    sys.setdlopenflags(os.RTLD_NOW | os.RTLD_DEEPBIND)
+
     # Import the compiled extension module
     from .origami import (
         # Enums
