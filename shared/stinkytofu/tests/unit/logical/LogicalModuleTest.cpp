@@ -27,6 +27,7 @@
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
@@ -127,4 +128,52 @@ TEST(IRModuleTest, LowersCallableIntoSeparateFunction) {
     ASSERT_NE(assembly.find("label_ASM_End:"), std::string::npos);
     ASSERT_NE(assembly.find("label_Activation_Relu_VW1:"), std::string::npos);
     EXPECT_LT(assembly.find("label_ASM_End:"), assembly.find("label_Activation_Relu_VW1:"));
+}
+
+// Adaptor path: HWRegContainer.toString() becomes a LiteralString on logical IR.
+// ToStinkyAsmPass must parse it via the per-arch DEF_HWREG table so emit matches
+// the rocisa converter (hwreg(28,6,4) not hwreg(HW_REG_IB_STS2,6,4)).
+TEST(IRModuleTest, LowersSymbolicHwregLiteralToNumericId) {
+    PyLogicalModule module("test_kernel");
+    module.add(makeLogicalInstructionShared(SGetRegB32(
+        sgpr(60), StinkyRegister(std::string("hwreg(HW_REG_IB_STS2,6,4)")), "cluster_id")));
+    module.add(makeLogicalInstructionShared(SSetRegIMM32B32(
+        StinkyRegister(std::string("hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2)")), StinkyRegister(0))));
+
+    auto asmModule = lowerLogicalModuleToAsm(module, {12, 5, 0});
+    const std::string assembly = asmModule->emitAssembly();
+    EXPECT_NE(assembly.find("hwreg(28,6,4)"), std::string::npos) << assembly;
+    EXPECT_EQ(assembly.find("HW_REG_IB_STS2"), std::string::npos) << assembly;
+    EXPECT_NE(assembly.find("hwreg(26,0,2)"), std::string::npos) << assembly;
+    EXPECT_EQ(assembly.find("HW_REG_WAVE_SCHED_MODE"), std::string::npos) << assembly;
+
+    bool sawGetregHwreg = false;
+    for (Function* fn : asmModule->getFunctions()) {
+        ASSERT_NE(fn, nullptr);
+        for (BasicBlock& bb : *fn) {
+            for (IRBase& ir : bb) {
+                if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+                auto* inst = static_cast<StinkyInstruction*>(&ir);
+                if (inst->getUnifiedOpcode() != GFX::s_getreg_b32) continue;
+                const auto& srcs = inst->getSrcRegs();
+                ASSERT_FALSE(srcs.empty());
+                EXPECT_EQ(srcs[0].dataType, StinkyRegister::Type::HwReg);
+                EXPECT_EQ(srcs[0].hwreg.id, 28);
+                EXPECT_EQ(srcs[0].hwreg.offset, 6);
+                EXPECT_EQ(srcs[0].hwreg.size, 4);
+                sawGetregHwreg = true;
+            }
+        }
+    }
+    EXPECT_TRUE(sawGetregHwreg);
+}
+
+TEST(IRModuleTest, LeavesUnknownHwregLiteralUnchanged) {
+    PyLogicalModule module("test_kernel");
+    module.add(makeLogicalInstructionShared(
+        SGetRegB32(sgpr(0), StinkyRegister(std::string("hwreg(HW_REG_DOES_NOT_EXIST,6,4)")))));
+
+    auto asmModule = lowerLogicalModuleToAsm(module, {12, 5, 0});
+    const std::string assembly = asmModule->emitAssembly();
+    EXPECT_NE(assembly.find("hwreg(HW_REG_DOES_NOT_EXIST,6,4)"), std::string::npos) << assembly;
 }
