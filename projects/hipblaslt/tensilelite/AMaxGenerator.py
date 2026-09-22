@@ -252,7 +252,6 @@ class AMaxKernelGenerator:
         return insts[num_elements]
 
 
-
     def defineSgpr(self, name, numSgprs, align=1):
         if numSgprs == 0: return
         sgprIdx = self.sgpr_pool.checkOutAligned(numSgprs, align, tag=name, preventOverflow=False)

@@ -35,7 +35,6 @@ from ..Common.DataType import DataType
 from ..Common.Utilities import assignParameterWithDefault, printWarning, print2, printExit
 
 
-
 class ProblemSizeRange:
 
   def __init__(self, problemType, config):

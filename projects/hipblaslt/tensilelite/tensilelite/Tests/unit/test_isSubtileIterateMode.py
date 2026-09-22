@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for ``Tensile.SolutionStructs.Utilities.isSubtileIterateMode``.
+"""Unit tests for ``tensilelite.SolutionStructs.Utilities.isSubtileIterateMode``.
 
 No GPU required -- exercises pure Python logic.
 """
