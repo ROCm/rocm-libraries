@@ -32,6 +32,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <shared_mutex>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -772,13 +773,29 @@ namespace TensileLite
         }
 
         /**
-         * Copy out every entry matching a key.
+         * Copy out every entry matching a key, best first.
          *
          * Returns values rather than iterators on purpose. The previous
          * signature returned an equal_range pair after its shared_lock had gone
          * out of scope, so every caller walked the multimap unlocked. That was
          * survivable while the map was written once at load; online tuning
          * inserts entries throughout the run, which turns it into a live race.
+         *
+         * The order is precedence, not insertion. Callers replay the first entry
+         * that still validates, so this decides which winner runs. The file is
+         * append-only: the run that finishes a truncated search appends its
+         * complete winner beside the partial row rather than rewriting it, and a
+         * multimap hands equal keys back in insertion order. Handing that order
+         * to the caller replayed the superseded partial forever, while
+         * needsFinishing saw the complete row and declined to tune again, so the
+         * finished winner was written and never used. Complete rows therefore
+         * come first, and the newest row wins within each group, which for rows
+         * read from a file is the last one appended.
+         *
+         * Only the widened map is ordered this way. Legacy rows are served by
+         * findLegacy and keep file order, because an override file the user
+         * writes by hand has no completeness to rank and its order is the only
+         * intent it can express.
          */
         std::vector<TunedEntry> find(const ProblemOverride& prob_key) const
         {
@@ -788,6 +805,12 @@ namespace TensileLite
             auto                    range = m_override.equal_range(prob_key);
             for(auto it = range.first; it != range.second; ++it)
                 found.push_back(it->second);
+
+            // stable_partition over the reversed range keeps newest-first inside
+            // both groups, so the result is complete-newest, then partial-newest.
+            std::reverse(found.begin(), found.end());
+            std::stable_partition(
+                found.begin(), found.end(), [](const TunedEntry& e) { return e.complete; });
 
             return found;
         }
@@ -859,10 +882,12 @@ namespace TensileLite
          * "none is complete" rather than "any is partial": the file is
          * append-only, so the run that finishes a search appends its winner
          * beside the partial row instead of rewriting it, and a key holding both
-         * has been tuned properly at least once. And this run's ceiling beats
-         * every ceiling those rows were written under, since a run that cannot
-         * get further would measure the same prefix, stop in the same place, and
-         * append another identical row.
+         * has been tuned properly at least once. That last part holds only
+         * because find orders complete rows ahead of partial ones; the two must
+         * agree, or a key holding both replays the partial and is never allowed
+         * to retune. And this run's ceiling beats every ceiling those rows were
+         * written under, since a run that cannot get further would measure the
+         * same prefix, stop in the same place, and append another identical row.
          *
          * Only the widened map is consulted: a legacy row has no completeness to
          * record and is never partial.

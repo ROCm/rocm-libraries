@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdint>
@@ -25,6 +26,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <streambuf>
@@ -149,13 +151,17 @@ namespace
      * tuned winner is never launched, because zero inputs make every possible
      * answer identical.
      */
+    // selectedIndex reports the solution the heuristic handed back, which in
+    // cache mode is the entry replay chose. Counters say a key matched; only the
+    // index says which of its rows won.
     bool runGemm(int64_t m,
                  int64_t n,
                  int64_t k,
                  float   betaValue     = 0.0f,
                  bool    inPlace       = true,
                  bool    verifyFirst   = false,
-                 bool    verifyProduct = false)
+                 bool    verifyProduct = false,
+                 int*    selectedIndex = nullptr)
     {
         hipblasLtHandle_t handle = nullptr;
         if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
@@ -243,6 +249,9 @@ namespace
                      == HIPBLAS_STATUS_SUCCESS
                  && returned > 0;
 
+            if(ok && selectedIndex)
+                *selectedIndex = hipblaslt_ext::getIndexFromAlgo(heuristic[0].algo);
+
             if(ok)
             {
                 const float alpha = 1.0f;
@@ -308,6 +317,92 @@ namespace
         hipblasLtDestroy(handle);
 
         return ok;
+    }
+
+    /**
+     * Distinct (solution index, kernel name) pairs the heuristic offers for this
+     * shape, newest API surface only.
+     *
+     * A hand-built cache row has to name a kernel that really can run the
+     * problem, or replay rejects it on identity or support and the row order
+     * under test never gets to matter. Taking the pairs from the heuristic is
+     * what guarantees that.
+     */
+    std::vector<std::pair<int, std::string>>
+        candidateIdentities(int64_t m, int64_t n, int64_t k, int want)
+    {
+        std::vector<std::pair<int, std::string>> found;
+
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return found;
+
+        hipblasLtMatrixLayout_t     layoutA = nullptr, layoutB = nullptr, layoutC = nullptr;
+        hipblasLtMatmulDesc_t       desc = nullptr;
+        hipblasLtMatmulPreference_t pref = nullptr;
+
+        bool ok
+            = hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, m, k, m) == HIPBLAS_STATUS_SUCCESS
+              && hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16F, k, n, k) == HIPBLAS_STATUS_SUCCESS
+              && hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16F, m, n, m) == HIPBLAS_STATUS_SUCCESS
+              && hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                     == HIPBLAS_STATUS_SUCCESS
+              && hipblasLtMatmulPreferenceCreate(&pref) == HIPBLAS_STATUS_SUCCESS;
+
+        if(ok)
+        {
+            const uint64_t maxWs = 32 * 1024 * 1024;
+            ok                   = hipblasLtMatmulPreferenceSetAttribute(
+                     pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &maxWs, sizeof(maxWs))
+                 == HIPBLAS_STATUS_SUCCESS;
+        }
+
+        if(ok)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> heuristic(want);
+            int                                           returned = 0;
+            if(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                               desc,
+                                               layoutA,
+                                               layoutB,
+                                               layoutC,
+                                               layoutC,
+                                               pref,
+                                               want,
+                                               heuristic.data(),
+                                               &returned)
+               == HIPBLAS_STATUS_SUCCESS)
+            {
+                for(int i = 0; i < returned; i++)
+                {
+                    const int  index = hipblaslt_ext::getIndexFromAlgo(heuristic[i].algo);
+                    const auto name
+                        = hipblaslt_ext::getKernelNameFromAlgo(handle, heuristic[i].algo);
+                    if(name.empty())
+                        continue;
+
+                    bool seen = false;
+                    for(const auto& p : found)
+                        seen = seen || p.first == index;
+                    if(!seen)
+                        found.emplace_back(index, name);
+                }
+            }
+        }
+
+        if(pref)
+            hipblasLtMatmulPreferenceDestroy(pref);
+        if(desc)
+            hipblasLtMatmulDescDestroy(desc);
+        if(layoutC)
+            hipblasLtMatrixLayoutDestroy(layoutC);
+        if(layoutB)
+            hipblasLtMatrixLayoutDestroy(layoutB);
+        if(layoutA)
+            hipblasLtMatrixLayoutDestroy(layoutA);
+        hipblasLtDestroy(handle);
+
+        return found;
     }
 
     /**
@@ -447,6 +542,20 @@ namespace
         return lines;
     }
 
+    std::vector<std::string> splitCells(const std::string& s)
+    {
+        std::vector<std::string> out;
+        std::stringstream        ss(s);
+        std::string              cell;
+        while(std::getline(ss, cell, ','))
+        {
+            const auto b = cell.find_first_not_of(" \t");
+            const auto e = cell.find_last_not_of(" \t");
+            out.push_back(b == std::string::npos ? "" : cell.substr(b, e - b + 1));
+        }
+        return out;
+    }
+
     /** Overwrite one named column in every value row. */
     bool rewriteColumn(const std::string& path, const std::string& column, const std::string& value)
     {
@@ -454,18 +563,7 @@ namespace
         if(lines.empty())
             return false;
 
-        auto split = [](const std::string& s) {
-            std::vector<std::string> out;
-            std::stringstream        ss(s);
-            std::string              cell;
-            while(std::getline(ss, cell, ','))
-            {
-                const auto b = cell.find_first_not_of(" \t");
-                const auto e = cell.find_last_not_of(" \t");
-                out.push_back(b == std::string::npos ? "" : cell.substr(b, e - b + 1));
-            }
-            return out;
-        };
+        auto split = splitCells;
 
         bool changed = false;
         for(size_t i = 0; i + 1 < lines.size(); i++)
@@ -643,6 +741,86 @@ namespace
             }
         }
         return n;
+    }
+
+    /**
+     * Rebuild the file as two value rows cloned from its first, each with the
+     * given column overrides applied.
+     *
+     * Cloning rather than composing a row from scratch keeps every key column
+     * byte-identical to what the writer emits, so both rows land under one key.
+     * That is the shape an append-only cache takes once a later run finishes a
+     * search the budget had truncated.
+     */
+    bool writeTwoRowsFromFirst(const std::string&                        path,
+                               const std::map<std::string, std::string>& firstOverrides,
+                               const std::map<std::string, std::string>& secondOverrides)
+    {
+        const auto lines  = readLines(path);
+        size_t     header = lines.size();
+        for(size_t i = 0; i + 1 < lines.size(); i++)
+        {
+            if(lines[i].find("transA") != std::string::npos)
+            {
+                header = i;
+                break;
+            }
+        }
+        if(header == lines.size())
+            return false;
+
+        const auto names = splitCells(lines[header]);
+
+        auto apply = [&](const std::map<std::string, std::string>& overrides) {
+            auto values = splitCells(lines[header + 1]);
+            for(size_t c = 0; c < names.size() && c < values.size(); c++)
+            {
+                const auto it = overrides.find(names[c]);
+                if(it != overrides.end())
+                    values[c] = it->second;
+            }
+
+            std::ostringstream row;
+            for(size_t c = 0; c < values.size(); c++)
+                row << (c ? "," : "") << values[c];
+            return row.str();
+        };
+
+        const auto first  = apply(firstOverrides);
+        const auto second = apply(secondOverrides);
+
+        std::ofstream out(path, std::ios::trunc);
+        if(!out)
+            return false;
+
+        // Whatever the writer put above the first header, including the version
+        // line the parser reads before any row.
+        for(size_t i = 0; i < header; i++)
+            out << lines[i] << "\n";
+
+        out << lines[header] << "\n" << first << "\n";
+        out << lines[header] << "\n" << second << "\n";
+        return out.good();
+    }
+
+    /** One named column's value from each value row, in file order. */
+    std::vector<std::string> columnValues(const std::string& path, const std::string& column)
+    {
+        std::vector<std::string> out;
+        const auto               lines = readLines(path);
+        for(size_t i = 0; i + 1 < lines.size(); i++)
+        {
+            if(lines[i].find("transA") == std::string::npos)
+                continue;
+
+            const auto names  = splitCells(lines[i]);
+            const auto values = splitCells(lines[i + 1]);
+            for(size_t c = 0; c < names.size() && c < values.size(); c++)
+                if(names[c] == column)
+                    out.push_back(values[c]);
+            i++;
+        }
+        return out;
     }
 
     class TuningCache : public ::testing::Test
@@ -1417,6 +1595,56 @@ namespace
         ASSERT_TRUE(runGemm(1024, 512, 1024));
         EXPECT_EQ(valueRowCount(m_path), before)
             << "a superseded partial row kept the shape looking untuned";
+    }
+
+    // The other half of that pair, and the one the row count cannot see. Not
+    // re-tuning is only correct if the completed row is also the row that runs.
+    // The file is append-only, so the finishing run leaves its winner behind the
+    // partial it supersedes, and equal keys come back from the multimap in
+    // insertion order: replay took the partial while needsFinishing saw the
+    // complete row and declined to tune again, so the finished winner was
+    // written to the file and then never used.
+    TEST_F(TuningCache, CompleteRowWinsOverTheOlderPartialRow)
+    {
+        // Two solutions the heuristic itself offers, so both rows below are
+        // genuinely valid and replay has to choose between them on order alone.
+        // Two real tuning runs would be more lifelike but not deterministic:
+        // a wider candidate pool often reaches the same winner, and then there
+        // is nothing to observe.
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+
+        const auto& partial  = identities[0];
+        const auto& finished = identities[1];
+
+        // A real row first, so every key column is exactly what the writer emits
+        // and both clones match the lookup key.
+        enterMode("tune", m_path);
+        hipblaslt_tuning_reset_for_test();
+        ASSERT_TRUE(runGemm(1024, 512, 1024));
+        ASSERT_EQ(valueRowCount(m_path), 1u) << "tune mode did not record exactly one row";
+
+        ASSERT_TRUE(writeTwoRowsFromFirst(m_path,
+                                          {{"solution_index", std::to_string(partial.first)},
+                                           {"kernel_name", partial.second},
+                                           {"complete", "0"},
+                                           {"budget_ms", "1000"}},
+                                          {{"solution_index", std::to_string(finished.first)},
+                                           {"kernel_name", finished.second},
+                                           {"complete", "1"},
+                                           {"budget_ms", "0"}}));
+
+        // Reset so the rows come back from the file the way a later process sees
+        // them. Within one process the tuner replaces its own entry, which is
+        // what kept this ordering hidden.
+        enterMode("cache", m_path);
+        hipblaslt_tuning_reset_for_test();
+
+        int replayed = -1;
+        ASSERT_TRUE(runGemm(1024, 512, 1024, 0.0f, true, false, false, &replayed));
+        EXPECT_EQ(replayed, finished.first) << "replay used the superseded partial row "
+                                            << partial.first << " instead of the completed search";
     }
 
     // The other half of that gate. A finished entry must close it, or every
