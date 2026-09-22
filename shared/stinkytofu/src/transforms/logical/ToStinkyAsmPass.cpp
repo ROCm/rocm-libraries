@@ -25,6 +25,7 @@
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -238,12 +239,20 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         }
     }
 
+    // Adaptor / Python logical IR carries HWRegContainer as a LiteralString
+    // ("hwreg(HW_REG_IB_STS2,6,4)"). Resolve it here — ToStinkyAsmPass already
+    // has the target arch — so emit matches the rocisa converter (numeric id).
+    auto canonicalizeHwregOperands = [arch](std::vector<StinkyRegister>& regs) {
+        for (auto& r : regs) r = HwReg::canonicalizeOperand(arch, r);
+    };
+
     if (!irInst->dests.empty() && !hwHasDestField) {
         // HW has no dest field — logical dests are really src operands.
         std::vector<StinkyRegister> merged;
         merged.reserve(irInst->dests.size() + irInst->srcs.size());
         merged.insert(merged.end(), irInst->dests.begin(), irInst->dests.end());
         merged.insert(merged.end(), irInst->srcs.begin(), irInst->srcs.end());
+        canonicalizeHwregOperands(merged);
         asmInst->setSrcRegs(merged);
     } else {
         std::vector<StinkyRegister> destRegs = irInst->dests;
@@ -302,6 +311,8 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             }
         }
 
+        canonicalizeHwregOperands(destRegs);
+        canonicalizeHwregOperands(srcRegs);
         if (!destRegs.empty()) {
             asmInst->setDestRegs(destRegs);
         }
