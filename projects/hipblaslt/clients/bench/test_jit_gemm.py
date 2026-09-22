@@ -49,7 +49,7 @@ def check_numerics(stdout, dtype):
     return result
 
 
-def check_provenance(stderr, stdout, case, artifact_root):
+def check_provenance(stderr, stdout, case, artifact_root, architecture):
     import yaml  # Use the existing configured venv (already needed by Tensile).
 
     def reported(label):
@@ -69,7 +69,7 @@ def check_provenance(stderr, stdout, case, artifact_root):
     require(manifest['counts']['solutions'] == 1, 'Generated more than one solution')
     require(manifest['counts']['main_kernels'] == 1, 'Generated more than one main kernel')
     require(manifest['main_kernel']['name'] in stdout, 'Reported kernel differs from artifact')
-    require(manifest['architecture']['resolved'].split(':')[0] == 'gfx950', 'Wrong device ISA')
+    require(manifest['architecture']['resolved'].split(':')[0] == architecture, 'Wrong device ISA')
     prediction = manifest['jit_prediction']
     require(prediction['model'] == 'origami.gemm.estimation', 'Missing Origami model provenance')
     ranked = prediction['ranked_candidates']
@@ -77,6 +77,14 @@ def check_provenance(stderr, stdout, case, artifact_root):
     for candidate in ranked:
         score = candidate['predicted_cycles']
         require(math.isfinite(score) and 0 < score < 1e300, 'Invalid Origami score')
+        parameters = candidate['parameters']
+        mi = parameters['MatrixInstruction']
+        permitted_k = {4} if case['dtype'] == 's' else ({16, 32} if architecture == 'gfx950' else {16})
+        require(mi[:2] == [16, 16] and mi[2] in permitted_k,
+                f'Unsupported {architecture} matrix instruction: {mi}')
+        if architecture == 'gfx90a':
+            require(parameters['NonTemporalA'] == parameters['NonTemporalB'] == 0,
+                    'gfx90a recipe uses unsupported cache hints')
     # Origami can reorder near-equal scores using tie-breaking. Preserve its rank order.
     rejected = {item['candidate_id'] for item in prediction['rejections']}
     accepted = next(candidate for candidate in ranked if candidate['id'] not in rejected)
@@ -106,12 +114,13 @@ def check_provenance(stderr, stdout, case, artifact_root):
         require(artifact.is_relative_to(manifest_path.parent), 'Nonlocal generated artifact')
         require(artifact.stat().st_size > 0, 'Empty generated artifact')
     return {'recipe': str(config), 'manifest': str(manifest_path),
-            'candidate': prediction['candidate_id'], 'ranked_count': len(ranked)}
+            'candidate': prediction['candidate_id'], 'ranked_count': len(ranked),
+            'architecture': architecture}
 
 
-def make_case(name, api, dtype, m, n, k, extra=(), batch=1, ta=False, tb=False):
+def make_case(name, api, dtype, m, n, k, extra=(), batch=1, ta=False, tb=False, amax=False):
     problem = dict(m=m, n=n, k=k, batch=batch, transpose_a=ta, transpose_b=tb,
-                   data_type=dtype, high_precision_accumulate=(dtype == 'h'))
+                   data_type=dtype, high_precision_accumulate=(dtype == 'h'), output_amax_d=amax)
     args = ['--api_method', api, '-m', str(m), '-n', str(n), '-k', str(k)]
     # The first case deliberately uses the bench's FP16 / FP32-compute defaults.
     if name != 'half-c-default':
@@ -124,6 +133,11 @@ CASES = [
     make_case('float-c', 'c', 's', 128, 96, 64),
     make_case('half-mix', 'mix', 'h', 256, 128, 512),
     make_case('float-cpp', 'cpp', 's', 128, 128, 64),
+    make_case('half-amax-c', 'c', 'h', 128, 96, 64, ['--amaxD'], amax=True),
+    make_case('float-amax-cpp', 'cpp', 's', 128, 96, 64, ['--amaxD'], amax=True),
+    make_case('half-amax-odd', 'mix', 'h', 129, 97, 65,
+              ['--amaxD', '--lda', '137', '--ldb', '72', '--ldc', '135', '--ldd', '139'],
+              amax=True),
     make_case('half-odd', 'c', 'h', 129, 97, 65,
               ['--lda', '137', '--ldb', '72', '--ldc', '135', '--ldd', '139']),
     make_case('half-nt', 'mix', 'h', 80, 65, 48, ['--transB', 'T', '--ldb', '73'], tb=True),
@@ -147,6 +161,8 @@ def main():
     parser.add_argument('--feature-off', action='store_true')
     parser.add_argument('--negative-only', action='store_true')
     parser.add_argument('--timeout', type=int, default=600)
+    parser.add_argument('--architecture', choices=('gfx90a', 'gfx942', 'gfx950'), default='gfx950',
+                        help='Expected real GPU architecture; does not override the runtime device')
     args = parser.parse_args()
     bench, build = args.bench.resolve(strict=True), args.build_root.resolve(strict=True)
     require(bench.is_relative_to(build), 'Benchmark must come from the existing local build')
@@ -239,7 +255,8 @@ sys.exit(status)
 
     if not args.negative_only:
         for name, options in [('activation', ['--activation_type', 'relu']),
-                              ('dtype', ['-r', 'bf16_r'])]:
+                              ('dtype', ['-r', 'bf16_r']),
+                              ('scale-cd', ['--amaxD', '--scaleC', '1', '--scaleD', '1'])]:
             proc, path, _ = run('negative-' + name, ['--jit-gemm', *options])
             require(proc.returncode != 0 and 'JIT preparation failed' in proc.stderr,
                     f'Unsupported descriptor was not rejected: {name}')
@@ -260,7 +277,7 @@ sys.exit(status)
                                       {'HIPBLASLT_JIT_TEST_DELAY': '2' if sentinel else '0'})
             require(proc.returncode == 0, f'{case["name"]} failed; see {path}')
             numeric = check_numerics(proc.stdout, case['dtype'])
-            provenance = check_provenance(proc.stderr, proc.stdout, case, artifact_root)
+            provenance = check_provenance(proc.stderr, proc.stdout, case, artifact_root, args.architecture)
             trace = [json.loads(line) for line in (path / 'generator.jsonl').read_text().splitlines()]
             require(len(trace) == 1, f'Expected one generation across warmup/timing: {trace}')
             require(trace[0]['args'][:2] == ['-m', 'Tensile.JitGemm'], 'Wrong generator entry point')

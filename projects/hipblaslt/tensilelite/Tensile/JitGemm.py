@@ -25,6 +25,9 @@ from Tensile import SingleSolution as SS
 _PARAMETERS = {"MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB"}
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
 _MAX_CANDIDATES = 192
+# This bounded recipe family uses the native square MFMA instructions in Origami's
+# per-architecture instruction map. It does not retarget gfx950 instructions.
+_HALF_MI_DEPTHS = {"gfx90a": (16,), "gfx942": (16,), "gfx950": (16, 32)}
 
 
 def _require(condition, message):
@@ -53,13 +56,20 @@ def _readRequest(path):
              "Expected JIT parameter request schema 1")
     _require(request.get("model") == "origami.gemm.estimation", "Unexpected prediction model")
     _require(isinstance(request.get("architecture"), str), "Missing target architecture")
+    architecture = request["architecture"].split(":", 1)[0]
+    _require(architecture in _HALF_MI_DEPTHS, "Expected gfx90a, gfx942, or gfx950")
+    SS._target(request["architecture"], {})
     problem = request.get("problem")
     _require(isinstance(problem, dict), "Missing problem descriptors")
     for key in ("m", "n", "k", "batch"):
         _require(_integer(problem.get(key), 1), f"problem.{key} must be a positive integer")
     _require(problem.get("data_type") in ("s", "h"), "Expected F32 or FP16 inputs/output")
-    for key in ("transpose_a", "transpose_b", "c_equals_d", "high_precision_accumulate"):
+    for key in ("output_amax_d", "use_scale_cd"):
+        problem.setdefault(key, False)  # Existing schema-1 requests imply neither feature.
+    for key in ("transpose_a", "transpose_b", "c_equals_d", "high_precision_accumulate",
+                "output_amax_d", "use_scale_cd"):
         _require(type(problem.get(key)) is bool, f"problem.{key} must be boolean")
+    _require(not problem["use_scale_cd"], "C/D scaling is outside the predictor scope")
     _require(problem["data_type"] != "h" or problem["high_precision_accumulate"],
              "FP16 requires FP32 accumulation")
     for tensor in "abcd":
@@ -87,10 +97,13 @@ def _readRequest(path):
                  and all(_integer(value, 1) for value in mi)
                  and mi[0:2] == [16, 16] and mi[3:5] == [1, 1]
                  and mi[7] * mi[8] == 4, "Expected a four-wave square MFMA recipe")
+        depths = _HALF_MI_DEPTHS[architecture] if problem["data_type"] == "h" else (4,)
+        _require(mi[2] in depths, f"Unsupported {architecture} MFMA depth for the input type")
         _require(_integer(parameters["DepthU"], 1), "DepthU must be positive")
         for key in ("NonTemporalA", "NonTemporalB"):
-            _require(type(parameters[key]) is int and parameters[key] in (0, 4),
-                     "Unsupported cache hint")
+            allowedHints = (0,) if architecture == "gfx90a" else (0, 4)
+            _require(type(parameters[key]) is int and parameters[key] in allowedHints,
+                     f"Unsupported {architecture} cache hint")
     return request
 
 
@@ -121,6 +134,8 @@ def _configuration(request, candidate):
             "StridedBatched": True,
             "Activation": False,
             "ActivationType": "none",
+            "OutputAmaxD": problem.get("output_amax_d", False),
+            "UseScaleCD": problem.get("use_scale_cd", False),
         }, {
             "ForkParameters": [{name: [copy.deepcopy(value)]}
                                for name, value in candidate["parameters"].items()],
@@ -138,12 +153,17 @@ def _problemRejection(solution, request, candidate):
     """
     p = request["problem"]
     m, n, k, batch = (p[key] for key in ("m", "n", "k", "batch"))
+    if p.get("output_amax_d", False) and batch != 1:
+        return "Output-amax requires BatchSizeEqual=1 for the current reduction kernel"
     mi = candidate["parameters"]["MatrixInstruction"]
     expected = (mi[0] * mi[5] * mi[7], mi[1] * mi[6] * mi[8])
     if (solution["MacroTile0"], solution["MacroTile1"]) != expected:
         return "Tensile derived a different macro tile from the modeled recipe"
     if solution["DepthU"] != candidate["parameters"]["DepthU"]:
         return "Tensile derived a different DepthU from the modeled recipe"
+    for name in ("NonTemporalA", "NonTemporalB"):
+        if solution[name] != candidate["parameters"][name]:
+            return f"Tensile changed the modeled {name} cache hint"
     if solution["StreamK"] != 0 or solution["GlobalSplitU"] != 1:
         return "Current Tensile defaults no longer match the unsplit Origami model"
     for value, name in ((m, "AssertFree0ElementMultiple"),

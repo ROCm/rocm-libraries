@@ -45,6 +45,7 @@ namespace
     // are binary-exact; the independent CPU oracle accumulates in FP32.
     int         M = 256, N = 128, K = 128;
     bool        transposeB             = false;
+    bool        outputAmax             = false;
     bool        allowWorkspaceFallback = false;
     std::string secondConfig, secondPython;
     bool        expectHelperFailure = false;
@@ -58,6 +59,8 @@ namespace
         __half *            a = nullptr, *b = nullptr, *c = nullptr, *d = nullptr;
         void*               workspace = nullptr;
         float               alpha = 1.25f, beta = 0.5f;
+        float*              amax         = nullptr;
+        float               expectedAmax = 0;
         std::vector<__half> hostA, hostB, hostC, hostD;
         std::vector<float>  expected;
 
@@ -109,6 +112,13 @@ namespace
             check(hipMalloc(&b, hostB.size() * sizeof(__half)), "Allocate B");
             check(hipMalloc(&c, hostC.size() * sizeof(__half)), "Allocate C");
             check(hipMalloc(&d, hostD.size() * sizeof(__half)), "Allocate D");
+            if(outputAmax)
+            {
+                check(hipMalloc(&amax, sizeof(float)), "Allocate output amax");
+                check(hipblasLtMatmulDescSetAttribute(
+                          desc, HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER, &amax, sizeof(amax)),
+                      "Set output amax pointer");
+            }
             check(hipMemcpy(a, hostA.data(), hostA.size() * sizeof(__half), hipMemcpyHostToDevice),
                   "Copy A");
             check(hipMemcpy(b, hostB.data(), hostB.size() * sizeof(__half), hipMemcpyHostToDevice),
@@ -118,6 +128,7 @@ namespace
         }
         void updateReference()
         {
+            expectedAmax = 0;
             for(int col = 0; col < N; ++col)
                 for(int row = 0; row < M; ++row)
                 {
@@ -126,8 +137,9 @@ namespace
                     for(int k = 0; k < K; ++k)
                         sum += __half2float(hostA[row + k * M])
                                * __half2float(hostB[transposeB ? col + k * N : k + col * K]);
-                    expected[i]
-                        = __half2float(__float2half(alpha * sum + beta * __half2float(hostC[i])));
+                    const float result = alpha * sum + beta * __half2float(hostC[i]);
+                    expectedAmax       = std::max(expectedAmax, std::abs(result));
+                    expected[i]        = __half2float(__float2half(result));
                 }
         }
         void changeInputs()
@@ -155,6 +167,8 @@ namespace
                 hipMemcpyAsync(
                     d, hostD.data(), hostD.size() * sizeof(__half), hipMemcpyHostToDevice, stream),
                 "Reset D");
+            if(amax)
+                check(hipMemsetAsync(amax, 0xff, sizeof(float), stream), "Poison output amax");
         }
         void verify(const char* label)
         {
@@ -177,6 +191,18 @@ namespace
             }
             std::cout << label << " PASS: " << hostD.size() << " elements, max error=" << maxError
                       << '\n';
+            if(amax)
+            {
+                float actualAmax = NAN;
+                check(hipMemcpy(&actualAmax, amax, sizeof(float), hipMemcpyDeviceToHost),
+                      "Copy output amax");
+                require(std::isfinite(actualAmax)
+                            && std::abs(actualAmax - expectedAmax) <= 1e-5f * expectedAmax + 1e-6f,
+                        (std::string(label) + ": amax mismatch, expected "
+                         + std::to_string(expectedAmax) + ", actual " + std::to_string(actualAmax))
+                            .c_str());
+                std::cout << label << " amax PASS: " << actualAmax << '\n';
+            }
         }
         void close()
         {
@@ -206,6 +232,11 @@ namespace
             {
                 check(hipFree(d), "Free D");
                 d = nullptr;
+            }
+            if(amax)
+            {
+                check(hipFree(amax), "Free output amax");
+                amax = nullptr;
             }
             if(aLayout)
             {
@@ -470,7 +501,8 @@ int main(int argc, char** argv)
     {
         std::cerr << "Usage: " << argv[0]
                   << " PYTHON TENSILE_SOURCE PYTHONPATH YAML FRESH_OUTPUT ARCH COMPILER "
-                     "[--m M --n N --k K --trans-b N|T] [--normal-api both] [--expect-kernels N "
+                     "[--m M --n N --k K --trans-b N|T --amax 0|1] [--normal-api both] "
+                     "[--expect-kernels N "
                      "--expect-min-gsu N] "
                      "[--expect-configured-gsu N --expect-accumulation MODE --min-workspace BYTES] "
                      "[--expect-prepare-failure|--expect-initialize-failure|--expect-unsupported "
@@ -514,6 +546,8 @@ int main(int argc, char** argv)
                 secondPython = value;
             else if(key == "--expect-helper-failure")
                 expectHelperFailure = integer(value) != 0;
+            else if(key == "--amax")
+                outputAmax = integer(value) != 0;
             else if(key == "--trans-b")
             {
                 require(value == "N" || value == "T", "--trans-b requires N or T");
@@ -653,6 +687,8 @@ int main(int argc, char** argv)
                     "Wrong stream unexpectedly accepted");
             for(int run = 0; run < 2; ++run)
             {
+                if(run)
+                    problem.changeInputs();
                 problem.reset();
                 check(gemm.run(problem.stream), gemm, "Run");
                 problem.verify(run == 0 ? "First run" : "Repeated run");

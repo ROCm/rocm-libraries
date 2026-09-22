@@ -46,8 +46,7 @@ def main():
         "unlisted-main": "Main code object missing from code_objects",
         "missing-helper-module": "Missing artifact",
         "missing-helper-symbol": "Resolve generated invocation symbol",
-        "unsupported-amax": "does not yet own the amax output synchronization state",
-        "unsupported-streamk": "does not yet bind Stream-K stream-private state",
+        "mismatched-amax": "does not support this problem/device",
     }
     for case, diagnostic in cases.items():
         wrapper = args.fresh_output / (case + "-generator")
@@ -94,14 +93,16 @@ def main():
             "            changed += 1\n"
             "        path.write_bytes(content)\n"
             "    assert changed > 0\n"
-            "if case in ('unsupported-amax', 'unsupported-streamk'):\n"
+            "if case == 'mismatched-amax':\n"
             "    path = bundle / data['library']['path']\n"
             "    packed = data['library']['format'] == 'msgpack'\n"
             "    library = msgpack.unpackb(zlib.decompress(path.read_bytes()), raw=False) "
             "if packed else yaml.safe_load(path.read_text())\n"
             "    solution = library['solutions'][0]\n"
-            "    if case == 'unsupported-amax': solution['problemType']['outputAmaxD'] = True\n"
-            "    else: solution['sizeMapping']['streamK'] = 1\n"
+            "    solution['problemType']['outputAmaxD'] = True\n"
+            "    checks = [p for p in solution['problemPredicate']['value'] if p['type'] == 'AmaxDCheck']\n"
+            "    assert len(checks) == 1\n"
+            "    checks[0]['value'] = True\n"
             "    if packed: path.write_bytes(zlib.compress(msgpack.packb(library)))\n"
             "    else: path.write_text(yaml.safe_dump(library))\n"
             "manifest.write_text(json.dumps(data))\n"

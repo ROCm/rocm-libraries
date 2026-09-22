@@ -3,6 +3,7 @@
 
 #include "hipblaslt-jit-gemm-predictor.hpp"
 #include <Tensile/hip/HipHardware.hpp>
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cmath>
@@ -91,9 +92,18 @@ namespace hipblaslt_ext::experimental
             const auto recommended = hardware.get_recommended_matrix_instruction(dtype);
             require(recommended.m == 16 && recommended.n == 16 && recommended.k != 0,
                     "no supported square MFMA recommendation for the requested type");
+            const auto valid    = hardware.get_valid_matrix_instructions(dtype);
+            const auto supports = [&](const origami::dim3_t& mi) {
+                return std::any_of(valid.begin(), valid.end(), [&](const auto& item) {
+                    return item.m == mi.m && item.n == mi.n && item.k == mi.k;
+                });
+            };
+            require(supports(recommended), "Origami recommended an unsupported instruction");
             std::vector<origami::dim3_t> instructions{recommended};
-            if(dtype == origami::data_type_t::Half && recommended.k != 16)
-                instructions.push_back({16, 16, 16});
+            // gfx90a/gfx942 recommend K=16 for Half; gfx950 also supports K=32.
+            const origami::dim3_t legacyHalf{16, 16, 16};
+            if(dtype == origami::data_type_t::Half && recommended.k != 16 && supports(legacyHalf))
+                instructions.push_back(legacyHalf);
 
             // Declarative parameter shapes, independent of the installed solution library.
             // Each shape retains its wave topology; MT/MI alone cannot reconstruct it.
@@ -110,8 +120,15 @@ namespace hipblaslt_ext::experimental
                 {256, 256, 2, 2},
                 {128, 16, 4, 1},
             }};
-            const std::array<std::array<int, 2>, 3>     hints{{{0, 0}, {4, 0}, {0, 4}}};
-            std::vector<Candidate>                      result;
+            // gfx90a has no NT modifier. Modeling bit 4 there would disagree with
+            // Tensile, which strips it while deriving the solution.
+            std::vector<std::array<int, 2>> hints{{0, 0}};
+            if(hardware.arch != origami::hardware_t::architecture_t::gfx90a)
+            {
+                hints.push_back({4, 0});
+                hints.push_back({0, 4});
+            }
+            std::vector<Candidate> result;
             for(const auto& mi : instructions)
                 for(const auto& shape : shapes)
                     for(size_t depth : {size_t(32), size_t(64)})
@@ -153,8 +170,13 @@ namespace hipblaslt_ext::experimental
         const auto* device = dynamic_cast<const TensileLite::hip::HipAMDGPU*>(&hardware);
         require(device && device->analyticalHardware, "actual HIP device hardware is required");
         const auto& analytical = *device->analyticalHardware;
-        require(analytical.arch == origami::hardware_t::architecture_t::gfx950,
-                "the initial predictor supports gfx950");
+        using Arch             = origami::hardware_t::architecture_t;
+        require(analytical.arch == Arch::gfx90a || analytical.arch == Arch::gfx942
+                    || analytical.arch == Arch::gfx950,
+                "the predictor supports gfx90a, gfx942, and gfx950");
+        require(analytical.N_CU && analytical.NUM_XCD && analytical.lds_capacity
+                    && analytical.rf_capacity && analytical.compute_clock_ghz > 0,
+                "actual device resource limits are unavailable");
         const auto type = problem.a().dataType();
         require((type == Type::Half || type == Type::Float) && problem.b().dataType() == type
                     && problem.c().dataType() == type && problem.d().dataType() == type
@@ -168,11 +190,11 @@ namespace hipblaslt_ext::experimental
         require(problem.stridedBatched() && !problem.groupedGemm() && !problem.sparse()
                     && !problem.swizzleTensorA() && !problem.swizzleTensorB() && !problem.mxBlockA()
                     && !problem.mxBlockB() && !problem.useBias() && !problem.useE()
-                    && !problem.outputAmaxD() && !problem.useGradient()
-                    && !problem.useGateResidual() && problem.useScaleAB().empty()
-                    && !problem.useScaleCD() && !problem.useScaleAlphaVec()
+                    && !problem.useGradient() && !problem.useGateResidual()
+                    && problem.useScaleAB().empty() && !problem.useScaleCD()
+                    && !problem.useScaleAlphaVec()
                     && problem.activationType() == TensileLite::ActivationType::None,
-                "expected a dense strided GEMM with the default epilogue");
+                "expected a dense strided GEMM with optional output-amax and no scaling");
         require(problem.aOps().empty() && problem.bOps().empty() && problem.cOps().empty()
                     && problem.dOps().empty(),
                 "tensor operations are unsupported");
@@ -218,7 +240,9 @@ namespace hipblaslt_ext::experimental
              << ",\"transpose_b\":" << transB
              << ",\"data_type\":" << jsonString(type == Type::Half ? "h" : "s")
              << ",\"high_precision_accumulate\":" << problem.highPrecisionAccumulate()
-             << ",\"c_equals_d\":" << problem.cEqualsD() << ",\"num_cus\":" << request.num_cus;
+             << ",\"c_equals_d\":" << problem.cEqualsD()
+             << ",\"output_amax_d\":" << problem.outputAmaxD()
+             << ",\"use_scale_cd\":" << problem.useScaleCD() << ",\"num_cus\":" << request.num_cus;
         const std::array<const TensileLite::TensorDescriptor*, 4> tensors{
             &problem.a(), &problem.b(), &problem.c(), &problem.d()};
         for(size_t i = 0; i != tensors.size(); ++i)
@@ -229,9 +253,12 @@ namespace hipblaslt_ext::experimental
         json << "},\"hardware\":{\"device_id\":" << device->deviceId
              << ",\"cu_count\":" << analytical.N_CU << ",\"xcd_count\":" << analytical.NUM_XCD
              << ",\"compute_clock_ghz\":" << analytical.compute_clock_ghz
+             << ",\"lds_capacity\":" << analytical.lds_capacity
+             << ",\"rf_capacity\":" << analytical.rf_capacity
              << "},\"model_assumptions\":{\"occupancy\":1,\"stream_k\":0,"
                 "\"workgroup_mapping\":\"estimated internally; Tensile uses its default\","
-                "\"vector_widths\":\"Origami defaults; Tensile derives actual widths\"},"
+                "\"vector_widths\":\"Origami defaults; Tensile derives actual widths\","
+                "\"epilogue\":\"output-amax overhead is not modeled\"},"
                 "\"candidates\":[";
         size_t count = 0;
         for(const auto& result : ranked)

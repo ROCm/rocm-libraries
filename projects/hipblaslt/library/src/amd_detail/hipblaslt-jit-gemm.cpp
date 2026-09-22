@@ -653,13 +653,6 @@ namespace hipblaslt_ext::experimental
             p.hardware   = context->hardware;
             p.library    = context->library;
             p.solution   = p.library->solutions.at(0);
-            // Stream-K has its own stream-private flag binding and queue setup in
-            // the normal host path. This experiment currently supports non-Stream-K
-            // solutions, including fixed/automatic GSU and adaptive accumulation.
-            require(p.solution->sizeMapping.streamK == 0,
-                    "JIT GEMM does not yet bind Stream-K stream-private state");
-            require(!p.solution->problemType.outputAmaxD,
-                    "JIT GEMM does not yet own the amax output synchronization state");
             p.support(std::numeric_limits<size_t>::max());
             p.workspaceRequired = p.solution->requiredWorkspaceSize(p.problem, *p.hardware);
             p.support(p.workspaceRequired);
@@ -703,22 +696,26 @@ namespace hipblaslt_ext::experimental
             p.problem.setParams().setWGMXCC(p.solution->isFallbackForHW(*p.hardware) ? 1 : 0);
             p.inputs.ws            = workspace;
             p.inputs.workspaceSize = workspaceBytes;
-            // The canonical inputs reference the handle's shared GSU counters. A
-            // JIT owner can run concurrently with another owner on that handle,
-            // so retain its own counters and preserve the normal kernel argument ABI.
-            const auto syncBytes = p.solution->requiredSynchronizerSize(p.problem, *p.hardware);
+            // An owner may run concurrently with another owner sharing its handle.
+            // Keep reduction counters and Stream-K flags private through completion.
+            auto syncBytes = p.solution->requiredSynchronizerSize(p.problem, *p.hardware);
+            if(p.solution->sizeMapping.streamK > 0 && p.solution->sizeMapping.streamKAtomic == 0)
+                syncBytes
+                    = std::max(syncBytes, size_t(TensileLite::StreamKFlagElements) * sizeof(int));
+            if(p.solution->problemType.outputAmaxD)
+                syncBytes = std::max(syncBytes, sizeof(int));
             if(syncBytes > p.synchronizerBytes)
             {
                 void* storage = nullptr;
-                checkHip(hipMalloc(&storage, syncBytes), "Allocate private GSU synchronizer");
+                checkHip(hipMalloc(&storage, syncBytes), "Allocate private GEMM synchronizer");
                 if(p.synchronizer)
                 {
                     const auto status = hipFree(p.synchronizer);
                     if(status != hipSuccess)
                     {
                         const auto cleanup = hipFree(storage);
-                        checkHip(cleanup, "Release unused GSU synchronizer");
-                        checkHip(status, "Resize private GSU synchronizer");
+                        checkHip(cleanup, "Release unused GEMM synchronizer");
+                        checkHip(status, "Resize private GEMM synchronizer");
                     }
                 }
                 p.synchronizer      = storage;

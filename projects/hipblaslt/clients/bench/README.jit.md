@@ -25,11 +25,20 @@ hipblaslt-bench --jit-gemm -m 256 -n 128 -k 512 \
 The benchmark defaults to FP16 matrices with FP32 computation and the C API.
 FP32 matrices are selected with `-r f32_r`. `--api_method mix` and
 `--api_method cpp` use the existing extension preparation and execution paths.
-The initial prediction scope is gfx950, plain non-grouped GEMM with matching
-FP16 or FP32 matrix types, FP32 computation, N/T transposes, and strided batches. Other
-epilogues, datatype combinations, and unsupported descriptor attributes fail
-explicitly. Leading dimensions, strides, alpha, beta, and transpose requests are
-carried by the normal descriptors.
+Automatic prediction supports gfx90a, gfx942, and gfx950 with matching FP16 or
+FP32 matrix types, FP32 computation, N/T transposes, and strided batches.
+Output-amax is optional and currently requires one
+batch. Other epilogues, datatype combinations, and unsupported descriptor
+attributes fail explicitly. Leading dimensions, strides, alpha, beta, transpose,
+and output-amax requests are carried by the normal descriptors. Automatic
+prediction does not support C/D scaling.
+
+The actual device selects the Origami hardware model and resource limits. FP16
+recipes use `16x16x16` matrix instructions on gfx90a/gfx942 and may also use
+`16x16x32` on gfx950; FP32 uses `16x16x4`. gfx90a recipes use zero A/B cache hints
+because that architecture has no non-temporal modifier. Tensile validates the
+chosen parameters against the target ISA before compilation. Origami's latency
+estimate does not model the extra output-amax work.
 
 JIT selects exactly one generated algorithm. It cannot be combined with
 `--algo_method all`, `--algo_method index`, an explicit `--solution_index`,
@@ -47,7 +56,10 @@ by prediction. Other tuning fields start at
 `Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters`; the
 manifest distinguishes those defaults from values derived by Tensile. Invalid
 recipes are skipped before compilation; compiler or resource failures stop the
-request. The initial automatic recipes use `GlobalSplitU: 1` and `StreamK: 0`.
+request. Automatic recipes retain the defaults `GlobalSplitU: 1` and `StreamK: 0`.
+Explicit YAML can select Stream-K or split-K configurations accepted by the
+normal generator and runtime. Output-amax currently requires `GlobalSplitU: 1`,
+`StreamK: 0`, and one batch in both the normal APIs and the standalone owner.
 Generated algorithms and their modules remain registered until process exit;
 there is no eviction. They are valid only on their original device in that
 process and have no reusable prebuilt solution index. Replay the YAML rather
@@ -76,13 +88,25 @@ with the existing configured virtual environment and local build:
 .venv/bin/python projects/hipblaslt/clients/bench/test_jit_gemm.py \
   --bench projects/hipblaslt/build/release/clients/hipblaslt-bench \
   --build-root projects/hipblaslt/build/release \
-  --python .venv/bin/python --output /tmp/hipblaslt-jit-checks
+  --python .venv/bin/python --architecture gfx950 --output /tmp/hipblaslt-jit-checks
 ```
 
 Use a fresh `--output` path for each run. `--case half-c-default` limits numerical
 coverage to a smoke case; `--negative-only` checks parser conflicts without GPU
 execution. After rebuilding the same build with JIT disabled, `--feature-off`
 checks the unavailable-feature diagnostic. The full numerical matrix includes
-FP16/FP32, all three API modes, odd dimensions, transpose variants, and a padded
-strided batch on gfx950. The two-second compiler-delay check is a timing-boundary
-test, not a kernel performance requirement.
+FP16/FP32, all three API modes, odd dimensions, transpose variants, a padded
+strided batch, and single-batch output-amax. Pass `--architecture gfx90a`,
+`gfx942`, or `gfx950` to match the executing device; the test verifies that the
+recorded instruction and cache hints are legal for that architecture. Run it
+on each target GPU in shared CI. Cross-compiling an architecture's kernels does
+not establish numerical correctness on that GPU. The two-second compiler-delay
+check is a timing-boundary test, not a kernel performance requirement.
+
+The `hipblaslt-jit-gemm-ci.yml` workflow builds this checkout and runs the full
+benchmark matrix plus standalone and normal-API Stream-K/amax fixtures on native
+gfx90a and gfx942 runners. It installs only SDK dependencies, stages the checkout's
+header-only hipblas-common, and uses an empty prebuilt device-library directory.
+The shared driver `.github/scripts/test_hipblaslt_jit.py` accepts `--build`,
+`--architecture`, and a fresh `--output` directory; `--case` selects a single route
+for local reproduction.

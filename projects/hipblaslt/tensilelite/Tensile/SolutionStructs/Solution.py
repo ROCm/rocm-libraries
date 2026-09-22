@@ -1867,6 +1867,19 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    if state.get("StreamK", 0) and state["ProblemType"].get("OutputAmaxD", False):
+      reject(state, printRejectionReason,
+             "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
+             "final-output tile per workgroup, not persistent or partial StreamK tiles")
+      return
+    if state["ProblemType"].get("OutputAmaxD", False):
+      if state.get("GlobalSplitU", 1) != 1:
+        reject(state, printRejectionReason,
+               "OutputAmaxD requires GlobalSplitU=1: split-reduction helpers do not reduce amax")
+        return
+      # The amax workspace/counter indexes dense output tiles within one batch.
+      # Publish the corresponding runtime predicate, including for explicit YAML.
+      state["BatchSizeEqual"] = 1
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,6 +50,7 @@ def solution(depth=64):
         "AssertSummationElementMultiple": 1,
         "GlobalReadVectorWidthA": 1, "GlobalReadVectorWidthB": 1,
         "BufferLoad": True, "BufferStore": True,
+        "NonTemporalA": 0, "NonTemporalB": 0,
         "ProblemType": {"TLUA": False, "TLUB": False},
         "MIWaveTile": [2, 2], "MIWaveGroup": [2, 2], "NumThreads": 256,
         "_GlobalAccumulation": None,
@@ -163,3 +166,123 @@ def test_strict_validator_propagates_unexpected_errors(monkeypatch):
               "WavefrontSize": 64}
     with pytest.raises(OSError, match="missing assembly backend resource"):
         BP._build_and_validate_solution(config, None, SimpleNamespace(), {}, strictErrors=True)
+
+
+@pytest.mark.parametrize("architecture, dtype, mi_k", [
+    ("gfx90a", "h", 16), ("gfx942", "h", 16), ("gfx950", "h", 32),
+    ("gfx90a", "s", 4), ("gfx942", "s", 4), ("gfx950", "s", 4),
+])
+def test_request_uses_architecture_legal_instruction_and_hints(
+    prediction_request, tmp_path, architecture, dtype, mi_k
+):
+    prediction_request["architecture"] = architecture + ":xnack-"
+    prediction_request["problem"]["data_type"] = dtype
+    prediction_request["candidates"] = prediction_request["candidates"][:1]
+    parameters = prediction_request["candidates"][0]["parameters"]
+    parameters["MatrixInstruction"][2] = mi_k
+    parameters["NonTemporalB"] = 0 if architecture == "gfx90a" else 4
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    request = JG._readRequest(source)
+    assert request["candidates"][0]["parameters"] == parameters
+    assert not request["problem"]["output_amax_d"]
+    assert not request["problem"]["use_scale_cd"]
+
+
+@pytest.mark.parametrize("architecture, dtype, mi_k, hint", [
+    ("gfx90a", "h", 32, 0), ("gfx942", "h", 32, 0),
+    ("gfx90a", "s", 16, 0), ("gfx942", "s", 16, 0), ("gfx950", "s", 16, 0),
+    ("gfx90a", "h", 16, 4), ("gfx90a", "s", 4, 4),
+])
+def test_request_rejects_architecture_incompatible_recipe(
+    prediction_request, tmp_path, architecture, dtype, mi_k, hint
+):
+    prediction_request["architecture"] = architecture
+    prediction_request["problem"]["data_type"] = dtype
+    prediction_request["candidates"] = prediction_request["candidates"][:1]
+    parameters = prediction_request["candidates"][0]["parameters"]
+    parameters["MatrixInstruction"][2] = mi_k
+    parameters["NonTemporalA"] = hint
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match="MFMA depth|cache hint"):
+        JG._readRequest(source)
+
+
+def test_mutated_cache_hint_rejected_before_emission(prediction_request):
+    candidate = prediction_request["candidates"][1]
+    candidate["parameters"]["NonTemporalB"] = 4
+    assert "NonTemporalB" in JG._problemRejection(solution(), prediction_request, candidate)
+
+
+@pytest.mark.parametrize("output_amax_d", [False, True])
+def test_configuration_preserves_amax_without_scaling(prediction_request, output_amax_d):
+    prediction_request["problem"].update(output_amax_d=output_amax_d, use_scale_cd=False)
+    config = JG._configuration(prediction_request, prediction_request["candidates"][0])
+    problem, group = config["BenchmarkProblems"][0]
+    assert problem["OutputAmaxD"] is output_amax_d
+    assert problem["UseScaleCD"] is False
+    assert {next(iter(item)) for item in group["ForkParameters"]} == JG._PARAMETERS
+
+
+def test_prediction_rejects_scaling_before_generation(prediction_request, tmp_path):
+    prediction_request["problem"]["use_scale_cd"] = True
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match="C/D scaling"):
+        JG._readRequest(source)
+
+
+@pytest.mark.parametrize("architecture, dtype, mi_k", [
+    ("gfx90a", "h", 16), ("gfx942", "h", 16), ("gfx950", "h", 32),
+    ("gfx90a", "s", 4), ("gfx942", "s", 4), ("gfx950", "s", 4),
+])
+def test_architecture_recipe_cross_compiles_without_gpu(
+    prediction_request, tmp_path, architecture, dtype, mi_k
+):
+    """Compile real target instructions; execution on each architecture belongs in GPU CI."""
+    compiler = shutil.which("amdclang++") or "/opt/rocm/bin/amdclang++"
+    if not Path(compiler).is_file():
+        pytest.skip("ROCm compiler is unavailable")
+    prediction_request["architecture"] = architecture
+    p = prediction_request["problem"]
+    p.update(m=128, n=128, k=128, batch=1, transpose_a=False, transpose_b=False,
+             data_type=dtype, high_precision_accumulate=(dtype == "h"))
+    for tensor in "abcd":
+        p[f"strides_{tensor}"] = [1, 128, 16384]
+    prediction_request["candidates"] = prediction_request["candidates"][:1]
+    parameters = prediction_request["candidates"][0]["parameters"]
+    parameters.update(MatrixInstruction=[16, 16, mi_k, 1, 1, 1, 1, 2, 2], DepthU=32,
+                      NonTemporalA=0, NonTemporalB=0 if architecture == "gfx90a" else 4)
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(prediction_request))
+    output = tmp_path / "cross-compiled"
+    completed = subprocess.run(
+        [sys.executable, "-m", "Tensile.JitGemm", str(source), str(output),
+         "--architecture", architecture, "--cxx-compiler", compiler, "--keep-build-tmp"],
+        capture_output=True, text=True, timeout=240,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    bundle = output / "bundle"
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    assert manifest["architecture"]["resolved"] == architecture
+    assert manifest["counts"]["solutions"] == manifest["counts"]["main_kernels"] == 1
+    prediction = manifest["jit_prediction"]
+    assert prediction["selected_parameters"] == parameters
+    assert prediction["resolved_parameters"]["MatrixInstruction"][:3] == [16, 16, mi_k]
+    assert prediction["resolved_parameters"]["NonTemporalB"] == parameters["NonTemporalB"]
+    assert all((bundle / name).is_file() for name in manifest["code_objects"])
+    assembly = "\n".join(path.read_text() for path in bundle.rglob("*.s"))
+    assert f"--{architecture}" in assembly
+    suffix = "f16" if dtype == "h" else "f32"
+    # CDNA2 assembly uses the legacy mnemonic without a separating underscore.
+    separator = "" if architecture == "gfx90a" else "_"
+    assert f"v_mfma_f32_16x16x{mi_k}{separator}{suffix}" in assembly
+
+
+def test_amax_batch_predicate_checked_before_compilation(prediction_request):
+    prediction_request["problem"]["output_amax_d"] = True
+    candidate = prediction_request["candidates"][1]
+    assert "BatchSizeEqual=1" in JG._problemRejection(solution(), prediction_request, candidate)
+    prediction_request["problem"]["batch"] = 1
+    assert JG._problemRejection(solution(), prediction_request, candidate) is None

@@ -10,7 +10,10 @@ Automatic callers use `Tensile.JitGemm` to validate Origami-ranked parameter
 recipes before invoking the same builder once. The explicit YAML entry point
 described here does not perform prediction and retains the normal parameter
 schema. Automatic bundles additionally record ranking, rejected candidates,
-selected parameters, defaults and derived values in `jit_prediction`.
+selected parameters, defaults and derived values in `jit_prediction`. Automatic
+prediction supports gfx90a, gfx942, and gfx950 with target-specific matrix
+instructions and cache hints. The explicit YAML entry point keeps the normal
+Tensile ISA support surface; it is not restricted to those three targets.
 
 ```python
 from Tensile.SingleSolution import generateAndBuildSingleSolution
@@ -85,10 +88,15 @@ Examples under `Tensile/Tests/unit/test_data/`:
 | `single_solution.yaml` | FP16/HPA, GSU1, MultipleBufferSingleKernel, no helpers |
 | `single_solution_splitk.yaml` | FP16/HPA, GSU4, MultipleBuffer, conversion and beta helper families |
 | `single_solution_adaptive.yaml` | FP16/HPA, automatic GSU and adaptive accumulation, conversion and beta helper families |
+| `single_solution_streamk.yaml` | FP16/HPA, non-atomic StreamK3 with partial-tile reduction |
+| `single_solution_amax.yaml` | FP16/HPA, GSU1, unscaled output-amax with packed stores |
 
-These examples use StreamK0. The Python generator follows normal solution
-validation for other configurations; a consuming runtime can impose narrower
-problem or scheduling limits. The experimental hipBLASLt JIT GEMM route is
+Explicit Stream-K configurations use normal
+solution validation. Output-amax currently requires `GlobalSplitU: 1` and
+`StreamK: 0`; its serialized solution also requires batch size one. Its current
+reduction needs final output and does not reduce across batch offsets. These
+limits apply through the normal validators and runtime predicates, including
+when consuming the bundle through either hipBLASLt JIT API. The experimental hipBLASLt JIT GEMM route is
 documented with `clients/samples/29_hipblaslt_jit_gemm/` in the parent project.
 
 The target is explicit; GPU enumeration is unnecessary. Compiler, bundler,

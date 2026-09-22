@@ -1,0 +1,50 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Singleton from Tensile/Tests/common/streamk/sk_hgemm_quick.yaml,
+# HGEMM NN parameter group at line 239, choosing its 128x128 MFMA tile.
+# Test shape changed to M=256,N=128,K=4096: 2 tiles, 64 K-iterations per tile.
+# For a deterministic partials/synchronizer smoke test, process-local settings
+# TENSILE_STREAMK_FIXED_GRID=16 TENSILE_STREAMK_DYNAMIC_GRID=0 produce 8 WGs/tile
+# with tree fixup. TENSILE_DB=64 prints kernel arguments for inspection.
+# This is an explicit-YAML test recipe; it does not alter predictor defaults.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: true
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: false
+      TransposeB: false
+      UseBeta: true
+      Batched: true
+      StridedBatched: true
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - 1LDSBuffer: [1]
+        - DepthU: [64]
+        - ExpandPointerSwap: [false]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - GlobalSplitU: [0]
+        - MatrixInstruction: [[16, 16, 16, 1, 1, 4, 4, 2, 2]]
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [true]
+        - StoreRemapVectorWidth: [0]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - TransposeLDS: [0]
+        - WorkGroupMapping: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 128, 1, 4096]

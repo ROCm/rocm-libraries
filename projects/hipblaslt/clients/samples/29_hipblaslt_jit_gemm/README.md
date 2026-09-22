@@ -9,9 +9,9 @@ YAML path invokes `Tensile.SingleSolution` directly. The benchmark
 The sample option `--normal-api both` exercises an explicit recipe through both
 normal APIs, including copied algorithms and repeated calls with changed input.
 Normal execution supplies the existing Stream-K and output-amax synchronization
-bindings. Explicit Stream-K execution is covered on gfx950; this does not claim
-output-amax numerical coverage on that architecture. Generated algorithms and
-modules remain registered until process exit. They are valid only on their
+bindings. Stream-K and output-amax follow the same generated-solution predicates
+as other normal algorithms. Generated algorithms and modules remain registered
+until process exit. They are valid only on their
 original device in that process and have no reusable prebuilt solution index.
 Normal execution follows the handle's existing synchronization ownership:
 Stream-K binds a stream-specific region, while MBSK and output-amax use shared
@@ -145,9 +145,10 @@ two owners sharing one handle on different streams with distinct data/workspace,
 immediate destruction after enqueue, and reuse of the remaining owner. Zero
 workspace and single-visible-device cases are reported as skipped where their
 negative test is inapplicable. The fault script checks missing main/helper
-modules and symbols, corrupt metadata, manifest schema/duplicates/paths and an
-unsupported transposed descriptor, and the explicit amax/Stream-K exclusions,
-without launching an invalid solution.
+modules and symbols, corrupt metadata, manifest schema/duplicates/paths and
+unsupported descriptors, without launching an invalid solution. With `--amax 1`
+and a matching `OutputAmaxD: true` recipe, the sample also checks output-amax
+against its independent CPU reference across repeated and separate-owner runs.
 
 ## Owner contract and current scope
 
@@ -163,8 +164,8 @@ without launching an invalid solution.
    symbol before reporting readiness. Failed reinitialization invalidates it.
 4. Call `run` on that stream. It enqueues the solution sequence and records a
    completion event; successful runs do not synchronize or regenerate. Private
-   MBSK synchronization storage is reset on the stream before dispatch, so
-   separate owners do not alias the handle's GSU counters.
+   synchronization storage for MBSK, Stream-K, or output-amax is reset on the
+   stream before dispatch. Separate owners do not alias these counters or flags.
 5. Keep the handle, matrices, workspace and stream alive through completion and
    serialize calls on each owner. Reinitialization may change streams after
    waiting. Destruction waits before unloading all private modules and freeing
@@ -173,12 +174,19 @@ without launching an invalid solution.
 
 Fixed GSU, automatic GSU (`GlobalSplitU: -1`) and adaptive accumulation
 (`AdaptiveGemmGSUA: 1`) use the ordinary runtime decisions and workspace rules.
-`AdaptiveGemm` is a separate store-width choice. The separate `JitGemm` owner
-currently rejects Stream-K because its private queue/flag binding has not been
-integrated; it does not treat Stream-K as a split-K alias. Output-amax solutions
-are also rejected because their separate shared synchronization state has no
-private ownership path here. Stream capture and
-architecture aliases not represented by the device's HIP name are unsupported.
+`AdaptiveGemm` is a separate store-width choice. Stream-K uses private queue/flag
+storage in the standalone owner and the normal stream-specific binding through
+`getJitGemmAlgo`. Output-amax similarly uses private owner storage or the normal
+handle binding. Output-amax currently requires `GlobalSplitU: 1`, `StreamK: 0`,
+and one batch: its reduction must see final output, and its workgroup reduction
+does not include batch offsets. The shared generator validation and runtime
+predicates enforce these limits for both API routes.
+
+Automatic prediction supports gfx90a, gfx942, and gfx950. Explicit YAML uses the
+normal target ISA and solution validators. Cross-compilation tests cover FP16
+and FP32 recipes for all three architectures; runtime correctness must also be
+checked on each GPU. Stream capture in the standalone owner and architecture
+aliases not represented by the device's HIP name remain unsupported.
 The owner API has no cache, tuning/benchmarking, transparent fallback, or package
 installation. The normal algorithm route uses a private tag in the existing
 opaque algorithm storage; the public algorithm type and size remain unchanged.
