@@ -865,4 +865,103 @@ TEST_F(TestSupportClaimEnforcement, ReportModeLeavesAnUnrelatedFailureAloneAndSt
     EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_FAILED_IN_USE);
 }
 
+// ---------------------------------------------------------------------------
+// The two counters the summary subtracts to attribute a shortfall.
+//
+// Everything above asserts on what the harness published *given* that a body ran.
+// These four assert on the publishing itself, at the call sites that decide it.
+// The summary's attribution -- "selected but skipped in SetUp()" versus "ran
+// without being queried" versus "left out by --gtest_filter" -- is nothing but the
+// difference between these two counters, so a refactor that moves either bump past
+// something that can exit first silently rewrites every one of those lines. No
+// assertion elsewhere in the tree notices: the report suites set the counters by
+// hand, which is exactly why these have to go through the reporter.
+// ---------------------------------------------------------------------------
+
+// The bump sits above SetUp()'s skip exits. Move it below applyMetadataGuards() and
+// an arch-guarded lane reports selected == ran == 0, filing its own skips back onto
+// the filter -- the one line the summary must never get wrong, since widening the
+// filter is not the remedy.
+TEST_F(TestSupportClaimEnforcement, ArchSkippedBundleStillCountsAsSelected)
+{
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(1);
+    // The skip is in SetUp(), so no body runs and nothing may claim one did.
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(0);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
+
+    auto bundle = loadBundle("Bundle", /*includeGoldenOutput=*/true);
+    // hostPolicy() is on gfx942; golden data stamped gfx90a is not portable here.
+    bundle->metadata.gpuArchitecture = "gfx90a";
+
+    harness.setBundle(bundle, "test/bundle", makeLocator());
+    testing_support::driveHarness(harness, &results);
+
+    ASSERT_TRUE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// Claims off touches neither counter, so a run with no claim flags cannot leave the
+// summary a partial tally to reconcile.
+TEST_F(TestSupportClaimEnforcement, ClaimsOffCountsNeitherSelectedNorReached)
+{
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(0);
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(0);
+
+    IntegrationBundleVerificationHarness harness(
+        _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::OFF)),
+        makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+}
+
+// Both bumps are keyed on the sidecar being on disk, not on shouldObserveClaims(),
+// which goes false when no engine loaded. That divergence is deliberate: a build
+// whose plugin never loaded is the run verifiedNothing() exists to catch, and
+// keying on the predicate would zero the numerator it is measured against.
+TEST_F(TestSupportClaimEnforcement, MissingEngineStillCountsSelectedAndReached)
+{
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(1);
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(
+        testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::ENFORCE)));
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+}
+
+// The reason graphsReachedBody is published from the top of TestBody() instead of
+// being derived from the observation: a hand-edited sidecar that does not parse
+// throws, and a fact that was already true when the body started must not be lost
+// with it. Derived, this run would report "selected but skipped before running" for
+// a body that plainly ran -- and point at the arch guard, which never fired.
+TEST_F(TestSupportClaimEnforcement, ReachedBodyIsCountedEvenWhenTheClaimReadThrows)
+{
+    using ::testing::_;
+    using ::testing::Throw;
+
+    ::testing::TestPartResultArray results;
+
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
+    // The throw is above coverageFor(), so the observation-derived update is the
+    // one thing that legitimately does not survive.
+    EXPECT_CALL(_mocks.reporter, recordCoverage(_)).Times(0);
+
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Throw(std::runtime_error("stub: sidecar does not parse")));
+
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(testing_support::hostPolicy(
+                                                     VerificationMode::AUTO, ClaimMode::ENFORCE)),
+                                                 makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results))
+        << "a throw from the claim read is a harness failure, not a silent pass";
+}
+
 // NOLINTEND(readability-identifier-naming)
