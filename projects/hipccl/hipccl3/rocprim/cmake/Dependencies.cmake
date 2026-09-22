@@ -41,7 +41,17 @@ if(DEFINED BUILD_SHARED_LIBS)
 endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
-set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
+# NOTE(hipccl3): FORCE added. Without it, this set() only takes effect if
+# ROCM_WARN_TOOLCHAIN_VAR's cache entry doesn't already exist - true for a
+# standalone build (nothing has touched it yet), but false in the hipccl3
+# superbuild, where the root CMakeLists.txt's find_package(ROCmCMakeBuildTools)
+# (via cmake/modules/fetch_rocm_cmake.cmake) already triggers
+# include(ROCMChecks), which claims the cache entry as ON before this file
+# ever runs - making this line a silent no-op and letting the warning through
+# anyway. The restore below intentionally still doesn't use FORCE, matching
+# today's standalone behavior (where it's already a no-op and the suppression
+# quietly outlives this block for the rest of that configure).
+set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "" FORCE)
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
 list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)
