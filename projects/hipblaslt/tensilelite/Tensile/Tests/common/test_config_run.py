@@ -53,22 +53,34 @@ import pytest
 from Tensile import Tensile
 
 from artifact_helpers import artifact_name_for_config, extract_artifact
+from config_helpers import materializeConfig
 
 
-def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
+def _run(
+    config: str,
+    output_dir: str,
+    artifact_dir: str,
+    tensile_args: list[str],
+    artifact_name: str | None = None,
+) -> None:
     """Extract a pre-built artifact and run benchmarks against it.
 
     Callable from both the pytest wrapper below and from test_config.py via
     subprocess (where it runs in a clean process to avoid global-state bleed).
     """
-    artifact_name = artifact_name_for_config(config)
+    artifact_name = artifact_name or artifact_name_for_config(config)
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
     Tensile.Tensile([config, output_dir, "--use-cache", *tensile_args])
 
 
-def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+def test_config_run(
+    tensile_args: list[str],
+    config,
+    tmpdir: py.path.local,
+    pytestconfig: pytest.Config,
+) -> None:
     """Pytest wrapper: extract a pre-built artifact and benchmark on the GPU.
 
     Activated only when ``--use-cache`` is passed; collection is skipped in all
@@ -80,6 +92,15 @@ def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local,
     """
     if not pytestconfig.getoption("--use-cache"):
         pytest.skip("requires --use-cache")
-    artifact_name = artifact_name_for_config(config)
+    config_path = materializeConfig(config, tmpdir.strpath)
+    artifact_name = artifact_name_for_config(
+        config.source_path, config.shard_label
+    )
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
-    _run(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)
+    _run(
+        config_path,
+        output_dir,
+        pytestconfig.getoption("--artifact-dir"),
+        tensile_args,
+        artifact_name,
+    )

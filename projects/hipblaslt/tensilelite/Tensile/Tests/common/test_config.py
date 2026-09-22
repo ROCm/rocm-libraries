@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -61,6 +61,7 @@ import py
 import pytest
 
 from artifact_helpers import artifact_name_for_config
+from config_helpers import materializeConfig
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,6 +73,7 @@ def _call_helper_in_subprocess(
     output_dir: str,
     artifact_dir: str,
     tensile_args: list[str],
+    artifact_name: str,
 ) -> None:
     """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
 
@@ -82,17 +84,32 @@ def _call_helper_in_subprocess(
     script = (
         f"import sys; sys.path.insert(0, {repr(_COMMON_DIR)}); "
         f"from {module} import {func}; "
-        f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
+        f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[5:], "
+        f"artifact_name=sys.argv[4])"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
     subprocess.run(
-        [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
+        [
+            sys.executable,
+            "-c",
+            script,
+            config,
+            output_dir,
+            artifact_dir,
+            artifact_name,
+            *tensile_args,
+        ],
         check=True,
         env=env,
     )
 
 
-def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+def test_config(
+    tensile_args: list[str],
+    config,
+    tmpdir: py.path.local,
+    pytestconfig: pytest.Config,
+) -> None:
     """Pytest wrapper: run the full build→artifact→run round-trip on a single machine.
 
     Activated in the default mode (no ``--build-only`` / ``--use-cache`` flags).
@@ -100,15 +117,34 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     """
     if pytestconfig.getoption("--build-only") or pytestconfig.getoption("--use-cache"):
         pytest.skip("split mode active — use test_config_build or test_config_run")
-    artifact_name = artifact_name_for_config(config)
+    config_path = materializeConfig(config, tmpdir.strpath)
+    artifact_name = artifact_name_for_config(
+        config.source_path, config.shard_label
+    )
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
 
-    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
+    _call_helper_in_subprocess(
+        "test_config_build",
+        "_build",
+        config_path,
+        output_dir,
+        artifact_dir,
+        tensile_args,
+        artifact_name,
+    )
     shutil.rmtree(output_dir)
     try:
-        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+        _call_helper_in_subprocess(
+            "test_config_run",
+            "_run",
+            config_path,
+            output_dir,
+            artifact_dir,
+            tensile_args,
+            artifact_name,
+        )
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(artifact_path)

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,8 +28,11 @@ For artifact compression/extraction utilities (no pytest dependency),
 see artifact_helpers.py.
 """
 
+import copy
+import itertools
 import os
 import re
+from dataclasses import dataclass
 
 import pytest
 import yaml
@@ -45,6 +48,172 @@ try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
 except AttributeError:
     DEFAULT_YAML_LOADER = yaml.SafeLoader
+
+
+@dataclass(frozen=True)
+class ConfigSpec:
+    """A source YAML config, optionally narrowed to one fork-parameter shard.
+
+    Shard coordinates use indices rather than values so the pytest parameter is
+    small and deterministic even when a selected value is a list (for example,
+    MatrixInstruction or ClusterDim).  The source file is re-read when the test
+    starts and the selected values are materialized in that test's temporary
+    directory.
+    """
+
+    source_path: str
+    problem_index: int = -1
+    group_index: int = -1
+    shard_axes: tuple[str, ...] = ()
+    value_indices: tuple[int, ...] = ()
+    shard_index: int = 0
+    shard_count: int = 1
+
+    @property
+    def is_sharded(self):
+        return self.problem_index >= 0
+
+    @property
+    def shard_label(self):
+        if not self.is_sharded:
+            return None
+        width = max(2, len(str(self.shard_count)))
+        return (
+            f"p{self.problem_index:02d}-g{self.group_index:02d}-"
+            f"s{self.shard_index + 1:0{width}d}-of-{self.shard_count}"
+        )
+
+
+def _readConfig(filepath):
+    with open(filepath) as f:
+        return yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
+
+
+def _forkParameterEntries(filepath, group):
+    """Return a name -> YAML-entry mapping, rejecting ambiguous layouts."""
+    entries = {}
+    forkParameters = group.get("ForkParameters")
+    if not isinstance(forkParameters, list):
+        raise ValueError(
+            f"{filepath}: a sharded benchmark group must define "
+            "ForkParameters as a list"
+        )
+
+    for entry in forkParameters:
+        if not isinstance(entry, dict) or len(entry) != 1:
+            raise ValueError(
+                f"{filepath}: each ForkParameters entry in a sharded "
+                "config must contain exactly one parameter"
+            )
+        name, values = next(iter(entry.items()))
+        if name == "Groups":
+            raise ValueError(
+                f"{filepath}: TestParameters.shard_by does not support "
+                "existing ForkParameters.Groups"
+            )
+        if name in entries:
+            raise ValueError(
+                f"{filepath}: duplicate ForkParameters entry {name!r}"
+            )
+        if not isinstance(values, list) or not values:
+            raise ValueError(
+                f"{filepath}: ForkParameters.{name} must be a non-empty list"
+            )
+        entries[name] = entry
+    return entries
+
+
+def configSpecs(filepath):
+    """Return deterministic pytest work items for one YAML config.
+
+    A config opts in with ``TestParameters.shard_by``.  For every
+    BenchmarkProblems size group, the Cartesian product of those selected fork
+    axes becomes independent pytest items. Every unselected fork axis and
+    every problem size remains in each item, so the shards form a disjoint,
+    exhaustive partition of the original fork-parameter product.
+    """
+    doc = _readConfig(filepath)
+    shardAxes = doc.get("TestParameters", {}).get("shard_by") \
+        if isinstance(doc, dict) else None
+    if shardAxes is None:
+        return [ConfigSpec(filepath)]
+    if (
+        not isinstance(shardAxes, list)
+        or not shardAxes
+        or not all(isinstance(axis, str) and axis for axis in shardAxes)
+        or len(set(shardAxes)) != len(shardAxes)
+    ):
+        raise ValueError(
+            f"{filepath}: TestParameters.shard_by must be a non-empty list "
+            "of unique ForkParameters names"
+        )
+
+    benchmarkProblems = doc.get("BenchmarkProblems")
+    if not isinstance(benchmarkProblems, list) or not benchmarkProblems:
+        raise ValueError(
+            f"{filepath}: TestParameters.shard_by requires BenchmarkProblems"
+        )
+
+    specs = []
+    axes = tuple(shardAxes)
+    for problemIndex, problem in enumerate(benchmarkProblems):
+        if not isinstance(problem, list) or len(problem) < 2:
+            raise ValueError(
+                f"{filepath}: BenchmarkProblems[{problemIndex}] has no "
+                "benchmark group"
+            )
+        for groupIndex, group in enumerate(problem[1:]):
+            entries = _forkParameterEntries(filepath, group)
+            missing = [axis for axis in axes if axis not in entries]
+            if missing:
+                raise ValueError(
+                    f"{filepath}: TestParameters.shard_by names missing "
+                    f"ForkParameters in BenchmarkProblems[{problemIndex}]"
+                    f"[{groupIndex + 1}]: {missing}"
+                )
+
+            indexRanges = [range(len(entries[axis][axis])) for axis in axes]
+            coordinates = list(itertools.product(*indexRanges))
+            for shardIndex, valueIndices in enumerate(coordinates):
+                specs.append(ConfigSpec(
+                    source_path=filepath,
+                    problem_index=problemIndex,
+                    group_index=groupIndex,
+                    shard_axes=axes,
+                    value_indices=tuple(valueIndices),
+                    shard_index=shardIndex,
+                    shard_count=len(coordinates),
+                ))
+    return specs
+
+
+def configForSpec(spec):
+    """Load and narrow ``spec`` to its single problem/group/fork shard."""
+    doc = _readConfig(spec.source_path)
+    if not spec.is_sharded:
+        return doc
+
+    problem = doc["BenchmarkProblems"][spec.problem_index]
+    group = copy.deepcopy(problem[spec.group_index + 1])
+    entries = _forkParameterEntries(spec.source_path, group)
+    for axis, valueIndex in zip(spec.shard_axes, spec.value_indices):
+        values = entries[axis][axis]
+        entries[axis][axis] = [copy.deepcopy(values[valueIndex])]
+
+    result = copy.deepcopy(doc)
+    result["BenchmarkProblems"] = [[copy.deepcopy(problem[0]), group]]
+    return result
+
+
+def materializeConfig(spec, outputDir):
+    """Return a runnable YAML path, writing an opted-in shard when needed."""
+    if not spec.is_sharded:
+        return spec.source_path
+
+    outputPath = os.path.join(str(outputDir), spec.shard_label + ".yaml")
+    with open(outputPath, "w") as f:
+        yaml.safe_dump(configForSpec(spec), f, sort_keys=False)
+    return outputPath
 
 
 def get_rocm_version_or_none():
@@ -241,7 +410,8 @@ def findAvailableArchs(gpu_targets=None):
 def findConfigs(rootDir=None, availableArchs=None):
     """
     Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
-    list of test parameters, one for each YAML file.
+    list of test parameters. Most YAML files produce one parameter; configs
+    with ``TestParameters.shard_by`` produce one per selected fork coordinate.
 
     Args:
         rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
@@ -289,5 +459,11 @@ def findConfigs(rootDir=None, availableArchs=None):
                         marks.append(pytest.mark.xfail(reason=reason, strict=True))
 
                     relpath = os.path.relpath(filepath, printRoot)
-                    params.append(pytest.param(filepath, marks=marks, id=relpath))
+                    for spec in configSpecs(filepath):
+                        testId = relpath
+                        if spec.shard_label:
+                            testId += "::" + spec.shard_label
+                        params.append(
+                            pytest.param(spec, marks=marks, id=testId)
+                        )
     return params

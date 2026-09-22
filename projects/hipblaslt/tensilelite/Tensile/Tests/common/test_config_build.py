@@ -52,19 +52,35 @@ import pytest
 from Tensile import Tensile
 
 from artifact_helpers import artifact_name_for_config, compress_output
+from config_helpers import materializeConfig
 
 
-def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
+def _build(
+    config: str,
+    output_dir: str,
+    artifact_dir: str,
+    tensile_args: list[str],
+    artifact_name: str | None = None,
+) -> None:
     """Build kernels and compress the result to artifact_dir.
 
     Callable from both the pytest wrapper below and from test_config.py via
     subprocess (where it runs in a clean process to avoid global-state bleed).
     """
     Tensile.Tensile([config, output_dir, "--build-only", *tensile_args])
-    compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
+    compress_output(
+        output_dir,
+        dest_dir=artifact_dir,
+        name=artifact_name or artifact_name_for_config(config),
+    )
 
 
-def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+def test_config_build(
+    tensile_args: list[str],
+    config,
+    tmpdir: py.path.local,
+    pytestconfig: pytest.Config,
+) -> None:
     """Pytest wrapper: build kernels for one YAML config and emit a .tar.gz artifact.
 
     Activated only when ``--build-only`` is passed; collection is skipped in all
@@ -75,5 +91,15 @@ def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.loca
     """
     if not pytestconfig.getoption("--build-only"):
         pytest.skip("requires --build-only")
-    output_dir = os.path.join(tmpdir.strpath, artifact_name_for_config(config))
-    _build(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)
+    config_path = materializeConfig(config, tmpdir.strpath)
+    artifact_name = artifact_name_for_config(
+        config.source_path, config.shard_label
+    )
+    output_dir = os.path.join(tmpdir.strpath, artifact_name)
+    _build(
+        config_path,
+        output_dir,
+        pytestconfig.getoption("--artifact-dir"),
+        tensile_args,
+        artifact_name,
+    )
