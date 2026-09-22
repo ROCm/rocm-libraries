@@ -1,0 +1,40 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <winver.h>
+
+#ifdef DEBUG
+#define VER_DEBUG VS_FF_DEBUG
+#else
+#define VER_DEBUG 0
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       VER_DEBUG
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Advanced Micro Devices, Inc."
+            VALUE "FileDescription",  "AMD Origami - Analytical GEMM Kernel Configuration Selection Library for GPU Computing"
+            VALUE "FileVersion",      "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"
+            VALUE "InternalName",     "origami"
+            VALUE "LegalCopyright",   "Copyright (C) @ORIGAMI_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
+            VALUE "OriginalFilename", "origami.dll"
+            VALUE "ProductName",      "AMD ROCm Origami @PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@ (@PROJECT_VERSION_TWEAK@)"
+            VALUE "ProductVersion",   "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@.0"
+            VALUE "Comments",         "Git commit: @ORIGAMI_VERSION_COMMIT_ID@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
