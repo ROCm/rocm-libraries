@@ -894,13 +894,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # strideTile into that factor, so a raw *MIWaveTile overshoots by vectorWidth (e.g. TN B:
         # 16*256*4 *4 = 65536 vs correct 16*256*4 = 16384). Transposed path has vectorWidth==1 so
         # this reduces to the original *MIWaveTile.
-        # Exclude MXS (the MX block-scale tensors): the scale reads have their own swizzled LDS layout
-        # (MXScaleFormat=InMemorySwizzle) whose per-wave placement is fixed by the wave-id decomposition
-        # (num1DWaves / hiOffset partner-block), NOT by the output-tile re-layout. Applying the MIWaveTile
-        # multiply over-shifts the scale read so the upper half-wave grabs the wrong E8M0 scale block
-        # (~half-value outputs in an N-band → 1/4 wrong on MXFP8 TN). A/B data reads still re-lay out.
+        # MXS scale tensors get the same wave-base re-layout as A/B: under WaveContiguousOutput a wave
+        # owns MIWaveTile contiguous M-tiles, so wtid0 must land at the start of that contiguous block
+        # (wtid0*MIWaveTile*perTile) rather than one tile in. Pairs with the contigOut adjustments in the
+        # swizzled scale per-vector step (LocalRead.localReadMX MIWaveGroupShape) and the tileSpan partner
+        # offset (hiOffset below) — all three are required together or the scale range mis-indexes.
         contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
-        if contigOut and ("MXS" not in tc):
+        if contigOut:
             strideWave = strideWave // vectorWidth * kernel["MIWaveTile"][tile01]
 
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
@@ -1144,7 +1144,14 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     # @+hiOffset. Bake it into the per-lane address so a single ds_load holds
                     # both blocks (lower/upper half-wave), which the WMMA then selects between
                     # via matrix_{a,b}_scale. hiOffset = full tile-half span in bytes.
-                    hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
+                    # contigOut: the partner tile is the CONTIGUOUS next tile (+1), so drop the
+                    # *num1DWaves interleave factor (matches the strideWave wave-base ×MIWaveTile and
+                    # the localReadMX MIWaveGroup drop). Without this the partner lands num1DWaves tiles
+                    # away and the upper half-wave grabs the wrong scale block.
+                    if contigOut:
+                        hiOffset = matrixInstT * num1DBlocks * vectorWidth * strideTile
+                    else:
+                        hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
                     # axis-neutral: tile01==0 -> M axis (MXSA), tile01==1 -> N axis (MXSB)
                     tileDim = "M" if tile01 == 0 else "N"
                     module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes, \
