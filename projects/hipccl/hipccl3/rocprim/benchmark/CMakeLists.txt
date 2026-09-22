@@ -93,7 +93,11 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
   endif()
 
-  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
+  # NOTE(hipccl3): two extra ".." vs upstream (rocm-libraries/projects/rocprim)
+  # - this copy lives two directory levels deeper
+  # (rocm-libraries/projects/hipccl/hipccl3/rocprim), so the relative path to
+  # the shared rocm-libraries/shared/primbench directory needs two more "..".
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../../../shared/primbench)
 
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")

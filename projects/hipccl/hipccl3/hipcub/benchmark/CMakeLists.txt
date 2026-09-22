@@ -55,7 +55,11 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
   target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
 
-  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
+  # NOTE(hipccl3): two extra ".." vs upstream (rocm-libraries/projects/hipcub)
+  # - this copy lives two directory levels deeper
+  # (rocm-libraries/projects/hipccl/hipccl3/hipcub), so the relative path to
+  # the shared rocm-libraries/shared/primbench directory needs two more "..".
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../../../shared/primbench)
 
   if(WIN32)
     target_compile_definitions(${BENCHMARK_TARGET} PRIVATE PRIMBENCH_NO_MONITORING)
