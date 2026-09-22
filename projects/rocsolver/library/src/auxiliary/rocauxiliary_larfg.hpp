@@ -90,7 +90,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     else
     {
 #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
-        // Let tau = 2. Differs from LAPACK, which has tau = 0, H = I.
+        // Set tau = 2. Differs from LAPACK, which sets tau = 0, H = I.
         norms[0] = 1;
         tau[0] = 2;
 
@@ -159,7 +159,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     else
     {
 #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
-        // Let tau = 2. Differs from LAPACK, which has tau = 0, H = I.
+        // Set tau = 2. Differs from LAPACK, which sets tau = 0, H = I.
         norms[0] = 1;
         tau[0] = 2;
 
@@ -222,8 +222,8 @@ rocblas_status rocsolver_larfg_getMemorySize(const I n,
         return rocblas_status_success;
     }
 
-    // if small size no workspace needed
-    if(n <= LARFG_SSKER_MAX_N)
+    // Use small-size kernel by default; no workspace needed.
+    if(true)
     {
         *size_norms = 0;
         *size_work = 0;
@@ -302,23 +302,7 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // if n==1 return tau=0
-    dim3 gridReset(1, batch_count, 1);
-    dim3 setDiag(batch_count, 1, 1);
-    dim3 threads(1, 1, 1);
-    if(n == 1 && !COMPLEX)
-    {
-        ROCSOLVER_LAUNCH_KERNEL(reset_batch_info<T>, gridReset, threads, 0, stream, tau, strideP, 1,
-                                0);
-        if(beta != nullptr)
-        {
-            ROCSOLVER_LAUNCH_KERNEL((set_diag<T>), setDiag, threads, 0, stream, beta, shiftb,
-                                    strideb, alpha, shifta, n, stridex, (I)1, true);
-        }
-        return rocblas_status_success;
-    }
-
-    // if n is small, use small-size kernel
+    // Use small-size kernel by default; no workspace needed.
     if(true)
     {
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed

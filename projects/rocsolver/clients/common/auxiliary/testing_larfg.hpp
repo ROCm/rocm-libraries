@@ -37,19 +37,19 @@
 #include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename I>
-void larfg_checkBadArgs(const rocblas_handle handle, const I n, T da, T dx, const I inc, T dt)
+void larfg_checkBadArgs(const rocblas_handle handle, const I n, T da, T dx, const I inc, T dtau)
 {
     // handle
-    EXPECT_ROCBLAS_STATUS(rocsolver_larfg(nullptr, n, da, dx, inc, dt),
+    EXPECT_ROCBLAS_STATUS(rocsolver_larfg(nullptr, n, da, dx, inc, dtau),
                           rocblas_status_invalid_handle);
 
     // values
     // N/A
 
     // pointers
-    EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, (T) nullptr, dx, inc, dt),
+    EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, (T) nullptr, dx, inc, dtau),
                           rocblas_status_invalid_pointer);
-    EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, da, (T) nullptr, inc, dt),
+    EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, da, (T) nullptr, inc, dtau),
                           rocblas_status_invalid_pointer);
     EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, da, dx, inc, (T) nullptr),
                           rocblas_status_invalid_pointer);
@@ -70,30 +70,36 @@ void testing_larfg_bad_arg()
     // memory allocation
     device_strided_batch_vector<T> da(1, 1, 1, 1);
     device_strided_batch_vector<T> dx(1, 1, 1, 1);
-    device_strided_batch_vector<T> dt(1, 1, 1, 1);
+    device_strided_batch_vector<T> dtau(1, 1, 1, 1);
     CHECK_HIP_ERROR(da.memcheck());
     CHECK_HIP_ERROR(dx.memcheck());
-    CHECK_HIP_ERROR(dt.memcheck());
+    CHECK_HIP_ERROR(dtau.memcheck());
 
     // check bad arguments
-    larfg_checkBadArgs(handle, n, da.data(), dx.data(), inc, dt.data());
+    larfg_checkBadArgs(handle, n, da.data(), dx.data(), inc, dtau.data());
 }
 
 template <bool CPU, bool GPU, typename T, typename I, typename Td, typename Th>
 void larfg_initData(const rocblas_handle handle,
+                    int singular,
                     const I n,
                     Td& da,
                     Td& dx,
                     const I inc,
-                    Td& dt,
+                    Td& dtau,
                     Th& ha,
                     Th& hx,
-                    Th& ht)
+                    Th& htau)
 {
     if(CPU)
     {
         rocblas_init<T>(ha, true);
         rocblas_init<T>(hx, true);
+        if(singular == 1)
+        {
+            for (int i = 0; i < n-1; ++i)
+                hx[0][i*inc] = 0;
+        }
     }
 
     if(GPU)
@@ -106,63 +112,115 @@ void larfg_initData(const rocblas_handle handle,
 
 template <typename T, typename I, typename Td, typename Th>
 void larfg_getError(const rocblas_handle handle,
+                    int singular,
                     const I n,
                     Td& da,
                     Td& dx,
                     const I inc,
-                    Td& dt,
+                    Td& dtau,
                     Th& ha,
                     Th& ha_res,
                     Th& hx,
                     Th& hx_res,
-                    Th& ht,
-                    Th& ht_res,
+                    Th& htau,
+                    Th& htau_res,
                     double* max_err)
 {
+    using std::real, std::imag;
+
     // initialize data
-    larfg_initData<true, true, T>(handle, n, da, dx, inc, dt, ha, hx, ht);
+    larfg_initData<true, true, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
+
+    if (true) {
+        fmt::print( "input, n {}, inc {}, singular {}\n\t"
+                    "alpha {:7.4f}, x=[\n\t",
+                    n, inc, singular,
+                    real( ha[0][0] ) );
+        for (int i = 0; i < n-1; ++i) {
+            // print 4 boundary elements; skip middle
+            if(i == 4 && i < n-1-4)
+            {
+                fmt::print( "      ...\n\t" );
+                i = n-1-4;
+            }
+            fmt::print( "      {:7.4f}\n\t",
+                        real( hx[0][i*inc] ) );
+        }
+        fmt::print( "]\n" );
+    }
 
     // execute computations
     // GPU lapack
-    CHECK_ROCBLAS_ERROR(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dt.data()));
+    CHECK_ROCBLAS_ERROR(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dtau.data()));
     CHECK_HIP_ERROR(ha_res.transfer_from(da));
     CHECK_HIP_ERROR(hx_res.transfer_from(dx));
-    CHECK_HIP_ERROR(ht_res.transfer_from(dt));
+    CHECK_HIP_ERROR(htau_res.transfer_from(dtau));
 
 
     // CPU lapack
-    cpu_larfg(n, ha[0], hx[0], inc, ht[0]);
+    cpu_larfg(n, ha[0], hx[0], inc, htau[0]);
 
-    // error is ||hx - hx_res|| (not necessary to check tau, for now)
+    // error is max( ||hx - hx_res||_inf,
+    //               |alpha - alpha_res| / |alpha|,
+    //               |tau - tau_res| ).
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
-    // using norm-1 which is infinity norm for this data setup
+    // using norm-1 which is infinity norm for this 1-by-(n-1) data setup
+    double err_alpha, err_tau;
     *max_err = norm_error('O', 1, n - 1, inc, hx[0], hx_res[0]);
-
-    using std::real, std::imag;
-    fmt::print( "n {}\n\t"
-                "tau   {:7.4f} ?= {:7.4f}\n\t"
-                "alpha {:7.4f} ?= {:7.4f}, v=[\n\t",
-                n,
-                real( *ht[0] ), real( *ht_res[0] ),
-                real( *ha[0] ), real( *ha_res[0] ) );
-    for (int i = 1; i < n; ++i) {
-        fmt::print( "      {:7.4f} ?= {:7.4f}\n\t",
-                    real( hx[0][i-1] ), real( hx_res[0][i-1] ) );
+    // For "singular" vector where x[1:n] == 0, tau = 2 instead of
+    // LAPACK's convention that tau = 0. Hence alpha = -alpha_lapack.
+    if(n <= 1 || singular == 1)
+    {
+        err_alpha = std::abs(ha[0][0] + ha_res[0][0]);
+        err_tau = std::abs(htau_res[0][0] - 2);
     }
-    fmt::print( "]\n" );
+    else
+    {
+        err_alpha = std::abs(ha[0][0] - ha_res[0][0]);
+        err_tau = std::abs(htau[0][0] - htau_res[0][0]);
+    }
+    if(std::abs(ha[0][0]) != 0)
+        err_alpha /= std::abs(ha[0][0]);
+    fmt::print( "error x     {:7.2e}\n"
+                "      alpha {:7.2e}\n"
+                "      tau   {:7.2e}\n",
+                *max_err, err_alpha, err_tau );
+    *max_err = rocblas_max_nan(*max_err, err_alpha);
+    *max_err = rocblas_max_nan(*max_err, err_tau);
+
+    if (true) {
+        fmt::print( "output\n\t"
+                    "tau   {:7.4f} ?= {:7.4f}\n\t"
+                    "alpha {:7.4f} ?= {:7.4f}, v=[\n\t",
+                    real( htau[0][0] ), real( htau_res[0][0] ),
+                    real( ha[0][0] ), real( ha_res[0][0] ) );
+                    // (n-1) - i - 1
+        for (int i = 0; i < n-1; ++i) {
+            // print 4 boundary elements; skip middle
+            if(i == 4 && i < n-1-4)
+            {
+                fmt::print( "      ...\n\t" );
+                i = n-1-4;
+            }
+            fmt::print( "      {:7.4f} ?= {:7.4f}\n\t",
+                        real( hx[0][i*inc] ), real( hx_res[0][i*inc] ) );
+        }
+        fmt::print( "]\n" );
+    }
 }
 
 template <typename T, typename I, typename Td, typename Th>
 void larfg_getPerfData(const rocblas_handle handle,
+                       int singular,
                        const I n,
                        Td& da,
                        Td& dx,
                        const I inc,
-                       Td& dt,
+                       Td& dtau,
                        Th& ha,
                        Th& hx,
-                       Th& ht,
+                       Th& htau,
                        double* gpu_time_used,
                        double* cpu_time_used,
                        const rocblas_int hot_calls,
@@ -172,22 +230,22 @@ void larfg_getPerfData(const rocblas_handle handle,
 {
     if(!perf)
     {
-        larfg_initData<true, false, T>(handle, n, da, dx, inc, dt, ha, hx, ht);
+        larfg_initData<true, false, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
-        cpu_larfg(n, ha[0], hx[0], inc, ht[0]);
+        cpu_larfg(n, ha[0], hx[0], inc, htau[0]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    larfg_initData<true, false, T>(handle, n, da, dx, inc, dt, ha, hx, ht);
+    larfg_initData<true, false, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        larfg_initData<false, true, T>(handle, n, da, dx, inc, dt, ha, hx, ht);
+        larfg_initData<false, true, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
 
-        CHECK_ROCBLAS_ERROR(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dt.data()));
+        CHECK_ROCBLAS_ERROR(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dtau.data()));
     }
 
     // gpu-lapack performance
@@ -207,10 +265,10 @@ void larfg_getPerfData(const rocblas_handle handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        larfg_initData<false, true, T>(handle, n, da, dx, inc, dt, ha, hx, ht);
+        larfg_initData<false, true, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
 
         timer.start(stream);
-        rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dt.data());
+        rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dtau.data());
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
@@ -223,6 +281,7 @@ void testing_larfg(Arguments& argus)
     rocblas_local_handle handle;
     I n = argus.get<I>("n");
     I inc = argus.get<I>("incx");
+    int singular = argus.get<int>("singular", 0);
 
     rocblas_int hot_calls = argus.iters;
 
@@ -271,20 +330,20 @@ void testing_larfg(Arguments& argus)
     host_strided_batch_vector<T> hx_res(size_xr, inc, stxr, 1);
     host_strided_batch_vector<T> ha(1, 1, 1, 1);
     host_strided_batch_vector<T> ha_res(1, 1, 1, 1);
-    host_strided_batch_vector<T> ht(1, 1, 1, 1);
-    host_strided_batch_vector<T> ht_res(1, 1, 1, 1);
+    host_strided_batch_vector<T> htau(1, 1, 1, 1);
+    host_strided_batch_vector<T> htau_res(1, 1, 1, 1);
     device_strided_batch_vector<T> dx(size_x, inc, stx, 1);
     device_strided_batch_vector<T> da(1, 1, 1, 1);
-    device_strided_batch_vector<T> dt(1, 1, 1, 1);
+    device_strided_batch_vector<T> dtau(1, 1, 1, 1);
     CHECK_HIP_ERROR(da.memcheck());
     if(size_x)
         CHECK_HIP_ERROR(dx.memcheck());
-    CHECK_HIP_ERROR(dt.memcheck());
+    CHECK_HIP_ERROR(dtau.memcheck());
 
     // check quick return
     if(n == 0)
     {
-        EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dt.data()),
+        EXPECT_ROCBLAS_STATUS(rocsolver_larfg(handle, n, da.data(), dx.data(), inc, dtau.data()),
                               rocblas_status_success);
 
         if(argus.timing)
@@ -295,11 +354,11 @@ void testing_larfg(Arguments& argus)
 
     // check computations
     if(argus.unit_check || argus.norm_check)
-        larfg_getError<T>(handle, n, da, dx, inc, dt, ha, ha_res, hx, hx_res, ht, ht_res, &max_error);
+        larfg_getError<T>(handle, singular, n, da, dx, inc, dtau, ha, ha_res, hx, hx_res, htau, htau_res, &max_error);
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
-        larfg_getPerfData<T>(handle, n, da, dx, inc, dt, ha, hx, ht, &gpu_time_used, &cpu_time_used,
+        larfg_getPerfData<T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau, &gpu_time_used, &cpu_time_used,
                              hot_calls, argus.profile, argus.profile_kernels, argus.perf);
 
     // validate results for rocsolver-test
