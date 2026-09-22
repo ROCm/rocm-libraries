@@ -525,6 +525,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // --- Rule (4) ds_load cap (dagFeatures.dsReadPerWmma) ---
     // Enforced by dsIssueCap_ above; no per-window counter is kept.
+    //
+    // Diagnostic only (PASS_DEBUG): which constraint is actually binding when a
+    // ds_load is available to pick. A cap that binds on nearly every sample is
+    // behaving as an assignment -- it, not the queue, is choosing placement --
+    // which is the thing to know before rebalancing the cap against the queue.
+    // Sampled once per pickOne(), so the four counters partition those samples.
+    int dsBindNeither_ = 0;   // free: could issue now
+    int dsBindCapOnly_ = 0;   // only the [X,Y) cap says stop
+    int dsBindQueueOnly_ = 0; // only the ds queue (full / throttled) says stop
+    int dsBindBoth_ = 0;
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
     int dsSchedulingBudgetUsed_ = 0;
@@ -1833,6 +1843,22 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
     }
 
+    // Diagnostic: classify what would stop this ds_load right now. Read both
+    // constraints unconditionally -- deliberately ignoring the !wmmaQueue.empty()
+    // guard -- so the tail is measured too.
+    if (pickedDS != nullptr) {
+        const bool capStops = dsIssueCap_.full();
+        const bool queueStops = dsReadInflight_.full() || dsReadInflight_.throttleWait() > 0;
+        if (capStops && queueStops)
+            ++dsBindBoth_;
+        else if (capStops)
+            ++dsBindCapOnly_;
+        else if (queueStops)
+            ++dsBindQueueOnly_;
+        else
+            ++dsBindNeither_;
+    }
+
     // Phase B — try WMMA if all gates pass.
     bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
                                !otherQueue.empty() || !valuQueue.empty();
@@ -2195,6 +2221,21 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
 }
 
 void CDNA5ReadyQueue::onFinishBB() {
+    PASS_DEBUG({
+        const int total = dsBindNeither_ + dsBindCapOnly_ + dsBindQueueOnly_ + dsBindBoth_;
+        if (total > 0) {
+            auto pct = [total](int n) { return (100 * n + total / 2) / total; };
+            std::cerr << "[CDNA5 dsBind] bb="
+                      << (currentBB_ ? currentBB_->getLabel() : "?") << " samples=" << total
+                      << " free=" << dsBindNeither_ << "(" << pct(dsBindNeither_) << "%)"
+                      << " capOnly=" << dsBindCapOnly_ << "(" << pct(dsBindCapOnly_) << "%)"
+                      << " queueOnly=" << dsBindQueueOnly_ << "(" << pct(dsBindQueueOnly_) << "%)"
+                      << " both=" << dsBindBoth_ << "(" << pct(dsBindBoth_) << "%)"
+                      << " dsReadPerWmma=" << dsReadPerWmma()
+                      << " queueDepth=" << dsReadQueueDepth() << "\n";
+        }
+    });
+    dsBindNeither_ = dsBindCapOnly_ = dsBindQueueOnly_ = dsBindBoth_ = 0;
     if (!currentBB_ || !getAnalysisCache()) return;
     getAnalysisCache()->store(currentBB_, {0, regDataReadyCounters, globalReadInflight_.size(),
                                            globalReadInflight_.maxResidual(),
