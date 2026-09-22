@@ -41,25 +41,32 @@ CONFIG = {
     "AssertSizeEqual": {1: 1, 2: 1},
     "AssertSizeGreaterThan": {3: 0},
 }
-NAME = "Custom_W4A16_Decode_G128_ExLlama_gfx1151"
+
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", default="hipcc")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--group-size", type=int, choices=(32, 128), default=128)
+    parser.add_argument("--load-width", type=int, choices=(4, 8), default=8)
     args = parser.parse_args()
+    width_suffix = "_W4" if args.load_width == 4 else ""
+    name = f"Custom_W4A16_Decode_G{args.group_size}{width_suffix}_ExLlama_gfx1151"
     source = Path(__file__).resolve().parent / "w4a16_decode.hip"
-    output = args.output or source.parent.parent / f"{NAME}.s"
+    output = args.output or source.parent.parent / f"{name}.s"
     with tempfile.TemporaryDirectory() as directory:
         assembly = Path(directory) / "decode.s"
         subprocess.run(
             [args.compiler, "-O3", "--offload-arch=gfx1151", "-mcode-object-version=4",
-             "-fuse-cuid=none",
+             "-fuse-cuid=none", f"-DW4A16_GROUP_SIZE={args.group_size}",
+             f"-DW4A16_KERNEL_NAME={name}", f"-DW4A16_LOAD_WIDTH={args.load_width}",
              "--cuda-device-only", "-S", str(source), "-o", str(assembly)],
             check=True,
         )
         text = assembly.read_text()
+    # Keep the otherwise unused compiler marker unique when kernels share a code object.
+    text = text.replace("__hip_cuid_", f"__hip_cuid_{name}")
     # Match the target spelling used by the custom-kernel inspection tools.
     text = text.replace(
         '\t.amdgcn_target "amdgcn-amd-amdhsa-unknown-gfx1151"',

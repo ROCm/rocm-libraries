@@ -4,6 +4,16 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
+#ifndef W4A16_GROUP_SIZE
+#define W4A16_GROUP_SIZE 128
+#endif
+#ifndef W4A16_LOAD_WIDTH
+#define W4A16_LOAD_WIDTH 8
+#endif
+#ifndef W4A16_KERNEL_NAME
+#define W4A16_KERNEL_NAME Custom_W4A16_Decode_G128_ExLlama_gfx1151
+#endif
+
 // The assembly generated from this source uses the Tensile universal argument
 // layout (version 3). Selection requires N = batch = 1 and positive K divisible
 // by 256. Each wave reduces one row; consecutive lanes read consecutive chunks of packed weights.
@@ -46,14 +56,25 @@ namespace
             using Packed = unsigned __attribute__((ext_vector_type(Width)));
             const Packed packed = __builtin_nontemporal_load(
                 reinterpret_cast<const Packed*>(a + size_t(row) * (lda / 8) + kk / 8));
+#if W4A16_GROUP_SIZE == 128
             unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k / 128) + kk / 128]);
             scale |= scale << 16;
             unsigned z = (zeroA[size_t(row / 2) * (k / 128) + kk / 128]
                           >> ((row % 2) * 4)) & 15;
             z |= z << 16;
+#endif
             #pragma unroll
             for(unsigned j = 0; j < Width; ++j)
             {
+#if W4A16_GROUP_SIZE != 128
+                constexpr unsigned groupSize = W4A16_GROUP_SIZE;
+                const unsigned group = kk / groupSize + j / (groupSize / 8);
+                unsigned scale = __half_as_ushort(scaleA[size_t(row) * (k / groupSize) + group]);
+                scale |= scale << 16;
+                unsigned z = (zeroA[size_t(row / 2) * (k / groupSize) + group]
+                              >> ((row % 2) * 4)) & 15;
+                z |= z << 16;
+#endif
                 unsigned q = packed[j];
                 const uint4 activation = *reinterpret_cast<const uint4*>(b + kk + j * 8);
 
@@ -80,7 +101,7 @@ namespace
 }
 
 extern "C" __global__ __launch_bounds__(128)
-void Custom_W4A16_Decode_G128_ExLlama_gfx1151(
+void W4A16_KERNEL_NAME(
     unsigned info, unsigned kernelInfo0, unsigned kernelInfo1, unsigned numWorkgroups,
     unsigned m, unsigned n, unsigned batch, unsigned k,
     const unsigned* __restrict__ a, const half* __restrict__ b,
@@ -96,13 +117,13 @@ void Custom_W4A16_Decode_G128_ExLlama_gfx1151(
     if(row >= m)
         return;
 
-    // Eight dwords share one scale/zero-point and use streaming weight loads.
+    // Vector loads stream weights; metadata follows quantization groups.
     // Preserve the dword path when K or the row stride cannot support this width.
     float sum = 0;
     if(alpha != 0)
     {
-        if(k % 2048 == 0 && lda % 64 == 0)
-            sum = accumulate<8>(a, b, scaleA, zeroA, row, lane, k, lda);
+        if(k % (256 * W4A16_LOAD_WIDTH) == 0 && lda % (8 * W4A16_LOAD_WIDTH) == 0)
+            sum = accumulate<W4A16_LOAD_WIDTH>(a, b, scaleA, zeroA, row, lane, k, lda);
         else
             sum = accumulate<1>(a, b, scaleA, zeroA, row, lane, k, lda);
     }

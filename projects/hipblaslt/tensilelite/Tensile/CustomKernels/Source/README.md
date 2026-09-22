@@ -1,19 +1,22 @@
 # W4A16 decode kernel
 
 `w4a16_decode.hip` is the source for
-`Custom_W4A16_Decode_G128_ExLlama_gfx1151.s`. Regenerate it with:
+`Custom_W4A16_Decode_G128_ExLlama_gfx1151.s` and
+`Custom_W4A16_Decode_G32_ExLlama_gfx1151.s`. Regenerate them with:
 
 ```sh
-python generate_w4a16_decode.py --compiler /path/to/hipcc
+python generate_w4a16_decode.py --compiler /path/to/hipcc --group-size 128
+python generate_w4a16_decode.py --compiler /path/to/hipcc --group-size 32
 ```
 
 The checked-in assembly was generated with AMD clang 23.0.0git,
 LLVM revision `0bace1908348b840e6aa1b4b6e12151dae208158`, targeting gfx1151
 and code object version 4. Compilation-unit IDs are disabled so temporary
-output paths do not change the assembly. The generator also attaches the
+output paths do not change the assembly. The compiler marker is named after
+the kernel to allow multiple variants in the same code object. The generator also attaches the
 Tensile kernel-argument version and selection constraints.
 
-The kernel supports FP16 activations/output, asymmetric group-128 scales,
+The kernel supports FP16 activations/output, asymmetric group-32 or group-128 scales,
 ExLlama nibble order, one output column, one batch, and positive K divisible
 by 256. Four waves compute four output rows. Each wave reduces along K in
 FP32 after FP16-rounded dequantization. Rotating the K starting point between
@@ -21,6 +24,8 @@ rows avoids concentrating power-of-two row strides on the same memory
 channels. Streaming weight loads preserve cache space for activations.
 K divisible by 2048 and a row stride divisible by 64 int4 elements use eight
 packed dwords per lane; other supported inputs use one dword per lane.
+With group size 32, each eight-dword load spans two quantization groups;
+each half uses its own scale and zero-point.
 The kernel uses no LDS and supports the usual scalar alpha/beta epilogue.
 
 ## Cold bandwidth measurement
@@ -58,3 +63,48 @@ For example, 56.48 microseconds corresponds to 231.9 GB/s of total payload
 or 222.8 GB/s counting packed weights alone. Report which convention is used.
 The rotating allocation exceeds the GPU cache capacity; these are cold weight
 measurements, not repeated accesses to a single resident weight matrix.
+
+For group size 32, use `--scaleA 1009` with the same shape and timing flags.
+The scales occupy 1,572,864 bytes and zero-points 393,216 bytes; all other
+payload sizes above stay the same, for a total of 14,569,472 bytes.
+Three cold adaptive runs measured 57.9322, 57.9134, and 57.5432 microseconds
+on the Radeon 8060S. Their median is 251.6 GB/s total payload or 217.3 GB/s
+packed weights alone. All three runs converged. The monitor recorded package
+power and CPU thermal throttling during the combined validation/comparison run.
+An alternative four-dword load was slower, so the eight-dword path is retained.
+
+## Q27B Equality dispatch
+
+The gfx1151 Equality logic in
+`gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_Q27B.yaml` selects measured
+solutions for these group-32 FP16 ExLlama projections. Decode uses the
+four-dword variant; prefill uses the matrix kernel with workgroup mapping
+1 or 4. Regenerate the additional decode assembly with:
+
+```sh
+python generate_w4a16_decode.py --compiler /path/to/hipcc --group-size 32 --load-width 4
+```
+
+| M | K | Tuned lda | Decode N=1 (us) | Prefill N=2048 (us) | Prefill mapping |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 34816 | 5120 | 5632 | 441.534 | 20603.5 | 1 |
+| 5120 | 17408 | 17920 | 216.800 | 10164.9 | 4 |
+| 16384 | 5120 | 5632 | 185.530 | 9733.75 | 1 |
+| 14336 | 5120 | 5632 | 172.852 | 8482.52 | 1 |
+| 5120 | 6144 | 6656 | 74.795 | 3767.01 | 4 |
+
+These are normal C API heuristic selections from a library containing both
+Equality and FreeSize logic, with `--rotating 512 --adaptive --use_gpu_timer`.
+All ten timings converged. Package power throttling was recorded during the
+run. Tuning compared decode load widths 4 and 8 and prefill mappings
+1, 4, 8, 16, and 32; the leading prefill mappings were measured again.
+Equality keys are M, N, batch=1, and K. Other dimensions retain the FreeSize
+fallback. The table records the strides used for tuning; it does not impose
+a new requirement that callers pad their weights.
+
+All five exact decode shapes passed numerical validation. Both prefill mappings
+passed numerical checks at M=129, N=2048 and each of the three K values,
+covering ragged rows and multiple tiles; full-size prefill timings do not run
+the CPU reference. Use the benchmark command above with `--scaleA 1009`,
+the desired M/N/K/lda from the table, ldb=K and ldc=ldd=M. Omit any captured
+`--solution_index` and `--algo_method index` to exercise Equality dispatch.

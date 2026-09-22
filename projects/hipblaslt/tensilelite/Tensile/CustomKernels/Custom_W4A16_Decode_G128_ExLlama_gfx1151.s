@@ -2233,17 +2233,17 @@ Custom_W4A16_Decode_G128_ExLlama_gfx1151: ; @Custom_W4A16_Decode_G128_ExLlama_gf
 	.set amdgpu.max_num_sgpr, 0
 	.set amdgpu.max_num_named_barrier, 0
 	.text
-	.type	__hip_cuid_,@object             ; @__hip_cuid_
+	.type	__hip_cuid_Custom_W4A16_Decode_G128_ExLlama_gfx1151,@object             ; @__hip_cuid_Custom_W4A16_Decode_G128_ExLlama_gfx1151
 	.section	.bss,"aw",@nobits
-	.globl	__hip_cuid_
-__hip_cuid_:
+	.globl	__hip_cuid_Custom_W4A16_Decode_G128_ExLlama_gfx1151
+__hip_cuid_Custom_W4A16_Decode_G128_ExLlama_gfx1151:
 	.byte	0                               ; 0x0
-	.size	__hip_cuid_, 1
+	.size	__hip_cuid_Custom_W4A16_Decode_G128_ExLlama_gfx1151, 1
 
 	.ident	"AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 0bace1908348b840e6aa1b4b6e12151dae208158)"
 	.section	".note.GNU-stack","",@progbits
 	.addrsig
-	.addrsig_sym __hip_cuid_
+	.addrsig_sym __hip_cuid_Custom_W4A16_Decode_G128_ExLlama_gfx1151
 	.amdgpu_metadata
 ---
 custom.config:
