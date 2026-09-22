@@ -2777,7 +2777,7 @@ class Solution(collections.abc.Mapping):
       if not (bufferLoad and ( state["PrefetchGlobalRead"] == 1 \
               or (state["PrefetchGlobalRead"] > 1 and \
                   (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()))
-              or (state["ProblemType"]["Sparse"] and state["PrefetchGlobalRead"] > 0))):
+              or (state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]))):
         state["ExpandPointerSwap"] = False
 
     #################################################################
