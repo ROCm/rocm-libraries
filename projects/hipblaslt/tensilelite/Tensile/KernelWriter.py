@@ -5160,6 +5160,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
 
+    if kernel.get("SubtileStoreInNLL", 0):
+      from Tensile.Components.Subtile.StoreInNLL import emitSubtileStoreInNLLAddressInit
+      self.states.storeAlign8 = False
+      if not self.states.doShadowInit:
+        self.removeSgprVarFromPool("SrdD")
+        module.add(RegSet("s", "sgprSrdD", self.sgprs["SrdD"]))
+        module.add(SMovB64(dst=sgpr("SrdD", 2), src=sgpr("AddressD", 2),
+                          comment="folded-store SRD base = AddressD (GSU=1, batch=1)"))
+        module.add(SMovB32(dst=sgpr("SrdD+2"), src="BufferOOB",
+                          comment="folded-store SRD limit"))
+        module.add(SMovB32(dst=sgpr("SrdD+3"), src="Srd127_96",
+                          comment="folded-store SRD format"))
+      module.addComment0("SubtileStoreInNLL: hoist D coordinates before NLL")
+      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+      module.add(emitSubtileStoreInNLLAddressInit(self, kernel))
+
     module.add(mainLoop(self, kernel))
 
     # Deallocate offset registers
@@ -5197,20 +5213,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Start of post-loop code
     if 1:
+      foldStoreInNLL = bool(kernel.get("SubtileStoreInNLL", 0))
       module.addComment0(" =============================================================== ")
       module.addComment0(" =================== Start of post-loop code =================== ")
       module.addComment0(" =============================================================== ")
 
       # ValuC aliases D-tile VGPRs on MIArchVgpr (see _subtileDtileBaseVgpr)
-      if kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
+      if foldStoreInNLL:
+        self.states.c.startVgprValu = 0
+      elif kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None:
         self.states.c.startVgprValu = self._subtileDtileBaseVgpr
       else:
         self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="postLoop_startVgprValu")
 
-      module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
-                             "serializedStore enabled" if self.states.serializedStore else ""))
-      module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
-      self.states.serializedStore = True
+      if not foldStoreInNLL:
+        module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
+                               "serializedStore enabled" if self.states.serializedStore else ""))
+        module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
+        self.states.serializedStore = True
 
 
       # SrdWS must be removed from the free pool before endSummation so that
@@ -5219,7 +5239,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdWS")
       module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
-      if not self.states.doShadowInit:
+      if not self.states.doShadowInit and not foldStoreInNLL:
         self.removeSgprVarFromPool("SrdD")
         self.removeSgprVarFromPool("SrdC")
         module.add(self.globalWriteWorkGroupInit(kernel))
@@ -5230,16 +5250,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
 
-      # global write indices
-      module.addComment1("not-LocalSplitU: global write indices")
-      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+      if foldStoreInNLL:
+        from Tensile.Components.Subtile.StoreInNLL import cleanupSubtileStoreInNLL
+        deferredGSU0 = None
+        module.addComment1("SubtileStoreInNLL: D already stored in NLL")
+        self.cleanupGlobalWrite(kernel)
+        cleanupSubtileStoreInNLL(self)
+      else:
+        # global write indices
+        module.addComment1("not-LocalSplitU: global write indices")
+        module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
 
-      # global write
-      #module.addComment1("not-LocalSplitU: global write")
-      storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
-      module.add(storeModule)
+        # global write
+        storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
+        module.add(storeModule)
 
-      if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
+      if not foldStoreInNLL and not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
 
     # Deallocate registers used for C/D tiles after store code instructions are emitted
@@ -9418,7 +9444,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # the sgprs overlap with wg ids
     # TODO: For subtileimpl, consider shadowInit param as well
-    if self.states.doShadowInit and kernel["BufferStore"]:
+    if (self.states.doShadowInit or kernel.get("SubtileStoreInNLL", 0)) and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
 

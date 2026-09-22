@@ -15,6 +15,7 @@ swap — and the MacroTile geometry that follows from it.
 import pytest
 
 from Tensile.Common import effectiveMatrixInstMN
+from Tensile.SolutionStructs.Solution import subtileSourceSwapWidthSupported
 
 
 class TestEffectiveMatrixInstMN:
@@ -47,6 +48,29 @@ class TestEffectiveMatrixInstMN:
         m, n = 32, 16
         effectiveMatrixInstMN(m, n, True)
         assert (m, n) == (32, 16)
+
+
+class TestSubtileSourceSwapWidthGate:
+    @pytest.mark.parametrize(
+        "miwt,vwa,vwb,expected",
+        [
+            ([8, 8], -1, -1, True),
+            ([8, 16], -1, -1, True),
+            ([8, 8], 8, 8, True),
+            ([8, 4], -1, -1, False),
+            ([8, 6], -1, -1, False),
+            ([8, 10], -1, -1, False),
+            ([8, 8], 8, 4, False),
+            ([4, 8], -1, -1, False),
+        ],
+        ids=[
+            "square_auto", "wide_auto", "square_explicit",
+            "narrow4", "narrow6", "nonmultiple10",
+            "explicit_narrow_b", "narrow_a",
+        ],
+    )
+    def test_only_eight_wide_ab_maps_are_admitted(self, miwt, vwa, vwb, expected):
+        assert subtileSourceSwapWidthSupported(miwt, vwa, vwb) is expected
 
 
 class TestMacroTileGeometry:

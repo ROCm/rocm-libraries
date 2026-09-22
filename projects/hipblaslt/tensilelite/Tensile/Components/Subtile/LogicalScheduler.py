@@ -3491,6 +3491,10 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{label} end")
+        if label.startswith("NLL_C") and kernel.get("SubtileStoreInNLL", 0):
+            from Tensile.Components.Subtile.StoreInNLL import interleaveSubtileStoreInNLL
+            module = interleaveSubtileStoreInNLL(
+                module, writer, kernel, writer.states.d.tileInfo)
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)

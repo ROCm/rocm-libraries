@@ -46,6 +46,7 @@ def getRequiredParametersMin() -> set:
         'ClusterLocalRead',
         'ConvertAfterDS',
         'CompactLoopStore',
+        'SubtileStoreInNLL',
         'DirectToVgprA',
         'DirectToVgprB',
         'DirectToVgprSparseMetadata',

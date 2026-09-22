@@ -33,6 +33,7 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
 from Tensile.Activation import ActivationType
 from Tensile.AsmStoreState import VectorDataTypes
+from Tensile.Components.Subtile.StoreInNLL import subtileStoreInNLLRejectionReason
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
@@ -60,6 +61,21 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+
+
+def subtileSourceSwapWidthSupported(miWaveTile, vectorWidthA, vectorWidthB):
+  """Return whether subtile SourceSwap can use conflict-free wide stores.
+
+  The profitable gfx950 mapping requires eight contiguous output rows per lane
+  and eight-wide local reads for both operands.  ``-1`` means derive the width;
+  it derives to eight exactly when the corresponding wave-tile dimension is a
+  multiple of eight.
+  """
+  return (len(miWaveTile) == 2
+          and miWaveTile[0] == 8
+          and miWaveTile[1] % 8 == 0
+          and vectorWidthA in (-1, 8)
+          and vectorWidthB in (-1, 8))
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -1016,12 +1032,10 @@ class Solution(collections.abc.Mapping):
       #   at 4 SS1 ties SS0 while paying for LDS padding and a disabled swizzle, and at
       #   2 it stores half as wide.
       #
-      #   MIWaveTile[1] is only required to be a multiple of VectorWidthB. It carries no
-      #   store-width bound of its own -- N is the strided store axis -- it only has to
-      #   let the local read tile the wave's rows, which the two-level interleaved map
-      #   does for any multiple (see SubtileLREmit.emitSingleDsRead). VectorWidthB is
-      #   derived below as a power-of-two divisor of MIWaveTile[1], so the auto case
-      #   always qualifies; only an explicit VectorWidthB can fail here.
+      #   B local-read width. Measurements show that narrower B interleaves turn every
+      #   local read into a 7x LDS-bank-conflicted access. Require the derived/explicit
+      #   width to be 8; the auto case derives to 8 exactly when MIWaveTile[1] is a
+      #   multiple of 8. Other shapes downgrade to SS0 instead of losing the candidate.
       #
       #   Destination size. With a 4-byte destination SS0's 4 elements already fill the
       #   16-byte store, so there is nothing left for SS1 to widen.
@@ -1032,14 +1046,10 @@ class Solution(collections.abc.Mapping):
       miwt = state.get("MIWaveTile", [])
       inputOK = (state["ProblemType"]["DataTypeA"].numBytes() == 2
                  or state["ProblemType"]["DataTypeA"].isFloat4())
-      # -1 means "derive below", which always yields a power-of-two divisor of MIWaveTile.
-      vwAOK = state["VectorWidthA"] in (-1, 8)
-      vwBOK = (state["VectorWidthB"] == -1
-               or (state["VectorWidthB"] > 0 and len(miwt) == 2
-                   and miwt[1] % state["VectorWidthB"] == 0))
       ssSupported = (inputOK
                      and state["ProblemType"]["DestDataType"].numBytes() == 2
-                     and len(miwt) == 2 and miwt[0] == 8 and vwAOK and vwBOK)
+                     and subtileSourceSwapWidthSupported(
+                       miwt, state["VectorWidthA"], state["VectorWidthB"]))
       if not (state["SourceSwap"] and ssSupported):
         state["VectorWidthA"] = 1
         state["VectorWidthB"] = 1
@@ -1126,6 +1136,10 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent requires PrefetchGlobalRead=2")
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
+
+    storeInNLLReason = subtileStoreInNLLRejectionReason(state)
+    if storeInNLLReason is not None:
+      reject(state, printRejectionReason, storeInNLLReason)
 
     state["Multicast"] = False
     state["ClusterBarrier"] = False
