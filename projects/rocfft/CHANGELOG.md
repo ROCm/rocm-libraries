@@ -11,6 +11,10 @@ Documentation for rocFFT is available at
 * Fixed out-of-bounds memory access when executing a multi-device complex-to-complex plan whose
   bricks used non-contiguous data layouts.
 
+### Added
+
+* Added further support for very large FFTs (length greater than 2^32) on gfx1250.
+
 ## rocFFT 1.0.40 for ROCm 10.1
 
 ### Added
