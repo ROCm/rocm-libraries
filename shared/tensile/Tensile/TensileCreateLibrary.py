@@ -87,11 +87,13 @@ def libraryDir(outputPath: Union[str, Path], archs: List[str]) -> Path:
     Single base arch, single xnack variant → library/<arch>/      e.g. library/gfx90a-xnack-/
     Single base arch, multiple xnack variants → library/<base>/   e.g. library/gfx90a/
     Multiple distinct base archs → library/                        (flat, multi-arch build)
+    Stub gfx000 only → library/                                    (no catalog is packaged)
 
     The runtime probes most-specific to least-specific (tensile_host.cpp):
       library/<base>-<xnack>/ → library/<base>/ → library/
     """
     path = Path(outputPath)
+    archs = [a for a in archs if not isStubGfxTarget(a)]
     if not archs:
         return path / TENSILE_LIBRARY_DIR
     base_archs = {a.split("-xnack")[0] for a in archs}
@@ -832,6 +834,8 @@ def buildObjectFilePaths(
     newMetadataPaths = set()
     if "full" not in masterLibraries.keys():
         for arch, lib in masterLibraries.items():
+            if isStubGfxTarget(arch):
+                continue
             if globalParameters["LazyLibraryLoading"]:
                 newMetadataPaths.add(
                     os.path.join(libDir, "TensileLibrary_lazy_" + arch + libraryExt)
@@ -1004,6 +1008,8 @@ def addFallback(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
             value.insert(masterLibraries["fallback"])
 
     for archName in archs:
+        if isStubGfxTarget(archName):
+            continue
         archName = archName.split("-", 1)[0]
         if archName not in masterLibraries:
             tPrint(1, "Using fallback for arch: " + archName)
@@ -1154,6 +1160,9 @@ def generateLogicData(
     applyNaming(masterLibraries)
     if fallbackAdded:
         renameFallbacksPerArch(masterLibraries)
+    for key in [k for k in masterLibraries if isStubGfxTarget(k)]:
+        tPrint(1, f"# Skipping Tensile packaging for stub gfx target: {key}")
+        masterLibraries.pop(key)
     for lib in masterLibraries.values():
         lib.version = version
 
@@ -1495,7 +1504,7 @@ def TensileCreateLibrary():
         tPrint(
             1,
             "# Requested only Tensile stub gfx target(s); "
-            "generating library catalogs without device kernel compilation",
+            "skipping device kernel compilation and catalog packaging",
         )
 
     manifestFile = libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME
@@ -1618,11 +1627,7 @@ def TensileCreateLibrary():
     newLibraryDir = libraryDir(outputPath, requestedArchs)
     newLibraryDir.mkdir(parents=True, exist_ok=True)
 
-    catalogArchs = list(supportedArchs)
-    for arch in requestedArchs:
-        base = arch.split("-xnack")[0]
-        if isStubGfxTarget(base) and base not in catalogArchs:
-            catalogArchs.append(base)
+    catalogArchs = [a for a in supportedArchs if not isStubGfxTarget(a)]
 
     masterFileList = generateMasterFileList(masterLibraries, catalogArchs, lazyLoading)
 
@@ -1630,22 +1635,24 @@ def TensileCreateLibrary():
     for name, lib in masterFileList:
         writeMasterFile(newLibraryDir, libraryFormat, kernelMinNaming, name, lib)
 
-    if embedLibrary or args["ClientConfig"]:
+    if masterFileList and (embedLibrary or args["ClientConfig"]):
         masterFile, fullMasterLibrary = masterFileList[0]
         ext = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
 
-    if embedLibrary:
-        embedFileName = Path(outputPath) / "library" / args["EmbedLibrary"]
-        EmbeddedData.generateLibrary(
-            embedFileName,
-            args["EmbedLibraryKey"],
-            (newLibraryDir / masterFile).with_suffix(ext),
-            fullMasterLibrary.cpp_base_class,
-            codeObjectFiles,
-        )
+        if embedLibrary:
+            embedFileName = Path(outputPath) / "library" / args["EmbedLibrary"]
+            EmbeddedData.generateLibrary(
+                embedFileName,
+                args["EmbedLibraryKey"],
+                (newLibraryDir / masterFile).with_suffix(ext),
+                fullMasterLibrary.cpp_base_class,
+                codeObjectFiles,
+            )
 
-    if args["ClientConfig"]:
-        generateClientConfig(Path(outputPath), Path(masterFile).with_suffix(ext), codeObjectFiles)
+        if args["ClientConfig"]:
+            generateClientConfig(
+                Path(outputPath), Path(masterFile).with_suffix(ext), codeObjectFiles
+            )
 
     if removeTemporaries:
         buildTmp = Path(outputPath).parent / "build_tmp"
