@@ -791,7 +791,7 @@ class TestAttentionHelpers(unittest.TestCase):
             ),
         ]
         for k in kernels:
-            ll = lower_kernel_to_llvm(k)
+            ll = lower_kernel_to_llvm(k, arch="gfx950")
             self.assertIn("define amdgpu_kernel void", ll)
             self.assertIn("@llvm.exp2.f32", ll)
 
@@ -813,7 +813,7 @@ class TestAttentionHelpers(unittest.TestCase):
             has_softcap=False,
         )
         k = build_unified_attention_2d_tiled(spec)
-        ll = lower_kernel_to_llvm(k)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
         # Async DMA for K/V should be emitted.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
         # MFMA atoms for QK (16x16x32) and PV (16x16x16 since T=16 < 32).
@@ -918,7 +918,7 @@ class TestAttentionHelpers(unittest.TestCase):
             use_transposed_half_local_pv=True,
         )
         k = build_unified_attention_2d_tiled(spec)
-        ll = lower_kernel_to_llvm(k)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
         self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.bf16", ll)
         self.assertIn("_s1_", k.name)
@@ -948,7 +948,7 @@ class TestAttentionHelpers(unittest.TestCase):
             use_agpr_alloc_zero=True,
         )
         agpr_k = build_unified_attention_2d_tiled(agpr_spec)
-        agpr_ll = lower_kernel_to_llvm(agpr_k)
+        agpr_ll = lower_kernel_to_llvm(agpr_k, arch="gfx950")
         self.assertIn("_agpr0", agpr_k.name)
         self.assertIn('"amdgpu-agpr-alloc"="0,0"', agpr_ll)
 
@@ -973,7 +973,7 @@ class TestAttentionHelpers(unittest.TestCase):
             use_qq_bias=True,
         )
         k = build_unified_attention_2d_tiled(spec)
-        ll = lower_kernel_to_llvm(k)
+        ll = lower_kernel_to_llvm(k, arch="gfx950")
         # ALiBi adds a position->f32 conversion (sitofp), since col_abs and
         # context_len are i32 and slope * (col-ctx) needs f32 arithmetic.
         self.assertIn("sitofp i32", ll)
@@ -1010,7 +1010,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 num_seqs=4,
             )
         )
-        seg_ll = lower_kernel_to_llvm(seg)
+        seg_ll = lower_kernel_to_llvm(seg, arch="gfx950")
         # Segment kernel must use the async DMA + transpose-read PV operand
         # path and emit MFMA atoms.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", seg_ll)
@@ -1029,7 +1029,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 num_segments=128,
             )
         )
-        red_ll = lower_kernel_to_llvm(red)
+        red_ll = lower_kernel_to_llvm(red, arch="gfx950")
         # Reduce must compute exp2-weighted segment combine and use NaN-safe
         # factor (`-inf - overall_max -> 0`).
         self.assertIn("@llvm.exp2.f32", red_ll)
@@ -1065,7 +1065,7 @@ class TestAttentionHelpers(unittest.TestCase):
                 use_qq_bias=True,
             )
         )
-        ll = lower_kernel_to_llvm(seg)
+        ll = lower_kernel_to_llvm(seg, arch="gfx950")
         self.assertIn("sitofp i32", ll)
         self.assertIn("select i1", ll)
         # `qq_bias_stride_0` is the last kernel param.
@@ -2423,7 +2423,7 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_seqs=4,
                 )
             )
-            seg_ll = lower_kernel_to_llvm(seg)
+            seg_ll = lower_kernel_to_llvm(seg, arch="gfx950")
             # The arch-dispatched reduce kernel must also build on gfx942.
             red = build_unified_attention_reduce_tiled(
                 UnifiedAttentionReduceTiledSpec(
@@ -2434,7 +2434,7 @@ class TestAttentionHelpers(unittest.TestCase):
                     num_segments=128,
                 )
             )
-            red_ll = lower_kernel_to_llvm(red)
+            red_ll = lower_kernel_to_llvm(red, arch="gfx950")
         # gfx942 narrow 3D path: 16x16x16 MFMA + 1-DWORD async DMA KV feed.
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", seg_ll)
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", seg_ll)
@@ -2512,7 +2512,9 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         for wpe in (1, 2):
             with self.subTest(waves_per_eu=wpe):
                 spec = replace(base, waves_per_eu=wpe)
-                ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+                ll = lower_kernel_to_llvm(
+                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                )
                 self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
 
     def test_waves_per_eu_cache_key_isolation(self):
@@ -2618,7 +2620,7 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                     replace(base, waves_per_eu=wpe), arch="gfx950"
                 )
                 ir_hashes[wpe] = hashlib.sha256(
-                    lower_kernel_to_llvm(kernel).encode()
+                    lower_kernel_to_llvm(kernel, arch="gfx950").encode()
                 ).hexdigest()
                 # Each variant must survive codegen, not just lowering.
                 _compile_or_skip(kernel, arch="gfx950")
@@ -2688,7 +2690,9 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         from kernels.gfx950.attention_dense import build_attention_dense
 
         kernel = build_attention_dense(spec, arch="gfx950")
-        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+        return hashlib.sha256(
+            lower_kernel_to_llvm(kernel, arch="gfx950").encode()
+        ).hexdigest()
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
         """Shapes that collapse to one cache key must emit one kernel."""
@@ -3008,7 +3012,7 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
             has_softcap=False,
             waves_per_eu=2,
         )
-        ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
+        ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec), arch="gfx950")
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
 
@@ -3024,7 +3028,7 @@ class TestEveryAttentionKernelUsesMfma(unittest.TestCase):
     """
 
     def _llvm_for(self, build_fn, spec):
-        return lower_kernel_to_llvm(build_fn(spec))
+        return lower_kernel_to_llvm(build_fn(spec), arch="gfx950")
 
     def test_fmha_mfma_uses_mfma(self):
         from kernels import FmhaMfmaSpec, build_fmha_fwd_mfma
@@ -3081,7 +3085,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             max_seqlen_k=256,
             batch=2,
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_varlen(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_varlen(spec), arch="gfx950")
         self.assertIn("@llvm.exp2.f32", ll)
         self.assertIn("define amdgpu_kernel", ll)
 
@@ -3094,7 +3098,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             batch=2,
             rotary=RotarySpec(head_size=64, layout="half"),
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_appendkv(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_appendkv(spec), arch="gfx950")
         self.assertGreaterEqual(ll.count("load float"), 32)
 
     def test_fmha_paged_prefill_builds(self):
@@ -3130,7 +3134,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             sorted(p.name for p in seg.params)[:3],
             sorted(["Q", "K", "V"])[:3],
         )
-        ll_red = lower_kernel_to_llvm(red)
+        ll_red = lower_kernel_to_llvm(red, arch="gfx950")
         self.assertIn("@llvm.exp2.f32", ll_red)
 
     def test_fmha_head_grouping_builds_for_gqa(self):
@@ -3144,7 +3148,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             seqlen_q=128,
             seqlen_k=128,
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_head_grouping(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_head_grouping(spec), arch="gfx950")
         self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
 
     def test_fmha_bwd_uses_atomic_fadd(self):
@@ -3155,7 +3159,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             seqlen_q=64,
             seqlen_k=64,
         )
-        ll = lower_kernel_to_llvm(build_fmha_bwd(spec))
+        ll = lower_kernel_to_llvm(build_fmha_bwd(spec), arch="gfx950")
         # 3 atomic accumulators (dQ, dK, dV) per K-step per head dim.
         self.assertGreaterEqual(ll.count("atomicrmw fadd ptr addrspace(1)"), 3)
 
@@ -3167,7 +3171,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
             kv_dtype="fp8e4m3",
             seqlen_q=32,
         )
-        ll = lower_kernel_to_llvm(build_fmha_fwd_fp8(spec))
+        ll = lower_kernel_to_llvm(build_fmha_fwd_fp8(spec), arch="gfx950")
         self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
 
@@ -3214,13 +3218,17 @@ class TestSageAttentionBuilds(unittest.TestCase):
     def test_fp16_baseline_no_fp8_cvt(self):
         from kernels.common.sage_attention import build_sage_attention
 
-        ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp16_bf16")))
+        ll = lower_kernel_to_llvm(
+            build_sage_attention(self._spec("fp16_bf16")), arch="gfx950"
+        )
         self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
     def test_fp8_variant_uses_fp8_cvt(self):
         from kernels.common.sage_attention import build_sage_attention
 
-        ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp8_bf16")))
+        ll = lower_kernel_to_llvm(
+            build_sage_attention(self._spec("fp8_bf16")), arch="gfx950"
+        )
         self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
     def test_int_variants_add_codebook_params(self):
@@ -3263,7 +3271,7 @@ class TestSparseAttentionBuilds(unittest.TestCase):
             block_q=1,
             block_k=32,
         )
-        ll = lower_kernel_to_llvm(build_jenga_sparse_attention(spec))
+        ll = lower_kernel_to_llvm(build_jenga_sparse_attention(spec), arch="gfx950")
         self.assertIn("load i8", ll)
         self.assertIn("icmp ne i8", ll)
 
@@ -3281,7 +3289,7 @@ class TestSparseAttentionBuilds(unittest.TestCase):
             block_k=32,
             max_blocks_per_q=4,
         )
-        ll = lower_kernel_to_llvm(build_vsa_sparse_attention(spec))
+        ll = lower_kernel_to_llvm(build_vsa_sparse_attention(spec), arch="gfx950")
         self.assertGreaterEqual(ll.count("load i32"), 2)
 
 
@@ -3355,7 +3363,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
         # head_idx = block_id_y, kv_head_idx = head_idx // 4 (HQ=8 / HK=2).
         # Lower and check the IR shows the divide.
         kb.builder.ret()
-        ll = lower_kernel_to_llvm(kb.kernel)
+        ll = lower_kernel_to_llvm(kb.kernel, arch="gfx950")
         # The arith.div lowers to ``sdiv i32 ..., 4``.
         self.assertIn("sdiv i32", ll)
 
