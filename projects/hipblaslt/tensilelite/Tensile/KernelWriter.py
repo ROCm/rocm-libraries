@@ -39,7 +39,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, TensorStoreFromLds, SCMovB32, SCMovB64
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
@@ -11229,12 +11229,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return isinstance(labelName, str) and "OptNLL_End" in labelName
 
     def _classifyTokenAccess(inst: Instruction):
-      # tensor_load / ds_write => write, ds_read => read
+      # tensor_load / ds_write => write, ds_read / tensor_store_from_lds => read
       if isinstance(inst, DSStoreInstruction):
         return "write"
       if isinstance(inst, TensorLoadToLds):
         return "write"
       if isinstance(inst, DSLoadInstruction):
+        return "read"
+      # tensor_store_from_lds reads LDS (reverse DMA LDS->global). The TensorStore epilogue stages the
+      # whole MT into a SHARED LDS image (many waves) then reads a disjoint N-slice, so the ds_store
+      # (write) -> tensor_store (read) transition needs a cross-wave barrier — same as any LDS read.
+      if isinstance(inst, TensorStoreFromLds):
         return "read"
       return None
 

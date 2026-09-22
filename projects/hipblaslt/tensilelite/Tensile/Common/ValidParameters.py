@@ -859,6 +859,14 @@ validParameters = { # we need to make sure this matches develop
     # LDS then one TDM store scatters it to D via descriptor strides (tile_dim0=M, dim0_stride=StrideD).
     # 0=off. Mutually exclusive with WaveTransposeStore (both set -> reject).
     "WaveTransposeStoreTDM": [0, 1],
+    # TensorStore: StoreRemap-style epilogue flushed by tensor_store_from_lds (TDM reverse DMA).
+    # Writes the whole MacroTile into LDS at each element's true (M,N) position (column-major, no pad),
+    # then one tensor_store_from_lds per wave DMAs a disjoint N-slice (MT1//numWaves cols) LDS->global.
+    # Unlike WaveContiguousOutput it does NOT re-lay-out accumulators, so it is MX-scale-agnostic.
+    # v1: non-edge only, GSU==1, whole MT must fit LDS; mutually exclusive with StoreRemap / WCO /
+    # WaveTransposeStore(TDM). Requires wave32, HPA, asmCaps["HasTDM"], f8/bf16/fp16 dest, BufferStore.
+    # False=off (default).
+    "TensorStore": [False, True],
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],

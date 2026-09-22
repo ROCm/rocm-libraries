@@ -16223,6 +16223,10 @@ class KernelWriterAssembly(KernelWriter):
                    and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
       wantTDMStore = (kernel.get("WaveTransposeStoreTDM", 0) and kernel.get("WaveContiguousOutput")
                       and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
+      # TensorStore reuses the same small scratch (vgprXposeBase field) for its per-batch LDS-base
+      # setup; unlike xpose/TDM it does NOT require WaveContiguousOutput (it is the non-WCO path).
+      wantTensorStore = (kernel.get("TensorStore", False)
+                         and not kernel.get("UseSubtileImpl") and kernel["WavefrontSize"] == 32)
       if is16bitHPA:
         # For UseSubtileImpl, allocate 7 vgprs with 2-alignment (64-bit aligned) so
         # that the first 4 (reused as pack scratch for the paired 16bit store) satisfy
@@ -16245,6 +16249,8 @@ class KernelWriterAssembly(KernelWriter):
           xposeBase, xposeCount = _checkoutXposeScratch()
         elif wantTDMStore:
           xposeBase, xposeCount = _checkoutTDMStoreScratch()
+        elif wantTensorStore:
+          xposeBase, xposeCount = _checkoutTDMStoreScratch()
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
@@ -16262,6 +16268,9 @@ class KernelWriterAssembly(KernelWriter):
             xposeBase, xposeCount = _checkoutTDMStoreScratch()
           else:
             f8MergePack = self.vgprPool.checkOutAligned(4, 4, tag="globalWriteElements_f8MergePack")
+        elif wantTensorStore:
+          # TensorStore is the non-WCO path, so it sits outside the WaveContiguousOutput block above.
+          xposeBase, xposeCount = _checkoutTDMStoreScratch()
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
                                               vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), \
                                               vgprF8MergePack=f8MergePack, \
@@ -16916,6 +16925,10 @@ class KernelWriterAssembly(KernelWriter):
             if kernel["StoreRemapVectorWidth"]:
               #Indication if this batch is last batch for this column block shape
               self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
+
+            if kernel.get("TensorStore", False):
+              # TensorStore flushes the whole MT once, after the LAST store batch has staged all elements.
+              self.TensorStoreLastBatch = 1 if batchIdx == numBatchesCLS - 1 else 0
 
             # Primer uses the next real row jump; boundary delta may be 0 (mid-row).
             _next_firing_rowInc = next_firing_per_batch[batchIdx]

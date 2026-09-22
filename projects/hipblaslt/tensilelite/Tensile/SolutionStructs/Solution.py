@@ -2663,10 +2663,13 @@ class Solution(collections.abc.Mapping):
     # into vector components (vc0/vc1) of a single (0,0) tile (NotLocalFullTileElementsMFMA), so the store's
     # per-tile trigger never fires. The NT/TT path gets VW=1 for free via enableLDSTr; force it here too so
     # the non-transposed TN/NN path enumerates the same 4x4 tile grid.
-    if state["enableLDSTrA"] or state["enableGLTrA"] or state["WaveContiguousOutput"]:
+    # TensorStore v1 stages each MI output tile's 8-M block per (tt0,tt1) element; VW>1 would fold those
+    # tiles into vector components so the per-tile staging trigger never fires (same reason WCO forces
+    # VW=1). Force VW=1 on the raw request; SourceSwap=False is required separately by the gate below.
+    if state["enableLDSTrA"] or state["enableGLTrA"] or state["WaveContiguousOutput"] or state.get("TensorStore", False):
       state["VectorWidthA"] = 1
 
-    if state["enableLDSTrB"] or state["enableGLTrB"] or state["WaveContiguousOutput"]:
+    if state["enableLDSTrB"] or state["enableGLTrB"] or state["WaveContiguousOutput"] or state.get("TensorStore", False):
       state["VectorWidthB"] = 1
 
     if state["_ScheduleIterAlg"] == 2:
@@ -6070,6 +6073,43 @@ class Solution(collections.abc.Mapping):
       stagingBytes = numWaves * Mfull * Nfull * int(state["ProblemType"]["DestDataType"].numBytes())
       state["TDMStoreLdsByteOffset"] = ldsNumBytes
       ldsNumBytes += stagingBytes
+
+    # TensorStore: StoreRemap-style whole-MT-to-LDS epilogue flushed by tensor_store_from_lds. Unlike
+    # WaveContiguousOutput it does NOT re-lay-out accumulators (each element lands in LDS at its true
+    # (M,N) position), so it is MX-scale-agnostic. Gated here where the tile geometry / GSU / LDS budget
+    # are all final. v1: non-edge only, GSU==1, whole MT must fit LDS, MT1 divisible by numWaves (each
+    # wave's tensor_store owns a disjoint N-slice); mutually exclusive with StoreRemap /
+    # WaveContiguousOutput / WaveTransposeStore(TDM). If any check fails, disable (fall back to the
+    # normal store) rather than reject the kernel.
+    if state.get("TensorStore", False):
+      dtype    = state["ProblemType"]["DestDataType"]
+      dtypeOK  = dtype.is8bitFloat() or dtype.isBFloat16() or dtype.isHalf()
+      numWaves = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+      mt0      = state["MacroTile0"]
+      mt1      = state["MacroTile1"]
+      fullMTBytes = mt0 * mt1 * int(dtype.numBytes())
+      ok = (state["EnableMatrixInstruction"]
+            and state["WavefrontSize"] == 32
+            and isaInfoMap[isa].asmCaps.get("HasTDM", False)
+            and dtypeOK
+            and state["ProblemType"]["HighPrecisionAccumulate"]
+            and state["BufferStore"]
+            and not state.get("SourceSwap", False)
+            and not state["UseSubtileImpl"]
+            and state["GlobalSplitU"] == 1
+            and state.get("StoreRemapVectorWidth", 0) == 0
+            and state.get("WaveTransposeStore", 0) == 0
+            and not state.get("WaveTransposeStoreTDM", 0)
+            and not state["WaveContiguousOutput"]
+            and (mt1 % numWaves == 0)
+            and (ldsNumBytes + fullMTBytes <= state["MaxLDS"]))
+      if ok:
+        # Disjoint staging region AFTER the main-loop/epilogue LDS (like the TDM store), so the
+        # local-write phase never clobbers main-loop LDS another wave may still be reading.
+        state["TensorStoreLdsByteOffset"] = ldsNumBytes
+        ldsNumBytes += fullMTBytes
+      else:
+        state["TensorStore"] = False
 
     state["LdsNumBytes"] = ldsNumBytes
     ldsSize = ldsNumBytes
