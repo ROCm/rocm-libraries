@@ -1,0 +1,41 @@
+{
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "s1_k3_h8_bw4": {
+          "bytes": 72391,
+          "sha256": "5012197b097561e3002efd458801672349ddad2f9e1222b6603bb700c4c039a1"
+        },
+        "s2_bf16_tail": {
+          "bytes": 70975,
+          "sha256": "9ef9df6aa3f84b01bb1adeb1d0424e82bddabec0e2ca6c469bbd0cc2db6110ad"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "s1_k3_h8_bw4": {
+          "bytes": 72524,
+          "sha256": "477a8243a38178783d50fb05ac0706e197f84932229fb1ac6b7ab043e7c8b3dc"
+        },
+        "s2_bf16_tail": {
+          "bytes": 71108,
+          "sha256": "57e26ca0b246f39e7c0750552bbf1cac3b5ff7306ddf49a6979a43bdd4a81d24"
+        }
+      }
+    },
+    "llvm23": {
+      "cases": {
+        "s1_k3_h8_bw4": {
+          "bytes": 72528,
+          "sha256": "876dbb01d3484b52a001eda4d64f333fa1bb58321db94316aabb79fa278efb9a"
+        },
+        "s2_bf16_tail": {
+          "bytes": 71112,
+          "sha256": "efc689e572e7f182bc9eea1d3b80b6658a4aacd6d8e4e72d7727d95f4c92e10a"
+        }
+      }
+    }
+  },
+  "schema": "direct_depthwise_col.ir_golden_sha256/v1"
+}

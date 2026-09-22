@@ -69,7 +69,7 @@ matmuls per wave — letting one wave process 16 groups simultaneously
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from rocke.core.ir import (
     F16,
@@ -80,6 +80,7 @@ from rocke.core.ir import (
     PtrType,
     Value,
 )
+from rocke.helpers.fuse import dtype_to_ir
 from rocke.helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
 
@@ -4404,12 +4405,20 @@ class DirectDepthwiseSpec:
         pass
 
 
+#: Register-pressure ceiling for the *preloading* depthwise kernel.  It holds
+#: all ``KH*KW`` weights live at once, so past this a large filter would
+#: "validate" on geometry and then emit an IR body that neither fits in the
+#: VGPR file nor finishes compiling in reasonable time.  The column-streamed
+#: variant has no equivalent limit -- that is the whole point of it.
+_DW_MAX_PRELOAD_TAPS = 200
+
+
 def is_valid_depthwise_spec(
     spec: "DirectDepthwiseSpec", arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a :class:`DirectDepthwiseSpec` on ``arch``.
 
-    Only validates geometry constraints; no MFMA atom check is needed because
+    Geometry and register pressure only; no MFMA atom check is needed because
     the kernel uses only scalar ``fma`` operations.
     """
     from rocke.core.arch import ArchTarget
@@ -4422,6 +4431,13 @@ def is_valid_depthwise_spec(
     p = spec.problem
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
+    taps = p.KH * p.KW
+    if taps > _DW_MAX_PRELOAD_TAPS:
+        return False, (
+            f"preloaded filter of {taps} taps (= KH*KW = {p.KH}*{p.KW}) exceeds "
+            f"max {_DW_MAX_PRELOAD_TAPS}; use DirectDepthwiseColSpec, whose "
+            f"live-register cost is linear in KH and independent of KW"
+        )
     return True, "ok"
 
 
@@ -4435,7 +4451,7 @@ _DW_UNROLL_THRESH = 20_000
 
 
 def build_direct_depthwise(
-    spec: "DirectDepthwiseSpec", arch: str = "gfx950"
+    spec: "DirectDepthwiseSpec", *, arch: str = "gfx950"
 ) -> KernelDef:
     """Build the IR for a scalar depthwise convolution kernel.
 
@@ -4709,6 +4725,491 @@ def build_direct_depthwise(
 
 
 # ---------------------------------------------------------------------------
+# Depthwise column-streamed kernel — filter column on the outer (runtime) loop
+# so only one filter column is register-resident at a time.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DirectDepthwiseColSpec:
+    """Depthwise kernel with the filter-column loop outermost (``cpg = kpg = 1``).
+
+    Same work and same data as :class:`DirectDepthwiseSpec`; only the loop order
+    differs, and with it the set of values that must stay live.
+
+    ``DirectDepthwiseSpec`` puts the filter column ``s`` *inside* the H sweep, so
+    every one of the ``KH × KW`` weights is referenced on every H step and all of
+    them must be preloaded and held.  That is fine for small filters and
+    catastrophic for large ones: at ``31 × 31`` it is 961 live f32 per lane, far
+    past the VGPR file, so the kernel spills to scratch.
+
+    Here the order is ``s`` (runtime, outer) → ``y`` (unrolled, inner) → ``r``:
+
+      - only column ``s`` of the filter is live, i.e. ``KH`` values, reloaded at
+        the top of each outer iteration (``KH × KW`` weight loads in total —
+        exactly the count the preload variant issues once up front);
+      - the whole output-row band is carried instead, ``Ho × block_w``
+        accumulators, so no circular slot reuse and no per-row flush is needed;
+      - live f32 per lane is therefore ``Ho * block_w + KH`` rather than
+        ``KH * KW + KH * block_w``.
+
+    Unrolling ``y`` (not ``s``) is what keeps the accumulator index
+    ``ho = (y - r) / stride`` a Python constant: both ``y`` and ``r`` are Python
+    loop variables, so each ``fma`` names a fixed register.  A runtime ``y``
+    would make ``ho`` a runtime value, which registers cannot be indexed by.
+
+    Because ``ho`` is static, taps that fall outside ``[0, Ho)`` -- and, at
+    ``stride > 1``, the ``(y - r) % stride != 0`` taps that land between output
+    rows -- are dropped at emission time rather than computed and discarded, so
+    the kernel issues only the ``fma`` operations that contribute to an output.
+
+    Restriction beyond ``DirectDepthwiseSpec``: ``Ho <= H``.
+
+    Block geometry:
+      ``threads_per_block = block_waves * 64``
+      Grid: ``(ceil(Wo / block_w), ceil(C / block_ch), N)``
+    """
+
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_col"
+    block_w: int = 1  # output W positions per block
+    block_waves: int = 1  # waves per block
+    wave_size: int = 64
+    # Element type of A, B and D.  Depthwise here is uniform-precision; the
+    # accumulator is f32 regardless, so ``live_f32`` is dtype-invariant.
+    dtype: str = "fp16"
+    # Live-f32 ceiling used by the validator.  ``None`` derives it from the
+    # arch VGPR budget; an explicit value overrides that (only downward -- the
+    # validator takes the stricter of the two).
+    max_live_f32: Optional[int] = None
+
+    @property
+    def threads_per_block(self) -> int:
+        return self.block_waves * self.wave_size
+
+    @property
+    def block_ch(self) -> int:
+        return self.block_waves * self.wave_size
+
+    @property
+    def live_f32(self) -> int:
+        """Accumulator band + one filter column, per lane.
+
+        Dtype-invariant: A/B are widened to f32 on load and the accumulator is
+        f32 for every supported element type, so fp16, bf16 and fp32 all hold
+        the same number of live f32 values.
+        """
+        return self.problem.Ho * self.block_w + self.problem.KH
+
+    def resolve_max_live_f32(self, arch: str = "gfx950") -> int:
+        """Live-f32 ceiling for ``arch``, honouring an explicit override.
+
+        Past roughly this many live values the allocator starts inserting
+        register shuffles and then scratch spills, which is precisely the
+        regime this variant exists to avoid.  Three eighths of the VGPR file
+        leaves room for the addressing, load and loop-carried values the band
+        does not account for; on a 512-VGPR arch that is 192.
+
+        An explicit ``max_live_f32`` may only tighten the budget -- a caller
+        cannot talk the validator into exceeding what the arch has.
+        """
+        from rocke.core.arch import ArchTarget
+
+        budget = ArchTarget.from_gfx(arch).limits.vgprs * 3 // 8
+        if self.max_live_f32 is None:
+            return budget
+        return min(self.max_live_f32, budget)
+
+    @property
+    def ch_tile_exact(self) -> bool:
+        """True when the channel tiling leaves no partially-masked block.
+
+        ``ch = by*block_ch + tid`` with ``by < ceil(total_c / block_ch)``, so the
+        largest channel any lane can address is ``ceil(...)*block_ch - 1``.  When
+        ``block_ch`` divides ``total_c`` that equals ``total_c - 1``, every lane
+        of every launched block is in range, and the ``ch < groups`` predicate is
+        statically true -- so the select/cndmask pairs guarding it are dead.
+        """
+        return self.problem.total_c % self.block_ch == 0
+
+    @property
+    def w_tile_exact(self) -> bool:
+        """True when the output-W tiling leaves no partially-masked block."""
+        return self.problem.Wo % self.block_w == 0
+
+    def dtype_tag(self) -> str:
+        """Canonical short element-type name, for the kernel name.
+
+        Unresolvable input falls back to a sanitized form of whatever was
+        passed, so naming never raises ahead of the validator -- rejecting a
+        bad dtype is the validator's job, and its message is the better one.
+        """
+        try:
+            return dtype_to_ir(self.dtype).name
+        except ValueError:
+            return "".join(c if c.isalnum() else "_" for c in str(self.dtype))
+
+    def kernel_name(self) -> str:
+        from rocke.helpers.spec import kernel_name_join
+
+        p = self.problem
+        # ``p.short()`` carries only N/H/W/groups/cpg/kpg, so the filter,
+        # padding, stride and element type have to be spelled out here: they
+        # all change the emitted kernel, and two specs that differ only in one
+        # of them would otherwise collide in the compile cache.
+        parts = [
+            self.name,
+            p.short(),
+            f"r{p.KH}x{p.KW}",
+            f"p{p.PAD}",
+            f"s{p.stride}",
+            self.dtype_tag(),
+            f"bw{self.block_w}",
+            f"bw{self.block_waves}wv",
+        ]
+        return kernel_name_join(*parts)
+
+    def validate(self) -> None:
+        """Prerequisite check only (cpg=kpg=1).
+
+        Call :func:`is_valid_depthwise_col_spec` for the full constraint set
+        (dtype, geometry, VGPR budget) before dispatch.
+        """
+        p = self.problem
+        if p.cpg != 1 or p.kpg != 1:
+            raise ValueError(
+                f"DirectDepthwiseColSpec requires cpg=kpg=1 "
+                f"(got cpg={p.cpg}, kpg={p.kpg})"
+            )
+
+
+#: Element types ``build_direct_depthwise_col`` can emit.  Accumulation is f32
+#: for all of them, so this only selects the A/B load and the D store width.
+_DW_COL_DTYPES = ("f16", "bf16", "f32")
+
+
+def is_valid_depthwise_col_spec(
+    spec: "DirectDepthwiseColSpec", arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a :class:`DirectDepthwiseColSpec` on ``arch``.
+
+    Every rejection names the offending value, because the only two callers are
+    :func:`build_direct_depthwise_col` -- which turns the reason into the
+    ``ValueError`` message -- and the benchmark sweep, which prints it as the
+    skip reason.  A bare "invalid" would be useless in both.
+
+    Checks run cheapest-first and, more importantly, in dependency order:
+    ``stride`` and the filter extents are validated *before* anything reads
+    ``p.Ho`` / ``p.Wo``, since those divide by ``stride`` and would raise
+    rather than return a reason.
+    """
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+
+    try:
+        dt = dtype_to_ir(spec.dtype).name
+    except ValueError:
+        dt = None
+    if dt not in _DW_COL_DTYPES:
+        return False, (
+            f"dtype {spec.dtype!r} is not supported; expected one of "
+            f"fp16, bf16, fp32"
+        )
+
+    p = spec.problem
+    if p.cpg != 1 or p.kpg != 1:
+        return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
+
+    # Geometry the Ho/Wo formulas assume before they can be evaluated at all.
+    if p.stride < 1:
+        return False, f"stride must be >= 1 (got {p.stride})"
+    if p.KH < 1 or p.KW < 1:
+        return False, f"filter extents must be >= 1 (got KH={p.KH}, KW={p.KW})"
+    if p.PAD < 0:
+        return False, f"PAD must be >= 0 (got {p.PAD})"
+
+    # A filter larger than the padded input leaves nothing to compute; without
+    # this the builder happily emits a kernel with an empty accumulator band.
+    if p.Ho < 1 or p.Wo < 1:
+        return False, (
+            f"filter does not fit the padded input: Ho={p.Ho}, Wo={p.Wo} "
+            f"(H={p.H}, W={p.W}, KH={p.KH}, KW={p.KW}, PAD={p.PAD}, "
+            f"stride={p.stride})"
+        )
+    if p.Ho > p.H:
+        # Over-padded configs (PAD > (KH-1)/2) at stride=1 push Ho > H. They
+        # are geometrically valid at stride > 1 but are rejected here because
+        # the current builder does not need them. Remove this check if a
+        # use-case for full-padding at stride=1 arises (author: jakpiase).
+        return False, f"requires Ho <= H (got Ho={p.Ho}, H={p.H})"
+    # At stride > 1 the Ho <= H check above stops constraining PAD, which leaves
+    # PAD the one unbounded input to the *host* unroll count
+    # n_iters = (Ho-1)*stride + KH (<= H + 2*PAD): PAD=1e9 keeps Ho small enough
+    # to pass every check above while making the builder emit a billion
+    # mostly-empty rows. PAD >= KH is degenerate anyway -- the first output row's
+    # receptive field is then entirely padding, so it is identically zero.
+    if p.PAD >= p.KH or p.PAD >= p.KW:
+        return False, (
+            f"PAD {p.PAD} must be < min(KH, KW) = {min(p.KH, p.KW)}; at or "
+            "beyond the filter extent the first output row reads only padding"
+        )
+
+    if spec.block_w < 1:
+        return False, f"block_w must be >= 1 (got {spec.block_w})"
+    if spec.block_w > p.Wo:
+        return False, (
+            f"block_w {spec.block_w} > Wo {p.Wo}; "
+            "reduce block_w to avoid wasted masked loads"
+        )
+    if spec.block_waves < 1:
+        return False, f"block_waves must be >= 1 (got {spec.block_waves})"
+    # The builder derives the per-lane channel index from wave_size, so a spec
+    # whose wave_size disagrees with the target's would emit a kernel that
+    # silently reads the wrong channel; wave_size=0 divides by zero outright.
+    if spec.wave_size != target.wave_size:
+        return False, (
+            f"wave_size {spec.wave_size} does not match the {arch} wave_size "
+            f"{target.wave_size}"
+        )
+    max_threads = target.limits.max_threads_per_block
+    if spec.threads_per_block > max_threads:
+        return False, (
+            f"threads_per_block {spec.threads_per_block} (= block_waves*"
+            f"wave_size = {spec.block_waves}*{spec.wave_size}) exceeds the "
+            f"{arch} limit of {max_threads}"
+        )
+
+    live = spec.live_f32
+    allowed = spec.resolve_max_live_f32(arch)
+    if live > allowed:
+        return False, (
+            f"live f32 per lane {live} (= Ho*block_w + KH = "
+            f"{p.Ho}*{spec.block_w} + {p.KH}) exceeds max_live_f32="
+            f"{allowed} on {arch}; lower block_w"
+        )
+    return True, "ok"
+
+
+def build_direct_depthwise_col(
+    spec: "DirectDepthwiseColSpec", *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the IR for the column-streamed depthwise convolution kernel.
+
+    Loop order is ``s`` (runtime scf.for over the ``KW`` filter columns) →
+    ``y`` (Python-unrolled over the ``(Ho - 1) * stride + KH`` input rows) →
+    ``r`` (Python-unrolled over the ``KH`` filter rows).  The ``Ho × block_w``
+    accumulator band is carried through the outer loop as iter_args and stored
+    once, after it closes.
+
+    See :class:`DirectDepthwiseColSpec` for why this order is the one that keeps
+    register pressure flat in ``KH × KW``.
+    """
+    spec.validate()
+    ok, why = is_valid_depthwise_col_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid DirectDepthwiseColSpec for {arch}: {why}")
+
+    p = spec.problem
+    BLOCK_W = spec.block_w
+    WAVE = spec.wave_size
+    THREADS = spec.threads_per_block
+    BLOCK_CH = spec.block_ch
+    Ho = p.Ho
+    Wo = p.Wo
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = THREADS
+
+    # A, B and D share one element type; only the accumulator is pinned to f32.
+    # The validator has already restricted DT to f16/bf16/f32.
+    DT = dtype_to_ir(spec.dtype)
+    ELEM_BYTES = {"f16": 2, "bf16": 2, "f32": 4}[DT.name]
+
+    A = b.param("A", PtrType(DT, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(DT, "global"), noalias=True, readonly=True, align=16)
+    D = b.param("D", PtrType(DT, "global"), noalias=True, writeonly=True, align=16)
+    A_bytes = b.param("A_bytes", I32)
+    B_bytes = b.param("B_bytes", I32)
+    D_bytes = b.param("D_bytes", I32)
+
+    c0 = b.const_i32(0)
+    c1 = b.const_i32(1)
+    c_wave = b.const_i32(WAVE)
+    c_W = b.const_i32(Wo)
+    c_groups = b.const_i32(p.groups)
+    c_elem_bytes = b.const_i32(ELEM_BYTES)
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    zero_f32 = b.const_f32(0.0)
+
+    def load_elem(rsrc: Value, byte_off: Value) -> Value:
+        """One element of A or B, widened to f32.
+
+        Dispatched on DT rather than routed through the generic
+        ``buffer_load`` so the f16 path emits exactly the ops it did before
+        this kernel grew a dtype knob -- which is what lets the stride-1 fp16
+        goldens stand as a regression check on everything else here.
+        """
+        if DT.name == "f16":
+            return b.cast_to_f32(b.buffer_load_f16(rsrc, byte_off, c0))
+        if DT.name == "bf16":
+            return b.cast_to_f32(b.buffer_load_bf16(rsrc, byte_off, c0))
+        # f32 loads need no widening; cast_to_f32 passes it straight through.
+        return b.buffer_load(rsrc, byte_off, c0, F32)
+
+    def store_elem(rsrc: Value, byte_off: Value, acc: Value) -> None:
+        """Narrow an f32 accumulator to DT and store it."""
+        if DT.name == "f16":
+            b.buffer_store_f16(rsrc, byte_off, c0, b.trunc_f32_to_f16(acc))
+        elif DT.name == "bf16":
+            b.buffer_store_bf16(rsrc, byte_off, c0, b.trunc_f32_to_bf16(acc))
+        else:
+            b.buffer_store_f32(rsrc, byte_off, c0, acc)
+
+    tid = b.thread_id_x()
+    wave_id = b.div(tid, c_wave)
+    lane = b.mod(tid, c_wave)
+
+    bx = b.block_id_x()
+    by = b.block_id_y()
+    n = b.block_id_z()
+    q_tile_start = b.mul(bx, b.const_i32(BLOCK_W))
+    ch = b.add(
+        b.mul(by, b.const_i32(BLOCK_CH)),
+        b.add(b.mul(wave_id, c_wave), lane),
+    )
+    # When block_ch divides total_c the predicate is statically true; emitting it
+    # would cost a v_cndmask on every weight load, every activation load and
+    # every store for a condition no lane can fail.
+    ch_exact = spec.ch_tile_exact
+    ch_in_range = None if ch_exact else b.cmp_lt(ch, c_groups)
+
+    def guard_ch(cond: Optional[Value]) -> Optional[Value]:
+        """AND ``cond`` with the channel predicate, dropping either if vacuous."""
+        if ch_in_range is None:
+            return cond
+        return ch_in_range if cond is None else b.land(cond, ch_in_range)
+
+    def addr(off: Value, cond: Optional[Value]) -> Value:
+        """Byte offset, redirected to the OOB sentinel when ``cond`` is false."""
+        byte_off = b.mul(off, c_elem_bytes)
+        return byte_off if cond is None else b.select(cond, byte_off, oob_sentinel)
+
+    a_rsrc = b.buffer_rsrc(A, A_bytes)
+    b_rsrc = b.buffer_rsrc(Bp, B_bytes)
+    d_rsrc = b.buffer_rsrc(D, D_bytes)
+
+    a_desc = TensorDescriptor.naive(
+        "A", lengths=[p.N, p.H, p.W, p.total_c], coord_names=("n", "h", "w", "c")
+    ).transform(
+        embed(upper=("y_iter",), into="h", strides=(1,), offset=-p.PAD, lo=0, hi=p.H),
+        embed(
+            upper=("wo", "s_off"),
+            into="w",
+            strides=(p.stride, 1),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.W,
+        ),
+    )
+    b_desc = TensorDescriptor.naive(
+        "B", lengths=[p.total_k, p.KH, p.KW, 1], coord_names=("k", "r", "s", "c")
+    )
+    d_desc = TensorDescriptor.naive(
+        "D", lengths=[p.N, Ho, Wo, p.total_k], coord_names=("n", "h", "w", "k")
+    )
+
+    # Input rows the band can reach: output row ho reads ho*stride + r - PAD, so
+    # the last one touched is (Ho-1)*stride + KH-1.  At stride 1 with
+    # same-padding this is exactly H + KH - 1; where it differs it is because
+    # H + KH - 1 was wrong -- too small for PAD > (KH-1)/2, which dropped real
+    # taps, and too large for PAD < (KH-1)/2, where the extra iterations have an
+    # empty tap list and emit nothing either way.
+    n_iters = (Ho - 1) * p.stride + p.KH
+
+    # Accumulator band: one f32 per (output row, output W position).  Unlike the
+    # KH-slot circular buffer of DirectDepthwiseSpec these are never recycled --
+    # every filter column contributes to every output row, so nothing can be
+    # flushed until the column loop has closed.
+    acc_args = [
+        (f"dw_acc_h{h}_w{w}", zero_f32) for h in range(Ho) for w in range(BLOCK_W)
+    ]
+    col_loop = b.scf_for_iter(
+        c0,
+        b.const_i32(p.KW),
+        c1,
+        acc_args,
+        iv_name="dw_col",
+        elide_trailing_barrier=False,
+    )
+    with col_loop as (s_iv, loop_accs):
+        new_accs = list(loop_accs)
+
+        # One filter column: KH weights live for the whole body.
+        w_col: List[Value] = []
+        for r_const in range(p.KH):
+            w_off, _ = b_desc.offset(b, k=ch, r=b.const_i32(r_const), s=s_iv, c=c0)
+            # No value-side zero-fill: ``addr`` already steers a failing lane to
+            # an offset past ``num_records``, and a buffer load that misses the
+            # bounds check returns 0 -- which is +0.0 in every supported element
+            # type and stays +0.0 through the convert.  Selecting over it again
+            # is a dead cndmask.
+            w_col.append(load_elem(b_rsrc, addr(w_off, ch_in_range)))
+
+        for y in range(n_iters):
+            # NOTE: rows with `not 0 <= y - PAD < H` read as zero and their taps
+            # cannot contribute, but pruning them here is a measured *regression*
+            # -- the ragged tap grid defeats the SLP vectorizer, which then pairs
+            # only a fraction of the fmas into v_pk_fma_f32.  Fewer taps, far more
+            # instructions.  Prune only together with explicit vector_fma packing.
+            # ho = (y - r) / stride, so a filter row lands inside the band only
+            # when the division is exact -- at stride > 1 the rows in between
+            # two output rows are simply never read, which is the convolution's
+            # own definition rather than an optimization.
+            taps = [
+                r
+                for r in range(p.KH)
+                if (y - r) % p.stride == 0 and 0 <= (y - r) // p.stride < Ho
+            ]
+            if not taps:
+                continue
+            y_i = b.const_i32(y)
+            for w_out in range(BLOCK_W):
+                w_pos = b.add(q_tile_start, b.const_i32(w_out))
+                a_off, valid = a_desc.offset(
+                    b, n=n, y_iter=y_i, wo=w_pos, s_off=s_iv, c=ch
+                )
+                load_ok = guard_ch(valid)
+                # Zero-fill comes from the hardware bounds check (see w_col).
+                a_f32 = load_elem(a_rsrc, addr(a_off, load_ok))
+                for r_const in taps:
+                    # STATIC slot: the tap filter above guarantees the division
+                    # is exact and the quotient is in [0, Ho).
+                    idx = ((y - r_const) // p.stride) * BLOCK_W + w_out
+                    new_accs[idx] = b.fma(w_col[r_const], a_f32, new_accs[idx])
+
+        b.scf_yield(*new_accs)
+
+    # Single drain after the column loop: the whole band is complete.
+    final_accs = col_loop.results
+    for h_out in range(Ho):
+        out_h = b.const_i32(h_out)
+        for w_out in range(BLOCK_W):
+            out_q = b.add(q_tile_start, b.const_i32(w_out))
+            # Same argument as ch_tile_exact, on the W axis.
+            q_ok = None if spec.w_tile_exact else b.cmp_lt(out_q, c_W)
+            store_ok = guard_ch(q_ok)
+            d_off, _ = d_desc.offset(b, n=n, h=out_h, w=out_q, k=ch)
+            acc_val = final_accs[h_out * BLOCK_W + w_out]
+            store_elem(d_rsrc, addr(d_off, store_ok), acc_val)
+
+    return b.kernel
+
+
+# ---------------------------------------------------------------------------
 # Depthwise spatial kernel — groups ≤ wave_size: threads map to both
 # channel AND output W-position within one wavefront.
 # ---------------------------------------------------------------------------
@@ -4797,7 +5298,7 @@ def is_valid_depthwise_spatial_spec(
 
 
 def build_direct_depthwise_spatial(
-    spec: "DirectDepthwiseSpatialSpec", arch: str = "gfx950"
+    spec: "DirectDepthwiseSpatialSpec", *, arch: str = "gfx950"
 ) -> KernelDef:
     """Build the small-group depthwise spatial kernel.
 

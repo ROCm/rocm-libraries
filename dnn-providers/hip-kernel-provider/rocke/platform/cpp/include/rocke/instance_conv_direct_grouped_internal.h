@@ -636,6 +636,78 @@ typedef struct rocke_dconv_dw_ctx
 } rocke_dconv_dw_ctx_t;
 
 /* ===================================================================== *
+ *  rocke_dconv_dwcol_ctx_t  --  shared state for build_direct_depthwise_col.
+ *
+ *  Column-streamed sibling of the above: the KW axis is a runtime scf.for
+ *  whose iter_args carry the whole Ho x BLOCK_W accumulator band, so the
+ *  only register arrays are KH weights and Ho*BLOCK_W accumulators -- both
+ *  bounded by the validator's live-f32 ceiling (arch VGPRs * 3/8), not by a
+ *  small compile-time cap.  KH reaches 31+ in the covered space, so neither
+ *  array is a fixed ctx member: the emitter alloca's them per call.
+ *
+ *  Guard elision is structural, not cosmetic.  When ch_tile_exact the
+ *  `ch < groups` predicate is absent from the IR entirely (ch_in_range is
+ *  NULL and addr() emits a bare mul with no select), and likewise for
+ *  w_tile_exact on the `out_q < Wo` store guard.
+ * ===================================================================== */
+typedef struct rocke_dconv_dwcol_ctx
+{
+    rocke_ir_builder_t* b;
+    const rocke_direct_depthwise_col_spec_t* spec;
+    const char* arch;
+    rocke_direct_conv_problem_t p;
+
+    int BLOCK_W;
+    int BLOCK_WAVES;
+    int WAVE;
+    int THREADS;
+    int BLOCK_CH;
+    int Ho; /* output height: (H + 2*PAD - KH) // stride + 1 */
+    int Wo; /* output width:  (W + 2*PAD - KW) // stride + 1 */
+    int n_iters; /* (Ho - 1) * stride + KH  -- NOT H + KH - 1  */
+    int ELEM_BYTES; /* 2 for f16/bf16, 4 for f32                  */
+    const rocke_type_t* DT; /* dtype_to_ir(spec->dtype)                   */
+
+    bool ch_tile_exact; /* total_c % BLOCK_CH == 0 -> no ch guard      */
+    bool w_tile_exact; /* Wo % BLOCK_W == 0      -> no out_q guard   */
+
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* D;
+    rocke_value_t* A_bytes;
+    rocke_value_t* B_bytes;
+    rocke_value_t* D_bytes;
+
+    rocke_value_t* c0;
+    rocke_value_t* c1; /* emitted SECOND, unlike the preload prologue */
+    rocke_value_t* c_wave;
+    rocke_value_t* c_W; /* const_i32(Wo) — output width          */
+    rocke_value_t* c_groups; /* const_i32(groups)                     */
+    rocke_value_t* c_elem_bytes;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* zero_f32;
+    rocke_value_t* ch_in_range; /* ch < groups, or NULL when ch_tile_exact */
+
+    rocke_value_t* tid;
+    rocke_value_t* wave_id;
+    rocke_value_t* lane;
+
+    rocke_value_t* bx;
+    rocke_value_t* by;
+    rocke_value_t* n;
+    rocke_value_t* q_tile_start;
+    rocke_value_t* ch; /* absolute channel: by*BLOCK_CH + wave_id*WAVE + lane */
+
+    rocke_value_t* a_rsrc;
+    rocke_value_t* b_rsrc;
+    rocke_value_t* d_rsrc;
+
+    const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,C] + 2 embeds     */
+    const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,1] naive  */
+    const rocke_tensor_descriptor_t* d_desc; /* D[N,Ho,Wo,total_k] naive  */
+} rocke_dconv_dwcol_ctx_t;
+
+/* ===================================================================== *
  *  8c PHASE FUNCTIONS
  * ===================================================================== */
 bool rocke_dconv8c_prologue(rocke_dconv_8c_ctx_t* ctx);
@@ -662,6 +734,17 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx);
 void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx);
 void rocke_dconv_dw_build_descriptors(rocke_dconv_dw_ctx_t* ctx);
 rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx);
+
+/* ===================================================================== *
+ *  Depthwise-column PHASE FUNCTIONS
+ *
+ *  There is no separate load_weights phase: the KH weights of one filter
+ *  column depend on the runtime `s` induction variable, so they are loaded
+ *  inside the column loop rather than in the prologue.
+ * ===================================================================== */
+bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx);
+void rocke_dconv_dwcol_build_descriptors(rocke_dconv_dwcol_ctx_t* ctx);
+rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

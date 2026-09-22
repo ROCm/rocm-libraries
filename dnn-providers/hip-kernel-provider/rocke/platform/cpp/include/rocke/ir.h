@@ -340,6 +340,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_BUFFER_STORE_VN_BF16,
     ROCKE_OP_TILE_BUFFER_STORE_F32,
     ROCKE_OP_TILE_BUFFER_STORE_VN_F32,
+    ROCKE_OP_TILE_BUFFER_LOAD,
 
     /* tile.* -- mma */
     ROCKE_OP_TILE_MMA,
@@ -1319,6 +1320,14 @@ void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* soffset,
                                  rocke_value_t* value,
                                  int n);
+/* Dtype-generic scalar buffer load (single element, OOB-clamped).
+   Supported dtypes: f16, bf16 (2-byte -> i16 intrinsic),
+   f32 / i32 (4-byte -> i32 intrinsic). */
+rocke_value_t* rocke_b_buffer_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   const rocke_type_t* dtype);
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
 rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b,

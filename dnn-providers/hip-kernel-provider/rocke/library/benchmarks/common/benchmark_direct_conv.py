@@ -41,6 +41,11 @@ _DOUBLE_BUFFER = (True, False)
 _DW_BLOCK_W = (4, 8, 16, 32)
 _DW_BLOCK_WAVES = (1, 2, 4)
 
+# The column-streamed depthwise kernel keeps only ``Ho*block_w + KH`` f32 live
+# per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
+# smaller block_w than the weight-preloading kernel's.
+_DW_COL_BLOCK_W = (1, 2, 4, 8, 16, 32)
+
 
 # ---------------------------------------------------------------------------
 # Result records
@@ -62,6 +67,7 @@ class Result:
 @dataclass
 class DepthwiseResult:
     kernel_name: str
+    variant: str
     block_w: int
     block_waves: int
     ms: float
@@ -380,12 +386,17 @@ def _print_results(
 
 
 def _print_depthwise_results(
-    results: "List[DepthwiseResult]", top_n_arg: int, arch: str, p, show_verify: bool
+    results: "List[DepthwiseResult]",
+    top_n_arg: int,
+    arch: str,
+    p,
+    show_verify: bool,
+    dtype: str = "fp16",
 ):
     top_n = min(top_n_arg, len(results))
     width = 96 if show_verify else 84
     print(f"\n{'='*width}")
-    print(f"Top {top_n} depthwise configurations for {arch} fp16 {p.short()}")
+    print(f"Top {top_n} depthwise configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*width}")
     hdr = (
         f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  config"
@@ -395,7 +406,7 @@ def _print_depthwise_results(
     print(hdr)
     print("-" * width)
     for rank, r in enumerate(results[:top_n], 1):
-        cfg = f"bw={r.block_w:3d} bwv={r.block_waves}"
+        cfg = f"{r.variant:<7} bw={str(r.block_w):>3s} bwv={r.block_waves}"
         if show_verify:
             v = "PASS" if r.passed else "FAIL"
             print(
@@ -428,16 +439,20 @@ def _run_depthwise_sweep(
     KernelLauncher,
     LaunchConfig,
     u8,
+    dtype: str = "fp16",
 ) -> "tuple[int, List[DepthwiseResult]]":
     import math
     import torch
 
     from rocke.helpers.manifest import conv_args_signature
     from kernels.common.conv_direct_grouped import (
+        DirectDepthwiseColSpec,
         DirectDepthwiseSpec,
         DirectDepthwiseSpatialSpec,
         build_direct_depthwise,
+        build_direct_depthwise_col,
         build_direct_depthwise_spatial,
+        is_valid_depthwise_col_spec,
         is_valid_depthwise_spec,
         is_valid_depthwise_spatial_spec,
     )
@@ -450,21 +465,40 @@ def _run_depthwise_sweep(
     _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
     _use_spatial = p.groups < _wave_size
 
+    # Only the column-streamed variant carries a dtype knob; the preload and
+    # spatial specs are fp16-only, so a non-fp16 run sweeps the col variant alone
+    # rather than silently feeding them tensors of the wrong width.
+    _torch_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[dtype]
+    _col_only = dtype != "fp16"
+
     torch.manual_seed(42)
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
+    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
-    sig = conv_args_signature("fp16")
+    sig = conv_args_signature(dtype)
 
     # For the spatial layout block_w is derived from block_waves internally,
     # so sweeping block_w would produce duplicate kernels; use a dummy value.
-    if _use_spatial:
-        combos = [(None, bw) for bw in _DW_BLOCK_WAVES]
+    _col_combos = [
+        ("col", bw, bwv)
+        for bw, bwv in itertools.product(_DW_COL_BLOCK_W, _DW_BLOCK_WAVES)
+    ]
+    if _col_only:
+        combos = _col_combos
+    elif _use_spatial:
+        combos = [("spatial", None, bw) for bw in _DW_BLOCK_WAVES]
     else:
-        combos = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
+        combos = [
+            ("preload", bw, bwv)
+            for bw, bwv in itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES)
+        ] + _col_combos
 
     if args.sample is not None:
         total = len(combos)
@@ -476,21 +510,33 @@ def _run_depthwise_sweep(
         )
 
     print(
-        f"Sweeping {len(combos)} depthwise combinations for {arch} fp16 {p.short()} ...",
+        f"Sweeping {len(combos)} depthwise combinations for {arch} {dtype} "
+        f"{p.short()} ...",
         flush=True,
     )
 
     n_skipped = 0
     pending = []
     for combo in combos:
-        block_w, block_waves = combo
-        if _use_spatial:
+        variant, block_w, block_waves = combo
+        if variant == "spatial":
             spec = DirectDepthwiseSpatialSpec(
                 problem=p,
                 name="rocke_bench_direct_depthwise_spatial",
                 block_waves=block_waves,
             )
             ok, _ = is_valid_depthwise_spatial_spec(spec, arch=arch)
+            build = build_direct_depthwise_spatial
+        elif variant == "col":
+            spec = DirectDepthwiseColSpec(
+                problem=p,
+                name="rocke_bench_direct_depthwise_col",
+                block_w=block_w,
+                block_waves=block_waves,
+                dtype=dtype,
+            )
+            ok, _ = is_valid_depthwise_col_spec(spec, arch=arch)
+            build = build_direct_depthwise_col
         else:
             spec = DirectDepthwiseSpec(
                 problem=p,
@@ -499,14 +545,12 @@ def _run_depthwise_sweep(
                 block_waves=block_waves,
             )
             ok, _ = is_valid_depthwise_spec(spec, arch=arch)
+            build = build_direct_depthwise
         if not ok:
             n_skipped += 1
             continue
         try:
-            if _use_spatial:
-                kernel = build_direct_depthwise_spatial(spec, arch=arch)
-            else:
-                kernel = build_direct_depthwise(spec, arch=arch)
+            kernel = build(spec, arch=arch)
         except ValueError:
             n_skipped += 1
             continue
@@ -537,7 +581,7 @@ def _run_depthwise_sweep(
 
     n_run = 0
     for combo, spec, kernel in pending:
-        block_w, block_waves = combo
+        variant, block_w, block_waves = combo
         artifact = artifact_map[kernel.name]
 
         try:
@@ -555,7 +599,7 @@ def _run_depthwise_sweep(
             )
             continue
 
-        if _use_spatial:
+        if variant == "spatial":
             q_tiles = math.ceil(p.Wo / spec.block_w)
             g_tiles = 1  # all channels handled within each wavefront
         else:
@@ -612,6 +656,7 @@ def _run_depthwise_sweep(
         results.append(
             DepthwiseResult(
                 kernel_name=artifact.kernel_name,
+                variant=variant,
                 block_w=block_w,
                 block_waves=block_waves,
                 ms=ms,
@@ -621,7 +666,7 @@ def _run_depthwise_sweep(
             )
         )
         print(
-            f"[{n_run:4d}] bw={block_w:3d} bwv={block_waves}"
+            f"[{n_run:4d}] {variant:<7} bw={str(block_w):>3s} bwv={block_waves}"
             f"  {cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
         )
@@ -637,7 +682,7 @@ def _run_depthwise_sweep(
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
-    _print_depthwise_results(results, args.top, arch, p, args.verify)
+    _print_depthwise_results(results, args.top, arch, p, args.verify, dtype)
     return 0, results
 
 
@@ -1546,6 +1591,17 @@ def main() -> int:
     conv.add_argument("--dH", type=int, default=1, help="vertical dilation")
     conv.add_argument("--dW", type=int, default=1, help="horizontal dilation")
     conv.add_argument(
+        "--dtype",
+        choices=("fp16", "bf16", "fp32"),
+        default="fp16",
+        help=(
+            "element type for A/B/D (default: fp16). Ignored with --miopen-cmd / "
+            "--miopen-file, where the dtype comes from the driver keyword. Only "
+            "the column-streamed depthwise variant honours this; the preload and "
+            "spatial variants are fp16-only and are skipped otherwise."
+        ),
+    )
+    conv.add_argument(
         "--groups",
         "-g",
         type=int,
@@ -1664,7 +1720,7 @@ def main() -> int:
             PAD=args.pH,
             stride=args.sH,
         )
-        cases = [(problem, "fp16", args.direction)]
+        cases = [(problem, args.dtype, args.direction)]
 
     _common = dict(
         args=args,
@@ -1693,7 +1749,7 @@ def main() -> int:
         if direction == "dgrad":
             rc, _ = _run_dgrad_sweep(problem=problem, **_common)
         elif cpg == 1:
-            rc, _ = _run_depthwise_sweep(problem=problem, **_common)
+            rc, _ = _run_depthwise_sweep(problem=problem, dtype=dtype, **_common)
         else:
             rc, _ = _run_sweep(problem=problem, **_common)
         all_rc = all_rc or rc

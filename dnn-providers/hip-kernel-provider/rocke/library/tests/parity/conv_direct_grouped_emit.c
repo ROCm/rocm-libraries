@@ -29,8 +29,9 @@ enum
     KIND_32C = 3,
     KIND_DW = 4,
     KIND_SPATIAL = 5,
-    KIND_DGRAD = 6,
-    KIND_DW_DGRAD = 7
+    KIND_DWCOL = 6,
+    KIND_DGRAD = 7,
+    KIND_DW_DGRAD = 8
 };
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
@@ -43,6 +44,7 @@ static int make_cfg(int idx,
                     rocke_direct_conv_32c_spec_t* s32,
                     rocke_direct_depthwise_spec_t* sdw,
                     rocke_direct_depthwise_spatial_spec_t* ssp,
+                    rocke_direct_depthwise_col_spec_t* sdwc,
                     rocke_direct_conv_dgrad_spec_t* sdgrad,
                     rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad,
                     const char** arch)
@@ -230,6 +232,151 @@ static int make_cfg(int idx,
         *arch = "gfx950";
         return 0;
     case 12:
+        /* column-streamed depthwise, stride=1 fp16, both tile guards elided
+         * (groups % block_ch == 0 and Wo % block_w == 0): addr() must emit a
+         * bare mul with no select at all. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 128;
+        p.cpg = 1;
+        p.kpg = 1;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 2;
+        sdwc->dtype = "fp16";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* col stride=2 bf16 with BOTH guards live (groups=70 % 64, Wo=5 % 4) */
+        p.N = 1;
+        p.H = 9;
+        p.W = 9;
+        p.groups = 70;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.stride = 2;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "bf16";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 14:
+        /* col stride=3 fp32: exercises the (y - r) % stride tap pruning and the
+         * f32 load/store forms; ch guard elided, w guard live. */
+        p.N = 1;
+        p.H = 16;
+        p.W = 16;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.stride = 3;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp32";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 15:
+        /* col with a large filter (31x31): the regime the variant exists for --
+         * KW rides the runtime loop so only KH weights are live. */
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 31;
+        p.KW = 31;
+        p.PAD = 15;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* col 1x1 / PAD=0 degenerate with a non-power-of-two group count */
+        p.N = 2;
+        p.H = 6;
+        p.W = 6;
+        p.groups = 3;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 1;
+        p.KW = 1;
+        p.PAD = 0;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 2;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp32";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 17:
+        /* col with KH != KW (5x3): separates the unrolled axis from the runtime one */
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 128;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 5;
+        p.KW = 3;
+        p.PAD = 2;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 2;
+        sdwc->dtype = "bf16";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 18:
+        /* col stride=2 with valid padding (PAD=0), both guards elided */
+        p.N = 1;
+        p.H = 13;
+        p.W = 13;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.PAD = 0;
+        p.stride = 2;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 6;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 19:
+        /* col with block_w=1 and a channel tail (groups=100 % 128) */
+        p.N = 1;
+        p.H = 10;
+        p.W = 10;
+        p.groups = 100;
+        p.cpg = 1;
+        p.kpg = 1;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 1;
+        sdwc->block_waves = 2;
+        sdwc->dtype = "fp32";
+        *kind = KIND_DWCOL;
+        *arch = "gfx950";
+        return 0;
+    case 20:
         /* dgrad: baseline grouped dgrad stride=1 */
         p.N = 2;
         p.H = 8;
@@ -244,7 +391,7 @@ static int make_cfg(int idx,
         *kind = KIND_DGRAD;
         *arch = "gfx950";
         return 0;
-    case 13:
+    case 21:
         /* dgrad: larger groups / different block_groups */
         p.N = 2;
         p.H = 8;
@@ -259,7 +406,7 @@ static int make_cfg(int idx,
         *kind = KIND_DGRAD;
         *arch = "gfx950";
         return 0;
-    case 14:
+    case 22:
         /* dgrad: gfx942 target */
         p.N = 1;
         p.H = 8;
@@ -274,7 +421,7 @@ static int make_cfg(int idx,
         *kind = KIND_DGRAD;
         *arch = "gfx942";
         return 0;
-    case 15:
+    case 23:
         /* depthwise_dgrad: stride=1 */
         p.N = 2;
         p.H = 14;
@@ -289,7 +436,7 @@ static int make_cfg(int idx,
         *kind = KIND_DW_DGRAD;
         *arch = "gfx950";
         return 0;
-    case 16:
+    case 24:
         /* depthwise_dgrad: stride=2 exercises divisibility checks */
         p.N = 2;
         p.H = 14;
@@ -303,6 +450,27 @@ static int make_cfg(int idx,
         sdw_dgrad->block_w = 8;
         sdw_dgrad->block_waves = 1;
         *kind = KIND_DW_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 25:
+        /* dwcol PAD-overhang: PAD=2 > (KH-1)/2=1 with stride=2.
+         * Cross-verifies the n_iters = (Ho-1)*stride + KH formula. */
+        p.N = 1;
+        p.H = 10;
+        p.W = 10;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.KH = 3;
+        p.KW = 3;
+        p.PAD = 2;
+        p.stride = 2;
+        *sdwc = rocke_direct_depthwise_col_spec_default();
+        sdwc->problem = p;
+        sdwc->block_w = 4;
+        sdwc->block_waves = 1;
+        sdwc->dtype = "fp16";
+        *kind = KIND_DWCOL;
         *arch = "gfx950";
         return 0;
     default:
@@ -327,10 +495,12 @@ int main(int argc, char** argv)
     rocke_direct_conv_32c_spec_t s32;
     rocke_direct_depthwise_spec_t sdw;
     rocke_direct_depthwise_spatial_spec_t ssp;
+    rocke_direct_depthwise_col_spec_t sdwc;
     rocke_direct_conv_dgrad_spec_t sdgrad;
     rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdgrad, &sdw_dgrad, &arch) != 0)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdwc, &sdgrad, &sdw_dgrad, &arch)
+       != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -348,6 +518,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_conv_32c_new(&b, &s32, arch);
     else if(kind == KIND_SPATIAL)
         kernel = rocke_build_direct_depthwise_spatial_new(&b, &ssp, arch);
+    else if(kind == KIND_DWCOL)
+        kernel = rocke_build_direct_depthwise_col_new(&b, &sdwc, arch);
     else if(kind == KIND_DGRAD)
         kernel = rocke_build_direct_conv_dgrad_new(&b, &sdgrad, arch);
     else if(kind == KIND_DW_DGRAD)

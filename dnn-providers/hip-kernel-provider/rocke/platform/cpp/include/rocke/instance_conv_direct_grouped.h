@@ -330,6 +330,69 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
                                           size_t reason_cap);
 
 /* ===================================================================== *
+ *  DirectDepthwiseColSpec  (cpg = kpg = 1, column-streamed, no MFMA)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectDepthwiseColSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_depthwise_col"
+ *      block_w: int = 1
+ *      block_waves: int = 1
+ *      wave_size: int = 64
+ *      dtype: str = "fp16"
+ *      max_live_f32: Optional[int] = None
+ *
+ *  Loop order s (runtime scf.for over KW) -> y (unrolled input rows) -> r
+ *  (unrolled over KH), so live f32 per lane is Ho*block_w + KH -- linear in KH
+ *  and independent of KW, unlike the preload sibling's KH*KW + KH*block_w.
+ *  Grid: (ceil(Wo / block_w), ceil(groups / block_ch), N).
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_col_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_col" */
+    int block_w; /* default 1  */
+    int block_waves; /* default 1  */
+    int wave_size; /* default 64 */
+    const char* dtype; /* default "fp16"; one of fp16 / bf16 / fp32 */
+    /* Python's Optional[int] max_live_f32.
+     * 0  = sentinel for Python None: use the arch VGPR budget as-is.
+     * >0 = tighten via min(max_live_f32, arch_budget).
+     * <0 = invalid; is_valid_spec() will reject it. */
+    int max_live_f32;
+} rocke_direct_depthwise_col_spec_t;
+
+rocke_direct_depthwise_col_spec_t rocke_direct_depthwise_col_spec_default(void);
+/* @property threads_per_block / block_ch -> block_waves * wave_size */
+int rocke_direct_depthwise_col_threads_per_block(const rocke_direct_depthwise_col_spec_t* spec);
+int rocke_direct_depthwise_col_block_ch(const rocke_direct_depthwise_col_spec_t* spec);
+/* @property live_f32 -> problem.Ho * block_w + problem.KH */
+int rocke_direct_depthwise_col_live_f32(const rocke_direct_depthwise_col_spec_t* spec);
+/* resolve_max_live_f32(arch) -> min(spec.max_live_f32, vgprs * 3 // 8) when the
+ * override is set, else the budget. Returns 0 on unknown arch. */
+int rocke_direct_depthwise_col_resolve_max_live_f32(const rocke_direct_depthwise_col_spec_t* spec,
+                                                    const char* arch);
+/* @property ch_tile_exact / w_tile_exact -- when true the matching bounds guard
+ * is elided from the emitted IR entirely (not merely made constant-true). */
+bool rocke_direct_depthwise_col_ch_tile_exact(const rocke_direct_depthwise_col_spec_t* spec);
+bool rocke_direct_depthwise_col_w_tile_exact(const rocke_direct_depthwise_col_spec_t* spec);
+/* dtype_tag() -> the IR scalar name ("f16"/"bf16"/"f32") when the dtype string
+ * resolves, else the string with non-alphanumerics replaced by '_'. */
+rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise_col_spec_t* spec,
+                                                    char* out,
+                                                    size_t out_cap);
+rocke_status_t rocke_direct_depthwise_col_kernel_name(const rocke_direct_depthwise_col_spec_t* spec,
+                                                      char* out,
+                                                      size_t out_cap);
+rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_col_spec_t* spec,
+                                                   char* reason,
+                                                   size_t reason_cap);
+bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_spec_t* spec,
+                                              const char* arch,
+                                              char* reason,
+                                              size_t reason_cap);
+
+/* ===================================================================== *
  *  DirectDepthwiseSpatialSpec  (cpg = kpg = 1, groups <= wave_size)
  *
  *  Thread layout: ch = tid % groups, w_in_wave = tid // groups.
@@ -485,6 +548,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_new(rocke_ir_builder_t* b,
                                                      const rocke_direct_depthwise_spec_t* spec,
                                                      const char* arch);
 
+/* build_direct_depthwise_col(spec, arch). Column-streamed depthwise kernel
+ * (cpg=kpg=1). The KW axis is a runtime scf.for whose iter_args carry the
+ * Ho x block_w accumulator band, so register pressure is independent of KW. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_col(rocke_ir_builder_t* b,
+                                                     const rocke_direct_depthwise_col_spec_t* spec,
+                                                     const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_col_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_col_spec_t* spec, const char* arch);
+
 /* build_direct_depthwise_spatial(spec, arch). Small-group spatial depthwise kernel
  * (cpg=kpg=1, groups <= wave_size). Thread layout: ch=tid%groups, w=tid//groups. */
 rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
@@ -510,9 +582,12 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
 
 /* ===================================================================== *
- *  SIGNATURE (manifest)  --  both kernels share the 6-entry ABI:
+ *  SIGNATURE (manifest)  --  the 16c and 4c kernels share the 6-entry ABI:
  *    ptr A:f16, ptr B:f16, ptr D:f16, scalar A_bytes:i32, B_bytes:i32,
  *    D_bytes:i32.
+ *  The depthwise_col kernel keeps the same 6-entry shape but its three pointer
+ *  element types follow spec->dtype (f16 / bf16 / f32), so it is not covered by
+ *  the fixed manifest below.
  * ===================================================================== */
 
 /* Writes the 6 manifest entries into out[] (capacity out_cap) and sets
@@ -564,6 +639,14 @@ rocke_status_t rocke_direct_depthwise_lower_to_llvm(const rocke_direct_depthwise
                                                     char** out_ll,
                                                     char* err,
                                                     size_t err_cap);
+
+rocke_status_t
+    rocke_direct_depthwise_col_lower_to_llvm(const rocke_direct_depthwise_col_spec_t* spec,
+                                             const char* arch,
+                                             rocke_llvm_flavor_t flavor,
+                                             char** out_ll,
+                                             char* err,
+                                             size_t err_cap);
 
 rocke_status_t rocke_direct_conv_dgrad_lower_to_llvm(const rocke_direct_conv_dgrad_spec_t* spec,
                                                      const char* arch,

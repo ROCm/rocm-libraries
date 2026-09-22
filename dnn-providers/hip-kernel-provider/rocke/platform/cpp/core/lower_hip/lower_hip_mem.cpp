@@ -1113,6 +1113,58 @@ static rocke_status_t _op_tile_buffer_load_bf16(rocke_h_lowerer_t* lw, const roc
     return lw->status;
 }
 
+/* Python _op_tile_buffer_load: dtype-generic scalar load. 2-byte types
+ * (f16, bf16) go through _b16, 4-byte types (f32, i32) through _b32. */
+static rocke_status_t _op_tile_buffer_load(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset;
+    const char *res, *tmp, *elem, *hip_t;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load: bad operand/result count");
+    }
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    elem = mem_attr_str(op, "elem_type", "f16");
+    hip_t = rocke_h_hip_scalar(elem);
+    /* Python indexes _HIP_TYPE and would raise KeyError on anything else. */
+    if(hip_t == NULL)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_KEY, "tile.buffer_load: unsupported element type '%s'", elem);
+    }
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_bl_%s", res);
+    if(strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "unsigned short %s = (unsigned short)"
+                      "__builtin_amdgcn_raw_buffer_load_b16(%s, %s, %s, 0);",
+                      tmp,
+                      rocke_h_name(lw, rsrc),
+                      rocke_h_name(lw, voffset),
+                      rocke_h_name(lw, soffset));
+        rocke_h_emitf(lw, "%s %s; __builtin_memcpy(&%s, &%s, 2);", hip_t, res, res, tmp);
+    }
+    else
+    {
+        rocke_h_emitf(lw,
+                      "unsigned int %s = (unsigned int)"
+                      "__builtin_amdgcn_raw_buffer_load_b32(%s, %s, %s, 0);",
+                      tmp,
+                      rocke_h_name(lw, rsrc),
+                      rocke_h_name(lw, voffset),
+                      rocke_h_name(lw, soffset));
+        rocke_h_emitf(lw, "%s %s; __builtin_memcpy(&%s, &%s, 4);", hip_t, res, res, tmp);
+    }
+    return lw->status;
+}
+
 /* Python _op_tile_buffer_load_vN_bf16 */
 static rocke_status_t _op_tile_buffer_load_vN_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -1480,6 +1532,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_STORE_VN_BF16, _op_tile_buffer_store_vN_bf16},
            {ROCKE_OP_TILE_BUFFER_STORE_F32, _op_tile_buffer_store_f32},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F32, _op_tile_buffer_store_vN_f32},
+           {ROCKE_OP_TILE_BUFFER_LOAD, _op_tile_buffer_load},
            /* async DRAM->LDS */
            {ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR, _op_tile_async_buffer_load_lds_addr},
            {ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, _op_tile_async_buffer_load_lds},
