@@ -323,6 +323,51 @@ class DriftTest(unittest.TestCase):
         self.assertIn("not valid JSON", G._drift("{oops", self._doc()))
 
 
+class ClassifyTest(unittest.TestCase):
+    """A diagnostic this tool does not recognise becomes `probe_error`.
+
+    That is the safe default -- guessing would bake a false negative into the
+    artifact -- but it is not an answer, and it must never reach a committed
+    column. Each new LLVM vintage words its diagnostics differently, so the
+    wordings we have had to learn are pinned here: they are the difference
+    between a measurement and a blank.
+    """
+
+    def test_a_target_that_says_so_in_words_is_arch_absent(self):
+        """llvm23 states it outright where llvm20 and llvm22 only fail.
+
+        Left unrecognised, twelve cells across `permlane16`, `permlanex16` and
+        `mov.dpp8` recorded `probe_error` -- the generator reporting itself
+        broken for targets that had answered the question clearly.
+        """
+        status, evidence = G._classify(
+            1,
+            "error: <unknown>:0:0: in function probe void (ptr, i32): "
+            "intrinsic not supported on subtarget",
+        )
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT)
+        self.assertTrue(evidence)
+
+    def test_an_illegal_transfer_size_asks_for_a_re_probe(self):
+        """The same complaint as the other two, caught earlier.
+
+        llvm23 rejects an out-of-range load-to-LDS size in the verifier, before
+        codegen. The message is about our module, not the target, so it must
+        route to the operand rescue rather than be recorded as an answer.
+        """
+        diag = (
+            "error: invalid LLVM IR input: invalid data size for load-to-LDS "
+            "intrinsic; must be 1, 2, 4, 12, or 16"
+        )
+        status, evidence = G._classify(1, diag)
+        self.assertEqual(status, G.STATUS_PROBE_ERROR)
+        self.assertTrue(G._wants_literals(status, evidence))
+
+    def test_the_sizes_llvm23_names_are_the_ones_we_try(self):
+        """The candidate list is not a guess; llvm23 enumerates the domain."""
+        self.assertEqual(G._IMMARG_PROBE_VALUES, (1, 2, 4, 12, 16))
+
+
 class ImmargSweepTest(unittest.TestCase):
     """A negative must survive being asked with a legal operand value.
 
