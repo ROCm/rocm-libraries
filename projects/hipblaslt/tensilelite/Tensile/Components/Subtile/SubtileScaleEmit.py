@@ -22,7 +22,7 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SMulI32, SNop, SXorB32,
+    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SNop, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -35,37 +35,6 @@ from rocisa.instruction import (
 def emitScaleGROffset(ti, writer, kernel):
   """Compute per-thread DTL vaddr for scale GR load."""
   return Module(f"Scale GR Offset ({ti.tc})")  # STUB
-  module = Module(f"Scale GR Offset ({ti.tc})")
-  tc = ti.tc
-  loadWidth = ti.loadWidthGR
-  loadWidthShift = loadWidth.bit_length() - 1
-
-  scaleGroupSize = ti.lrSubtileSize
-  numThreadsPerGroup = (scaleGroupSize * int(ti.localSubtileGrid[1])) // loadWidth
-
-  vtmp = writer.vgprPool.checkOut(1, tag="emitScaleGROffset_vtmp")
-  stmp = writer.sgprPool.checkOut(1, tag="emitScaleGROffset_stmp")
-
-  module.add(VLShiftRightB32(dst=vgpr(vtmp),
-             shiftHex=hex(numThreadsPerGroup.bit_length()-1), src=vgpr("Serial"),
-             comment=f"scale{tc}: groupId"))
-  module.add(SMulI32(dst=sgpr(stmp), src0=int(ti.bpe), src1=sgpr("Strides" + tc),
-             comment=f"scale{tc}: stride * bpe"))
-  module.add(VMulLOU32(dst=vgpr(vtmp), src1=vgpr(vtmp), src0=sgpr(stmp),
-             comment=f"scale{tc}: groupId * stride"))
-  module.add(VAndB32(dst=vgpr(ti.sharedVgprGROffset[0]),
-             src0=hex(numThreadsPerGroup - 1), src1=vgpr("Serial"),
-             comment=f"scale{tc}: threadId"))
-  module.add(VLShiftLeftB32(dst=vgpr(ti.sharedVgprGROffset[0]),
-             shiftHex=hex(loadWidthShift), src=vgpr(ti.sharedVgprGROffset[0]),
-             comment=f"scale{tc}: threadId * loadWidth"))
-  module.add(VAddU32(dst=vgpr(ti.sharedVgprGROffset[0]),
-             src0=vgpr(ti.sharedVgprGROffset[0]), src1=vgpr(vtmp),
-             comment=f"scale{tc}: final offset"))
-
-  writer.vgprPool.checkIn(vtmp)
-  writer.sgprPool.checkIn(stmp)
-  return module
 
 
 # ---------------------------------------------------------------------------
@@ -99,70 +68,6 @@ def emitScaleGRLoad(ti, writer, kernel):
 def emitScaleLROffset(ti, writer, kernel):
   """Compute per-lane LDS read offset for scale LR."""
   return Module(f"Scale LR Offset ({ti.tc})")  # STUB
-  module = Module(f"Scale LR Offset ({ti.tc})")
-  tc = ti.tc
-  wavesize = kernel["WavefrontSize"]
-
-  mi = kernel["MIWaveGroup"]
-  totalScaleBytes = (ti.macroTile // ti.waveGroupSize) * ti.scaleDepthU * int(ti.bpe)
-
-  waveIdVgpr = writer.vgprPool.checkOut(1, tag="emitScaleLROffset_waveIdVgpr")
-  module.add(VLShiftRightB32(dst=vgpr(waveIdVgpr), shiftHex=hex(wavesize.bit_length()-1),
-             src=vgpr("Serial"), comment=f"scale{tc}: waveId"))
-
-  vtmp = writer.vgprPool.checkOut(1, tag="emitScaleLROffset_vtmp")
-  stmp = writer.sgprPool.checkOut(1, tag="emitScaleLROffset_stmp")
-
-  if tc in ('A', 'MXSA'):
-    module.add(VAndB32(dst=vgpr(vtmp), src0=mi[0]-1, src1=vgpr(waveIdVgpr),
-               comment=f"scale{tc}: waveId %% {mi[0]}"))
-  else:
-    module.add(VLShiftRightB32(dst=vgpr(vtmp),
-               shiftHex=int(math.log2(mi[0])), src=vgpr(waveIdVgpr),
-               comment=f"scale{tc}: waveId / {mi[0]}"))
-
-  module.add(SMovB32(dst=sgpr(stmp), src=totalScaleBytes,
-             comment=f"scale{tc}: partition stride"))
-  module.add(VMulLOU32(dst=vgpr(ti.sharedVgprLROffset[0]),
-             src0=sgpr(stmp), src1=vgpr(vtmp),
-             comment=f"scale{tc}: partition offset"))
-
-  writer.vgprPool.checkIn(vtmp)
-  writer.vgprPool.checkIn(waveIdVgpr)
-
-  # Per-lane offset: laneId * 4
-  laneOffset = writer.vgprPool.checkOut(1, tag="emitScaleLROffset_laneOffset")
-  module.add(VAndB32(dst=vgpr(laneOffset), src0=vgpr("Serial"), src1=wavesize-1,
-             comment=f"scale{tc}: laneId"))
-  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset),
-             comment=f"scale{tc}: laneId * 4"))
-  module.add(VAddU32(dst=vgpr(ti.sharedVgprLROffset[0]),
-             src0=vgpr(laneOffset), src1=vgpr(ti.sharedVgprLROffset[0]),
-             comment=f"scale{tc}: + laneOffset"))
-  writer.vgprPool.checkIn(laneOffset)
-
-  # Add global LDS offset
-  ldsStartOffset = getattr(writer, f'ldsStartOffset{tc}', 0)
-  if ldsStartOffset:
-    module.add(SMovB32(dst=sgpr(stmp), src=hex(ldsStartOffset),
-               comment=f"scale{tc}: LDS base offset"))
-    module.add(VAddU32(dst=vgpr(ti.sharedVgprLROffset[0]),
-               src0=vgpr(ti.sharedVgprLROffset[0]), src1=sgpr(stmp),
-               comment=f"scale{tc}: + LDS offset"))
-
-  # Init swap VGPRs
-  module.add(SMovB32(dst=sgpr(stmp), src=writer.ldsTotalSize,
-             comment=f"scale{tc}: ldsTotalSize"))
-  for i in range(len(ti.sharedVgprLROffset)):
-    vOff  = ti.sharedVgprLROffset[i]
-    vSwap = ti.sharedVgprLROffsetSwap[i]
-    module.add(VAddU32(dst=vgpr(vSwap), src0=vgpr(vOff), src1=sgpr(stmp),
-               comment=f"scale{tc}: swap init"))
-    module.add(VXorB32(dst=vgpr(vSwap), src0=vgpr(vOff), src1=vgpr(vSwap),
-               comment=f"scale{tc}: swap mask"))
-
-  writer.sgprPool.checkIn(stmp)
-  return module
 
 
 # ---------------------------------------------------------------------------
