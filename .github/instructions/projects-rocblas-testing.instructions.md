@@ -8,48 +8,28 @@ excludeAgent: "cloud-agent"
 
 ## Purpose
 
-When performing a code review of files under `projects/rocblas`, apply the testing strategy in `projects/rocblas/TESTING.md`. Comment on relevant test changes and on missing tests. Do not apply this guidance to other projects in the monorepo.
+When performing a code review of files under `projects/rocblas`, read `projects/rocblas/TESTING.md` and apply the named tables and lists below as written. Do not copy or paraphrase them here. Do not apply this guidance to other projects in the monorepo.
 
-Treat `projects/rocblas/TESTING.md` as the source of truth. Prefer its coverage tables over general testing advice.
+## Named tables and lists in TESTING.md
+
+- **Table: `Coverage Expectations by Change Type`** — comment when the expected validation is absent.
+- **List: `Choosing the Right Test Type`** — comment when the wrong test type is used for the change.
+- **Table: `CI Label Suggestions`** — comment when a matching GitHub PR label is missing.
 
 ## When to comment
 
 Consider adding a review comment when any of the following is true:
 
-- Library, API, harness, YAML, CTest, or CI behavior changed and the matching validation from `TESTING.md` is missing.
-- Tests were added but they skip required files, dispatch wiring, CMake/YAML registration, or the wrong test type for the change.
+- Library, API, harness, YAML, CTest, or CI behavior changed and the matching validation from Table `Coverage Expectations by Change Type` is missing.
+- Tests were added but they skip required files, dispatch wiring, CMake/YAML registration, or the wrong test type from List `Choosing the Right Test Type`.
+- A change matches a row in Table `CI Label Suggestions` and the PR does not have that label.
 - A bug fix has no regression case that would fail without the fix.
 - `known_bugs.yaml` quarantines a case with no tracking ticket or with no intent to fix.
 - `gpu_arch` / `os_flags` appear in YAML but `type_filter()` does not go through `RocBLAS_Test<>::type_filter_functor`.
 - GEMM / Tensile logic changed with no targeted `*gemm*` / `*_tensile` coverage called out.
 - Performance-sensitive GEMM changed with no `rocblas-bench` spot-check note (there is no automated PR performance gate).
-- Kernel algorithm or HMM tests changed (`category: HMM`, `HMM: true`, or `*HMM*`) and the PR does not have the `ci:extended` label.
-- Stress tests changed (`category: stress` or `*stress*`) and the PR does not have the `ci:weekly` label.
 
 Stay silent for license-header, clang-format, comment-only, and docs-only diffs, unless the change updates test tiers, CTest layout, or quarantine policy without updating `TESTING.md` or the matching `test_categories.yaml` / `rtest.xml`.  Do not nit-pick.
-
-## Coverage expectations by change type
-
-Use this table from `TESTING.md`. Comment when the expected validation is absent.
-
-| Change type | Expected validation |
-| --- | --- |
-| New BLAS routine | `testing_*.hpp`, `*_gtest.cpp`, `*_gtest.yaml`, CMake registration, YAML included in `rocblas_gtest.yaml` |
-| Bug fix | Regression gtest that fails without the fix |
-| New public API / handle mode | Auxiliary gtest + YAML case |
-| GEMM / Tensile logic | Rebuild Tensile; gemm / `*_tensile` filters; bench spot-check if performance-related |
-| CI / CTest only | Update `test_categories.yaml` and `rtest.xml`; verify `ctest -N` |
-| Packaging | Install-tree `ctest` from `bin/rocblas/` |
-| Format / hooks only | No client tests required |
-
-## Choosing the right test type
-
-- **Bug fix** — regression test that fails before the fix.
-- **GPU numerical BLAS behavior** — integration case in `*_gtest.yaml` plus `testing_*.hpp`.
-- **Invalid arguments / status codes** — `testing_*_bad_arg` or a small dedicated gtest.
-- **Handle / logging / stride APIs** — auxiliary gtest pattern (see existing `set_get_*` tests).
-- **Performance** — `rocblas-bench` with representative sizes; results belong in the PR, not as a merge gate.
-- **CTest / CI tier change** — `clients/gtest/test_categories.yaml`, `rtest.xml`, and `ctest -L`.
 
 ## Required pieces for a new data-driven suite
 
@@ -71,20 +51,9 @@ Walkthrough: `projects/rocblas/clients/gtest/README.md`.
 - Prefer fixing a failure over widening filters or adding `known_bug` without a ticket.
 - `*known_bug*` must stay excluded from normal smoke / pre-checkin / nightly runs.
 
-## CI label suggestions
-
-HMM and stress suites are outside default PR CI. Comment when the matching GitHub label from `TESTING.md` is missing:
-
-| Test change | PR label |
-| --- | --- |
-| HMM tests (`category: HMM`, `HMM: true`, `*HMM*`) | `ci:extended` |
-| Stress tests (`category: stress`, `*stress*`) | `ci:weekly` |
-
-If both kinds of tests change, both labels are required. Do not treat these as TheRock PR-lane substitutes.
-
 ## How to phrase comments
 
-- Point at the missing path (`testing_*.hpp`, `*_gtest.yaml`, CMake, filter, or bench note).
-- Name the `TESTING.md` expectation (change type or test type) that is unmet.
+- Point at the missing path (`testing_*.hpp`, `*_gtest.yaml`, CMake, filter, label, or bench note).
+- Name the `TESTING.md` table or list that is unmet (`Coverage Expectations by Change Type`, `Choosing the Right Test Type`, or `CI Label Suggestions`).
 - Suggest a concrete gtest filter or YAML category when possible, for example `*quick*<routine>*` or a `pre_checkin` YAML entry.
 - Do not request overview-comment checklists, merge blocking, or emoji-only severity labels.

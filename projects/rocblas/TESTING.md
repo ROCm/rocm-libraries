@@ -458,6 +458,8 @@ Default PR jobs do not run HMM or stress client tests. Add GitHub PR labels so M
 schedules the matching longer job. Reviewers (including Copilot) should comment when a
 change of this kind lands without the label.
 
+**Table: `CI Label Suggestions`**
+
 | If these tests change | Add this PR label |
 | --- | --- |
 | HMM (`category: HMM`, `HMM: true`, or `*HMM*` filters) | `ci:extended` |
@@ -546,6 +548,8 @@ Document unsupported combinations explicitly during release planning rather than
 
 ## Coverage Expectations by Change Type
 
+**Table: `Coverage Expectations by Change Type`**
+
 | Change type | Expected validation |
 | --- | --- |
 | New BLAS routine | `testing_*.hpp`, `*_gtest.cpp`, `*_gtest.yaml`, CMake registration |
@@ -598,6 +602,8 @@ When changing rocBLAS:
 4. Update this document if you change tiers, CTest, or quarantine policy.
 
 ### Choosing the Right Test Type
+
+**List: `Choosing the Right Test Type`**
 
 - **Bug fix** — regression test failing before the fix.
 - **GPU numerical BLAS behavior** — integration case in `*_gtest.yaml` + `testing_*.hpp`.
