@@ -477,6 +477,48 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
     EXPECT_FALSE(gate.timedOut()) << "a declined arm still reports the earlier timeout";
 }
 
+TEST_F(TestGpuProfilingControlDescriptor, NonPositiveTimeoutUsesDefaultBudget)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    for(const auto timeout : {std::chrono::milliseconds(0), std::chrono::milliseconds(-1)})
+    {
+        hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
+        hipdnn_data_sdk::utilities::StallGate gate(timeout);
+        ASSERT_TRUE(gate.arm(_testStream));
+        // Give an immediate watchdog deadline time to fire, well below the default 2 s.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        gate.release();
+        ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+        EXPECT_FALSE(gate.timedOut());
+    }
+}
+
+TEST_F(TestGpuProfilingControlDescriptor, DestructionReleasesAndRetiresWaitOnEitherStream)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    for(const auto stream : {hipStream_t{nullptr}, _testStream})
+    {
+        hipEvent_t stop = nullptr;
+        ASSERT_EQ(hipEventCreate(&stop), hipSuccess);
+        const hipdnn_backend::HipEventGuard stopGuard(stop);
+        {
+            hipdnn_data_sdk::utilities::StallGate gate;
+            ASSERT_TRUE(gate.arm(stream));
+            ASSERT_EQ(hipEventRecord(stop, stream), hipSuccess);
+        }
+        // No explicit release or synchronization: destruction must retire the waiter.
+        EXPECT_EQ(hipEventQuery(stop), hipSuccess);
+    }
+}
+
 // A normal release must not depend on another GPU command making forward progress:
 // some runtimes cannot execute a stream write while another stream waits on the signal.
 // Repeating the cycle also proves that arm() resets the host-written signal for reuse.

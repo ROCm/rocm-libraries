@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/Visibility.hpp>
 #include <mutex>
 #include <system_error>
 #include <thread>
@@ -50,28 +51,26 @@ namespace hipdnn_data_sdk::utilities
  * synchronize returns, and the caller continues. A permanent hang becomes one slow
  * iteration.
  *
- * The timeout measures *host* time between arm() and release(), which is submission
- * cost only and independent of kernel duration, so a generous value cannot produce a
- * false positive on a long-running kernel.
+ * The timeout measures host time between arm() and release(), not kernel duration.
+ * A timeout can indicate a blocked host, a slow host, or a missing release; it does
+ * not identify the cause.
  *
- * A watchdog release means the measurement is worthless: it contains the timeout, and
- * the host gap it was supposed to exclude. timedOut() reports it so the caller discards
- * the sample rather than averaging it. Firing also sets a sticky flag that makes every
- * later arm() a no-op, because the cause is a property of the executed code and re-arming
- * would only buy another timeout. See isStallingDisabled() for how far that flag reaches.
+ * A watchdog release invalidates the measurement because device work can proceed
+ * before host submission finishes. timedOut() reports this to the caller. A sticky
+ * flag conservatively disables later arms in this shared object to bound repeated
+ * timeout delays. See isStallingDisabled() for its scope.
  *
  * Not thread-safe for concurrent arm/release: one gate arms one stream at a time.
  */
 class StallGate
 {
 public:
-    /// Default host-side budget between arm() and release(). Submission is a
-    /// microsecond-scale operation, so seconds of headroom still cannot fire on a
-    /// merely slow kernel; it only bounds a genuine deadlock.
+    /// Default host-side budget between arm() and release(), not a kernel time limit.
     static constexpr std::chrono::milliseconds DEFAULT_TIMEOUT{2000};
 
+    /// Non-positive budgets use DEFAULT_TIMEOUT rather than an immediate deadline.
     explicit StallGate(std::chrono::milliseconds timeout = DEFAULT_TIMEOUT)
-        : _timeout(timeout)
+        : _timeout(timeout > std::chrono::milliseconds::zero() ? timeout : DEFAULT_TIMEOUT)
     {
         int device = 0;
         auto status = hipGetDevice(&device);
@@ -135,18 +134,9 @@ public:
             _watchdog.join();
         }
 
-        // A pending stream-wait must not outlive the signal memory it references. This
-        // drains only the most recently armed stream -- _armedStream holds one stream
-        // at a time, so an arm() on a different stream earlier in this gate's life is
-        // not redrained here. That is safe, not merely convenient: every arm() waits on
-        // the same shared signal value, so the release write above (or any earlier
-        // release()) already satisfied every wait this gate ever enqueued on every
-        // stream it was armed with, not only the last one; only the explicit drain is
-        // limited to the last one.
-        if(_armedStream != nullptr)
-        {
-            static_cast<void>(hipStreamSynchronize(_armedStream));
-        }
+        // Satisfying the predicate does not retire its wait packet. hipFree performs
+        // an implicit device synchronization before freeing the signal, covering
+        // both default and explicit streams. Release above must precede that drain.
         if(_signal != nullptr)
         {
             static_cast<void>(hipFree(_signal));
@@ -171,6 +161,10 @@ public:
     /// `stream` until release() or the watchdog. Returns false when the gate is unusable,
     /// already armed, disabled after a timeout in this shared object, bound to another
     /// device, or when a HIP/runtime resource operation fails; the stream is then unstalled.
+    ///
+    /// Before re-arming, the previously armed stream must have drained past its wait
+    /// packet. release() satisfies the predicate but does not retire the waiter;
+    /// resetting the signal too early can stall already-released work again.
     ///
     /// After this returns, lastError() and lastOperation() describe this attempt only,
     /// unless the gate is unusable -- then they still hold the constructor's diagnosis,
@@ -242,8 +236,8 @@ public:
             }
         }
 
-        // HIP documents volatile CPU access to hipMallocSignalMemory. Resetting from
-        // the host also avoids depending on a second GPU stream for gate progress.
+        // Update the low word observed by hipStreamWaitValue32. A host write avoids
+        // depending on a second GPU stream for gate progress.
         writeSignal(0U);
 
         const auto status
@@ -262,7 +256,6 @@ public:
         {
             const std::lock_guard<std::mutex> lock(_mutex);
             _armed = true;
-            _armedStream = stream;
             _deadline = std::chrono::steady_clock::now() + _timeout;
         }
         _cv.notify_all();
@@ -294,10 +287,8 @@ public:
         return _timedOut;
     }
 
-    /// Clear the disable. For tests only, so one case that deliberately trips the watchdog
-    /// cannot change the behavior of the next one. Production code must not re-enable
-    /// stalling after a timeout: the condition that caused it is a property of the code
-    /// being measured and has not gone away.
+    /// Clear the disable for tests so a deliberate timeout cannot affect later cases.
+    /// Production callers retain the conservative backoff until this module unloads.
     ///
     /// Reaches only the caller's own copy of the flag; see isStallingDisabled().
     static void resetStallingDisabledForTesting()
@@ -305,12 +296,12 @@ public:
         disabledFlag().store(false, std::memory_order_relaxed);
     }
 
-    /// True once a gate has timed out. Stalling stays off afterwards: the cause is a
-    /// property of the code being measured, so re-arming would only buy another timeout.
+    /// True once any gate in this shared object has timed out. The sticky backoff
+    /// bounds repeated timeout delays; a timeout does not prove a permanent fault.
     ///
-    /// The flag is per shared object, not per process. hipDNN's libraries build with
-    /// hidden visibility, so each module that includes this header links its own copy of
-    /// disabledFlag(). A timeout inside libhipdnn_backend.so therefore does not disable
+    /// The flag is per shared object, not per process. disabledFlag() has hidden
+    /// visibility so each consuming module keeps its own copy independently of its
+    /// build flags. A timeout inside libhipdnn_backend.so therefore does not disable
     /// stalling inside a provider plugin, and neither can observe the other's flag. That
     /// is bounded and safe -- each module arms its own gates and reads its own flag, so
     /// every comparison stays internally consistent, and the cost of the split is at most
@@ -340,8 +331,8 @@ public:
 private:
     void writeSignal(uint32_t value) noexcept
     {
-        // hipMallocSignalMemory is host-accessible on AMD HIP backends. HIP requires
-        // volatile for CPU semaphore access; the fences preserve host-side ordering.
+        // Emit the host store to the signal word observed by the device. The fences
+        // conservatively order host accesses; they do not replace waiter retirement.
         std::atomic_thread_fence(std::memory_order_seq_cst);
         *static_cast<volatile uint32_t*>(_signal) = value;
         std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -381,7 +372,7 @@ private:
     // Function-local rather than a static data member: one timeout turns stalling off for
     // every later gate in this module, including ones created afterwards. Hidden
     // visibility makes the scope per shared object; see isStallingDisabled().
-    static std::atomic<bool>& disabledFlag()
+    HIPDNN_HIDDEN static std::atomic<bool>& disabledFlag()
     {
         static std::atomic<bool> s_disabled{false};
         return s_disabled;
@@ -389,7 +380,6 @@ private:
 
     uint32_t* _signal = nullptr;
     int _device = 0;
-    hipStream_t _armedStream = nullptr;
     hipError_t _lastError = hipSuccess;
     const char* _lastOperation = nullptr;
 

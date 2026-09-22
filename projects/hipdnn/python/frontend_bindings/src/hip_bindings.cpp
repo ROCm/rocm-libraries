@@ -182,9 +182,9 @@ void armStallGate(StallGate& gate, uintptr_t stream)
 // owns it indirectly and can detach that ownership before releasing the GIL.
 //
 // close()/__exit__ are the deterministic teardown path. The plain destructor is
-// the GC fallback. StallGate destruction joins its watchdog thread and can
-// synchronize a stream, so teardown releases the GIL when the current thread
-// holds it.
+// the GC fallback. StallGate destruction joins its watchdog thread and frees
+// signal memory with hipFree, which can synchronize the device. Teardown
+// therefore releases the GIL.
 class PyStallGate
 {
 public:
@@ -321,17 +321,17 @@ void hipBindings(nb::module_& m)
              &PyStallGate::arm,
              nb::arg("stream") = 0,
              "Stall a HIP stream pointer encoded as an integer until release() is called.\n"
-             "A non-default stream must outlive this gate: close()/the destructor "
-             "synchronizes the stream this gate last armed, but the stream is passed as a "
-             "raw integer, so nanobind has no object to keep_alive and the caller is "
-             "responsible for the stream's lifetime.")
+             "Before re-arming, synchronize the previously armed stream so its wait "
+             "packet has retired; release() alone does not guarantee retirement. "
+             "The stream must remain valid until the measurement has finished.")
         .def("release", &PyStallGate::release, "Release the gate so stalled work proceeds")
         .def("timed_out",
              &PyStallGate::timedOut,
              "Return whether the stall watchdog, not release(), ended the last arm()")
         .def("close",
              &PyStallGate::close,
-             "Idempotently join the watchdog thread and synchronize any armed stream. "
+             "Idempotently release pending waits, join the watchdog, and free its signal. "
+             "Freeing the signal can synchronize the device. "
              "Every other method raises RuntimeError once closed.")
         .def("__enter__", &PyStallGate::enter, nb::rv_policy::reference_internal)
         .def("__exit__",
