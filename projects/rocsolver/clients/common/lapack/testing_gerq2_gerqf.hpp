@@ -232,7 +232,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     // are stored in the last min_mn rows of A (rows m-min_mn .. m-1).
     //
     // For each batch element b:
-    //   1. Extract R (upper trapezoid) from hARse[b] into hC, zeroing below diagonal n-m.
+    //   1. Extract R (upper trapezoid) from hARes[b] into hC, zeroing below diagonal n-m.
     //   2. Apply unmrq on CPU: hC = hC * Q.
     //   3. Compute norm( R*Q - A ).
     //
