@@ -81,6 +81,18 @@ def build_selected(capture_loc=True):
     return b.kernel
 
 
+def build_selected_accumulator(capture_loc=True, *, name=None):
+    """An MFMA result selected as one logical vector value."""
+    b = IRBuilder("dbg_accumulator", capture_loc=capture_loc)
+    a_fragment = b.zero_vec_f16(4)
+    b_fragment = b.zero_vec_f16(4)
+    zero_accumulator = b.zero_vec_f32_4()
+    accumulator = b.mfma_f32_16x16x16_f16(a_fragment, b_fragment, zero_accumulator)
+    b.debug_value(accumulator, name=name)
+    b.ret()
+    return b.kernel
+
+
 def body_instructions(ll):
     """The instruction lines inside the kernel definition, minus block labels."""
     body = ll.split("define ", 1)[1].split("\n}", 1)[0].split("\n")[1:]
@@ -414,6 +426,62 @@ class TestSelectedDebugValue(unittest.TestCase):
         b.debug_value("tid", b.thread_id_x())
         with self.assertRaisesRegex(ValueError, "duplicate debug value"):
             b.debug_value("tid", b.thread_id_x())
+
+    def test_value_first_form_uses_generated_ir_name(self):
+        b = IRBuilder("dbg_generated_name", capture_loc=True)
+        tid = b.thread_id_x()
+        self.assertIs(b.debug_value(tid), tid)
+        self.assertEqual(b.kernel.attrs["debug_values"][0]["name"], tid.name[1:])
+
+    def test_keyword_form_is_supported(self):
+        b = IRBuilder("dbg_keyword", capture_loc=True)
+        tid = b.thread_id_x()
+        self.assertIs(b.debug_value(name="tid", value=tid), tid)
+        self.assertEqual(b.kernel.attrs["debug_values"][0]["name"], "tid")
+
+    def test_direct_mma_result_infers_logical_accumulator(self):
+        kernel = build_selected_accumulator()
+        selected = kernel.attrs["debug_values"][0]
+        self.assertEqual(selected["name"], selected["value"][1:])
+        self.assertEqual(selected["type"], "vec<f32x4>")
+        self.assertEqual(selected["logical"]["name"], selected["name"])
+        self.assertEqual(selected["logical"]["dtype"], "f32")
+        self.assertEqual(selected["logical"]["shape"], [16, 16])
+        self.assertEqual(
+            selected["logical"]["layout"]["name"],
+            "mfma_f32_16x16x16_f16.acc",
+        )
+        self.assertEqual(selected["logical"]["layout"]["fragment_length"], 4)
+        self.assertEqual(selected["logical"]["layout"]["wave_size"], 64)
+
+    def test_explicit_name_updates_inferred_logical_name(self):
+        selected = build_selected_accumulator(name="scores").attrs["debug_values"][0]
+        self.assertEqual(selected["name"], "scores")
+        self.assertEqual(selected["logical"]["name"], "scores")
+
+    def test_vector_debug_type_is_emitted(self):
+        ll = lower_kernel_to_llvm(build_selected_accumulator(), arch="gfx942")
+        self.assertEqual(ll.count("@llvm.dbg.value(metadata <4 x float>"), 1)
+        self.assertRegex(
+            ll,
+            r"call void @llvm\.dbg\.value\(metadata <4 x float> %acc\d+, "
+            r"metadata !\d+, metadata !DIExpression\(\)\), !dbg !\d+",
+        )
+        self.assertIn("!DISubrange(count: 4)", ll)
+        self.assertRegex(
+            ll,
+            r"!DICompositeType\(tag: DW_TAG_array_type, baseType: !\d+, "
+            r"size: 128, flags: DIFlagVector, elements: !\d+\)",
+        )
+
+    def test_vector_selection_round_trips_through_serialization(self):
+        kernel = build_selected_accumulator()
+        rebuilt = parse(serialize(kernel))
+        self.assertEqual(rebuilt.attrs["debug_values"], kernel.attrs["debug_values"])
+        self.assertEqual(
+            lower_kernel_to_llvm(rebuilt, arch="gfx942"),
+            lower_kernel_to_llvm(kernel, arch="gfx942"),
+        )
 
 
 class TestInliningChains(unittest.TestCase):

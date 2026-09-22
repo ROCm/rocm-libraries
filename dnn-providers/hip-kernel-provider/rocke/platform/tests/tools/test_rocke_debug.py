@@ -252,10 +252,16 @@ class TestLogicalValues(unittest.TestCase):
         self.assertEqual(decoded["name"], "acc")
         self.assertEqual(decoded["layout"]["name"], "test.acc")
         self.assertEqual(decoded["machine_locations"], ["$v40", "$v41"])
-        human = rocke_debug.values_human([record])
+        human = rocke_debug.render_readable([record])
         self.assertIn("acc f32 [2x2] layout=test.acc status=available", human)
         self.assertIn("locations: $v40, $v41", human)
         self.assertIn("?1.0 ?2.0", human)
+        self.assertNotIn("sources (lane/register):", human)
+
+        annotated = rocke_debug.render_readable([record], show_sources=True)
+        self.assertIn("sources (lane/register):", annotated)
+        self.assertIn("0: ?L0/$v40 ?L0/$v41", annotated)
+        self.assertIn("1: ?L1/$v40 ?L1/$v41", annotated)
 
     def test_unavailable_status_is_explicit(self):
         record = rocke_debug.unavailable_value(
@@ -264,7 +270,7 @@ class TestLogicalValues(unittest.TestCase):
 
         self.assertEqual(record["status"], "optimized_out")
         self.assertIsNone(record["tile"])
-        self.assertIn("optimized out", rocke_debug.values_human([record]))
+        self.assertIn("optimized out", rocke_debug.render_readable([record]))
 
         error = ValueError("layout coordinate is invalid")
         self.assertEqual(
@@ -352,7 +358,7 @@ class TestLogicalValues(unittest.TestCase):
         self.assertEqual(record["tile"][0][0]["status"], "replica_mismatch")
         self.assertEqual(record["tile"][0][0]["value_text"], "<replica-mismatch>")
         self.assertIn(
-            "observable replicas disagree", rocke_debug.values_human([record])
+            "observable replicas disagree", rocke_debug.render_readable([record])
         )
 
     def test_inactive_replica_does_not_override_active_source(self):

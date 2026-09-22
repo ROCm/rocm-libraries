@@ -54,11 +54,11 @@ def build_kernel(arch: str):
         b_fragment,
         builder.zero_vec_f32(operation.c_frag_len),
     )
+    builder.debug_value(accumulator)
 
     accumulator_slots = []
     for slot in range(operation.c_frag_len):
         value = builder.vec_extract(accumulator, slot)
-        builder.debug_value(f"acc_slot{slot}", value)
         accumulator_slots.append(value)
 
     width = builder.const_i32(operation.n)
@@ -72,9 +72,7 @@ def build_kernel(arch: str):
 
 def expected_product() -> list[float]:
     return [
-        21.0 if row == column else 19.0
-        for row in range(_M)
-        for column in range(_N)
+        21.0 if row == column else 19.0 for row in range(_M) for column in range(_N)
     ]
 
 

@@ -10,10 +10,10 @@ import json
 import sys
 from typing import Any
 
-from rocke.debug import load_snapshot, logical_snapshot, values_human
+from rocke.debug import load_snapshot, logical_snapshot, render_readable
 
 
-def render_human(record: dict[str, Any]) -> str:
+def render_human(record: dict[str, Any], *, show_sources: bool = False) -> str:
     """Render capture identity and logical values without hiding partial data."""
     capture = record["capture"]
     target = record["target"]
@@ -32,7 +32,7 @@ def render_human(record: dict[str, Any]) -> str:
             f"wave thread={wave['thread_id']} status={wave['status']} "
             f"pc={wave.get('pc') or '?'} exec={wave.get('exec') or '?'}"
         )
-        lines.append(values_human(wave["values"]))
+        lines.append(render_readable(wave["values"], show_sources=show_sources))
     return "\n".join(line for line in lines if line)
 
 
@@ -40,6 +40,7 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("snapshot")
     parser.add_argument("--format", choices=("human", "json"), default="human")
+    parser.add_argument("--show-sources", action="store_true")
     return parser
 
 
@@ -54,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "json":
         print(json.dumps(logical, allow_nan=False, indent=2, sort_keys=True))
     else:
-        print(render_human(logical))
+        print(render_human(logical, show_sources=args.show_sources))
     return 0
 
 
