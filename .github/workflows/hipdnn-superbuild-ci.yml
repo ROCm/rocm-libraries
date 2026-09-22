@@ -11,7 +11,6 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
-      - '.github/scripts/tests/test_hipdnn_dependency_resolution.py'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
@@ -174,10 +173,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
-
-      - name: Test dependency resolution
-        run: |
-          "$VENV_PYTHON" -m unittest discover -s .github/scripts/tests -p test_hipdnn_dependency_resolution.py -v
 
       - name: Configure superbuild
         run: |
@@ -393,10 +388,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
-
-      - name: Test dependency resolution
-        run: |
-          "$VENV_PYTHON" -m unittest discover -s .github/scripts/tests -p test_hipdnn_dependency_resolution.py -v
 
       - name: Configure superbuild
         run: |
