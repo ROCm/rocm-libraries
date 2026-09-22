@@ -79,7 +79,12 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     GRID_STRIDE,
+              typename T,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void check_matrix_csr_device(J m,
                                  J n,
@@ -130,6 +135,10 @@ namespace rocsparse
 
             if(row >= m)
             {
+                if constexpr(!GRID_STRIDE)
+                {
+                    break;
+                }
                 continue;
             }
 
@@ -222,6 +231,14 @@ namespace rocsparse
                         }
                     }
                 }
+            }
+
+            // A launch that did not clamp the block count already covers m in one
+            // sweep, so the straight-line variant stops here instead of paying
+            // the grid-stride loop's per-iteration control cost (AISPARSE-698).
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }

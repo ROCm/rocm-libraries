@@ -67,33 +67,57 @@
 // substitution for
 //     rocsparse::get_grid_size(static_cast<int64_t>(wf_size) * m, block_size)
 // which performs the same overflow-safe ceil-divide and grid clamp.
-#define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                  \
-    do                                                                                \
-    {                                                                                 \
-        static constexpr int64_t max_work_items = 0xffffffffLL;                       \
-        const int64_t            max_blocks_x                                         \
-            = rocsparse::min(static_cast<int64_t>(handle->properties.maxGridSize[0]), \
-                             max_work_items / (block_size));                          \
-        const int64_t num_blocks_x = rocsparse::min(                                  \
-            (static_cast<int64_t>(wf_size) * m - 1) / block_size + 1, max_blocks_x);  \
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
-            (rocsparse::check_matrix_csr_device<block_size, wf_size>),                \
-            dim3(num_blocks_x),                                                       \
-            dim3(block_size),                                                         \
-            0,                                                                        \
-            handle->stream,                                                           \
-            m,                                                                        \
-            n,                                                                        \
-            nnz,                                                                      \
-            csr_val,                                                                  \
-            csr_row_ptr,                                                              \
-            csr_col_ind,                                                              \
-            csr_col_ind_sorted,                                                       \
-            idx_base,                                                                 \
-            matrix_type,                                                              \
-            uplo,                                                                     \
-            storage,                                                                  \
-            d_data_status);                                                           \
+#define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                               \
+    do                                                                                             \
+    {                                                                                              \
+        static constexpr int64_t max_work_items = 0xffffffffLL;                                    \
+        const int64_t            max_blocks_x                                                      \
+            = rocsparse::min(static_cast<int64_t>(handle->properties.maxGridSize[0]),              \
+                             max_work_items / (block_size));                                       \
+        const int64_t natural_blocks_x = (static_cast<int64_t>(wf_size) * m - 1) / block_size + 1; \
+        const int64_t num_blocks_x     = rocsparse::min(natural_blocks_x, max_blocks_x);           \
+        if(num_blocks_x < natural_blocks_x)                                                        \
+        {                                                                                          \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
+                (rocsparse::check_matrix_csr_device<block_size, wf_size, true>),                   \
+                dim3(num_blocks_x),                                                                \
+                dim3(block_size),                                                                  \
+                0,                                                                                 \
+                handle->stream,                                                                    \
+                m,                                                                                 \
+                n,                                                                                 \
+                nnz,                                                                               \
+                csr_val,                                                                           \
+                csr_row_ptr,                                                                       \
+                csr_col_ind,                                                                       \
+                csr_col_ind_sorted,                                                                \
+                idx_base,                                                                          \
+                matrix_type,                                                                       \
+                uplo,                                                                              \
+                storage,                                                                           \
+                d_data_status);                                                                    \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
+                (rocsparse::check_matrix_csr_device<block_size, wf_size, false>),                  \
+                dim3(num_blocks_x),                                                                \
+                dim3(block_size),                                                                  \
+                0,                                                                                 \
+                handle->stream,                                                                    \
+                m,                                                                                 \
+                n,                                                                                 \
+                nnz,                                                                               \
+                csr_val,                                                                           \
+                csr_row_ptr,                                                                       \
+                csr_col_ind,                                                                       \
+                csr_col_ind_sorted,                                                                \
+                idx_base,                                                                          \
+                matrix_type,                                                                       \
+                uplo,                                                                              \
+                storage,                                                                           \
+                d_data_status);                                                                    \
+        }                                                                                          \
     } while(0)
 
 template <typename T, typename I, typename J>
