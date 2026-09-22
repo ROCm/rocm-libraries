@@ -138,11 +138,11 @@ gh search issues "<error text>" --repo ROCm/rocm-libraries --repo ROCm/TheRock -
 gh run rerun --failed <RUN_ID>
 ```
 
-**Required checks (step 2).** On `develop`, `rocm-libraries` requires `TheRock CI Summary`,
-`Math CI Summary` and `pre-commit`, while `rocm-systems` requires `TheRock CI Summary` and
-`HIP NVIDIA CI Summary` and no `pre-commit`. The two `gardening.md` files differ by six lines, so
-enumerate rather than assume. Everything outside the set - packaging install lanes, coverage
-thresholds, aggregates - is advisory: worth an issue, never worth a bypass.
+**Required checks (step 2).** On `develop`, `rocm-libraries` requires `Multi-Arch CI Summary`,
+`Component CI Summary`, `Math CI Summary`, and `pre-commit`, while `rocm-systems` requires
+`TheRock CI Summary` and `HIP NVIDIA CI Summary` and no `pre-commit`. The two `gardening.md` files
+differ, so enumerate rather than assume. Everything outside the set - packaging install lanes,
+coverage thresholds, and other aggregates - is advisory: worth an issue, never worth a bypass.
 
 **Merge state (step 3).**
 

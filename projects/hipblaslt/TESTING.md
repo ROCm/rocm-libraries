@@ -57,11 +57,11 @@ the library logic YAML; the client GTest suite on gfx90a, gfx942, gfx950 and gfx
 Python unit and characterization suites; a host-side AddressSanitizer build and quick test on gfx90a;
 and `pre-commit`.
 
-**What does not gate, despite appearances.** The coverage floors fail their own lane, but that lane
-is not a required check. Pull requests are not benchmarked, so there is no performance signal on a
-change to gate on. The gating job named `static-analysis` is a sensitive-word
-scan for disclosure rather than a code analyzer, and no static analysis runs on the C++ library on a
-pull request from any source.
+**What does not gate, despite appearances.** Codecov's project and patch statuses are advisory; the
+local TensileLite floor and per-file ratchet do gate through `Component CI Summary`. Pull requests
+are not benchmarked, so there is no performance signal on a change to gate on. The gating job named
+`static-analysis` is a sensitive-word scan for disclosure rather than a code analyzer, and no static
+analysis runs on the C++ library on a pull request from any source.
 
 **The biggest gap is performance.** hipBLASLt exists for throughput, and pull requests are not
 benchmarked. What does exist is a nightly lane outside this repository that measures a build of the
@@ -281,9 +281,9 @@ semantics, and multi-GPU behavior. All of that is integration territory by const
 **Suite size.** TensileLite's unit and characterization suites together run into the thousands of
 tests, across four separate CI lanes; see
 [tensilelite/TESTING.md#where-these-tests-actually-run](tensilelite/TESTING.md#where-these-tests-actually-run).
-For the C++ side there is no coverage target at all today, because with the current structure a
-target would be aspirational rather than actionable. TensileLite's own coverage floors, per-file
-ratchet, and the characterization-versus-unit distinction are covered in
+For the C++ side there is no required local coverage floor today; Codecov reports an advisory
+per-flag no-regression status. TensileLite's own coverage floors, per-file ratchet, and the
+characterization-versus-unit distinction are covered in
 [tensilelite/TESTING.md#coverage](tensilelite/TESTING.md#coverage).
 
 ### Integration Testing Strategy
@@ -564,7 +564,7 @@ the C++ build and test.
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched and the PR targets `develop` | Component team | Asserted by the gating `preliminary` job. Review every golden diff; never bulk-regenerate |
 | HOST_ASAN build and quick test | Yes, on gfx90a | Component team | Keep the sanitizer lane green |
-| Code coverage floor and ratchet (TensileLite) | **No** | Component team / CI | Enforced, but only inside lanes that roll up to non-required checks. Floors move up only, on the honor system |
+| Code coverage floor and ratchet (TensileLite) | **Yes** | Component team / CI | Enforced by the CPU coverage lane through the required `Component CI Summary`. Floors move up only |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
 | Code-quality static analysis (C++) | No | Unowned | **Nothing runs.** No clang-tidy or cppcheck configuration exists for hipBLASLt, and CodeQL does not cover C++ |
@@ -597,8 +597,6 @@ required-check list, in this repository, is tracked as a gap.
 **Informational.** Worth reading, cannot block a merge.
 
 - HOST_ASAN on gfx942, opt-in via the `ci:asan` label and explicitly non-blocking
-- The TensileLite coverage floor and per-file ratchet, which fail their own lane but not a required
-  check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` check and the codecov reports
 
@@ -692,12 +690,13 @@ fraction of the C++ library's lines.
 
 | Scope | Tool | Measured in | Enforced |
 | --- | --- | --- | --- |
-| hipBLASLt C++ library | Optional `HIPBLASLT_ENABLE_COVERAGE=ON` build | Not run in CI | No |
+| hipBLASLt C++ library | `HIPBLASLT_ENABLE_COVERAGE=ON` build | Math CI codecov on gfx950 | Advisory Codecov no-regression target |
 
-**No C++ coverage target exists.** For the reasons given in
-[Unit Testing Strategy](#unit-testing-strategy) — no host-only link target, internal headers not
-reachable from the test target, validation interleaved with dispatch — a target set before the
-host-side code is linkable in isolation would be aspirational rather than actionable.
+**No required local C++ coverage floor exists.** Codecov reports an advisory per-flag no-regression
+status. For the reasons given in [Unit Testing Strategy](#unit-testing-strategy) — no host-only link
+target, internal headers not reachable from the test target, validation interleaved with dispatch —
+an absolute floor set before the host-side code is linkable in isolation would be aspirational rather
+than actionable.
 
 TensileLite Python has a considerably more developed coverage story, including enforced floors, a
 per-file ratchet, and (the more important number) a split summary card that separates

@@ -7,35 +7,37 @@
 name: Docs Preview Cleanup
 
 on:
-  pull_request:
+  # Cleanup reads only the trusted base checkout and PR comments. Use the base
+  # repository context so same-repository PRs can access the Read the Docs secret.
+  pull_request_target:
     types: [closed]
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   cleanup:
+    # The preview workflow does not publish fork PRs, so they have nothing to
+    # clean up and should never receive this secret-bearing job.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout docs-config only
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # pull_request_target has access to secrets. Pin the trusted base SHA
+          # explicitly and never check out code from the closed PR.
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
           sparse-checkout: |
             .github/docs-config.json
           sparse-checkout-cone-mode: false
 
-      - name: Generate a token
-        id: generate-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
       - name: Get project slug from preview comment
         id: rtd
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Extract project identifier from the bot's comment.
           # The JSON output for a valid commit will have "assistant-librarian[bot]"
@@ -63,20 +65,26 @@ jobs:
       - name: Deactivate RTD preview version
         if: steps.rtd.outputs.project_slug
         env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PROJECT_SLUG: ${{ steps.rtd.outputs.project_slug }}
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
-          branch_name="${{ github.head_ref }}"
           # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
-          version_slug="${branch_name//\//-}"
+          version_slug="${PR_HEAD_REF//\//-}"
+          version_slug=$(jq -rn --arg value "${version_slug}" '$value | @uri')
 
           response=$(curl \
             --connect-timeout 180 \
+            --fail-with-body \
+            --retry 5 \
+            --retry-all-errors \
             --silent \
+            --show-error \
             --output /dev/null \
             --write-out "%{http_code}" \
             --request PATCH \
             --header "Authorization: Token $RTD_TOKEN" \
             --header "Content-Type: application/json" \
             --data '{"active": false}' \
-            "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${version_slug}/")
+            "https://app.readthedocs.com/api/v3/projects/${PROJECT_SLUG}/versions/${version_slug}/")
           echo "RTD PATCH responded with HTTP $response"

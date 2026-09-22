@@ -177,15 +177,19 @@ jobs:
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
+      - name: Install LLVM tools for clang-tidy
+        if: matrix.job_id == 'clang-tidy'
+        uses: ./.github/actions/setup-llvm
+        with:
+          version: '23'
+
       - name: Install clang-tidy deps
         if: matrix.job_id == 'clang-tidy'
         run: |
-          # Install clang-tidy-23 and ninja-build (analyze target requires the
-          # Ninja generator; this container is not guaranteed to ship ninja).
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm23.list
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy-23 ninja-build
+          # The analyze target requires Ninja; the container is not guaranteed
+          # to ship it.
+          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 install -y ninja-build
           # Prepare MIOpen deps for clang-tidy in a venv
           python3 -m venv .venv
           VENV_BIN="$(pwd)/.venv/bin"

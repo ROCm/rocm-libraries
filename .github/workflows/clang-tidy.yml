@@ -66,12 +66,12 @@ jobs:
               "cmake/modules/ClangTidy.cmake",
               "cmake/modules/CheckToolVersion.cmake"
             ],
-            checkout_paths: ["shared/stinkytofu", "cmake/modules"]
+            checkout_paths: ["shared/stinkytofu", "cmake/modules", ".github/actions/setup-llvm"]
           }'))
 
 
           # Common filters applied to every library — changes here re-run all opted-in libraries.
-          COMMON_FILTERS='[".github/workflows/clang-tidy.yml"]'
+          COMMON_FILTERS='[".github/workflows/clang-tidy.yml", ".github/actions/setup-llvm/**"]'
 
           printf '%s\n' "${LIBS[@]}" \
             | jq -rs --argjson common "$COMMON_FILTERS" \
@@ -152,16 +152,17 @@ jobs:
 
       # Per-library optional dependency steps — only the matching step runs.
       # Add a new step here when opting in a library that has custom deps.
+      - name: Install LLVM tools (stinkytofu)
+        if: matrix.name == 'stinkytofu'
+        uses: ./.github/actions/setup-llvm
+        with:
+          version: '20'
+
       - name: Install deps (stinkytofu)
         if: matrix.name == 'stinkytofu'
         run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang-tidy-20 \
-            clang-tools-20 \
+          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 install -y \
             libgtest-dev \
             python3-dev
           . .venv/bin/activate

@@ -10,6 +10,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
+      - '.github/actions/ci-env/**'
       - '.github/workflows/hipdnn-superbuild-ci.yml'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'

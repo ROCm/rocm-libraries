@@ -7,6 +7,7 @@ on:
       - synchronize
       - reopened
     paths:
+      - ".github/actions/ci-env/**"
       - "projects/hipblaslt/**"
       - "test/therock/test_hipblaslt.py"
       - "test/therock/lsan.supp"
@@ -27,7 +28,7 @@ jobs:
     outputs:
       # Use the same TheRock revision as rocm-libraries' Multi-Arch CI so
       # this focused gfx90a lane exercises its actual math-libs build system.
-      therock_ref: ${{ steps.therock-ref.outputs.ref }}
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
@@ -44,15 +45,14 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
-      - name: Select locked TheRock revision
-        id: therock-ref
-        run: echo "ref=3c4ec014374d4d32243334ef229093fe7b38c5b2" >> "$GITHUB_OUTPUT"
-
       - name: Compute arch matrix
         id: matrix
         run: |
           build='[{"family":"gfx90a"}]'
-          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-gpu-rocm"}]'
+          # Use the production OSS CI pool from TheRock's current gfx90a
+          # family definition. The legacy generic label also selects dev
+          # runners that repeatedly wedge before the first GPU test.
+          test='[{"family":"gfx90a","runs_on":"linux-gfx90a-1gpu-ossci-rocm"}]'
           echo "build_matrix={\"include\":${build}}" >> "$GITHUB_OUTPUT"
           echo "test_matrix={\"include\":${test}}" >> "$GITHUB_OUTPUT"
 
@@ -115,7 +115,10 @@ jobs:
           LOGNAME=github-runner dvc pull -v
 
       - name: Fetch sources
-        timeout-minutes: 30
+        # Cloning the full dependency graph occasionally exceeds 30 minutes on
+        # otherwise healthy builders; keep a finite cap without killing valid
+        # fetches at the old boundary.
+        timeout-minutes: 60
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
@@ -236,11 +239,14 @@ jobs:
           path: rocm-libraries
           sparse-checkout: |
             .github/scripts
+            projects/hipblaslt/tools/scripts/validate_library_layout.py
             test/therock
           sparse-checkout-cone-mode: true
 
       - name: Download hipBLASLt ASAN trees
-        timeout-minutes: 30
+        # The ASAN tree is currently about 900 MB. A 30-minute cap has killed
+        # otherwise healthy jobs during transiently slow artifact transfers.
+        timeout-minutes: 60
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: asan-trees-hipblaslt-${{ matrix.family }}
@@ -278,6 +284,22 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
+      - name: Verify HIP compilation and execution
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          OUT="${GITHUB_WORKSPACE}/build"
+          OFFLOAD_ARCH=$("${OUT}/lib/llvm/bin/offload-arch" | grep -m1 '^gfx')
+          test -n "${OFFLOAD_ARCH}"
+          "${OUT}/bin/amdclang++" \
+            --hip-path="${OUT}" \
+            --hip-device-lib-path="${OUT}/lib/llvm/amdgcn/bitcode" \
+            --offload-arch="${OFFLOAD_ARCH}" \
+            -x hip tests/hip_check.cpp \
+            -Xlinker "-rpath=${OUT}/lib" \
+            -o "${RUNNER_TEMP}/hip-check"
+          timeout -k 10 120 "${RUNNER_TEMP}/hip-check"
+
       - name: Test hipBLASLt (quick)
         timeout-minutes: 180
         env:
@@ -287,6 +309,15 @@ jobs:
         run: |
           mkdir -p ./test_logs
           python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/hipblaslt-test_output.log
+
+      - name: Upload test log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hipblaslt-asan-test-log-${{ matrix.family }}
+          path: test_logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   summary:
     name: "hipBLASLt ASAN CI Summary"

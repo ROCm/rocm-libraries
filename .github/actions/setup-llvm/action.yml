@@ -1,0 +1,63 @@
+name: Set up LLVM tools
+description: Install a versioned LLVM toolchain from apt.llvm.org with bounded, IPv4-only network access
+
+inputs:
+  version:
+    description: Major LLVM version to install
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install LLVM ${{ inputs.version }}
+      shell: bash
+      env:
+        LLVM_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        required=(
+          "clang-${LLVM_VERSION}"
+          "clang++-${LLVM_VERSION}"
+          "clang-tidy-${LLVM_VERSION}"
+        )
+        missing=false
+        for tool in "${required[@]}"; do
+          if ! command -v "${tool}" >/dev/null 2>&1; then
+            missing=true
+          fi
+        done
+        if [[ "${missing}" == false ]]; then
+          echo "LLVM ${LLVM_VERSION} tools are already installed"
+          exit 0
+        fi
+
+        apt_options=(
+          -o Acquire::ForceIPv4=true
+          -o Acquire::Retries=5
+          -o Acquire::http::Timeout=30
+          -o Acquire::https::Timeout=30
+        )
+        sudo apt-get "${apt_options[@]}" update
+        sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+          ca-certificates curl gnupg
+
+        . /etc/os-release
+        codename="${VERSION_CODENAME:?VERSION_CODENAME is missing from /etc/os-release}"
+        downloaded_key="${RUNNER_TEMP}/apt.llvm.org.asc"
+        keyring="/usr/share/keyrings/apt.llvm.org.asc"
+        sources="/etc/apt/sources.list.d/apt.llvm.org.list"
+
+        curl -4 --proto '=https' --tlsv1.2 --fail --show-error --location \
+          --retry 5 --retry-all-errors --connect-timeout 30 --max-time 120 \
+          https://apt.llvm.org/llvm-snapshot.gpg.key --output "${downloaded_key}"
+        sudo install -m 0644 "${downloaded_key}" "${keyring}"
+        printf 'deb [signed-by=%s] https://apt.llvm.org/%s/ llvm-toolchain-%s-%s main\n' \
+          "${keyring}" "${codename}" "${codename}" "${LLVM_VERSION}" \
+          | sudo tee "${sources}" >/dev/null
+
+        sudo apt-get "${apt_options[@]}" update
+        sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+          "clang-${LLVM_VERSION}" \
+          "clang-tidy-${LLVM_VERSION}" \
+          "clang-tools-${LLVM_VERSION}"

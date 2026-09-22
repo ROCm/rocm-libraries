@@ -274,6 +274,7 @@ jobs:
         !cancelled() &&
         github.event_name == 'pull_request' &&
         (
+          needs.configure.outputs.run_all_tests == 'true' ||
           contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
           contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
           contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')

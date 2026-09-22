@@ -22,13 +22,22 @@ from ci_utils import get_modified_paths, matches_paths, set_github_output
 COMPONENTS = {
     "stinkytofu": [
         "shared/stinkytofu/**",
+        ".github/actions/pip-install-test/**",
+        ".github/actions/setup-rocm-linux/**",
+        ".github/actions/setup-rocm-windows/**",
     ],
     "rocisa": [
         "projects/hipblaslt/tensilelite/rocisa/**",
         "shared/stinkytofu/**",
+        ".github/actions/pip-install-test/**",
+        ".github/actions/setup-rocm-linux/**",
+        ".github/actions/setup-rocm-windows/**",
     ],
     "geko": [
         "projects/hipblaslt/utilities/geko/**",
+        ".github/actions/pip-install-test/**",
+        ".github/actions/setup-rocm-linux/**",
+        ".github/actions/setup-rocm-windows/**",
         ".github/workflows/component-ci-geko.yml",
     ],
     "miopen": [
@@ -38,10 +47,12 @@ COMPONENTS = {
         # originals. A PR touching only the provider is exactly the drift that
         # gate exists to catch, so it has to trigger this component too.
         "dnn-providers/miopen-provider/**",
+        ".github/actions/setup-llvm/**",
         ".github/workflows/component-ci-miopen.yml",
     ],
     "tensilelite_coverage": [
         "projects/hipblaslt/tensilelite/**",
+        ".github/actions/setup-rocm-linux/**",
         ".github/workflows/component-ci-tensilelite-coverage.yml",
     ],
 }
