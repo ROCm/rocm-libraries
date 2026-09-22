@@ -1165,10 +1165,8 @@ _EMBEDDED_SOURCE = {
 
 
 def _inline_ukd_root(tmp_path, fixture, mutate):
-    """Nest `fixture` under one child folder and mutate its inline UKD.
-
-    The fixture carries exactly one inline UKD, so a mutation of that entry puts
-    the whole root on the shape under test.
+    """Nest `fixture` under one child folder and mutate its inline UKD; the fixture
+    carries exactly one, so mutating it puts the whole root on the shape under test.
     """
     root = tmp_path / "root"
     _nest(root, "pointwise", fixture)
@@ -1286,14 +1284,11 @@ def _embedded_source_without_contract(ukd):
 def test_a_passthrough_kind_carries_no_specialization_obligation(
     tmp_path, empty_arch_fixture
 ):
-    """An embedded kernel packs carrying no specialization contract at all.
-
-    No producer runs for the kind, so there is no producing compiler whose
-    specialization a contract could state and no observation for one to certify.
-    The walk therefore collects neither a consumer record nor an observation
-    request for it, compiles nothing, and carries the authored kernel_source
-    through -- with the KDP's engine and KMD resolving exactly as they do for a
-    compiling kernel, so the exemption is the kind's and not a missing catalog's.
+    """An embedded kernel packs carrying no specialization contract at all: no
+    producer runs, so the walk collects neither a consumer record nor an
+    observation request and carries the authored kernel_source through, while the
+    KDP's engine and KMD still resolve -- so the exemption is the kind's, not a
+    missing catalog's.
     """
     root = _inline_ukd_root(
         tmp_path, empty_arch_fixture, _embedded_source_without_contract
@@ -1314,12 +1309,9 @@ def test_a_passthrough_kind_carries_no_specialization_obligation(
 def test_a_compiling_kind_without_a_contract_is_still_refused(
     tmp_path, empty_arch_fixture
 ):
-    """The waiver is scoped to the pass-through kinds and to nothing else.
-
-    The same descriptor with the same contract removed, on the kind a producer
-    compiles: the obligation stays mandatory, and the refusal lands before a
-    compiler is reached rather than shipping a kernel whose specialization
-    nothing can be checked against.
+    """The waiver is scoped to the pass-through kinds and nothing else: the same
+    descriptor with the same contract removed, on a kind a producer compiles, stays
+    refused before a compiler is reached.
     """
     root = _inline_ukd_root(tmp_path, empty_arch_fixture, _drop_specialization_contract)
     flat = load_flat_input(root)

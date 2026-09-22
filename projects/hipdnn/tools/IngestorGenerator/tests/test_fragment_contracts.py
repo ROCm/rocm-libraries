@@ -1,13 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The splice fragments' structural contracts against each other.
-
-Only contracts between fragments this generator emits. A fragment's agreement
-with the provider's own headers is caught by the compiler at the splice, with
-the struct in hand; parsing those headers here would couple this suite to source
-it does not own and redden it for a mismatch the build already reports.
-"""
+"""The splice fragments' structural contracts against each other. A fragment's
+agreement with the provider's own headers is caught by the compiler at the splice;
+parsing those headers here would couple this suite to source it does not own."""
 import re
 from pathlib import Path
 
@@ -16,14 +12,12 @@ import pytest
 from codegen.generator import PLACEHOLDER_MARKER, mint_ids
 from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
 
-# Imported rather than re-written: a second extractor would be a second opinion
-# about what counts as a case, and the pin checked below is a claim about that set.
+# Imported rather than re-written: a second extractor would be a second opinion about
+# what counts as a case, and the pin checked below is a claim about that set.
 from tests.test_generator import emitted_cases
 
 
 class TestFragmentsAgreeWithEachOther:
-    """Fragments that must agree on a shape, checked by parsing what this
-    generator emits."""
 
     def test_ingestor_packs_hpp_declares_the_same_register_fn_the_cpp_row_uses(
         self, generator, scale_add_config
@@ -47,13 +41,9 @@ class TestFragmentsAgreeWithEachOther:
     def test_a_packaged_engine_gets_a_real_reset_pointer_not_the_default(
         self, generator, gfx950_attention_dense_config
     ):
-        """A kpack engine owns a module cache and MUST drop it.
-
-        `TestIngestorPacksModuleCacheOwnership` asserts only
-        `ownsModuleCache == (resetModuleCache != nullptr)`, which `false, nullptr`
-        satisfies -- so a packaged engine left at the default passes there while
-        never dropping its cache.
-        """
+        """A kpack engine owns a module cache and MUST drop it: the reset sweep branches
+        on `resetModuleCache != nullptr` alone, so a `nullptr` row reads as a pack with
+        no archive to drop."""
         config = gfx950_attention_dense_config
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
         ids = mint_ids(config)
@@ -64,7 +54,7 @@ class TestFragmentsAgreeWithEachOther:
             "fragments/ingestor_packs_hpp.j2", config, ids=ids
         )
         row = next(line for line in cpp.splitlines() if line.strip().startswith('{"'))
-        assert "true" in row and "nullptr" not in row, (
+        assert "nullptr" not in row, (
             f"packaged engine emitted a non-owning row: {row!r} -- a kpack engine "
             "that never drops its module cache passes every existing test"
         )
@@ -78,12 +68,9 @@ class TestFragmentsAgreeWithEachOther:
     def test_the_packaged_reset_symbol_is_actually_defined_somewhere(
         self, generator, gfx950_attention_dense_config, tmp_path
     ):
-        """Declared and referenced is not the same as defined.
-
-        The test above only reaches the declaration; a row naming a
-        `reset<Name>ModuleCache` that nothing defines splices to an
-        undefined-reference link error.
-        """
+        """Declared and referenced is not defined: a row naming a
+        `reset<Name>ModuleCache` that nothing defines splices to an undefined-reference
+        link error."""
         config = gfx950_attention_dense_config
         written = generator.render(config, tmp_path)
         cpp_row = (tmp_path / "fragments/ingestor_packs.cpp.txt").read_text()
@@ -115,16 +102,18 @@ class TestFragmentsAgreeWithEachOther:
     def test_a_direct_load_engine_defines_no_reset(
         self, generator, scale_add_config, tmp_path
     ):
-        """Control: an embedded_source pack holds no archive, so emitting a
-        module-cache reset for it would be dead code contradicting its own row."""
+        """Control: an embedded_source pack holds no archive, so a module-cache reset
+        would be dead code contradicting its own row."""
         written = generator.render(scale_add_config, tmp_path)
         for rel in written:
             if rel.endswith(".cpp"):
                 assert "ModuleCache" not in (tmp_path / rel).read_text(), rel
 
-    def test_a_direct_load_engine_stays_non_owning(self, generator, scale_add_config):
-        """Without this, the test above passes trivially against a template that
-        emits `true` unconditionally."""
+    def test_a_direct_load_engine_keeps_a_null_reset_pointer(
+        self, generator, scale_add_config
+    ):
+        """Without this, the test above passes against a template that emits a reset
+        pointer unconditionally."""
         assert not scale_add_config.is_packaged
         cpp = generator._render_template(
             "fragments/ingestor_packs_cpp.j2",
@@ -132,13 +121,13 @@ class TestFragmentsAgreeWithEachOther:
             ids=mint_ids(scale_add_config),
         )
         row = next(line for line in cpp.splitlines() if line.strip().startswith('{"'))
-        assert "false" in row and "nullptr" in row, row
+        assert "nullptr" in row, row
 
     def test_cmake_test_sources_names_files_this_generator_actually_writes(
         self, generator, scale_add_config, tmp_path
     ):
-        """The fragment names its files under packs/ but this run writes them
-        under tests/ -- the provider moves them when splicing."""
+        """The fragment names its files under packs/ but this run writes them under
+        tests/: the provider moves them when splicing."""
         written = generator.render(scale_add_config, tmp_path)
         fragment = (tmp_path / "fragments" / "cmake_test_sources.txt").read_text()
         basenames = re.findall(r"packs/(Test\w+\.cpp)", fragment)
@@ -153,13 +142,9 @@ class TestFragmentsAgreeWithEachOther:
 
 @pytest.fixture
 def packaged_opposite_shape_config():
-    """A packaged engine taking the OTHER arm of all three suite conditionals.
-
-    ``configs/gfx950_attention_dense.yaml`` is the only packaged config that
-    ships, and it renders one fixed arm of each gate in ``test_packs.cpp.j2``.
-    Against that shape alone a transcribed case list is indistinguishable from a
-    derived one.
-    """
+    """A packaged engine taking the OTHER arm of all three suite conditionals;
+    ``configs/gfx950_attention_dense.yaml`` renders one fixed arm of each, against which
+    a transcribed case list is indistinguishable from a derived one."""
     return make_minimal_config(
         dialect="packaged",
         kernel_source_kind="rocke",
@@ -187,26 +172,15 @@ def packaged_opposite_shape_config():
 
 
 class TestCensusCasePinIsDerivedFromTheSuite:
-    """``EXPECTED_CASES`` is READ OUT OF the suite template, never restated.
-
-    The pin is what lets the census see a suite that SHRINKS: the execution guard
-    builds its obligations from the cases that registered, so a case which stops
-    being compiled takes its own obligation with it and the run still certifies
-    complete.
-
-    A transcribed pin re-opens that hole from the other side, going stale in
-    whichever direction nobody is watching.
-    """
+    """``EXPECTED_CASES`` is READ OUT OF the suite template, never restated: the pin is
+    what lets the census see a suite that SHRINKS, since the execution guard builds its
+    obligations from the cases that registered."""
 
     @staticmethod
     def _census_call(fragment: str) -> list[str]:
-        """The emitted ``hkp_register_census_tests(...)`` call, line by line.
-
-        Sliced out rather than matched across the fragment: the fragment is mostly
-        prose explaining the call, and every keyword the call uses appears in that
-        prose too, so a whole-text check can be satisfied by the documentation
-        instead of by the call.
-        """
+        """The emitted ``hkp_register_census_tests(...)`` call, line by line. Sliced out
+        rather than matched across the fragment, which is mostly prose using the same
+        keywords."""
         lines = fragment.splitlines()
         opens = [
             index
@@ -236,11 +210,8 @@ class TestCensusCasePinIsDerivedFromTheSuite:
 
     @classmethod
     def _pin_and_suite(cls, generator, config) -> tuple[list[str], dict]:
-        """The pin and the suite's own case names, from ONE render context.
-
-        Both rendered against the same ``ids``, so the pair compared is the one a
-        single run emits.
-        """
+        """Both from ONE render context, so the pair compared is what a single run
+        emits."""
         ids = mint_ids(config)
         fragment = generator._render_template(
             "fragments/cmake_test_sources.j2", config, ids=ids
@@ -253,11 +224,7 @@ class TestCensusCasePinIsDerivedFromTheSuite:
     def test_the_pin_is_exactly_the_case_set_the_suite_renders(
         self, generator, gfx950_attention_dense_config
     ):
-        """Set equality against the rendered suite, never against a list here.
-
-        A list written in this test would be a third authority on the suite's
-        shape, drifting on precisely the change the pin exists to catch.
-        """
+        """A list written here would be a third authority on the suite's shape."""
         config = gfx950_attention_dense_config
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
         pin, cases = self._pin_and_suite(generator, config)
@@ -273,14 +240,10 @@ class TestCensusCasePinIsDerivedFromTheSuite:
     def test_the_pin_follows_the_suites_conditional_arms(
         self, generator, packaged_opposite_shape_config
     ):
-        """Genuinely derived, not incidentally correct for one bundle shape.
-
-        This config takes the opposite arm of all three gates in
-        ``test_packs.cpp.j2``, so a pin that agrees with it cannot also be the
-        shipped fixture's list. The gated names are stated here because set
-        equality alone is satisfied by a pin that derived an empty list from an
-        empty scrape.
-        """
+        """This config takes the opposite arm of all three gates in
+        ``test_packs.cpp.j2``, so a pin agreeing with it cannot also be the shipped
+        fixture's list. The gated names are stated because set equality alone is
+        satisfied by a pin from an empty scrape."""
         config = packaged_opposite_shape_config
         assert not config.engine.has_heuristic
         assert config.is_multi_pack
@@ -299,15 +262,10 @@ class TestCensusCasePinIsDerivedFromTheSuite:
     def test_every_pinned_case_survives_the_wire_to_the_binary(
         self, generator, gfx950_attention_dense_config
     ):
-        """The pin crosses three separators, and may contain none of them.
-
-        It leaves the fragment as CMake arguments, is joined into ONE
-        comma-separated value, and travels inside the ENVIRONMENT test property,
-        itself a semicolon-separated list of VAR=VALUE. So a comma is rejected
-        outright by ``_hkp_join_census_cases``, a semicolon tears
-        HIPDNN_TEST_CENSUS_EXPECTED_CASES off into a fragment of that list, and
-        whitespace inside a name makes it two CMake arguments.
-        """
+        """The pin crosses three separators and may contain none of them: it leaves the
+        fragment as CMake arguments, is joined into ONE comma-separated value, and
+        travels inside the ENVIRONMENT property, itself a semicolon-separated VAR=VALUE
+        list."""
         config = gfx950_attention_dense_config
         fragment = generator._render_template("fragments/cmake_test_sources.j2", config)
         lines = self._pinned_case_lines(fragment)
@@ -325,13 +283,9 @@ class TestCensusCasePinIsDerivedFromTheSuite:
     def test_a_direct_load_bundle_pins_nothing_because_it_registers_nothing(
         self, generator, scale_add_config
     ):
-        """The control: the call is not emitted unconditionally.
-
-        A direct-load engine's suite is censused by a hand-added call at the pack
-        target, so a fragment emitting EXPECTED_CASES here would hand the author a
-        pin for a call they are not making. The branch describes that hand-added
-        call in prose, which is why this reads the payload lines.
-        """
+        """The call is not emitted unconditionally: a direct-load engine's suite is
+        censused by a hand-added call at the pack target, so emitting EXPECTED_CASES
+        here would hand the author a pin for a call they are not making."""
         assert not scale_add_config.is_packaged
         fragment = generator._render_template(
             "fragments/cmake_test_sources.j2", scale_add_config
@@ -349,11 +303,8 @@ class TestCensusCasePinIsDerivedFromTheSuite:
 
 
 class TestPlaceholderScanSeesEveryEmittedFile:
-    """The scan must cover what the generator WROTE, not one hand-picked glob.
-
-    A packs/-only glob omits the generated matcher test, so RUNBOOK §3's placeholder
-    gate reports green with placeholder bodies still shipping.
-    """
+    """A packs/-only glob omits the generated matcher test, so RUNBOOK §3's placeholder
+    gate reports green with placeholder bodies still shipping."""
 
     def test_the_generated_matcher_test_is_included(
         self, generator, scale_add_config, tmp_path
@@ -370,8 +321,8 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_filling_every_placeholder_empties_the_scan(
         self, generator, scale_add_config, tmp_path
     ):
-        """The control: the scan must be able to reach zero, or the gate it
-        backs is unsatisfiable and would be worked around."""
+        """The scan must be able to reach zero, or the gate it backs is
+        unsatisfiable."""
         written = generator.render(scale_add_config, tmp_path)
         for rel in generator.unfilled_placeholders([tmp_path], written):
             path = tmp_path / rel
@@ -381,14 +332,9 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_the_scan_finds_files_the_provider_splits_across_two_trees(
         self, generator, scale_add_config, tmp_path
     ):
-        """The emitted layout is flat; the SPLICED layout is not.
-
-        Packs go to the engine directory, test stubs to
-        `src/tests/engines/.../packs/` -- the generator's own cmake_test_sources
-        fragment says so. Resolving `root / rel` finds the packs and skips every
-        test stub, leaving the gate green on a tree whose matcher stubs are
-        untouched.
-        """
+        """The emitted layout is flat; the SPLICED layout is not. Packs go to the engine
+        directory and test stubs to `src/tests/engines/.../packs/`, so resolving `root /
+        rel` finds the packs and skips every test stub."""
         written = generator.render(scale_add_config, tmp_path / "src")
         engine = tmp_path / "spliced/engine/packs"
         tests = tmp_path / "spliced/tests/engines/kernel_ingestor_engine/packs"
@@ -420,8 +366,8 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_an_unlocatable_shippable_file_is_reported_missing(
         self, generator, scale_add_config, tmp_path
     ):
-        """A file the engine ships that is nowhere under the root is an unfinished
-        splice; `fragments/` are splice instructions and correctly excluded."""
+        """A shipped file nowhere under the root is an unfinished splice; `fragments/`
+        are splice instructions and correctly excluded."""
         written = generator.render(scale_add_config, tmp_path / "src")
         empty = tmp_path / "nothing"
         empty.mkdir()
@@ -433,13 +379,9 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_two_files_at_one_spliced_path_are_ambiguous_not_a_coin_flip(
         self, generator, scale_add_config, tmp_path
     ):
-        """A stale copy must not be able to answer for the real file.
-
-        Two trees can legitimately hold the same spliced relative path -- a build
-        tree, a stale checkout -- so uniqueness is luck, not a property. Keeping
-        the first hit binds by filesystem order, which is why the decoy is named
-        to sort BEFORE the real directory.
-        """
+        """Two trees can legitimately hold the same spliced relative path, so keeping
+        the first hit binds by filesystem order -- hence a decoy named to sort BEFORE
+        the real directory."""
         generator.render(scale_add_config, tmp_path / "gen")
         real = tmp_path / "root/real/packs"
         decoy = tmp_path / "root/aa_stale/packs"
@@ -466,13 +408,9 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_a_same_named_file_elsewhere_neither_satisfies_nor_confuses(
         self, generator, scale_add_config, tmp_path
     ):
-        """A basename is not evidence.
-
-        Repo-wide, 1809 basenames collide and `build/` already duplicates shipped
-        descriptor names, so matching on the basename alone would both answer for
-        a missing target and manufacture ambiguity against somebody else's files.
-        The decoy here sits at a path the generator's own fragments never splice to.
-        """
+        """A basename is not evidence: basenames collide repo-wide and `build/`
+        duplicates shipped descriptor names, so matching on one would answer for a
+        missing target."""
         generator.render(scale_add_config, tmp_path / "gen")
         decoy = tmp_path / "root/unrelated/subsystem"
         decoy.mkdir(parents=True)
@@ -494,12 +432,8 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_the_real_spliced_path_is_located_across_separate_roots(
         self, generator, scale_add_config, tmp_path
     ):
-        """The positive half, and why the roots are a LIST.
-
-        The engine tree and the provider's test tree may share no ancestor worth
-        scanning, and widening a single root until they do drags in build trees and
-        stale copies for the ambiguity rule to report, correctly but uselessly.
-        """
+        """The roots are a LIST because the engine tree and the provider's test tree may
+        share no ancestor worth scanning, and widening one root drags in build trees."""
         written = generator.render(scale_add_config, tmp_path / "gen")
         engine = tmp_path / "provider/engines/kernel_ingestor_engine/packs"
         tests = tmp_path / "elsewhere/tests/engines/kernel_ingestor_engine/packs"
@@ -529,8 +463,8 @@ class TestPlaceholderScanSeesEveryEmittedFile:
     def test_a_root_that_does_not_exist_is_an_error_not_an_empty_search(
         self, generator, scale_add_config, tmp_path
     ):
-        """An unreadable root contributes zero hits, and zero hits with no
-        complaint is a gate that passes because it looked nowhere."""
+        """Zero hits with no complaint is a gate that passes because it looked
+        nowhere."""
         written = generator.render(scale_add_config, tmp_path / "gen")
         with pytest.raises(ValueError, match="do not exist"):
             generator.locate_emitted([tmp_path / "gen", tmp_path / "typo"], written)

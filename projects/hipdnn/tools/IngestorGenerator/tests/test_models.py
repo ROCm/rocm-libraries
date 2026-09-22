@@ -143,12 +143,9 @@ class TestIngestorConfigDerivation:
 
 
 class TestWaveSizeForArch:
-    """The hand-mirrored arch -> wavefront-width rule.
-
-    Its upstream is rocKE's ``core/arch/data/arch_specs.json``; the ids below are
-    that file's own, so a drift between the two families shows up here rather than
-    in a generated fixture describing a device that cannot exist.
-    """
+    """The hand-mirrored arch -> wavefront-width rule. Its upstream is rocKE's
+    ``core/arch/data/arch_specs.json`` and the ids below are that file's own, so drift
+    shows up here."""
 
     @pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
     def test_cdna_targets_are_wave64(self, arch):
@@ -158,12 +155,12 @@ class TestWaveSizeForArch:
         "arch", ["gfx1030", "gfx1100", "gfx1151", "gfx11-generic", "gfx1201", "gfx1250"]
     )
     def test_gfx10_through_gfx12_targets_are_wave32(self, arch):
-        """Including ``gfx1250``, which rocKE files under the CDNA family and still
-        runs 32 lanes -- the wave size is the hardware's, not the family label's."""
+        """Including ``gfx1250``, which rocKE files under CDNA and still runs 32
+        lanes."""
         assert wave_size_for_arch(arch) == 32
 
     def test_an_unrecognized_arch_takes_the_wave64_default(self):
-        """64 rather than a raise: the prefix rule is about the arch FAMILY, and
-        wave64 is what every non-gfx10/11/12 AMD target has shipped."""
+        """64 rather than a raise: the prefix rule is about the arch FAMILY, and wave64
+        is what every non-gfx10/11/12 AMD target has shipped."""
         assert wave_size_for_arch("gfx999") == 64
         assert wave_size_for_arch("") == 64

@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -28,23 +29,19 @@
 
 /**
  * @file ValidateDescriptors.cpp
- * @brief Standalone STRUCTURAL validator for generic-kernel-ingestor descriptor bundles.
+ * @brief Standalone structural validator for generic-kernel-ingestor descriptor bundles.
  *
- * Wraps `loadValidatedDescriptorSets`, the loader's own provider-facing entry point and
- * "the only place validation happens" (`DescriptorLoader.hpp`). This tool exists because
- * that entry point requires two things a standalone binary does not have for free: a
- * registered log sink (the loader never throws -- every rejection is
- * `HIPDNN_PLUGIN_LOG_ERROR(...); continue`, and the default log level is off), and
- * native symbols registered by a linked provider. Neither gap can be closed by calling
- * the loader differently; both are worked around below.
+ * Wraps `loadValidatedDescriptorSets`, the loader's provider-facing entry point and the
+ * only place validation happens (`DescriptorLoader.hpp`). That entry point needs two
+ * things a standalone binary lacks: a registered log sink (the loader never throws --
+ * every rejection is `HIPDNN_PLUGIN_LOG_ERROR(...); continue` -- and the default log
+ * level is off), and registered native symbols. Both are supplied below.
  *
- * The symbols registered here are STUBS, harvested from the descriptors themselves. That
- * makes this a check of descriptor structure, cross-references and completeness. It says
- * nothing about whether any provider implements those symbols: that question is answered
- * only by the provider host checks, which run the real typed registration
- * (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
- * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle. A clean run here
- * is not native-implementation proof.
+ * The registered symbols are stubs harvested from the descriptors, so this checks
+ * descriptor structure, cross-references and completeness only. Whether a provider
+ * implements those symbols is answered by the provider host checks, which run the real
+ * typed registration (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
+ * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle.
  */
 
 namespace
@@ -53,10 +50,8 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 
 /// The validator's own THandle. `NativeRegistry<T>` is one instance per `T` per image,
-/// so this cannot collide with any provider's registrations. `getStream()` is not
-/// required by anything `makeStateManager` instantiates (that static_assert lives in
-/// GenericPlanBuilder/BenchmarkPlan, neither reached here), but is provided anyway so
-/// the handle stays usable if the loader ever needs more of it.
+/// so this cannot collide with any provider's registrations. `getStream()` is provided
+/// so the handle stays usable if the loader ever needs more of it.
 struct ValidatorHandle
 {
     static hipStream_t getStream()
@@ -65,9 +60,9 @@ struct ValidatorHandle
     }
 };
 
-/// A stub dispatch handler. Its methods are never invoked -- DispatchRegistry only ever
-/// stores a pointer to it, resolved during the native-symbol pre-flight -- so the bodies
-/// are trivial. Static storage duration: the registry holds a non-owning pointer.
+/// A stub dispatch handler. DispatchRegistry only stores a pointer to it, resolved
+/// during the native-symbol pre-flight, so the bodies are trivial. Static storage
+/// duration: the registry holds a non-owning pointer.
 class StubDispatchHandler : public IKernelDispatchHandler<ValidatorHandle>
 {
 public:
@@ -95,10 +90,9 @@ public:
     }
 };
 
-/// The stub `GraphMatchFn`. Must return an *engaged* optional -- `nullopt` is the
-/// engine-level verdict that empties the whole catalog and skips every remaining pack
-/// of that engine (`KernelIngestorStateManager.hpp`), which would make every engine
-/// declaring a graph_match symbol validate as empty rather than as its real shape.
+/// The stub `GraphMatchFn`. Must return an engaged optional: `nullopt` is the
+/// engine-level verdict that empties the catalog and skips every remaining pack of that
+/// engine (`KernelIngestorStateManager.hpp`).
 std::optional<BoundTokens> stubGraphMatch(const MatchContext& /*context*/)
 {
     return BoundTokens{};
@@ -132,10 +126,9 @@ struct Diagnostic
     std::string message;
 };
 
-/// Accumulates every message the loader logs. The callback registered with
-/// `registerLoggingCallback` is a bare function pointer with no user-data slot, so the
-/// sink must be a namespace-scope (file-static) collection rather than a captured
-/// lambda.
+/// Accumulates every message the loader logs. `registerLoggingCallback` takes a bare
+/// function pointer with no user-data slot, so the sink is namespace-scope rather than
+/// a captured lambda.
 class DiagnosticSink
 {
 public:
@@ -208,9 +201,8 @@ const char* severityName(hipdnnSeverity_t severity)
 /// Every native symbol name one DescriptorSet references, across all five hook kinds:
 /// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every
-/// `dispatches[].dispatchSymbol`, and `heuristic->payload` when the heuristic is
-/// native. Harvested from pass 1's (unresolved-symbol) sets, before any stub is
-/// registered.
+/// `dispatches[].dispatchSymbol`, and `heuristic->payload` for a native heuristic.
+/// Harvested from pass 1's unresolved-symbol sets, before any stub is registered.
 struct HarvestedSymbols
 {
     std::set<std::string> graphMatch;
@@ -252,15 +244,11 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
     return harvested;
 }
 
-/// Registers a no-op stub per unique harvested name into each registry. Names are
-/// pre-deduped into `std::set`s by `harvestSymbols`, which is required: two descriptor
-/// sets may legally share a symbol name (e.g. two engines' matchers), and
-/// `NativeRegistry::registerSymbol` throws `std::runtime_error` on a duplicate. That throw
-/// must never reach here -- it is not a validator failure mode -- so registering from a
-/// `std::set` rather than a raw harvested list keeps the registration itself well-formed
-/// regardless of what the descriptors name.
 StubDispatchHandler stubDispatchHandler;
 
+/// Registers a no-op stub per unique harvested name into each registry. `harvestSymbols`
+/// pre-dedupes into `std::set`s, which is required: two descriptor sets may legally
+/// share a symbol name and `NativeRegistry::registerSymbol` throws on a duplicate.
 void registerStubs(const HarvestedSymbols& harvested)
 {
     for(const auto& symbol : harvested.graphMatch)
@@ -372,10 +360,25 @@ try
 
     const std::vector<std::filesystem::path> roots(options->roots.begin(), options->roots.end());
 
-    // Installed for the whole run, before the first load: the loader never throws, so
-    // without this sink every rejection is invisible and the tool would report nothing
-    // more useful than a bare engine count.
-    const LogSinkGuard logSinkGuard;
+    // A root that is not a directory reaches the loader as an INFO -- "no descriptor
+    // directory at ..." -- which the ERROR/FATAL filter below never escalates. Rejected
+    // here so the failure names the mistyped path, in the wording
+    // `describeUnusableDescriptorRoot` uses, rather than surfacing as an empty set.
+    bool rootsUsable = true;
+    for(const auto& root : roots)
+    {
+        std::error_code failed;
+        if(!std::filesystem::is_directory(root, failed))
+        {
+            std::cerr << "Error: the descriptor root '" << root.string()
+                      << "' is not a directory\n";
+            rootsUsable = false;
+        }
+    }
+    if(!rootsUsable)
+    {
+        return 1;
+    }
 
     // Pass 1: harvest every symbol name the descriptors reference. Neither
     // loadDescriptorCatalog nor resolveDescriptorSets checks symbol registration, so
@@ -383,10 +386,13 @@ try
     const auto unresolvedSets = resolveDescriptorSets(loadDescriptorCatalog(roots));
     const auto harvested = harvestSymbols(unresolvedSets);
 
-    // Register a no-op stub per unique name. Duplicate names across sets are legal and
-    // already deduped by harvestSymbols' std::set members; registerStubs must never
-    // observe NativeRegistry::registerSymbol's duplicate-throw on well-formed input.
     registerStubs(harvested);
+
+    // Installed between the passes: pass 2 repeats pass 1's parse and resolve verbatim,
+    // so a sink spanning both would record every diagnostic twice. With no callback
+    // registered the logger drops pass 1's messages and pass 2 re-emits them. The sink
+    // is mandatory: the loader never throws, so without it every rejection is silent.
+    const LogSinkGuard logSinkGuard;
 
     // Pass 2: the real verdict. Every rejection this call makes reaches DiagnosticSink
     // as an ERROR, which is what actually drives this tool's exit code.
@@ -418,7 +424,22 @@ try
         }
     }
 
-    const bool success = errorMessages.empty() && missingEngines.empty();
+    // An empty validated set is a failure in its own right: a root that exists but was
+    // never staged emits no ERROR and names no missing engine, so the verdict would
+    // otherwise be green for a bundle the tool never saw.
+    const bool success = errorMessages.empty() && missingEngines.empty() && !validatedSets.empty();
+
+    // Built once for both reports: the empty set is the one verdict no loader
+    // diagnostic explains, so `success` would be false with nothing saying why.
+    std::string emptySetViolation;
+    if(validatedSets.empty())
+    {
+        emptySetViolation = "no descriptor set validated under:";
+        for(const auto& root : options->roots)
+        {
+            emptySetViolation += " '" + root + "'";
+        }
+    }
 
     if(options->json)
     {
@@ -434,6 +455,11 @@ try
         {
             diagnosticsJson.push_back(
                 {{"severity", severityName(diagnostic.severity)}, {"message", diagnostic.message}});
+        }
+        if(!emptySetViolation.empty())
+        {
+            diagnosticsJson.push_back(
+                {{"severity", severityName(HIPDNN_SEV_ERROR)}, {"message", emptySetViolation}});
         }
 
         std::cout << report.dump(2) << "\n";
@@ -472,13 +498,20 @@ try
         }
     }
 
+    // stderr in both modes: stdout carries the JSON report alone, and the argument and
+    // root failures above exit before one exists.
+    if(!emptySetViolation.empty())
+    {
+        std::cerr << "VIOLATION: " << emptySetViolation << "\n";
+    }
+
     return success ? 0 : 1;
 }
 catch(const std::exception& error)
 {
-    // The tool walks the filesystem and parses JSON, both of which throw. Letting one
-    // escape `main` gives the caller a terminate() and no diagnostic, which in a
-    // validator is indistinguishable from a crash in the thing being validated.
+    // The tool walks the filesystem and parses JSON, both of which throw. An escaped
+    // exception would terminate() with no diagnostic, indistinguishable from a crash in
+    // the thing being validated.
     std::cerr << "FATAL: " << error.what() << "\n";
     return 2;
 }

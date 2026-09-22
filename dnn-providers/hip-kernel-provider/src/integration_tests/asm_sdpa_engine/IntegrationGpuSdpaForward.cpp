@@ -63,7 +63,6 @@ protected:
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
-        // Register output tensor validator
         GraphVerificationContext context(*graph);
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
@@ -74,8 +73,8 @@ protected:
                 }
                 if(tensorAttr == stats)
                 {
-                    // Every fully masked causal row has a log-sum-exp of -inf in the CPU
-                    // reference and in the device result alike.
+                    // A fully masked causal row has a log-sum-exp of -inf in both the CPU
+                    // reference and the device result.
                     this->registerValidator(context,
                                             tensorAttr,
                                             createAllCloseMatchingInfinitiesValidator(

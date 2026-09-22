@@ -1,23 +1,19 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The variant-set gate must fail on each defect it claims to catch.
-
-A gate is only worth its exit code if every branch can reach 1, so each class below
-introduces one defect in isolation and asserts the branch that catches it -- with a
-clean pair passing as the control, because a gate that refuses everything is not a
-gate. Each class states the property it covers.
+"""The variant-set gate must fail on each defect it claims to catch: every branch must
+be able to reach exit 1, so each class introduces one defect in isolation.
 
 NO PRODUCER IS IMPORTED, here or by the tool. The full-mode fixtures build the
-compiler's evidence with `hkp_pack.agreement` itself -- the same pure-stdlib module
-the packer publishes through -- so the battery runs on a machine that has never had
-rocKE installed. That is not a convenience: it is the property under test.
+compiler's evidence with `hkp_pack.agreement` itself, so the battery runs on a machine
+that has never had rocKE installed. That is the property under test.
 """
 
 from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -35,6 +31,8 @@ import verify_variant_sets as gate_module  # noqa: E402
 sys.path.insert(0, str(gate_module._agreement_python_root()))
 
 from hkp_pack import agreement  # noqa: E402
+from hkp_pack.errors import HkpPackError  # noqa: E402
+from hkp_pack.kpack_resolver import load_kpack  # noqa: E402
 
 _KMD_ID = "11111111-1111-1111-1111-111111111111"
 _UED_ID = "22222222-2222-2222-2222-222222222222"
@@ -51,16 +49,16 @@ _KMD_FIELDS = [
     {"name": "head_size", "type": "int", "default_value": 128},
     {"name": "seqlen_q", "type": "int", "default_value": 512},
     {"name": "use_exp2_fast", "type": "int", "default_value": -1},
-    # Fields the metadata-matches-spec cases below perturb. Declared here because a
-    # metadata key the KMD does not know is a different defect (an undeclared field
-    # drops the whole pack at load) and would fail those cases for the wrong reason.
+    # Fields the metadata-matches-spec cases perturb. Declared here because a metadata
+    # key the KMD does not know is a different defect (it drops the whole pack at load)
+    # and would fail those cases for the wrong reason.
     {"name": "ragged", "type": "int", "default_value": 0},
     {"name": "varlen", "type": "int", "default_value": 0},
     {"name": "persist_decode", "type": "string", "default_value": "auto"},
 ]
 
 #: The declaration a UKD carries when the twin and full-mode cases need the gate to
-#: know which field the compiler settles. Exactly the six keys
+#: know which field the compiler settles: exactly the six keys
 #: `agreement.validate_consumer` requires, partitioning this KMD.
 _DECLARATION = {
     "engine_id": _UED_ID,
@@ -90,12 +88,10 @@ def _contract(descriptor: dict) -> dict:
 
 
 def _descriptor(name: str, seqlen_q: int, use_exp2_fast: int | None = None) -> dict:
-    """A descriptor whose metadata agrees with the spec it is built from.
-
-    `use_exp2_fast` absent from the spec is the authoring form for "the kernel
-    settles this at build time"; the metadata still states which binary resulted,
-    because a field absent there resolves to the KMD default -- a different kernel.
-    """
+    """A descriptor whose metadata agrees with its spec. `use_exp2_fast` absent from the
+    spec is the authoring form for "the kernel settles this at build time"; the metadata
+    still states which binary resulted, since a field absent there takes the KMD
+    default."""
     spec = {"dtype": "bf16", "head_size": 128, "seqlen_q": seqlen_q}
     if use_exp2_fast is not None:
         spec["use_exp2_fast"] = use_exp2_fast
@@ -115,8 +111,8 @@ def _descriptor(name: str, seqlen_q: int, use_exp2_fast: int | None = None) -> d
 
 
 def _pinned_descriptor(name: str, seqlen_q: int, use_exp2_fast: int) -> dict:
-    """A descriptor that PINS `use_exp2_fast` in its spec rather than leaving it to
-    the kernel -- the shape of an override, as opposed to `_descriptor()`."""
+    """PINS `use_exp2_fast` in its spec rather than leaving it to the kernel: the shape
+    of an override, as opposed to `_descriptor()`."""
     out = _descriptor(name, seqlen_q, use_exp2_fast)
     out["metadata"]["use_exp2_fast"] = use_exp2_fast
     return out
@@ -203,7 +199,7 @@ class TestModeIsAlwaysStated:
 
 
 class TestGatePasses:
-    """The control. Every failure assertion below is worthless without this."""
+    """The control: every failure assertion below is worthless without this."""
 
     def test_a_clean_nesting_pair_passes(self, gate):
         result = gate.run("small", "small", "big", "big")
@@ -212,13 +208,10 @@ class TestGatePasses:
 
 
 class TestTheSchemaIsReachedByReference:
-    """A bundle's KMD is found by walking the ids the documents declare.
-
-    Reaching it by filename surgery -- swapping `.kdp.json` for `.kmd.json` on the
-    same stem -- answers "which schema governs this bundle" with a coincidence of
-    naming, and every defaulted field, completed tuple and type below is then
-    decided by the wrong document.
-    """
+    """Reaching the KMD by filename surgery -- swapping `.kdp.json` for `.kmd.json` on
+    the same stem -- answers "which schema governs this bundle" with a coincidence of
+    naming, so every defaulted field, completed tuple and type is decided by the wrong
+    document."""
 
     def test_a_correctly_wired_bundle_resolves(self, gate):
         result = gate.run("small", "small")
@@ -266,7 +259,6 @@ class TestTheSchemaIsReachedByReference:
 
 
 class TestGateCatchesEachDefect:
-    """One case per property, each defect introduced in isolation."""
 
     def test_catches_a_shipped_sentinel(self, gate):
         bad = copy.deepcopy(gate.small)
@@ -304,9 +296,8 @@ class TestGateCatchesEachDefect:
         assert "MISSING" in result.stdout
 
     def test_tuple_check_substitutes_kmd_defaults_like_the_loader(self, gate):
-        """Absent key and explicit default are ONE catalog entry, not two -- the
-        collision the JSON does not show, because the two descriptors differ on disk
-        and collide only after the loader applies default_value."""
+        """Absent key and explicit default are ONE catalog entry: the two descriptors
+        differ on disk and collide only after the loader applies default_value."""
         pinned = _descriptor("k_pinned", 512)
         unset = _descriptor("k_unset", 512)
         unset["metadata"].pop("seqlen_q")
@@ -317,14 +308,10 @@ class TestGateCatchesEachDefect:
 
 
 class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
-    """The loader assembles ONE catalog per engine per device.
-
-    Two KDPs of one engine that each look unique alone still collide there, so the
-    identity has to be engine-wide. It also has to carry the effective architecture:
-    a gfx942 pack and a gfx950 pack never meet on one device, so an identical tuple
-    in both is legal, while an overlap -- including a wildcard sitting over a
-    concrete arch -- is the collision that drops the engine.
-    """
+    """The loader assembles ONE catalog per engine per device, so the identity is
+    engine-wide and carries the effective architecture: an identical tuple in a gfx942
+    and a gfx950 pack is legal, while an overlap -- including a wildcard over a concrete
+    arch -- drops the engine."""
 
     def _two_packs(self, gate, tag, left_arch, right_arch):
         root = gate.tmp / tag
@@ -357,9 +344,8 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         assert "gfx950" in result.stdout
 
     def test_a_wildcard_arch_overlaps_a_concrete_one(self, gate):
-        """An absent arch list is "every device", so it meets the concrete pack on
-        the concrete pack's own device. Treating absence as its own bucket is how a
-        wildcard duplicate ships."""
+        """An absent arch list is "every device", so it meets the concrete pack on that
+        pack's own device."""
         self._two_packs(gate, "wildcard", None, ["gfx950"])
         result = gate.run("w", "wildcard", profiled=False)
         assert result.returncode == 1, result.stdout
@@ -367,8 +353,8 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
 
     def test_one_and_one_point_zero_are_one_tuple_on_a_float_field(self, gate):
         """The catalog holds a value of the field's declared type, so 1 and 1.0 on a
-        FLOAT field are the same entry. Comparing the JSON spellings raw reports two
-        distinct tuples and lets the duplicate that drops the engine ship."""
+        FLOAT field are one entry; comparing JSON spellings raw lets the duplicate
+        ship."""
         fields = [
             {"name": "dtype", "type": "string"},
             {"name": "scale", "type": "float", "default_value": 1.0},
@@ -439,14 +425,10 @@ class TestGateRefusesAmbiguity:
 
 
 class TestGateCatchesSpecializationTwins:
-    """A bigger set may only OVERRIDE a compiler-settled knob if it also keeps the
-    settled variant beside it. Overriding alone silently drops the smaller set's
-    kernel from the candidate list.
-
-    The knob is read off the UKDs' own declarations -- the fields the compiler
-    specializes on are the only ones a descriptor may legitimately leave out of its
-    spec, so they are the only ones that can have a twin.
-    """
+    """A bigger set may only OVERRIDE a compiler-settled knob if it keeps the settled
+    variant beside it. The knob is read off the UKDs' own declarations, since the fields
+    the compiler specializes on are the only ones a descriptor may leave out of its
+    spec."""
 
     def test_override_without_the_twin_fails_naming_the_knob(self, gate):
         small = [_contract(_descriptor("k_sq512", 512))]
@@ -472,8 +454,7 @@ class TestGateCatchesSpecializationTwins:
         assert "specialization twin" not in result.stdout
 
     def test_a_set_with_no_declared_specialization_reports_no_twins(self, gate):
-        """The control for the knob source. Without a declaration nothing states
-        that any field is compiler-settled, so nothing can be a twin -- and the
+        """Without a declaration nothing states that a field is compiler-settled, so the
         twin check must not invent one from a field that merely looks tri-state."""
         result = gate.run("small", "small", "big", "big")
         assert result.returncode == 0, result.stdout + result.stderr
@@ -481,16 +462,9 @@ class TestGateCatchesSpecializationTwins:
 
 
 class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
-    """A metadata key that is ALSO a spec key must match it.
-
-    This needs no evidence, no profile and no kernel knowledge -- it is the
-    descriptor checked against ITSELF, so it runs in both modes.
-
-    The dangerous direction is a descriptor labelled aligned whose binary is actually
-    ragged. The C++ matcher tests catch that at the matcher rung; this is the STATIC
-    rung, which is separate precisely because each catches what the other cannot. A
-    mislabelled tree that reaches STATIC clean still builds and still packs.
-    """
+    """A metadata key that is ALSO a spec key must match it. The descriptor is checked
+    against ITSELF, so this runs in both modes; a tree labelled aligned whose binary is
+    ragged reaches STATIC clean and still builds and packs."""
 
     def test_catches_a_flag_whose_metadata_contradicts_its_spec(self, gate):
         bad = copy.deepcopy(gate.small)
@@ -551,10 +525,9 @@ class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
         assert "metadata contradicts the spec" not in result.stdout
 
     def test_an_undeclared_string_field_is_named_not_guessed_at(self, gate):
-        # Without a vocabulary declaration there is no way to know whether two
-        # spellings of a string are a translation or a defect, so the check declines
-        # to guess -- and says so, because a field nobody can judge is a liability
-        # the author should see.
+        # Without a vocabulary declaration there is no way to know whether two spellings
+        # of a string are a translation or a defect, so the check declines to guess and
+        # says so.
         gate.write("ok", copy.deepcopy(gate.small))
         result = gate.run("ok", "ok", profiled=False)
         assert result.returncode == 0, result.stdout
@@ -564,10 +537,9 @@ class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
     def test_a_string_field_absent_from_a_declared_vocabulary_is_still_compared(
         self, gate
     ):
-        # The profile's vocabulary declares dtype and says nothing about
-        # persist_decode, a second string field both layers carry. Once a vocabulary
-        # section exists the author has the exact place to declare a field
-        # translated, so an unmentioned string field is compared raw.
+        # The profile's vocabulary declares dtype and says nothing about persist_decode,
+        # a second string field both layers carry, so an unmentioned string field is
+        # compared raw.
         bad = copy.deepcopy(gate.small)
         bad[0]["kernel_source"]["spec"]["persist_decode"] = "auto"
         bad[0]["metadata"]["persist_decode"] = "manual"
@@ -587,13 +559,9 @@ _SYMBOL = "test_kernel_symbol"
 
 
 class _Payloads:
-    """The bytes a packed descriptor names, supplied directly.
-
-    The gate's own reader pulls them out of the arch's `.kpack` archive, which needs
-    rocm_kpack -- a build artifact. Everything the full-mode battery is about happens
-    AFTER the bytes are in hand, so substituting the reader keeps it runnable on any
-    machine while leaving the property under test untouched.
-    """
+    """The bytes a packed descriptor names, supplied directly: the gate's own reader
+    needs rocm_kpack, and everything full mode is about happens after the bytes are in
+    hand."""
 
     def __init__(self, payload: bytes = _PAYLOAD):
         self.payload = payload
@@ -641,18 +609,13 @@ def _identity(name: str) -> dict:
     return {
         "module": "kernels.test",
         "qualname": name,
-        "file": f"/src/kernels/{name}.py",
         "sha256": "0" * 64,
     }
 
 
 def _publish(ukd: dict, kmd: dict, kdp_doc: dict, ued: dict, observed_value=1) -> None:
-    """Write the evidence a producing compile would have written onto `ukd`.
-
-    Built through `agreement` itself: the record's shape and order are that module's
-    business, and a fixture reconstructing them would pass or fail on its own guess
-    about key order rather than on the property.
-    """
+    """Write the evidence a producing compile would have written onto `ukd`, through
+    `agreement` itself, so the fixture cannot guess the record's shape or key order."""
     declaration = agreement.select_declaration(ukd, ued, kmd, {kmd["id"]: kmd}, kdp_doc)
     request = agreement.observation_request(declaration, kmd)
     header = {k: v for k, v in kdp_doc.items() if k != "kernelDescriptors"}
@@ -679,14 +642,10 @@ def _publish(ukd: dict, kmd: dict, kdp_doc: dict, ued: dict, observed_value=1) -
 def packed(tmp_path):
     """A packed bundle carrying real compiler-written evidence, plus a mutator.
 
-    `build(mutate=...)` applies `mutate(docs)` AFTER the evidence is published --
-    which is what a tamper is: the record was true of the artifact that left the
-    compiler, and something changed underneath it.
-
-    The documents are round-tripped through JSON before the mutation, as writing them
-    to disk does. Without that the stored record still holds live references to the
-    engine and schema objects, so altering the KMD would alter the evidence with it
-    and the tamper would be invisible for the wrong reason.
+    `build(mutate=...)` applies `mutate(docs)` AFTER the evidence is published, which is
+    what a tamper is. The documents are round-tripped through JSON first, as writing
+    them to disk does; otherwise the record still holds live references to the engine
+    and schema objects and altering the KMD would alter the evidence with it.
     """
 
     def build(mutate=None, tag="packed"):
@@ -730,15 +689,9 @@ def _run_full(root, payloads=None, arch=_ARCH):
 
 
 class TestFullModeChecksTheProducingBuildRecord:
-    """The effective values come from the compiler's own evidence.
-
-    Nothing here imports a producer, redirects an import root, or re-derives a
-    policy: the descriptor carries the declaration and the record, and the gate
-    checks them against the descriptors, the schema, the architecture and the bytes
-    in hand. Every case below is a way that correspondence can break, and each one
-    must be a FAILURE rather than a property left unchecked -- an artifact that
-    cannot say what it was built from has not established agreement.
-    """
+    """The effective values come from the compiler's own evidence: nothing imports a
+    producer, redirects an import root, or re-derives a policy. Every case below is a
+    way that correspondence can break, and each must be a FAILURE."""
 
     def test_a_valid_packed_fixture_passes(self, packed):
         failures, unchecked = _run_full(packed())
@@ -790,9 +743,8 @@ class TestFullModeChecksTheProducingBuildRecord:
         assert failures
 
     def test_an_altered_effective_arch_fails(self, packed):
-        """The evidence was written for one architecture. Checked as another, it
-        describes a compile that did not produce these bytes -- even though every
-        byte of the descriptor is otherwise untouched."""
+        """Evidence written for one architecture, checked as another, describes a
+        compile that did not produce these bytes."""
 
         def mutate(docs):
             docs["ukd"]["arch"] = ["gfx950"]
@@ -806,13 +758,9 @@ class TestFullModeChecksTheProducingBuildRecord:
         assert any("payload" in f for f in failures), failures
 
     def test_a_forged_authored_record_fails(self, packed, tmp_path):
-        """Evidence authored into the input rather than written by the compiler.
-
-        `provenance.effective_spec` is the producing compiler's alone. An authored
-        descriptor -- `kind: rocke`, no bytes yet -- that supplies one claims a
-        compile that has not happened, and no internal consistency makes it evidence
-        about an artifact that does not exist.
-        """
+        """`provenance.effective_spec` is the producing compiler's alone, so an authored
+        descriptor -- `kind: rocke`, no bytes yet -- supplying one claims a compile that
+        has not happened."""
         kmd, ued = _kmd(), _ued()
         ukd = _packed_ukd()
         kdp = _kdp([ukd], arch=[_ARCH])
@@ -840,8 +788,7 @@ class TestFullModeChecksTheProducingBuildRecord:
         assert any("specialization declaration" in f for f in failures), failures
 
     def test_an_unreadable_payload_fails(self, packed, tmp_path):
-        """The gate's own reader, on a descriptor naming bytes that are not there.
-        Reached before any archive library is imported, so it runs anywhere."""
+        """Reached before any archive library is imported, so it runs anywhere."""
         root = packed(tag="unreadable")
         failures, _ = gate_module.check(
             "set",
@@ -854,12 +801,9 @@ class TestFullModeChecksTheProducingBuildRecord:
         assert any("does not exist" in f for f in failures), failures
 
     def test_a_kdp_level_declaration_covers_every_kernel_under_it(self, tmp_path):
-        """Shared carriage: the declaration is written once and inherited.
-
-        Every kernel still resolves to a declaration and its evidence still binds the
-        bytes, so a bundle declaring once passes exactly as one repeating itself per
-        kernel does.
-        """
+        """Shared carriage: every kernel still resolves to a declaration and its
+        evidence still binds the bytes, so declaring once passes as repeating per kernel
+        does."""
         kmd, ued = _kmd(), _ued()
         ukd = _packed_ukd()
         contract = ukd["provenance"].pop("specialization_contract")
@@ -876,14 +820,10 @@ class TestFullModeChecksTheProducingBuildRecord:
 
 
 class TestFullModeReportsAKernelWithNothingToBind:
-    """A packed kernel that declares no specialized field, in full mode.
-
-    `metadata_fields: []` is the MANDATORY declaration for a non-compiled source --
-    an AOT hip bundle has no builder object, so there is nothing to bind and no
-    producing-build record to read. Failing it would make full mode unpassable for
-    every hip bundle; passing it silently would claim a binding that was never made.
-    It is reported instead, exactly as `hkp_pack.desk_check` reports the same artifact.
-    """
+    """`metadata_fields: []` is the MANDATORY declaration for a non-compiled source: an
+    AOT hip bundle has no builder object to bind and no producing-build record to read.
+    Failing it would make full mode unpassable for every hip bundle; passing it silently
+    would claim a binding never made, so it is reported."""
 
     @staticmethod
     def tree(tmp_path, metadata_fields, tag):
@@ -928,31 +868,23 @@ class TestFullModeReportsAKernelWithNothingToBind:
     def test_a_kernel_that_claims_a_field_and_has_no_evidence_still_fails(
         self, tmp_path
     ):
-        """The other half. Nothing above may become a way to skip a real check."""
+        """Nothing above may become a way to skip a real check."""
         root = self.tree(tmp_path, ["use_exp2_fast"], "claimed")
         failures, _ = _run_full(root)
         assert failures
 
     @staticmethod
     def verdict(root):
-        """`(failures, unverified)` from one full-mode run over `root`.
-
-        The waiver and the failure are separate output lists, so the three origin
-        cases below have to read both: a kernel that lands in neither, or in both,
-        is a different verdict from the one each asserts.
-        """
+        """`(failures, unverified)` from one full-mode run. Both lists are read, since a
+        kernel landing in neither, or in both, is a different verdict."""
         _b, _d, failures, _unchecked, unverified, _k = gate_module.check(
             "set", str(root), gate_module.Profile.empty(), "full", _ARCH, _Payloads()
         )
         return failures, unverified
 
     def with_origin(self, tmp_path, tag, origin_kind):
-        """The recordless, claimless bundle above, stamped with an origin.
-
-        `tree` writes no `provenance.origin_kind` at all and publishes no
-        `effective_spec`, so the stamp is the only thing separating the origin cases
-        and each verdict below is attributable to the origin alone.
-        """
+        """`tree` writes no `provenance.origin_kind` and publishes no `effective_spec`,
+        so the stamp is the only thing separating the origin cases."""
         root = self.tree(tmp_path, [], tag)
         path = root / "test_engine.kdp.json"
         doc = json.loads(path.read_text())
@@ -965,15 +897,10 @@ class TestFullModeReportsAKernelWithNothingToBind:
     def test_a_rocke_origin_cannot_waive_its_own_evidence(
         self, tmp_path, monkeypatch, capsys
     ):
-        """The waiver keyed on the claim alone is a self-service exemption.
-
-        The packer publishes `effective_spec` onto every rocKE UKD it ships, so a
-        descriptor whose own origin is rocKE contradicts the absence of the record.
-        Left waivable, deleting the record and relabelling the specialized fields as
-        matcher-only carries a shipped rocKE shard to a clean exit with the archive
-        bytes never read. Asserted on the exit code as well, because the waiver is
-        reported at status 0 and only the code separates the two outcomes.
-        """
+        """A waiver keyed on the claim alone is a self-service exemption: the packer
+        publishes `effective_spec` onto every rocKE UKD it ships, so deleting the record
+        and relabelling the specialized fields as matcher-only would carry a shipped
+        rocKE shard to a clean exit with the archive bytes never read."""
         root = self.with_origin(tmp_path, "rocke_origin", "rocke")
         failures, unverified = self.verdict(root)
         assert unverified == []
@@ -998,25 +925,18 @@ class TestFullModeReportsAKernelWithNothingToBind:
         assert "k_packed" in out
 
     def test_a_non_rocke_origin_in_the_same_state_still_waives(self, tmp_path):
-        """The control, differing from the case above only in the origin it names.
-
-        An AOT hip pack has no builder object to bind, so there is no record for it
-        to have lost and the waiver is the legitimate verdict. Without this pair the
-        rocKE case passes just as well against a check that fails every recordless
-        kernel whatever produced it.
-        """
+        """An AOT hip pack has no builder object to bind, so the waiver is legitimate;
+        without this pair the rocKE case passes against a check that fails every
+        recordless kernel."""
         root = self.with_origin(tmp_path, "hip_origin", "hip")
         failures, unverified = self.verdict(root)
         assert failures == []
         assert len(unverified) == 1
 
     def test_an_absent_origin_kind_is_not_read_as_rocke(self, tmp_path):
-        """Silence is not a claim of rocKE origin, so it keeps the waiver.
-
-        Descriptors packed before `origin_kind` existed, and hand-authored trees,
-        carry no origin at all. Reading rocKE out of the absence would fail every one
-        of them over evidence they were never asked to produce.
-        """
+        """Hand-authored trees and descriptors packed without `origin_kind` carry no
+        origin at all, so reading rocKE out of the absence would fail them over evidence
+        they were never asked to produce."""
         root = self.tree(tmp_path, [], "absent_origin")
         doc = json.loads((root / "test_engine.kdp.json").read_text())
         assert "origin_kind" not in doc["kernelDescriptors"][0]["provenance"]
@@ -1026,12 +946,8 @@ class TestFullModeReportsAKernelWithNothingToBind:
 
 
 class TestFullModeCannotPassOnANarrowedRun:
-    """A full run claims every property, so a check it could not RUN is a gap.
-
-    Asserted on this tool's own EXIT CODE, at `main`, rather than on the output: a
-    caller that reads the claim off the exit status must not need a second tool to
-    scrape the caveat back out of stdout.
-    """
+    """Asserted on this tool's EXIT CODE, at `main`: a caller reading the claim off the
+    exit status must not need a second tool to scrape the caveat out of stdout."""
 
     def test_a_narrowed_full_run_exits_nonzero(self, packed, monkeypatch, capsys):
         monkeypatch.setattr(gate_module, "Payloads", lambda *_a, **_k: _Payloads())
@@ -1046,13 +962,8 @@ class TestFullModeCannotPassOnANarrowedRun:
 
 
 class TestStructuralModeNeverClaimsCompiledAgreement:
-    """The same tampered trees, checked structurally.
-
-    Structural mode cannot see any of the full-mode failures above -- that is what
-    the mode is -- so the property under test is that it says so: a clean structural
-    pass on a tree whose evidence no longer matches its bytes is only dangerous if
-    the output reads as though it checked.
-    """
+    """Structural mode cannot see any full-mode failure -- that is what the mode is --
+    so the property is that it says so."""
 
     def test_it_passes_its_own_properties_and_names_what_it_did_not_check(
         self, packed, capsys
@@ -1069,12 +980,37 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
         assert "COMPILED SPECIALIZATION AGREEMENT" in capsys.readouterr().out
 
 
+# TestRealArchiveSelectedConsumer is the one class that builds a real kpack archive,
+# carried as a skip rather than a hard failure so a checkout without rocm_kpack keeps
+# the no-producer property.
+_NO_ROCM_KPACK = (
+    "rocm_kpack is not installed and HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset; set it "
+    "to the rocm-kpack 'python' directory to run this class"
+)
+
+
+def _kpack_python_dir() -> str | None:
+    """The rocm-kpack `python` directory an operator named, or None to import
+    `rocm_kpack` from the environment. Skips when neither is available."""
+    # An exported-but-empty variable names no directory and counts as unset. `""` is not
+    # `None`, so left alone it resolves to the working directory and the class dies on a
+    # raw import error instead of naming the dependency it wants.
+    python_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR") or None
+
+    # Only a genuinely absent dependency skips: find_spec answers that without executing
+    # the package, so a broken rocm_kpack still reaches load_kpack and fails. An
+    # operator who set the directory gets their value passed to load_kpack unexamined.
+    if python_dir is None and importlib.util.find_spec("rocm_kpack") is None:
+        pytest.skip(_NO_ROCM_KPACK)
+
+    return python_dir
+
+
 @pytest.fixture
 def real_archive():
     """Real rocm-kpack serialization; the payload is deliberately non-executable."""
-    from hkp_pack.kpack_resolver import load_kpack
+    python_dir = _kpack_python_dir()
 
-    python_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
     kpack, compression = load_kpack(python_dir)
 
     def write(root):
@@ -1097,8 +1033,63 @@ def real_archive():
     return write, python_dir
 
 
+class TestTheArchiveDependencyIsResolvedOrSkipped:
+    """An exported-but-empty directory is a variable, not a path:
+    `HIPKERNELPROVIDER_ROCM_KPACK_DIR=` survives a shell export and a CMake `-D` that
+    resolved to nothing, while a stale path an operator named must still fail."""
+
+    @staticmethod
+    def _outcome():
+        try:
+            return ("directory", _kpack_python_dir())
+        except pytest.skip.Exception as skipped:
+            return ("skip", str(skipped))
+
+    def test_an_empty_value_is_unset_while_a_named_one_still_runs(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", raising=False)
+        unset = self._outcome()
+
+        monkeypatch.setenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", "")
+        assert self._outcome() == unset, (
+            "an empty value names no directory, so it has to reach the same outcome "
+            "as an absent one on this machine"
+        )
+
+        stale = tmp_path / "no-such-kpack-checkout"
+        monkeypatch.setenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", str(stale))
+        assert self._outcome() == ("directory", str(stale)), (
+            "a named directory is a request to run this class; a nonexistent one is "
+            "a loud failure in load_kpack, never a skip"
+        )
+
+    def test_a_stale_named_directory_raises_out_of_load_kpack(
+        self, monkeypatch, tmp_path
+    ):
+        """Where "fails loudly" happens; the case above only proves the stale path is
+        HANDED ON. NOT marked `needs_rocm_kpack`: the directory check precedes any
+        import, so proving a named path fails must not need the dependency it is proving
+        absent."""
+        stale = tmp_path / "no-such-kpack-checkout"
+        monkeypatch.setenv("HIPKERNELPROVIDER_ROCM_KPACK_DIR", str(stale))
+
+        with pytest.raises(HkpPackError) as excinfo:
+            load_kpack(_kpack_python_dir())
+
+        # The path is the discriminator: `load_kpack`'s other HkpPackError -- the one
+        # a machine without rocm_kpack installed raises from the import -- names no
+        # directory, so a message carrying this one can only be the stale-path branch.
+        assert str(stale.resolve()) in str(excinfo.value)
+
+
+@pytest.mark.needs_rocm_kpack
 class TestRealArchiveSelectedConsumer:
-    """Selected authority and packed-input gates cannot borrow sibling evidence."""
+    """Selected authority and packed-input gates cannot borrow sibling evidence.
+
+    The skip keeps a default run green without rocm_kpack; the marker is the handle
+    `-m needs_rocm_kpack` selects on, which a fixture-internal skip cannot offer.
+    """
 
     @staticmethod
     def run(root, python_dir, tmp_path, mode="full", arch=None):

@@ -3,6 +3,7 @@ Copyright © Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier: MIT
 */
 
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -19,13 +20,18 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
 #include "TestDescriptorRoot.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
+// Every census diagnostic in this file is matched as text by the CTest entries in
+// descriptor-packaging/cmake/HkpPackaging.cmake: each control keys on one refusal's
+// wording, and the census entry keys on the "Census: " prefix. Rewording either breaks
+// those gates silently.
 namespace
 {
 
 // Comma-separated, because the value arrives through the CTest ENVIRONMENT property,
-// which is itself a semicolon-separated list of VAR=VALUE. Empty entries are dropped so
-// a trailing separator is not read as a case named "".
+// itself a semicolon-separated list of VAR=VALUE. Empty entries are dropped so a trailing
+// separator is not read as a case named "".
 std::set<std::string> splitCaseNames(const std::string& packed)
 {
     std::set<std::string> names;
@@ -46,16 +52,13 @@ std::set<std::string> splitCaseNames(const std::string& packed)
     return names;
 }
 
-// The inventory includes disabled, filtered and sharded-out cases. Only callbacks
-// from a complete passing iteration can satisfy a declared census obligation.
+// The inventory includes disabled, filtered and sharded-out cases; only callbacks from a
+// complete passing iteration satisfy a census obligation. Obligations are built from the
+// suite itself, so a suite that loses cases loses obligations with them. The pinned set
+// closes that hole and is compared by name in both directions, since a lost case and a new
+// one cancel in a count but call for opposite remedies.
 //
-// That proves everything REGISTERED ran and passed. It cannot prove that everything
-// EXPECTED was registered: the obligation set is built from the suite itself, so a suite
-// that loses cases loses obligations with them and still reports a complete census. The
-// pinned set closes that hole. It is compared by NAME and in both directions -- a lost
-// case and a new one cancel in a count, and the two call for opposite remedies.
-//
-// The pin is optional. Absent, only the execution guard runs.
+// The pin is optional; absent, only the execution guard runs.
 class CensusExecutionListener : public testing::EmptyTestEventListener
 {
 public:
@@ -160,18 +163,20 @@ int main(int argc, char** argv)
 
     std::unique_ptr<CensusExecutionListener> census;
     const auto censusSuite = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_SUITE");
+    // Captured and validated ahead of the default-root block below, which can write
+    // HIPDNN_DESCRIPTOR_DIR itself: the shard a census is verdicted against is never one
+    // this binary chose.
+    const auto censusArch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
+    const auto censusRoot = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
     if(!censusSuite.empty())
     {
-        // Validate the caller's explicit shard before default-root setup can supply
-        // another tree.
-        const auto arch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
-        const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
         std::error_code error;
-        if(arch.empty() || root.empty() || !std::filesystem::is_directory(root, error))
+        if(censusArch.empty() || censusRoot.empty()
+           || !std::filesystem::is_directory(censusRoot, error))
         {
             std::cerr << "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing "
                          "explicit HIPDNN_DESCRIPTOR_DIR; arch='"
-                      << arch << "', root='" << root << "'.\n";
+                      << censusArch << "', root='" << censusRoot << "'.\n";
             return 1;
         }
 
@@ -191,10 +196,8 @@ int main(int argc, char** argv)
             std::cerr << "Census suite '" << censusSuite << "' is absent or empty.\n";
             return 1;
         }
-        // Optional; unset leaves the execution guard alone in effect.
-        // The registration comparison happens here, before RUN_ALL_TESTS, because it
-        // reads the static registration rather than any result -- and because a suite
-        // that shrank should say so even if the surviving cases all pass.
+        // Before RUN_ALL_TESTS: this reads the static registration rather than results, and
+        // a suite that shrank should say so even when the surviving cases pass.
         const auto expectedCases
             = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_EXPECTED_CASES");
         census = std::make_unique<CensusExecutionListener>(*suite, expectedCases);
@@ -244,10 +247,73 @@ int main(int argc, char** argv)
     hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
                                                           recordingCallback);
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    if(!censusSuite.empty())
+    {
+        // The packer stamps every emitted copy of a pack with the architecture of the
+        // shard it writes into, so those stamps say which shard arrived. Uncompared, an
+        // entry declared for one architecture passes identically on another's shard.
+        //
+        // Below the logging setup because this call loads and memoizes for the process:
+        // each loader diagnostic is dispatched once.
+        //
+        // A second stamp means the root spans shards, which a per-arch entry exists to
+        // avoid. An arch-independent pack is refused too: it cannot show which shard
+        // arrived.
+        std::size_t loadedSets = 0;
+        std::size_t loadedPacks = 0;
+        std::set<std::string> stamped;
+        for(const auto& descriptorSet :
+            hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets())
+        {
+            ++loadedSets;
+            loadedPacks += descriptorSet.packs.size();
+            for(const auto& pack : descriptorSet.packs)
+            {
+                stamped.insert(pack.arch.begin(), pack.arch.end());
+            }
+        }
+        if(stamped.size() != 1 || *stamped.begin() != censusArch)
+        {
+            std::string detail;
+            if(loadedSets == 0)
+            {
+                detail = "no descriptor set loaded from this root";
+            }
+            else if(loadedPacks == 0)
+            {
+                detail = std::to_string(loadedSets)
+                         + " descriptor sets loaded from this root, holding no pack";
+            }
+            else if(stamped.empty())
+            {
+                detail = std::to_string(loadedPacks)
+                         + " packs loaded from this root, none of them architecture-stamped";
+            }
+            else
+            {
+                std::string found;
+                for(const auto& stamp : stamped)
+                {
+                    found += (found.empty() ? "'" : ", '") + stamp + "'";
+                }
+                detail = std::to_string(loadedPacks)
+                         + " packs loaded from this root carry the stamps " + found;
+            }
+            std::cerr << "Census requires every loaded pack to be stamped for the expected "
+                         "architecture; arch='"
+                      << censusArch << "', root='" << censusRoot << "'; " << detail << ".\n";
+            return 1;
+        }
+    }
+#endif
+
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     auto hipErrorHandler = std::make_unique<hipdnn_test_sdk::utilities::HipErrorHandler>();
     listeners.Append(hipErrorHandler.release());
+    // Append takes ownership: gtest deletes its listeners only when the UnitTest singleton
+    // is torn down at static destruction, so this pointer stays valid past the release.
     const auto* censusResult = census.get();
     if(census)
     {

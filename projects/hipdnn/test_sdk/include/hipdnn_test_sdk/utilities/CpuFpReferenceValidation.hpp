@@ -14,14 +14,13 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-/// Whether a comparison treats same-signed infinities in the reference and the implementation
-/// as equal.
+/// Whether a comparison treats same-signed infinities in the reference and the
+/// implementation as equal.
 ///
-/// REJECTED is the default everywhere because an unexpected infinity is normally a real defect
-/// (most often an output element the operation never wrote), and flagging it is the point.
-/// ACCEPTED exists for the few outputs whose correct value is infinite in the reference and on
-/// the device alike - an SDPA forward STATS (log-sum-exp) tensor holds -inf for every fully
-/// masked causal row - where the strict rule would reject a tensor that agrees exactly.
+/// REJECTED is the default: an unexpected infinity is normally a real defect, most often an
+/// output element the operation never wrote. ACCEPTED is for outputs whose correct value is
+/// infinite on both sides, such as an SDPA forward STATS (log-sum-exp) tensor holding -inf
+/// for every fully masked causal row.
 enum class MatchingInfinities
 {
     REJECTED,
@@ -196,8 +195,8 @@ public:
 namespace validation_detail
 {
 
-/// Integer element types have no infinity, so the relaxation is meaningless for them and is
-/// reported rather than silently ignored.
+/// Integer element types have no infinity, so the relaxation is reported rather than
+/// silently ignored.
 inline void rejectMatchingInfinitiesRequest(MatchingInfinities matchingInfinities)
 {
     if(matchingInfinities == MatchingInfinities::ACCEPTED)
@@ -253,11 +252,10 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
         dataType, absoluteTolerance, relativeTolerance, MatchingInfinities::REJECTED);
 }
 
-/// Builds a validator for an output whose correct value is infinite in the reference and on the
-/// device alike, such as the SDPA forward STATS (log-sum-exp) tensor, whose fully masked causal
-/// rows are legitimately -inf on both sides. Same-signed infinities compare equal; NaN, opposite
-/// signed infinities and finite versus infinite disagreements still fail, and the numeric
-/// comparison of finite elements is unchanged.
+/// Builds a validator for an output whose correct value is infinite in the reference and on
+/// the device alike, such as the SDPA forward STATS (log-sum-exp) tensor. Same-signed
+/// infinities compare equal; NaN, opposite-signed infinities and finite-versus-infinite
+/// disagreements still fail, and finite elements compare as usual.
 ///
 /// Throws for integer data types, which have no infinity to match.
 inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>

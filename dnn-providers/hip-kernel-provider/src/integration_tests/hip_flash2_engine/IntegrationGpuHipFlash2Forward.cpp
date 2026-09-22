@@ -35,7 +35,7 @@ struct Flash2TestConfig
     int headDim;
     bool causal;
     float scale;
-    std::string expectedArch; // B1: all struct fields initialized
+    std::string expectedArch;
 };
 
 class IntegrationGpuHipFlash2Forward

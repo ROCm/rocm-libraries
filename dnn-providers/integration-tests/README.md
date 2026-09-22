@@ -233,53 +233,6 @@ runs the bundle graphs without any DVC pull. Bundle registration is on by defaul
 pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
 that were compiled into the binary.
 
-### What the reference executors cannot verify
-
-Both reference executors are **dense and stride-based**. Their SDPA argument struct is
-q/k/v pointers plus strides (`gpu-ref/kernels/types/GpuRefSdpaArgs.h`), so a graph whose
-operands are addressed indirectly has no reference to compare against. Rather than
-compute something wrong, each plan declines the graph up front:
-
-| Graph feature | Attribute | Declined at |
-|---|---|---|
-| paged KV | `page_table_k/v_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp`, `SdpaFwdPlan.hpp` |
-| varlen sequence lengths | `seq_len_q/kv_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp` |
-| ragged tensors | `ragged_offset_tensor_uid` (**tensor**) | `PlanUtils.hpp`, `CHECK_NO_RAGGED_TENSORS` |
-| block-sparse | `block_mask_tensor_uid` (node) | both |
-| sinks | `sink_token_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp`, `SdpaFwdPlan.hpp` |
-| dropout, FP8 descale, softmax stats | assorted | both |
-
-**A sink-bearing graph requires a sink-capable numerical reference.** A sink is an
-extra per-head logit in the softmax denominator, but neither the current CPU
-reference (`SdpaFwdPlan.hpp`) nor the GPU reference (`GpuSdpaFwdPlan.hpp`) supports
-`sink_token_tensor_uid`. Selecting CPU verification does not provide a fallback.
-Use an actually capable, independently verified reference with evidence covering
-the graph's sink semantics, or record the workflow as **BLOCKED**. Unverified
-expected output, including a golden tensor without a capable reference behind it,
-does not satisfy this requirement.
-
-In `auto` mode a declined graph falls through golden → GPU → CPU → **skip**, so a bundle
-for an unsupported feature reports as skipped rather than failing. A skip is not
-numerical evidence: required unsupported cases block engine acceptance even if
-the remaining cases pass.
-
-**These features are distinct and are easy to conflate.** Paged KV is a block-table
-indirection into a physical cache. Varlen is per-batch *valid lengths* inside a padded
-buffer. Ragged (RFC 0014) is one contiguous buffer where batch `b` occupies
-`[off[b], off[b+1])` with no padding at all — and it is a property of the **tensor**,
-not the node, gated on `K_RAGGED_TENSOR_MIN_API_VERSION`. A kernel parameter named
-`seq_lens_ptr` or `query_start_len_ptr` may be any of the three; determine which from the
-kernel's address arithmetic, not the parameter name.
-
-**Closing a gap is an adapter, not a new reference.** All three are pure address
-remapping onto the same mathematics: gather paged K/V to dense through the block table,
-or expand ragged to padded-dense through the offset table, then call the existing
-`GpuFpReferenceSdpa::fprop`. Teaching the plan to do that unblocks every engine of that
-shape at once.
-
-Avoid hand-rolling a private reference for one engine. A reference derived from the
-implementation under test proves the two agree, not that either is correct, and a shared
-misunderstanding cancels out silently.
 ### Validating golden data itself
 
 The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each
@@ -435,7 +388,7 @@ Both the superbuild (target already present) and standalone provider builds
 (`find_package`) are supported; if the package is not found the target is
 skipped with a status message.
 
-### Per-provider TOML config (tolerance overrides & skips)
+### Per-provider TOML config (tolerance overrides, validator overrides & skips)
 
 Each provider owns one `--test-config` TOML file (e.g.
 `miopen-provider/config/MIOPEN_ENGINE.toml`,
@@ -446,6 +399,9 @@ recompiling or touching test source:
 - **Override tolerances** for specific tests/groups, when that engine's
   numerics legitimately differ from the default atol/rtol (e.g. reduced
   precision from split-k accumulation).
+- **Override the validator** for specific output tensors, when per-element
+  allclose is the wrong *question* for that tensor rather than merely too
+  tight. This is the only place a validator can be changed.
 - **Skip tests** on specific architectures (or globally), when that engine
   has no applicable kernel/solution for a case.
 
@@ -458,6 +414,12 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
+[[validator_overrides]]
+filters       = ["*LayernormBackward*"]
+tensors       = ["*::DSCALE", "*::DBIAS"]
+validator     = "rms"
+rms_threshold = 1e-4
+
 [[test_skips]]
 archs   = ["gfx90a", "gfx10", "gfx11", "gfx12"]   # optional; omit to skip everywhere
 filters = ["*ConvFwdBiasActiv*"]
@@ -468,12 +430,34 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   GTest name — same string a `--gtest_filter` would match.
 - `tolerance_overrides`: later entries take precedence when multiple filters
   match. Both `atol` and `rtol` are required.
+- `validator_overrides`: later entries take precedence. An entry applies only
+  when a `filters` glob matches the test name **and** a `tensors` glob matches
+  the output tensor's label — its name (e.g. `LayernormBackward_0::DSCALE`), or
+  `uid=N` when the graph did not name it. Match on the tensor label rather than
+  the uid: uids differ between a C++ graph test and the bundle captured from it,
+  names do not. `validator` is `"allclose"` or `"rms"`; `rms_threshold` is
+  required and must be positive when the validator is `"rms"`, and must be
+  absent when it is `"allclose"` — an entry that does not say exactly what it
+  means is a load error, never a silent fall-back. `"rms"` is only defined for
+  float, half, bfloat16 and double outputs; a glob wide enough to catch an
+  integer output fails that tensor with a message naming the glob to narrow.
+  Absent any match the comparison is allclose — **allclose is the default
+  everywhere, and this section is the only thing that changes it.** Use it when
+  a per-element check is the wrong question, not to buy slack: an output that is
+  a long reduction (layernorm/RMSNorm backward `dscale`/`dbias`) has elements
+  that land arbitrarily near zero through cancellation, so per-element relative
+  error is unbounded while the aggregate relative-RMS error is not. Prefer
+  `tolerance_overrides` for everything else.
 - `test_skips`: the first matching entry wins; `reason` is surfaced in the
   `GTEST_SKIP` message. `archs` (substring match against the raw
   `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
   omit either to match any.
 - Applies to **both** bundle/sweep tests and C++ graph tests; the lookup runs
   in the shared harness (`TestConfig`/`TestSettings`), not per test type.
+  One caveat for `validator_overrides`: golden data validated against a *reference*
+  executor (`BundleReferenceValidationHarness`) is always compared with allclose at
+  the default tolerance. An engine's config describes how far that engine may
+  drift; it never relaxes the gate on our own committed data.
 - `[meta] version = 1` is required; the file is rejected on parse if missing
   or on an unsupported version.
 
@@ -649,30 +633,29 @@ automatically from `integration-test-bundles/`.
 
 ```bash
 # Find all batchnorm bundle cases
-python3 migration-scripts/find_case.py --op Batchnorm
+python3 migration_scripts/find_case.py --op Batchnorm
 
 # Find cases that have an epsilon input
-python3 migration-scripts/find_case.py --input epsilon
+python3 migration_scripts/find_case.py --input epsilon
 
 # Find cases where epsilon is in [-1,1]
-python3 migration-scripts/find_case.py --input epsilon:-1,1
+python3 migration_scripts/find_case.py --input epsilon:-1,1
 
 # Full detail for a hashed case id
-python3 migration-scripts/find_case.py --id f446b9 --detail
+python3 migration_scripts/find_case.py --id f446b9 --detail
 ```
 
 ### Adding a bundle test
 
 ```bash
-python3 migration-scripts/import_graph.py \
+python3 migration_scripts/import_graph.py \
     --graph new_conv.json \
     --bundle-dir integration-test-bundles/
 ```
 
 The case id is auto-generated and printed to stderr. No manual naming
-needed. See [`migration-scripts/README.md`](migration-scripts/README.md)
+needed. See [`migration_scripts/README.md`](migration_scripts/README.md)
 for the full workflow and tooling reference.
-
 ## Troubleshooting
 
 | Symptom | Fix |

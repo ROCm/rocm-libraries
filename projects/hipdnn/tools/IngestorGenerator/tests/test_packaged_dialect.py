@@ -95,8 +95,7 @@ class TestPackagedKdp:
         assert ks["source"] == "kernels/gfx950/attention_dense.py"
         assert ks["builder"] == "build_attention_dense"
         # Every non-defaulted AttentionDenseSpec field must be present: hkp_pack
-        # hydrates with Spec(**fields), so a missing one is a TypeError at pack
-        # time, after the descriptor already looks complete.
+        # hydrates with Spec(**fields), so a missing one is a TypeError at pack time.
         for required in (
             "batch",
             "seqlen_q",
@@ -141,12 +140,9 @@ class TestPackagedFragments:
     def test_census_fragment_registers_the_suite_this_run_writes(
         self, generator, gfx950_attention_dense_config, tmp_path
     ):
-        """The packaged bundle's one emitted registration names a real suite.
-
-        The call is spliced verbatim, so the suite in its SUITES list has to be a
-        suite this run actually wrote: a census whose gtest filter matches nothing
-        registers, runs zero cases and reports success.
-        """
+        """The call is spliced verbatim, so its suite must be one this run actually
+        wrote: a census whose gtest filter matches nothing runs zero cases and reports
+        success."""
         written = generator.render(gfx950_attention_dense_config, tmp_path)
         text, _payload = self._payload(tmp_path, "cmake_test_sources.txt")
         assert "hkp_register_census_tests(TARGET hip_kernel_provider_tests" in text
@@ -161,12 +157,9 @@ class TestPackagedFragments:
     def test_direct_load_fragment_splices_nothing_either(
         self, generator, scale_add_config, tmp_path
     ):
-        """Installation is by directory in BOTH roots.
-
-        A hand-maintained list would put the shard's contents under two
-        authorities -- the directory walk and the list -- which disagree exactly
-        when a file is added.
-        """
+        """Installation is by directory in BOTH roots: a hand-maintained list would put
+        the shard's contents under two authorities that disagree when a file is
+        added."""
         generator.render(scale_add_config, tmp_path)
         text, payload = self._payload(tmp_path, "cmake_descriptor_files.txt")
         assert payload == []

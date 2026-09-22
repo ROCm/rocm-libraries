@@ -329,9 +329,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
 
     # The shipped descriptors, and the default of the overridable
-    # HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT cache entry that descriptor-packaging
-    # declares. Declared beside the test root so the two authored descriptor roots are
-    # read together rather than one of them being buried in the packaging module.
+    # HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT cache entry descriptor-packaging declares.
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
@@ -555,10 +553,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # tree, so a directory missing at install time means the build did not run to
     # completion, and saying so beats shipping a package with no descriptors in it.
     #
-    # hkp_packaging_product exists exactly when the production packer will write -- the
-    # production source root is set and is a real directory. Re-testing the source root
-    # here would emit the rule for configurations the packer skips, turning a supported
-    # build into an install-time failure.
+    # hkp_packaging_product exists exactly when the production packer will write;
+    # re-testing the source root here would emit the rule for configurations the packer
+    # skips, turning a supported build into an install-time failure.
     # Each pack marks its output root complete with a stamp file inside it, so that
     # emptying the tree invalidates the stamp too. The stamp belongs to the build and not
     # to the package, and every pack writes the same name, so one pattern drops all of

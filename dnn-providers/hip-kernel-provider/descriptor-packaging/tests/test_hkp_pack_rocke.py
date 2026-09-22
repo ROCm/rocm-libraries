@@ -674,11 +674,11 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 # --- real-corpus guards (rocke importable, no comgr needed) -----------------
 @pytest.mark.quick
 def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
-    """gfx942's dense builder satisfies the `(spec, *, arch)` contract.
+    """gfx942's dense builder must stay packageable.
 
-    Asserting against the real builder catches a regression that reintroduces
-    an unsuppliable keyword-only knob; `test_hkp_pack_producer_guards.py`
-    covers the rejection shapes synthetically.
+    Its sweep knobs are flat fields on the spec, so the signature is the
+    ``(spec, *, arch)`` the gate requires. Asserting against the real builder
+    catches a regression that reintroduces an unsuppliable keyword-only knob.
     """
     from kernels.gfx942 import attention_dense as m
 

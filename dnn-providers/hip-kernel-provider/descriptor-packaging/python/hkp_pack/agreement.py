@@ -1,7 +1,7 @@
 """Data-only specialization declarations and producing-build evidence.
 
-No producer imports occur here. Only the compiler observes builder objects; readers
-verify those observations against the current descriptors and archive payload.
+Only the compiler observes builder objects; readers verify those observations
+against the current descriptors and archive payload. No producer imports here.
 """
 
 import copy
@@ -103,21 +103,14 @@ def validate_consumer(consumer, kmd):
 def resolved_contract(ukd, kdp=None):
     """The specialization contract in force for one kernel descriptor.
 
-    A declaration is identical across every inline kernel of one bundle -- one
-    engine, one KMD, one field partition -- so it may be declared ONCE on the
-    enclosing KDP's `provenance` and inherited by the kernels under it. Copying it
-    onto each entry instead says nothing extra and costs the whole bundle: a
-    2733-kernel pack grew 2.8x carrying the same fourteen fields 2733 times.
+    A declaration is identical across every inline kernel of one bundle, so it is
+    declared once on the enclosing KDP's `provenance` and inherited; copying it per
+    kernel is pure bloat (a 2733-kernel pack grew 2.8x). A kernel carrying its own
+    overrides the KDP's wholesale and is never merged with it, so it cannot
+    silently inherit a consumer it never declared.
 
-    A kernel that carries its own overrides the KDP's WHOLESALE and is NEVER merged
-    with it. A merge would let a per-kernel block silently inherit a consumer it
-    never declared -- and the declaration's whole purpose is to state exactly what
-    the producing compiler specialized on, so a consumer nobody wrote down is worse
-    than no declaration at all.
-
-    `kdp` is the enclosing document, or None where there is none: a standalone UKD
-    is its own file and therefore has to carry its own. Returns None when neither
-    side declares anything, which every caller treats as the hard error it is.
+    `kdp` is the enclosing document, or None for a standalone UKD. Returns None
+    when neither side declares anything, which every caller treats as an error.
     """
     own = (ukd.get("provenance") or {}).get("specialization_contract")
     if own is not None:
@@ -165,13 +158,9 @@ def observation_request(consumer, kmd):
 def select_declaration(ukd, engine, kmd, schemas, kdp=None):
     """The single consumer entry this UKD declares for one (engine, KMD) pair.
 
-    A standalone UKD several engines reference carries one entry per pair, so the
-    pair -- not the UKD -- selects. Zero matches is an unfulfilled specialization
-    obligation and more than one is a conflict; both fail rather than picking, since
-    either would certify this compile against a declaration it was not written for.
-
-    `kdp` is the enclosing document whose declaration an inline kernel inherits when
-    it carries none of its own; see `resolved_contract`.
+    A standalone UKD referenced by several engines carries one entry per pair, so
+    the pair selects, not the UKD, and zero or multiple matches fail rather than
+    picking one. `kdp` is the enclosing document an inline kernel inherits from.
     """
     declarations = contracts(ukd, schemas, kdp)
     matching = [
@@ -191,15 +180,12 @@ def consumer_record(ukd, engine, kmd, kdp_header, arch, declaration):
     """One consumer's binding of this compile to the descriptors that consume it.
 
     The producer writes these into the evidence and a reader rebuilds them from the
-    descriptors in front of it; equality of the two lists is what makes a changed
-    KMD, metadata, KDP header or effective architecture fail its binding. Both sides
-    therefore build the record HERE and nowhere else -- a second construction with
-    the same intent and a different key order would compare unequal for no reason,
-    or equal despite a real difference.
+    current descriptors; equality of the two lists fails a changed KMD, metadata,
+    KDP header or effective architecture, so both sides must build the record here
+    and key order cannot differ.
 
     `kdp_header` is the KDP document without its `kernelDescriptors`, carrying the
-    single shard `arch`, so the record binds the pack the UKD ships under rather than
-    the authored multi-arch list.
+    single shard `arch`, so the record binds the pack the UKD ships under.
     """
     return {
         "ukd_id": ukd["id"],
@@ -212,23 +198,55 @@ def consumer_record(ukd, engine, kmd, kdp_header, arch, declaration):
     }
 
 
+def stored_record(record):
+    """One consumer record as it ships: ids to name the documents, digests to bind
+    them. Each document digests separately so a failure can name which one moved,
+    and `declaration` separately because a standalone UKD states its own contract.
+    """
+    return {
+        "ukd_id": record["ukd_id"],
+        "engine_id": record["engine"]["id"],
+        "engine_digest": digest(record["engine"]),
+        "kmd_id": record["kmd"]["id"],
+        "kmd_digest": digest(record["kmd"]),
+        "kdp_id": record["kdp"]["id"],
+        "kdp_digest": digest(record["kdp"]),
+        "metadata_digest": digest(record["metadata"]),
+        "effective_arch": record["effective_arch"],
+        "declaration_digest": digest(record["declaration"]),
+    }
+
+
 def canonical_records(records):
     """One consumer list in an order neither side chooses.
 
-    Two KDPs referencing one standalone UKD under the same engine, KMD and arch
-    describe the same consumer, so the duplicate collapses. Ordering by digest keeps
-    the list independent of descriptor traversal order, which differs between the
-    producer's walk and a reader's directory scan.
+    Duplicates collapse, and ordering by digest keeps the list independent of the
+    producer's walk versus a reader's directory scan.
     """
     unique = {digest(record): record for record in records}
     return [unique[key] for key in sorted(unique)]
 
 
 class OriginObserver:
-    """One stable producing invocation's defining-file identities."""
+    """One stable producing invocation's defining-file identities.
+
+    The resolved path is watched for the invocation and never published: shipping
+    it would make the artifact depend on the building machine's layout.
+    """
 
     def __init__(self):
         self.files = {}
+
+    def _record(self, path, sha):
+        """The one way a file identity enters `files`; `path` is already resolved.
+
+        A second SHA for a recorded path means the defining file was edited between
+        two observations, which is what this observer catches. Assigning into
+        `files` elsewhere, or merging with `dict.update`, would retire the check.
+        """
+        if path in self.files and self.files[path] != sha:
+            raise HkpPackError(f"producer changed during compilation: {path}")
+        self.files[path] = sha
 
     def identity(self, obj):
         obj = getattr(obj, "__func__", obj)
@@ -236,17 +254,34 @@ class OriginObserver:
             path = Path(inspect.getsourcefile(obj)).resolve(strict=True)
             content = path.read_bytes()
             sha = hashlib.sha256(content).hexdigest()
-            if path in self.files and self.files[path] != sha:
-                raise HkpPackError(f"producer changed during compilation: {path}")
-            self.files[path] = sha
+            self._record(path, sha)
             return {
                 "module": obj.__module__,
                 "qualname": obj.__qualname__,
-                "file": str(path),
                 "sha256": sha,
             }
         except (TypeError, OSError, AttributeError) as exc:
             raise HkpPackError(f"unresolvable producer origin: {obj!r}: {exc}") from exc
+
+    def exported(self):
+        """This observer's identities as a plain, picklable mapping.
+
+        Keys are `str` rather than `Path` because the map crosses a process
+        boundary; `absorb` resolves them back.
+        """
+        return {str(path): sha for path, sha in self.files.items()}
+
+    def absorb(self, exported):
+        """Fold in identities observed elsewhere, typically a worker process.
+
+        A variant compiled in a pool observes its producer against a fresh
+        observer, so the cross-variant property -- one stable producing invocation
+        behind every variant -- holds only once those observations reach the
+        observer spanning the arch. Each key resolves here so a worker's string and
+        this process's `Path` land on one entry.
+        """
+        for path, sha in exported.items():
+            self._record(Path(path).resolve(), sha)
 
     def stable(self):
         for path, sha in self.files.items():
@@ -332,14 +367,11 @@ def descriptor_binding(ukd):
 def publish(ukd, observations, records):
     """Write the producing compiler's evidence onto a shipped UKD.
 
-    Only this function creates `provenance.effective_spec`, and it runs inside the
-    invocation that actually compiled the payload. The authored `provenance.spec`
-    sits beside it untouched: one is what was asked for, the other is what was
-    observed, and collapsing them would lose the disagreement the whole check exists
-    to find.
-
-    `descriptor_binding` excludes the evidence from its own digest, so the record
-    binds the descriptor it ships in without having to describe itself.
+    Only this function creates `provenance.effective_spec`, inside the invocation
+    that compiled the payload. The authored `provenance.spec` stays untouched
+    beside it: one is what was asked for, the other what was observed, and
+    collapsing them loses the disagreement this check exists to find.
+    `descriptor_binding` excludes the evidence from its own digest.
     """
     provenance = ukd["provenance"]
     authored = {key: provenance[key] for key in ("source", "builder", "spec")}
@@ -347,7 +379,7 @@ def publish(ukd, observations, records):
         "schema_version": 1,
         "authored_digest": digest(authored),
         "observations": observations,
-        "consumers": records,
+        "consumers": [stored_record(record) for record in records],
         "descriptor_digest": descriptor_binding(ukd),
     }
 
@@ -355,15 +387,12 @@ def publish(ukd, observations, records):
 def verify(ukd, records, payload):
     """Check one shipped UKD's evidence against the descriptors and bytes in hand.
 
-    `records` is built from the CURRENT descriptors through `consumer_record` and
-    `canonical_records`, so equality with the stored list is what fails a changed
-    KMD, metadata, KDP header, declaration or effective architecture. Nothing here
-    imports a producer: the evidence is self-contained, which is what lets a packed
-    artifact be checked on a machine that has never had rocKE installed.
-
-    Every deviation raises. A missing or unsupported record is a failure and never
-    an unchecked property -- an artifact that cannot say what it was built from has
-    not established agreement, which is the case this exists to reject.
+    `records` is rebuilt from the current descriptors, so equality of their
+    `stored_record` projections with the stored list fails a changed KMD, metadata,
+    KDP header, declaration or effective architecture. Nothing here imports a
+    producer, so a packed artifact can be checked where rocKE was never installed.
+    Every deviation raises: a missing or unsupported record is a failure, never an
+    unchecked property.
     """
     record = ukd.get("provenance", {}).get("effective_spec")
     if not isinstance(record, dict) or record.get("schema_version") != 1:
@@ -375,7 +404,7 @@ def verify(ukd, records, payload):
     }
     if record.get("authored_digest") != digest(authored):
         raise HkpPackError("effective_spec authored-input binding mismatch")
-    if record.get("consumers") != records:
+    if record.get("consumers") != [stored_record(entry) for entry in records]:
         raise HkpPackError("effective_spec consumer binding mismatch")
     source = ukd["kernel_source"]
     payload_sha = hashlib.sha256(payload).hexdigest()
@@ -383,8 +412,7 @@ def verify(ukd, records, payload):
         raise HkpPackError("effective_spec payload binding mismatch")
     observations = record.get("observations", {})
     # The observations were taken on the object handed to the builder; these three
-    # bind them to the artifact that came back out of it. Without them the record
-    # would describe a compile that happened, with no evidence it is the compile
+    # bind them to the artifact it returned, so the record describes the compile
     # whose bytes this descriptor names.
     if observations.get("code_object_sha256") != payload_sha:
         raise HkpPackError("effective_spec code-object binding mismatch")
@@ -395,7 +423,7 @@ def verify(ukd, records, payload):
     producer = observations.get("producer", {})
     for role in ("builder", "spec"):
         identity = producer.get(role, {})
-        if set(identity) != {"module", "qualname", "file", "sha256"} or not all(
+        if set(identity) != {"module", "qualname", "sha256"} or not all(
             isinstance(v, str) and v for v in identity.values()
         ):
             raise HkpPackError("missing producing-object identity")

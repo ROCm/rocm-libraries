@@ -3,18 +3,12 @@
 
 """The sweep, probe and audit CLIs, exercised as programs.
 
-Every case below runs the actual `tools/*.py` entry point as a subprocess, from a
-directory unrelated to the generator tree and to the sweep's own inputs, because
-the defects these guard against were all in the wiring: a driver that resolved a
-path against the caller's cwd, a gate that never ran because the phase
-short-circuited, a resume that trusted a filename.
-
-CONTROL-FLOW FIXTURES. `bin/rocminfo`, `bin/python3` and each install tree's
-`bin/hipdnn_list_engines` below emit the field names and shapes the real
-`dnn_benchmarking` result schema defines (`reporting/suite_results.py`) and nothing
-more. They exist so the driver's control flow can be steered deterministically
-without a GPU; no case here establishes that a kernel ran, that a number is
-correct, or that an install tree is loadable.
+Every case runs the real `tools/*.py` entry point as a subprocess from an unrelated
+cwd, because the defects guarded against are wiring defects. The staged
+`bin/rocminfo`, `bin/python3` and `bin/hipdnn_list_engines` are CONTROL-FLOW
+FIXTURES emitting the field names the `dnn_benchmarking` result schema defines
+(`reporting/suite_results.py`): no case establishes that a kernel ran or that a
+number is correct.
 """
 
 from __future__ import annotations
@@ -38,8 +32,8 @@ _ENGINE_NAME = "test:Engine"
 _ENGINE_ID = 0x1A2B
 _ARCH = "gfx942"
 
-#: CONTROL-FLOW FIXTURE. Stands in for `rocminfo` so the arch gate has a definite
-#: answer. Emits one agent line in the shape the token scan reads.
+#: CONTROL-FLOW FIXTURE for `rocminfo`: one agent line in the shape the token scan
+#: reads.
 _ROCMINFO = """\
 import os, sys
 print("Agent 1")
@@ -49,8 +43,8 @@ print("  Name:                    " + os.environ.get("FAKE_ROCMINFO_ARCH", "{arc
 sys.exit(int(os.environ.get("FAKE_ROCMINFO_RC", "0")))
 """
 
-#: CONTROL-FLOW FIXTURE. Stands in for the installed engine registry so discovery
-#: resolves one name to one ID, in the exact line shape the driver parses.
+#: CONTROL-FLOW FIXTURE for the installed engine registry: one name to one ID, in the
+#: line shape the driver parses.
 _LIST_ENGINES = """\
 import sys
 print("Engines:")
@@ -59,9 +53,7 @@ print("  {name} (0x{eid:x})")
 
 #: CONTROL-FLOW FIXTURE, and deliberately TWO programs in one file: the driver
 #: identifies the benchmark's Python environment by running the same executable with
-#: `-c <probe>`, then runs it again as the benchmark. Answering both here is what
-#: lets a test steer the whole benchmark side, via the scenario JSON at
-#: $FAKE_SCENARIO, without a venv.
+#: `-c <probe>`, then runs it again as the benchmark.
 _FAKE_BENCH = """\
 import glob, json, os, sys
 from pathlib import Path
@@ -170,15 +162,9 @@ raise SystemExit(scenario.get("rc", 0))
 """
 
 
-#: Marks a case that drives a sweep far enough to execute a staged fixture.
-#:
-#: The tool targets an allocated device host and carries no platform handling, so
-#: this is a limit of what can be driven here rather than a gap in a supported
-#: configuration.
-#:
-#: Deliberately narrower than the file: staging a fixture and refusing a config both
-#: work anywhere, so the refusal cases and the device-probe and field-audit cases
-#: stay live on every platform.
+#: Marks a case that drives a sweep far enough to execute a staged fixture. Narrower
+#: than the file: staging a fixture and refusing a config work anywhere, so the
+#: refusal, device-probe and field-audit cases stay live on every platform.
 _needs_posix_exec = pytest.mark.skipif(
     os.name != "posix",
     reason=(
@@ -189,11 +175,8 @@ _needs_posix_exec = pytest.mark.skipif(
 )
 
 
-#: Marks a case that withdraws write access from a path to drive an operational error.
-#:
-#: Narrower than execution: `chmod` does not deny directory writes on Windows, so the
-#: condition the case exists to create never holds and the driver reaches its verdict
-#: by some other route, which is not the thing being asserted.
+#: Marks a case that withdraws write access to drive an operational error. `chmod`
+#: does not deny directory writes on Windows, so the condition never holds there.
 _needs_posix_permissions = pytest.mark.skipif(
     os.name != "posix",
     reason=(
@@ -340,7 +323,6 @@ def sweep(tmp_path):
 
 
 class TestTheCLIsRunAsPrograms:
-    """From an unrelated cwd, with no inherited environment doing the work."""
 
     @_needs_posix_exec
     def test_a_clean_timing_sweep_completes(self, sweep):
@@ -377,8 +359,8 @@ class TestTheCLIsRunAsPrograms:
         assert "exact gfx architecture token" in result.stderr
 
     def test_early_mode_makes_no_installation_claim(self, tmp_path):
-        """Early feasibility must not accept --install, and must ignore an inherited
-        INSTALL: the runbook's early gate precedes any build."""
+        """The runbook's early gate precedes any build, so an inherited INSTALL is
+        ignored."""
         env = dict(os.environ, INSTALL=str(tmp_path / "not-a-tree"))
         rejected = subprocess.run(
             [
@@ -479,11 +461,8 @@ class TestTheCLIsRunAsPrograms:
 
 @_needs_posix_exec
 class TestGatesFailIndependently:
-    """Each gate must be able to be the ONLY thing that failed.
-
-    Where one gate's failure suppresses another's evaluation, a run with several
-    causes reports one, and the rest surface only at a later, more expensive step.
-    """
+    """Where one gate's failure suppresses another's evaluation, a run with several
+    causes reports one and the rest surface only at a later, more expensive step."""
 
     def _only_failing(self, gates: dict) -> set:
         return {name for name, value in gates.items() if not value}
@@ -512,16 +491,16 @@ class TestGatesFailIndependently:
         assert "outcomes" in self._only_failing(sweep.gates(result))
 
     def test_an_unloaded_plugin_fails_only_the_provenance_gate(self, sweep):
-        """Every number is present and plausible; nothing in the log says this
-        engine's plugin was ever loaded, so the numbers are another engine's."""
+        """Every number is plausible, but nothing in the log loaded this engine's
+        plugin, so the numbers are another engine's."""
         sweep.scenario(skip_provenance=True)
         result = sweep.run()
         assert result.returncode == 1
         assert self._only_failing(sweep.gates(result)) == {"provenance"}
 
     def test_too_few_served_graphs_fails_only_the_served_gate(self, sweep):
-        """Declines are a legitimate outcome, so the ledger is clean -- the count is
-        the only thing wrong, and it is what catches a dropped engine."""
+        """Declines are legitimate, so the ledger is clean and the count is the only
+        thing wrong -- which is what catches a dropped engine."""
         sweep.scenario(served=1)
         result = sweep.run()
         assert result.returncode == 1
@@ -541,8 +520,8 @@ class TestGatesFailIndependently:
         assert {"parsed_inventory", "metadata", "served", "outcomes"} <= failing
 
     def test_a_suite_reporting_another_arch_fails_the_metadata_gate(self, sweep):
-        """The device gate established the arch on this host. A result document
-        claiming a different one is not this sweep's evidence."""
+        """The device gate established the arch on this host; a result document claiming
+        a different one is not this sweep's evidence."""
         sweep.scenario(gpu_arch="gfx950")
         result = sweep.run()
         assert result.returncode == 1
@@ -567,8 +546,8 @@ class TestCorrectnessEvidenceIsRequiredNotOptional:
         assert staged.gates(result, "correctness")["correctness"] is False
 
     def test_an_unreported_comparison_is_not_a_pass(self, tmp_path):
-        """`tolerance_match: null` is what the suite emits when no comparison ran,
-        and it counts it as a pass. The sweep must not."""
+        """`tolerance_match: null` is what the suite emits when no comparison ran, and
+        the suite counts it as a pass."""
         staged = Sweep(tmp_path, correctness=True)
         staged.scenario(tolerance=None)
         result = staged.run()
@@ -576,8 +555,8 @@ class TestCorrectnessEvidenceIsRequiredNotOptional:
         assert staged.gates(result, "correctness")["correctness"] is False
 
     def test_a_skipped_reference_provider_fails_the_reference_gate(self, tmp_path):
-        """The reference silently skipping is the dangerous shape: every engine row
-        still says success, the suite exits 0, and nothing was compared."""
+        """A silently skipping reference leaves every engine row saying success and the
+        suite exiting 0 with nothing compared."""
         staged = Sweep(tmp_path, correctness=True)
         staged.scenario(reference="skipped")
         result = staged.run()
@@ -595,11 +574,11 @@ class TestCorrectnessEvidenceIsRequiredNotOptional:
 
 @_needs_posix_exec
 class TestResume:
-    """A completed phase is reusable only when it is bound to the CURRENT inputs and
-    passed EVERY gate. Each of the three ways that binding is broken is tested."""
+    """A completed phase is reusable only when bound to the CURRENT inputs and past
+    EVERY gate."""
 
     def test_an_unchanged_rerun_resumes(self, sweep):
-        """The control. Without it, every assertion below passes vacuously."""
+        """The control: without it every assertion below passes vacuously."""
         assert sweep.run().returncode == 0
         again = sweep.run()
         assert again.returncode == 0
@@ -607,7 +586,7 @@ class TestResume:
 
     def test_a_failed_phase_is_rerun_not_resumed(self, sweep):
         """A failed served-count gate leaves no reusable record, so fixing the cause
-        must re-measure rather than adopt the failure or skip past it."""
+        re-measures."""
         sweep.scenario(served=1)
         assert sweep.run().returncode == 1
         sweep.scenario()
@@ -617,8 +596,8 @@ class TestResume:
         assert all(sweep.gates(recovered).values())
 
     def test_an_edited_corpus_invalidates_the_resume(self, sweep):
-        """Same filenames, same count, same timestamps-as-far-as-anyone-checks --
-        different content. Binding to names would resume a different experiment."""
+        """Same filenames, count and timestamps, different content: binding to names
+        would resume a different experiment."""
         assert sweep.run().returncode == 0
         graph = json.loads((sweep.corpus / "g0.json").read_text())
         graph["tensors"][0]["dims"] = [2, 8, 512, 128]
@@ -645,8 +624,8 @@ class TestResume:
         assert not sweep.resumed(again), "a changed measurement config must not resume"
 
     def test_an_interrupted_write_is_never_treated_as_success(self, sweep):
-        """A completion record that was being written when the job died. Half a
-        record is not a phase that passed."""
+        """A completion record half-written when the job died is not a phase that
+        passed."""
         assert sweep.run().returncode == 0
         sidecars = sorted((sweep.root / "results").glob("timing__*.complete.json"))
         assert sidecars, "the control run wrote no completion record"
@@ -657,8 +636,8 @@ class TestResume:
         assert not sweep.resumed(again), "a truncated record must not resume"
 
     def test_a_record_whose_evidence_was_edited_is_not_resumed(self, sweep):
-        """The record is intact and its gates all passed; the artifact it points at
-        no longer hashes to what it recorded."""
+        """The record is intact and its gates passed; the artifact no longer hashes to
+        what it recorded."""
         assert sweep.run().returncode == 0
         results = sorted((sweep.root / "results" / "attempts").rglob("results.json"))
         assert results
@@ -681,10 +660,9 @@ class TestTheDriverRefusesAnUnsafeConfig:
         assert "shell launchers are not sweep executables" in result.stderr
 
     def test_a_wrapper_that_selects_a_shell_is_refused_by_its_shebang(self, sweep):
-        """What makes a launcher unusable is what it SELECTS, not its name. Refusing
-        only argv[0]'s filename leaves a differently-named wrapper to the much later
-        interpreter identity gate, which declines the sweep (exit 1) rather than
-        rejecting the config (exit 2)."""
+        """What makes a launcher unusable is what it SELECTS, not its name: refusing
+        only argv[0]'s filename leaves a renamed wrapper to the later interpreter gate,
+        which declines the sweep (exit 1) rather than rejecting the config (exit 2)."""
         wrapper = _script(sweep.bin / "run-benchmark", "")
         wrapper.write_text('#!/bin/sh\nexec "%s" "$@"\n' % (sweep.bin / "python3"))
         config = json.loads(sweep.config_path.read_text())
@@ -697,8 +675,8 @@ class TestTheDriverRefusesAnUnsafeConfig:
         assert "SWEEP_INCOMPLETE" not in result.stderr
 
     def test_a_config_may_not_redirect_a_driver_owned_option(self, sweep):
-        """`--engine` in the config would let the evidence come from a different
-        engine than the one the ledger attributes it to."""
+        """`--engine` in the config would let the evidence come from a different engine
+        than the ledger attributes it to."""
         config = json.loads(sweep.config_path.read_text())
         config["benchmark"]["argv"] = [str(sweep.bin / "python3"), "--engine", "1"]
         sweep.config_path.write_text(json.dumps(config))
@@ -722,9 +700,8 @@ class TestTheDriverRefusesAnUnsafeConfig:
 
     @_needs_posix_exec
     def test_a_missing_device_declines_the_sweep_at_the_device_gate(self, sweep):
-        """Wrong-arch host: the sweep may not silently measure whatever is present.
-        A gate that declined is an ordinary incomplete outcome, exit 1 -- distinct
-        from the operational failure below, which is exit 2."""
+        """A gate that declined is an ordinary incomplete outcome, exit 1, distinct from
+        the operational failure below at exit 2."""
         env_result = subprocess.run(
             [sys.executable, str(_SWEEP), "--config", str(sweep.config_path)],
             cwd=sweep.elsewhere,
@@ -746,9 +723,9 @@ class TestTheDriverRefusesAnUnsafeConfig:
     def test_an_unwritable_output_root_is_an_operational_error_not_an_incomplete_sweep(
         self, sweep
     ):
-        """An OSError is a broken execution host, not a measured decline. Reported
-        as SWEEP_INCOMPLETE, a harness driving several arches carries on as though
-        this one had simply produced nothing to compare."""
+        """An OSError is a broken execution host, not a measured decline: reported as
+        SWEEP_INCOMPLETE, a multi-arch harness carries on as though nothing was
+        produced."""
         sweep.root.chmod(0o555)
         try:
             result = sweep.run()

@@ -2,19 +2,16 @@
 # SPDX-License-Identifier: MIT
 #
 # A SYNTHETIC authoring profile in the gfx942 shape, read by `test_launch_surface.py`
-# when no override is set. It is a controlled INPUT to `launch_surface.py --check`,
-# not a claim about any shipped engine's real launch surface: the surfaces below name
-# `ConvNative.cpp` because that pack is committed and really does read `dtype` and
-# `block_size` through required accessors, which is what makes the audit's
-# cross-reference do work here rather than pass vacuously.
+# when no override is set: a controlled INPUT to `launch_surface.py --check`, not a
+# claim about any shipped engine's real launch surface. See README.md in this
+# directory.
 #
-# Every path is repo-relative and must exist -- `--check` resolves them against the
-# repo root and reports a missing one as a failure, so a moved file fails this
-# fixture loudly instead of weakening it.
+# Every path is repo-relative and must exist; `--check` resolves them against the repo
+# root and reports a missing one as a failure.
 #
 # The audited property is the UNION rule: `grid` and `applicability` cite the same
 # mirror and split its two required fields between them, so neither surface alone
-# covers the file and the check must combine them.
+# covers the file.
 
 #: Set on the profile, not on any one surface, so the shape check has a vocabulary to
 #: reject a surface's `kmd_fields` entry against.
@@ -42,9 +39,9 @@ launch_surface:
     guard: convFwdKernelMatches compares the descriptor's dtype against the graph's
     test: projects/hipdnn/tools/IngestorGenerator/tests/test_launch_surface.py
   # The two honest admissions this fixture exists to have `--check` report by name.
-  # `guard: none` / `test: none` are written out rather than omitted so an unguarded
-  # surface is a visible choice; both land in the audit's `unguarded` list, and
-  # `TestAgainstTheGfx942Profile` asserts that list is exactly these two.
+  # `guard: none` / `test: none` are written out rather than omitted, so an unguarded
+  # surface is a visible choice; `TestAgainstTheGfx942Profile` asserts the `unguarded`
+  # list is exactly these two.
   - name: kernargs
     python_source: kernels/common/conv_implicit_gemm.py:_build_implicit_gemm_conv_impl
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/ConvNative.cpp:convFwdKernelSignature

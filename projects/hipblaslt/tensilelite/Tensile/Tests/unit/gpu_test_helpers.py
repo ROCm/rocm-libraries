@@ -193,6 +193,8 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
         "ISA": (9, 5, 0),
         "NonTemporalA": 0,
         "NonTemporalB": 0,
+        # RAP off by default; the beta store path reads this key unconditionally.
+        "ReuseAcrossPersistent": 0,
         "enableTDMA": False,
         "enableTDMB": False,
         "enableTDMMetadata": False,

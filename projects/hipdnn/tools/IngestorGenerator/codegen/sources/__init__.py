@@ -1,13 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Adapters producing a normalized pack/kernel skeleton from something other
-than a hand-authored YAML config.
-
-Every adapter returns the same shape the config loader itself builds
-(``codegen.models``), so the rest of the pipeline -- pre-mint checks, UUID
-minting, template rendering -- never needs to know which one produced its input.
-"""
+"""Adapters producing a pack/kernel skeleton from something other than a
+hand-authored YAML config. Each returns the shape the config loader builds
+(``codegen.models``), so the rest of the pipeline is adapter-agnostic."""
 
 from .base import SourceAdapter, SourceAdapterResult
 from .hiprtc import HiprtcAdapter

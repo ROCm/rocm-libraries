@@ -3,66 +3,43 @@
     python3 tools/hkp_desk_check.py --mode structural <path/to/*.kdp.json>
     python3 tools/hkp_desk_check.py --mode full <path/to/shipped.kdp.json>
 
-TWO MODES, TWO DIFFERENT CONCLUSIONS. `--mode structural` reads the descriptors
-against themselves and against each other: drift between metadata and the AUTHORED
-spec, duplicate matcher tuples, toc_key uniqueness, symbol tolerance. It says so in
-its own output, and it never reports compiled agreement, because nothing it looked
-at is evidence about a binary.
+`--mode structural` reads the descriptors against themselves and each other: drift
+between metadata and the authored spec, duplicate matcher tuples, toc_key
+uniqueness, symbol tolerance. It never reports compiled agreement. It accepts an
+authored (`kernel_source.spec`) or shipped (`provenance.spec`) KDP, since the drift
+check falls back between the two.
 
 `--mode full` additionally binds every kernel to the producing compiler's
 `provenance.effective_spec` record and to the archive bytes the descriptor names:
-the self-contained declaration, the current metadata, KMD schema, KDP header,
-effective arch, captured symbol and payload SHA256 must all agree with what the
-compiler observed. A missing, unsupported or mismatched record is a FAILURE, not an
-unchecked property. Nothing here imports rocKE, so a valid packed artifact verifies
-on a machine that has never had the producer installed.
+declaration, metadata, KMD schema, KDP header, effective arch, captured symbol and
+payload SHA256 must all agree with what the compiler observed. A missing,
+unsupported or mismatched record is a FAILURE. Nothing imports rocKE, so a valid
+artifact verifies where the producer was never installed. It needs the packed
+dialect: a non-kpack kernel fails, the same refusal `verify_variant_sets` makes.
 
-`--mode full` needs the packed dialect. Before packing there are no bytes, so
-there is no producing-build record for a declaration to bind and the mode has
-nothing to check; a non-kpack kernel is a failure here, the same refusal
-`verify_variant_sets` makes, so the two readers agree about one artifact.
+A packed non-rocKE kernel whose declaration lists no specialized metadata field is
+reported NOT VERIFIED HERE, never folded into the agreement line: only rocKE-origin
+kernels carry compiled-specialization evidence today. A kernel whose
+`provenance.origin_kind` is `rocke` cannot reach that report -- the packer published
+its `effective_spec` -- so declaring no specialized field AND carrying no record is
+a FAILURE. An ABSENT `origin_kind` is not rocKE.
 
-A packed NON-rocKE kernel whose declaration lists no specialized metadata field is
-reported as NOT VERIFIED HERE and never folded into the agreement line. Only
-rocKE-origin kernels currently carry compiled-specialization evidence: a hip kernel
-AOT-built with specializing preprocessor defines is a real compiled specialization
-that this check does not yet verify, so the absence of a claim is a limit of this
-tool rather than a property of the kernel. Reading it as compiled agreement would be
-a success this tool never earned, which is the substitution the two modes exist to
-prevent.
+Standalone-UKD id references in a KDP's `kernelDescriptors` resolve against the
+shard, the same hop `verify_variant_sets` makes.
 
-A kernel whose `provenance.origin_kind` is `rocke` cannot reach that report: the
-packer published its `effective_spec` when it shipped it, so declaring no
-specialized metadata field AND carrying no record is a FAILURE. Without that,
-moving the specialized fields into `matcher_only_fields` and deleting the record
-would waive a rocKE kernel's evidence into a clean exit with the archive unread. An
-ABSENT `origin_kind` is not treated as rocKE -- descriptors packed before the field
-existed have none.
+The mode is REQUIRED: a default would let a structural run read as a full one.
 
-A KDP's `kernelDescriptors` may hold standalone-UKD id references as bare strings
-after packing; they are resolved against the shard, the same hop
-`verify_variant_sets` makes, so both readers see the same descriptor set.
-
-The mode is REQUIRED. A default would let a structural run be mistaken for a full
-one in a log, which is the substitution this split exists to prevent.
-
-Exits 0 when every enforced invariant is clean, 1 when any is violated OR
-could not be checked (a "COULD-NOT-CHECK" spec-drift result is a failure, not
-a silent pass -- see `hkp_pack.desk_check.DeskCheckReport.ok`). Symbol
-non-uniqueness is informational only and never causes a non-zero exit on its own.
-
-Structural mode works on an authored (pre-pack) KDP -- `kernel_source.spec` --
-and a shipped (post-pack) one -- `provenance.spec` -- since the drift check
-falls back between the two automatically. Full mode needs a shipped shard: the
-record and the archive it binds exist only after packing.
+Exits 0 when every enforced invariant is clean, 1 when any is violated or could not
+be checked (see `hkp_pack.desk_check.DeskCheckReport.ok`). Symbol non-uniqueness is
+informational and never causes a non-zero exit on its own.
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-# Same shadowing hazard hkp_pack.py's own tool guards against: tools/ must
-# never resolve `hkp_pack` to itself.
+# Same shadowing hazard hkp_pack.py's own tool guards against: tools/ must never
+# resolve `hkp_pack` to itself.
 _PKG_ROOT = str(Path(__file__).resolve().parent.parent / "python")
 while _PKG_ROOT in sys.path:
     sys.path.remove(_PKG_ROOT)
@@ -117,9 +94,9 @@ def _parse_args(argv):
         help="A KMD field the matcher keys on; repeatable. This is the "
         "MATCHER-TUPLE identity (invariant 2). Defaults to the fields the "
         "bundle's own specialization_contract declares it specialized on, and "
-        "only falls back to a generic attention-shaped list for a bundle that "
-        "declares no contract. Neither this flag nor that declaration narrows "
-        "--drift-field.",
+        "otherwise to the fields derived from the bundle's own kernel "
+        "metadata -- there is no generic attention-shaped fallback. Neither "
+        "this flag nor that declaration narrows --drift-field.",
     )
     p.add_argument(
         "--drift-field",
@@ -147,9 +124,9 @@ def main(argv=None):
     unclaimed: list = []
     verified = 0
     if args.mode == "full":
-        # A tree that cannot be read at all is one failure message, not a crash
-        # and not a skip: the caller asked whether this bundle agrees with its
-        # binaries, and "the record could not be reached" answers that with no.
+        # A tree that cannot be read at all is one failure message, not a crash and
+        # not a skip: "the record could not be reached" answers the caller's
+        # question with no.
         try:
             failures, unclaimed, verified = compiled_agreement(
                 kdp, args.kpack_python_dir
@@ -161,12 +138,12 @@ def main(argv=None):
     except HkpPackError as exc:
         # An unresolvable standalone-UKD reference means the descriptor set is not
         # readable at all. Reported, not raised: a traceback out of a gate reads as
-        # a broken tool rather than as a broken artifact.
+        # a broken tool rather than a broken artifact.
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     # No generic fallback after the derived one: it is reached only by a bundle
     # whose kernels carry no metadata, and `duplicate_matcher_tuples` drops every
-    # field absent from all of them, so any list and the empty one agree there.
+    # field absent from all of them.
     fields = tuple(args.fields) or declared_fields or metadata_identity_fields(kernels)
     report = DeskCheckReport(
         kernels,

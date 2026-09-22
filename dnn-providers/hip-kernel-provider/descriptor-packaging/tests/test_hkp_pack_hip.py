@@ -770,9 +770,9 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
     # A second referencing KDP is a second CONSUMER: it resolves to its own engine
-    # and its own KMD, so the UKD has to declare what it claims for that pair too.
-    # Every field of kmd-copy is matcher-only here -- a hip source compiles no
-    # specialization -- but the claim is stated rather than inferred from silence.
+    # and KMD, so the UKD declares what it claims for that pair too. Every field of
+    # kmd-copy is matcher-only here -- a hip source compiles no specialization --
+    # but the claim is stated rather than inferred from silence.
     ukd_path = src / _STANDALONE_UKD_FILE
     ukd_doc = _read(ukd_path)
     consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
@@ -801,12 +801,9 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
 def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """The same second reference, with the declaration left alone.
-
-    A UKD several engines reference carries one entry per engine. Silence is not a
-    waiver: without the entry there is no statement about what this descriptor
-    claims under `ued-copy`, and packing it anyway would ship a catalog entry
-    nothing checked.
+    """The same second reference with the declaration left alone. A UKD several
+    engines reference carries one entry per engine, and silence is not a waiver:
+    packing without the entry ships a catalog entry nothing checked.
     """
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -1121,10 +1118,9 @@ def test_scoped_ued_name_loads_clean(main_fixture):
 def test_authored_provenance_cannot_hijack(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # The shipped provenance block is the generated traceability record: an
-    # authored value for a field the producer writes is overwritten, while an
-    # authored field the producer does not write survives -- so this is the
-    # reservation at work rather than a wholesale drop.
+    # The shipped provenance block is the generated traceability record: an authored
+    # value for a field the producer writes is overwritten, while an authored field
+    # the producer does not write survives.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)

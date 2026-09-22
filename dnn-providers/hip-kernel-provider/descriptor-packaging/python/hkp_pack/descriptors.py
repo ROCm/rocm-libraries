@@ -231,16 +231,12 @@ def _validate_provenance(provenance, where, *, produced=False):
     """Shape of one `provenance` block, wherever it is declared.
 
     A KDP and the kernels under it declare the same `specialization_contract`
-    object -- a kernel with none of its own inherits the enclosing KDP's -- so one
-    rule covers both. An unusable declaration fails at the document that wrote it
-    rather than at every kernel that inherited it.
+    object, so one rule covers both and an unusable declaration fails at the
+    document that wrote it.
 
-    `effective_spec` is the producing compiler's own statement about what it
-    observed while building the payload. An authored input claiming one would be
-    asserting an observation nothing made, so it is refused at the door rather than
-    overwritten later. `produced` is true only for the one form that legitimately
-    carries it -- a shipped `kpack` kernel, because packing is what wrote it. It is
-    never true of a KDP: evidence binds specific payload bytes and a pack has none.
+    `effective_spec` is the producing compiler's statement about what it observed,
+    so an authored input claiming one is refused. `produced` is true only for a
+    shipped `kpack` kernel, never for a KDP, which has no payload bytes to bind.
     """
     if not isinstance(provenance, dict):
         raise HkpPackError(f"{where}: provenance must be an object")

@@ -3,19 +3,12 @@
 
 """The converse of the desk check: can any graph SELECT this variant?
 
-The desk check (`hkp_desk_check.py`) and the variant-set gate
-(`verify_variant_sets.py`) both ask "does a shipped variant match this graph?" and
-"is the set internally consistent?". Neither asks the question backwards, and
-backwards is where dead weight hides: a real integration shipped 48 variants of
-which 24 could not be selected by ANY graph the author could write, because every
-shipped shape had a sequence length divisible by the wider of two tiles, so both
-were always APPLICABLE and the scorer picked the wider one every time. The suite
-was green throughout.
-
-`TestGfx942AttentionDenseMatchers.cpp` carries the real engine's version of the
-same shape: applicability is `seqlen_kv % block_n == 0`, not equality, so both
-shipped tiles are simultaneously legal at the shapes the corpus actually has.
-`TestHistoricalCase` below reproduces that structure without a build or a device.
+The desk check and the variant-set gate both ask whether a shipped variant matches a
+graph and whether the set is internally consistent. Backwards is where dead weight
+hides: when every shipped shape is divisible by the wider of two tiles, both are always
+APPLICABLE, the scorer picks the wider one, and half the set can be selected by no
+graph while the suite stays green. Applicability in the real engine is
+`seqlen_kv % block_n == 0`, not equality, so both shipped tiles are legal at once.
 """
 
 from __future__ import annotations
@@ -36,9 +29,8 @@ sys.path.insert(0, str(_TOOLS))
 import variant_reachability  # noqa: E402
 from launch_surface import find_repo_root  # noqa: E402
 
-# One KMD, shared by every test: a `dtype` field compared by equality and a
-# `block_n` tile compared by divisibility (declared via --divides), mirroring the
-# real engine's own shape-valued metadata split.
+# One KMD, shared by every test: a `dtype` field compared by equality and a `block_n`
+# tile compared by divisibility (via --divides), mirroring the real engine's split.
 _KMD_FIELDS = [
     {"name": "dtype", "type": "string", "default_value": "bf16"},
     {"name": "block_n", "type": "int", "default_value": 64},
@@ -54,12 +46,9 @@ def _variant(name: str, block_n: int, dtype: str = "bf16") -> dict:
 
 @pytest.fixture
 def env(tmp_path):
-    """Write an id-wired descriptor bundle and a shape corpus; run the tool.
-
-    The bundle's schema is reached through `KDP.engine -> UED.metadata -> KMD`,
-    the same chain the loader and the variant-set gate walk, so the fixture has to
-    carry the UED that links them.
-    """
+    """Write an id-wired descriptor bundle and a shape corpus; run the tool. The schema
+    is reached through `KDP.engine -> UED.metadata -> KMD`, so the fixture carries the
+    UED that links them."""
 
     def write_bundle(variants: list[dict], fields=None) -> Path:
         kdp = tmp_path / "engine.kdp.json"
@@ -116,8 +105,7 @@ def env(tmp_path):
     )
 
 
-# Every corpus shape here is divisible by 64, so both tiles are always
-# applicable -- exactly the property that hid the historical defect.
+# Every corpus shape here is divisible by 64, so both tiles are always applicable.
 _DIVISIBLE_SHAPES = [
     {"dtype": "bf16", "seqlen_kv": 256},
     {"dtype": "bf16", "seqlen_kv": 512},
@@ -134,8 +122,8 @@ _RANKING = (
 
 
 class TestControlPasses:
-    """A bundle where every variant wins somewhere must pass. Every failure
-    assertion below is worthless without this."""
+    """A bundle where every variant wins somewhere must pass; every failure assertion
+    below is worthless without it."""
 
     def test_single_variant_always_wins_by_itself(self, env):
         kdp = env.write_bundle([_variant("only", block_n=64)])
@@ -146,13 +134,9 @@ class TestControlPasses:
         assert "SELECTED                    1" in result.stdout
 
     def test_the_two_dtype_vocabularies_are_the_same_value(self, env):
-        """Metadata says `BF16`; a request corpus says `bf16`. Same value.
-
-        The rest of this pipeline translates between the two spellings on purpose
-        (the gate's `vocabulary:` block exists for exactly this), so a reachability
-        check comparing them raw reports EVERY variant unreachable -- a false alarm
-        total enough to teach an author to pass --allow-unreachable and stop reading.
-        """
+        """Metadata says `BF16`, the corpus says `bf16`, and the pipeline translates
+        between them on purpose (the gate's `vocabulary:` block), so a raw comparison
+        reports EVERY variant unreachable."""
         kdp = env.write_bundle([_variant("upper", block_n=64, dtype="BF16")])
         shapes = env.write_shapes(_DIVISIBLE_SHAPES)  # corpus carries "bf16"
         result = env.run(kdp, shapes, *_RANKING)
@@ -172,8 +156,8 @@ class TestControlPasses:
 
 
 class TestUnreachableVariant:
-    """Applicable to no corpus shape at all -- either the corpus is missing a
-    shape family or the variant should never have been built."""
+    """Applicable to no corpus shape at all: either the corpus is missing a shape family
+    or the variant should never have been built."""
 
     def test_a_tile_dividing_nothing_is_unreachable(self, env):
         # block_n=48 divides neither 256 nor 512.
@@ -188,8 +172,8 @@ class TestUnreachableVariant:
 
 
 class TestHistoricalCase:
-    """Two tiles, every corpus shape divisible by the wider one, scorer prefers
-    the wider one -- the headline case this tool exists to catch."""
+    """Two tiles, every corpus shape divisible by the wider one, scorer prefers the
+    wider: the headline case this tool exists to catch."""
 
     def test_narrow_tile_is_applicable_but_never_wins(self, env):
         kdp = env.write_bundle(
@@ -223,9 +207,8 @@ class TestHistoricalCase:
 
 
 class TestNoRankingDeclared:
-    """Without a declared ranking, applicable IS reachable by construction, and
-    the output must say the ranking was never asked for -- a gate that silently
-    stops checking a property is worse than one that admits it never checked."""
+    """Without a declared ranking, applicable IS reachable by construction, so the
+    output must say the ranking was never asked for."""
 
     def test_every_applicable_variant_is_reachable_and_it_says_so(self, env):
         kdp = env.write_bundle(
@@ -256,13 +239,9 @@ class TestAllowUnreachableFlag:
 
 
 class TestTheSchemaIsReachedByReference:
-    """The bundle's KMD is found by walking the ids the documents declare.
-
-    `default_value` decides what an absent metadata key resolves to, and that
-    decides applicability. Reaching the schema by swapping a filename suffix picks
-    whichever document happens to sit beside the KDP, so a tree with two unrelated
-    bundles in one directory is scored against the wrong defaults entirely.
-    """
+    """`default_value` decides what an absent metadata key resolves to, and that decides
+    applicability, so reaching the schema by filename suffix scores a directory holding
+    two bundles against the wrong defaults."""
 
     def test_a_correctly_wired_bundle_resolves(self, env):
         kdp = env.write_bundle([_variant("only", 64)])
@@ -294,14 +273,9 @@ class TestTheSchemaIsReachedByReference:
 
 
 class TestGfx950RealBundle:
-    """The real gfx950 bundle against the real shape corpus -- the case the module
-    docstring and `TestHistoricalCase` above only model in miniature.
-
-    Nothing here needs a device or a build: `.kdp.json`/`.kmd.json` are committed
-    descriptor JSON and the corpus is a committed shape list. Both properties are
-    derived from the bundle rather than hard-coded, so resizing the variant set
-    cannot make them stale.
-    """
+    """The real gfx950 bundle against the real shape corpus. Nothing here needs a device
+    or a build, and both properties are derived from the bundle rather than hard-coded,
+    so resizing the variant set cannot make them stale."""
 
     _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
     _KDP = (
@@ -332,10 +306,9 @@ class TestGfx950RealBundle:
 
     @classmethod
     def _require_assets(cls):
-        """The bundle, the corpus and the profile are gfx950 deliverables that exist
-        only on a branch carrying that pack, so an absent asset is a branch fact and
-        not a regression. `TestHistoricalCase` above models the same property in
-        miniature and runs everywhere, so skipping here leaves nothing unguarded."""
+        """The bundle, corpus and profile are gfx950 deliverables that exist only on a
+        branch carrying that pack, so an absent asset is a branch fact.
+        `TestHistoricalCase` models the same property everywhere."""
         for label, path in (
             ("gfx950_attention_dense.kdp.json", cls._KDP),
             ("gfx950_attention_dense.shapes.json", cls._SHAPES),
@@ -345,15 +318,10 @@ class TestGfx950RealBundle:
                 pytest.skip(f"{label} not present in this checkout")
 
     def test_every_candidate_set_is_tied_on_block_n(self):
-        """The precondition for the native `scoreKernel`, checked directly rather
-        than inferred from the tool's own report.
-
-        `scoreKernel` ranks on `block_n` ALONE, so while every candidate set holds
-        ONE distinct `block_n` the declared ranking is a tie it cannot break and the
-        choice falls to tuning. Multi-candidate sets are the intended state; the
-        question is not "is there a choice?" but "can `score` see a difference?",
-        and the answer must stay no.
-        """
+        """The precondition for the native `scoreKernel`, checked directly rather than
+        inferred from the tool's report: it ranks on `block_n` ALONE, so while every
+        candidate set holds ONE distinct `block_n` the declared ranking is a tie it
+        cannot break."""
         self._require_assets()
         defaults, descriptors = variant_reachability.load_bundle(str(self._KDP))
         shapes = json.loads(self._SHAPES.read_text())
@@ -398,14 +366,9 @@ class TestGfx950RealBundle:
         )
 
     def test_declared_ranking_matches_the_narrowed_verdict(self, tmp_path):
-        """Runs the real tool twice against the real bundle: once with no ranking
-        declared (narrowed), once with the profile's `score:` block.
-
-        The two must agree on EVERY tally -- that is the profile comment's claim,
-        that declaring the ranking changes nothing observable. The tallies are
-        compared to EACH OTHER rather than to literals, which go stale on every
-        resize while the property they meant to protect does not change.
-        """
+        """Runs the real tool twice: once with no ranking declared, once with the
+        profile's `score:` block. The tallies are compared to EACH OTHER rather than to
+        literals, which go stale on every resize."""
 
         self._require_assets()
         narrowed = subprocess.run(
@@ -464,8 +427,8 @@ class TestGfx950RealBundle:
             "that `score:` is observationally inert on this bundle no longer "
             "holds and needs re-verifying"
         )
-        # APPLICABLE-BUT-NEVER-WINS is the one tally with an absolute meaning:
-        # a variant applicable to some shape yet always outranked is dead
-        # weight that every other gate reports green.
+        # APPLICABLE-BUT-NEVER-WINS is the one tally with an absolute meaning: a variant
+        # applicable to some shape yet always outranked is dead weight every other gate
+        # reports green.
         assert narrowed_tallies["APPLICABLE-BUT-NEVER-WINS"] == "0"
         assert int(narrowed_tallies["SELECTED"]) > 0

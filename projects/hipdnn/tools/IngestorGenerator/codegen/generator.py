@@ -3,16 +3,9 @@
 
 """Renders a full descriptor bundle for one ``IngestorConfig``.
 
-Descriptor JSON is built as plain Python dicts and serialized with
-``json.dumps`` -- not Jinja2 -- because every key emitted must be on that type's
-allow-list and an unknown key is a hard error at load, so a dict literal makes
-"every key this function writes is a key I chose" a property of the code rather
-than of template whitespace. Jinja2 renders the C++ stub/test files and the
-CMake/registration text fragments, where hand-tuned whitespace against
-``.clang-format`` actually matters.
-
-UUIDs are minted exactly once per run, in :func:`mint_ids`, and threaded
-through every cross-reference from that one dict -- never retyped.
+Descriptor JSON is built as dicts and serialized with ``json.dumps``; Jinja2
+renders only the C++ stubs and the CMake/registration fragments. UUIDs are
+minted once per run in :func:`mint_ids`.
 """
 
 import json
@@ -28,14 +21,8 @@ from .models import (
     PackSpec,
 )
 
-#: Two-line AMD copyright + SPDX header every emitted C++/CMake file opens with.
-#:
-#: It carries U+00A9, which is why every emitted file is written with an EXPLICIT
-#: ``encoding="utf-8"``. ``Path.write_text`` otherwise picks the platform's locale
-#: codec, and a copyright sign written as cp1252 is a lone ``0xa9`` byte that is not
-#: valid UTF-8. `unfilled_placeholders` skips what it cannot decode, so on a
-#: non-UTF-8 locale the whole emitted set is undecodable and the placeholder gate
-#: reports an empty scan -- green because it read nothing.
+#: Header every emitted C++/CMake file opens with. It contains ©, so emitted
+#: files are written as UTF-8.
 CPP_COPYRIGHT_HEADER = (
     "// Copyright \u00a9 Advanced Micro Devices, Inc., or its affiliates.\n"
     "// SPDX-License-Identifier:  MIT\n"
@@ -46,20 +33,38 @@ CMAKE_COPYRIGHT_HEADER = (
 )
 
 
-def mint_ids(config: IngestorConfig) -> dict:
-    """Mint every UUID this bundle needs, once, in one dict.
+_CPP_NAMED_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
 
-    Every other function in this module reads ids from this dict rather than
-    calling ``uuid.uuid4()`` itself.
 
-    Ids are RANDOM, deliberately: deriving one from a name or from metadata makes
-    it only as unique as whatever it is keyed on, and the config guarantees
-    uniqueness for neither. The properties it does need are enforced by explicit
-    checks in `config_loader` that fail loudly and name the offender.
+def cpp_escape(value) -> str:
+    """Escape ``value`` for use inside a C++ string literal, without the
+    surrounding quotes.
 
-    Indexed by POSITION, not by name, so the lookup stays correct even for a config
-    whose names repeat.
+    Control characters use three-digit octal: C++ hex escapes are
+    maximal-munch, so ``"\\x1f32"`` would absorb the following text.
     """
+    text = value if isinstance(value, str) else str(value)
+    out = []
+    for character in text:
+        escape = _CPP_NAMED_ESCAPES.get(character)
+        if escape is not None:
+            out.append(escape)
+        elif ord(character) < 0x20 or ord(character) == 0x7F:
+            out.append(f"\\{ord(character):03o}")
+        else:
+            out.append(character)
+    return "".join(out)
+
+
+def mint_ids(config: IngestorConfig) -> dict:
+    """Generate random UUIDs once per bundle, indexed by pack/kernel position
+    so duplicate names remain distinct."""
     ids = {
         "kmd": str(uuid.uuid4()),
         "ued": str(uuid.uuid4()),
@@ -109,15 +114,9 @@ def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
 
 
 def build_ued(config: IngestorConfig, ids: dict) -> dict:
-    """The engine descriptor.
-
-    ``sdk_version`` is emitted UNCONDITIONALLY, including at the baseline
-    ``"1.0.0"``. The runtime parses it onto ``EngineDescriptor::sdkVersion`` and
-    ``GenericPlanBuilder::understandsGraph()`` gates on it at match time, so a
-    descriptor without one is silently matched against the loader's own baseline
-    -- invisibly, and for exactly the engines whose author never thought about it
-    -- and a later change of that baseline would re-target every shipped bundle.
-    """
+    """The engine descriptor. ``sdk_version`` is always emitted, including the
+    ``"1.0.0"`` baseline, because ``GenericPlanBuilder::understandsGraph()``
+    gates on it at match time."""
     ued = {
         "version": "1.0",
         "id": ids["ued"],
@@ -145,9 +144,9 @@ def build_udd(config: IngestorConfig, ids: dict) -> dict:
 
 
 def build_kernel_match_umd(config: IngestorConfig, ids: dict) -> dict:
-    """The shared kernel-scoped dtype matcher -- one per engine, referenced by
-    every pack's KDP. A per-*kernel* applicability check the UED's graph_match
-    cannot express, having no kernel in scope."""
+    """The shared kernel-scoped dtype matcher: one per engine, referenced by
+    every pack's KDP. Expresses the per-kernel applicability check the UED's
+    graph_match cannot, having no kernel in scope."""
     return {
         "version": "1.0",
         "id": ids["kernel_match"],
@@ -157,33 +156,15 @@ def build_kernel_match_umd(config: IngestorConfig, ids: dict) -> dict:
     }
 
 
-#: KMD sentinel meaning "not set -- the kernel's own policy decides".
-#:
-#: A CONFIG-AUTHORING convenience that must never reach a descriptor: every compiled
-#: kernel has a definite setting for every knob, so a descriptor claiming "unset"
-#: mis-describes its own binary.
+#: KMD sentinel meaning "not set; the kernel's own policy decides". Never
+#: legal in an emitted descriptor.
 UNSET_SENTINEL = -1
 
 
 def _canonical_metadata_value(value, kind: str | None):
-    """One value in the spelling its DESTINATION KMD field's declared type ships.
-
-    Canonicalization is DESTINATION-DIRECTED, never value-directed, because the
-    same Python value means different things in different fields.
-
-    ``bool`` -> ``int`` only where the field is declared ``int``: the loader's
-    ``MetadataField`` compares an int alternative, so a boolean reaching an int
-    field never matches anything. Projecting unconditionally would ship ``1``
-    where a ``bool`` field's matcher holds ``true`` and decline every graph --
-    the same silent decline one field type over.
-
-    ``int`` -> ``float`` where the field is declared ``float``: ``1`` and ``1.0``
-    compare equal in Python but serialize to different bytes, so an identity keyed
-    on the emitted JSON sees a duplicate catalog tuple.
-
-    Mirrors ``hkp_pack.agreement.canonical``; anything else passes through untouched
-    and reaches the config loader's own type check with its authored spelling.
-    """
+    """Canonicalize ``value`` for a KMD field declared ``kind``: ``bool`` ->
+    ``int`` for an ``int`` field, ``int`` -> ``float`` for a ``float`` field,
+    anything else unchanged. Mirrors ``hkp_pack.agreement.canonical``."""
     if kind == "int" and isinstance(value, bool):
         return int(value)
     if (
@@ -196,26 +177,16 @@ def _canonical_metadata_value(value, kind: str | None):
 
 
 def _resolved_metadata(kernel: KernelSpec, config: IngestorConfig) -> dict:
-    """Metadata DERIVED from the spec that built the kernel, not carried beside it.
+    """Metadata for one kernel, with unresolved knobs filled from the spec that
+    built it.
 
-    A tri-state knob lives in three layers that must agree:
+    A tri-state knob spans three layers: ``kernel_source.spec[k]`` decides the
+    binary (absent = the kernel's policy decides at build time), ``metadata[k]``
+    is the catalog key the matcher compares, and the KMD ``default_value``
+    fills anything absent at load.
 
-      * ``kernel_source.spec[k]`` -- decides the COMPILED BINARY. Absent means the
-        kernel's own policy resolves it at build time.
-      * ``metadata[k]``           -- what the MATCHER compares; the catalog key.
-      * the KMD field's ``default_value`` -- substituted for anything ABSENT at load.
-
-    Authored metadata can disagree with the binary it labels, silently and in both
-    directions, so the spec wins -- but only for knobs the config left UNRESOLVED.
-    An authored value is never overwritten: metadata carries the hipDNN spelling the
-    matcher compares (`"BF16"`) and the spec carries the builder's (`"bf16"`), so
-    copying the spec over one breaks matching while the engine still loads and every
-    count still reconciles.
-
-    Resolving a POLICY default is deliberately out of scope: that resolution is
-    arch- and shape-dependent and is not importable from this tool. An unresolved
-    tri-state is rejected instead -- see `_check_metadata_resolved`. Surviving
-    values are canonicalized by `_canonical_metadata_value`.
+    An authored metadata value is never overwritten, since the layers use
+    different spellings (matcher ``"BF16"``, builder ``"bf16"``).
     """
     types = {f.name: f.type for f in config.kmd_fields}
     spec = kernel.kernel_source.spec or {}
@@ -227,11 +198,11 @@ def _resolved_metadata(kernel: KernelSpec, config: IngestorConfig) -> dict:
         name = field_spec.name
         authored = out.get(name, UNSET_SENTINEL)
         if authored != UNSET_SENTINEL:
-            # The author stated it, in the vocabulary the matcher reads. Leave it.
+            # Authored in the vocabulary the matcher reads; leave it.
             continue
         if name in spec and spec[name] is not None:
-            # Unresolved in metadata but pinned in the spec: the binary is definite,
-            # so state that rather than ship "undecided".
+            # Unresolved in metadata but pinned in the spec: state the
+            # definite binary value rather than ship "undecided".
             out[name] = _canonical_metadata_value(spec[name], field_spec.type)
     return out
 
@@ -239,25 +210,13 @@ def _resolved_metadata(kernel: KernelSpec, config: IngestorConfig) -> dict:
 def _check_metadata_resolved(
     kernel: KernelSpec, metadata: dict, config: IngestorConfig
 ) -> None:
-    """Refuse to emit a descriptor whose knob does not describe its binary.
+    """Refuse a descriptor whose knob does not describe its binary: a stated
+    ``-1`` sentinel, or an optional field absent from both ``metadata`` and
+    ``kernel_source.spec``.
 
-    Two ways a knob can fail to describe the binary, and only one of them is
-    visible in the emitted document.
-
-    THE STATED SENTINEL. The author wrote ``-1``. A descriptor is a claim about a
-    compiled artifact, and every artifact has a definite setting, so shipping the
-    sentinel publishes a claim that is not true of anything.
-
-    THE ABSENT KNOB, which is the same defect with nothing to grep for -- and so the
-    one that actually gets shipped. An optional field absent from ``metadata`` AND
-    unpinned in ``kernel_source.spec`` looks clean, but the loader keys the catalog
-    on the KMD's ``default_value`` while the BINARY was built from the builder
-    dataclass's own default. Those two defaults are not required to agree: when they
-    disagree the descriptor names one kernel and advertises another, and when they
-    agree two entries collapse onto one tuple (see `_completed_metadata`).
-
-    Mandatory fields are not checked here -- the config loader already refuses a
-    kernel that omits one, and its diagnostic is better because it names the pack.
+    An absent knob takes the KMD ``default_value`` as its catalog key while the
+    binary was built from the builder dataclass's default. Mandatory fields are
+    left to the config loader.
     """
     unresolved = sorted(k for k, v in metadata.items() if v == UNSET_SENTINEL)
     if unresolved:
@@ -288,18 +247,51 @@ def _check_metadata_resolved(
         )
 
 
+#: What each declared KMD type accepts, mirroring ``coerceToDeclaredType``
+#: (``DescriptorLoader.hpp``): the JSON kind must be the declared type, with
+#: one widening, an integer into a ``float`` field. A JSON ``bool`` is not an
+#: ``int``; `_canonical_metadata_value` has already projected that case.
+_METADATA_TYPE_ACCEPTS = {
+    "bool": lambda v: isinstance(v, bool),
+    "int": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "float": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "string": lambda v: isinstance(v, str),
+    "int_list": lambda v: isinstance(v, list)
+    and all(isinstance(item, int) and not isinstance(item, bool) for item in v),
+}
+
+
+def _check_metadata_types(
+    kernel: KernelSpec, metadata: dict, config: IngestorConfig
+) -> None:
+    """Type-check metadata as projected, not as authored: `_resolved_metadata`
+    projects spec values in after the config loader's own check.
+
+    At load, ``coerceKernelMetadata`` refuses a mismatch and drops the whole
+    pack. Fields the KMD does not declare are left to the config loader.
+    """
+    declared = {f.name: f.type for f in config.kmd_fields}
+    for name, value in sorted(metadata.items()):
+        accepts = _METADATA_TYPE_ACCEPTS.get(declared.get(name))
+        if accepts is None or accepts(value):
+            continue
+        raise ValueError(
+            f"kernel {kernel.name!r} resolves metadata field '{name}' to {value!r}, "
+            f"which its kmd_fields entry declares as type '{declared[name]}'. The "
+            f"value is projected from kernel_source.spec after the config loader's "
+            f"own type check has run, so nothing before this point compared it with "
+            f"the declared type. At load, coerceKernelMetadata refuses the mismatch "
+            f"and drops the whole pack. Pin the knob in the spec using the field's "
+            f"declared type, or state the matcher-visible value in metadata."
+        )
+
+
 def _completed_metadata(metadata: dict, config: IngestorConfig) -> dict:
-    """The metadata tuple AS THE LOADER COMPLETES IT, not as it is written.
+    """The metadata tuple as the loader completes it, substituting each absent
+    field's KMD ``default_value``, so descriptors differing only in which layer
+    stated a value collide here as they do at runtime.
 
-    The emitted document is not the catalog key. ``DescriptorLoader`` substitutes
-    each absent field's KMD ``default_value`` before comparing, so two descriptors
-    that differ only in WHICH LAYER stated a value -- one omitting a field, one
-    stating it at exactly the KMD default -- are one tuple to the runtime and two
-    documents here. Completing the tuple the same way the loader does is what makes
-    that collision visible to this tool at all.
-
-    A mandatory field the config omitted has no default to substitute and is left
-    out rather than invented -- the config loader already refuses that kernel.
+    A mandatory field the config omitted has no default and is left out.
     """
     completed = {}
     for kmd_field in config.kmd_fields:
@@ -314,31 +306,20 @@ def _completed_metadata(metadata: dict, config: IngestorConfig) -> dict:
 
 
 def _dedup_key(metadata: dict, config: IngestorConfig) -> str:
-    """Identity of a descriptor AS THE MATCHER SEES IT.
+    """Identity of a descriptor as the matcher sees it: the completed tuple,
+    not the emitted document.
 
-    Keyed on the COMPLETED tuple rather than the emitted document, because the
-    matcher compares the completed one -- see `_completed_metadata`.
-
-    Architecture is deliberately NOT part of this key. Two candidates with the same
-    tuple on disjoint devices are not duplicates at all, and one that overlaps is a
-    conflict rather than a droppable repeat; both decisions need to see the whole
-    group that shares a tuple, so `build_kdp` makes them against the arch coverage
-    it records beside each key.
+    Architecture is not part of this key; `build_kdp` decides overlap against
+    the arch coverage recorded beside each key.
     """
     return json.dumps(_completed_metadata(metadata, config), sort_keys=True)
 
 
 def _candidate_identity(kernel: KernelSpec) -> str:
-    """What a candidate IS, beyond the tuple that selects it.
-
-    Two entries sharing a completed tuple are the same candidate only if they also
-    name the same binary at the same priority. The confusable pair is a knob left
-    absent from ``kernel_source.spec`` (the kernel's own policy decides it) beside
-    one pinned to the value the policy happened to choose: the SPECS differ, so the
-    compiled binaries differ, while the matcher sees one tuple. `build_kdp` refuses
-    and names both, since dropping one discards a distinct binary and keeping both
-    ships a duplicate tuple that drops the engine at load.
-    """
+    """What a candidate is beyond its tuple: two entries sharing a completed
+    tuple are the same candidate only if they name the same binary at the same
+    priority. A knob absent from ``kernel_source.spec`` and one pinned to the
+    value the policy chose are different binaries under one tuple."""
     return json.dumps(
         {
             "kernel_source": kernel.kernel_source.as_document(),
@@ -349,23 +330,15 @@ def _candidate_identity(kernel: KernelSpec) -> str:
 
 
 def _arch_overlaps(left: list, right: list) -> bool:
-    """Whether two arch coverages can select on the same device.
-
-    An EMPTY list is the loader's wildcard -- absent ``arch`` means "any device" --
-    so it overlaps everything, including a concrete id. Treating empty as "no
-    coverage" would let a wildcard candidate sit beside a concrete one holding the
-    same tuple. Mirrors ``hkp_pack.agreement.overlap``.
-    """
+    """Whether two arch coverages can select on the same device. An empty list
+    is the loader's wildcard and overlaps everything. Mirrors
+    ``hkp_pack.agreement.overlap``."""
     return not left or not right or bool(set(left) & set(right))
 
 
 def _pack_index(config: IngestorConfig, pack: PackSpec) -> int:
-    """This pack's position in the config.
-
-    Ids are keyed on position rather than name because nothing guarantees pack names
-    are unique, and a name-keyed lookup silently returns another pack's id. Identity
-    comparison, not equality: two packs may legitimately compare equal by value.
-    """
+    """This pack's position in the config, by identity: pack names are not
+    guaranteed unique and two packs may compare equal by value."""
     for index, candidate in enumerate(config.packs):
         if candidate is pack:
             return index
@@ -375,9 +348,9 @@ def _pack_index(config: IngestorConfig, pack: PackSpec) -> int:
 def build_operation_umd(
     config: IngestorConfig, pack: PackSpec, ids: dict
 ) -> dict | None:
-    """UMD policy: emitted only for genuine per-pack narrowing, i.e. only
-    when the engine has more than one pack. A single-pack engine gets zero
-    graph-scoped UMDs -- TestConvFwdPack.cpp asserts exactly this."""
+    """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
+    the engine has more than one pack. A single-pack engine gets zero
+    graph-scoped UMDs."""
     if not config.is_multi_pack:
         return None
     return {
@@ -392,19 +365,9 @@ def build_operation_umd(
 def build_specialization_contract(config: IngestorConfig, ids: dict) -> dict:
     """The ``provenance.specialization_contract`` this bundle's KDP carries.
 
-    The declaration is DATA, and it is self-contained on purpose: a machine checking
-    a shipped bundle must be able to say which metadata fields the producing compiler
-    specialized on, and how each is read off the builder object, WITHOUT the original
-    rocKE installed -- otherwise the check is unrunnable on the machine that received
-    the archive rather than the one that built it.
-
-    ``engine_id`` and ``kmd_id`` are the MINTED ids, threaded from `mint_ids`;
-    re-deriving them from names would point the declaration at whatever engine
-    happened to share a name. Everything else here is authored and loader-validated.
-
-    A missing declaration is an ERROR, never an empty contract: an empty consumers
-    list reads as "this engine specializes on nothing", which is the claim under
-    which an unverifiable rocKE bundle would sail through a full-mode check.
+    Self-contained data, so a bundle can be checked without rocKE installed.
+    ``engine_id`` and ``kmd_id`` come from `mint_ids`; the rest is authored.
+    A missing declaration is an error, never an empty contract.
     """
     declaration = config.specialization
     if not declaration:
@@ -449,53 +412,38 @@ def build_kdp(
 ) -> dict:
     """One pack's KDP.
 
-    ``seen_metadata`` carries de-duplication state ACROSS the packs of one engine.
-    Pass the same dict to every ``build_kdp`` call for a config; omit it and each
-    pack de-duplicates against itself alone, which is the behaviour that ships a
-    duplicate.
-
-    Why engine-wide and not per-pack: the loader collects packs into one
-    ``DescriptorSet`` BY ENGINE ID, so two entries with identical matcher-visible
-    metadata are one candidate to the runtime whichever pack produced them -- a
-    duplicate CATALOG TUPLE, which drops the whole engine at load, not one entry.
-
-    A coverage gap is therefore served by widening the union rather than by shipping
-    a second bundle beside the first: native symbol names are derived from the engine
-    name, so a new slug mints a new engine that registers, loads, and matches nothing.
+    ``seen_metadata`` carries de-duplication state across the packs of one
+    engine; pass the same dict to every ``build_kdp`` call for a config.
+    De-duplication is engine-wide because the loader collects packs into one
+    ``DescriptorSet`` by engine id, and a duplicate tuple drops the engine at
+    load. Widen this engine's union to close a coverage gap; a new slug mints
+    a different engine.
     """
     pack_index = _pack_index(config, pack)
     matchers = [ids["kernel_match"]]
     if config.is_multi_pack:
         matchers.insert(0, ids[("operation_umd", pack_index)])
-    # Several generation expressions may target one engine and are EXPECTED to
-    # overlap -- an author writes "the model-trace shapes" and "the published-sweep
-    # shapes" without hand-partitioning them.
-    #
-    # Three outcomes, not one, because a shared tuple means three different things:
-    #
-    #   * DISJOINT arch coverage -- not duplicates at all. Two devices, two
-    #     binaries; dropping either leaves a coverage hole no count reconciles.
-    #   * OVERLAPPING coverage, same candidate -- one entry, de-duplicated here.
-    #   * OVERLAPPING coverage, DIFFERENT candidate -- refused; see
-    #     `_candidate_identity`.
-    #   * OVERLAPPING but UNEQUAL coverage, SAME candidate -- also refused, with its
-    #     own diagnostic: nothing about the candidate differs, and de-duplicating
-    #     would silently widen one entry's coverage to devices its author never
-    #     claimed.
+    # Generation expressions targeting one engine may overlap, so a shared
+    # tuple has four outcomes: disjoint arch coverage is not a duplicate;
+    # overlapping coverage with the same candidate and equal arch de-duplicates
+    # here; a different candidate, or unequal coverage, is refused.
     kernel_descriptors = []
     if seen_metadata is None:
         seen_metadata = {}
     duplicates: list = []
     contract = build_specialization_contract(config, ids)
     for index, kernel in enumerate(pack.kernels):
-        # Resolve FIRST, then key on the resolved form: the dedup key and the emitted
-        # document are derived from the same values, so they cannot drift apart.
+        # Resolve first, then key on the resolved form, so the dedup key and
+        # the emitted document derive from the same values.
         metadata = _resolved_metadata(kernel, config)
+        # Before the type check: the unset sentinel is an int, so a type check
+        # would report "-1 is not a string" for a knob nobody decided.
         _check_metadata_resolved(kernel, metadata, config)
+        _check_metadata_types(kernel, metadata, config)
         key = _dedup_key(metadata, config)
-        # A kernel stating no arch inherits its pack's, which is the KDP convention
-        # the loader reads. Comparing the authored (often empty) list instead would
-        # make every kernel of an arch-scoped pack look like a wildcard.
+        # A kernel stating no arch inherits its pack's, per the KDP convention
+        # the loader reads; comparing the authored list would make every kernel
+        # of an arch-scoped pack look like a wildcard.
         arch = list(kernel.arch or pack.arch)
         identity = _candidate_identity(kernel)
         already = None
@@ -533,7 +481,9 @@ def build_kdp(
                 f"one of the arch lists, or do not ship both."
             )
         if already is not None:
-            duplicates.append((kernel.name, already["name"]))
+            # Carry the prior kernel's own pack: a drop that empties this pack
+            # is reported against the pack that absorbed it.
+            duplicates.append((kernel.name, already["name"], already["pack"]))
             continue
         seen_metadata[key].append(
             {
@@ -557,11 +507,36 @@ def build_kdp(
             entry["arch"] = list(kernel.arch)
         kernel_descriptors.append(entry)
     if duplicates:
-        shown = ", ".join(f"{d} == {k}" for d, k in duplicates[:3])
+        shown = ", ".join(f"{d} == {k}" for d, k, _p in duplicates[:3])
         more = f" (+{len(duplicates) - 3} more)" if len(duplicates) > 3 else ""
         print(
             f"  pack '{pack.name}': dropped {len(duplicates)} duplicate "
             f"variant(s) with metadata already emitted: {shown}{more}"
+        )
+    # The descriptor list is final here: after resolution, the metadata checks
+    # and the engine-wide de-duplication. The loader drops a KDP with no
+    # kernels while the census counts every KDP written, so an empty pack is
+    # refused rather than silently dropped.
+    if not kernel_descriptors:
+        if duplicates:
+            absorbed = ", ".join(
+                f"{name} == {prior} (pack '{prior_pack}')"
+                for name, prior, prior_pack in duplicates
+            )
+            absorbing = sorted({prior_pack for _n, _p, prior_pack in duplicates})
+            cause = (
+                f"all {len(duplicates)} of its kernels de-duplicated against "
+                f"kernels already emitted by pack(s) {absorbing}: {absorbed}"
+            )
+        else:
+            cause = "it contributed no kernels at all"
+        raise ValueError(
+            f"pack {pack.name!r} would ship a KDP with ZERO kernel descriptors: "
+            f"{cause}. The loader drops a pack that declares no kernels, so the "
+            f"emitted census would assert a pack the runtime never holds and the "
+            f"generated test would fail on this bundle. Give the pack at least one "
+            f"kernel the rest of the engine does not already emit, or do not "
+            f"declare it."
         )
     kdp = {
         "version": "1.0",
@@ -570,71 +545,48 @@ def build_kdp(
         "matchers": matchers,
         "engine": ids["ued"],
         "dispatch": ids["udd"],
-        # Declared ONCE for the whole pack, and emitted AFTER minting so the ids in
-        # it are this bundle's real ids. Every kernel below shares one engine, one
-        # KMD and one field partition, so per-kernel copies would be identical
-        # boilerplate -- 2.8x the size on a 2733-kernel pack. A reader resolves a
-        # kernel's own declaration first and this one second
-        # (``hkp_pack.agreement.resolved_contract``), so a kernel needing different
-        # terms can still state them.
+        # Declared once per pack, after minting, since every kernel shares one
+        # engine, KMD and field partition. A reader resolves a kernel's own
+        # declaration first (``hkp_pack.agreement.resolved_contract``), so a
+        # kernel needing different terms can still state them.
         "provenance": {"specialization_contract": contract},
         "kernelDescriptors": kernel_descriptors,
     }
     if pack.arch:
         kdp["arch"] = list(pack.arch)
     elif config.is_packaged:
-        # hkp_pack REQUIRES arch on a KDP (_validate_kdp), unlike the runtime
-        # loader, which treats absence as a wildcard. The config loader rejects
-        # this earlier with a better message; reaching here means that check was
-        # bypassed, so keep the key present and empty and let the packager's own
-        # diagnostic be the one the author sees.
+        # hkp_pack requires arch on a KDP (_validate_kdp) where the runtime
+        # loader treats absence as a wildcard. The config loader rejects this
+        # earlier, so keep the key present and empty.
         kdp["arch"] = []
     return kdp
 
 
 def build_kdp_documents(config: IngestorConfig, ids: dict) -> list:
-    """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated ENGINE-WIDE.
-
-    The one de-duplication scope, in one place: building the packs separately,
-    each against its own fresh state, is exactly the arrangement that ships a
-    duplicate. See `build_kdp`.
-    """
+    """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide.
+    The single de-duplication scope; see `build_kdp`."""
     seen_metadata: dict = {}
     return [
         (pack, build_kdp(config, pack, ids, seen_metadata)) for pack in config.packs
     ]
 
 
-#: Inventory key for descriptors that name no architecture at all.
-#:
-#: An absent ``arch`` is the loader's WILDCARD -- the descriptor ships for every
-#: device -- so it cannot be filed under a concrete id, and dropping it from the
-#: per-arch view would understate what ships by exactly the entries nobody
-#: restricted.
+#: Inventory key for descriptors naming no architecture. An absent ``arch`` is
+#: the loader's wildcard, so it cannot be filed under a concrete id.
 ARCH_WILDCARD = "*"
 
 
 def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
-    """What this bundle ACTUALLY SHIPS, keyed by architecture.
+    """What this bundle ships, keyed by architecture.
 
-    Built from the FINALIZED KDP documents -- after metadata resolution, the
-    resolved-knob check and the engine-wide de-duplication -- never from the config.
-    Those three passes are exactly where the authored count and the emitted count
-    diverge, and a census keyed on the authored number reports a shortfall on every
-    run and trains its reader to ignore it.
+    Built from the finalized KDP documents, never from the config, since
+    resolution, the resolved-knob check and de-duplication all change the
+    count. ``source_kind`` is what the runtime sees: a packaged bundle is
+    lowered to ``kpack`` first. A descriptor with no ``arch`` is filed under
+    its pack's; a pack with none under `ARCH_WILDCARD`.
 
-    ``source_kind`` is what the RUNTIME will see, not what was authored: a packaged
-    bundle is lowered to ``kpack`` by hkp_pack before the loader reads it.
-
-    A descriptor stating no ``arch`` of its own is filed under its pack's, because
-    that is the coverage the loader gives it; a pack stating none either is filed
-    under `ARCH_WILDCARD`.
-
-    ``kdp_documents`` is `build_kdp_documents`' ``[(pack, document), ...]``; the
-    pack carries the stem the file is named for, which the document does not.
-
-    A descriptor is filed under every arch it names, and each arch reports its
-    distinct names, so an engine contributes one entry per arch it covers.
+    Each concrete arch row is unioned with the wildcard row, one way only,
+    because a wildcard entry ships on that device too.
     """
     arches: dict[str, dict] = {}
 
@@ -652,6 +604,14 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             for arch in list(descriptor.get("arch") or []) or pack_arch:
                 bucket(arch)["descriptors"].append(descriptor["name"])
 
+    wildcard = arches.get(ARCH_WILDCARD)
+    if wildcard is not None:
+        for arch, entry in arches.items():
+            if arch == ARCH_WILDCARD:
+                continue
+            entry["descriptors"].extend(wildcard["descriptors"])
+            entry["pack_names"].update(wildcard["pack_names"])
+
     return {
         "sdk_version": config.engine.sdk_version,
         "source_kind": (
@@ -659,10 +619,9 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             if config.is_packaged
             else config.kernel_source_kind
         ),
-        # Both the list and the count come from the distinct names, matching the
+        # List and count both come from the distinct names, matching the
         # std::set the generated census loads them into. Two descriptors of one
-        # engine cannot share a name -- the loader rejects that engine-wide -- so
-        # the set collapses nothing a bundle can actually ship.
+        # engine cannot share a name, so the set collapses nothing shippable.
         "arches": {
             arch: {
                 "descriptor_names": sorted(set(entry["descriptors"])),
@@ -686,11 +645,13 @@ class IngestorGenerator:
             keep_trailing_newline=True,
             trim_blocks=True,
             lstrip_blocks=True,
-            # An unset UUID cross-reference must fail loudly at generation time,
-            # not render "" and fail later at the loader with a message about an
-            # empty string instead of a missing field.
+            # An unset UUID cross-reference fails loudly at generation time
+            # rather than rendering "" and failing later at the loader.
             undefined=StrictUndefined,
         )
+        # JSON is serialized by `json.dumps`, never by a template, so there is
+        # no counterpart filter.
+        self.env.filters["cpp_escape"] = cpp_escape
 
     def preview_files(self, config: IngestorConfig) -> list[str]:
         """The file list :meth:`render` would write, without writing anything."""
@@ -716,13 +677,11 @@ class IngestorGenerator:
         return files
 
     def render(self, config: IngestorConfig, output_dir: Path) -> list[str]:
-        """Mint ids, write every descriptor JSON, the native/test C++ stubs,
-        and the five CMake/registration fragments. Returns the list of
-        relative paths written.
+        """Mint ids, write every descriptor JSON, the native/test C++ stubs and
+        the CMake/registration fragments. Returns the relative paths written.
 
-        Every KDP is BUILT before anything is rendered, because the templates are
-        given the emitted inventory (`emitted_inventory`) and that view is only
-        truthful once the engine-wide de-duplication has run over all of them.
+        Every KDP is built before rendering, since the templates are given the
+        emitted inventory and that view needs the engine-wide de-duplication.
         """
         ids = mint_ids(config)
         written: list[str] = []
@@ -800,16 +759,14 @@ class IngestorGenerator:
 
         return written
 
-    #: Emitted files that are splice INSTRUCTIONS, not shipped source. They are
-    #: pasted into existing files by hand and never exist as files in the tree,
-    #: so they are excluded from the located/missing accounting.
+    #: Emitted files that are splice instructions, not shipped source. They are
+    #: pasted into existing files by hand, so they are excluded from the
+    #: located/missing accounting.
     _NON_SHIPPED_PREFIXES = ("fragments/",)
 
-    #: Where each emitted directory is SPLICED TO, relative to a root it was spliced
-    #: into. Derived from this generator's own CMake fragments, which are the
-    #: instructions the splice follows: ``packs/`` keeps its name per
-    #: ``cmake_target_sources``, and ``tests/`` nests under ``packs/`` per
-    #: ``cmake_test_sources``. Descriptors are handled in `_accepted_destinations`.
+    #: Where each emitted directory is spliced to, per this generator's CMake
+    #: fragments: ``packs/`` keeps its name (``cmake_target_sources``),
+    #: ``tests/`` nests under ``packs/`` (``cmake_test_sources``).
     _SPLICE_DESTINATIONS: dict[str, tuple[str, ...]] = {
         "packs": ("packs",),
         "tests": ("tests", "packs"),
@@ -818,17 +775,12 @@ class IngestorGenerator:
     @classmethod
     def _accepted_destinations(cls, rel: str) -> tuple[str, ...]:
         """The relative paths ``rel`` may legitimately have been spliced to.
-
-        Every one of them keeps the ENGINE-SPECIFIC component of the emitted path
-        -- the descriptor subpath, or a filename built from the engine's class or
-        Pascal name -- because that is what makes a match evidence about THIS
-        engine.
-        """
+        Each keeps the engine-specific component of the emitted path, so a
+        match is evidence about this engine."""
         head, _, tail = rel.partition("/")
         if head in ("descriptors", "test_descriptors"):
-            # A root pointed AT the `descriptors/` or `test_descriptors/` tree sees
-            # the subpath alone, while a root above it sees the whole thing. Both
-            # spellings keep the authored subpath and the engine's own directory.
+            # A root pointed at the ``descriptors/``/``test_descriptors/`` tree
+            # sees the subpath alone; a root above it sees the whole path.
             return (rel, tail)
         return tuple(
             f"{destination}/{tail}"
@@ -842,22 +794,13 @@ class IngestorGenerator:
         """``({relative path: real path}, [not found], {relative path: [ambiguous]})``
         for the shippable files in ``written``, searched across ``roots``.
 
-        Not ``root / rel``, because the provider splits this tool's flat ``packs/``
-        + ``tests/`` layout: packs land in the engine directory and the test stubs
-        under ``src/tests/engines/.../packs/``, as ``cmake_test_sources`` instructs.
-        That split is why ``roots`` is a LIST -- the two trees may have no common
-        ancestor worth scanning, and widening the root until they do drags in build
-        trees and stale copies.
+        ``roots`` is a list because the provider splits this tool's flat
+        ``packs/`` + ``tests/`` layout, test stubs landing under
+        ``src/tests/engines/.../packs/`` as ``cmake_test_sources`` instructs.
+        A hit must sit at an engine-specific spliced path (see
+        `_accepted_destinations`), never merely share a basename.
 
-        Not by basename either: any file sharing a name would satisfy a missing
-        target and manufacture ambiguity against some other engine's files. A hit
-        must be at the engine-specific SPLICED RELATIVE PATH this generator's own
-        fragments name (see `_accepted_destinations`).
-
-        Two matches for one relative path is an ERROR, not a pick, and a
-        non-existent root is a hard error: picking by directory order lets a filled
-        stale copy report green, and zero hits with no complaint is a gate that
-        passes because it looked nowhere.
+        Two matches for one relative path, or a non-existent root, is an error.
         """
         roots = [Path(root) for root in roots]
         if not roots:
@@ -876,17 +819,16 @@ class IngestorGenerator:
         shippable = [
             rel for rel in written if not rel.startswith(cls._NON_SHIPPED_PREFIXES)
         ]
-        # Index by basename first: the suffix comparison below is the real test,
-        # but only files that could possibly match need to reach it, and a spliced
-        # provider tree is large.
+        # Index by basename first: the suffix comparison below is the real
+        # test, and a spliced provider tree is large.
         by_name: dict[str, list[Path]] = {}
         seen_paths: set = set()
         for root in roots:
             for path in sorted(root.rglob("*")):
                 if not path.is_file():
                     continue
-                # Two roots may nest. The same file reached twice is one file, not
-                # an ambiguity -- reporting it as one would fail a correct tree.
+                # Two roots may nest; the same file reached twice is one file,
+                # not an ambiguity.
                 resolved = path.resolve()
                 if resolved in seen_paths:
                     continue
@@ -915,41 +857,43 @@ class IngestorGenerator:
     def unfilled_placeholders(
         cls, roots: list[Path], written: list[str]
     ) -> dict[str, int]:
-        """``{relative path: placeholder count}`` for every LOCATED file that
+        """``{relative path: placeholder count}`` for every located file that
         still carries an unfilled stub marker, worst first.
 
-        Lives here because this object is the only one that knows the full emitted
-        set. A hand-written ``grep -c`` over a transcribed glob drifts the moment
-        that set changes; the generator cannot fall behind itself.
-
-        An empty result means "nothing unfilled AMONG THE FILES FOUND", never
-        "nothing left to do": a file that was not located is counted by neither
-        this nor any caller reading only this. The gate therefore reads
-        `locate_emitted`'s missing/ambiguous lists too, and fails on them.
+        Counts only located files, so the gate also fails on `locate_emitted`'s
+        missing/ambiguous lists. An unreadable located file is an error naming
+        every such path.
         """
         located, _missing, _ambiguous = cls.locate_emitted(roots, written)
         counts: dict[str, int] = {}
+        unreadable: list[str] = []
         for rel, path in located.items():
             try:
                 text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
+            except (UnicodeDecodeError, OSError) as e:
+                unreadable.append(f"{rel} (at {path}): {e}")
                 continue
             n = text.count(PLACEHOLDER_MARKER)
             if n:
                 counts[rel] = n
+        if unreadable:
+            listed = "; ".join(sorted(unreadable))
+            raise ValueError(
+                f"{len(unreadable)} located file(s) could not be read, so the "
+                f"placeholder scan did not cover them: {listed}. A file the scan "
+                f"skipped reports exactly as a file it read and found clean, which "
+                f"is the false green this gate exists to prevent. Emitted files are "
+                f"written UTF-8; re-generate the bundle, or fix the copy that is "
+                f"not."
+            )
         return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
     def _render_template(
         self, template_name: str, config: IngestorConfig, **extra
     ) -> str:
-        """Render one template against the standard context.
-
-        Every template sees ``config``, plus ``ids`` and ``emitted`` threaded
-        through ``extra``. A caller that renders one template on its own gets
-        ``emitted`` computed here rather than left undefined, because
-        ``StrictUndefined`` would otherwise raise about a missing name rather than
-        about the caller that skipped a step.
-        """
+        """Render one template with ``config`` plus ``ids`` and ``emitted``
+        from ``extra``. A caller rendering one template alone gets ``emitted``
+        computed here rather than a ``StrictUndefined`` error."""
         if "emitted" not in extra:
             ids = extra.setdefault("ids", mint_ids(config))
             extra["emitted"] = emitted_inventory(
@@ -967,7 +911,7 @@ class IngestorGenerator:
 
 #: The marker every unfilled stub body carries. Templates emit it; the reader
 #: replaces it. One spelling, defined once, so a scan cannot look for a string
-#: the templates stopped writing.
+#: the templates no longer write.
 PLACEHOLDER_MARKER = "FILL THIS OUT"
 
 FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (

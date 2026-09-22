@@ -1,13 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The one interface every ``sources/`` adapter implements.
-
-An adapter's job stops at *candidates*: entry points, signature-derived KMD
-field guesses, and a pack-count hint. It never decides the engine name, the
-arch list, which fields become knobs, or the UMD-vs-graph_match split -- those
-stay engine-level judgment calls a human confirms.
-"""
+"""Interface every ``sources/`` adapter implements. Adapters produce
+candidates only -- entry points, KMD field guesses, a pack-count hint. Engine
+name, arch list, knob selection and the UMD-vs-graph_match split stay human
+decisions."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,32 +17,25 @@ class CandidateKernel:
 
     entry_point: str
     source_file: str
-    #: Template parameters / #define names this entry point varies along, as raw
-    #: strings -- the adapter's best guess at KMD field names.
+    #: Template parameter / #define names this entry point varies along; the
+    #: adapter's guess at KMD field names.
     template_params: list[str] = field(default_factory=list)
 
 
 @dataclass
 class SourceAdapterResult:
-    """What a ``sources/`` adapter hands back: candidates only, never a finished
-    ``IngestorConfig``."""
+    """Adapter output: candidates only, never a finished ``IngestorConfig``."""
 
     kernels: list[CandidateKernel] = field(default_factory=list)
-    #: Best-effort pack-count guess: one pack per distinct source file
-    #: implementing a genuinely different operation, or one pack for several
-    #: instantiations of the same operation.
+    #: Pack-count guess: one pack per source file implementing a distinct
+    #: operation; instantiations of one operation share a pack.
     suggested_pack_count: int = 1
 
 
 class SourceAdapter(Protocol):
     """Produces ``SourceAdapterResult`` candidates from some external input.
-
-    Implementations: ``InteractiveAdapter`` (a human/skill fills every
-    field directly, no inference), ``HiprtcAdapter`` (scans one or more
-    ``.cpp``/``.hip`` files for ``__global__`` entry points) and
-    ``RockeAdapter`` (introspects a rocKE builder's spec surface). Each sits
-    behind this protocol alone, so adding another requires no change here
-    or to any existing adapter.
-    """
+    Implementations: ``InteractiveAdapter`` (no inference), ``HiprtcAdapter``
+    (scans ``.cpp``/``.hip`` for ``__global__`` entry points), ``RockeAdapter``
+    (introspects a rocKE builder spec)."""
 
     def infer(self, *sources: Path) -> SourceAdapterResult: ...

@@ -23,8 +23,8 @@
 namespace hip_kernel_provider::test_utilities
 {
 
-/// Verification state belongs to this graph and survives repeated executions.
-/// The graph (whether stack allocated or shared-owned) must outlive its context.
+/// Per-graph verification state that survives repeated executions. The graph must
+/// outlive its context.
 class GraphVerificationContext
 {
 public:
@@ -45,9 +45,8 @@ private:
         float absoluteTolerance = 0.0f;
         float relativeTolerance = 0.0f;
         hipdnn_frontend::DataType validatorType = hipdnn_frontend::DataType::NOT_SET;
-        /// A caller-supplied validator owns its own comparison rules and is never rebuilt from
-        /// the tolerances below. Any later registration for the same output, whether a tolerance
-        /// or a second comparator, is a test-authoring error and is rejected rather than honoured.
+        /// A caller-supplied validator is never rebuilt from the tolerances above; any
+        /// later registration for the same output is rejected.
         bool suppliedByCaller = false;
         std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
     };
@@ -142,11 +141,9 @@ protected:
 
     /// Registers each nonvirtual output in this graph's context.
     ///
-    /// @p epsilonMultiple is expressed in epsilons of THIS FIXTURE'S element type, not in
-    /// absolute units: a K-term sum needs ~K of them, an elementwise op needs one, and
-    /// the same number then means the same thing in a FLOAT fixture and a HALF one.
-    /// Hardcoding an absolute float epsilon is how a HALF comparison ends up ~4000x
-    /// tighter than the type can represent.
+    /// @p epsilonMultiple is expressed in epsilons of this fixture's element type, so the
+    /// same value means the same thing for FLOAT and HALF fixtures: a K-term sum needs
+    /// ~K of them, an elementwise op one.
     void registerValidatorsForOutputs(GraphVerificationContext& context,
                                       float epsilonMultiple = 1.0f)
     {
@@ -178,10 +175,9 @@ protected:
         ASSERT_TRUE(belongsToGraph) << "Validator output does not belong to the context's graph";
     }
 
-    /// Reports and refuses any registration that would displace a caller-supplied comparator,
-    /// whether the displacing registration is a tolerance or a second comparator, and answers
-    /// whether the caller's registration was refused. Reports nonfatally so a suite sees every
-    /// offending output rather than only the first.
+    /// Refuses any registration that would displace a caller-supplied comparator and
+    /// answers whether it was refused. Fails nonfatally so a suite sees every offending
+    /// output, not only the first.
     static bool refuseDuplicateOfCallerValidator(
         const GraphVerificationContext::Registration& registration,
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr)
@@ -223,9 +219,9 @@ protected:
         registration.relativeTolerance = relativeTolerance;
     }
 
-    /// Registers a caller-built comparator for one output, for the outputs whose correct values
-    /// the tolerance-based default validator cannot express. One output holds at most one
-    /// comparator: a second registration is rejected and the first keeps deciding the output.
+    /// Registers a caller-built comparator for one output whose correct values the
+    /// tolerance-based default validator cannot express. One comparator per output: a
+    /// second registration is rejected.
     void registerValidator(
         GraphVerificationContext& context,
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr,
@@ -250,7 +246,7 @@ protected:
         hipdnn_frontend::DataType dataType;
     };
 
-    // Check the entire current output set before any comparator reads its storage.
+    // Check the entire output set before any comparator reads its storage.
     void resolveOutputValidators(GraphVerificationContext& context,
                                  const std::vector<OutputTensor>& outputs)
     {
@@ -305,11 +301,9 @@ protected:
         });
     }
 
-    /// Seeds every tensor in @p bundle alike.
-    ///
-    /// A suite whose operation can confuse two identically-seeded operands overrides this
-    /// rather than changing it here: the base is shared with suites that have their own
-    /// seeding contract and their own tolerances calibrated against it.
+    /// Seeds every tensor in @p bundle alike. A suite whose operation can confuse two
+    /// identically-seeded operands overrides this instead of changing it: other suites
+    /// calibrate their tolerances against this seeding.
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                                   unsigned int seed)
@@ -346,9 +340,8 @@ private:
         result = graph.execute(handle, variantPack, workspace.get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        // execute() only enqueues. The readback below copies on the tensor's own stream,
-        // which is not ordered against a caller-selected stream such as hipStreamPerThread,
-        // so without this the comparison can race the kernel and read a stale buffer.
+        // execute() only enqueues. The readback copies on the tensor's own stream, which
+        // is not ordered against a caller-selected stream such as hipStreamPerThread.
         ASSERT_EQ(hipStreamSynchronize(stream()), hipSuccess);
     }
 

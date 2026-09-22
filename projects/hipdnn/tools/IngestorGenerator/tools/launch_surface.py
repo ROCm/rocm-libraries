@@ -1,13 +1,14 @@
 """Audit the Python/C++ launch-contract restatement, per surface, per op.
 
-A rocKE kernel is launched from Python; the C++ ingestor engine restates that launch
-contract by hand -- grid shape, block size, kernarg order, baked constants, spec
-resolution, applicability -- and nothing in the build, the packer, the validator or
-the test suite compares the two halves. A mismatch does not fail: the kernel runs and
-computes something else.
+A rocKE kernel is launched from Python and the C++ ingestor engine restates
+that launch contract by hand -- grid shape, block size, kernarg order, baked
+constants, spec resolution, applicability. Nothing else compares the two
+halves, and a mismatch does not fail: the kernel runs and computes something
+else.
 
-A ``launch_surface:`` block declares one entry per surface (grid, block, kernargs,
-baked_constants, spec_resolution, applicability, or any further split an op needs):
+A ``launch_surface:`` block declares one entry per surface (grid, block,
+kernargs, baked_constants, spec_resolution, applicability, or any further
+split an op needs):
 
     launch_surface:
       - name: grid
@@ -17,16 +18,14 @@ baked_constants, spec_resolution, applicability, or any further split an op need
         guard: attentionDenseGeometry throws on a non-positive dimension
         test: dnn-providers/.../TestGfx942AttentionDenseGeometry.cpp
 
-``guard: none`` and ``test: none`` are the honest answer for a surface nothing
-defends or compares; writing "none" rather than omitting the key makes an unguarded
-surface a deliberate, visible choice instead of a blank nobody notices.
+Write ``guard: none`` / ``test: none`` rather than omitting the key, so an
+unguarded surface is a visible choice.
 
-``--check`` verifies mechanically, with no device and no build, that the fields a
-mirror needs are declared, that the files and symbols named are real, and that every
-unguarded surface is named rather than left silently missing (see ``check``). It
-never compares what the two halves COMPUTE -- that is what the ``test`` column is
-for -- and it notices a missing surface only when that surface uniquely covered a
-metadata field some still-declared mirror reads through a required accessor.
+``--check`` verifies, with no device and no build, that the fields a mirror
+needs are declared, that the files and symbols named are real, and that every
+unguarded surface is named. It never compares what the two halves compute, and
+it notices a missing surface only when that surface uniquely covered a
+metadata field a still-declared mirror reads through a required accessor.
 
     launch_surface.py --check <profile.yaml> [--allow-unguarded]
     launch_surface.py --report <profile.yaml>
@@ -54,12 +53,9 @@ class LaunchSurfaceError(RuntimeError):
 
 
 def _load_profile(path: str) -> dict:
-    """Parse a profile as JSON, falling back to YAML.
-
-    The mapping check covers BOTH paths: a file that parses as valid JSON but is not
-    an object -- a bare list, say -- would otherwise crash later with an
-    AttributeError naming neither the file nor the problem.
-    """
+    """Parse a profile as JSON, falling back to YAML. The mapping check covers
+    both paths: a file that parses as valid JSON but is not an object would
+    otherwise crash later naming neither the file nor the problem."""
     text = Path(path).read_text(encoding="utf-8")
     try:
         import json
@@ -99,20 +95,16 @@ def load_surfaces(profile: dict) -> list[dict]:
 def _path_part(value: str) -> str:
     """The filesystem path prefix of a ``cpp_mirror``/``test`` value.
 
-    Both fields carry a path plus a free-text locator (``Foo.cpp:functionName``, a
-    pytest node id ``test_x.py::TestY::test_z``), and no path in this repo contains a
-    ``:``, so everything before the first one is the path.
+    Both fields carry a path plus a free-text locator (``Foo.cpp:functionName``,
+    a pytest node id), and no path in this repo contains a ``:``.
     """
     return value.split(":", 1)[0].strip()
 
 
 def find_repo_root(start: Path) -> Path:
-    """The nearest ``.git`` ancestor of ``start``, or the resolved ``start`` itself.
-
-    Callers anchor on this script's location rather than ``Path.cwd()``: every path a
-    surface names is repo-relative, so only the repo root resolves one the same way
-    from anywhere in the tree. Both branches return an absolute, resolved path.
-    """
+    """The nearest ``.git`` ancestor of ``start``, or the resolved ``start``.
+    Callers anchor on this script's location rather than ``Path.cwd()``, since
+    every path a surface names is repo-relative. Always absolute."""
     current = start.resolve()
     for candidate in (current, *current.parents):
         if (candidate / ".git").exists():
@@ -133,14 +125,13 @@ _WRAPPER_LAMBDA_RE = re.compile(
 
 
 def _strip_cpp_comments(text: str) -> str:
-    """``text`` with ``//``, ``/* */``, and ``#`` comments removed, quoted content
-    intact.
+    """``text`` with ``//``, ``/* */`` and ``#`` comments removed, quoted
+    content intact.
 
-    Hand-rolled rather than a regex, because ``//.*$`` also eats a ``//`` inside a
-    string literal and swallows the real code after it. Triple quotes count as ONE
-    delimiter, and ``#`` counts as a line comment (a macro contributes nothing to a
-    call-site scan), so that a non-C++ file named as a cpp_mirror by mistake cannot
-    open an unterminated string span and silently drop the rest of the file.
+    Hand-rolled rather than a regex, since ``//.*$`` also eats a ``//`` inside
+    a string literal. Triple quotes count as one delimiter and ``#`` as a line
+    comment, so a non-C++ file named by mistake cannot open an unterminated
+    string span.
     """
     out = []
     i, n = 0, len(text)
@@ -185,12 +176,9 @@ def _strip_cpp_comments(text: str) -> str:
 
 
 def _blank_cpp_string_contents(text: str) -> str:
-    """Comment-stripped C++ with every string/char literal's INTERIOR blanked.
-
-    Applied before the accessor-call regexes run, so a call site spelled out inside
-    an error message cannot be mistaken for real code. Quote delimiters are kept so
-    string boundaries still parse.
-    """
+    """Comment-stripped C++ with every string/char literal's interior blanked,
+    so a call site spelled out inside an error message is not mistaken for
+    code. Quote delimiters are kept so string boundaries still parse."""
     out = []
     i, n = 0, len(text)
     while i < n:
@@ -226,15 +214,13 @@ def _blank_cpp_string_contents(text: str) -> str:
 
 
 def extract_required_metadata_fields(cpp_text: str) -> set[str]:
-    """KMD field names ``cpp_text`` reads through a REQUIRED accessor (see
-    ``_REQUIRED_ACCESSORS``), resolving both a direct call and the one-line forwarding
-    lambda this pack's files use to fetch several fields through one accessor
-    (``_WRAPPER_LAMBDA_RE``).
+    """KMD field names ``cpp_text`` reads through a required accessor (see
+    ``_REQUIRED_ACCESSORS``), resolving a direct call and the one-line
+    forwarding lambda this pack's files use (``_WRAPPER_LAMBDA_RE``).
 
-    A regex scan rather than a parse: the C++ here is one consistent idiom, a
-    ``constexpr std::string_view ..._FIELD`` per name, read directly or through that
-    lambda. Comments and string literals are excluded first so neither can forge a
-    call site the compiler would never see.
+    A regex scan, not a parse: the C++ here is one idiom, a
+    ``constexpr std::string_view ..._FIELD`` per name. Comments and string
+    literals are excluded first.
     """
     code = _blank_cpp_string_contents(_strip_cpp_comments(cpp_text))
     consts = dict(_CONST_DEF_RE.findall(_strip_cpp_comments(cpp_text)))
@@ -269,12 +255,11 @@ _LEADING_SYMBOL_RE = re.compile(r"[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*")
 
 
 def _leading_symbol(locator: str) -> str | None:
-    """The symbol a ``cpp_mirror``/``python_source`` value names, if its first
-    whitespace-delimited token parses as a bare identifier or a ``Class::method``
-    qualifier -- ``None`` for a value whose locator is prose from the first token on
-    (``"prepare() trusts persistent..."`` has no leading symbol; ``"prepare -- ..."``
-    names ``prepare``).
-    """
+    """The symbol a ``cpp_mirror``/``python_source`` locator names, when its
+    first whitespace-delimited token is a bare identifier or ``Class::method``;
+    ``None`` when the locator is prose from the first token on
+    (``"prepare() trusts persistent..."`` -> None; ``"prepare -- ..."`` ->
+    ``prepare``)."""
     rest = locator.split(":", 1)[1].strip() if ":" in locator else locator.strip()
     token = rest.split(None, 1)[0] if rest.split() else ""
     return token if _LEADING_SYMBOL_RE.fullmatch(token) else None
@@ -292,12 +277,10 @@ def cpp_symbol_exists(cpp_text: str, symbol: str) -> bool:
 
 
 def python_symbol_exists(py_text: str, symbol: str) -> bool:
-    """Whether ``symbol`` is defined as a function anywhere in ``py_text`` -- module
-    level, nested, or a method body -- via ``ast.parse`` rather than a text scan, so a
-    comment or docstring merely mentioning the name cannot pass for a definition.
-    A file that fails to parse is reported as the symbol NOT existing; the caller
-    surfaces the reason rather than this raising.
-    """
+    """Whether ``symbol`` is defined as a function anywhere in ``py_text`` --
+    module level, nested or a method -- via ``ast.parse``, so a mention in a
+    comment cannot pass for a definition. A file that fails to parse reports
+    the symbol as absent and the caller surfaces the reason."""
     try:
         tree = ast.parse(py_text)
     except SyntaxError:
@@ -332,10 +315,9 @@ def validate_shape(surfaces: list[dict]) -> list[str]:
 def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
     """(failures, unguarded_or_untested) for every declared surface.
 
-    ``failures`` are structural -- each one means the profile's own claim about
-    itself is false. An honestly-declared ``guard: none`` is not a defect but a fact
-    the caller decides whether to accept (``--allow-unguarded``), so it is a separate
-    list; conflating the two would make an honest admission look like a broken path.
+    A failure is structural: the profile's claim about itself is false. An
+    honestly-declared ``guard: none`` is a separate list the caller decides on
+    (``--allow-unguarded``).
     """
     surfaces = load_surfaces(profile)
     shape_errors = validate_shape(surfaces)
@@ -351,17 +333,15 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
     failures: list[str] = []
     unguarded: list[str] = []
 
-    # Per-file caches: a cpp_mirror/python_source cited by several surfaces is read
-    # and scanned once, and a file that fails to read is reported once, not per
-    # surface.
+    # Per-file caches: a cpp_mirror/python_source cited by several surfaces is
+    # read and scanned once, and an unreadable file is reported once.
     cpp_text_cache: dict[str, str | None] = {}
     py_text_cache: dict[str, str | None] = {}
 
     def read_cached(cache: dict[str, str | None], resolved: Path) -> str | None:
-        # UTF-8 explicitly: this repo's sources are UTF-8 and read_text() would
-        # otherwise decode with the platform's locale encoding, so a source file
-        # carrying one non-ASCII character in a comment aborts the whole audit on a
-        # cp1252 Windows shell and checks clean everywhere else.
+        # UTF-8 explicitly: read_text() would otherwise decode with the
+        # platform's locale encoding, so one non-ASCII character in a comment
+        # would abort the audit on a cp1252 shell and pass everywhere else.
         key = str(resolved)
         if key not in cache:
             try:
@@ -414,10 +394,9 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
         cpp_path = _path_part(surface["cpp_mirror"])
         cpp_text = read_cached(cpp_text_cache, root / cpp_path) if cpp_path else None
         if cpp_path and cpp_text is None:
-            # read_cached answers None for a file that is absent and for one that is
-            # present but undecodable, and the two want different repairs: author the
-            # file, or re-save it as UTF-8. Reporting both as a missing path sends the
-            # second reader looking for a file they are staring at.
+            # read_cached answers None for an absent file and for an
+            # undecodable one; the two want different repairs, so they are
+            # reported differently.
             reason = (
                 "path does not exist"
                 if not (root / cpp_path).is_file()

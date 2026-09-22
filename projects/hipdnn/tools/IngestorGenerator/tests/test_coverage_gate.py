@@ -3,21 +3,14 @@
 
 """Three rungs, three questions. A count answers none of them.
 
-A descriptor count can be exactly right -- every descriptor on disk, correctly named
--- while nothing reaches a GPU: one duplicate catalog tuple makes the loader reject
-the whole engine, every graph falls through to a different one, and the phase runs to
-completion and exits 0.
+A descriptor count can be exactly right while nothing reaches a GPU: one duplicate
+catalog tuple makes the loader reject the whole engine and the phase still exits 0. The
+property under test is that each rung stays separable, and that a rung which cannot run
+reports NOT RUN and fails rather than being skipped into a pass.
 
-The property under test here is therefore not "does the gate pass on good input" but
-"does each rung stay separable", defending against a gate that quietly stops checking
-and still prints a reassuring last line. A rung that cannot run must report NOT RUN
-loudly and fail, never be skipped into a pass.
-
-The validator is a build artifact and the profile is an author's own input, so the
-end-to-end class needs both pointed at from the environment and skips otherwise. The
-rung-separation tests need neither, and it is they that assert a missing validator is
-a FAILURE of the gate rather than a skip -- the property this module exists for is
-therefore checked on every machine, opt-in or not.
+The end-to-end class needs a validator and a profile named in the environment and skips
+otherwise; the rung-separation tests need neither, so the property is checked on every
+machine.
 """
 
 from __future__ import annotations
@@ -34,42 +27,32 @@ _GATE = Path(__file__).resolve().parents[1] / "tools" / "coverage_gate.py"
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
 #: The env vars naming the authoring profile handed to `--profile`, in precedence
-#: order: the unsuffixed name wins, then gfx942, then gfx950. Nothing here asserts a
-#: profile's CONTENT -- only that the gate runs clean on a profile and the build it
-#: describes -- so any of the three serves, and accepting all three is what stops a
-#: reader who set `test_launch_surface.py`'s per-arch pair from being silently
-#: skipped by this module. gfx942 precedes gfx950 because `_EXPECT_ENGINE`'s default
-#: names the gfx942 bundle this branch ships; with both set, that is the one more
-#: likely to match the build under test. The chosen profile and `_EXPECT_ENGINE` must
-#: name the same pack.
+#: order: unsuffixed, then gfx942, then gfx950. Any of the three serves, since nothing
+#: here asserts a profile's CONTENT; gfx942 precedes gfx950 because `_EXPECT_ENGINE`'s
+#: default names a gfx942 engine. The chosen profile and `_EXPECT_ENGINE` must name the
+#: same pack.
 _PROFILE_VARS = (
     "HIPDNN_INGESTOR_PROFILE",
     "HIPDNN_INGESTOR_PROFILE_GFX942",
     "HIPDNN_INGESTOR_PROFILE_GFX950",
 )
 
-#: The engine name the packed tree under test must expose. Overridable for the same
-#: reason the profile is: it identifies a specific pack, not a property of the tool.
-#: The default is the engine the provider's shipped production bundle declares
-#: (`src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx942_attention_dense/`),
-#: because `_find_build_artifacts` below probes a PACKED tree and that bundle is what
-#: a build of this branch packs into one. A generator config under `configs/` is an
-#: author's input that no build wires, so naming an engine only a config mentions
-#: would reject every build dir and turn this class into a skip no machine can
-#: satisfy.
+#: The engine name the packed tree must expose, overridable because it identifies a
+#: specific pack. The default names a rocKE gfx942 attention-dense engine under the
+#: provider's production root
+#: (`src/engines/kernel_ingestor_engine/descriptors/<producer>/<bundle>/`), the only
+#: place a bundle reaches the PACKED tree `_find_build_artifacts` probes. That root
+#: ships empty, so an author points `HIPDNN_INGESTOR_ENGINE` at their own bundle's
+#: engine; naming one only a `configs/` file mentions would reject every build dir.
 _EXPECT_ENGINE = os.environ.get(
     "HIPDNN_INGESTOR_ENGINE", "hipkernel:Gfx942AttentionDense"
 )
 
 
 def _profile_from_env() -> Path | None:
-    """The first of `_PROFILE_VARS` naming an existing file, or None.
-
-    Deliberately NO fixture default, unlike `test_launch_surface.py`: the class below
-    drives the whole gate against a packed tree an author really built, and the
-    committed fixture profiles describe no real pack, so defaulting to one would
-    manufacture a failure on the first machine that has a build rather than skip.
-    """
+    """The first of `_PROFILE_VARS` naming an existing file, or None. No fixture
+    default: the committed profiles describe no real pack, so defaulting would
+    manufacture a failure on the first machine that has a build."""
     for var in _PROFILE_VARS:
         raw = os.environ.get(var)
         if raw and Path(raw).is_file():
@@ -80,19 +63,55 @@ def _profile_from_env() -> Path | None:
 _PROFILE = _profile_from_env()
 
 
-def _find_build_artifacts() -> tuple[Path | None, Path | None]:
-    """(validator, packed tree) from a build that actually contains the engine
-    these tests assert on.
+def _loaded_engines(validator: Path, packed: Path) -> list[str] | None:
+    """Engine names the validator reports for `packed`, or None when the probe could not
+    run: an unusable validator and an empty catalog are different answers."""
+    try:
+        probe = subprocess.run(
+            [str(validator), str(packed), "--json"],
+            capture_output=True,
+            text=True,
+            # The real validator answers in ~0.12s.
+            timeout=15,
+        )
+        return json.loads(probe.stdout).get("engines", [])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
-    A build can be present and valid and still predate this engine, in which case
-    the assertions below fail on a stale artifact rather than on a defect. Skip
-    covers "no build for this engine"; it must never cover "the gate is broken".
+
+def _assert_expected_engine(engines: list[str] | None, packed: Path) -> None:
+    """Fail, naming what the packed tree does expose, when `_EXPECT_ENGINE` is gone: a
+    dropped engine leaves every file count unchanged, so the missing name is the only
+    observable, and a build was found, so this is an artifact defect."""
+    if engines is None:
+        raise AssertionError(
+            f"the validator could not be probed against {packed}; a build is present, "
+            "so this is a broken artifact, not a missing prerequisite"
+        )
+    assert _EXPECT_ENGINE in engines, (
+        f"{_EXPECT_ENGINE} is absent from the packed tree SELECTED at {packed}; the "
+        f"validator loaded {sorted(engines)}. Discovery takes the FIRST build*/ "
+        "carrying both a validator and a packed tree, so where several build "
+        "directories exist the one named above may be a stale build shadowing the "
+        "one under test -- check that before the others; then either set "
+        "HIPDNN_INGESTOR_ENGINE to the engine this build actually packs, or repack "
+        "the bundle that declares it."
+    )
+
+
+def _find_build_artifacts(
+    repo_root: Path = _REPO_ROOT,
+) -> tuple[Path | None, Path | None]:
+    """(validator, packed tree) from the first `build*/` carrying both, by PRESENCE.
+
+    Selecting on `_EXPECT_ENGINE` would collapse "nothing was built here" into "a build
+    is present and the engine was dropped"; engine survival is asserted inside the test
+    that depends on it.
     """
-    for candidate in sorted(_REPO_ROOT.glob("build*")):
-        # Both spellings, because the executable suffix is the platform's and the
-        # skip below cannot tell "no build" apart from "a build this probe walked
-        # past": a bare name matches nothing on Windows, where every build writes
-        # the .exe, so the tests would report no build on a tree that has one.
+    for candidate in sorted(repo_root.glob("build*")):
+        # Both spellings, because the executable suffix is the platform's: a bare name
+        # matches nothing on Windows, so the skip below would report no build on a tree
+        # that has one.
         validator = next(
             (
                 path
@@ -105,35 +124,32 @@ def _find_build_artifacts() -> tuple[Path | None, Path | None]:
             None,
         )
         packed = candidate / "lib/hipdnn_plugins/engines/arch_content"
-        if not (validator and packed.is_dir()):
-            continue
-        try:
-            probe = subprocess.run(
-                [str(validator), str(packed), "--json"],
-                capture_output=True,
-                text=True,
-                # Per candidate, at import time, so N build dirs cost N x this
-                # before collection finishes. The real validator answers in ~0.12s.
-                timeout=15,
-            )
-            engines = json.loads(probe.stdout).get("engines", [])
-        except (OSError, ValueError, subprocess.SubprocessError):
-            continue
-        if _EXPECT_ENGINE in engines:
+        if validator and packed.is_dir():
             return validator, packed
     return None, None
 
 
 _VALIDATOR, _PACKED = _find_build_artifacts()
 
+_NEEDS_BUILD_REASON = (
+    "needs BOTH a build*/ carrying the descriptor validator beside a packed tree "
+    "(configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON) AND one of "
+    f"{', '.join(_PROFILE_VARS)} (first wins) set to the existing authoring profile "
+    "that build was packed from -- a profile is an author's input this repo does not "
+    "ship, so this class is opt-in and its absence is not a broken checkout"
+)
+
+
+def _missing_prerequisite(validator: Path | None, profile: Path | None) -> str | None:
+    """The reason the end-to-end class cannot run, or None. Only genuinely absent inputs
+    belong here; a present build missing `_EXPECT_ENGINE` is a failure, not a skip."""
+    if validator is None or profile is None:
+        return _NEEDS_BUILD_REASON
+    return None
+
+
 _needs_build = pytest.mark.skipif(
-    _VALIDATOR is None or _PROFILE is None,
-    reason=f"needs BOTH a build*/ whose packed tree contains {_EXPECT_ENGINE} "
-    "(configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON; HIPDNN_INGESTOR_ENGINE "
-    f"overrides the name) AND one of {', '.join(_PROFILE_VARS)} (first wins) set to "
-    "the existing authoring profile that build was packed from -- a profile is an "
-    "author's input this repo does not ship, so this class is opt-in and its "
-    "absence is not a broken checkout",
+    _missing_prerequisite(_VALIDATOR, _PROFILE) is not None, reason=_NEEDS_BUILD_REASON
 )
 
 
@@ -151,11 +167,8 @@ _UED_ID = "55555555-5555-5555-5555-555555555555"
 
 
 def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
-    """A structurally-valid, id-wired bundle, so rung 1 can pass without a build.
-
-    The static rung reaches a bundle's schema through `KDP.engine -> UED.metadata
-    -> KMD`, so documents that merely share a filename stem have no schema at all.
-    """
+    """A structurally-valid, id-wired bundle, so rung 1 can pass without a build: the
+    static rung reaches the schema through `KDP.engine -> UED.metadata -> KMD`."""
     root = tmp_path / name
     root.mkdir()
     (root / "test_engine.kmd.json").write_text(
@@ -207,11 +220,9 @@ def _minimal_tree(tmp_path: Path, name: str = "descriptors") -> Path:
 
 
 class TestTheStaticRungNeverOverstatesItself:
-    """The two modes answer different questions, and the failure defended against is
-    the weaker answer printed under the stronger one's name: a run that read no
-    compiled evidence at all, reported "1. STATIC PASS", and let a reader conclude
-    the shipped binaries match the metadata selecting them.
-    """
+    """The failure defended against is the weaker answer printed under the stronger
+    one's name: a run that read no compiled evidence, reported "1. STATIC PASS", and let
+    a reader conclude the shipped binaries match the metadata selecting them."""
 
     def test_omitting_the_mode_is_a_usage_error(self, tmp_path):
         result = _run("--tree", str(_minimal_tree(tmp_path)))
@@ -227,8 +238,7 @@ class TestTheStaticRungNeverOverstatesItself:
         ), "the unqualified line asserts a claim this run never made"
 
     def test_full_mode_fails_a_tampered_evidence_record(self, tmp_path):
-        """The minimal tree carries no producing-build evidence at all, the limiting
-        case of a record that does not describe the artifact."""
+        """The minimal tree carries no producing-build evidence at all."""
         result = _run("--tree", str(_minimal_tree(tmp_path)), "--mode", "full")
         assert result.returncode != 0
         assert "1. STATIC   FAIL" in result.stdout
@@ -237,7 +247,7 @@ class TestTheStaticRungNeverOverstatesItself:
 
 class TestRungsStaySeparable:
     def test_a_missing_validator_fails_rather_than_skipping_to_a_pass(self, tmp_path):
-        """The whole point of the split: rung 1 passing must not imply rung 2."""
+        """Rung 1 passing must not imply rung 2."""
         result = _run("--tree", str(_minimal_tree(tmp_path)), "--mode", "structural")
         assert result.returncode != 0
         assert "2. LOADS    NOT RUN" in result.stdout
@@ -258,18 +268,85 @@ class TestRungsStaySeparable:
         assert result.returncode == 2
 
 
+class TestDiscoverySeparatesNoBuildFromADroppedEngine:
+    """Discovery gated on the expected engine makes a dropped engine indistinguishable
+    from a machine that never built anything, and the opt-in class below then SKIPS. The
+    property is the DISTINCTION, so both trees are built here and compared."""
+
+    @staticmethod
+    def _build_tree(root: Path, *, present: bool) -> Path:
+        """A `build*/` candidate shaped exactly as discovery reads it."""
+        candidate = root / "build"
+        candidate.mkdir(parents=True, exist_ok=True)
+        if present:
+            binary = candidate / "bin" / "hipdnn_validate_descriptors.exe"
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes(b"")
+            (candidate / "lib/hipdnn_plugins/engines/arch_content").mkdir(parents=True)
+        return candidate
+
+    @staticmethod
+    def _a_profile(tmp_path: Path) -> Path:
+        """An existing profile, so each case isolates the build half of the pair."""
+        profile = tmp_path / "profile.json"
+        profile.write_text("{}")
+        return profile
+
+    def test_an_absent_build_skips_where_a_dropped_engine_fails(self, tmp_path):
+        """Both trees in one case: only the pair rules out a discovery rule that answers
+        "no build" to both."""
+        profile = self._a_profile(tmp_path)
+
+        absent = tmp_path / "absent"
+        self._build_tree(absent, present=False)
+        no_build = _find_build_artifacts(absent)
+        assert no_build == (None, None)
+        assert _missing_prerequisite(no_build[0], profile) is not None, (
+            "nothing on disk to run the gate against is an absent prerequisite, and "
+            "an opt-in class skips on it"
+        )
+
+        dropped = tmp_path / "dropped"
+        self._build_tree(dropped, present=True)
+        validator, packed = _find_build_artifacts(dropped)
+        assert (validator, packed) != no_build, (
+            "a validator binary beside a packed directory is a build; reporting it "
+            "as absent turns the dropped-engine regression test into a skip"
+        )
+        assert _missing_prerequisite(validator, profile) is None, (
+            "the build is present, so the class runs and the dropped engine has to "
+            "surface as a failure"
+        )
+
+        with pytest.raises(AssertionError) as caught:
+            _assert_expected_engine(["hipkernel:SomethingElse"], packed)
+        message = str(caught.value)
+        assert _EXPECT_ENGINE in message
+        assert "hipkernel:SomethingElse" in message, (
+            "a dropped engine's only observable is the list it is missing from, so "
+            "the failure has to print that list"
+        )
+        assert str(packed) in message, (
+            "first-match discovery means a stale build*/ can shadow the one under "
+            "test, so the failure has to name the tree it actually selected"
+        )
+        assert "stale build" in message, (
+            "a reader whose build was shadowed follows the remedies as written; "
+            "neither HIPDNN_INGESTOR_ENGINE nor a repack fixes that cause, so it "
+            "has to be offered alongside them"
+        )
+
+
 @_needs_build
 class TestAgainstTheRealBuild:
-    """The whole gate driven end to end against a packed tree an author actually
-    built and the profile they authored it from.
-
-    Opt-in, on both a build and one of `_PROFILE_VARS`: the classes above pin the
-    rung-separation property everywhere, and this class adds only the claim that the
-    assembled gate agrees with them on real inputs. Skipping it therefore leaves the
-    module's stated property checked; it does not make it conditional.
-    """
+    """The whole gate end to end against a packed tree an author built. Opt-in on a
+    build and a profile; the classes above pin the rung-separation property
+    everywhere."""
 
     def test_packed_tree_passes_both_runnable_rungs(self):
+        # Checked by name first so a dropped engine reports itself instead of
+        # arriving as an opaque nonzero exit from the gate.
+        _assert_expected_engine(_loaded_engines(_VALIDATOR, _PACKED), _PACKED)
         result = _run(
             "--tree",
             str(_PACKED),
@@ -289,8 +366,8 @@ class TestAgainstTheRealBuild:
         assert "NOT CHECKED" not in result.stdout
 
     def test_an_engine_that_is_not_loaded_is_named(self):
-        """The dropped-engine case. Its only observable is a name missing from the
-        loaded list -- the file count is unchanged and the exit code would be 0."""
+        """The dropped-engine case: the file count is unchanged and the exit code would
+        be 0, so a name missing from the loaded list is the only observable."""
         result = _run(
             "--tree",
             str(_PACKED),
@@ -310,15 +387,13 @@ class TestAgainstTheRealBuild:
     def test_the_authored_dialect_fails_rung_two_with_the_loaders_own_reason(
         self, tmp_path
     ):
-        """`kind: rocke` is an AUTHORING form that hkp_pack lowers to `kind: kpack`.
-        The runtime loader has never heard of `builder`, so the authored tree fails
-        rung 2 with the same 'dropping it' message a real dropped engine produces.
-        """
+        """`kind: rocke` is an AUTHORING form hkp_pack lowers to `kind: kpack`; the
+        runtime loader does not know `builder`, so the authored tree fails rung 2."""
         root = _minimal_tree(tmp_path, "authored")
         kdp_path = root / "test_engine.kdp.json"
         doc = json.loads(kdp_path.read_text())
-        # Only the dialect changes. The tree stays id-wired so rung 1 still passes
-        # and the failure this test is about belongs unambiguously to rung 2.
+        # Only the dialect changes, so the tree stays id-wired, rung 1 still passes, and
+        # the failure belongs unambiguously to rung 2.
         doc["kernelDescriptors"][0]["kernel_source"] = {
             "kind": "rocke",
             "source": "m.py",

@@ -123,9 +123,8 @@ endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
-    # DescriptorLoader.hpp -> MakeEngine.hpp -> GenericEngine.hpp ->
-    # EnginePluginTypeTraits.hpp, so it needs the same HIP wiring every ingestor test
-    # target already carries (plugin_sdk/tests/CMakeLists.txt).
+    # DescriptorLoader.hpp, so it needs the same HIP wiring every ingestor test target
+    # carries (plugin_sdk/tests/CMakeLists.txt).
     find_package(hip REQUIRED)
 
     add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
@@ -133,29 +132,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
     install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    # Smoke test: run the validator over a real descriptor bundle and assert it reports that
-    # bundle's own engine. Modeled on hipdnn_list_engines_smoke above -- same generated
-    # driver script, same exit-status-plus-output checks.
+    # Smoke test: run the validator over a real descriptor bundle and assert it reports
+    # that bundle's engine. Same generated-driver-script shape as
+    # hipdnn_list_engines_smoke above.
     #
-    # The input is the baseline bundle the tool's own mutation fixtures are mutations of.
-    # It is authored JSON carried in this project's source tree, so it needs neither a
-    # packing step nor a device, and it is the bundle tests/fixtures/validate_descriptors/
-    # README.md declares must exit 0. The staged provider trees under dnn-providers/ are
-    # the alternative and do not qualify: they exist only after a per-architecture packing
-    # rule has run, and that project need not be configured at all in a hipDNN-only build.
+    # The input is the baseline bundle the tool's mutation fixtures derive from: authored
+    # JSON in this source tree, needing neither a packing step nor a device, and the bundle
+    # tests/fixtures/validate_descriptors/README.md declares must exit 0. The staged
+    # provider trees under dnn-providers/ exist only after a per-architecture packing rule
+    # has run, which a hipDNN-only build need not configure.
     if(NOT HIPDNN_SKIP_TESTS)
         set(HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT
             "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/fixtures/validate_descriptors/valid"
         )
 
-        # The `name` the bundle's UED authors, and the same engine tests/test_round_trip.py
-        # names. Passed as --expect-engine so a bundle whose engine the loader DROPS exits
-        # non-zero: a drop leaves no error behind on its own, and the tool would otherwise
-        # print an empty engine list and succeed.
+        # The `name` the bundle's UED authors, and the engine tests/test_round_trip.py
+        # names. Passed as --expect-engine so a bundle whose engine the loader drops exits
+        # non-zero, and so a catalog loading some other engine is caught too.
         set(HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE "hipkernel:ValidateFixture")
 
-        # The tool is not a gtest binary, so the checks live in a driver script: it asserts a
-        # zero exit status, a printed engine list, and the expected engine name in it.
+        # The tool is not a gtest binary, so the checks live in a driver script: zero exit
+        # status, a printed engine list, and the expected engine name in it.
         # cmake-format: off
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
@@ -210,31 +207,26 @@ endif()
         )
 
         # The tool walks one small directory and parses its JSON, so anything past a few
-        # seconds is a hang. Fail fast rather than sitting until ctest's 1500 s default.
+        # seconds is a hang. Fail fast rather than ctest's 1500 s default.
         set_tests_properties(hipdnn_validate_descriptors_smoke PROPERTIES TIMEOUT 120)
 
         # add_hipdnn_test() assumes a gtest executable registered as the test command; this
-        # test runs a CMake driver script instead, so its one run-time prerequisite -- the
-        # tool binary -- is appended to CHECK_DEPENDS_GLOBAL by hand.
-        #
-        # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are deliberately not
-        # touched, for the reason given at hipdnn_list_engines_smoke above: both assume a
-        # gtest executable installed under its own test name, so this test is build-tree
-        # only and the driver script is not installed either.
+        # test runs a CMake driver script, so its one run-time prerequisite (the tool
+        # binary) is appended to CHECK_DEPENDS_GLOBAL by hand.
+        # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are left untouched for the
+        # reason given at hipdnn_list_engines_smoke above; this test is build-tree only.
         set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_validate_descriptors
             CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
         )
 
         # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial
-        # build plus a manual ctest doesn't load the stale System32 amd_comgr.dll.
-        # add_hipdnn_test() does this for gtest binaries; mirror it here.
+        # build plus a manual ctest does not load the stale System32 amd_comgr.dll.
         if(TARGET stage_shadowed_rocm_dlls)
             add_dependencies(hipdnn_validate_descriptors stage_shadowed_rocm_dlls)
         endif()
 
-        # No discovery environment of its own: the root is a command-line argument, and the
-        # validator registers stubs for the native symbols rather than loading a plugin. Only
-        # the ambient test environment applies.
+        # No discovery environment of its own: the root is a command-line argument and the
+        # validator registers stubs for the native symbols rather than loading a plugin.
         if(DEFINED TEST_ENVIRONMENT)
             set_tests_properties(
                 hipdnn_validate_descriptors_smoke PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}"

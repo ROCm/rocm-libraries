@@ -52,9 +52,8 @@ constexpr const char* ENGINE_NAME = "hipkernel:Pointwise";
 constexpr const char* CONV_ENGINE_NAME = "hipkernel:ConvFwd";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
-/// In epsilons of the fixture's element type. Elementwise ops accumulate nothing, so
-/// one epsilon is the whole budget, and the same number is right for a FLOAT fixture
-/// and a HALF one.
+/// In epsilons of the fixture's element type. Elementwise ops accumulate nothing, so one
+/// epsilon is the whole budget.
 constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
 
 /// Maximum workspace across the pack's surviving kernels for a FLOAT graph.
@@ -107,7 +106,7 @@ std::shared_ptr<Graph> buildPointwiseSubGraph()
 
 /// N=1, C=2, H=4, W=4, K=3, R=3, S=3, unit stride/dilation, no padding, cross-correlation,
 /// NCHW/KCRS. y's dims/strides are left unset -- infer_properties_node() derives NKPQ
-/// from x, w and the attributes.
+/// from x, w and the attributes. uids are assigned in input order, so y takes 3.
 std::shared_ptr<Graph> buildConvFwdGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -275,13 +274,9 @@ protected:
     hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
         "ingestor-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
 
-    /// Offsets the seed by UID to distinguish this fixture's binary operands.
-    ///
-    /// `a + b` and `a + a` agree elementwise when both operands carry the same data, so a
-    /// pointwise comparison cannot tell an add that reads both inputs from one that reads
-    /// one twice. The base seeds every tensor alike, which is right for suites whose
-    /// reference is insensitive to it; this engine's whole catalog is elementwise binary
-    /// ops, so it is not right here.
+    /// Offsets the seed by UID so the binary operands differ: `a + b` and `a + a` agree
+    /// elementwise when both operands carry the same data, and this engine's catalog is
+    /// entirely elementwise binary ops.
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                           unsigned int seed) override
@@ -505,9 +500,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
     buildAndCompileWithKnobs(*graph, engineId(), knobSettings);
 
-    // buildPlan() took the benchmarking branch rather than the single-plan one, and it
-    // had more than one candidate to choose between: a one-candidate sweep would prove
-    // nothing about selection.
+    // The benchmarking branch ran with more than one candidate.
     EXPECT_TRUE(recorder.hasLogContaining("will benchmark"))
         << "buildPlan() did not take the benchmarking branch. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
@@ -515,9 +508,8 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
         << "expected more than one candidate to benchmark. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    // The first execute() samples every candidate; the second reuses the cached winner.
-    // Both must produce the correct result, and verifyBuiltGraph() re-randomizes and
-    // re-checks each time.
+    // The first execute() samples every candidate, the second reuses the cached winner;
+    // verifyBuiltGraph() re-randomizes and re-checks each time.
     GraphVerificationContext context(*graph);
     registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(context, /*seed=*/0);
@@ -620,7 +612,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDif
     verifyBuiltGraph(mulContext, 1);
 
     // The engine's catalog is keyed per graph, so the add graph still answers after a
-    // second pack of the same engine has run and cached its own.
+    // second pack of the same engine cached its own.
     verifyBuiltGraph(addContext, 2);
 }
 
@@ -641,7 +633,6 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
     registerValidatorsForOutputs(subContext, POINTWISE_TOLERANCE_EPSILONS);
     verifyBuiltGraph(subContext, 1);
 
-    // Confirms the add graph still answers correctly after the sub graph ran.
     verifyBuiltGraph(addContext, 2);
 }
 
@@ -656,8 +647,8 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
     auto graph = buildConvFwdGraph();
     buildAndCompile(*graph, convEngineId());
 
-    // C*R*S = 2*3*3: every output element is an 18-term sum. GPU and CPU accumulate in
-    // different orders, so it is held to 18 epsilons rather than the elementwise one.
+    // C*R*S = 2*3*3: every output element is an 18-term sum, and GPU and CPU accumulate
+    // in different orders, so the budget is 18 epsilons rather than the elementwise one.
     GraphVerificationContext context(*graph);
     registerValidatorsForOutputs(context, /*epsilonMultiple=*/2 * 3 * 3);
     verifyBuiltGraph(context, 0);

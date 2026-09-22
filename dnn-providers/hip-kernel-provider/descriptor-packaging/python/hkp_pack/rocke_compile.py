@@ -379,9 +379,9 @@ def compile_rocke_variant(
         raise HkpPackError(f"invalid spec for {spec_cls.__name__}: {exc}") from exc
 
     _check_support_predicate(module, builder, spec_obj, arch)
-    # Observed BEFORE the builder runs, on the very object `builder_fn` is about to
-    # be handed. Reading the same attributes afterwards would observe whatever the
-    # builder left behind rather than what it was given.
+    # Observed BEFORE the builder runs, on the object `builder_fn` is about to be
+    # handed: reading the same attributes afterwards would observe whatever the
+    # builder left behind.
     origins = origins if origins is not None else OriginObserver()
     observations = observe(spec_obj, builder_fn, requests or {}, origins)
 
@@ -415,9 +415,8 @@ def compile_rocke_variant(
     co_path = out_dir / f"{rocke_variant_key(source, builder, spec)}.co"
     co_path.write_bytes(artifact.hsaco)
     origins.stable()
-    # The arch, the captured symbol and the code object identify WHICH compile these
-    # observations came from. A reader binds all three to the shipped descriptor, so
-    # an observation set cannot certify an artifact it was not taken alongside.
+    # The arch, captured symbol and code object identify which compile these
+    # observations came from; a reader binds all three to the shipped descriptor.
     observations["arch"] = arch
     observations["symbol"] = artifact.kernel_name
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()

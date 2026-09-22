@@ -1,13 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The validator's two permanent (opt-in) regressions: the generate -> validate
-round trip, and the discriminating mutation fixtures under
-``tests/fixtures/validate_descriptors/``.
+"""The validator's two opt-in regressions: the generate -> validate round trip and
+the discriminating mutation fixtures under ``tests/fixtures/validate_descriptors/``.
 
-These depend on ``hipdnn_validate_descriptors``, a C++ binary this Python tool's
-own suite does not and should not build, so they skip rather than fail unless
-pointed at one -- it exists only under ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON``:
+Both need ``hipdnn_validate_descriptors``, a C++ binary this Python suite does not
+build -- it exists only under ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON`` -- so they skip
+unless pointed at one:
 
     HIPDNN_VALIDATE_DESCRIPTORS=<build-dir>/bin/hipdnn_validate_descriptors \\
         .venv/bin/python -m pytest -m round_trip
@@ -47,11 +46,9 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "validate_descriptors"
 FIXTURE_ENGINE = "hipkernel:ValidateFixture"
 
 # Each malformed bundle differs from valid/ by exactly one field. The marker is a token
-# the loader can only emit because it reached THAT mutation, which is what keeps the
-# case discriminating -- a bundle failing for an unrelated reason would still exit
-# non-zero without naming it. For three it is the mutated value; for duplicate_tuple it
-# is the kernel id, since that diagnostic names the offending kernel rather than the
-# colliding value. See the fixtures' README for the mechanism each one trips.
+# the loader can only emit because it reached THAT mutation; for duplicate_tuple it is
+# the kernel id, since that diagnostic names the kernel rather than the colliding
+# value. See the fixtures' README for the mechanism each one trips.
 MALFORMED_FIXTURES = [
     ("bad_arch", "GFX942"),
     ("dangling_uuid", "9341b3cb-3540-44f6-9066-f3695a3b6a2d"),
@@ -61,12 +58,9 @@ MALFORMED_FIXTURES = [
 
 
 def _run_validator(validator, root):
-    """Validate a fixture bundle, always naming the engine it is supposed to expose.
-
-    Every malformed bundle fails by making the loader DROP the engine, which leaves
-    no error behind; ``--expect-engine`` is what turns that silent drop into a
-    non-zero exit.
-    """
+    """Validate a fixture bundle, always naming the engine it should expose: malformed
+    bundles fail by making the loader DROP the engine, leaving no error behind, and
+    ``--expect-engine`` turns that silent drop into a non-zero exit."""
     result = subprocess.run(
         [str(validator), str(root), "--expect-engine", FIXTURE_ENGINE, "--json"],
         capture_output=True,

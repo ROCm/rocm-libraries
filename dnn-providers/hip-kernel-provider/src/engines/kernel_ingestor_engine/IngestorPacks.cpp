@@ -13,11 +13,10 @@ const std::vector<IngestorPack>& ingestorPacks()
     // Function-local static: entries are plain function pointers, so this cannot fail
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
-        {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, true, &resetConvFwdModuleCache},
+        {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
         {"hipkernel:Gfx950AttentionDense",
          &registerGfx950AttentionDenseSymbols,
-         true,
          &resetGfx950AttentionDenseModuleCache},
     };
     return s_packs;

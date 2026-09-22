@@ -1,32 +1,22 @@
-"""Build the shape corpus the dispatcher resolves (RUNBOOK §2's corpus), from the
-sources that actually decide.
+"""Build the shape corpus the dispatcher resolves (RUNBOOK §2's corpus).
 
-Three sources answer three different questions, and no one of them is sufficient:
+Three sources answer three different questions, and none is sufficient alone:
 
-  * the kernel team's PUBLISHED RESULTS CSV -- what they measure, tune and will
-    escalate a regression on. It is the shape list ALREADY RESOLVED, with priority
-    and ticket group attached, and it carries shapes a benchmark's nested loops do
-    not enumerate. Ask for it before mining anything.
+  * the kernel team's published results CSV -- shapes already resolved, with
+    priority and ticket group attached. Ask for it before mining anything.
   * dnn-benchmarking's graph corpus -- what real callers ask for.
   * the kernel's own `supports_*` predicate -- what is legal to build.
 
-The first two are the ones an integration skips: kernel-side sources answer "what is
-LEGAL?" and nothing answers "what will anyone ASK for?", which is how a legal,
-validated, well-tested engine ends up serving zero real workloads.
-
-PROVENANCE SURVIVES INTO THE NAME. Every emitted shape carries where it came from,
-because a result that can be split by source stops being one number -- the same
-measured win was large on one synthetic microbenchmark suite and close to parity on
-real model traces. It costs nothing here and cannot be recovered later. A `microbench/`
-path is a provenance LABEL, not a synthetic-data warning: judge a suite by its own
-manifest, never by its directory name.
+Kernel-side sources answer what is legal; the first two answer what anyone
+asks for. Every emitted shape carries its provenance so a result can be split
+by source; a `microbench/` path is a provenance label, not a synthetic-data
+warning.
 
     mine_shapes.py --published <csv> --arch gfx942 --out shapes.json
 
-Emits the request-field mappings `dispatch_parity.py --shapes` consumes. It does NOT
-filter by what the kernel can serve: that is the dispatcher's job at RUNBOOK §2's
-baseline resolution, and it reports declines with reasons. Filtering here would hide
-the gap this corpus exists to measure.
+Emits the request-field mappings `dispatch_parity.py --shapes` consumes, and
+does not filter by what the kernel can serve: the dispatcher reports declines
+with reasons, and filtering here would hide the gap this corpus measures.
 """
 
 from __future__ import annotations
@@ -39,16 +29,14 @@ import sys
 from pathlib import Path
 
 #: CSV mask spellings -> the request's mask_type. `swin` is a sliding window, a
-#: different mask kind rather than a causal variant; it is carried through with its own
-#: value so the dispatcher declines it explicitly instead of it silently becoming a
-#: causal duplicate.
+#: different mask kind rather than a causal variant, carried with its own value
+#: so the dispatcher declines it explicitly.
 _MASK_TYPE = {"full": 0, "none": 0, "causal": 1, "swin": 2}
 
-#: Tensor names that mark a graph as backward rather than forward, in BOTH gradient
-#: spellings a corpus uses: `d_query`-style names alone let a graph whose gradients are
-#: `dq`/`dk`/`dv`/`do` through the filter. Module-level so a consumer outside this file
-#: (e.g. a config's own EXCLUDE_TENSORS list) can be checked against the same set
-#: rather than a second literal that can silently drift from this one.
+#: Tensor names marking a graph as backward, in both gradient spellings a
+#: corpus uses: `d_query`-style names alone would let `dq`/`dk`/`dv`/`do`
+#: through. Module-level so a consumer outside this file (e.g. a config's
+#: EXCLUDE_TENSORS list) checks against the same set.
 BACKWARD_GRADIENT_TENSOR_NAMES = {
     "d_query",
     "d_key",
@@ -62,12 +50,9 @@ BACKWARD_GRADIENT_TENSOR_NAMES = {
 
 
 def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[dict]:
-    """Shapes from the kernel team's results CSV.
-
-    Why this beats reading the benchmark source: it is the shape list already
-    resolved, it names which kernel each published number refers to, and it carries
-    `priority`/`ticket_group` -- a shipping-priority signal available nowhere else.
-    """
+    """Shapes from the kernel team's results CSV: the shape list already
+    resolved, naming which kernel each published number refers to and carrying
+    `priority`/`ticket_group`, a signal available nowhere else."""
     shapes = []
     with path.open() as handle:
         for row in csv.DictReader(handle):
@@ -155,11 +140,10 @@ def _mask_from_attributes(
     }
 
 
-#: Every spelling a source uses for a dtype -> the spelling the rocKE spec takes.
-#: Three vocabularies meet here and none of them agree: hipDNN graphs say `bfloat16`,
-#: torch traces say `torch.bfloat16`, the spec says `bf16`. An unmapped dtype is
-#: REJECTED at spec construction, which reads like the kernel declining a shape when it
-#: is really the miner mis-spelling one.
+#: Every spelling a source uses for a dtype -> the spelling the rocKE spec
+#: takes. hipDNN graphs say `bfloat16`, torch traces `torch.bfloat16`, the spec
+#: `bf16`. An unmapped dtype is rejected at spec construction, which reads like
+#: the kernel declining a shape when the miner mis-spelled one.
 _DTYPE_SPELLINGS = {
     "bf16": "bf16",
     "bfloat16": "bf16",
@@ -174,9 +158,8 @@ _DTYPE_SPELLINGS = {
 def _normalise_dtype(raw, path: Path, fallback: str) -> str:
     """One spelling for a dtype, or a refusal naming the source.
 
-    An ABSENT dtype falls back (the source simply did not say); an UNRECOGNISED one is
-    a mapping this table owes, not a value to paper over -- a guessed dtype builds a
-    different binary and still validates, so the failure is silent and numeric.
+    An absent dtype falls back; an unrecognised one is a mapping this table
+    owes, since a guessed dtype builds a different binary and still validates.
     """
     if raw is None or str(raw).strip() == "":
         return fallback
@@ -192,12 +175,10 @@ def _normalise_dtype(raw, path: Path, fallback: str) -> str:
 
 
 def from_graph_corpus(root: Path) -> list[dict]:
-    """Shapes from a dnn-benchmarking graph tree, one JSON per graph.
-
-    The suite name is kept because it is the axis a result must be split along. Real
-    model traces and parameter sweeps do not behave alike, and a single geomean over
-    both reports the synthetic population's win as though it were everyone's.
-    """
+    """Shapes from a dnn-benchmarking graph tree, one JSON per graph. The suite
+    name is kept because it is the axis a result must be split along: a single
+    geomean over model traces and parameter sweeps reports the synthetic
+    population's win as everyone's."""
     shapes = []
     for path in sorted(root.rglob("*.json")):
         try:
@@ -207,12 +188,10 @@ def from_graph_corpus(root: Path) -> list[dict]:
         tensors = {
             str(t.get("name", "")).lower(): t for t in graph.get("tensors", []) or []
         }
-        # A backward graph cannot be served by a prefill kernel, and one of them takes
-        # the device down through a third-party backward FMHA. The filename is not
-        # authoritative, so the marker is structural: the node's own op type is primary,
-        # since that is what the graph DECLARES it is, and
-        # BACKWARD_GRADIENT_TENSOR_NAMES is the fallback for a graph whose node type is
-        # absent or spelled differently.
+        # A backward graph cannot be served by a prefill kernel. The filename
+        # is not authoritative, so the marker is structural: the node's own op
+        # type is primary, with BACKWARD_GRADIENT_TENSOR_NAMES as the fallback
+        # for a graph whose node type is absent or spelled differently.
         node_types = {str(n.get("type", "")).lower() for n in graph.get("nodes") or []}
         if any("backward" in t or "bwd" in t for t in node_types):
             continue
@@ -320,27 +299,20 @@ def _bench_graph_name(shape: dict) -> str:
 
 
 def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
-    """Shapes from rocKE's OWN benchmark tree -- the third source, and for an arch
-    with no published CSV it is the only one that says what the kernel team measures.
+    """Shapes from rocKE's own benchmark tree; for an arch with no published
+    CSV it is the only source saying what the kernel team measures.
 
-    `*_shapes.json` / `*_bench.json` under `benchmarks/<arch>/attention/` are JSONL,
-    ONE RECORD PER LINE (not a JSON document; `json.load` raises "Extra data" on them).
-    They are captured launch traces, with `window_size` and `has_sinks` as genuine
-    recorded attributes. The paired `benchmark_*_live.py` is the sweep that GENERATES
-    shapes instead, and the two are not interchangeable.
+    `*_shapes.json` / `*_bench.json` under `benchmarks/<arch>/attention/` are
+    JSONL, one record per line (`json.load` raises "Extra data"): captured
+    launch traces carrying `window_size` and `has_sinks`. The paired
+    `benchmark_*_live.py` generates shapes instead.
 
-    CAUSALITY IS NOT IN THE TRACES: no record carries a causal/mask key. The dispatcher
-    does `causal = (mask_type != 0)`, so guessing it picks which kernels get built, and
-    a prefill trace defaulted to non-causal sizes a variant set that cannot serve the
-    causal traffic it was mined from. A trace states causality through `window_size`, or
-    it is skipped and counted.
-
-    `window_size` is `[left, right]` in the kernel's own convention, matching the graph
-    side's (`left_bound`, `right_bound`) pair. `[-1, -1]` is unbounded both ways, which
-    for these prefill suites is CAUSAL by construction -- the paired
-    `benchmark_dense_prefill_live.py` labels the W=0 arm "full-causal" rather than "no
-    mask". `[W, 0]` with W >= 0 is a banded causal window, a DIFFERENT mask kind that is
-    never folded onto plain causal.
+    Causality is not recorded and the dispatcher does
+    `causal = (mask_type != 0)`, so a trace states causality through
+    `window_size` or it is skipped and counted. `window_size` is
+    `[left, right]`: `[-1, -1]` is unbounded both ways, causal for these
+    prefill suites, and `[W, 0]` with W >= 0 is a banded causal window, never
+    folded onto plain causal.
     """
     shapes: list[dict] = []
     skipped_unknown_mask = 0
@@ -372,10 +344,10 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             if left is None or right is None:
                 skipped_unknown_mask += 1
                 continue
-            # The WIDTH is carried, not just the kind. A windowed shape whose width is
-            # dropped reaches the dispatcher as sliding_window=0, resolves to plain
-            # causal, and the kernel then computes a full causal triangle for a banded
-            # request -- a WRONG ANSWER rather than a decline.
+            # The width is carried, not just the kind: a windowed shape whose
+            # width is dropped reaches the dispatcher as sliding_window=0,
+            # resolves to plain causal, and the kernel computes a full causal
+            # triangle for a banded request -- a wrong answer, not a decline.
             sliding_window = 0
             if int(left) < 0 and int(right) < 0:
                 mask_type = _MASK_TYPE["causal"]
@@ -396,9 +368,8 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
             heads_kv = record.get("num_kv_heads")
             if None in (head_size, seqlen_q, seqlen_k, heads_q, heads_kv):
                 continue
-            # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised through
-            # the same table the graph corpus uses -- one vocabulary, one place to
-            # add a spelling, rather than two that can disagree.
+            # `q_dtype` is a torch spelling ("torch.bfloat16"), normalised
+            # through the same table the graph corpus uses.
             dtype = _normalise_dtype(record.get("q_dtype"), path, dtype_default)
             shapes.append(
                 {
@@ -412,11 +383,11 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                     "dtype": dtype,
                     "mask_type": mask_type,
                     "sliding_window": sliding_window,
-                    # A recorded request attribute, not a tuning choice. Carried so the
-                    # dispatcher resolves the shape the trace actually asked for;
-                    # whether THIS integration ships a sink variant is a scope decision
-                    # made downstream, and filtering here would hide the shape from
-                    # RUNBOOK §7's runtime reconciliation entirely.
+                    # A recorded request attribute, not a tuning choice: the
+                    # dispatcher resolves the shape the trace asked for.
+                    # Whether this integration ships a sink variant is decided
+                    # downstream, and filtering here would hide the shape from
+                    # runtime reconciliation.
                     "use_sinks": bool(record.get("has_sinks")),
                     "_provenance": {
                         "source": "rocke_bench",
@@ -451,12 +422,9 @@ def _shape_key(shape: dict) -> str:
 
 
 def deduplicate(shapes: list[dict]) -> tuple[list[dict], int]:
-    """One entry per distinct shape, keeping the first provenance and counting the rest.
-
-    A corpus is a set of shapes, not a set of rows. Two suites asking for the same
-    shape is one variant to compile -- but it is two votes for that shape mattering,
-    so the duplicate count is reported rather than discarded.
-    """
+    """One entry per distinct shape, keeping the first provenance and counting
+    the rest: two suites asking for the same shape is one variant to compile
+    but two votes for it mattering."""
     seen: dict = {}
     duplicates = 0
     for shape in shapes:

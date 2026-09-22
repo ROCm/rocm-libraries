@@ -3,17 +3,10 @@
 
 """`device_probe`'s exit statuses, which a caller branches on.
 
-The probe shells out to ``rocminfo``. When that binary is absent -- a
-packaging or platform difference, and no statement at all about the host's
-GPUs -- ``subprocess.run`` raises ``FileNotFoundError``. That is an
-``OSError``, and it used to be caught beside the ``ValueError`` raised when
-``rocminfo`` ran and reported a different architecture. Both returned 1, so
-a healthy host that simply lacked the utility reported device-absent and
-halted an unattended run at its first gate.
-
-The two are now distinct: 1 means observed and negative, 3 means not
-observed. These tests pin that split, because nothing else does and the
-failure it prevents is silent on the only hosts where it happens.
+The probe shells out to ``rocminfo``. Exit 1 means observed and negative, exit 3 means
+not observed: a missing ``rocminfo`` raises ``FileNotFoundError`` (an ``OSError``) and
+says nothing about the host's GPUs, so it must not halt an unattended run at its first
+gate.
 """
 import subprocess
 import sys
@@ -21,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from tools import device_probe  # noqa: E402
+import device_probe  # noqa: E402
 
 
 def _args(tmp_path: Path) -> list:
@@ -53,7 +46,7 @@ class TestExitStatusDistinguishesUnobservedFromNegative:
     def test_missing_utility_is_unobserved_not_device_absent(
         self, tmp_path, monkeypatch, capsys
     ):
-        """The regression: no rocminfo on PATH must not read as no GPU."""
+        """No rocminfo on PATH must not read as no GPU."""
 
         def raise_missing(*args, **kwargs):
             raise FileNotFoundError(2, "No such file or directory: 'rocminfo'")
@@ -99,12 +92,9 @@ class TestExitStatusDistinguishesUnobservedFromNegative:
     def test_second_utility_observes_what_the_first_could_not(
         self, tmp_path, monkeypatch, capsys
     ):
-        """A host missing only the reference tool is observable, not unobserved.
-
-        The Windows ROCm wheels ship hipInfo and no rocminfo. Falling through to it
-        is the difference between a verified device and a gate that can never be met
-        on that platform, so the fallthrough is behaviour rather than convenience.
-        """
+        """A host missing only the reference tool is observable: the Windows ROCm wheels
+        ship hipInfo and no rocminfo, so the fallthrough is behaviour rather than
+        convenience."""
 
         def run(args, **kwargs):
             if args[0] == "rocminfo":

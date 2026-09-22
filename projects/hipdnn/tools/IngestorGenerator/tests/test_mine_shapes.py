@@ -3,14 +3,9 @@
 
 """The shape corpus: what to compile, from the sources that decide it.
 
-A kernel-side source answers "what is LEGAL?", never "what will anyone ASK for?",
-so a legal, validated, fully-tested engine can serve zero real workloads and only
-a count against an external corpus shows it.
-
-Two properties carry most of the value: a mask spelling is never GUESSED, and
-provenance survives onto every shape. The second is not bookkeeping -- one measured
-result was a large win on a synthetic suite and near-parity on real model traces,
-and only the provenance split made that visible.
+A kernel-side source answers "what is LEGAL?", never "what will anyone ASK for?", so
+only a count against an external corpus shows an engine serving zero real workloads.
+A mask spelling is never GUESSED, and provenance survives onto every shape.
 """
 
 from __future__ import annotations
@@ -87,8 +82,8 @@ class TestPublishedCsv:
         assert len(shapes) == 1
 
     def test_carries_priority_and_model_as_provenance(self, tmp_path):
-        """`priority` is a shipping signal available from no other source, and the
-        model is the axis a mixed-corpus result has to be split along."""
+        """`priority` comes from no other source, and the model is the axis a
+        mixed-corpus result is split along."""
         rc, _, shapes = _mine(
             tmp_path, _HEADER + _row(priority="P0", model="Llama-3-8B")
         )
@@ -99,16 +94,15 @@ class TestPublishedCsv:
         assert provenance["source"] == "published"
 
     def test_an_unknown_mask_spelling_is_refused_not_guessed(self, tmp_path):
-        """Defaulting an unrecognised mask is how a windowed graph gets served as
-        plain causal -- a wrong answer rather than a decline."""
+        """Defaulting an unrecognised mask serves a windowed graph as plain causal: a
+        wrong answer rather than a decline."""
         rc, output, _ = _mine(tmp_path, _HEADER + _row(mask="cheesecake"))
         assert rc != 0
         assert "unknown mask spelling" in output
 
     def test_an_unknown_dtype_spelling_is_refused_not_passed_through(self, tmp_path):
-        """The graph-corpus and rocKE-bench readers both refuse an unrecognised
-        dtype, and an unrecognised dtype here builds the wrong binary and still
-        validates -- a decline is the correct answer, not a passthrough."""
+        """An unrecognised dtype builds the wrong binary and still validates, and the
+        other two readers refuse it too."""
         rc, output, shapes = _mine(tmp_path, _HEADER + _row(dtype="fp8_e4m3"))
         assert rc != 0, f"bad dtype must be refused, not mined: {shapes}"
         assert "unknown dtype spelling" in output
@@ -116,9 +110,8 @@ class TestPublishedCsv:
     def test_every_dtype_spelling_normalises_the_same_as_the_other_readers(
         self, tmp_path
     ):
-        """The converse of the refusal above: every spelling `_DTYPE_SPELLINGS`
-        recognises must mine cleanly through the CSV path and normalise to the same
-        canonical value the graph/rocKE-bench readers produce."""
+        """Every spelling `_DTYPE_SPELLINGS` recognises must normalise to the same
+        canonical value the graph and rocKE-bench readers produce."""
         for spelling, canonical in (
             ("bf16", "bf16"),
             ("bfloat16", "bf16"),
@@ -133,15 +126,14 @@ class TestPublishedCsv:
             assert shapes[0]["dtype"] == canonical
 
     def test_an_absent_dtype_falls_back_to_bf16(self, tmp_path):
-        """A row that simply does not say is a fallback, not a refusal --
-        distinct from a row that says something this table does not recognise."""
+        """A row that does not say is a fallback, distinct from one saying something
+        this table does not recognise."""
         rc, output, shapes = _mine(tmp_path, _HEADER + _row(dtype=""))
         assert rc == 0, output
         assert shapes[0]["dtype"] == "bf16"
 
     def test_windowed_rows_are_excluded_loudly_not_folded_onto_causal(self, tmp_path):
-        """Folding `swin` onto `causal` collapses seven distinct shape keys.
-        Excluded by default, included on request, never merged."""
+        """Folding `swin` onto `causal` collapses seven distinct shape keys."""
         text = (
             _HEADER
             + _row(mask="causal")
@@ -158,12 +150,8 @@ class TestPublishedCsv:
         assert len(masks) == 2, "swin must keep its own mask_type, not become causal"
 
     def test_a_windowed_csv_row_carries_its_WIDTH_not_just_its_kind(self, tmp_path):
-        """The published CSV states the width in its `window_size` column. Reading
-        any other column name refuses every swin row outright, so the documented
-        `--include-windowed` mining of this source cannot produce one at all; and a
-        width that silently arrived as 0 resolves to plain causal at the dispatcher
-        -- the same shape served wrong that this reader exists to prevent.
-        """
+        """The published CSV states the width in its `window_size` column; a width
+        arriving as 0 resolves to plain causal at the dispatcher."""
         rc, output, shapes = _mine(
             tmp_path, _HEADER + _row(mask="swin", window_size=512), "--include-windowed"
         )
@@ -176,8 +164,8 @@ class TestPublishedCsv:
         )
 
     def test_a_windowed_csv_row_without_a_width_is_refused(self, tmp_path):
-        """The converse: absent a width there is no windowed shape to mine, and
-        defaulting one would invent a shape nobody asked for."""
+        """Absent a width there is no windowed shape to mine, and defaulting one invents
+        a shape nobody asked for."""
         rc, output, shapes = _mine(
             tmp_path, _HEADER + _row(mask="swin", window_size=0), "--include-windowed"
         )
@@ -185,8 +173,8 @@ class TestPublishedCsv:
         assert not shapes, "a widthless windowed row must not reach the corpus"
 
     def test_identical_shapes_from_different_rows_merge_to_one_variant(self, tmp_path):
-        """A corpus is a set of shapes; two rows asking for the same shape is one
-        variant to compile."""
+        """A corpus is a set of shapes: two rows asking for the same shape are one
+        variant."""
         text = _HEADER + _row(shape_idx=0, model="A") + _row(shape_idx=1, model="B")
         rc, output, shapes = _mine(tmp_path, text)
         assert rc == 0
@@ -194,7 +182,6 @@ class TestPublishedCsv:
         assert "1 duplicate shape(s) merged" in output
 
     def test_a_genuinely_different_shape_is_kept(self, tmp_path):
-        """Guards the merge above from collapsing real coverage."""
         text = (
             _HEADER
             + _row(seq_q=4096, seq_kv=4096)
@@ -227,8 +214,8 @@ class TestGraphCorpus:
 
     def test_backward_graphs_are_excluded_structurally(self, tmp_path):
         """A prefill kernel has no backward path, and one such graph routes to a
-        third-party backward FMHA that takes the DEVICE down. Gradient tensors are
-        the marker; the filename is not authoritative."""
+        third-party backward FMHA that takes the DEVICE down. Gradient tensors are the
+        marker."""
         corpus = tmp_path / "graphs"
         corpus.mkdir()
         self._graph(corpus / "fwd_shape.json")
@@ -271,21 +258,14 @@ class TestGraphCorpus:
 
 
 class TestCausalityComesFromTheGraphNotTheFilename:
-    """`causal` decides which dispatcher branch resolves, so mining it wrong
-    silently sizes a variant set that cannot serve the shapes it claims.
+    """`causal` decides which dispatcher branch resolves, so mining it wrong sizes a
+    variant set that cannot serve the shapes it claims.
 
-    A filename heuristic (`"causal" in path.stem.lower()`) is wrong for every causal
-    graph in this repo's bundle tree: 25 carry `causal` in a PARENT DIRECTORY
-    (`.../hd128_causal_batch/Small/Small.json`) and none carry it in the leaf name.
-    It reports a corpus with zero causal graphs and collapses causal and non-causal
-    shapes that differ in nothing else onto one key -- a coverage loss, not merely a
-    mislabel.
-
-    hipDNN has no `causal` boolean. The deprecated pair takes precedence when set;
-    otherwise causality is (left_bound, right_bound, diagonal_alignment). Every
-    shipped causal bundle leaves both booleans false and says `left_bound=-1,
-    right_bound=0`, so a reader that trusts the booleans alone calls them all
-    non-causal.
+    hipDNN has no `causal` boolean: the deprecated pair takes precedence when set,
+    otherwise causality is (left_bound, right_bound, diagonal_alignment), and every
+    shipped causal bundle leaves both booleans false with `left_bound=-1,
+    right_bound=0`. A filename heuristic is wrong for every causal graph here -- they
+    carry `causal` in a PARENT DIRECTORY, never in the leaf name.
     """
 
     def _graph(self, path: Path, attrs: dict) -> None:
@@ -346,8 +326,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [1]
 
     def test_no_bounds_at_all_is_not_causal_despite_a_causal_PATH(self, tmp_path):
-        """The converse, and the one a filename heuristic gets backwards: a
-        directory named `causal` containing an unmasked graph."""
+        """A directory named `causal` containing an unmasked graph."""
         self._graph(
             tmp_path / "graphs" / "hd128_causal_batch" / "Small" / "Small.json",
             {
@@ -361,8 +340,7 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [0]
 
     def test_a_finite_left_bound_is_a_window_not_a_causal_variant(self, tmp_path):
-        """Folding a window onto causal is how one gets SERVED as plain causal --
-        a wrong answer rather than a decline."""
+        """Folding a window onto causal gets it SERVED as plain causal."""
         self._graph(
             tmp_path / "graphs" / "swa" / "g.json",
             {"causal_mask": False, "left_bound": 128, "right_bound": 0},
@@ -377,8 +355,8 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         assert [s["mask_type"] for s in self._mine(tmp_path)] == [1]
 
     def test_causal_and_noncausal_shapes_do_not_collapse_onto_one_key(self, tmp_path):
-        """Two graphs identical but for causality are TWO variants to compile;
-        mining them both as non-causal merges them and halves coverage."""
+        """Two graphs identical but for causality are TWO variants; merging them halves
+        coverage."""
         self._graph(
             tmp_path / "graphs" / "a" / "g.json",
             {"causal_mask": False, "left_bound": -1, "right_bound": 0},
@@ -390,9 +368,8 @@ class TestCausalityComesFromTheGraphNotTheFilename:
         assert sorted(s["mask_type"] for s in self._mine(tmp_path)) == [0, 1]
 
     def test_a_non_numeric_left_bound_is_refused_not_resolved_to_causal(self, tmp_path):
-        """`left_bound` drives the branch below (`>= 0` -> window, else causal), so
-        a non-numeric value falls through neither comparison and lands on causal --
-        the same wrong-answer-not-a-decline failure refused for mask and dtype."""
+        """`left_bound` drives the branch below (`>= 0` -> window, else causal), so a
+        non-numeric value falls through both comparisons and lands on causal."""
         self._graph(
             tmp_path / "graphs" / "g.json",
             {"causal_mask": False, "left_bound": "unbounded", "right_bound": 0},
@@ -416,15 +393,9 @@ class TestCausalityComesFromTheGraphNotTheFilename:
 
 
 class TestRocKeBenchTree:
-    """The third source: rocKE's own benchmark tree.
-
-    For an arch with no published results CSV it is the ONLY source that says what
-    the kernel team measures, so a miner that cannot read it sizes a variant set
-    from sample graphs alone.
-
-    These files are JSONL (one record per line), not JSON documents: `json.load`
-    raises "Extra data" on every one of them.
-    """
+    """The third source: rocKE's own benchmark tree, the only one saying what the kernel
+    team measures on an arch with no published results CSV. The files are JSONL, so
+    `json.load` raises "Extra data"."""
 
     def _trace(self, path: Path, *records) -> None:
         path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
@@ -460,8 +431,7 @@ class TestRocKeBenchTree:
         return result, shapes
 
     def test_a_jsonl_trace_is_read_at_all(self, tmp_path):
-        """Guards the format: a json.load reader gets 'Extra data' and silently
-        mines nothing."""
+        """A json.load reader gets 'Extra data' and silently mines nothing."""
         result, shapes = self._mine_bench(
             tmp_path, self._record(), self._record(max_seqlen_q=8192, max_seqlen_k=8192)
         )
@@ -470,15 +440,14 @@ class TestRocKeBenchTree:
 
     def test_an_unwindowed_prefill_trace_is_causal(self, tmp_path):
         """`[-1, -1]` is unbounded both ways, which for a prefill suite is full
-        causal -- the paired live benchmark labels its W=0 arm 'full-causal'."""
+        causal."""
         _, shapes = self._mine_bench(tmp_path, self._record(window_size=[-1, -1]))
         assert shapes[0]["mask_type"] == 1
         assert shapes[0]["sliding_window"] == 0
 
     def test_a_windowed_trace_carries_its_WIDTH_not_just_its_kind(self, tmp_path):
-        """Dropping the width sends sliding_window=0 to the dispatcher, which
-        resolves to plain causal: the kernel computes a full causal triangle for a
-        banded request and returns a WRONG ANSWER instead of declining."""
+        """Dropping the width sends sliding_window=0 to the dispatcher, which computes a
+        full causal triangle for a banded request instead of declining."""
         _, shapes = self._mine_bench(tmp_path, self._record(window_size=[127, 0]))
         assert shapes[0]["mask_type"] == 2, "a finite left bound is a window"
         assert shapes[0]["sliding_window"] == 128, (
@@ -487,9 +456,8 @@ class TestRocKeBenchTree:
         )
 
     def test_sinks_are_carried_rather_than_filtered(self, tmp_path):
-        """Whether an integration SHIPS a sink variant is a scope decision made
-        downstream. Filtering the shape out here hides it from the reconciler, which
-        is exactly where a declined-but-servable shape is supposed to surface."""
+        """Shipping a sink variant is a scope decision made downstream; filtering the
+        shape out here hides it from the reconciler."""
         _, shapes = self._mine_bench(tmp_path, self._record(has_sinks=True))
         assert shapes[0]["use_sinks"] is True
         assert shapes[0]["_provenance"]["has_sinks"] is True
@@ -497,9 +465,8 @@ class TestRocKeBenchTree:
     def test_a_trace_with_no_recorded_causality_is_skipped_not_defaulted(
         self, tmp_path
     ):
-        """No record in rocKE's shipped traces carries a causal/mask key, so
-        causality comes from window_size or from nowhere. Defaulting it picks which
-        branch the dispatcher resolves and which kernels get built."""
+        """No record in rocKE's traces carries a causal/mask key, so defaulting it picks
+        which branch the dispatcher resolves and which kernels get built."""
         result, shapes = self._mine_bench(
             tmp_path, self._record(window_size=None), self._record()
         )
@@ -508,8 +475,8 @@ class TestRocKeBenchTree:
         assert "no recorded causality" in result.stdout
 
     def test_an_unknown_dtype_spelling_is_refused(self, tmp_path):
-        """Three vocabularies meet in this miner and none agree. A guessed dtype
-        builds a different binary and still validates."""
+        """Three vocabularies meet here and none agree; a guessed dtype builds a
+        different binary and still validates."""
         result, _ = self._mine_bench(
             tmp_path, self._record(q_dtype="torch.float8_e4m3")
         )
@@ -525,10 +492,8 @@ class TestRocKeBenchTree:
 
 
 class TestGradientSpellingsAreBothExcluded:
-    """`sample_sdpa_backward` spells its gradients `dq`/`dk`/`dv`/`do`, not
-    `d_query`. A marker set matching only one spelling mines a backward graph as
-    forward whenever its dtype is servable, and one of that class takes the DEVICE
-    down mid-sweep."""
+    """`sample_sdpa_backward` spells its gradients `dq`/`dk`/`dv`/`do`, not `d_query`,
+    and a marker set matching one spelling mines a backward graph as forward."""
 
     @pytest.mark.parametrize("gradient", ["d_query", "dq", "dk", "dv", "do"])
     def test_either_gradient_spelling_excludes_the_graph(self, tmp_path, gradient):
@@ -551,8 +516,8 @@ class TestGradientSpellingsAreBothExcluded:
         assert "no shapes mined" in result.stderr
 
     def test_the_node_type_alone_excludes_a_backward_graph(self, tmp_path):
-        """Belt and braces: the graph DECLARES what it is, so the op type is the
-        primary marker and tensor names are the fallback."""
+        """The graph DECLARES what it is, so the op type is the primary marker and
+        tensor names the fallback."""
         corpus = tmp_path / "graphs"
         corpus.mkdir()
         (corpus / "g.json").write_text(
@@ -576,8 +541,8 @@ class TestGradientSpellingsAreBothExcluded:
         assert result.returncode == 1, "a declared backward graph must not be mined"
 
     def test_a_forward_graph_with_similar_names_is_still_mined(self, tmp_path):
-        """Control: the exclusion must not fire on an ordinary forward graph whose
-        tensors merely start with d (`descale_q`), or the corpus empties silently."""
+        """Control: the exclusion must not fire on a forward graph whose tensors merely
+        start with d (`descale_q`), or the corpus empties silently."""
         corpus = tmp_path / "graphs"
         corpus.mkdir()
         (corpus / "g.json").write_text(
@@ -604,15 +569,9 @@ class TestGradientSpellingsAreBothExcluded:
 
 
 class TestEveryRequestSemanticSurvivesMining:
-    """A mined shape is a REQUEST, and a request field dropped here cannot be
-    recovered downstream.
-
-    A field dropped during mining sends the dispatcher a request the caller did not
-    make -- a banded window read as full causal computes a whole triangle and returns
-    a WRONG ANSWER rather than declining. A field dropped from the corpus IDENTITY
-    merges two genuinely different requests into one variant, so only one of them is
-    ever compiled and the other is served by whatever the fallback is.
-    """
+    """A field dropped during mining sends the dispatcher a request the caller did not
+    make; a field dropped from the corpus IDENTITY merges two requests into one variant,
+    so only one is ever compiled."""
 
     @staticmethod
     def _graph(
@@ -670,9 +629,8 @@ class TestEveryRequestSemanticSurvivesMining:
     def test_an_asymmetric_v_head_dimension_is_carried_not_copied_from_q(
         self, tmp_path
     ):
-        """Q and V head dimensions are INDEPENDENT. Copying Q's onto V builds a
-        variant with the wrong output width -- and the shape whose V dimension
-        actually differs then has no variant at all."""
+        """Q and V head dimensions are INDEPENDENT: copying Q's onto V builds a variant
+        with the wrong output width and leaves the asymmetric shape with none."""
         self._graph(
             tmp_path / "graphs" / "g.json",
             attrs=self._CAUSAL,
@@ -684,9 +642,8 @@ class TestEveryRequestSemanticSurvivesMining:
         assert shapes[0]["hdim_v"] == 64, "V's head dimension was taken from Q"
 
     def test_a_v_tensor_disagreeing_on_batch_or_heads_is_refused(self, tmp_path):
-        """Independent does not mean arbitrary: V shares batch, heads and key length
-        with K. A graph where it does not is not one attention request, and mining
-        it as one invents a shape nobody asked for."""
+        """V shares batch, heads and key length with K; a graph where it does not is not
+        one attention request."""
         self._graph(
             tmp_path / "graphs" / "g.json",
             attrs=self._CAUSAL,
@@ -709,8 +666,8 @@ class TestEveryRequestSemanticSurvivesMining:
     def test_unmasked_causal_and_windowed_requests_are_three_distinct_shapes(
         self, tmp_path
     ):
-        """Identical in every dimension; different in what they mask. Collapsing any
-        pair of them sizes a variant set that cannot serve the other."""
+        """Identical in every dimension, different in what they mask: collapsing any
+        pair sizes a variant set that cannot serve the other."""
         self._graph(tmp_path / "graphs" / "none.json", attrs=self._UNMASKED)
         self._graph(tmp_path / "graphs" / "causal.json", attrs=self._CAUSAL)
         self._graph(tmp_path / "graphs" / "window.json", attrs=self._WINDOW)
@@ -724,8 +681,8 @@ class TestEveryRequestSemanticSurvivesMining:
         }
 
     def test_two_windows_of_different_width_do_not_merge(self, tmp_path):
-        """The mask KIND alone does not encode the window. Carrying only the kind
-        sends both to the dispatcher as the same request."""
+        """The mask KIND alone does not encode the window, so both reach the dispatcher
+        as the same request."""
         self._graph(
             tmp_path / "graphs" / "w64.json",
             attrs={"causal_mask": False, "left_bound": 63, "right_bound": 0},
@@ -758,9 +715,8 @@ class TestEveryRequestSemanticSurvivesMining:
         assert "sink_token_tensor_uid" in output
 
     def test_provenance_alone_never_makes_two_shapes_distinct(self, tmp_path):
-        """The converse of every test above, and the reason identity is computed
-        from request fields rather than from the whole record: the same request
-        arriving from two suites is ONE variant to compile, and two votes for it."""
+        """Identity is computed from request fields, not the whole record: the same
+        request from two suites is ONE variant and two votes for it."""
         self._graph(tmp_path / "graphs" / "suite_a" / "g.json", attrs=self._CAUSAL)
         self._graph(tmp_path / "graphs" / "suite_b" / "g.json", attrs=self._CAUSAL)
         rc, output, shapes = self._mine(tmp_path)
