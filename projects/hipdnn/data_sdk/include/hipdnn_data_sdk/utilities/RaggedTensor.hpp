@@ -46,11 +46,13 @@ public:
                      std::vector<int64_t> strides,
                      int seqAxis,
                      std::shared_ptr<ITensor> raggedOffset,
-                     std::optional<size_t> physicalElementCount)
+                     std::optional<size_t> physicalElementCount,
+                     int64_t raggedOffsetMultiplier = 1)
         : _paddedDims(std::move(paddedDims))
         , _strides(std::move(strides))
         , _seqAxis(seqAxis)
         , _raggedOffset(std::move(raggedOffset))
+        , _raggedOffsetMultiplier(raggedOffsetMultiplier)
     {
         // Structural checks first, so readOffset below only sees a supported element size and
         // _seqAxis is a valid index into _strides.
@@ -115,8 +117,9 @@ public:
     }
 
 protected:
-    // Ragged addressing: base each batch at ragged_offset[b], then add the remaining
-    // indices against the padded strides. A bare index {b} bases at ragged_offset[b].
+    // Ragged addressing: base each batch at the element-unit ragged offset
+    // (stored_offset * multiplier), then add the remaining indices against the padded
+    // strides. A bare index {b} bases at the batch's element offset.
     int64_t getIndexImpl(const std::vector<int64_t>& indices) const override
     {
         if(indices.empty())
@@ -124,7 +127,7 @@ protected:
             return 0;
         }
 
-        const int64_t base = readOffset(static_cast<size_t>(indices[0]));
+        const int64_t base = readElementOffset(static_cast<size_t>(indices[0]));
         return base
                + std::inner_product(std::next(indices.begin()),
                                     indices.end(),
@@ -147,12 +150,24 @@ protected:
         }
     }
 
+    // ragged_offset[b] recovered to element units (stored_offset * multiplier), letting
+    // the aux be stored in coarser (e.g. token) units.
+    int64_t readElementOffset(size_t b) const
+    {
+        return readOffset(b) * _raggedOffsetMultiplier;
+    }
+
     // Constructor-time structural validation, shared by both concrete types (RFC 0014 §4.5.5).
     void validateRaggedStructure() const
     {
         if(_raggedOffset == nullptr)
         {
             throw std::invalid_argument("ragged_offset must not be null");
+        }
+        if(_raggedOffsetMultiplier < 1)
+        {
+            throw std::invalid_argument("ragged_offset_multiplier must be >= 1 (got "
+                                        + std::to_string(_raggedOffsetMultiplier) + ")");
         }
         if(_paddedDims.size() < 2)
         {
@@ -189,7 +204,9 @@ protected:
         }
     }
 
-    // Reads the B+1 offset table from the aux, each widened to int64_t.
+    // Reads the B+1 offset table from the aux, each widened to int64_t. The single
+    // boundary where the multiplier is applied, so every downstream consumer operates on
+    // element units and the existing element-stride math needs no change.
     std::vector<int64_t> collectRowOffsets() const
     {
         const auto batchCount = static_cast<size_t>(_paddedDims[0]);
@@ -197,7 +214,7 @@ protected:
         offsets.reserve(batchCount + 1);
         for(size_t b = 0; b <= batchCount; ++b)
         {
-            offsets.push_back(readOffset(b));
+            offsets.push_back(readElementOffset(b));
         }
         return offsets;
     }
@@ -252,9 +269,10 @@ protected:
     std::vector<int64_t> _strides;
     int _seqAxis;
     int64_t _seqStride{1};
-    size_t _iteratedElementCount{0}; ///< ragged_offset[B]
-    size_t _physicalElementCount{0}; ///< allocated buffer size (== ragged_offset[B])
+    size_t _iteratedElementCount{0}; ///< ragged_offset[B] in element units
+    size_t _physicalElementCount{0}; ///< allocated buffer size (== ragged_offset[B] elements)
     std::shared_ptr<ITensor> _raggedOffset; ///< non-null, fixed at construction, never reseated
+    int64_t _raggedOffsetMultiplier{1}; ///< stored_offset -> element_offset scale
 };
 
 /**
@@ -273,12 +291,14 @@ public:
                  std::vector<int64_t> strides,
                  int seqAxis,
                  std::shared_ptr<ITensor> raggedOffset,
-                 std::optional<size_t> physicalElementCount = std::nullopt)
+                 std::optional<size_t> physicalElementCount = std::nullopt,
+                 int64_t raggedOffsetMultiplier = 1)
         : RaggedTensorBase<T>(std::move(paddedDims),
                               std::move(strides),
                               seqAxis,
                               std::move(raggedOffset),
-                              physicalElementCount)
+                              physicalElementCount,
+                              raggedOffsetMultiplier)
     {
         _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(this->elementSpace());
     }

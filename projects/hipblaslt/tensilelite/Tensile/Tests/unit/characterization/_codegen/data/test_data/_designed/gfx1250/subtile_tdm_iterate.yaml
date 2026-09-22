@@ -1,0 +1,80 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R8 DESIGNED config: SubtileGREmit TDM-descriptor + iterate-mode coverage.
+#
+# Targets the TDM-subtile global-address / descriptor emit added by the
+# "subtile tdm iterate mode for large depthu" feature (#9410), which the char
+# lane never reached: no prior char config pairs UseSubtileImpl with TDMInst,
+# so isSubtileIterateMode() (Utilities.py) was False for every emitted kernel
+# and initTDMDescriptorSubtile / tdmGlobalOffsetSubtile (called only on the
+# hasTDM subtile path, KernelWriter.py:5141-5145) were entirely unexecuted.
+#
+# isSubtileIterateMode(state, tc) is:
+#   UseSubtileImpl AND enableTDM<tc> AND DepthU * DataType<tc>.numBytes() > 1024
+# For BF16 (numBytes=2): DepthU=1024 -> 2048 > 1024 -> iterate TRUE;
+#                        DepthU=256  ->  512 < 1024 -> iterate FALSE.
+#
+# Fork = 2 MatrixInstruction x 2 DepthU = 4 kernels, all valid on gfx1250:
+#   MI [16,16,32,1,1,2,2,1,1] MT32x32 WG(1,1) numWaves=1
+#   MI [16,16,32,1,1,1,1,2,2] MT32x32 WG(2,2) numWaves=4 (non-iterate edge-clamp path)
+#   DepthU 256  -> isSubtileIter FALSE (setPadding/tile1 non-iterate arms)
+#   DepthU 1024 -> isSubtileIter TRUE  (setPadding(0,0), tile1=1, iteration increments)
+#
+# Adapted from the validated e2e Tests/common/gemm/gfx12/subtile_bf16_gfx1250.yaml
+# "large DepthU" problem group (StreamK=0, GlobalSplitU=1). CPU-only; no GPU,
+# no compile, no hardware.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # BF16 TN GEMM, gfx1250 TDM subtile, iterate + non-iterate DepthU
+  ########################################
+  -
+    - # ProblemType: BF16 TN
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]   # MT 32x32 WG 1x1 (numWaves=1)
+          - [16, 16, 32, 1,  1, 1, 1,  2, 2]   # MT 32x32 WG 2x2 (numWaves=4, edge clamp path)
+        - DepthU: [256, 1024]                   # 256 -> iterate False; 1024 -> iterate True
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchGL2: [0]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [True]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 1024]
