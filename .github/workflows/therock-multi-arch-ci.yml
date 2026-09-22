@@ -113,6 +113,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
+      changed_files: ${{ steps.configure.outputs.changed_files }}
       # TheRock's determine_rocm_test_dependencies.py natively resolves
       # shared/* monorepo subtrees (shared/stinkytofu, shared/tensile,
       # shared/origami, shared/mxdatagenerator, shared/rocroller) into the
@@ -121,13 +122,11 @@ jobs:
       # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
       test_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: |
-            .github/repos-config.json
+          sparse-checkout: .github/repos-config.json
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -192,20 +191,24 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
-      # Pass external repo info for stage-impact analysis.
-      # extra_cmake_options is appended to the cmake configure line of every
-      # build stage, scoped to this repository's CI runs. TheRock keeps
-      # HIPKERNELPROVIDER_ENABLE_ROCKE OFF by default; enabling it here is what
-      # gives rocKE build and test signal while it is still in development.
-      # Keep the value constant: the flag state file participates in every
-      # subproject's configure fingerprint, and stage reuse does not key on
-      # flags (TheRock#3399), so a per-PR value would churn fingerprints and
-      # let baselines built with the opposite value look reusable.
+      ref: users/geomin12/path-based-external-2
+      # Pass external repo info for stage-impact analysis and path-based CI skip.
+      # - changed_files: List of files changed in this PR/push (null for unknown)
+      # - skip_ci_config: Path to TOML config file with skip patterns
+      # - extra_cmake_options: Appended to cmake configure for this repo's CI runs
+      #
+      # TheRock reads skip_ci_config TOML file and evaluates changed_files
+      # against the patterns to determine if CI can be skipped.
+      #
+      # Keep extra_cmake_options constant: the flag state file participates in
+      # every subproject's configure fingerprint, and stage reuse does not key
+      # on flags (TheRock#3399), so a per-PR value would churn fingerprints.
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
+          "changed_files": ${{ needs.configure.outputs.changed_files || 'null' }},
+          "skip_ci_config": ".github/skip-ci-config.toml",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
@@ -215,8 +218,7 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
     secrets: inherit
@@ -243,8 +245,7 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
     secrets: inherit
