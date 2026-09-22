@@ -258,6 +258,38 @@ convention and same rule as `KNOWN_VIOLATIONS` in
 shrinks.** An entry that starts compiling is itself reported as a failure, so a
 fix cannot leave dead weight behind.
 
+### 4.5 Can this target lower this intrinsic? (the arch-domain gate)
+
+§4.4 asks a compiler. The **arch-domain gate**,
+[`check_arch_domain.py`](platform/tools/check_arch_domain.py), asks *committed
+measured data* instead: `tools/gen_arch_domain.py` probes, per (declaration key,
+gfx target), whether that declaration actually links, and commits one JSON column
+per LLVM flavor under `platform/python/rocke/core/arch/data/`. The lowerer's
+`_need` chokepoint consults that table on every intrinsic demand and warns
+(`ArchDomainWarning`) when the answer is a measured negative. This gate lowers
+the same corpus §4.4 uses, harvests the warnings, and compares them against an
+`EXPECTED_WARNINGS` allowlist.
+
+The two gates overlap on purpose and neither subsumes the other:
+
+- **It needs no toolchain.** Lowering is pure Python and the table is committed
+  data, so this gate rules on *every* flavor on any host — where §4.4 can only
+  ever rule on the host's own and reports `UNVALIDATED` for the rest.
+- **It names the intrinsic.** §4.4 reports whatever the backend chose to say,
+  often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
+  diagnostic the probe recorded.
+- **Only a definite negative speaks.** `arch_absent` is the sole negative
+  status. A flavor with no committed column, an unswept target, a key absent
+  from the table, and the no-data statuses (`target_unsupported`,
+  `toolchain_crash`, `toolchain_timeout`) are all silent — 14% of the llvm20
+  column is no-data, and warning on those would train people to ignore the lane.
+  `name_absent` is deliberately *not* warned on: §4.4 already catches a reachable
+  one with a real diagnostic.
+
+`EXPECTED_WARNINGS` carries the same rule as `KNOWN_BAD`: **it only shrinks**,
+and an entry that stops firing is itself a failure. `ROCKE_ARCH_DOMAIN=off`
+disables the lookup.
+
 ---
 
 ## 5. Execution tiers & gating
@@ -266,13 +298,13 @@ Four distinct things run here; **do not conflate them**:
 
 | Tier | What | Gated? |
 |---|---|---|
-| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → pytest (`platform/tests`) → ctest | ✅ blocking |
+| **1. Gate** | relative-path guard → byte-identity gate → emitted-IR validity gate → arch-domain gate → pytest (`platform/tests`) → ctest | ✅ blocking |
 | **2. Diagnostics** | IR-canonical diff, fuzz diff, per-config golden check | ❌ opt-in |
 | **3. GPU / numeric** | reference-oracle kernel-correctness lanes | ❌ skipped off-device |
 | **4. Manual demos/tools** | hand-compiled CLIs / demos | ❌ |
 
 **Two entrypoints, one gated scope.** [`run_all.py`](platform/tests/run_all.py) is
-the **developer** runner (guard → gate → IR validity → pytest → ctest). **CI does not run
+the **developer** runner (guard → gate → IR validity → arch domain → pytest → ctest). **CI does not run
 `run_all.py`** — it runs
 **ctest** (wired from TheRock; project selection via `get_changed_projects.py`),
 whose registered pytest targets the **`platform/tests`** tree only. The exact
