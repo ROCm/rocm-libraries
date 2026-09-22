@@ -129,8 +129,8 @@ jobs:
 
       - name: Install base dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 install -y \
             ninja-build \
             python3-venv \
             python3-dev \

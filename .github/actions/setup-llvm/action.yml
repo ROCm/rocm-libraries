@@ -20,6 +20,7 @@ runs:
           "clang-${LLVM_VERSION}"
           "clang++-${LLVM_VERSION}"
           "clang-tidy-${LLVM_VERSION}"
+          "run-clang-tidy-${LLVM_VERSION}"
         )
         missing=false
         for tool in "${required[@]}"; do
@@ -38,9 +39,11 @@ runs:
           -o Acquire::http::Timeout=30
           -o Acquire::https::Timeout=30
         )
-        sudo apt-get "${apt_options[@]}" update
-        sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-          ca-certificates curl gnupg
+        if ! command -v curl >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+            ca-certificates curl gnupg
+        fi
 
         . /etc/os-release
         codename="${VERSION_CODENAME:?VERSION_CODENAME is missing from /etc/os-release}"

@@ -462,7 +462,9 @@ def findConfigs(rootDir=None, availableArchs=None):
                     for spec in configSpecs(filepath):
                         testId = relpath
                         if spec.shard_label:
-                            testId += "::" + spec.shard_label
+                            # ``::`` is pytest's node-selector delimiter, including
+                            # on the oldest supported pytest releases.
+                            testId += "--" + spec.shard_label
                         params.append(
                             pytest.param(spec, marks=marks, id=testId)
                         )
