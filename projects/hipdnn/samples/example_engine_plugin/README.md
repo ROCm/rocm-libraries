@@ -20,7 +20,7 @@ Runtime Compilation):
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
 | hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
-| GoogleTest | Unit testing framework | Provide its CMake package via `CMAKE_PREFIX_PATH` or `GTest_DIR`; fetching requires `-DALLOW_FETCH_DEPS=ON` |
+| GoogleTest including GoogleMock | Unit testing and mocking frameworks | Supplied by the hipDNN developer image, or provide its CMake package via `CMAKE_PREFIX_PATH` or `GTest_DIR`; fetching requires `-DALLOW_FETCH_DEPS=ON` |
 
 ## Directory Structure
 
@@ -97,11 +97,26 @@ example_engine_plugin/
 
 Run these commands from the example_engine_plugin folder.
 
+The [hipDNN developer image](../../dockerfiles/README.md) installs GoogleTest/GoogleMock and spdlog automatically in `/usr/local`. The Linux recipe below uses those packages without manual downloads, installs, or a fetch flag, together with hipDNN and ROCm in `/opt/rocm`.
+
+Outside the image, supply complete installed prefixes: HIP/HIPRTC, the hipDNN plugin, data, FlatBuffers and frontend SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), and GoogleTest including GoogleMock. Use absolute paths in the `CMAKE_PREFIX_PATH` lists below; `GTest_DIR` can identify the installed GoogleTest package instead of adding its prefix. The alternative `ALLOW_FETCH_DEPS=ON` only permits fetching GoogleTest, not hipDNN, HIP, or the other SDK dependencies. A copied plugin is an independent configure and does not inherit a previous hipDNN or samples build's fetch setting.
+
 ### Linux (GCC)
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH="/opt/rocm"
 cmake --build build
+```
+
+Outside the image, replace the configure command with one of:
+
+```bash
+cmake -B build -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, fetch missing GoogleTest.
+cmake -B build -DALLOW_FETCH_DEPS=ON \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies"
 ```
 
 Run all tests, including the sample app:
@@ -143,10 +158,12 @@ set PATH=C:\AMD\ROCm\bin;%PATH%
 With MSVC installed:
 
 ```powershell
-cmake -B build -G "Visual Studio 17 2022"
+cmake -B build -G "Visual Studio 17 2022" -DALLOW_FETCH_DEPS=OFF -DCMAKE_PREFIX_PATH="C:/path/to/hipdnn-install;C:/AMD/ROCm;C:/path/to/dependencies"
 cmake --build build --config Release
 ctest --test-dir build --build-config Release
 ```
+
+If GoogleTest is not installed, use `-DALLOW_FETCH_DEPS=ON` instead of `OFF` in this configure command; keep the installed SDK and other dependency prefixes.
 
 The tests and sample can also be run directly:
 
@@ -162,10 +179,12 @@ The tests and sample can also be run directly:
 With Clang and Ninja installed, and with the ROCm `bin` folder in your system PATH:
 
 ```powershell
-cmake -B build -G "Ninja"
+cmake -B build -G "Ninja" -DALLOW_FETCH_DEPS=OFF -DCMAKE_PREFIX_PATH="C:/path/to/hipdnn-install;C:/AMD/ROCm;C:/path/to/dependencies"
 cmake --build build
 ctest --test-dir build
 ```
+
+If GoogleTest is not installed, use `-DALLOW_FETCH_DEPS=ON` instead of `OFF` in this configure command; keep the installed SDK and other dependency prefixes.
 
 The tests and sample can also be run directly:
 

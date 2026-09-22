@@ -89,14 +89,23 @@ function(hipdnn_add_dependency dep_name)
         endif()
         if(NOT ${dep_name}_FOUND)
             if(NOT ALLOW_FETCH_DEPS)
-                message(FATAL_ERROR
-                    "${dep_name} was not found, and hipDNN does not fetch "
-                    "third-party dependencies. They are provided by the build "
-                    "environment: TheRock's third-party tree, or an install "
-                    "prefix on CMAKE_PREFIX_PATH. Provide ${dep_name}, or "
-                    "configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
-                    "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
-                )
+                # Explicit source trees need no acquisition. These names match
+                # the FetchContent declarations, not necessarily package names.
+                set(_source_dir_GTest "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}")
+                set(_source_dir_flatbuffers "${FETCHCONTENT_SOURCE_DIR_FLATBUFFERS}")
+                set(_source_dir_spdlog "${FETCHCONTENT_SOURCE_DIR_SPDLOG}")
+                set(_source_dir_nlohmann_json "${FETCHCONTENT_SOURCE_DIR_JSON}")
+                set(_source_dir "${_source_dir_${dep_name}}")
+                if(NOT _source_dir OR NOT IS_DIRECTORY "${_source_dir}")
+                    message(FATAL_ERROR
+                        "${dep_name} was not found, and hipDNN does not fetch "
+                        "third-party dependencies. They are provided by the build "
+                        "environment: TheRock's third-party tree, or an install "
+                        "prefix on CMAKE_PREFIX_PATH. Provide ${dep_name}, or "
+                        "configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
+                        "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
+                    )
+                endif()
             endif()
             message(STATUS "Did not find ${dep_name}, it will be built locally")
             _build_local()

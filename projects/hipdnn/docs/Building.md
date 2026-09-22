@@ -57,19 +57,32 @@
 #### Third-Party Libraries
 These libraries are resolved with `find_package` (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
 - [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
-- [Google Test](https://github.com/google/googletest) - Unit testing framework
+- [GoogleTest and GoogleMock](https://github.com/google/googletest) - Unit testing and mocking frameworks
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
 
-The build environment provides them: TheRock's third-party tree, or an install prefix on `CMAKE_PREFIX_PATH`. This follows TheRock's [dependency policy](https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md), which keeps third-party acquisition in TheRock rather than in each sub-project. A missing library fails configuration with an error naming it.
+The build environment provides them: TheRock's third-party tree when building within TheRock, or installed packages found through standard CMake search paths. This follows TheRock's [dependency policy](https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md), which keeps third-party acquisition in TheRock rather than in each sub-project. A missing library fails configuration with an error naming it.
+
+The [developer image](../dockerfiles/README.md) automatically installs GoogleTest/GoogleMock 1.17.0 and spdlog 1.15.3 with bundled fmt in `/usr/local`; its ROCm prefix supplies FlatBuffers and nlohmann_json. CMake finds `/usr/local` without extra flags, and a runtime `/opt/rocm` mount does not hide those developer packages. The normal image build needs no manual download, dependency installation, or fetch opt-in.
+
+Outside the image, supply a **complete** set of installed packages. With ROCm available as described below, use absolute paths in a semicolon-separated `CMAKE_PREFIX_PATH` list for any additional prefixes. The combined search paths must provide FlatBuffers, GoogleTest including GoogleMock, spdlog (and any dependencies required by its installed configuration), and nlohmann_json when JSON support is enabled. A hipDNN or ROCm prefix alone does not necessarily contain all of them. Package-specific `GTest_DIR` and `spdlog_DIR` may instead point at the directories containing their package configuration files.
 
 To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. Standalone hipDNN, providers, and samples default to `OFF`. The developer superbuild defaults to `ON`, but preserves an explicit `-DALLOW_FETCH_DEPS=OFF`.
 
 This policy also applies to standalone samples and the example engine plugin's GoogleTest dependency. Samples forward `ALLOW_FETCH_DEPS` to the plugin's separate CMake build; an explicit `OFF` is preserved. In TheRock, `hipDNN_samples` must declare its GoogleTest build dependency even when the lookup uses `QUIET`.
 
+From `projects/hipdnn`, choose one outside-image configuration:
+
 ```bash
-cmake -S . -B build -DALLOW_FETCH_DEPS=ON
+# Installed packages only; /path/to/dependencies contains the third-party packages.
+cmake --preset release -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, permit fetching missing third-party libraries.
+cmake --preset release -DALLOW_FETCH_DEPS=ON
 ```
+
+The fetch opt-in does not install ROCm, HIP, hipDNN SDKs, or provider libraries. Each independently configured provider, samples tree, or copied plugin needs its own package inputs or explicit fetch opt-in; configuring hipDNN with `ON` does not enable it for later standalone builds.
 
 For one release, a truthy `HIPDNN_NO_DOWNLOAD` value still emits a deprecation warning and disables fetching, even when `ALLOW_FETCH_DEPS=ON`. Legacy `OFF` values are ignored: neither a fresh nor a cached `HIPDNN_NO_DOWNLOAD=OFF` opts into downloads. Remove the legacy setting and use `ALLOW_FETCH_DEPS` instead.
 
@@ -133,6 +146,8 @@ For the **superbuild**, follow [Superbuild](#superbuild) instead. These steps bu
 
 Two build types are available: `release` (optimized) and `debug` (slower, but suited for a debugger). The examples below use `release`; for a debug build, substitute `debug` for `release` throughout, including the `build/release` -> `build/debug` binary directory. By default the presets find your ROCm installation on your PATH; if ROCm is not on your PATH, add `-DROCM_CMAKE_PATH=<rocm-root>` (see [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)).
 
+Inside the developer image, the following recipe uses its installed dependencies with fetching disabled by default. Outside the image, substitute one of the [complete-prefix or opt-in configurations](#third-party-libraries) for the configure command.
+
 Configure, build, and run the tests:
 
 ```bash
@@ -175,6 +190,19 @@ cd rocm-libraries/projects/hipdnn/samples
 cmake --preset release   # matches the hipDNN build type; use debug for a debug build
 cmake --build build/release
 ```
+
+Inside the developer image, GoogleTest/GoogleMock and spdlog are found automatically. Outside it, this is a separate configure: it does not inherit hipDNN's `ALLOW_FETCH_DEPS`. For installed dependencies, retain the matching hipDNN build-tree prefix when adding complete ROCm and third-party prefixes:
+
+```bash
+# From projects/hipdnn/samples; replace paths with absolute locations.
+cmake --preset release -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/rocm-libraries/projects/hipdnn/build/release/lib/cmake;/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, let the nested example plugin fetch missing GoogleTest.
+cmake --preset release -DALLOW_FETCH_DEPS=ON
+```
+
+The installed paths must satisfy the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies, plus HIP/HIPRTC and GoogleTest including GoogleMock. The opt-in only covers GoogleTest here; it does not fetch missing SDK packages or their other dependencies. See the [samples README](../samples/README.md#how-to-build) for the separate installed-hipDNN route.
 
 A standalone hipDNN build does **not** build any provider plugins, so the samples will have no engine to load at runtime. To run them, build a provider and either install its plugin alongside hipDNN or point `HIPDNN_PLUGIN_DIR` at the plugin's location. Because the superbuild handles this for you, it is the simpler choice for building and running samples against an in-tree hipDNN build.
 
