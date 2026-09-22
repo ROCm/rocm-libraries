@@ -885,6 +885,19 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
 
+        # contigOut: a wave's base spans its whole contiguous MIWaveTile[tile01] block of output
+        # tiles, mirroring LraTileAssignmentTransposedMFMA so the non-transposed (TN/NN) path gets the
+        # same WaveContiguousOutput re-layout the NT/TT transposed path already has. Applied to this
+        # path's own strideWave base (NOT the transposed base which forces strideTile=4).
+        # The base already carries a vectorWidth factor (interleaved grouping); REPLACE it with
+        # MIWaveTile rather than multiplying on top. The K-major (umlds) non-transposed base folds
+        # strideTile into that factor, so a raw *MIWaveTile overshoots by vectorWidth (e.g. TN B:
+        # 16*256*4 *4 = 65536 vs correct 16*256*4 = 16384). Transposed path has vectorWidth==1 so
+        # this reduces to the original *MIWaveTile.
+        contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
+        if contigOut:
+            strideWave = strideWave // vectorWidth * kernel["MIWaveTile"][tile01]
+
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
         # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
