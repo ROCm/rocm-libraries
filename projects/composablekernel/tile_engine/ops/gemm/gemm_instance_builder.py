@@ -611,7 +611,10 @@ class GemmKernelBuilder:
 #include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
 #include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
 """
-        if self.kernel_name_prefix == "grouped_gemm":
+        if self.kernel_name_prefix == "gemm_preshuffle":
+            instance_code += """#include "ck_tile/ops/epilogue/permuten_epilogue.hpp"
+"""
+        elif self.kernel_name_prefix == "grouped_gemm":
             instance_code += """#include <vector>
 #include <hip/hip_runtime.h>
 #include "ck_tile/ops/gemm/kernel/grouped_gemm_kernel.hpp"
@@ -1523,8 +1526,14 @@ struct SelectedKernel {{
         return instance_code
 
     def populate_cshuffle_gemm_preshuffle(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+        # Match the native preshuffle example's output permutation. The old
+        # trailing PermuteN argument now occupies BlockedXDLN_PerWarp, where
+        # false becomes zero and causes a compile-time division by zero.
+        permute_n = self.config.get("permute_n", False)
+        epilogue = "PermuteNEpilogue" if permute_n else "CShuffleEpilogue"
+        tail = "TransposeC" if permute_n else "TransposeC, NumWaveGroups"
+        instance_code = f"""
+        using EpilogueProblem = ck_tile::{epilogue}Problem<
             ADataType,
             BDataType,
             ck_tile::tuple<>,  // DsDataType
@@ -1540,13 +1549,9 @@ struct SelectedKernel {{
             WarpTileM,                   // MPerXdl_
             WarpTileN,                   // NPerXdl_
             WarpTileK,                   // KPerXdl_
-            TransposeC,                  // isCTransposed_
-            NumWaveGroups,               // kNumWaveGroups_
-            false,                       // FixedVectorSize_
-            1,                           // VectorSizeC_
-            PermuteN>;                   // isPermuteN_
+            {tail}>;
 
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        using GemmEpilogue = ck_tile::{epilogue}<EpilogueProblem>;"""
         return instance_code
 
     def populate_cshuffle_mx_gemm(self):
@@ -1627,6 +1632,9 @@ struct SelectedKernel {{
         return instance_code
 
     def populate_default_gemm_preshuffle(self):
+        # Permuted B requires the matching N store order for either epilogue.
+        if self.config.get("permute_n", False):
+            return self.populate_cshuffle_gemm_preshuffle()
         instance_code = """
         using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
             ADataType,

@@ -56,7 +56,7 @@ _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 # Single source of truth for the preshuffle B-shuffle permutation used by the
 # bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
 # (WeightPreshufflePipelineAGmemBGmemCRegV2), whose device-side B packing matches
-# ck_tile::shuffle_b (permute_n=False). Old-TE's default_config.json /
+# ck_tile::shuffle_b_v0 (permute_n=False). Old-TE's default_config.json /
 # default_ci_config.json set permute_n=true, but that is a HOST-marker that
 # selects a distinct (permuteN) TE pipeline the bridge does not generate -- it
 # does NOT map to a separate bridged device kernel. Honoring true here would
@@ -371,7 +371,7 @@ class GemmKernelConfig:
     reduction_strategy: str = "atomic"
 
     # --- Preshuffle only ---------------------------------------------------
-    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b).
+    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b_v0).
     # Mirrors Old-TE's permute_n config knob; participates in the kernel name so
     # it must match unified_gemm_codegen.py::key_name. Ignored by other variants.
     permute_n: bool = False
@@ -523,7 +523,7 @@ class GemmKernelConfig:
                 "persistent": [self.persistent],
             },
             # Top-level knob read by unified_gemm_codegen for the preshuffle
-            # variant (selects shuffle_b_permuteN vs shuffle_b). Harmless for
+            # variant (selects shuffle_b_permuteN vs shuffle_b_v0). Harmless for
             # other variants, which ignore it.
             "permute_n": self.permute_n,
         }

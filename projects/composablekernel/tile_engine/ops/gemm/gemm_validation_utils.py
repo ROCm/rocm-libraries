@@ -97,6 +97,10 @@ WARP_SUPPORTED_COMBINATIONS = {
 }
 
 GEMM_PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS = {
+    "gfx1250": {
+        "fp16_fp16_fp16": [[16, 16, 32]],
+        "bf16_bf16_bf16": [[16, 16, 32]],
+    },
     "gfx90a": {
         "fp16_fp16_fp16": [
             [32, 32, 8],

@@ -139,6 +139,7 @@ def is_preshuffle_config_valid(
     warp_tile_n: int,
     warp_tile_k: int,
     datatype: str,
+    warp_size: int = 64,
 ) -> bool:
     """
     Comprehensive preshuffle configuration validation.
@@ -161,7 +162,7 @@ def is_preshuffle_config_valid(
         warp_tile_k,
         datatype,
         m_iter_per_warp,
-        wave_size=64,
+        wave_size=warp_size,
         vector_load_size=16,
     ):
         return False
@@ -175,7 +176,7 @@ def is_preshuffle_config_valid(
         warp_k,
         datatype,
         vector_load_size=16,
-        warp_size=64,
+        warp_size=warp_size,
     ):
         return False
 
@@ -721,7 +722,7 @@ struct {struct_name} {{
     static constexpr bool UseStructuredSparsity = false;
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
     // PermuteN selects the B-preshuffle permutation used by the host-side
-    // shuffle_b_permuteN (true) vs shuffle_b (false). The preshuffle ctypes lib
+    // shuffle_b_permuteN (true) vs shuffle_b_v0 (false). The preshuffle ctypes lib
     // reads this value to apply the same permutation the device kernel expects.
     static constexpr bool PermuteN = {str(config.permute_n).lower()};
     static constexpr index_t NumWaveGroups = {config.num_wave_groups};
@@ -2053,6 +2054,7 @@ class UnifiedGemmCodegen:
                 warp_tile_n=tile.warp_tile_n,
                 warp_tile_k=tile.warp_tile_k,
                 datatype=self.datatype,
+                warp_size=64 if self.gpu_target.startswith("gfx9") else 32,
             ):
                 return False
 

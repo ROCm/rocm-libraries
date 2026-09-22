@@ -375,6 +375,10 @@
   },
   
   "preshuffle_warp_tile_combos": {
+    "gfx1250": {
+      "fp16_fp16_fp32": [[16, 16, 32]],
+      "bf16_bf16_fp32": [[16, 16, 32]]
+    },
     "_comment": "Preshuffle-specific warp tile combinations (subset of standard GEMM, no [4, 64, 16])",
     "gfx90a": {
       "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],

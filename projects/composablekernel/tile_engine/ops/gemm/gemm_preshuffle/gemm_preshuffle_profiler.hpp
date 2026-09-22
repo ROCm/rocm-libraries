@@ -104,7 +104,8 @@ class GemmPreshuffleProfiler
                 }
                 else
                 {
-                    return ck_tile::shuffle_b<KernelConfig>(b_k_n);
+                    // Use the same B packing as the native preshuffle V2 pipeline.
+                    return ck_tile::shuffle_b_v0<KernelConfig>(b_k_n);
                 }
             }();
 

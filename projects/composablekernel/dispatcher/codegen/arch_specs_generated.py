@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-16T15:00:49.738739
+Generated at: 2026-09-21T22:33:58.708745
 
 To update this file:
 1. Edit arch_specs.json
@@ -116,6 +116,10 @@ WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
 
 # Preshuffle-specific warp tile combinations (subset of standard GEMM)
 PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
+    "gfx1250": {
+        "fp16_fp16_fp32": [[16, 16, 32]],
+        "bf16_bf16_fp32": [[16, 16, 32]],
+    },
     "gfx90a": {
         "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
         "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
@@ -134,10 +138,6 @@ PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]
         "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16], [32, 32, 32], [16, 16, 64]],
         "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 64], [16, 16, 128], [32, 32, 64]],
         "bf8_bf8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 64], [16, 16, 32], [16, 16, 128], [32, 32, 64]],
-    },
-    "gfx1250": {
-        "fp16_fp16_fp32": [[16, 16, 32]],
-        "bf16_bf16_fp32": [[16, 16, 32]],
     },
 }
 
