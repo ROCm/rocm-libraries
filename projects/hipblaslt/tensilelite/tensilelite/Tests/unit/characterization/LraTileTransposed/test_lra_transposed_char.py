@@ -9,7 +9,7 @@ Directly instantiates and invokes ``LraTileAssignmentTransposedMFMA``,
 and ``LraTileAssignmentTransposedMFMAF6`` with a minimal mock writer, bypassing
 the ``Component.find()`` asmCaps dispatch filter.
 
-Target missing ranges in Tensile/Components/LraTileAssignment.py:
+Target missing ranges in tensilelite/Components/LraTileAssignment.py:
   144-249  : LraTileAssignmentTransposedMFMA.__call__
              (BF16, enableLDSTr=True, isM=False, wave-offset branch num1DWaves>1)
   285-409  : LraTileAssignmentTransposedMFMAB8.__call__
@@ -43,13 +43,13 @@ from types import SimpleNamespace
 pytestmark = pytest.mark.unit
 
 # Module-level import of KernelWriter is required to break the circular import
-# that occurs when Tensile.Components.LraTileAssignment is imported before the
+# that occurs when tensilelite.Components.LraTileAssignment is imported before the
 # parent Tensile package finishes loading (Component.py line 295:
 # ``from .Components import *``).  Importing KernelWriter here ensures the
 # Tensile package is fully initialized before any per-test import of a
 # specific component module.
 import rocisa  # noqa: F401
-import Tensile.KernelWriter  # noqa: F401
+import tensilelite.KernelWriter  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ def _make_writer():
 
     from rocisa._rocisa.enum import Vgpr, Sgpr
     from rocisa.register import RegisterPool
-    from Tensile.Common.RegisterPool import allocTmpGpr
+    from tensilelite.Common.RegisterPool import allocTmpGpr
 
     vgpr_pool = RegisterPool(256, Vgpr, False)
     vgpr_pool.add(0, 256, "init")
@@ -106,7 +106,7 @@ def _make_tP(tile01, tc, is_m=False, is_a=False, is_b=True, block_width=1, bpe_d
 
 def _make_kernel_bf16():
     """Kernel dict for BF16 NN — exercises LraTileAssignmentTransposedMFMA."""
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
     return {
         "MatrixInstM": 16,
         "MatrixInstN": 16,
@@ -132,7 +132,7 @@ def _make_kernel_bf16():
 
 def _make_kernel_i8():
     """Kernel dict for I8 — exercises LraTileAssignmentTransposedMFMAB8."""
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
     return {
         "MatrixInstM": 16,
         "MatrixInstN": 16,
@@ -160,7 +160,7 @@ def _make_kernel_i8():
 
 def _make_kernel_f4():
     """Kernel dict for F4 — exercises LraTileAssignmentTransposedMFMAF4."""
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
     return {
         "MatrixInstM": 16,
         "MatrixInstN": 16,
@@ -187,7 +187,7 @@ def _make_kernel_f4():
 
 def _make_kernel_f6():
     """Kernel dict for F6 — exercises LraTileAssignmentTransposedMFMAF6."""
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
     return {
         "MatrixInstM": 16,
         "MatrixInstN": 16,
@@ -226,7 +226,7 @@ class TestLraTileAssignmentTransposedMFMA:
 
     def test_tile01_0_returns_module(self):
         """tile01=0 (A-side / M-tile) executes BF16 transposed LRA."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
         writer = _make_writer()
         kernel = _make_kernel_bf16()
         tP = _make_tP(tile01=0, tc="A", is_m=False, is_a=True, is_b=False,
@@ -238,7 +238,7 @@ class TestLraTileAssignmentTransposedMFMA:
 
     def test_tile01_1_returns_module(self):
         """tile01=1 (B-side / N-tile) executes BF16 transposed LRA."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
         writer = _make_writer()
         kernel = _make_kernel_bf16()
         tP = _make_tP(tile01=1, tc="B", is_m=False, is_a=False, is_b=True,
@@ -250,7 +250,7 @@ class TestLraTileAssignmentTransposedMFMA:
 
     def test_num1dwaves_gt1_wave_offset(self):
         """MIWaveGroup[1]=2 -> num1DWaves=2 > 1 triggers wave-offset branch (line 233)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
         writer = _make_writer()
         kernel = _make_kernel_bf16()
         # Ensure num1DWaves > 1 for tile01=1
@@ -263,7 +263,7 @@ class TestLraTileAssignmentTransposedMFMA:
 
     def test_source_swap_false(self):
         """SourceSwap=False selects the else-branch of dividedForBlkId (line 183)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMA
         writer = _make_writer()
         kernel = _make_kernel_bf16()
         kernel["SourceSwap"] = False
@@ -289,7 +289,7 @@ class TestLraTileAssignmentTransposedMFMAB8:
 
     def test_is_m_false_returns_module(self):
         """isM=False (N-side) executes unroll-offset branch (lines 373-390)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAB8
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAB8
         writer = _make_writer()
         kernel = _make_kernel_i8()
         tP = _make_tP(tile01=1, tc="B", is_m=False, is_a=False, is_b=True,
@@ -301,7 +301,7 @@ class TestLraTileAssignmentTransposedMFMAB8:
 
     def test_is_m_true_returns_module(self):
         """isM=True (M-side) executes k-stride inner branch (lines 359-371)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAB8
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAB8
         writer = _make_writer()
         kernel = _make_kernel_i8()
         tP = _make_tP(tile01=0, tc="A", is_m=True, is_a=True, is_b=False,
@@ -313,7 +313,7 @@ class TestLraTileAssignmentTransposedMFMAB8:
 
     def test_wave_offset_branch(self):
         """num1DWaves > 1 fires wave-offset append (lines 393-399)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAB8
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAB8
         writer = _make_writer()
         kernel = _make_kernel_i8()
         kernel["MIWaveGroup"] = [1, 4]  # num1DWaves=4 for tile01=1
@@ -336,7 +336,7 @@ class TestLraTileAssignmentTransposedMFMAF4:
 
     def test_tile01_0_returns_module(self):
         """tile01=0 (A-side) executes F4 transposed LRA."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF4
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF4
         writer = _make_writer()
         kernel = _make_kernel_f4()
         tP = _make_tP(tile01=0, tc="A", is_m=False, is_a=True, is_b=False,
@@ -348,7 +348,7 @@ class TestLraTileAssignmentTransposedMFMAF4:
 
     def test_tile01_1_returns_module(self):
         """tile01=1 (B-side) executes F4 transposed LRA."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF4
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF4
         writer = _make_writer()
         kernel = _make_kernel_f4()
         tP = _make_tP(tile01=1, tc="B", is_m=False, is_a=False, is_b=True,
@@ -359,7 +359,7 @@ class TestLraTileAssignmentTransposedMFMAF4:
 
     def test_wave_offset_branch_f4(self):
         """num1DWaves > 1 fires wave-offset branch (lines 576-582)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF4
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF4
         writer = _make_writer()
         kernel = _make_kernel_f4()
         kernel["MIWaveGroup"] = [1, 4]
@@ -382,7 +382,7 @@ class TestLraTileAssignmentTransposedMFMAF6:
 
     def test_tile01_0_returns_module(self):
         """tile01=0 (A-side) executes F6 transposed LRA."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF6
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF6
         writer = _make_writer()
         kernel = _make_kernel_f6()
         tP = _make_tP(tile01=0, tc="A", is_m=False, is_a=True, is_b=False,
@@ -394,7 +394,7 @@ class TestLraTileAssignmentTransposedMFMAF6:
 
     def test_tile01_1_returns_module(self):
         """tile01=1 (B-side) executes F6 transposed LRA."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF6
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF6
         writer = _make_writer()
         kernel = _make_kernel_f6()
         tP = _make_tP(tile01=1, tc="B", is_m=False, is_a=False, is_b=True,
@@ -405,7 +405,7 @@ class TestLraTileAssignmentTransposedMFMAF6:
 
     def test_wave_offset_branch_f6(self):
         """num1DWaves > 1 fires wave-offset branch (lines 677-683)."""
-        from Tensile.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF6
+        from tensilelite.Components.LraTileAssignment import LraTileAssignmentTransposedMFMAF6
         writer = _make_writer()
         kernel = _make_kernel_f6()
         kernel["MIWaveGroup"] = [1, 4]
