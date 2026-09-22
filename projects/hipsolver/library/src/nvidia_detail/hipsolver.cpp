@@ -4186,11 +4186,12 @@ catch(...)
 /******************** GETRI_BATCHED ********************/
 hipsolverStatus_t hipsolverSgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               n,
-                                                    float**           A,
+                                                    float*            A[],
                                                     int               lda,
-                                                    float**           C,
-                                                    int               ldc,
+                                                    int*              devIpiv,
                                                     int               strideP,
+                                                    float*            C[],
+                                                    int               ldc,
                                                     int*              lwork,
                                                     int               batch_count)
 try
@@ -4199,8 +4200,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    // cuBLAS doesn't need workspace for getri
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
 }
@@ -4211,11 +4213,12 @@ catch(...)
 
 hipsolverStatus_t hipsolverDgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               n,
-                                                    double**          A,
+                                                    double*           A[],
                                                     int               lda,
-                                                    double**          C,
-                                                    int               ldc,
+                                                    int*              devIpiv,
                                                     int               strideP,
+                                                    double*           C[],
+                                                    int               ldc,
                                                     int*              lwork,
                                                     int               batch_count)
 try
@@ -4224,8 +4227,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    // cuBLAS doesn't need workspace for getri
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
 }
@@ -4236,11 +4240,12 @@ catch(...)
 
 hipsolverStatus_t hipsolverCgetriBatched_bufferSize(hipsolverHandle_t handle,
                                                     int               n,
-                                                    hipFloatComplex** A,
+                                                    hipFloatComplex*  A[],
                                                     int               lda,
-                                                    hipFloatComplex** C,
-                                                    int               ldc,
+                                                    int*              devIpiv,
                                                     int               strideP,
+                                                    hipFloatComplex*  C[],
+                                                    int               ldc,
                                                     int*              lwork,
                                                     int               batch_count)
 try
@@ -4249,8 +4254,9 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    // cuBLAS doesn't need workspace for getri
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
 }
@@ -4259,23 +4265,25 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-hipsolverStatus_t hipsolverZgetriBatched_bufferSize(hipsolverHandle_t  handle,
-                                                    int                n,
-                                                    hipDoubleComplex** A,
-                                                    int                lda,
-                                                    hipDoubleComplex** C,
-                                                    int                ldc,
-                                                    int                strideP,
-                                                    int*               lwork,
-                                                    int                batch_count)
+hipsolverStatus_t hipsolverZgetriBatched_bufferSize(hipsolverHandle_t handle,
+                                                    int               n,
+                                                    hipDoubleComplex* A[],
+                                                    int               lda,
+                                                    int*              devIpiv,
+                                                    int               strideP,
+                                                    hipDoubleComplex* C[],
+                                                    int               ldc,
+                                                    int*              lwork,
+                                                    int               batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || lda < n || ldc < n || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
-    // cuBLAS doesn't need workspace for getri
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
 }
@@ -4286,21 +4294,21 @@ catch(...)
 
 hipsolverStatus_t hipsolverSgetriBatched(hipsolverHandle_t handle,
                                          int               n,
-                                         float**           A,
+                                         float*            A[],
                                          int               lda,
-                                         float**           C,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         float*            C[],
                                          int               ldc,
                                          float*            work,
                                          int               lwork,
-                                         int*              devIpiv,
-                                         int               strideP,
                                          int*              devInfo,
                                          int               batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
@@ -4314,21 +4322,21 @@ catch(...)
 
 hipsolverStatus_t hipsolverDgetriBatched(hipsolverHandle_t handle,
                                          int               n,
-                                         double**          A,
+                                         double*           A[],
                                          int               lda,
-                                         double**          C,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         double*           C[],
                                          int               ldc,
                                          double*           work,
                                          int               lwork,
-                                         int*              devIpiv,
-                                         int               strideP,
                                          int*              devInfo,
                                          int               batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
@@ -4342,21 +4350,21 @@ catch(...)
 
 hipsolverStatus_t hipsolverCgetriBatched(hipsolverHandle_t handle,
                                          int               n,
-                                         hipFloatComplex** A,
+                                         hipFloatComplex*  A[],
                                          int               lda,
-                                         hipFloatComplex** C,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         hipFloatComplex*  C[],
                                          int               ldc,
                                          hipFloatComplex*  work,
                                          int               lwork,
-                                         int*              devIpiv,
-                                         int               strideP,
                                          int*              devInfo,
                                          int               batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
@@ -4375,23 +4383,23 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-hipsolverStatus_t hipsolverZgetriBatched(hipsolverHandle_t  handle,
-                                         int                n,
-                                         hipDoubleComplex** A,
-                                         int                lda,
-                                         hipDoubleComplex** C,
-                                         int                ldc,
-                                         hipDoubleComplex*  work,
-                                         int                lwork,
-                                         int*               devIpiv,
-                                         int                strideP,
-                                         int*               devInfo,
-                                         int                batch_count)
+hipsolverStatus_t hipsolverZgetriBatched(hipsolverHandle_t handle,
+                                         int               n,
+                                         hipDoubleComplex* A[],
+                                         int               lda,
+                                         int*              devIpiv,
+                                         int               strideP,
+                                         hipDoubleComplex* C[],
+                                         int               ldc,
+                                         hipDoubleComplex* work,
+                                         int               lwork,
+                                         int*              devInfo,
+                                         int               batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(strideP != n)
+    if(devIpiv && strideP != n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;

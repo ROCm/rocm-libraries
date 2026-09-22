@@ -24,29 +24,24 @@
 #include "clientcommon.hpp"
 #include "hipsolver_timer.hpp"
 
-template <bool BATCHED,
-          bool NPVT,
-          typename I,
-          typename Td,
-          typename Twork,
-          typename Id,
-          typename INTd>
+template <testAPI_t API, typename I, typename Td, typename Id, typename INTd, typename TdWork>
 void getri_checkBadArgs(const hipsolverHandle_t handle,
                         const I                 n,
                         Td                      dA,
                         const I                 lda,
-                        Td                      dC,
-                        const I                 ldc,
-                        Twork                   dWork,
-                        const I                 lwork,
                         Id                      dIpiv,
                         const I                 stP,
+                        Td                      dC,
+                        const I                 ldc,
+                        TdWork                  dWork,
+                        const I                 lwork,
                         INTd                    dinfo,
                         const int               bc)
 {
     // handle
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_getriBatched(nullptr, n, dA, lda, dC, ldc, dWork, lwork, dIpiv, stP, dinfo, bc),
+        hipsolver_getri(
+            API, false, nullptr, n, dA, lda, dIpiv, stP, dC, ldc, dWork, lwork, dinfo, bc),
         HIPSOLVER_STATUS_NOT_INITIALIZED);
 
     // values
@@ -55,33 +50,28 @@ void getri_checkBadArgs(const hipsolverHandle_t handle,
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
     // pointers
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_getriBatched(
-            handle, n, (Td) nullptr, lda, dC, ldc, dWork, lwork, dIpiv, stP, dinfo, bc),
+        hipsolver_getri(
+            API, false, handle, n, (Td) nullptr, lda, dIpiv, stP, dC, ldc, dWork, lwork, dinfo, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_getriBatched(
-            handle, n, dA, lda, (Td) nullptr, ldc, dWork, lwork, dIpiv, stP, dinfo, bc),
+        hipsolver_getri(
+            API, false, handle, n, dA, lda, dIpiv, stP, (Td) nullptr, ldc, dWork, lwork, dinfo, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_getriBatched(
-            handle, n, dA, lda, dC, ldc, dWork, lwork, dIpiv, stP, (INTd) nullptr, bc),
+        hipsolver_getri(
+            API, false, handle, n, dA, lda, dIpiv, stP, dC, ldc, dWork, lwork, (INTd) nullptr, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
 #endif
 }
 
-template <testAPI_t API,
-          bool      BATCHED,
-          bool      STRIDED,
-          bool      NPVT,
-          typename T,
-          typename I,
-          typename SIZE>
+template <testAPI_t API, bool BATCHED, bool STRIDED, typename T, typename I, typename SIZE>
 void testing_getri_bad_arg()
 {
     // safe arguments
     hipsolver_local_handle handle;
     I                      n     = 1;
     I                      lda   = 1;
+    I                      ldc   = 1;
     I                      stP   = 1;
     I                      lwork = 1;
     int                    bc    = 1;
@@ -91,28 +81,34 @@ void testing_getri_bad_arg()
         // memory allocations
         device_batch_vector<T>           dA(1, 1, 1);
         device_batch_vector<T>           dC(1, 1, 1);
-        device_strided_batch_vector<T>   dWork(1, 1, 1, 1);
         device_strided_batch_vector<int> dIpiv(1, 1, 1, 1);
         device_strided_batch_vector<int> dInfo(1, 1, 1, 1);
         CHECK_HIP_ERROR(dA.memcheck());
         CHECK_HIP_ERROR(dC.memcheck());
-        CHECK_HIP_ERROR(dWork.memcheck());
         CHECK_HIP_ERROR(dIpiv.memcheck());
         CHECK_HIP_ERROR(dInfo.memcheck());
 
+        SIZE size_W;
+        hipsolver_getri_bufferSize(
+            API, handle, n, dA.data(), lda, dIpiv.data(), stP, dC.data(), ldc, &size_W, bc);
+        SIZE                           size_W_elems = (size_W + sizeof(T) - 1) / sizeof(T);
+        device_strided_batch_vector<T> dWork(size_W_elems, 1, size_W_elems, 1);
+        if(size_W)
+            CHECK_HIP_ERROR(dWork.memcheck());
+
         // check bad arguments
-        getri_checkBadArgs<BATCHED, NPVT, I, T**, T*, int*, int*>(handle,
-                                                                  n,
-                                                                  dA.data(),
-                                                                  lda,
-                                                                  dC.data(),
-                                                                  lda,
-                                                                  dWork.data(),
-                                                                  lwork,
-                                                                  dIpiv.data(),
-                                                                  stP,
-                                                                  dInfo.data(),
-                                                                  bc);
+        getri_checkBadArgs<API>(handle,
+                                n,
+                                dA.data(),
+                                lda,
+                                dIpiv.data(),
+                                stP,
+                                dC.data(),
+                                lda,
+                                dWork.data(),
+                                lwork,
+                                dInfo.data(),
+                                bc);
     }
 }
 
@@ -127,20 +123,20 @@ template <bool NPVT,
           typename Th,
           typename Ih,
           typename INTh>
-void getriBatched_initData(const hipsolverHandle_t handle,
-                           const I                 n,
-                           Td&                     dA,
-                           const I                 lda,
-                           Td&                     dC,
-                           const I                 ldc,
-                           Id&                     dIpiv,
-                           const I                 stP,
-                           INTd&                   dInfo,
-                           const int               bc,
-                           Th&                     hA,
-                           Th&                     hC,
-                           Ih&                     hIpiv,
-                           INTh&                   hInfo)
+void getri_initData(const hipsolverHandle_t handle,
+                    const I                 n,
+                    Td&                     dA,
+                    const I                 lda,
+                    Id&                     dIpiv,
+                    const I                 stP,
+                    Td&                     dC,
+                    const I                 ldc,
+                    INTd&                   dInfo,
+                    const int               bc,
+                    Th&                     hA,
+                    Ih&                     hIpiv,
+                    Th&                     hC,
+                    INTh&                   hInfo)
 {
     if(CPU)
     {
@@ -162,15 +158,18 @@ void getriBatched_initData(const hipsolverHandle_t handle,
                 }
             }
 
-            // shuffle rows to test pivoting
-            // always the same permuation for debugging purposes
-            for(rocblas_int i = 0; i < n / 2; i++)
+            if(!NPVT)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                // shuffle rows to test pivoting
+                // always the same permuation for debugging purposes
+                for(rocblas_int i = 0; i < n / 2; i++)
                 {
-                    tmp                        = hA[b][i + j * lda];
-                    hA[b][i + j * lda]         = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    for(rocblas_int j = 0; j < n; j++)
+                    {
+                        tmp                        = hA[b][i + j * lda];
+                        hA[b][i + j * lda]         = hA[b][n - 1 - i + j * lda];
+                        hA[b][n - 1 - i + j * lda] = tmp;
+                    }
                 }
             }
 
@@ -187,80 +186,75 @@ void getriBatched_initData(const hipsolverHandle_t handle,
     }
 }
 
-template <bool NPVT,
+template <testAPI_t API,
+          bool      NPVT,
           typename T,
           typename I,
           typename Td,
-          typename Twork,
           typename Id,
           typename INTd,
+          typename TdWork,
           typename Th,
           typename Ih,
           typename INTh>
-void getriBatched_getError(const hipsolverHandle_t handle,
-                           const I                 n,
-                           Td&                     dA,
-                           const I                 lda,
-                           Td&                     dC,
-                           const I                 ldc,
-                           Id&                     dIpiv,
-                           const I                 stP,
-                           Twork&                  dWork,
-                           const I                 lwork,
-                           INTd&                   dInfo,
-                           const int               bc,
-                           Th&                     hA,
-                           Th&                     hC,
-                           Th&                     hCRes,
-                           Ih&                     hIpiv,
-                           Ih&                     hIpivRes,
-                           INTh&                   hInfo,
-                           INTh&                   hInfoRes,
-                           double*                 max_err)
+void getri_getError(const hipsolverHandle_t handle,
+                    const I                 n,
+                    Td&                     dA,
+                    const I                 lda,
+                    Id&                     dIpiv,
+                    const I                 stP,
+                    Td&                     dC,
+                    const I                 ldc,
+                    TdWork&                 dWork,
+                    const I                 lwork,
+                    INTd&                   dInfo,
+                    const int               bc,
+                    Th&                     hA,
+                    Ih&                     hIpiv,
+                    Ih&                     hIpivRes,
+                    Th&                     hC,
+                    Th&                     hCRes,
+                    INTh&                   hInfo,
+                    INTh&                   hInfoRes,
+                    double*                 max_err)
 {
     // input data initialization (includes cpu_getrf to compute LU factorization)
-    getriBatched_initData<NPVT, true, true, T>(
-        handle, n, dA, lda, dC, ldc, dIpiv, stP, dInfo, bc, hA, hC, hIpiv, hInfo);
-
-    // save LU-factorized matrix for CPU reference
-    Th hA_LU(hA.n(), 1, hA.stride(), bc);
-    for(int b = 0; b < bc; ++b)
-    {
-        for(I i = 0; i < n * lda; ++i)
-            hA_LU[b][i] = hA[b][i];
-    }
+    getri_initData<NPVT, true, true, T>(
+        handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
 
     // execute computations
     // GPU lapack - A is input (LU), C is output (inverse)
-    CHECK_ROCBLAS_ERROR(hipsolver_getriBatched(handle,
-                                               n,
-                                               dA.data(),
-                                               lda,
-                                               dC.data(),
-                                               ldc,
-                                               dWork.data(),
-                                               lwork,
-                                               dIpiv.data(),
-                                               stP,
-                                               dInfo.data(),
-                                               bc));
+    CHECK_ROCBLAS_ERROR(hipsolver_getri(API,
+                                        NPVT,
+                                        handle,
+                                        n,
+                                        dA.data(),
+                                        lda,
+                                        dIpiv.data(),
+                                        stP,
+                                        dC.data(),
+                                        ldc,
+                                        dWork.data(),
+                                        lwork,
+                                        dInfo.data(),
+                                        bc));
     CHECK_HIP_ERROR(hCRes.transfer_from(dC));
-    CHECK_HIP_ERROR(hIpivRes.transfer_from(dIpiv));
+    if(!NPVT)
+        CHECK_HIP_ERROR(hIpivRes.transfer_from(dIpiv));
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
     // CPU lapack - compute inverse from LU factorization
     for(int b = 0; b < bc; ++b)
-        cpu_getri(n, hA_LU[b], lda, hIpiv[b], hInfo[b]);
+        cpu_getri(n, hA[b], lda, hIpiv[b], hInfo[b]);
 
     // expecting original matrix to be non-singular
-    // error is ||hA_LU_inv - hCRes|| / ||hA_LU_inv||
+    // error is ||hA - hCRes|| / ||hA||
     // using frobenius norm
-    // NOTE: hA_LU has lda, hCRes has ldc
     double err;
     *max_err = 0;
     for(int b = 0; b < bc; ++b)
     {
-        err      = norm_error('F', n, n, lda, hA_LU[b], hCRes[b], ldc);
+        err      = norm_error('F', n, n, lda, hA[b], hCRes[b], ldc);
         *max_err = err > *max_err ? err : *max_err;
     }
 
@@ -275,7 +269,8 @@ void getriBatched_getError(const hipsolverHandle_t handle,
     *max_err += err;
 }
 
-template <bool NPVT,
+template <testAPI_t API,
+          bool      NPVT,
           typename T,
           typename I,
           typename Td,
@@ -285,68 +280,62 @@ template <bool NPVT,
           typename Th,
           typename Ih,
           typename INTh>
-void getriBatched_getPerfData(const hipsolverHandle_t handle,
-                              const I                 n,
-                              Td&                     dA,
-                              const I                 lda,
-                              Td&                     dC,
-                              const I                 ldc,
-                              Id&                     dIpiv,
-                              const I                 stP,
-                              Twork&                  dWork,
-                              const I                 lwork,
-                              INTd&                   dInfo,
-                              const int               bc,
-                              Th&                     hA,
-                              Th&                     hC,
-                              Ih&                     hIpiv,
-                              INTh&                   hInfo,
-                              double*                 gpu_time_used,
-                              double*                 cpu_time_used,
-                              const int               hot_calls,
-                              const bool              perf)
+void getri_getPerfData(const hipsolverHandle_t handle,
+                       const I                 n,
+                       Td&                     dA,
+                       const I                 lda,
+                       Id&                     dIpiv,
+                       const I                 stP,
+                       Td&                     dC,
+                       const I                 ldc,
+                       Twork&                  dWork,
+                       const I                 lwork,
+                       INTd&                   dInfo,
+                       const int               bc,
+                       Th&                     hA,
+                       Ih&                     hIpiv,
+                       Th&                     hC,
+                       INTh&                   hInfo,
+                       double*                 gpu_time_used,
+                       double*                 cpu_time_used,
+                       const int               hot_calls,
+                       const bool              perf)
 {
     if(!perf)
     {
-        getriBatched_initData<NPVT, true, false, T>(
-            handle, n, dA, lda, dC, ldc, dIpiv, stP, dInfo, bc, hA, hC, hIpiv, hInfo);
-
-        // save LU-factorized matrix for CPU reference
-        Th hA_LU(hA.n(), 1, hA.stride(), bc);
-        for(int b = 0; b < bc; ++b)
-        {
-            for(I i = 0; i < n * lda; ++i)
-                hA_LU[b][i] = hA[b][i];
-        }
+        getri_initData<NPVT, true, false, T>(
+            handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
         for(int b = 0; b < bc; ++b)
-            cpu_getri(n, hA_LU[b], lda, hIpiv[b], hInfo[b]);
+            cpu_getri(n, hA[b], lda, hIpiv[b], hInfo[b]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    getriBatched_initData<NPVT, true, false, T>(
-        handle, n, dA, lda, dC, ldc, dIpiv, stP, dInfo, bc, hA, hC, hIpiv, hInfo);
+    getri_initData<NPVT, true, false, T>(
+        handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        getriBatched_initData<NPVT, false, true, T>(
-            handle, n, dA, lda, dC, ldc, dIpiv, stP, dInfo, bc, hA, hC, hIpiv, hInfo);
+        getri_initData<NPVT, false, true, T>(
+            handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
 
-        CHECK_ROCBLAS_ERROR(hipsolver_getriBatched(handle,
-                                                   n,
-                                                   dA.data(),
-                                                   lda,
-                                                   dC.data(),
-                                                   ldc,
-                                                   dWork.data(),
-                                                   lwork,
-                                                   dIpiv.data(),
-                                                   stP,
-                                                   dInfo.data(),
-                                                   bc));
+        CHECK_ROCBLAS_ERROR(hipsolver_getri(API,
+                                            NPVT,
+                                            handle,
+                                            n,
+                                            dA.data(),
+                                            lda,
+                                            dIpiv.data(),
+                                            stP,
+                                            dC.data(),
+                                            ldc,
+                                            dWork.data(),
+                                            lwork,
+                                            dInfo.data(),
+                                            bc));
     }
 
     // gpu-lapack performance
@@ -356,22 +345,24 @@ void getriBatched_getPerfData(const hipsolverHandle_t handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        getriBatched_initData<NPVT, false, true, T>(
-            handle, n, dA, lda, dC, ldc, dIpiv, stP, dInfo, bc, hA, hC, hIpiv, hInfo);
+        getri_initData<NPVT, false, true, T>(
+            handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
 
         timer.start(stream);
-        hipsolver_getriBatched(handle,
-                               n,
-                               dA.data(),
-                               lda,
-                               dC.data(),
-                               ldc,
-                               dWork.data(),
-                               lwork,
-                               dIpiv.data(),
-                               stP,
-                               dInfo.data(),
-                               bc);
+        hipsolver_getri(API,
+                        NPVT,
+                        handle,
+                        n,
+                        dA.data(),
+                        lda,
+                        dIpiv.data(),
+                        stP,
+                        dC.data(),
+                        ldc,
+                        dWork.data(),
+                        lwork,
+                        dInfo.data(),
+                        bc);
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
@@ -417,18 +408,20 @@ void testing_getri(Arguments& argus)
     {
         if(BATCHED)
         {
-            EXPECT_ROCBLAS_STATUS(hipsolver_getriBatched(handle,
-                                                         n,
-                                                         (T**)nullptr,
-                                                         lda,
-                                                         (T**)nullptr,
-                                                         ldc,
-                                                         (T*)nullptr,
-                                                         0,
-                                                         (int*)nullptr,
-                                                         stP,
-                                                         (int*)nullptr,
-                                                         bc),
+            EXPECT_ROCBLAS_STATUS(hipsolver_getri(API,
+                                                  NPVT,
+                                                  handle,
+                                                  n,
+                                                  (T**)nullptr,
+                                                  lda,
+                                                  (int*)nullptr,
+                                                  stP,
+                                                  (T**)nullptr,
+                                                  ldc,
+                                                  (T*)nullptr,
+                                                  0,
+                                                  (int*)nullptr,
+                                                  bc),
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }
 
@@ -440,8 +433,8 @@ void testing_getri(Arguments& argus)
 
     // memory size query is necessary
     I lwork;
-    hipsolver_getriBatched_bufferSize(
-        handle, n, (T**)nullptr, lda, (T**)nullptr, ldc, stP, &lwork, bc);
+    hipsolver_getri_bufferSize(
+        API, handle, n, (T**)nullptr, lda, (int*)nullptr, stP, (T**)nullptr, ldc, &lwork, bc);
 
     if(argus.mem_query)
     {
@@ -476,67 +469,49 @@ void testing_getri(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            getriBatched_getError<NPVT,
-                                  T,
-                                  I,
-                                  device_batch_vector<T>,
-                                  device_strided_batch_vector<T>,
-                                  device_strided_batch_vector<int>,
-                                  device_strided_batch_vector<int>,
-                                  host_batch_vector<T>,
-                                  host_strided_batch_vector<int>,
-                                  host_strided_batch_vector<int>>(handle,
-                                                                  n,
-                                                                  dA,
-                                                                  lda,
-                                                                  dC,
-                                                                  ldc,
-                                                                  dIpiv,
-                                                                  stP,
-                                                                  dWork,
-                                                                  lwork,
-                                                                  dInfo,
-                                                                  bc,
-                                                                  hA,
-                                                                  hC,
-                                                                  hCRes,
-                                                                  hIpiv,
-                                                                  hIpivRes,
-                                                                  hInfo,
-                                                                  hInfoRes,
-                                                                  &max_error);
+            getri_getError<API, NPVT, T>(handle,
+                                         n,
+                                         dA,
+                                         lda,
+                                         dIpiv,
+                                         stP,
+                                         dC,
+                                         ldc,
+                                         dWork,
+                                         lwork,
+                                         dInfo,
+                                         bc,
+                                         hA,
+                                         hIpiv,
+                                         hIpivRes,
+                                         hC,
+                                         hCRes,
+                                         hInfo,
+                                         hInfoRes,
+                                         &max_error);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
-            getriBatched_getPerfData<NPVT,
-                                     T,
-                                     I,
-                                     device_batch_vector<T>,
-                                     device_strided_batch_vector<T>,
-                                     device_strided_batch_vector<int>,
-                                     device_strided_batch_vector<int>,
-                                     host_batch_vector<T>,
-                                     host_strided_batch_vector<int>,
-                                     host_strided_batch_vector<int>>(handle,
-                                                                     n,
-                                                                     dA,
-                                                                     lda,
-                                                                     dC,
-                                                                     ldc,
-                                                                     dIpiv,
-                                                                     stP,
-                                                                     dWork,
-                                                                     lwork,
-                                                                     dInfo,
-                                                                     bc,
-                                                                     hA,
-                                                                     hC,
-                                                                     hIpiv,
-                                                                     hInfo,
-                                                                     &gpu_time_used,
-                                                                     &cpu_time_used,
-                                                                     hot_calls,
-                                                                     argus.perf);
+            getri_getPerfData<API, NPVT, T>(handle,
+                                            n,
+                                            dA,
+                                            lda,
+                                            dIpiv,
+                                            stP,
+                                            dC,
+                                            ldc,
+                                            dWork,
+                                            lwork,
+                                            dInfo,
+                                            bc,
+                                            hA,
+                                            hIpiv,
+                                            hC,
+                                            hInfo,
+                                            &gpu_time_used,
+                                            &cpu_time_used,
+                                            hot_calls,
+                                            argus.perf);
     }
 
     // validate results for rocsolver-test

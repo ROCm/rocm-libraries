@@ -96,6 +96,7 @@ class hipsolver_dispatcher
             {"getrf_batched", testing_getrf<API_NORMAL, true, false, false, T, int, int>},
             {"getrf_64", testing_getrf<API_COMPAT, false, false, false, T, int64_t, size_t>},
             {"getri_batched", testing_getri<API_NORMAL, true, false, false, T, int, int>},
+            {"getri_npvt_batched", testing_getri<API_NORMAL, true, false, true, T, int, int>},
             {"getrs", testing_getrs<API_NORMAL, false, false, T, int, int>},
             {"getrs_64", testing_getrs<API_COMPAT, false, false, T, int64_t, size_t>},
             {"larft_64", testing_larft<API_COMPAT, false, false, T, int64_t, size_t>},

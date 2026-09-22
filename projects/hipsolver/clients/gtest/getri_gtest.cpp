@@ -87,7 +87,7 @@ protected:
         Arguments arg = getri_setup_arguments(GetParam());
 
         if(arg.peek<rocblas_int>("n") == -1)
-            testing_getri_bad_arg<API, BATCHED, STRIDED, NPVT, T, I, SIZE>();
+            testing_getri_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
 
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
         testing_getri<API, BATCHED, STRIDED, NPVT, T, I, SIZE>(arg);
