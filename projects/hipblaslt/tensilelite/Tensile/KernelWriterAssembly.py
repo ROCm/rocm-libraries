@@ -73,7 +73,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
-from .Common.MxScaleLayout import mxFreeTile, mxLdsKStride, mxTdmTile0, mxTdmTileM
+from .Common.MxScaleLayout import mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
@@ -21037,25 +21037,13 @@ class KernelWriterAssembly(KernelWriter):
   
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     comp = GL2PrefetchLoad.find(self)
-    comp.init(self, kernel, tPA)
-    comp.init(self, kernel, tPB)
-    if kernel["ProblemType"]["MXBlockA"]:
-      comp.init(self, kernel, tPA["MX"])
-    if kernel["ProblemType"]["MXBlockB"]:
-      comp.init(self, kernel, tPB["MX"])
-    if kernel["enableTDMMetadata"]:
-      comp.init(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
+    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+      comp.init(self, kernel, tp)
   
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Addresses Calculation")
     comp = GL2PrefetchLoad.find(self)
-    tpList = [tPA, tPB]
-    if kernel["ProblemType"]["MXBlockA"]:
-      tpList.append(tPA["MX"])
-    if kernel["ProblemType"]["MXBlockB"]:
-      tpList.append(tPB["MX"])
-    if kernel["enableTDMMetadata"]:
-      tpList.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
+    tpList = mxIssueTpList(kernel, tPA, tPB, includeMetadata=True)
 
     if not comp.isGSUEnabled(kernel):
       for tp in tpList:
@@ -21078,28 +21066,16 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("GL2 Prefetch Issue Load")
     mod.addComment("GL2 Prefetch Issue Load")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.issueLoad(self, kernel, tPA))
-    mod.add(comp.issueLoad(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
-      mod.add(comp.issueLoad(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      mod.add(comp.issueLoad(self, kernel, tPB["MX"]))
-    if kernel["enableTDMMetadata"]:
-      mod.add(comp.issueLoad(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+      mod.add(comp.issueLoad(self, kernel, tp))
     return mod
   
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     mod = Module("GL2 Prefetch Increment Address")
     mod.addComment("GL2 Prefetch Increment Address")
     comp = GL2PrefetchLoad.find(self)
-    mod.add(comp.incrementAddr(self, kernel, tPA))
-    mod.add(comp.incrementAddr(self, kernel, tPB))
-    if kernel["ProblemType"]["MXBlockA"]:
-      mod.add(comp.incrementAddr(self, kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
-    if kernel["enableTDMMetadata"]:
-      mod.add(comp.incrementAddr(self, kernel, tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]))
+    for tp in mxIssueTpList(kernel, tPA, tPB, includeMetadata=True):
+      mod.add(comp.incrementAddr(self, kernel, tp))
     return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):

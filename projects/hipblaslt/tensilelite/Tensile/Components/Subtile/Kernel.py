@@ -1233,11 +1233,11 @@ def preLoop(writer, kernel):
   # Just sample impl, we can also interleave A/B loads
   for i in range(pgr):
     module.addComment0("Emitting %u-th set of GRs"%i)
-    module.add(globalReadDoSubtile('A', writer, kernel))
-    module.add(globalReadDoSubtile('B', writer, kernel))
-    # Scale GR in preloop
+    # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
     module.add(globalReadDoScaleSubtile('A', writer, kernel))
     module.add(globalReadDoScaleSubtile('B', writer, kernel))
+    module.add(globalReadDoSubtile('A', writer, kernel))
+    module.add(globalReadDoSubtile('B', writer, kernel))
     module.addComment("Add appropriate GR offset swap logic")
   module.addComment("")
 

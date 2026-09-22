@@ -2709,14 +2709,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if iteration == swapIter:
         tdmInj = Module("tdmInjectGRForPGR2")
         tdmInj.addComment1("tdm: inject GR for PGR>=2 (scheduler drops these when no LWs to pair with)")
-        for item in self.codes.globalReadA.middle.items():
-          tdmInj.add(deepcopy(item))
-        for item in self.codes.globalReadMXSA.middle.items():
-          tdmInj.add(deepcopy(item))
-        for item in self.codes.globalReadMXSB.middle.items():
-          tdmInj.add(deepcopy(item))
-        for item in self.codes.globalReadB.middle.items():
-          tdmInj.add(deepcopy(item))
+        # Family order matches SIA4 ds_load: MXSA → MXSB → A → B.
+        for grCode in (self.codes.globalReadMXSA, self.codes.globalReadMXSB,
+                       self.codes.globalReadA, self.codes.globalReadB):
+          for item in grCode.middle.items():
+            tdmInj.add(deepcopy(item))
         if tdmInj.itemsSize() > 1:
           iterCode.add(tdmInj)
 
@@ -3184,10 +3181,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st)
         module.add(replaceHolder(moduleTmp, 0))
 
-        module.add(self.globalReadDo(kernel, 0, tensorParameters1st, tPM=tPM))
-        # PAP+MX keeps MX G2L in the durable read range, so scale loads are part
-        # of the same first-PGR handoff as main A/B. When SkPrefetchPrimed is
-        # already set, the branch above skips this whole first-PGR group.
+        # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
         if "MX" in tensorParameters1st:
           moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters1st["MX"], skipWait=True)
           module.add(replaceHolder(moduleTmp, 0))
@@ -3196,6 +3190,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd["MX"], skipWait=True)
           module.add(replaceHolder(moduleTmp, 0))
           module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"]))
+        # PAP+MX keeps MX G2L in the durable read range, so scale loads are part
+        # of the same first-PGR handoff as main A/B. When SkPrefetchPrimed is
+        # already set, the branch above skips this whole first-PGR group.
+        module.add(self.globalReadDo(kernel, 0, tensorParameters1st, tPM=tPM))
         skip2ndWaitForDtl = kernel["DirectToLds%s"%tensorParameters1st["tensorChar"]]
         moduleTmp = self.directToLdsM0Update(kernel, 0, tensorParameters2nd, skip2ndWaitForDtl)
         module.add(replaceHolder(moduleTmp, 0))
@@ -3434,11 +3432,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
       if papPrefetchUsesStagger:
         module.add(self.declareStaggerParms(kernel))
-      emitTensorLoad(tensorParameters1st)
+      # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
       if "MX" in tensorParameters1st:
         emitTensorLoad(tensorParameters1st["MX"], skipWait=True)
       if "MX" in tensorParameters2nd:
         emitTensorLoad(tensorParameters2nd["MX"], skipWait=True)
+      emitTensorLoad(tensorParameters1st)
       skip2ndWaitForDtl = kernel["DirectToLds%s" % tensorParameters1st["tensorChar"]]
       emitTensorLoad(tensorParameters2nd, skipWait=skip2ndWaitForDtl)
 
@@ -3536,12 +3535,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if preloopGrModule is not None:
       module.add(preloopGrModule)
     else:
-      emitTensorLoad(tensorParametersA)
-      emitTensorLoad(tensorParametersB)
+      # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
       if kernel["ProblemType"].get("MXBlockA", 0) and "MX" in tensorParametersA:
         emitTensorLoad(tensorParametersA["MX"])
       if kernel["ProblemType"].get("MXBlockB", 0) and "MX" in tensorParametersB:
         emitTensorLoad(tensorParametersB["MX"])
+      emitTensorLoad(tensorParametersA)
+      emitTensorLoad(tensorParametersB)
     module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=1, comment="Subtile PAP: first PRELOOP GR group prefetched"))
 
     module.addComment2("End setupPrefetchAcrossPersistentSubtileLoads")
@@ -5663,13 +5663,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # skip wait for DTL if global load 1st is DTL
           skip1stWaitForDtl = idxPgr > 1 or kernel["NoLdsWriteCode"]
           skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1] or idxPgr > 1
-          if not skip1st:
-            g2lBufIdx1st = 0
-            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc1]:
-              # use second buffer
-              g2lBufIdx1st = 1
-            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st, skip1stWaitForDtl))
-            module.add(self.globalReadDo(kernel, 0, tensorParameters1st, g2lBufIdx=g2lBufIdx1st, tPM=tPM))
+          # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
           if not skipMXS1st:
             g2lBufIdx1st = 0
             if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgprMXS%s"%tc1]:
@@ -5684,6 +5678,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
               g2lBufIdx2nd = 1
             module.add(self.directToLdsM0Update(kernel, 1, tensorParameters2nd["MX"], skipWait=True))
             module.add(self.globalReadDo(kernel, 0, tensorParameters2nd["MX"], g2lBufIdx=g2lBufIdx2nd))
+          if not skip1st:
+            g2lBufIdx1st = 0
+            if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc1]:
+              # use second buffer
+              g2lBufIdx1st = 1
+            module.add(self.directToLdsM0Update(kernel, 1, tensorParameters1st, skip1stWaitForDtl))
+            module.add(self.globalReadDo(kernel, 0, tensorParameters1st, g2lBufIdx=g2lBufIdx1st, tPM=tPM))
           if not skip2nd:
             g2lBufIdx2nd = 0
             if kernel["UnrollLoopSwapGlobalReadOrder"] == 1 or kernel["DirectToVgpr%s"%tc2]:
@@ -6355,8 +6356,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         # skip wait for DTL if global load 1st is DTL
         skip2ndWaitForDtl = kernel["DirectToLds%s"%tc1]
-        module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
-
+        # TDM tensor_load family order matches SIA4 ds_load: MXSA → MXSB → A → B.
         if "MX" in tensorParameters1st:
           module.addComment1("Update M0 for DTLDS")
           moduleTmp = self.directToLdsM0Update(kernel, 1, tensorParameters1st["MX"], skipWait=skip2ndWaitForDtl)
@@ -6376,6 +6376,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.doTailLoopOpt(kernel, tensorParameters2nd["MX"]))
           else:
             module.add(self.globalReadDo(kernel, globalReadMode2nd, tensorParameters2nd["MX"]))
+
+        module.add(self.globalReadDo(kernel, globalReadMode1st, tensorParameters1st))
 
         module.addComment1("Update M0 for DTLDS")
         moduleTmp = self.directToLdsM0Update(kernel, 2, tensorParameters2nd, skip2ndWaitForDtl)
