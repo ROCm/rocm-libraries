@@ -80,7 +80,7 @@ std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
 
 // A [1, 3, 1, 1] tensor with the three values written individually, so a test can build
 // the magnitude spread that separates allclose from RMS.
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     floatTensor3(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                  float v0,
                  float v1,
@@ -97,7 +97,7 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 
 // An integer tensor, filled with one value. Integer outputs exist in this suite, and
 // the RMS validator has no implementation for them.
-std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     intTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs, int32_t value)
 {
     auto tensor = hipdnn_test_sdk::detail::createTensorFromAttribute(attrs);
