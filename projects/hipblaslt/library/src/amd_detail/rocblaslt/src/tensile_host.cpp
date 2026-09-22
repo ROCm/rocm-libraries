@@ -1071,6 +1071,44 @@ namespace
             : std::to_string(0.0f);
     }
 
+    /// True on the w4a16 group-scale path; "Block" is exclusive to it.
+    inline bool isW4A16(const TensileLite::ContractionProblemGemm& problem)
+    {
+        return problem.useScaleAB() == "Block";
+    }
+
+    /// hipblaslt-bench --scaleA mode, matching the client's scaleInt2Enum:
+    /// 0 none, 1 scalar, 2 vector, 1006..1011 w4a16 group scales. MX scales do
+    /// not travel through useScaleAB() and are still logged as 0.
+    inline int benchScaleModeA(const TensileLite::ContractionProblemGemm& problem)
+    {
+        if(problem.useScaleAB().empty())
+            return 0;
+        if(problem.useScaleAB() == "Vector")
+            return 2;
+        if(!isW4A16(problem))
+            return 1;
+        // The numbers are the public
+        // HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,64,128}[_ZP]_EXT enumerators.
+        const bool zp = problem.scaleZeroPointA();
+        switch(problem.scaleBlockSizeA())
+        {
+        case 32:
+            return zp ? 1009 : 1006;
+        case 64:
+            return zp ? 1010 : 1007;
+        case 128:
+            return zp ? 1011 : 1008;
+        default:
+            return 0;
+        }
+    }
+
+    /// Same for B, which carries no scale on the w4a16 path.
+    inline int benchScaleModeB(const TensileLite::ContractionProblemGemm& problem)
+    {
+        return isW4A16(problem) ? 0 : benchScaleModeA(problem);
+    }
 
     inline void logBenchFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
                                             const TensileLite::ContractionInputs&      inputs,
@@ -1140,9 +1178,11 @@ namespace
 			"--batch_mode",
 			problem.batchMode(),
             "--scaleA",
-            problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
+            benchScaleModeA(problem),
             "--scaleB",
-            problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
+            benchScaleModeB(problem),
+            isW4A16(problem) ? "--int4_encoding" : "",
+            isW4A16(problem) ? std::to_string(static_cast<int>(problem.int4EncodingA())) : "",
             problem.useScaleCD() ? "--scaleC" : "",
             problem.useScaleCD() ? "--scaleD" : "",
             problem.swizzleTensorA() ? "--swizzleA" : "",
@@ -1504,13 +1544,13 @@ namespace
             "--batch_count",
             problem.gemms[0].batchSize(0),
             "--scaleA",
-            problem.gemms[0].useScaleAB().empty()
-                ? 0
-                : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            benchScaleModeA(problem.gemms[0]),
             "--scaleB",
-            problem.gemms[0].useScaleAB().empty()
-                ? 0
-                : (problem.gemms[0].useScaleAB() == "Vector" ? 2 : 1),
+            benchScaleModeB(problem.gemms[0]),
+            isW4A16(problem.gemms[0]) ? "--int4_encoding" : "",
+            isW4A16(problem.gemms[0])
+                ? std::to_string(static_cast<int>(problem.gemms[0].int4EncodingA()))
+                : "",
             problem.gemms[0].useScaleCD() ? "--scaleC" : "",
             problem.gemms[0].useScaleCD() ? "--scaleD" : "",
             problem.gemms[0].swizzleTensorA() ? "--swizzleA" : "",
