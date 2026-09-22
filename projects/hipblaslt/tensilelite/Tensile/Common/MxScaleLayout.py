@@ -82,6 +82,25 @@ def mxTdmKRowPitch(size: int, mxTile: int) -> int:
     return max(1, int(size) // mxTile)
 
 
+def mxIssueTpList(kernel: Mapping, tPA: Mapping, tPB: Mapping, *, includeMetadata: bool = False):
+    """Tensor-parameter list for TDM tensor_load and GL2 prefetch issue.
+
+    Matches SIA4 ds_load parent-tier: MXSA, MXSB, then remaining A, B.
+    Metadata stays last when requested.
+    """
+    tps = []
+    pt = kernel.get("ProblemType") or {}
+    if pt.get("MXBlockA") and "MX" in tPA:
+        tps.append(tPA["MX"])
+    if pt.get("MXBlockB") and "MX" in tPB:
+        tps.append(tPB["MX"])
+    tps.append(tPA)
+    tps.append(tPB)
+    if includeMetadata and kernel.get("enableTDMMetadata"):
+        tps.append(tPA["tpsMetadata"] if tPA.get("is_sparse") else tPB["tpsMetadata"])
+    return tps
+
+
 def mxGl2CoalescedDim(mt: int, numTileWGs: int, mxUnit: int, mxTile: int = 1) -> int:
     """Cluster coalesced e8s for MX GL2 prefetch.
 
