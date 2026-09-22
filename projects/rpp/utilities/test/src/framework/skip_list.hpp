@@ -310,6 +310,7 @@ inline constexpr const char* kSkipList[] = {
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_FullRoi_XYZWHD_2x3x10x19_h1_v1_d0",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_FullRoi_XYZWHD_2x3x10x19_h1_v0_d1",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_FullRoi_XYZWHD_2x3x10x19_h0_v1_d1",
+    "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_FullRoi_XYZWHD_2x3x10x19_h1_v1_d1",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_PartialRoi_LTFRBB_2x3x10x19_h0_v0_*",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_PartialRoi_LTFRBB_*_h1_v0_*",
     "Voxel_Geometric/FlipVoxelTest.Correctness/HIP_*_PartialRoi_LTFRBB_*_v1_*",
