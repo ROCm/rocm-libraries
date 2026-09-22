@@ -29,6 +29,7 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 Backend::Backend(StinkyAsmModule& module) : module(module) {}
@@ -62,23 +63,27 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     gemmTileConfig.NumGRM = opts.NumGRM;
     gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
 
-    // Entry-point sanity check on the tile config. 0 is not a valid tile size,
-    // so TileA0 == 0 means the module options never carried one and every pass
-    // downstream is about to work from defaults rather than from this kernel's
-    // shape. Warn rather than abort: a caller may legitimately drive a non-GEMM
-    // module through here, and a hard failure would take it down with it.
+    // Entry-point validation. This is the GEMM backend: a kernel arriving here
+    // without a tile configuration is misconfigured, not merely unusual. 0 is
+    // not a valid tile size and 0 waves is not an occupancy anything runs at,
+    // so both mean the module options never carried the values. Fail loudly
+    // instead of letting every downstream pass silently work from defaults and
+    // schedule for a kernel shape that does not exist.
+    //
+    // Deliberately NOT in PassContext::setGemmTileConfig: that is the generic
+    // config setter and has legitimate non-GEMM callers, notably
+    // StinkyIRConverter::convertToFunction, which parses arbitrary asm text and
+    // has no tile config to give.
     if (gemmTileConfig.TileA0 == 0) {
-        std::cerr << "[StinkyTofu] warning: GemmTileConfig has TileA0 == 0, so the tile "
-                     "configuration was never set. Scheduling passes will fall back to "
-                     "defaults and will not reflect this kernel.\n";
+        report_fatal_error(
+            "GemmTileConfig::TileA0 is 0 at the backend entry, so the tile configuration was "
+            "never set. Set TileA0/TileB0/TileM0 in the module options before running the "
+            "backend.");
     }
-    // WaveGroup0 * WaveGroup1 is 0 when neither was set, which is not an
-    // occupancy any kernel runs at. Passes branch on this (TDMLoadWaveSyncPass
-    // skips at <= 1, the CDNA5 ds issue-cost model reads it), so pin it to a
-    // single wave rather than letting 0 propagate.
     if (gemmTileConfig.NumWaves == 0) {
-        std::cerr << "[StinkyTofu] warning: WaveGroup0 * WaveGroup1 == 0; assuming 1 wave.\n";
-        gemmTileConfig.NumWaves = 1;
+        report_fatal_error(
+            "GemmTileConfig::NumWaves is 0 at the backend entry (WaveGroup0 * WaveGroup1). Set "
+            "WaveGroup0 and WaveGroup1 in the module options before running the backend.");
     }
 
     pm.setGemmTileConfig(gemmTileConfig);
