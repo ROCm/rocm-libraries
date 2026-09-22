@@ -42,19 +42,25 @@ enum class StinkyErrorCode : int {
 ///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query
 ///       it.
 struct GemmTileConfig {
-    // Scalars are zero-initialized: `arch` carried a default member initializer
-    // but the rest did not, so a default-initialized GemmTileConfig left them
-    // indeterminate. Passes do read these (NumWaves in RemoveDscntPass and the
-    // CDNA5 ds issue-cost model), which made scheduling depend on whatever was
-    // on the stack. 0 means "unset" everywhere that reads them.
+    // Every member carries a default initializer. Only `arch` used to, so a
+    // default-initialized GemmTileConfig left the rest holding whatever was on
+    // the stack. Passes read these (NumWaves in RemoveDscntPass and in the CDNA5
+    // ds issue-cost model), so scheduling could depend on leftover memory --
+    // quiet, and different between runs. Sanitizers flag it as a read of an
+    // uninitialized value.
+    //
+    // NumWaves defaults to 1 rather than 0 because 1 is a real occupancy: a
+    // reader gets single-wave behaviour, not a sentinel it has to special-case.
+    // The tile sizes default to 0, which is NOT a valid tile, so 0 there means
+    // "nobody configured this" and is worth complaining about.
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
-    uint32_t TileA0 = 0;               ///< Tile size for A dimension 0
-    uint32_t TileB0 = 0;               ///< Tile size for B dimension 0
-    uint32_t TileM0 = 0;               ///< Tile size for M dimension 0
+    uint32_t TileA0 = 0;               ///< Tile size for A dimension 0; 0 = unset
+    uint32_t TileB0 = 0;               ///< Tile size for B dimension 0; 0 = unset
+    uint32_t TileM0 = 0;               ///< Tile size for M dimension 0; 0 = unset
     uint32_t NumGRA = 0;               ///< Number of global read A
     uint32_t NumGRB = 0;               ///< Number of global read B
     uint32_t NumGRM = 0;               ///< Number of global read M
-    uint32_t NumWaves = 0;             ///< Number of waves; 0 = unset
+    uint32_t NumWaves = 1;             ///< Number of waves; 1 = single wave
 };
 
 /// Pass-specific feature configuration
