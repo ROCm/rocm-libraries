@@ -45,27 +45,27 @@
  * applicability rules live only in that Python; this file is where they become
  * enforceable.
  *
- * Three facts drive almost every check, each a silent wrong answer if missed:
+ * The 150-variant catalog has three families, each identified by (ragged, sliding_window):
  *
- *  a. **The kernel is BSHD; hipDNN dims are always (B, H, S, D) with layout in the
- *     strides.** The builder computes strides from `Hq * D` / `Hkv * D` and takes no
- *     stride kernargs, so a BHSD graph is indexed as if it were BSHD: in-bounds reads
- *     of the wrong elements, no fault.
- *  b. **Every shape field is baked into the emitted binary**, including `batch`. Strict
- *     equality in kernelMatches.
- *  c. **hipDNN has no `causal` boolean.** Causality is derived from the deprecated
- *     `causal_mask` / `causal_mask_bottom_right` pair, which take precedence when set,
- *     otherwise from (`left_bound`, `right_bound`, `diagonal_alignment`). Reading only
- *     the deprecated booleans computes "not causal" for every shipped causal bundle.
+ *  - **Aligned (132)**: ragged=0, sliding_window=0. Runtime batch/seqlen_q/seqlen_kv.
+ *    Any valid B/Sq/Skv with Sq divisible by 256 and Skv divisible by 64.
+ *  - **Tail (17)**: ragged=1, sliding_window=0. Exact B/Sq/Skv from metadata.
+ *    Dense self-attention where Sq is not a tile multiple; boundary tiles handled on-chip.
+ *  - **SWA (1)**: ragged=0, sliding_window=128. Runtime batch/seqlen_q/seqlen_kv.
+ *    Sliding-window self-attention; window size is baked, shape is not.
  *
- *  d. **RAGGED IS SERVED.** gfx950 emits a separate kernel path that pads boundary tiles
- *     on-chip for self-attention shapes where Sq is not a multiple of block_m=256. The
- *     tile divisibility rule is CONDITIONAL on the variant's own `ragged` flag.
+ * Key invariants:
  *
- *  e. **Sliding-window attention is served for self-attention shapes.** The rocke_bench
- *     corpus carries SWA self-attention shapes (sw=128). `sliding_window` is a spec
- *     field baked at compile time into the KV-loop bound; the 5-argument ABI is
- *     unchanged and correct for all shipped variants.
+ *  a. **The kernel is BSHD.** The builder computes strides from `Hq * D` / `Hkv * D`
+ *     and takes no stride kernargs; a BHSD graph reads the wrong elements in bounds.
+ *  b. **All 150 variants are non-persistent.** Every variant takes (q,k,v,o,scale,
+ *     batch,seqlen_q,seqlen_kv) -- eight kernel arguments. There is no persistent grid.
+ *  c. **shape_generic = (ragged == 0).** Aligned and SWA binaries are shape-generic:
+ *     skip metadata B/Sq/Skv equality for these. Tail rows must match exactly.
+ *  d. **hipDNN has no `causal` boolean.** Derive from left_bound/right_bound/deprecated
+ *     booleans via maskTypeFor(). The deprecated booleans are wrong for shipped bundles.
+ *  e. **Tile divisibility is conditional on `ragged`.** An aligned variant requires
+ *     Sq % 256 == 0 and Skv % 64 == 0. A ragged variant serves non-multiples.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -82,7 +82,8 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-// KMD fields this engine varies along. No BLOCK_M_FIELD: gfx950 bakes it as 256.
+// KMD fields (10-field schema). block_n/waves_per_eu/persistent/num_persistent/wide_lds_dma
+// no longer vary across variants and are not in the KMD.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -93,9 +94,9 @@ constexpr std::string_view BATCH_FIELD = "batch";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
-constexpr std::string_view BLOCK_N_FIELD = "block_n";
-constexpr std::string_view PERSISTENT_FIELD = "persistent";
-constexpr std::string_view NUM_PERSISTENT_FIELD = "num_persistent";
+
+// Fixed BN64 constant shared by all 150 variants. Not a knob; not in the KMD.
+constexpr int64_t GFX950_ATTENTION_DENSE_BLOCK_N = 64;
 
 constexpr std::string_view Q_TOKEN = "gfx950_attention_dense.q.uid";
 constexpr std::string_view K_TOKEN = "gfx950_attention_dense.k.uid";
@@ -228,6 +229,14 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
     const int64_t right
         = attributes.right_bound().has_value() ? attributes.right_bound().value() : UNBOUNDED;
 
+    // A non-zero right bound creates a bidirectional window the kernel cannot serve:
+    // the compiled kernel is hard-causal (upper mask only) and has no right-bound field.
+    // Decline early so the graph is not silently served with wrong numerics.
+    if(right != UNBOUNDED && right != 0)
+    {
+        return std::nullopt;
+    }
+
     // A bounded left edge is a window whatever the booleans say.
     if(left != UNBOUNDED)
     {
@@ -325,7 +334,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     }
     const auto& attributes = *attributesPtr;
 
-    // --- 2. Operands. Q/K/V/O are the four the shipped 5-slot ABI has pointers for.
+    // --- 2. Operands. Q/K/V/O are the four the shipped 8-arg ABI has pointers for.
     const auto* q = findTensor(context, attributes.q_tensor_uid());
     const auto* k = findTensor(context, attributes.k_tensor_uid());
     const auto* v = findTensor(context, attributes.v_tensor_uid());
@@ -458,7 +467,6 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         }
         causal = 1;
         slidingWindow = left + 1;
-        // sliding_window % block_n == 0 is checked in kernelMatches.
         break;
     }
     default:
@@ -595,10 +603,13 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound)
 /**
  * @brief Kernel-scoped applicability: does THIS candidate's baked metadata fit?
  *
- * Strict equality on every shape field, because this kernel is fully shape-specialized.
+ * **shape_generic = (ragged == 0).** Aligned and SWA variants receive batch/seqlen_q/
+ * seqlen_kv as runtime kernel arguments, so one binary serves any valid shape for the
+ * same head/dtype configuration. Skip metadata shape equality for these. Tail rows
+ * (ragged==1) bake the shape, so exact equality is required there.
  *
  * THE TILE RULE IS CONDITIONAL ON `ragged`. An aligned variant requires
- * `Sq % 256 == 0` and `Skv % block_n == 0`. A ragged variant is compiled with on-chip
+ * `Sq % 256 == 0` and `Skv % 64 == 0`. A ragged variant is compiled with on-chip
  * boundary padding and a ceil'd grid, so it serves the non-multiple lengths an aligned
  * binary cannot.
  */
@@ -633,9 +644,19 @@ bool kernelMatches(const MatchContext& context,
 
     if(intField(HEAD_SIZE_FIELD) != problem.headSize
        || intField(NUM_QUERY_HEADS_FIELD) != problem.numQueryHeads
-       || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads
-       || intField(SEQLEN_Q_FIELD) != problem.seqLenQ
-       || intField(SEQLEN_KV_FIELD) != problem.seqLenKv || intField(BATCH_FIELD) != problem.batch)
+       || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads)
+    {
+        return false;
+    }
+
+    // shape_generic = (ragged == 0): aligned and SWA variants take runtime shape params,
+    // so a single binary covers any valid (batch, seqlen_q, seqlen_kv) for the same
+    // head/dtype configuration.  Tail rows (ragged==1) bake the exact shape.
+    const bool kernelIsRagged = intField(RAGGED_FIELD) != 0;
+    if(kernelIsRagged
+       && (intField(SEQLEN_Q_FIELD) != problem.seqLenQ
+           || intField(SEQLEN_KV_FIELD) != problem.seqLenKv
+           || intField(BATCH_FIELD) != problem.batch))
     {
         return false;
     }
@@ -656,18 +677,13 @@ bool kernelMatches(const MatchContext& context,
     }
 
     // Tile divisibility, conditional on the variant's own ragged flag.
-    const int64_t blockN = intField(BLOCK_N_FIELD);
-    if(blockN <= 0)
-    {
-        return false;
-    }
+    // block_n is not in the KMD; all 150 variants share BN64.
     // Whether THIS GRAPH is ragged, derived exactly as the dispatcher derives it
     // (dispatch/attention/gfx950.py::_dense_spec):
     //     ragged = (sq == sk) and ((sq % _BLOCK_M != 0) or (sk % block_n != 0))
-    const bool aligned
-        = problem.seqLenQ % GFX950_ATTENTION_DENSE_BLOCK_M == 0 && problem.seqLenKv % blockN == 0;
+    const bool aligned = problem.seqLenQ % GFX950_ATTENTION_DENSE_BLOCK_M == 0
+                         && problem.seqLenKv % GFX950_ATTENTION_DENSE_BLOCK_N == 0;
     const bool graphIsRagged = problem.seqLenQ == problem.seqLenKv && !aligned;
-    const bool kernelIsRagged = intField(RAGGED_FIELD) != 0;
     if(graphIsRagged != kernelIsRagged)
     {
         return false;
@@ -677,48 +693,35 @@ bool kernelMatches(const MatchContext& context,
 }
 
 /**
- * @brief Ranks the candidates that survived kernelMatches. Higher wins.
+ * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
- * A larger block_n amortises per-tile overhead across more keys. This is a HEURISTIC
- * placeholder ranking one real knob rather than returning a constant. The parity set
- * carries a single block_n=64, so ranking has no effect on the shipped set.
+ * All 150 variants share fixed BN64 tuning; no competing tuning variants exist in this
+ * catalog. Return a neutral constant -- ranking has no effect on the shipped set.
  */
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
-                   const KernelDefinition& kernel)
+                   const KernelDefinition& /*kernel*/)
 {
-    return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_N_FIELD)));
+    return 1.0;
 }
 
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The expected kernel signature for this engine.
+/// The kernel signature for all 150 variants in this engine.
 ///
-/// All shipped variants use use_sinks=False, so no sink_ptr slot is present.
-/// The ABI is determined solely by whether the variant is persistent:
-///
-///   hasShapeParams  (persistent==0)  8 args  (q,k,v,o,scale,batch,seqlen_q,seqlen_kv)
-///  !hasShapeParams  (persistent!=0)  5 args  (q,k,v,o,scale)
-///
-/// This holds for all shipped variants including ragged and SWA.
-/// hasShapeParams = (persistent==0); all non-persistent variants -- aligned, ragged, SWA --
-/// take runtime shape params.
-std::vector<KernelArgument> attentionDenseKernelSignature(bool hasShapeParams)
+/// All variants are non-persistent. use_sinks=False so no sink_ptr slot.
+/// ABI: (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv) -- 8 args.
+std::vector<KernelArgument> attentionDenseKernelSignature()
 {
     static const KernelArgument s_buffer{
         "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     static const KernelArgument s_f32{"by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
     static const KernelArgument s_i32{"by_value", static_cast<uint32_t>(sizeof(int32_t)), 0, ""};
 
-    if(hasShapeParams)
-    {
-        // (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv)
-        return {s_buffer, s_buffer, s_buffer, s_buffer, s_f32, s_i32, s_i32, s_i32};
-    }
-    // (q_ptr, k_ptr, v_ptr, o_ptr, scale)
-    return {s_buffer, s_buffer, s_buffer, s_buffer, s_f32};
+    // (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv)
+    return {s_buffer, s_buffer, s_buffer, s_buffer, s_f32, s_i32, s_i32, s_i32};
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
@@ -728,11 +731,9 @@ class PreparedGfx950AttentionDense : public PreparedDispatch
 public:
     PreparedGfx950AttentionDense(IngestorKernelCode code,
                                  AttentionDenseBinding binding,
-                                 bool hasShapeParams,
                                  AttentionDenseProblem problem)
         : _code(std::move(code))
         , _binding(binding)
-        , _hasShapeParams(hasShapeParams)
         , _problem(problem)
     {
     }
@@ -747,11 +748,6 @@ public:
         return _binding;
     }
 
-    bool hasShapeParams() const
-    {
-        return _hasShapeParams;
-    }
-
     const AttentionDenseProblem& problem() const
     {
         return _problem;
@@ -760,7 +756,6 @@ public:
 private:
     IngestorKernelCode _code;
     AttentionDenseBinding _binding;
-    bool _hasShapeParams;
     AttentionDenseProblem _problem;
 };
 
@@ -778,7 +773,7 @@ public:
     }
 
     /// Zero: the kernel's only scratch is LDS and registers; no global scratch,
-    /// and the 5-slot ABI has no workspace pointer.
+    /// and the 8-arg ABI has no workspace pointer.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& /*kernel*/) const override
@@ -827,42 +822,33 @@ public:
         const compilation::KernelCompileOptions options(standIn,
                                                         context.deviceProperties.gcnArchName);
 
-        // `_has_shape_params` is true for ALL non-persistent variants, including ragged and SWA.
-        // On gfx950 every non-persistent kernel (aligned, ragged, SWA) takes runtime
-        // batch/seqlen_q/seqlen_kv. Only persistent variants bake them into the binary.
-        const bool hasShapeParams = kernel.getIntMetadata(std::string(PERSISTENT_FIELD)) == 0;
+        // All 150 variants are non-persistent: every variant takes runtime batch/seqlen_q/seqlen_kv.
         auto code = buildIngestorKernelCode(_kernelCompiler,
                                             _kpackLoader,
                                             context,
                                             kernel,
                                             options,
-                                            attentionDenseKernelSignature(hasShapeParams));
-
-        // Geometry, restated from the builder's own helpers INCLUDING the persistent branch.
-        // This correspondence is unchecked by the build, the packer, and the validator.
-        const auto geometry = gfx950AttentionDenseGeometry(
-            kernel.getIntMetadata(std::string(SEQLEN_Q_FIELD)),
-            kernel.getIntMetadata(std::string(NUM_QUERY_HEADS_FIELD)),
-            kernel.getIntMetadata(std::string(BATCH_FIELD)),
-            kernel.getIntMetadata(std::string(PERSISTENT_FIELD)),
-            kernel.getIntMetadata(std::string(NUM_PERSISTENT_FIELD)),
-            toString(kernel.kernelId));
-
-        code.setBlockSize(geometry.blockX, 1, 1);
-        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+                                            attentionDenseKernelSignature());
 
         const auto* q = findTensor(context, binding.q);
         const auto* k = findTensor(context, binding.k);
         const auto problem = problemFor(*q, *k);
 
-        return std::make_unique<PreparedGfx950AttentionDense>(
-            std::move(code), binding, hasShapeParams, problem);
+        // Grid from the GRAPH PROBLEM, not from descriptor metadata.
+        // Aligned/SWA: metadata carries canonical build inputs (B=1, Sq=Skv=512), not
+        // runtime constraints.  Tail: metadata carries exact baked shape, which matches
+        // the problem (enforced by kernelMatches), so problem values are equally correct.
+        const auto geometry = gfx950AttentionDenseGeometry(
+            problem.seqLenQ, problem.numQueryHeads, problem.batch, toString(kernel.kernelId));
+
+        code.setBlockSize(geometry.blockX, 1, 1);
+        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+
+        return std::make_unique<PreparedGfx950AttentionDense>(std::move(code), binding, problem);
     }
 
-    /// The ABI is `attention_dense_signature` (kernels/gfx950/attention_dense.py).
-    /// All shipped variants use use_sinks=False; no sink_ptr slot is present.
-    /// Non-persistent variants (aligned, ragged, SWA) take runtime shape params;
-    /// persistent variants bake them.
+    /// ABI: (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- 8 args, all 150 variants.
+    /// use_sinks=False; no sink_ptr slot.
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -881,27 +867,18 @@ public:
         const auto o
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
-        if(preparedDense.hasShapeParams())
-        {
-            // (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- non-persistent (incl. ragged, SWA)
-            const auto& p = preparedDense.problem();
-            preparedDense.kernelForStream(handle.getStream())
-                .launch(handle.getStream(),
-                        q.ptr,
-                        k.ptr,
-                        v.ptr,
-                        o.ptr,
-                        binding.scale,
-                        static_cast<int32_t>(p.batch),
-                        static_cast<int32_t>(p.seqLenQ),
-                        static_cast<int32_t>(p.seqLenKv));
-        }
-        else
-        {
-            // (q,k,v,o,scale) -- persistent
-            preparedDense.kernelForStream(handle.getStream())
-                .launch(handle.getStream(), q.ptr, k.ptr, v.ptr, o.ptr, binding.scale);
-        }
+        const auto& p = preparedDense.problem();
+        // (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- aligned, ragged, and SWA all share this ABI.
+        preparedDense.kernelForStream(handle.getStream())
+            .launch(handle.getStream(),
+                    q.ptr,
+                    k.ptr,
+                    v.ptr,
+                    o.ptr,
+                    binding.scale,
+                    static_cast<int32_t>(p.batch),
+                    static_cast<int32_t>(p.seqLenQ),
+                    static_cast<int32_t>(p.seqLenKv));
     }
 
 private:

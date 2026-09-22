@@ -280,8 +280,9 @@ std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
     return matcher(context);
 }
 
-/// KernelSpec matches our KMD fields: dtype, head_size, num_query_heads, num_kv_heads,
-/// batch, seqlen_q, seqlen_kv, causal, sliding_window, ragged, block_n.
+/// KernelSpec matches our 10-field KMD schema: dtype, head_size, num_query_heads,
+/// num_kv_heads, batch, seqlen_q, seqlen_kv, causal, sliding_window, ragged.
+/// block_n is no longer a KMD field (fixed at 64 for all 150 variants).
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -294,7 +295,6 @@ struct KernelSpec
     int64_t causal = 1;
     int64_t slidingWindow = 0;
     int64_t ragged = 0;
-    int64_t blockN = 64;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
@@ -317,7 +317,6 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("causal"), spec.causal},
         {std::string("sliding_window"), spec.slidingWindow},
         {std::string("ragged"), spec.ragged},
-        {std::string("block_n"), spec.blockN},
     };
     return kernel;
 }
@@ -689,6 +688,29 @@ TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoB
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
+{
+    // A graph with both left_bound and a non-zero right_bound is a bidirectional
+    // window. The gfx950 kernel is hard-causal (upper mask only) and has no
+    // right-bound field, so serving it would produce silent wrong numerics.
+    // The review's exact scenario: left=127, right=64, same shape as a shipped SWA variant.
+    GraphSpec spec;
+    spec.leftBound = 127;
+    spec.rightBound = 64;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalWithNonZeroRightBound)
+{
+    // A graph with causal_mask=true and right_bound > 0 also describes a shape the kernel
+    // cannot serve correctly. The right_bound wins over the deprecated causal boolean.
+    GraphSpec spec;
+    spec.causalMaskDeprecated = true;
+    spec.leftBound = std::nullopt;
+    spec.rightBound = 64;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // kernel_match
 // ---------------------------------------------------------------------------
@@ -768,12 +790,112 @@ TEST(TestGfx950AttentionDenseKernelMatch, AcceptsARaggedCandidateForARaggedGraph
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoesNotDivideSeqLenKv)
 {
+    // block_n is fixed at 64 for all variants; tile alignment is checked against
+    // GFX950_ATTENTION_DENSE_BLOCK_N, not a KMD field.
     GraphSpec graph;
     graph.seqLenKv = 288; // not a multiple of 64
     KernelSpec kernel;
     kernel.seqLenKv = 288;
-    kernel.blockN = 64;
     EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RaggedKernelRefusesWrongBatch)
+{
+    // Tail (ragged=1) KDs bake the exact shape; a request with a different batch
+    // must not reuse the baked binary (silent wrong bounds). shape_generic=false
+    // for ragged==1, so batch equality is enforced. ViT-B/16 scenario: KD has
+    // B=16 but caller requests B=32.
+    GraphSpec graph;
+    graph.seqLenQ = 197;
+    graph.seqLenKv = 197;
+    graph.batch = 32;
+    graph.numQueryHeads = 12;
+    graph.numKvHeads = 12;
+    graph.headSize = 64;
+    graph.headSizeV = 64;
+    graph.leftBound = std::nullopt; // noncausal
+    graph.rightBound = std::nullopt;
+
+    KernelSpec kernel;
+    kernel.ragged = 1;
+    kernel.seqLenQ = 197;
+    kernel.seqLenKv = 197;
+    kernel.batch = 16;
+    kernel.numQueryHeads = 12;
+    kernel.numKvHeads = 12;
+    kernel.headSize = 64;
+    kernel.causal = 0;
+
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RaggedKernelRefusesWrongSeqLen)
+{
+    // A ragged KD baked for S=197 must not serve S=394 (different tail length,
+    // different on-chip boundary-padding bounds).
+    GraphSpec graph;
+    graph.seqLenQ = 394;
+    graph.seqLenKv = 394;
+    graph.batch = 16;
+    graph.numQueryHeads = 12;
+    graph.numKvHeads = 12;
+    graph.headSize = 64;
+    graph.headSizeV = 64;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+
+    KernelSpec kernel;
+    kernel.ragged = 1;
+    kernel.seqLenQ = 197;
+    kernel.seqLenKv = 197;
+    kernel.batch = 16;
+    kernel.numQueryHeads = 12;
+    kernel.numKvHeads = 12;
+    kernel.headSize = 64;
+    kernel.causal = 0;
+
+    EXPECT_FALSE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RaggedKernelAcceptsExactShape)
+{
+    // Positive control: the exact baked shape matches.
+    GraphSpec graph;
+    graph.seqLenQ = 197;
+    graph.seqLenKv = 197;
+    graph.batch = 16;
+    graph.numQueryHeads = 12;
+    graph.numKvHeads = 12;
+    graph.headSize = 64;
+    graph.headSizeV = 64;
+    graph.leftBound = std::nullopt;
+    graph.rightBound = std::nullopt;
+
+    KernelSpec kernel;
+    kernel.ragged = 1;
+    kernel.seqLenQ = 197;
+    kernel.seqLenKv = 197;
+    kernel.batch = 16;
+    kernel.numQueryHeads = 12;
+    kernel.numKvHeads = 12;
+    kernel.headSize = 64;
+    kernel.causal = 0;
+
+    EXPECT_TRUE(matchesKernel(graph, kernel));
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, AlignedKernelAcceptsDifferentBatch)
+{
+    // Aligned (ragged=0) KDs are shape-generic: a KD compiled with B=1 must
+    // serve a graph with B=4. shape_generic=true, so batch equality is skipped.
+    GraphSpec graph;
+    graph.batch = 4;
+
+    KernelSpec kernel;
+    kernel.ragged = 0;
+    kernel.batch = 1; // canonical build input, not a runtime constraint
+
+    EXPECT_TRUE(matchesKernel(graph, kernel));
 }
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesWindowedCandidateForPlainGraph)
@@ -789,21 +911,15 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesWindowedCandidateForPlainGraph)
 // score
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseScore, RanksOnARealKnobRatherThanReturningAConstant)
+TEST(TestGfx950AttentionDenseScore, ReturnsNeutralConstant)
 {
-    KernelSpec wide;
-    wide.blockN = 128;
-    KernelSpec narrow;
-    narrow.blockN = 64;
-    EXPECT_NE(scoreOf(wide), scoreOf(narrow));
-}
-
-TEST(TestGfx950AttentionDenseScore, IgnoresAxesThatKernelMatchAlreadyPinned)
-{
+    // All 150 variants share fixed BN64 tuning; no competing tuning variants exist.
+    // score() returns a neutral constant so no arbitrary ordering bias is introduced.
     const KernelSpec bf16;
     KernelSpec fp16;
     fp16.dtype = "FP16";
     EXPECT_EQ(scoreOf(bf16), scoreOf(fp16));
+    EXPECT_GT(scoreOf(bf16), 0.0);
 }
 
 } // namespace

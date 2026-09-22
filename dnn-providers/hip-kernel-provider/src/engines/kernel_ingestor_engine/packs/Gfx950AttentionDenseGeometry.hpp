@@ -21,7 +21,7 @@
  * Header-only and dependency-light on purpose: a pure function of KMD metadata,
  * testable on any machine, with no HIP context and nothing to mock.
  *
- * THREE DIFFERENCES FROM THE gfx942 TWIN, each verified against the source rather
+ * TWO DIFFERENCES FROM THE gfx942 TWIN, each verified against the source rather
  * than assumed from the sibling:
  *
  *  1. **block_m is not a parameter.** gfx950 bakes `_BLOCK_M = 256` as a module
@@ -38,10 +38,6 @@
  *     (attention_dense.py:1878 keeps the ceil for exactly that reason). Truncating
  *     here would drop the final block: the tail rows are never written, and nothing
  *     reports it.
- *
- *  3. **num_persistent defaults to 256**, the MI355X CU count, where gfx942 uses
- *     304. That value is not used here -- it arrives from the KMD -- but it is why
- *     a gfx942 geometry test's expectations do not transfer.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -77,15 +73,13 @@ struct Gfx950AttentionDenseGeometry
  *
  * Mirrors `attention_dense_grid` (kernels/gfx950/attention_dense.py:1874-1881):
  *
- *     if spec.persistent: return (spec.num_persistent, 1, 1)
  *     nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M   # ceil: ragged partial block
  *     return (nqb, spec.num_query_heads, spec.batch)
  *
  * and `attention_dense_block` (:1883-1885), `(num_waves * 64, 1, 1)`.
  *
- * BOTH ARMS MATTER. The persistent grid-stride variant is a different binary that
- * expects a 1-D grid of `num_persistent` CTAs. Launching it on the default 3-D grid
- * leaves output rows unwritten, with no error anywhere.
+ * All 150 shipped variants are non-persistent; the persistent grid-stride arm is
+ * not present in this catalog.
  *
  * Throws instead of returning a degenerate grid. An empty or negative launch returns
  * cleanly having written nothing, which is the silent-wrong-answer case this file
@@ -96,23 +90,11 @@ struct Gfx950AttentionDenseGeometry
 inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ,
                                                                  int64_t numQueryHeads,
                                                                  int64_t batch,
-                                                                 int64_t persistent,
-                                                                 int64_t numPersistent,
                                                                  const std::string& kernelName)
 {
-    // A persistent variant with no usable CTA count would launch an empty or negative
-    // grid. Fail at prepare with a named reason rather than at the far end of a silent
-    // miscompute.
-    if(persistent != 0 && numPersistent <= 0)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950 attention_dense: kernel '" + kernelName
-                + "' is persistent but declares a non-positive num_persistent");
-    }
-    // The default arm indexes gridY/gridZ directly, so a non-positive head count or
-    // batch launches zero CTAs and returns having written nothing.
-    if(persistent == 0 && (seqLenQ <= 0 || numQueryHeads <= 0 || batch <= 0))
+    // gridY/gridZ index heads and batch directly; a non-positive value launches zero
+    // CTAs and returns having written nothing.
+    if(seqLenQ <= 0 || numQueryHeads <= 0 || batch <= 0)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -126,21 +108,12 @@ inline Gfx950AttentionDenseGeometry gfx950AttentionDenseGeometry(int64_t seqLenQ
     // halves can be diffed term for term.
     geometry.blockX = static_cast<unsigned>(GFX950_ATTENTION_DENSE_BLOCK_M / GFX950_ROWS_PER_WAVE
                                             * GFX950_WAVE_LANES);
-    if(persistent != 0)
-    {
-        geometry.gridX = static_cast<unsigned>(numPersistent);
-        geometry.gridY = 1;
-        geometry.gridZ = 1;
-    }
-    else
-    {
-        // CEIL, and it is load-bearing here: a ragged shape has a partial final query
-        // block, and truncating drops it.
-        geometry.gridX = static_cast<unsigned>((seqLenQ + GFX950_ATTENTION_DENSE_BLOCK_M - 1)
-                                               / GFX950_ATTENTION_DENSE_BLOCK_M);
-        geometry.gridY = static_cast<unsigned>(numQueryHeads);
-        geometry.gridZ = static_cast<unsigned>(batch);
-    }
+    // CEIL, and it is load-bearing here: a ragged shape has a partial final query
+    // block, and truncating drops it.
+    geometry.gridX = static_cast<unsigned>((seqLenQ + GFX950_ATTENTION_DENSE_BLOCK_M - 1)
+                                           / GFX950_ATTENTION_DENSE_BLOCK_M);
+    geometry.gridY = static_cast<unsigned>(numQueryHeads);
+    geometry.gridZ = static_cast<unsigned>(batch);
     return geometry;
 }
 
