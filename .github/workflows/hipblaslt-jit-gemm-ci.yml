@@ -54,9 +54,14 @@ jobs:
           from amdgpu_family_matrix import get_all_families_for_trigger_types, select_weighted_label
           families = get_all_families_for_trigger_types(["presubmit", "postsubmit"])
           matrix = []
-          # Both families are required for this focused regression workflow,
-          # including gfx90a, which generic CI otherwise selects by PR label.
-          for architecture, key in [("gfx90a", "gfx90a"), ("gfx942", "gfx94x")]:
+          # All requested architectures run the same JIT regressions, including
+          # families that generic CI otherwise selects only by PR label.
+          for architecture, key in [
+              ("gfx90a", "gfx90a"),
+              ("gfx942", "gfx94x"),
+              ("gfx950", "gfx950"),
+              ("gfx1250", "gfx125x"),
+          ]:
               config = families[key]["linux"]
               labels = config.get("test-runs-on-labels")
               runner = select_weighted_label(labels, architecture) if labels else config["test-runs-on"]

@@ -18,7 +18,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument(
-        "--architecture", choices=("gfx90a", "gfx942", "gfx950"), required=True
+        "--architecture",
+        choices=("gfx90a", "gfx942", "gfx950", "gfx1250"),
+        required=True,
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -117,6 +119,7 @@ def main():
             1800,
         )
     ]
+    fixture_suffix = "_gfx1250" if args.architecture == "gfx1250" else ""
     for feature, options in [("streamk", ["--k", "4096"]), ("amax", ["--amax", "1"])]:
         for route in ("standalone", "normal"):
             name = f"{feature}-{route}"
@@ -125,7 +128,7 @@ def main():
                 sys.executable,
                 str(tensile),
                 env["PYTHONPATH"],
-                str(fixtures / f"single_solution_{feature}.yaml"),
+                str(fixtures / f"single_solution_{feature}{fixture_suffix}.yaml"),
                 str(output / name),
                 args.architecture,
                 compiler,
