@@ -74,6 +74,7 @@ function(hipconv_add_arch_lib name)
         "${HIPCONV_ROOT}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(hipconv_arch_${name} PRIVATE hip::device)
+    target_compile_options(hipconv_arch_${name} PRIVATE ${HIPCONV_DEVICE_COMPILE_OPTIONS})
     # Position-independent so the objects can link into libMIOpen.so.
     #
     # hipconv_set_stand_in_offload sets HIP_ARCHITECTURES, once every architecture has
