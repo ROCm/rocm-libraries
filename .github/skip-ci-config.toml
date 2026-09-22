@@ -38,8 +38,9 @@ common = [
     "tools/libraries_pr_bot/*",
     "projects/hipdnn/tools/*",
 
-    # TheRock CI workflow file changes (handled separately by TheRock)
+    # TheRock CI workflow and config - changes here don't affect build/test
     ".github/workflows/therock-multi-arch-ci.yml",
+    ".github/skip-ci-config.toml",
 
     # ComposableKernel directories not built by TheRock
     "projects/composablekernel/Jenkinsfile",
