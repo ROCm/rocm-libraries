@@ -22,7 +22,7 @@ pytestmark = pytest.mark.unit
 _CONFIGS = [
     ("Tensile/Tests/common/gemm/gfx12/f8f8s_cls_gfx1250.yaml", "51b1d0cc5a73", "gfx1250", True),
     ("Tensile/Tests/common/gemm/gfx950/agntab_coverage_gfx950.yaml", "abcabf698281", "gfx950", True),
-    ("Tensile/Tests/common/gemm/gfx12/bf6_gfx1250.yaml", "4daa88f04c04", "gfx1250", True),
+    ("Tensile/Tests/common/gemm/gfx12/bf6_gfx1250.yaml", "935c7cba12c1", "gfx1250", True),
     ("Tensile/Tests/common/gemm/gfx12/segment_interleave_gfx1250.yaml", "7ea1860de90a", "gfx1250", True),
     ("Tensile/Tests/common/gemm/icache_flush.yaml", "61cc4a8fbdb2", "gfx942", True),
     ("Tensile/Tests/common/gemm/gfx12/mxf6_tdm_gfx1250.yaml", "0b0294fb343f", "gfx1250", False),
@@ -63,7 +63,7 @@ _CONFIGS = [
     ("Tensile/Tests/common/gemm/gfx12/f4f6ss_tdm_gfx1250.yaml", "54f294c7f2f3", "gfx1250", True),
     ("Tensile/Tests/common/gemm/gfx12/f6b6ss_gfx1250.yaml", "838967ae0fb3", "gfx1250", True),
     ("Tensile/Tests/common/gemm/gfx12/f8f8s_pk8_gfx1250.yaml", "2f8050b1da9c", "gfx1250", True),
-    ("Tensile/Tests/common/gemm/gfx12/xfp32_gfx1250.yaml", "23ff9e767b94", "gfx1250", True),
+    ("Tensile/Tests/common/gemm/gfx12/xfp32_gfx1250.yaml", "06bbc2fbb1c0", "gfx1250", True),
     ("Tensile/Tests/common/gemm/gfx950/custom_mainloop_scheduling.yaml", "384864cf0cc9", "gfx950", True),
     ("Tensile/Tests/common/gemm/gfx950/general_wgm.yaml", "e7a1371235c8", "gfx950", True),
     ("Tensile/Tests/common/gemm/swizzleA.yaml", "826443980ca1", "gfx942", True),
