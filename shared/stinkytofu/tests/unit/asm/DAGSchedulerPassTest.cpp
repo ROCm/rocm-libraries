@@ -770,6 +770,53 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
         << trace;
 }
 
+// ---------------------------------------------------------------------------
+// The ds issue pipe is shared between waves (HWModel::Lds::wavesPerDsIssuePipe),
+// so a ds_load's ISA issue cost of 1 only holds at one wave. With more waves
+// resident the cost doubles, and fewer ds_loads fit in a WMMA's co-issue window.
+//
+// The rule (4) cap is held inert here (perWmma well above the ds_load count) so
+// what is measured is the window filling up, not the cap.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
+    auto dsInFirstWmmaWindow = [this](uint32_t numWaves) {
+        SetUp();  // fresh block per run
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
+        createWmmaF32_16x16x16_bf16(/*destStart=*/120, /*src0Start=*/220);
+        for (int i = 0; i < 12; ++i)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 1);
+        config.NumWaves = numWaves;
+        runPassWithDsReadThrottle(/*queueDepth=*/64, /*throttleLatency=*/64, /*perWmma=*/100);
+        int count = 0;
+        bool seenFirstWmma = false;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* in = cast<StinkyInstruction>(&ir);
+            if (isMatrixInstruction(*in)) {
+                if (seenFirstWmma) break;  // second WMMA closes the first window
+                seenFirstWmma = true;
+                continue;
+            }
+            if (seenFirstWmma && isDSRead(*in)) ++count;
+        }
+        return count;
+    };
+
+    const int oneWave = dsInFirstWmmaWindow(1);
+    const int twoWaves = dsInFirstWmmaWindow(2);
+    const int fourWaves = dsInFirstWmmaWindow(4);
+
+    EXPECT_GT(oneWave, fourWaves)
+        << "a shared issue pipe must fit fewer ds_loads per window once more "
+           "than one wave contends for it";
+    EXPECT_EQ(twoWaves, fourWaves)
+        << "contention saturates at wavesPerDsIssuePipe: 4 waves run as 2-2 "
+           "pairs, so a wave contends with one partner either way. NOTE the "
+           "2-wave case is unverified on hardware -- if waves turn out to land "
+           "on separate pipes instead, twoWaves should equal oneWave and this "
+           "is the assertion to flip";
+}
+
 TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsPickedNodesRatherThanIssueCycles) {
     createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
     StinkyInstruction* wideIssue = createVAddInBlock(bb, arch, /*destReg=*/300, /*src0Reg=*/301,

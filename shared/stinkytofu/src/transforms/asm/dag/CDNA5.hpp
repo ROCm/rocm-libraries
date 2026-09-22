@@ -442,6 +442,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
             getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleTransitionEntries;
         return cfg >= 0 ? cfg : dsReadQueueDepth();
     }
+    // Effective ds issue cost for one wave. The ISA number is single-wave; the
+    // ds issue pipe is shared, so resident waves round-robin it and one wave's
+    // issues are spaced out (see HWModel::Lds::wavesPerDsIssuePipe). Distinct
+    // from dsReadPerWmma below, which is a manually tuned ceiling, not a cost.
+    int dsIssueCost(const StinkyInstruction& inst) const {
+        return dsIssueCyclesForWaves(
+            hw_, inst.issueCycles,
+            static_cast<int>(getPassContext().getGemmTileConfig().NumWaves));
+    }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         return cfg > 0 ? (cfg < INT_MAX ? cfg : config_.dsReadPerWmma) : config_.dsReadPerWmma;
@@ -819,6 +828,8 @@ void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
         elapsedCycles = node->inst->latencyCycles;
     else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
         elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
+    else if (isDSRead(*node->inst))
+        elapsedCycles = dsIssueCost(*node->inst);
     advanceTime(elapsedCycles);
 }
 
@@ -1221,7 +1232,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         const bool fitsSchedulingBudget =
             dsThrottleWait == 0 ||
             (schedulingPos < activeWmmaLatency_ &&
-             dsThrottleWait + pickedDS->inst->issueCycles <= schedulingSpace);
+             dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;

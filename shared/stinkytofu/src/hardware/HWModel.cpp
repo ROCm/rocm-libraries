@@ -29,6 +29,11 @@ constexpr HWModel kGfx1250Model = {
             // Fallback when HwInstDesc::dsThroughput / dsMaxDrain are 0.
             .dsLoadDefaultThroughput = 4,
             .dsLoadDefaultMaxDrain = 120,
+            // One ds issue pipe per 2 waves: the ISA's 1-cycle ds issue holds
+            // at 1 wave, but 4 waves run as 2-2 pairs and each wave's issues
+            // cost 2. Independent of dagFeatures.dsReadPerWmma, which stays a
+            // separately tuned ceiling.
+            .wavesPerDsIssuePipe = 2,
         },
     .barrier =
         {
@@ -97,6 +102,17 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
     return capDrainLatency(targetDSLoadLatency + (queueDepth - 1) * numWaves +
                                (matchingDsLoadCount - queueDepth) * numWaves / throughput,
                            maxDrainLatency);
+}
+
+int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves) {
+    const int share = hw.lds.wavesPerDsIssuePipe;
+    // numWaves <= 0 is "unset" (GemmTileConfig::NumWaves default): model no
+    // sharing rather than guessing an occupancy, so the ISA cost stands.
+    if (issueCycles <= 0 || share <= 1 || numWaves <= 0) return issueCycles;
+    // Waves pair onto a pipe as soon as there are enough to fill one, so the
+    // contending count saturates at the share. See the header for the
+    // unverified numWaves == 2 case.
+    return issueCycles * std::min(numWaves, share);
 }
 
 int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,

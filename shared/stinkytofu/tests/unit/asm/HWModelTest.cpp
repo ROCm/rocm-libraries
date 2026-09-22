@@ -106,3 +106,52 @@ TEST(HWModel, ConfiguredPassContextCachesMatchingModel) {
     ctx.setGemmTileConfig(cfg);
     EXPECT_EQ(&ctx.getHWModel(), &hwModelForArch(kGfx1250));
 }
+
+// ---------------------------------------------------------------------------
+// ds issue cost vs resident waves. A ds_load's ISA issue cost is quoted for one
+// wave; the issue pipe is shared, so resident waves round-robin it and a single
+// wave's issues are spaced out by however many share its pipe.
+// ---------------------------------------------------------------------------
+
+TEST(HWModelDsIssue, SingleWaveKeepsTheIsaCost) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    ASSERT_EQ(hw.lds.wavesPerDsIssuePipe, 2) << "gfx1250 shares one ds issue pipe per 2 waves";
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/1), 1);
+}
+
+TEST(HWModelDsIssue, FourWavesRunAsPairsSoTheCostDoubles) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    // 4 waves over a 2-wave pipe is 2-2: a wave contends with one partner, not
+    // with all three others, so the cost saturates at the share rather than
+    // scaling with the wave count.
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/4), 2);
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/8), 2);
+}
+
+TEST(HWModelDsIssue, TwoWavesAreAssumedPaired) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    // UNVERIFIED on hardware: the conservative reading is that two waves share
+    // one pipe. If they turn out to land on separate pipes this becomes 1, and
+    // this test is the one to flip.
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/2), 2);
+}
+
+TEST(HWModelDsIssue, UnsetWaveCountFallsBackToTheIsaCost) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    // GemmTileConfig::NumWaves defaults to 0. Model no sharing rather than
+    // guessing an occupancy.
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/0), 1);
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/4, /*numWaves=*/0), 4);
+}
+
+TEST(HWModelDsIssue, ScalesAMultiCycleIssueCost) {
+    const HWModel& hw = hwModelForArch({12, 5, 0});
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/4, /*numWaves=*/4), 8);
+}
+
+TEST(HWModelDsIssue, UnmodelledShareIsInert) {
+    HWModel hw = hwModelForArch({12, 5, 0});
+    hw.lds.wavesPerDsIssuePipe = 0;
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, /*numWaves=*/4), 1)
+        << "an arch that does not model pipe sharing must keep the ISA cost";
+}

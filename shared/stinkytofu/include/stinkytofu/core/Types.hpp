@@ -42,14 +42,19 @@ enum class StinkyErrorCode : int {
 ///       not a user-configurable parameter. Use getWaveFrontSize(arch) to query
 ///       it.
 struct GemmTileConfig {
+    // Scalars are zero-initialized: `arch` carried a default member initializer
+    // but the rest did not, so a default-initialized GemmTileConfig left them
+    // indeterminate. Passes do read these (NumWaves in RemoveDscntPass and the
+    // CDNA5 ds issue-cost model), which made scheduling depend on whatever was
+    // on the stack. 0 means "unset" everywhere that reads them.
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
-    uint32_t TileA0;                   ///< Tile size for A dimension 0
-    uint32_t TileB0;                   ///< Tile size for B dimension 0
-    uint32_t TileM0;                   ///< Tile size for M dimension 0
-    uint32_t NumGRA;                   ///< Number of global read A
-    uint32_t NumGRB;                   ///< Number of global read B
-    uint32_t NumGRM;                   ///< Number of global read M
-    uint32_t NumWaves;                 ///< Number of waves
+    uint32_t TileA0 = 0;               ///< Tile size for A dimension 0
+    uint32_t TileB0 = 0;               ///< Tile size for B dimension 0
+    uint32_t TileM0 = 0;               ///< Tile size for M dimension 0
+    uint32_t NumGRA = 0;               ///< Number of global read A
+    uint32_t NumGRB = 0;               ///< Number of global read B
+    uint32_t NumGRM = 0;               ///< Number of global read M
+    uint32_t NumWaves = 0;             ///< Number of waves; 0 = unset
 };
 
 /// Pass-specific feature configuration
