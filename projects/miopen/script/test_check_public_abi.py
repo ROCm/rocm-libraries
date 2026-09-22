@@ -22,6 +22,7 @@ or GPU is needed and the module runs in a lint lane:
     python -m pytest projects/miopen/script/test_check_public_abi.py
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -458,8 +459,17 @@ needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not avai
 
 
 def _git(root: Path, *args: str) -> str:
+    # GIT_DIR overrides -C, and git exports it to hooks -- so under a hook-invoked run
+    # every call here would reach the surrounding repository instead of `root`. The
+    # `git init` below would then re-initialise it, and with no GIT_WORK_TREE alongside
+    # it would come back bare, disabling every later git command in that checkout.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     done = subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
     )
     return done.stdout.strip()
 
@@ -477,6 +487,10 @@ def _repo_with_unreadable_blob(tmp_path: Path) -> tuple[Path, Path]:
     target = root / "tracked.hpp"
     target.write_text("#pragma once\n", encoding="utf-8")
     _git(root, "init", "-q")
+    assert (root / ".git").is_dir(), (
+        f"git init did not create {root}/.git -- it reached some other repository, "
+        "and the git calls below are about to write to it"
+    )
     _git(root, "config", "user.email", "nobody@example.invalid")
     _git(root, "config", "user.name", "Test")
     _git(root, "add", "tracked.hpp")
@@ -485,6 +499,26 @@ def _repo_with_unreadable_blob(tmp_path: Path) -> tuple[Path, Path]:
     target.unlink()
     (root / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
     return root, target
+
+
+@needs_git
+def test_the_scratch_repo_stays_inside_tmp_path(tmp_path, monkeypatch):
+    """Stands in for a suite run from a git hook, which inherits GIT_DIR.
+
+    The damage would land on whoever ran it rather than on this test, and would show
+    up as an unrelated repository going unusable, so nothing here would report it.
+    """
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    _git(outer, "init", "-q")
+    monkeypatch.setenv("GIT_DIR", str(outer / ".git"))
+
+    root, _ = _repo_with_unreadable_blob(tmp_path)
+
+    assert (root / ".git").is_dir(), "the scratch repo was never created"
+    config = (outer / ".git" / "config").read_text(encoding="utf-8")
+    assert "nobody@example.invalid" not in config
+    assert "bare = true" not in config
 
 
 @needs_git
@@ -533,6 +567,24 @@ def test_a_non_checkout_is_a_skip_not_a_failure(tmp_path):
     assert "not a git checkout" in "".join(reasons.values())
 
 
+@needs_git
+def test_an_ambient_git_environment_does_not_redirect_the_read(tmp_path, monkeypatch):
+    """Stands in for the pre-commit hook this runs as, which exports GIT_DIR.
+
+    Redirected, every read here answers from the repository that invoked the hook,
+    so a file absent from the tree under test is reported on some other tree's
+    contents -- and the answer looks ordinary either way.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _git(elsewhere, "init", "-q")
+    monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+
+    reasons: dict[str, str] = {}
+    assert abi.read_tracked_source(tmp_path / "absent.hpp", tmp_path, reasons) is None
+    assert "not a git checkout" in "".join(reasons.values())
+
+
 # --------------------------------------------------------------------------
 # Installed headers
 #
@@ -556,6 +608,21 @@ def test_a_clean_include_tree_passes(tmp_path):
     assert abi.check_installed_headers(str(root), []) is True
 
 
+def test_an_include_tree_with_no_headers_is_an_error(tmp_path):
+    """A tree that stages nothing this recognises never got checked, so passing it
+    would report a clean include tree having read no files at all."""
+    root = staged(tmp_path, {"miopen/miopen-config.cmake": "# miopenFoo_impl\n"})
+    with pytest.raises(abi.AbiError, match="nothing was checked"):
+        abi.check_installed_headers(str(root), [])
+
+
+def test_an_include_tree_exempt_all_the_way_down_is_an_error(tmp_path):
+    """Exempting every staged header leaves the same nothing-was-read result."""
+    root = staged(tmp_path, {"miopen/private/rename.hpp": "void miopenFoo_impl();\n"})
+    with pytest.raises(abi.AbiError, match="nothing was checked"):
+        abi.check_installed_headers(str(root), ["miopen/private"])
+
+
 def test_a_leaked_rename_is_reported_with_file_and_line(tmp_path, capsys):
     root = staged(
         tmp_path,
@@ -567,10 +634,17 @@ def test_a_leaked_rename_is_reported_with_file_and_line(tmp_path, capsys):
 
 
 def test_the_private_directory_is_exempt(tmp_path):
-    """The private declarations spell the private names by definition."""
+    """The private declarations spell the private names by definition.
+
+    A public header is staged alongside so the exemption is what carries the pass;
+    without one the tree scans nothing, which is its own failure.
+    """
     root = staged(
         tmp_path,
-        {"miopen/private/miopen_impl.h": "miopenStatus_t miopenFoo_impl(int);\n"},
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n",
+            "miopen/private/miopen_impl.h": "miopenStatus_t miopenFoo_impl(int);\n",
+        },
     )
     assert abi.check_installed_headers(str(root), ["miopen/private"]) is True
 
@@ -744,3 +818,13 @@ def test_private_symbols_that_were_never_renamed_are_not_required():
     wrapper = wrapper_elf(symbols=("miopenFoo",))
     private = private_elf(symbols=("miopenFoo_impl", "miopenInternalThing"))
     assert abi.check_impl_superset(wrapper, private) is True
+
+
+def test_a_private_library_with_no_renamed_symbols_is_an_error():
+    """Zero renamed entry points means the wrong file -- --private-lib aimed at the
+    wrapper, or a build where the rename was never applied -- not a satisfied
+    superset."""
+    wrapper = wrapper_elf(symbols=("miopenFoo",))
+    private = private_elf(symbols=("miopenInternalThing",))
+    with pytest.raises(abi.AbiError, match="not a flag-on private library"):
+        abi.check_impl_superset(wrapper, private)

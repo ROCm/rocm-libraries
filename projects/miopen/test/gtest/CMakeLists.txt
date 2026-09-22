@@ -310,29 +310,42 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Skipped when there is no GPU: the shim surface is all *GPU* tests, which the shard
     # filter drops in that configuration and this filter does not.
     if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU)
-      add_test(NAME ${TEST_NAME}_forwarding_parity
-        COMMAND ${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py
-          --gtest $<TARGET_FILE:${TEST_NAME}>
-          --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
-          --output-dir ${PROJECT_BINARY_DIR}/test_results
-          --lib-dir $<TARGET_FILE_DIR:MIOpen>
-          --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
-          --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
-        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
-      )
-      # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
-      # GPU tests registered outside the shards, so without it ctest -j would run them
-      # against a GPU the shards are already using.
-      #
-      # The gtest shard variables are pinned rather than left inherited: a sharded CI run
-      # exports them for the whole run, and a replay that honoured them would compare one
-      # shard's worth of the shim surface while no other entry covered the remainder.
-      set_tests_properties(${TEST_NAME}_forwarding_parity PROPERTIES
-        RUN_SERIAL TRUE
-        LABELS "${MIOPEN_FORWARDING_PARITY_LABELS}"
-        TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT}
-        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=1;GTEST_SHARD_INDEX=0"
-      )
+      # One bare entry plus one per architecture test_categories.yaml declares an exclusion
+      # set for, matching the packaged mirror at the end of this file. The runner's
+      # architecture filter takes two forms -- `-L ^ex_gpu_<arch>$` on a declared
+      # architecture, `-LE ex_gpu` elsewhere -- and no single entry satisfies both. Under
+      # either form exactly one of these is selected.
+      set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_LABELS}")
+      set(PARITY_ENTRY_NAME "${TEST_NAME}_forwarding_parity")
+      foreach(GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
+        if(GPU_LABEL)
+          set(PARITY_ENTRY_NAME "${TEST_NAME}_forwarding_parity_${GPU_LABEL}")
+          set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS};${GPU_LABEL}")
+        endif()
+        add_test(NAME ${PARITY_ENTRY_NAME}
+          COMMAND ${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py
+            --gtest $<TARGET_FILE:${TEST_NAME}>
+            --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
+            --output-dir ${PROJECT_BINARY_DIR}/test_results
+            --lib-dir $<TARGET_FILE_DIR:MIOpen>
+            --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
+            --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+          WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
+        )
+        # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
+        # GPU tests registered outside the shards, so without it ctest -j would run them
+        # against a GPU the shards are already using.
+        #
+        # The gtest shard variables are pinned rather than inherited: a sharded CI run exports
+        # them for the whole run, and a replay honouring them would compare one shard's worth
+        # of the shim surface while no other entry covered the remainder.
+        set_tests_properties(${PARITY_ENTRY_NAME} PROPERTIES
+          RUN_SERIAL TRUE
+          LABELS "${PARITY_ENTRY_LABELS}"
+          TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT}
+          ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=1;GTEST_SHARD_INDEX=0"
+        )
+      endforeach()
     endif()
 
   endif()
@@ -398,12 +411,22 @@ endif()
 # slice of the suite.
 set(MIOPEN_FORWARDING_PARITY_TIMEOUT 3600)
 
-# Labels the harness carries so an ordinary MIOpen test run selects it. The runner ANDs a tier
-# label with an architecture filter, and keeping `forwarding_parity` alongside leaves the
-# harness selectable by name for a hand-run. Every tier is listed because the harness is not a
-# slice of the suite that some tiers can afford to skip -- it either runs or the wrapper build
-# has no parity coverage at all.
-set(MIOPEN_FORWARDING_PARITY_LABELS "forwarding_parity;quick;standard;comprehensive;full")
+# The runner ANDs a tier label with an architecture filter. Every tier is listed because the
+# harness either runs or the wrapper build has no parity coverage at all.
+set(MIOPEN_FORWARDING_PARITY_TIER_LABELS "quick;standard;comprehensive;full")
+
+# `forwarding_parity` goes on the bare entry only: the architecture variants differ only in
+# which filter they survive, so a hand-run by this label should replay the shim surface once,
+# not once per declared architecture for the same answer.
+set(MIOPEN_FORWARDING_PARITY_LABELS
+  "forwarding_parity;${MIOPEN_FORWARDING_PARITY_TIER_LABELS}")
+
+# Read before the test executables are registered: the build-tree entries below loop over
+# these, and setting them later would leave the build tree with no architecture variants.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+  include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
+endif()
 
 if( MIOPEN_TEST_DISCRETE )
   foreach(TEST ${TESTS})
@@ -486,22 +509,16 @@ endif()
 # carries none of them. Only the single-binary build packages a test executable and so only it
 # registers the harness mirrored here.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
-  # The architecture filter takes one of two forms: on an architecture test_categories.yaml
-  # declares an exclusion set for, the runner requires `-L ^ex_gpu_<arch>$`; on any other it
-  # excludes everything matching `ex_gpu`. No single entry satisfies both. Labels are read back
-  # out of the YAML rather than repeated here, so adding an exclusion set does not silently drop
-  # parity coverage on that architecture.
-  set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
-  include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
-
-  # One bare entry plus one per declared architecture, exactly one of which the runner ever
-  # selects. They are identical apart from the label and the name.
+  # The same set of entries the build tree registers, under the same rule: a bare entry for the
+  # architecture filter's exclude form and one per declared architecture for its require form.
+  # Labels are read back out of the YAML rather than repeated here, so adding an exclusion set
+  # does not silently drop parity coverage on that architecture.
   set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_LABELS}")
   set(PARITY_ENTRY_NAME "miopen_gtest_forwarding_parity")
   foreach(GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
     if(GPU_LABEL)
       set(PARITY_ENTRY_NAME "miopen_gtest_forwarding_parity_${GPU_LABEL}")
-      set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_LABELS};${GPU_LABEL}")
+      set(PARITY_ENTRY_LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS};${GPU_LABEL}")
     endif()
     file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(${PARITY_ENTRY_NAME} \"../run_forwarding_parity.py\" \"--gtest\" \"../miopen_gtest\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")

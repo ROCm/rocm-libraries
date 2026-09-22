@@ -112,6 +112,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import struct
 import subprocess
@@ -675,6 +676,22 @@ def parse_renames(source: str, what: str = "rename header") -> dict[str, str]:
     return out
 
 
+def run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run git against `repo_root`, immune to an ambient git environment.
+
+    GIT_DIR overrides -C, and git exports it to the hooks it runs. This check runs
+    as one, so without stripping it every read below would answer from whichever
+    repository invoked the hook, whatever --repo-root was given.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+
 def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> tuple[bool, str]:
     """Say why git could not produce HEAD:<rel>, and whether that is fatal.
 
@@ -695,11 +712,7 @@ def describe_git_failure(repo_root: Path, rel: str, stderr: bytes) -> tuple[bool
     if "not a git repository" in text:
         return False, "not on disk, and the source root is not a git checkout"
     try:
-        listed = subprocess.run(
-            ["git", "-C", str(repo_root), "ls-tree", "--name-only", "HEAD", "--", rel],
-            capture_output=True,
-            check=False,
-        )
+        listed = run_git(repo_root, "ls-tree", "--name-only", "HEAD", "--", rel)
     except OSError:
         listed = None
     if listed is not None and listed.returncode == 0 and listed.stdout.strip():
@@ -743,11 +756,7 @@ def read_tracked_source(
         unavailable(path.as_posix(), "not on disk, and outside the repository root")
         return None
     try:
-        blob = subprocess.run(
-            ["git", "-C", str(repo_root), "cat-file", "-p", f"HEAD:{rel}"],
-            capture_output=True,
-            check=False,
-        )
+        blob = run_git(repo_root, "cat-file", "-p", f"HEAD:{rel}")
     except OSError:  # no git available: a source tarball, not a checkout
         unavailable(rel, "not on disk, and git is unavailable to read it from HEAD")
         return None
@@ -933,6 +942,15 @@ def check_impl_superset(wrapper: Elf, private: Elf) -> bool:
     set of renamed entry points.
     """
     renamed = impl_symbols(private)
+    # An empty set satisfies every comparison below, reporting success having
+    # compared nothing. Guarded here rather than in impl_symbols() because
+    # check_no_impl() reads an empty set as its passing case.
+    if not renamed:
+        raise AbiError(
+            f"no miopen*_impl symbols exported from {private.path} -- "
+            "not a flag-on private library (wrong file, or the rename was "
+            "not applied?)"
+        )
     exported = wrapper.defined_dynamic_functions()
     # Report the public spelling -- that is the name the missing stub would
     # carry, and the one the reader will grep for.
@@ -991,6 +1009,15 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
             for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", line):
                 if IMPL_RE.match(word):
                     offenders.append((path, lineno, word))
+
+    # Nothing scanned is not a clean tree, it is a tree this never looked at.
+    # Nothing else guards the staged include tree, so a vacuous pass is
+    # undetectable.
+    if scanned == 0:
+        raise AbiError(
+            f"no headers found under {root} -- nothing was checked "
+            "(wrong prefix, or an install staged without C++ headers?)"
+        )
 
     if not offenders:
         print(f"PASS: no private rename spelling in {scanned} installed headers")

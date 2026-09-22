@@ -21,9 +21,13 @@ import pytest
 HERE = Path(__file__).resolve().parent
 MODULE = HERE / "ForwardingParityGpuLabels.cmake"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("cmake") is None, reason="cmake not on PATH"
-)
+
+@pytest.fixture(autouse=True)
+def cmake_on_path():
+    """Fail rather than skip: a skip reads as a pass, and what these guard against is
+    itself a silent pass. Every environment meant to run them has cmake."""
+    if shutil.which("cmake") is None:
+        pytest.fail("cmake is not on PATH; these tests drive it with cmake -P")
 
 
 def derive(tmp_path, yaml_text):

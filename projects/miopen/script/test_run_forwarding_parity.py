@@ -19,11 +19,18 @@ passes.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+# Before anything here touches os.geteuid(), which off POSIX would fail collection
+# rather than skip.
+pytestmark = pytest.mark.skipif(
+    os.name != "posix", reason="the harness under test is POSIX-only"
+)
 
 HARNESS = Path(__file__).resolve().parent / "run_forwarding_parity.py"
 
@@ -81,9 +88,9 @@ def run(tree, cwd, *extra):
             "--abi-check",
             str(tree / "fake_abi.py"),
             "--baseline",
-            "/dev/null",
+            os.devnull,
             "--excluded",
-            "/dev/null",
+            os.devnull,
             *extra,
         ],
         cwd=str(cwd),
@@ -157,6 +164,51 @@ def test_two_versioned_libraries_are_refused_rather_than_picked_between(tree):
     result = run(tree, tree)
     assert result.returncode == 1
     assert "more than one libMIOpen.so.*" in result.stdout
+
+
+def test_a_pair_split_across_two_directories_is_refused(tree):
+    """lib and lib64 both present, with one half of the pair in each.
+
+    Only one directory can go first on LD_LIBRARY_PATH, so the replays would load
+    mismatched halves -- what the co-versioning check exists to catch.
+    """
+    lib64 = tree / "lib64"
+    lib64.mkdir()
+    (tree / "lib" / "libMIOpen_private.so.1.0").rename(
+        lib64 / "libMIOpen_private.so.1.0"
+    )
+
+    # Copied in so the harness's default search -- lib* beside its parent directory --
+    # lands here. That search is the only way to reach a split pair; --lib-dir names
+    # one directory and cannot express one.
+    bindir = tree / "bin"
+    bindir.mkdir(exist_ok=True)
+    harness = bindir / HARNESS.name
+    shutil.copy(HARNESS, harness)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(harness),
+            "--gtest",
+            str(tree / "fake_gtest.py"),
+            "--filter",
+            "*",
+            "--compare",
+            str(tree / "fake_compare.py"),
+            "--abi-check",
+            str(tree / "fake_abi.py"),
+            "--baseline",
+            os.devnull,
+            "--excluded",
+            os.devnull,
+        ],
+        cwd=str(tree),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "different directories" in result.stdout
 
 
 def test_the_libraries_under_test_are_named(tree):

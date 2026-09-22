@@ -121,6 +121,20 @@ def main():
     # Named, so a co-versioning failure below can be tied back to the files it is about.
     print(f"libraries under test: {wrapper_lib}, {private_lib}", flush=True)
 
+    # Each stem is resolved independently, so a tree carrying both lib and lib64 can
+    # split the pair. Only one directory can go first on LD_LIBRARY_PATH, so the
+    # replays would load one half and some other copy of the other -- the mismatch
+    # the paragraph below exists to prevent.
+    if wrapper_lib.parent != private_lib.parent:
+        print(
+            f"FAIL: wrapper and private library are in different directories:\n"
+            f"  {wrapper_lib}\n"
+            f"  {private_lib}\n"
+            "They are halves of one build and must be installed side by side.",
+            flush=True,
+        )
+        return 1
+
     # The replays have to load the pair the ABI check inspects. An installed test
     # binary's RUNPATH names the ROCm library directory, not the tree it was
     # installed into, so without this an install to any other prefix silently
