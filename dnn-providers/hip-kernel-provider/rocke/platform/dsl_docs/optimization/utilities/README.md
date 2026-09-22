@@ -1,11 +1,11 @@
 # Kernel Optimization Notes And Tools
 
-The files are copied here so CK DSL optimization guidance remains available with
+The files are copied here so rocKE optimization guidance remains available with
 the `rocke` docs. They are reference material, not part of the runtime package.
 
 ## Skills
 
-`skills/` contains the CK DSL/profiling-relevant runbooks:
+`skills/` contains the rocKE/profiling-relevant runbooks:
 
 - `gemm-optimization-rocke.md`
 - `lds-optimization-rocke.md`
@@ -18,7 +18,7 @@ the `rocke` docs. They are reference material, not part of the runtime package.
 
 ## Helper Scripts
 
-`tools/` contains the helper scripts most useful for CK DSL benchmarking and
+`tools/` contains the helper scripts most useful for rocKE benchmarking and
 post-processing:
 
 - `dsl_probes/` (rocke-native, no GPU launch required for most probes)
@@ -42,6 +42,8 @@ post-processing:
     env and the sidecar step, so the trace opens with Python correlation
   - `emit_inline_frames.py` — `inline_frames.json` sidecar recovering the inlining
     call stack rocprofv3 flattens away
+  - `capture_wavescope_pmc.py` — uses perf primitives to emit raw PMC CSVs for
+    WaveScope and versioned measurement JSON
   - `README.md`                    — install the extension, capture, and read a trace
 - `stage3_extract_isa/`
   - `count_instructions.py`
