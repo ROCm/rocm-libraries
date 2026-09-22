@@ -840,7 +840,7 @@ class StreamK(Component):
         When ``skipLroReset`` is True the local-read-offset reset inside
         ``skTileIndex`` is suppressed.  This is needed when PAP runs *before*
         the NLL body: the NLL still needs the current tile's read pointers."""
-        from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
+        from .WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
 
         module = Module("StreamK prefetchAcrossPersistentSetupNextTile")
         with writer.allocTmpSgpr(4, 2, "SKPrefetchTemp") as sTmpRes:
@@ -5182,7 +5182,7 @@ class StreamKHybrid(StreamK):
         SkNextWorkItem), so we only derive its tile identity + WorkGroup* here
         (no second queue interaction, no LDS broadcast).
         """
-        from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
+        from .WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
 
         module = Module("StreamK Hybrid prefetchAcrossPersistentSetupNextTile")
 

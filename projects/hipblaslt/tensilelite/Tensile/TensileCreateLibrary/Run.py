@@ -39,8 +39,11 @@ from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
 
-from Tensile import LibraryIO
-from Tensile.Common import (
+from .ParseArguments import parseArguments
+
+
+from .. import LibraryIO
+from ..Common import (
     CHeader,
     DebugConfig,
     ensurePath,
@@ -57,39 +60,36 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
-
-from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch, load_logic_schedule_name
-from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.KernelWriterBase import (
+from ..Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
+from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
+from ..Common.TimingInstrumentation import timing_context
+from ..SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..CustomYamlLoader import load_logic_gfx_arch, archMatch, load_logic_schedule_name
+from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from ..KernelWriterAssembly import KernelWriterAssembly
+from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
     KERNEL_HELPER_FILENAME_H,
 )
-from Tensile.resources import copy_static_headers
-from Tensile.SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
-from Tensile.SolutionStructs import Solution
-from Tensile.SolutionStructs.Solution import (
+from ..resources import copy_static_headers
+from ..SolutionLibrary import MasterSolutionLibrary, PlaceholderLibrary
+from ..SolutionStructs import Solution
+from ..SolutionStructs.Solution import (
     raiseIfTypeMismatches,
     mergeTypeMismatchCollector,
     resetTypeMismatchCollector,
 )
-from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
-from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
-from Tensile.Toolchain.Validators import (
+from ..verify_stinky_comment_vs_elf_text import verify_stinky_paths
+from ..Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
+from ..Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
+from ..Toolchain.Validators import (
     ToolchainDefaults,
     validateToolchain,
 )
-from Tensile.Toolchain.Component import Assembler
-from Tensile.Utilities.Decorators.Profile import profile
-from Tensile.Utilities.Decorators.Timing import timing
-
-from .ParseArguments import parseArguments
+from ..Toolchain.Component import Assembler
+from ..Utilities.Decorators.Profile import profile
+from ..Utilities.Decorators.Timing import timing
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
