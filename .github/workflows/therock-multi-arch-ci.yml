@@ -14,7 +14,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 90d12f3a151c4b3ae22e30417676ab7fe84a1d14.
+# TheRock ref: pinned to ROCm/TheRock branch users/geomin12/external-ci-rework.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -134,7 +134,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
+          ref: users/geomin12/external-ci-rework
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -151,9 +151,13 @@ jobs:
             --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
-  setup:
+  # Single workflow_call to multi_arch_ci.yml replaces separate setup,
+  # linux_build_and_test, and windows_build_and_test jobs.
+  multi_arch_ci:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
+    if: ${{ needs.configure.outputs.skip_tests != 'true' }}
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci.yml@users/geomin12/external-ci-rework
+    secrets: inherit
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -189,8 +193,11 @@ jobs:
           'reuse-stage' ||
           'off'
         }}
+      # Empty string when run_all_tests=true triggers full test run in downstream workflow
+      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
+      # External repo support - TheRock checkout info
       repository: ROCm/TheRock
-      ref: 90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
+      ref: users/geomin12/external-ci-rework
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -206,57 +213,6 @@ jobs:
           "ref": "${{ github.sha }}",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
-
-  linux_build_and_test:
-    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.linux_build_config }}
-      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
-      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
-      repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
-    permissions:
-      contents: read
-      id-token: write
-
-  windows_build_and_test:
-    name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.windows_build_config }}
-      test_labels: ${{ needs.setup.outputs.windows_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
-      repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
     permissions:
       contents: read
       id-token: write
@@ -264,9 +220,9 @@ jobs:
   rocjitsu_race_check_gfx94x:
     name: rocjitsu race check (gfx94X-dcgpu)
     # A caller cannot depend on an individual job inside a reusable workflow,
-    # so start after the Linux workflow has finished publishing its artifacts.
+    # so start after the multi_arch_ci workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
+    needs: [ci-env, configure, multi_arch_ci]
     if: >-
       ${{
         !cancelled() &&
@@ -276,7 +232,7 @@ jobs:
           contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
           contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
         ) &&
-        needs.linux_build_and_test.result != 'skipped'
+        needs.multi_arch_ci.result != 'skipped'
       }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
@@ -293,17 +249,14 @@ jobs:
     needs:
       - ci-env
       - configure
-      - setup
-      - linux_build_and_test
-      - windows_build_and_test
+      - multi_arch_ci
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 90d12f3a151c4b3ae22e30417676ab7fe84a1d14 # 2026-09-21
+          ref: users/geomin12/external-ci-rework
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
