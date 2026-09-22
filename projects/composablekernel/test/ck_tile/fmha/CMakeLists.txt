@@ -116,9 +116,17 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     set_tests_properties(test_ck_tile_fmha_qr_tdm_progressive_k_lds PROPERTIES
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
+    add_gtest_executable(test_ck_tile_fmha_qr_tdm_causal_mapping
+        test_qr_tdm_causal_mapping.cpp)
+    target_compile_definitions(test_ck_tile_fmha_qr_tdm_causal_mapping
+        PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
+    set_tests_properties(test_ck_tile_fmha_qr_tdm_causal_mapping PROPERTIES
+        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
     set(FMHA_QR_TDM_TEST_TARGETS
         test_ck_tile_fmha_qr_tdm_lds_padding
-        test_ck_tile_fmha_qr_tdm_progressive_k_lds)
+        test_ck_tile_fmha_qr_tdm_progressive_k_lds
+        test_ck_tile_fmha_qr_tdm_causal_mapping)
 endif()
 
 # Python integration test for the fmha_fwd codegen path.
