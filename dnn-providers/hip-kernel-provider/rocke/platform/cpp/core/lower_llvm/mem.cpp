@@ -749,6 +749,16 @@ static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
 }
 
+/* addrspace(1) peer of smem_addr_of: a plain ptrtoint, no intrinsic.
+ * Descriptor-based features (gfx1250 TDM) need the raw address rather than
+ * a pointer operand. Mirrors Python _op_tile_global_addr_of. */
+static void op_tile_global_addr_of(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr = op->operands[0];
+    rocke_ll_emitf(
+        L, "  %s = ptrtoint ptr addrspace(1) %s to i64", ll_res(op), rocke_ll_operand(L, ptr));
+}
+
 static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* base = op->operands[0];
@@ -1648,6 +1658,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_LOAD_VN_F32, op_tile_smem_load_vN_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_LDS_ATOMIC_ADD, op_tile_lds_atomic_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_ADDR_OF, op_tile_smem_addr_of);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_ADDR_OF, op_tile_global_addr_of);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
 

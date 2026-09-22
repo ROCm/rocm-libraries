@@ -291,6 +291,24 @@ static void build_tensor_transfers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+/* addrspace(1) peer of smem_addr_of. Pinned together with the i64 add that
+ * consumes it: the raw address is only ever used as base + elem_off * bytes
+ * (the TDM descriptor's D# group 0), and a lone ptrtoint would leave an unused
+ * value that says nothing about how the engines widen and fold the offset. */
+static void build_global_addr_of(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t o;
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f16(), "global"), &o);
+    rocke_value_t* base = rocke_b_global_addr_of(b, src);
+    rocke_b_add(b, base, rocke_b_const_i64(b, 2 * 4096));
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -323,6 +341,7 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {build_global_addr_of, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

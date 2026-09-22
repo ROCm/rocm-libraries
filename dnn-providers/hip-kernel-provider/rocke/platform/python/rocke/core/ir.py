@@ -3182,6 +3182,27 @@ class IRBuilder:
             result_name_hint="lds_addr",
         ).result
 
+    def global_addr_of(self, ptr: Value) -> Value:
+        """The i64 byte address of a global pointer.
+
+        The `addrspace(1)` peer of :meth:`smem_addr_of`: a plain
+        ``ptrtoint``, not an intrinsic. Needed by descriptor-based
+        features that take a raw address rather than a pointer operand
+        -- the gfx1250 TDM descriptor (`helpers/tdm.py`) carries the
+        global base in ``D#`` group 0, so it cannot accept a
+        ``ptr<...,global>`` the way `global_load_async_to_lds` does.
+        """
+        if not isinstance(ptr.type, PtrType) or ptr.type.space != "global":
+            raise TypeError(
+                f"global_addr_of expects a global pointer, got {ptr.type}"
+            )
+        return self._op(
+            "tile.global_addr_of",
+            [ptr],
+            [I64],
+            result_name_hint="gaddr",
+        ).result
+
     def smem_ptr_add(self, lds_addr: Value, byte_off: Value) -> Value:
         """Compute `lds_addr + byte_off` and return an i64 LDS address.
 
@@ -4418,6 +4439,7 @@ PURE_OP_NAMES = {
     "tile.wave_ballot",
     "tile.sync_half_block",
     "tile.smem_addr_of",
+    "tile.global_addr_of",
     "tile.smem_ptr_add",
     "tile.lane_id",
     "tile.ds_bpermute",

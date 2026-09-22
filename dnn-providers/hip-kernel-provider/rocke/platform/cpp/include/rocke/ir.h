@@ -316,6 +316,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_SMEM_LOAD_VN,
     ROCKE_OP_TILE_SMEM_LOAD_VN_F32,
     ROCKE_OP_TILE_SMEM_ADDR_OF,
+    ROCKE_OP_TILE_GLOBAL_ADDR_OF,
     ROCKE_OP_TILE_SMEM_PTR_ADD,
     ROCKE_OP_TILE_LDS_ATOMIC_ADD,
     ROCKE_OP_TILE_GLOBAL_PTR_ADD,
@@ -1179,6 +1180,9 @@ rocke_value_t*
 
 /* ----- LDS pointer arithmetic + async DRAM->LDS ----- */
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
+/* addrspace(1) peer of smem_addr_of: raw i64 address of a global pointer,
+ * for descriptor-based features (gfx1250 TDM) that cannot take a pointer. */
+rocke_value_t* rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,

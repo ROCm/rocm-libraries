@@ -179,6 +179,21 @@ def _global_tr16(elem):
     return build
 
 
+def build_global_addr_of(b: IRBuilder) -> None:
+    """``global_addr_of``: the addrspace(1) peer of ``smem_addr_of``.
+
+    The raw address is only ever useful with byte arithmetic on top of it --
+    the TDM descriptor carries ``base + elem_off * bytes`` in ``D#`` group 0 --
+    so the ``ptrtoint`` is pinned together with the i64 ``add`` that consumes
+    it. Emitting the ``ptrtoint`` alone would leave an unused value that says
+    nothing about how the two engines widen and fold the offset.
+    """
+    src = b.param("src", PtrType(F16, "global"), noalias=True, align=16)
+    base = b.global_addr_of(src)
+    b.add(base, b.const_i64(2 * 4096))
+    b.ret()
+
+
 def build_tensor_transfers(b: IRBuilder) -> None:
     d4 = b.zero_vec(I32, 4)
     d8 = b.zero_vec(I32, 8)
@@ -211,6 +226,7 @@ CONFIGS = [
     (_global_tr16(BF16), "gfx1250"),
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
+    (build_global_addr_of, "gfx1250"),
 ]
 
 

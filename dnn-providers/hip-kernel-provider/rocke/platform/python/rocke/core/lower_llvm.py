@@ -4259,6 +4259,16 @@ class _Lowerer:
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # The addrspace(1) peer of smem_addr_of: a plain ptrtoint, no
+        # intrinsic. Descriptor-based features (gfx1250 TDM) need the raw
+        # address rather than a pointer operand.
+        (ptr,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) "
+            f"{self._operand(ptr)} to i64"
+        )
+
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
         self._current().emit(
