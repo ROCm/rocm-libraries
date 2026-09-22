@@ -1535,10 +1535,10 @@ struct FmhaFwdKernel
                        kargs.window_size_right == 0 && num_tile_n1 == 1)
                     {
                         return ck_tile::make_tuple(static_cast<index_t>(gridDim.y) - 1 -
-                                                      static_cast<index_t>(blockIdx.y),
-                                                  index_t{0},
-                                                  static_cast<index_t>(blockIdx.x),
-                                                  static_cast<index_t>(blockIdx.z));
+                                                       static_cast<index_t>(blockIdx.y),
+                                                   index_t{0},
+                                                   static_cast<index_t>(blockIdx.x),
+                                                   static_cast<index_t>(blockIdx.z));
                     }
                 }
                 const index_t num_tile_total   = has_padded_seqlen_k ? gridDim.z : gridDim.y;

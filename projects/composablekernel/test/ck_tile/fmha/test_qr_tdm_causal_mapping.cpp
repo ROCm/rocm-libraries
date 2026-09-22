@@ -12,10 +12,10 @@ namespace {
 
 template <ck_tile::index_t M,
           bool Mask,
-          bool StoreLSE = false,
-          typename DataType = ck_tile::bf16_t,
+          bool StoreLSE                            = false,
+          typename DataType                        = ck_tile::bf16_t,
           ck_tile::BlockAttentionBiasEnum BiasEnum = ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-          bool HasSink = false>
+          bool HasSink                             = false>
 using MappingProblem = ck_tile::BlockFmhaPipelineProblem<
     DataType,
     DataType,
@@ -29,42 +29,41 @@ using MappingProblem = ck_tile::BlockFmhaPipelineProblem<
     float,
     DataType,
     ck_tile::TileFmhaShape<ck_tile::sequence<M, 64, 32, 128, 32, 128>,
-                          ck_tile::sequence<4, 1, 1>,
-                          ck_tile::sequence<16, 16, 32>,
-                          ck_tile::sequence<4, 1, 1>,
-                          ck_tile::sequence<16, 16, 32>,
-                          true>,
+                           ck_tile::sequence<4, 1, 1>,
+                           ck_tile::sequence<16, 16, 32>,
+                           ck_tile::sequence<4, 1, 1>,
+                           ck_tile::sequence<16, 16, 32>,
+                           true>,
     false,
     ck_tile::ComposedAttention<0>,
     ck_tile::SimplifiedGenericAttentionMask<Mask>,
     false,
     ck_tile::TileFmhaTraits<false,
-                           false,
-                           false,
-                           false,
-                           false,
-                           BiasEnum,
-                           false,
-                           StoreLSE,
-                           false,
-                           ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
-                           -1,
-                           false,
-                           HasSink>,
+                            false,
+                            false,
+                            false,
+                            false,
+                            BiasEnum,
+                            false,
+                            StoreLSE,
+                            false,
+                            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+                            -1,
+                            false,
+                            HasSink>,
     true,
     true>;
 
 template <ck_tile::index_t M,
           bool Mask,
-          bool StoreLSE = false,
-          typename DataType = ck_tile::bf16_t,
+          bool StoreLSE                            = false,
+          typename DataType                        = ck_tile::bf16_t,
           ck_tile::BlockAttentionBiasEnum BiasEnum = ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-          bool HasSink = false>
+          bool HasSink                             = false>
 using MappingKernel = ck_tile::FmhaFwdKernel<
     ck_tile::BlockFmhaPipelineQRKSVSTdm<
         MappingProblem<M, Mask, StoreLSE, DataType, BiasEnum, HasSink>>,
-    ck_tile::Default2DEpilogue<
-        ck_tile::Default2DEpilogueProblem<float, DataType, false, false>>>;
+    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<float, DataType, false, false>>>;
 
 template <typename Kernel>
 __global__ void capture_mapping(typename Kernel::Kargs args, int* output)
@@ -72,7 +71,7 @@ __global__ void capture_mapping(typename Kernel::Kargs args, int* output)
     if(threadIdx.x == 0)
     {
         const auto [q, v, head, batch] = Kernel::GetTileIndex(args);
-        const auto linear            = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+        const auto linear      = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
         output[linear * 4 + 0] = q;
         output[linear * 4 + 1] = v;
         output[linear * 4 + 2] = head;
@@ -82,10 +81,10 @@ __global__ void capture_mapping(typename Kernel::Kargs args, int* output)
 
 template <ck_tile::index_t M,
           bool Mask,
-          bool StoreLSE = false,
-          typename DataType = ck_tile::bf16_t,
+          bool StoreLSE                            = false,
+          typename DataType                        = ck_tile::bf16_t,
           ck_tile::BlockAttentionBiasEnum BiasEnum = ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-          bool HasSink = false>
+          bool HasSink                             = false>
 std::vector<int> capture(int heads,
                          int batches,
                          int tiles,
@@ -131,7 +130,7 @@ TEST(QrTdmCausalMapping, CausalLongTilesComeFirstAcrossHeads)
     // this observable schedule must instead keep long causal work together.
     const auto actual = capture<128, true>(2, 1, 4);
     const std::vector<int> expected{3, 0, 0, 0, 3, 0, 1, 0, 2, 0, 0, 0, 2, 0, 1, 0,
-                                   1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+                                    1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
     EXPECT_EQ(actual, expected);
 }
 
@@ -141,7 +140,7 @@ TEST(QrTdmCausalMapping, DenseRetainsHeadMajorOrder)
         GTEST_SKIP();
     const auto actual = capture<128, false>(2, 1, 3);
     const std::vector<int> expected{0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0,
-                                   0, 0, 1, 0, 1, 0, 1, 0, 2, 0, 1, 0};
+                                    0, 0, 1, 0, 1, 0, 1, 0, 2, 0, 1, 0};
     EXPECT_EQ(actual, expected);
 }
 
@@ -150,7 +149,7 @@ TEST(QrTdmCausalMapping, OtherMasksAndRectangularInputsRetainTheirSchedule)
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
     const std::vector<int> expected{2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-                                   2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0};
+                                    2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0};
     EXPECT_EQ((capture<128, true>(2, 1, 3, 127)), expected);
     EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 128)), expected);
 }
@@ -182,7 +181,7 @@ TEST(QrTdmCausalMapping, SupportedVariantsUseQMajorOrder)
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
     const std::vector<int> expected{2, 0, 0, 0, 2, 0, 1, 0, 1, 0, 0, 0,
-                                   1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+                                    1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
     EXPECT_EQ((capture<128, true, true>(2, 1, 3)), expected);
     EXPECT_EQ((capture<128, true, false, ck_tile::half_t>(2, 1, 3)), expected);
     EXPECT_EQ((capture<128,
@@ -191,13 +190,10 @@ TEST(QrTdmCausalMapping, SupportedVariantsUseQMajorOrder)
                        ck_tile::bf16_t,
                        ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS>(2, 1, 3)),
               expected);
-    EXPECT_EQ((capture<128,
-                       true,
-                       false,
-                       ck_tile::bf16_t,
-                       ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-                       true>(2, 1, 3)),
-              expected);
+    EXPECT_EQ(
+        (capture<128, true, false, ck_tile::bf16_t, ck_tile::BlockAttentionBiasEnum::NO_BIAS, true>(
+            2, 1, 3)),
+        expected);
 }
 
 TEST(QrTdmCausalMapping, SingleOutputTileVariantsUseQMajorOrder)
@@ -205,7 +201,7 @@ TEST(QrTdmCausalMapping, SingleOutputTileVariantsUseQMajorOrder)
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
     const std::vector<int> expected{2, 0, 0, 0, 2, 0, 1, 0, 1, 0, 0, 0,
-                                   1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
+                                    1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0};
     EXPECT_EQ((capture<64, true>(2, 1, 3)), expected);
     EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 0, 64, 128)), expected);
     EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 0, 128, 64)), expected);
@@ -215,10 +211,9 @@ TEST(QrTdmCausalMapping, MultipleOutputTilesRetainHeadMajorOrder)
 {
     if(!ck_tile::is_gfx125_supported())
         GTEST_SKIP();
-    const std::vector<int> expected{2, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0,
-                                   1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-                                   2, 0, 1, 0, 2, 1, 1, 0, 1, 0, 1, 0,
-                                   1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0};
+    const std::vector<int> expected{2, 0, 0, 0, 2, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0,
+                                    0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1, 0, 2, 1, 1, 0,
+                                    1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0};
     EXPECT_EQ((capture<128, true>(2, 1, 3, -1, 0, 128, 256)), expected);
 }
 
