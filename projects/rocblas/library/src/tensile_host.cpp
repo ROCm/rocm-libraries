@@ -1065,8 +1065,10 @@ namespace
             }
 
             {
-                // initialize adapter for lazy loading or experimental code objects
-                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(processor, path));
+                // initialize adapter for lazy loading or experimental code objects.
+                // Uses catalog_key (not processor) because the helper kernel's on-disk
+                // name carries the compiler-target arch, i.e. gfx1250-strict under strict.
+                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(catalog_key, path));
 
                 // Load library for this specific architecture if not already loaded
 
