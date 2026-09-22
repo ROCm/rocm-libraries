@@ -1260,16 +1260,16 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
     using dst_vector_type = vector_type_maker_t<T, NumElemsPerThread>;
     using dst_vector_t    = typename dst_vector_type::type;
 
+    constexpr index_t offset_limit = 1 << 16; // 65536
+    constexpr uint32_t static_dst_offset_ =
+        std::min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
+
     __attribute__((address_space(1))) const T* global_ptr =
         reinterpret_cast<__attribute__((address_space(1))) T*>(
             reinterpret_cast<uintptr_t>(global_base_ptr));
     __attribute__((address_space(3))) T* lds_ptr =
-        reinterpret_cast<__attribute__((address_space(3))) T*>(
-            reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
-
-    constexpr index_t offset_limit = 1 << 16; // 65536
-    constexpr uint32_t static_dst_offset_ =
-        std::min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
+        reinterpret_cast<__attribute__((address_space(3))) T*>(reinterpret_cast<uintptr_t>(
+            lds_base_ptr + lds_offset + (static_dst_offset - static_dst_offset_)));
 
     uint32_t save_exec;
 
