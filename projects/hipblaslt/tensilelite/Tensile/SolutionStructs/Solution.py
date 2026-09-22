@@ -929,6 +929,15 @@ class Solution(collections.abc.Mapping):
       and state["ProblemType"]["HighPrecisionAccumulate"] \
       and ((state["ISA"] == IsaVersion(9,4,2) and state["ProblemType"]["DataType"].isHalf()) \
       or (state["ISA"] == IsaVersion(9,5,0) and (state["ProblemType"]["DataType"].isBFloat16() or state["ProblemType"]["DataType"].isHalf())))
+    # Custom dot2 kernels can use wave reductions on other architectures
+    # that implement the instruction, independently of the generated MAC path.
+    if (state.get("CustomKernelName") and state["WaveSplitK"]
+        and not state["EnableMatrixInstruction"]
+        and state["ProblemType"]["HighPrecisionAccumulate"]):
+      caps = isaInfoMap[state["ISA"]].asmCaps
+      state["UseDotInstruction"] |= (
+        state["ProblemType"]["DataType"].isHalf() and caps['v_dot2_f32_f16']) or (
+        state["ProblemType"]["DataType"].isBFloat16() and caps['v_dot2_f32_bf16'])
     if state["UseDotInstruction"]:
       # need modification for dot4 or dot8
       state["NumDotElements"] = 2
@@ -6161,7 +6170,7 @@ class Solution(collections.abc.Mapping):
       if cont1 and cont2:
         reject(state, printRejectionReason, "MatrixInstN %u %% GlobalReadVectorWidthB %u must be 0" % \
           (state["MatrixInstN"], state["GlobalReadVectorWidthB"]))
-    else: # mac
+    elif not (state.get("CustomKernelName") and state["WaveSplitK"]): # generated mac
       # if not bufferLoad or not state["GuaranteeNoPartialA"]:
       # Restrict GRVW/VW combos so shift-ptr logic will work
       if state["GlobalReadVectorWidthA"] > 1 \

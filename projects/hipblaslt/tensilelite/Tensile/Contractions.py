@@ -450,8 +450,7 @@ class ProblemType:
 
 def extractDimPredicate(cls, key, value, predicateName):
     """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
+    Extract dimension-indexed predicates from an assertion dictionary.
     """
     predicates = []
     for pos,val in value.items():
@@ -497,6 +496,11 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+
+        if key == "AssertSizeEqual":
+            return extractDimPredicate(cls, key, value, "SizeEqual")
+        if key == "AssertSizeGreaterThan":
+            return extractDimPredicate(cls, key, value, "SizeGreaterThan")
 
         if key.endswith('Multiple'):
             if value == 1:

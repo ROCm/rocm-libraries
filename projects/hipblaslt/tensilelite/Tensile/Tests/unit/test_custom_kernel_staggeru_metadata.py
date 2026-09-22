@@ -506,7 +506,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 131,
+    "kernels": 132,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -515,8 +515,11 @@ EXPECTED_CENSUS = {
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
     # 60, plus the twelve gfx1151 w4a16 kernels: their solutions set StaggerU 0,
-    # so they declare it rather than inheriting the default of 32.
-    "declaredZero": 72,
+    # so they declare it rather than inheriting the default of 32. The decode
+    # kernel adds one: it has no generated scalar StaggerU path. Its independent
+    # per-row K rotation uses vector addresses, ignores the packed argument, and
+    # remains excluded by the host's blanket custom-kernel uniform-order gate.
+    "declaredZero": 73,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 31,
 }
