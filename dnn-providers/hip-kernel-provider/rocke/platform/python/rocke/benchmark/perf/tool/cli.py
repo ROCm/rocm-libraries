@@ -20,6 +20,7 @@ import argparse
 import json
 import math
 import sys
+from contextlib import nullcontext
 from typing import Optional, Sequence
 
 from rocke.benchmark.perf import aggregate as _aggregate
@@ -29,6 +30,7 @@ from rocke.benchmark.perf import report as _report
 from rocke.benchmark.perf import schema as _schema
 from . import selfcheck as _selfcheck
 from . import store as _store
+from .artifacts import ArtifactBundle
 
 
 def _emit(obj, *, as_json: bool, human: str) -> None:
@@ -69,33 +71,47 @@ def _nonnegative_float(text: str) -> float:
 
 
 def _cmd_profile(a: argparse.Namespace) -> int:
-    # argparse.REMAINDER keeps the literal '--' separator as cmd[0]; drop it so we
-    # don't try to exec a program named '--'.
     cmd = a.cmd[1:] if a.cmd and a.cmd[0] == "--" else a.cmd
     if not cmd:
         raise SystemExit("profile: give the kernel command after '--'")
     shape = _shape_arg(a.shape)
-    _warn = lambda m: print(f"warning: {m}", file=sys.stderr)
-    samples = []
-    for _ in range(a.repeats):
-        try:
-            samples.append(
-                _harness.profile(
-                    cmd,
-                    a.arch,
-                    match=a.match_kernel,
-                    label=a.kernel_name,
-                    op=a.op,
-                    shape=shape,
-                    warmup=a.warmup,
-                    per_dispatch=a.per_dispatch,
-                    warn=_warn,
-                )
-            )
-        except RuntimeError as exc:
-            raise SystemExit(f"profile: {exc}") from exc
-    rec = _aggregate.aggregate(samples)
+    bundle = (
+        ArtifactBundle(
+            a.artifacts_dir, repeats=a.repeats, warmup=a.warmup, match=a.match_kernel
+        )
+        if a.artifacts_dir
+        else None
+    )
+    try:
+        with bundle if bundle is not None else nullcontext():
+            return _profile_and_export(a, cmd, shape, bundle)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SystemExit(f"profile: {exc}") from exc
 
+
+def _profile_and_export(a, cmd, shape, bundle) -> int:
+    warnings = lambda m: print(f"warning: {m}", file=sys.stderr)
+    samples = []
+    for index in range(a.repeats):
+        options = {"artifacts_dir": bundle.sample_dir(index)} if bundle else {}
+        sample = _harness.profile(
+            cmd,
+            a.arch,
+            match=a.match_kernel,
+            label=a.kernel_name,
+            op=a.op,
+            shape=shape,
+            warmup=a.warmup,
+            per_dispatch=a.per_dispatch,
+            warn=warnings,
+            **options,
+        )
+        if bundle:
+            bundle.add_sample(index, sample)
+        samples.append(sample)
+    rec = _aggregate.aggregate(samples)
+    # Capture status belongs to individual repeats, not the first sample's aggregate.
+    rec.pop("profile_capture", None)
     identity = _schema.identity(rec)
     prior = _store.records_for(_store.load(cache=a.cache), identity)
     if prior:
@@ -115,7 +131,9 @@ def _cmd_profile(a: argparse.Namespace) -> int:
         }
     if not a.no_store:
         _store.append(rec, cache=a.cache)
-
+    if bundle:
+        bundle.finish(rec, result)
+        print(f"Artifacts: {bundle.path}", file=sys.stderr)
     _emit(
         {"record": rec, "selfcheck": result},
         as_json=a.json,
@@ -135,6 +153,17 @@ def _cmd_occupancy(a: argparse.Namespace) -> int:
         raise SystemExit(
             "occupancy: could not read ELF notes "
             "(need llvm-readelf and a valid HSACO)"
+        )
+    target = res.get("target_arch")
+    requested = (a.arch or "").split(":", 1)[0]
+    if target and target != requested:
+        # The occupancy model follows the binary, so say so rather than letting a
+        # stale --arch look like it was honoured. Feature suffixes (e.g. :xnack-)
+        # do not change the family model and are ignored for this comparison.
+        print(
+            f"warning: {a.hsaco} is built for {target}, not --arch {a.arch}; "
+            f"occupancy computed for {target}",
+            file=sys.stderr,
         )
     human = "\n".join(f"{k}: {v}" for k, v in res.items())
     _emit(res, as_json=a.json, human=human)
@@ -232,6 +261,11 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="noise_k",
         type=_nonnegative_float,
         default=_selfcheck.DEFAULT_NOISE_K,
+    )
+    pr.add_argument(
+        "--artifacts-dir",
+        default=None,
+        help="new directory for original PMC CSVs and versioned measurement JSON",
     )
     pr.add_argument("--no-store", dest="no_store", action="store_true")
     pr.add_argument("cmd", nargs=argparse.REMAINDER, help="-- <kernel launch argv>")
