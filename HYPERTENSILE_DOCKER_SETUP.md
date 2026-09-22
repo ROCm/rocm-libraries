@@ -94,11 +94,18 @@ assert torch.cuda.is_available() and torch.cuda.device_count() > 0
 
 ## Install LLVM development files for `build-client`
 
-The image includes the `rocm-llvm` compiler package, which supplies
-`amdclang` and `amdclang++`, but that package alone does not supply
-`LLVMConfig.cmake`, `llvm-config`, or the complete LLVM development headers.
-The TensileLite client preset enables `HIPBLASLT_ENABLE_YAML=ON`, which makes
-hipBLASLt call `find_package(LLVM REQUIRED)` and link `LLVMObjectYAML`.
+The image includes the `rocm-llvm` compiler package and the `libzstd1` runtime
+package. Those packages supply `amdclang`, `amdclang++`, and the versioned zstd
+runtime library, but they do not supply `LLVMConfig.cmake`, the complete LLVM
+development headers, `zstd.h`, or the zstd CMake targets. The TensileLite
+client preset enables `HIPBLASLT_ENABLE_YAML=ON`, which makes hipBLASLt call
+`find_package(LLVM REQUIRED)` and link `LLVMObjectYAML`.
+
+ROCm's exported `LLVMSupport` target links `zstd::libzstd_shared`. Consequently,
+both the matching ROCm LLVM development package and the Ubuntu zstd development
+package are required. Without `libzstd-dev`, CMake reports that the link
+interface of `LLVMSupport` contains `zstd::libzstd_shared`, but that target was
+not found.
 
 Install the matching ROCm development package rather than Ubuntu's generic
 `llvm-dev` package:
@@ -106,15 +113,20 @@ Install the matching ROCm development package rather than Ubuntu's generic
 ```bash
 docker exec vllm-rcm-a bash -lc '
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y rocm-llvm-dev
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  rocm-llvm-dev \
+  libzstd-dev
 '
 ```
 
-Confirm that the package installed the LLVM CMake configuration:
+Confirm that the packages installed the LLVM and zstd CMake configurations:
 
 ```bash
-docker exec vllm-rcm-a \
-  find /opt/rocm -name LLVMConfig.cmake -print
+docker exec vllm-rcm-a bash -lc '
+find /opt/rocm -name LLVMConfig.cmake -print
+find /usr -iname "*zstd*config*.cmake" -print
+test -f /usr/include/zstd.h
+'
 ```
 
 The configuration is normally beneath `/opt/rocm/lib/llvm`. Include that
