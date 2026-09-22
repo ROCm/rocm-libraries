@@ -150,6 +150,28 @@ private:
 // is enforcement failing to look, which is the only thing this guard is about.
 bool verifiedNothing(const SupportClaimCoverage& coverage);
 
+// Whether the counters still nest. Every number above is a subset of the one before
+// it, so the ladder can only ever descend:
+//
+//     found >= withClaims >= selected >= ran >= queried + notOpened
+//
+// (queried and notOpened are disjoint halves of the bodies that ran: the sidecar was
+// read, or the graph never opened so it could not be. A shortfall against their sum
+// is the harness losing a query it owed, which the summary reports separately -- the
+// invariant here is only that the sum cannot exceed the bodies it is drawn from.)
+//
+// Nothing asserts this today; the relations live in the field comments above and in
+// the arithmetic printSupportClaimSummary() does on them. That is the fragile part:
+// a new skip path added to SetUp() without a counter to match, or two bumps keyed on
+// different predicates, silently rewrites every attribution line downstream and no
+// test notices. Checked rather than described, because the failure mode is a
+// confident wrong answer rather than a crash.
+//
+// Deliberately not a hard assert: a summary is a diagnostic, and aborting the run
+// that produced it helps nobody. The caller prints and suppresses the attributions
+// instead, since those are the lines the broken numbers would corrupt.
+bool countersAreConsistent(const SupportClaimCoverage& coverage);
+
 // `claims` only labels the header. Report and enforce produce byte-identical bodies,
 // CLAIM FAILURES block included, and differ solely in the exit code -- so a scraped
 // log showing failures next to a green lane is unreadable without the label.

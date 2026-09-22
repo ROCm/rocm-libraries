@@ -10,6 +10,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 
 using hipdnn_integration_tests::bundle::ClaimMode;
+using hipdnn_integration_tests::bundle::countersAreConsistent;
 using hipdnn_integration_tests::bundle::coverageFor;
 using hipdnn_integration_tests::bundle::CoverageUpdate;
 using hipdnn_integration_tests::bundle::missedQueryComplaint;
@@ -204,6 +205,7 @@ TEST_F(TestSupportClaimReport, MultiEngineQueriedCountIsPerGraph)
     supportClaimCoverage().graphsFound = 1;
     supportClaimCoverage().graphsWithClaims = 1;
     supportClaimCoverage().graphsSelectedWithClaims = 1;
+    supportClaimCoverage().graphsReachedBody = 1;
     supportClaimCoverage().graphsQueried = 1;
 
     SupportResult r1 = makeResult(SupportVerdict::CLAIM_CONFIRMED);
@@ -272,6 +274,7 @@ TEST_F(TestSupportClaimReport, PrintBodyIsIdenticalAcrossModes)
     supportClaimCoverage().graphsFound = 3;
     supportClaimCoverage().graphsWithClaims = 2;
     supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsReachedBody = 2;
     supportClaimCoverage().graphsQueried = 2;
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::UNCLAIMED_SUPPORT));
@@ -609,6 +612,171 @@ TEST_F(TestSupportClaimReport, EmptyQueryGuardNotTrippedWithOnlyQueries)
     SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
     EXPECT_FALSE(verifiedNothing(supportClaimCoverage()));
 }
+
+// ---------------------------------------------------------------------------
+// The nesting invariant, checked rather than described. Each counter is a subset
+// of the one before it, so every attribution line in the summary is a difference
+// between two adjacent sets. Break the nesting and those differences stop
+// describing any set of graphs at all — while still printing a confident sentence
+// about what happened to them.
+// ---------------------------------------------------------------------------
+
+TEST(TestCountersAreConsistent, ANestedLadderIsConsistent)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 10;
+    coverage.graphsWithClaims = 8;
+    coverage.graphsSelectedWithClaims = 5;
+    coverage.graphsReachedBody = 4;
+    coverage.graphsQueried = 3;
+    coverage.graphsNotOpened = 1;
+
+    EXPECT_TRUE(countersAreConsistent(coverage));
+}
+
+// The all-zero run: claims off, or a tree with no sidecars. Every relation holds
+// on equality, so the check must not read "nothing happened" as a defect.
+TEST(TestCountersAreConsistent, AllZeroIsConsistent)
+{
+    EXPECT_TRUE(countersAreConsistent(SupportClaimCoverage{}));
+}
+
+TEST(TestCountersAreConsistent, MoreClaimsThanGraphsIsInconsistent)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 1;
+    coverage.graphsWithClaims = 2;
+
+    EXPECT_FALSE(countersAreConsistent(coverage));
+}
+
+// The shape the counter keying is there to prevent: registration seeds the two
+// discovery counters only when an engine was named, so a bump keyed on the sidecar
+// alone selects graphs that were never counted as discovered. Report mode without
+// --test-engine is the run that produces it, and the summary's answer used to be
+// "this is a harness defect" when the real answer was "you forgot a flag".
+TEST(TestCountersAreConsistent, SelectingMoreThanWasDiscoveredIsInconsistent)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 0;
+    coverage.graphsWithClaims = 0;
+    coverage.graphsSelectedWithClaims = 100;
+    coverage.graphsReachedBody = 100;
+    coverage.graphsQueried = 0;
+
+    EXPECT_FALSE(countersAreConsistent(coverage));
+}
+
+TEST(TestCountersAreConsistent, RunningMoreThanWasSelectedIsInconsistent)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 4;
+    coverage.graphsWithClaims = 4;
+    coverage.graphsSelectedWithClaims = 1;
+    coverage.graphsReachedBody = 2;
+
+    EXPECT_FALSE(countersAreConsistent(coverage));
+}
+
+// queried and notOpened are disjoint halves of the bodies that ran, so their sum
+// cannot exceed it. Double-counting one graph as both is the way this breaks.
+TEST(TestCountersAreConsistent, QueriesPlusUnopenedExceedingBodiesIsInconsistent)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 2;
+    coverage.graphsWithClaims = 2;
+    coverage.graphsSelectedWithClaims = 2;
+    coverage.graphsReachedBody = 2;
+    coverage.graphsQueried = 2;
+    coverage.graphsNotOpened = 1;
+
+    EXPECT_FALSE(countersAreConsistent(coverage));
+}
+
+// The other direction of the same relation is *not* an inconsistency. A body that
+// ran, opened its graph and never queried is a real harness defect -- and one the
+// summary already names on its own line. Folding it in here would suppress that
+// line at exactly the moment it is true.
+TEST(TestCountersAreConsistent, AMissedQueryIsAShortfallAndNotAnInconsistency)
+{
+    SupportClaimCoverage coverage;
+    coverage.graphsFound = 2;
+    coverage.graphsWithClaims = 2;
+    coverage.graphsSelectedWithClaims = 2;
+    coverage.graphsReachedBody = 2;
+    coverage.graphsQueried = 1;
+
+    EXPECT_TRUE(countersAreConsistent(coverage));
+}
+
+// graphsWithNoApplicableClaim is deliberately outside the ladder: it is a subset of
+// queried rather than a rung, and today both it and queried derive from the same
+// read flag, so a relation over it would assert on the shape of one `if`.
+
+// The counters are chosen so that all three subtraction lines would fire: only the
+// topmost relation is broken, and every rung below it still descends. That is the
+// dangerous shape -- one impossible number upstream, and three downstream sentences
+// that each look locally reasonable.
+TEST_F(TestSupportClaimReport, PrintSuppressesAttributionsWhenCountersDoNotNest)
+{
+    supportClaimCoverage().graphsFound = 0;
+    supportClaimCoverage().graphsWithClaims = 5;
+    supportClaimCoverage().graphsSelectedWithClaims = 4;
+    supportClaimCoverage().graphsReachedBody = 3;
+    supportClaimCoverage().graphsQueried = 0;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
+
+    const auto output = summary();
+
+    EXPECT_NE(output.find("do not nest"), std::string::npos) << output;
+    // Each would otherwise print a count of graphs that corresponds to no set of
+    // graphs, next to a sentence naming a cause.
+    EXPECT_EQ(output.find("harness defect"), std::string::npos) << output;
+    EXPECT_EQ(output.find("skipped before running"), std::string::npos) << output;
+    EXPECT_EQ(output.find("not selected"), std::string::npos) << output;
+}
+
+// The counters themselves and the verdicts still print. They are the evidence: one
+// says which number is impossible, the other comes from the claim records and never
+// touched the ladder at all.
+TEST_F(TestSupportClaimReport, PrintKeepsCountersAndVerdictsWhenCountersDoNotNest)
+{
+    supportClaimCoverage().graphsFound = 0;
+    supportClaimCoverage().graphsWithClaims = 0;
+    supportClaimCoverage().graphsSelectedWithClaims = 3;
+    supportClaimCoverage().graphsReachedBody = 3;
+    supportClaimCoverage().graphsNotOpened = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_BROKEN));
+
+    const auto output = summary();
+
+    EXPECT_NE(output.find("0 found, 0 with claims, 3 selected, 3 ran, 0 queried"),
+              std::string::npos)
+        << output;
+    EXPECT_NE(output.find("CLAIM FAILURES"), std::string::npos) << output;
+    // A direct read of one counter, not a difference between two, so a miscount
+    // elsewhere cannot turn it into a wrong claim about which graphs these were.
+    EXPECT_NE(output.find("1 claim-bearing graph(s) could not be opened"), std::string::npos)
+        << output;
+}
+
+TEST_F(TestSupportClaimReport, PrintOmitsTheWarningWhenCountersNest)
+{
+    supportClaimCoverage().graphsFound = 3;
+    supportClaimCoverage().graphsWithClaims = 2;
+    supportClaimCoverage().graphsSelectedWithClaims = 2;
+    supportClaimCoverage().graphsReachedBody = 1;
+    supportClaimCoverage().graphsQueried = 1;
+    SupportClaimVerdicts::get().record(makeResult(SupportVerdict::CLAIM_CONFIRMED));
+
+    const auto output = summary();
+
+    EXPECT_EQ(output.find("do not nest"), std::string::npos) << output;
+    // And the attribution the sound ladder earns is still there.
+    EXPECT_NE(output.find("1 claim-bearing graph(s) were selected but skipped"), std::string::npos)
+        << output;
+}
+
 // ---------------------------------------------------------------------------
 // coverageFor(): the rules behind the counters, without the process-wide singleton.
 //

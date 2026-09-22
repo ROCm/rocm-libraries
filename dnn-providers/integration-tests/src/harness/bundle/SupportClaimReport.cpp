@@ -67,6 +67,14 @@ bool verifiedNothing(const SupportClaimCoverage& coverage)
     return coverage.graphsReachedBody > 0 && coverage.graphsQueried == 0;
 }
 
+bool countersAreConsistent(const SupportClaimCoverage& coverage)
+{
+    return coverage.graphsFound >= coverage.graphsWithClaims
+           && coverage.graphsWithClaims >= coverage.graphsSelectedWithClaims
+           && coverage.graphsSelectedWithClaims >= coverage.graphsReachedBody
+           && coverage.graphsReachedBody >= coverage.graphsQueried + coverage.graphsNotOpened;
+}
+
 namespace
 {
 
@@ -128,9 +136,28 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
        << "  (accepted = engine advertises support; confirmed = the run reached the "
           "depth this bundle's enforcement_level declares)\n";
 
+    // Printed between the counters and the lines drawn from them: the numbers above
+    // are the evidence, and everything below is the arithmetic that just became
+    // meaningless. A reader who sees only one of the two is misled either way.
+    const bool consistent = countersAreConsistent(coverage);
+    if(!consistent)
+    {
+        os << "\n  WARNING: the counters above do not nest (each should be a subset of "
+              "the one\n"
+              "  before it), so the harness is miscounting and the attribution lines "
+              "that would\n"
+              "  follow are suppressed. The verdicts below are unaffected -- they come "
+              "from the\n"
+              "  claim records, not from these counters.\n";
+    }
+
     // A graph that never opened ran and failed; it is not a graph the filter left
     // out. Subtracted before the remainder is attributed, so the filter line counts
     // only bundles that genuinely never ran.
+    //
+    // Printed even when the ladder is broken: this is a counter read straight out,
+    // not a difference between two of them, so a miscount elsewhere cannot turn it
+    // into a wrong claim about which graphs these were.
     if(coverage.graphsNotOpened > 0)
     {
         os << "  " << coverage.graphsNotOpened
@@ -143,12 +170,17 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
     // has exactly one cause and one remedy. Nothing here is a guess: the counters are
     // bumped at the three points a claim-bearing graph can stop -- discovery, SetUp(),
     // the test body -- and subtracting neighbours names which one it stopped at.
+    //
+    // All three are gated on `consistent`, because that reasoning is exactly what a
+    // broken ladder invalidates: subtract counters that are not nested and the result
+    // is a number of graphs that does not correspond to any set of graphs, printed
+    // beside a confident sentence about what happened to them.
 
     // A body ran and neither queried the sidecar nor failed to open the graph. No
     // configuration produces this; it is the harness losing a query it owed, which
     // missedQueryComplaint() has already reported per-bundle.
     const size_t accountedFor = coverage.graphsQueried + coverage.graphsNotOpened;
-    if(coverage.graphsReachedBody > accountedFor)
+    if(consistent && coverage.graphsReachedBody > accountedFor)
     {
         os << "  " << (coverage.graphsReachedBody - accountedFor)
            << " claim-bearing graph(s) ran without ever being queried;\n"
@@ -157,7 +189,7 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
 
     // Selected, then stopped in SetUp(). The remedy is a skip-list edit or different
     // hardware -- never widening the filter, which already let these through.
-    if(coverage.graphsSelectedWithClaims > coverage.graphsReachedBody)
+    if(consistent && coverage.graphsSelectedWithClaims > coverage.graphsReachedBody)
     {
         os << "  " << (coverage.graphsSelectedWithClaims - coverage.graphsReachedBody)
            << " claim-bearing graph(s) were selected but skipped before running "
@@ -168,7 +200,7 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
     // Discovery counts every claim-bearing bundle on disk; only selected ones reach
     // SetUp(). The gap between the two is the filter's doing and is named as such
     // rather than left as a bare mismatch a reader has to interpret.
-    if(coverage.graphsWithClaims > coverage.graphsSelectedWithClaims)
+    if(consistent && coverage.graphsWithClaims > coverage.graphsSelectedWithClaims)
     {
         os << "  " << (coverage.graphsWithClaims - coverage.graphsSelectedWithClaims)
            << " claim-bearing graph(s) were discovered but not selected to run "
