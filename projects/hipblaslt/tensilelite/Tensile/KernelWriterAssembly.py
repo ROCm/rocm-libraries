@@ -18630,9 +18630,11 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCmpEQU32(sgpr("Offset"), 0))
     mod.add(SCBranchSCC1(label_wave_end.getLabelName()))
     mod.add(SLShiftLeftB32(sgpr("Tmp"), 1, sgpr("Offset")))
-    mod.add(VCmpLtU32(sgpr("Tmp+2",2), vgpr("Widx"), sgpr("Tmp")))
-    mod.add(VCmpGEU32(sgpr("Tmp+4",2), vgpr("Widx"), sgpr("Offset")))
-    mod.add(SAndB64(VCC(), sgpr("Tmp+2",2), sgpr("Tmp+4",2)))
+    laneSGPRCount = 1 if wave_size == 32 else 2
+    SAndBX = SAndB32 if wave_size == 32 else SAndB64
+    mod.add(VCmpLtU32(sgpr("Tmp+2", laneSGPRCount), vgpr("Widx"), sgpr("Tmp")))
+    mod.add(VCmpGEU32(sgpr("Tmp+4", laneSGPRCount), vgpr("Widx"), sgpr("Offset")))
+    mod.add(SAndBX(VCC(), sgpr("Tmp+2", laneSGPRCount), sgpr("Tmp+4", laneSGPRCount)))
     mod.add(SCBranchVCCNZ(label_wave_upper.getLabelName()))
     mod.add(VCmpLtU32(VCC(), vgpr("Widx"), sgpr("Offset")))
     mod.add(SCBranchVCCNZ(label_wave_lower.getLabelName()))
@@ -18699,6 +18701,11 @@ class KernelWriterAssembly(KernelWriter):
     amaxInType = kernel["ProblemType"]["ComputeDataType"]
     amaxOutType = kernel["ProblemType"]["DataTypeAmaxD"]
 
+    # Reuse the established cross-workgroup publication protocol and atomic
+    # fallback. Output-amax solutions require GlobalSplitU=1.
+    memoryOrder = Component.StreamKMemoryOrdering.find(self)
+    workspaceModifiers = MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV) \
+        if self.states.archCaps["DefaultScopeIsCULocal"] else MUBUFModifiers(offen=True, glc=True, slc=True)
     mod = Module("output_result")
     mod.addComment0("output_result")
 
@@ -18722,20 +18729,24 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SMovB32(sgpr("Dst+1"), sgpr("AddressWk+1")))
     mod.add(SMovB32(sgpr("Dst+2"), sgpr("Tmp")))
     mod.add(SMovB32(sgpr("Dst+3"), "Srd127_96"))
+    mod.add(self._shiftSrdImpl(sgpr("Dst+1"), sgpr("Dst+2")))
 
     mod.add(SLShiftLeftB32(sgpr("Offset"), int(log2(amaxInType.numBytes())), sgpr("WGIdx")))
     mod.add(VMovB32(vgpr("Offset"), 0))
 
     # TODO- select inst
-    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), MUBUFModifiers(offen=True, glc=True, slc=True)))
-    mod.add(SWaitCnt(vlcnt=0))
+    mod.add(memoryOrder.preVolatileVmem(self, comment="drain before amax partial store"))
+    mod.add(BufferStoreB32(vgpr("AmaxOut"), vgpr("Offset"), sgpr("Dst",4), sgpr("Offset"), workspaceModifiers))
+    mod.add(memoryOrder.releaseFence(self))
     mod.addSpaceLine()
 
     mod.add(SSubI32(sgpr("Tmp"), sgpr("NumGroup"), 1))
-    mod.add(SAtomicDec(sgpr("Tmp"), sgpr("AddressSy",2), SMEMModifiers(glc=True)))
+    mod.add(Component.GSU.find(self)._generateAtomicDec(
+        self, kernel, dst=sgpr("Tmp"), base=sgpr("AddressSy",2)))
     mod.add(SWaitCnt(vlcnt=0, kmcnt=0))
     mod.add(SCmpEQU32(sgpr("Tmp"), 1))
     mod.add(SCBranchSCC0(label_end.getLabelName()))
+    mod.add(memoryOrder.acquireFence(self))
     mod.addSpaceLine()
 
     mod.add(SLShiftLeftB32(sgpr("Tmp"), int(log2(amaxInType.numBytes())), sgpr("NumGroup")))
@@ -18743,6 +18754,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SMovB32(sgpr("Src+1"), sgpr("AddressWk+1")))
     mod.add(SMovB32(sgpr("Src+2"), sgpr("Tmp")))
     mod.add(SMovB32(sgpr("Src+3"), "Srd127_96"))
+    mod.add(self._shiftSrdImpl(sgpr("Src+1"), sgpr("Src+2")))
     mod.addSpaceLine()
 
     mod.add(VLShiftLeftB32(vgpr("Offset"), int(log2(amaxOutType.numBytes())), vgpr("Serial")))
@@ -18753,7 +18765,8 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(label_final_loop)
 
     # TODO- select inst
-    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True, glc=True, slc=True)))
+    mod.add(memoryOrder.preVolatileVmem(self, comment="drain before amax partial load"))
+    mod.add(BufferLoadB32(vgpr(f"Value"), vgpr("Offset"), sgpr("Src",4), 0, workspaceModifiers))
     mod.add(SWaitCnt(vlcnt=0))
     mod.addSpaceLine()
 
@@ -18778,6 +18791,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SMovB32(sgpr("Dst+1"), sgpr("AddrAmaxOut+1")))
     mod.add(SMovB32(sgpr("Dst+2"), int(amaxOutType.numBytes())))
     mod.add(SMovB32(sgpr("Dst+3"), "Srd127_96"))
+    mod.add(self._shiftSrdImpl(sgpr("Dst+1"), sgpr("Dst+2")))
     mod.addSpaceLine()
 
     mod.add(VMovB32(vgpr("Offset"), 0))
