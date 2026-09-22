@@ -374,8 +374,28 @@ if(ROCKE_INSTALL_TESTS)
     # resolves without the source-tree sys.path shims. The staged library tree
     # does not need to be listed here: tests/conftest.py probes for it and
     # inserts it on sys.path, covering both the staged and checkout layouts.
+    #
+    # The installed CI environment intentionally provides only TheRock's common
+    # test requirements. Exclude suites requiring additional Python packages
+    # from the installed CTest invocation; normal source-tree pytest runs remain
+    # unaffected.
+    #
+    # TODO: Re-enable these tests when NumPy is available in TheRock CI, or
+    # investigate a dependency-free reference implementation or another way to
+    # supply test-specific dependencies without changing the shared CI
+    # requirements.
+    set(_ROCKE_INSTALLED_PYTEST_EXCLUDE_RELPATHS
+        "tests/library"
+        "tests/core/test_gfx1250_scaled_wmma_reference.py"
+        "tests/test_numeric_references.py"
+        "tests/instances/test_gfx1250_scaled_wmma_numeric.py")
+    set(_ROCKE_INSTALLED_PYTEST_EXCLUDES "")
+    foreach(_rocke_pytest_exclude ${_ROCKE_INSTALLED_PYTEST_EXCLUDE_RELPATHS})
+      string(APPEND _ROCKE_INSTALLED_PYTEST_EXCLUDES
+             " --ignore \"${ROCKE_TEST_CTEST_REL}${_rocke_pytest_exclude}\"")
+    endforeach()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -v --timeout=60)\n")
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\"${_ROCKE_INSTALLED_PYTEST_EXCLUDES} -v --timeout=60)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;quick\"\n"
