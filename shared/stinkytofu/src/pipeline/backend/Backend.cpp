@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include <iostream>
+#include <string>
 
 #include "stinkytofu/pipeline/Backend.hpp"
 
@@ -74,12 +74,20 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     // config setter and has legitimate non-GEMM callers, notably
     // StinkyIRConverter::convertToFunction, which parses arbitrary asm text and
     // has no tile config to give.
-    if (gemmTileConfig.TileA0 == 0) {
-        report_fatal_error(
-            "GemmTileConfig::TileA0 is 0 at the backend entry, so the tile configuration was "
-            "never set. Set TileA0/TileB0/TileM0 in the module options before running the "
-            "backend.");
-    }
+    // Every tile dimension, not just the first: a config carrying TileA0 but
+    // leaving TileB0 or TileM0 at 0 would pass a TileA0-only gate and schedule
+    // for a zero-width tile, which is the same silent default this check exists
+    // to stop.
+    const auto rejectUnsetTile = [](const char* name, uint32_t value) {
+        if (value != 0) return;
+        report_fatal_error(std::string("GemmTileConfig::") + name +
+                           " is 0 at the backend entry, so the tile configuration was never "
+                           "set. Set TileA0, TileB0 and TileM0 in the module options before "
+                           "running the backend.");
+    };
+    rejectUnsetTile("TileA0", gemmTileConfig.TileA0);
+    rejectUnsetTile("TileB0", gemmTileConfig.TileB0);
+    rejectUnsetTile("TileM0", gemmTileConfig.TileM0);
     if (gemmTileConfig.NumWaves == 0) {
         report_fatal_error(
             "GemmTileConfig::NumWaves is 0 at the backend entry (WaveGroup0 * WaveGroup1). Set "

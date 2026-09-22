@@ -100,6 +100,40 @@ TEST(BackendTileConfigDeathTest, UnsetTileSizeAborts) {
         "TileA0 is 0");
 }
 
+TEST(BackendTileConfigDeathTest, UnsetSecondTileDimensionAborts) {
+    // A config carrying TileA0 but nothing else must not slip through: it would
+    // schedule for a zero-width tile, which is the silent default the check
+    // exists to stop.
+    EXPECT_DEATH(
+        {
+            StinkyAsmModule::ModuleOptions opts{};
+            opts.OptLevel = 0;
+            opts.TileA0 = 128;  // set
+            opts.WaveGroup0 = 2;
+            opts.WaveGroup1 = 2;
+            StinkyAsmModule module("test", kArch, opts);
+            Backend backend(module);
+            backend.runOptimization();
+        },
+        "TileB0 is 0");
+}
+
+TEST(BackendTileConfigDeathTest, UnsetThirdTileDimensionAborts) {
+    EXPECT_DEATH(
+        {
+            StinkyAsmModule::ModuleOptions opts{};
+            opts.OptLevel = 0;
+            opts.TileA0 = 128;
+            opts.TileB0 = 128;
+            opts.WaveGroup0 = 2;
+            opts.WaveGroup1 = 2;
+            StinkyAsmModule module("test", kArch, opts);
+            Backend backend(module);
+            backend.runOptimization();
+        },
+        "TileM0 is 0");
+}
+
 TEST(BackendTileConfigDeathTest, UnsetWaveGroupsAbort) {
     EXPECT_DEATH(
         {
