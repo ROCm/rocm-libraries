@@ -115,7 +115,10 @@ endif()
 option(USE_CUDA "Build hipFFT for the CUDA backend using nvcc directly (no hipcc)" OFF)
 
 # Set internal BUILD_WITH_COMPILER.
-if( USE_CUDA OR BUILD_WITH_LIB STREQUAL "CUDA" )
+# Only use HIP-nvcc mode (which wraps flags with -Xcompiler=/-Xlinker=) when
+# nvcc is the actual CXX compiler.  Other compilers (g++, clang++) that target
+# the CUDA backend link against cufft directly and do not need nvcc wrapping.
+if( (USE_CUDA OR BUILD_WITH_LIB STREQUAL "CUDA") AND CMAKE_CXX_COMPILER MATCHES ".*nvcc$" )
   set( BUILD_WITH_COMPILER "HIP-nvcc" )
 elseif(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
   set( BUILD_WITH_COMPILER "HOST-default" )
