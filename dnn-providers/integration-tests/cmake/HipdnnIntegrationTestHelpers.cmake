@@ -84,36 +84,24 @@
 #     Optional prefix for generated category suite CTest names. Defaults to
 #     ``TARGET_NAME``.
 #
-#   Support-claim mode is not a per-target keyword; it is the cache option
-#   ``HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS`` below, applied uniformly
-#   to every lane this module registers.
+#   Support-claim mode is not a per-target keyword. Every lane this module
+#   registers gets the same flag; see the constant below.
 
 # Support-claim mode for every lane registered by this module.
 #
-# ON (default) -> --enforce-support-claims. A bundle whose sidecar claims this engine on
-#   this arch/platform, and which the engine then declines, FAILS the test. Enforcement
-#   implies reporting, so the summary still prints.
-# OFF -> --report-support-claims. Same sidecar query, same verdicts, same summary, no test
-#   failures. For local `ctest` runs that should observe claims without going red.
+# Report only: the sidecar is queried, every verdict is printed in the summary, and a
+# broken claim never fails the test. That is what produces the day-one claim-failure
+# count these lanes exist to measure, and it keeps a local `ctest` run from going red
+# over a claim the developer did not author.
 #
-# CI leaves this ON. Turning it off is a deliberate reconfigure (-D...=OFF); no environment
-# variable can flip it behind your back. Running the binary directly is the other local
-# route and needs no reconfigure:
+# Enforcement is the deliberate follow-up. It lands with the `dvc pull` that gives the
+# superbuild lanes real bundles to check; until then flipping this would enforce over an
+# empty set. Either mode is available when running the binary directly:
 #   hipdnn_integration_tests --test-article <plugin>.so --test-engine <ENGINE> \
-#       --report-support-claims
-option(HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS
-    "Fail integration tests on a broken support claim (OFF = report only, never fails)" ON
+#       --enforce-support-claims
+set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--report-support-claims"
+    CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
 )
-
-if(HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS)
-    set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--enforce-support-claims"
-        CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
-    )
-else()
-    set(HIPDNN_INTEGRATION_TESTS_SUPPORT_CLAIM_FLAG "--report-support-claims"
-        CACHE INTERNAL "Support-claim flag passed to every registered integration lane"
-    )
-endif()
 
 # Builds the build-tree command for an external integration test.
 #
@@ -121,9 +109,8 @@ endif()
 #   out_var - Variable to receive the command list
 # ~~~
 macro(_build_external_integration_command out_var)
-    # --enforce-support-claims by default; --report-support-claims when
-    # HIPDNN_INTEGRATION_TESTS_ENFORCE_SUPPORT_CLAIMS=OFF. Either way the lane prints the
-    # support-claim summary — the option only decides whether a broken claim is fatal.
+    # --report-support-claims, so the lane prints the support-claim summary without
+    # failing on a broken claim. See the constant's definition above.
     set(${out_var}
         $<TARGET_FILE:hipdnn_integration_tests>
         --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
