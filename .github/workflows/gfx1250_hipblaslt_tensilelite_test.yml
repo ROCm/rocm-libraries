@@ -269,9 +269,6 @@ jobs:
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
           HIPBLASLT_TEST_TIMEOUT=3600 \
           HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
-          # No --gtest_output=xml: the junit XML records per-test time= regardless of
-          # GTEST_PRINT_TIME=0, so it would leak timing into the public artifact. The
-          # -v console log (timing-free under GTEST_PRINT_TIME=0) is what we keep.
           "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 \
             | tee test_results/hipblaslt_test.log
 
@@ -307,6 +304,14 @@ jobs:
             --global-parameters="LibraryFormat='msgpack'" \
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
+
+      - name: Redact wall-clock timing from logs
+        if: always()
+        run: |
+          for f in "$GITHUB_WORKSPACE/test_results/hipblaslt_test.log" \
+                   "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"; do
+            [ -f "$f" ] && sed -i -E 's/ in [0-9]+(\.[0-9]+)?s\b//g; s/ \([0-9]+ ms\)//g' "$f" || true
+          done
 
       - name: Upload test results
         if: always()
