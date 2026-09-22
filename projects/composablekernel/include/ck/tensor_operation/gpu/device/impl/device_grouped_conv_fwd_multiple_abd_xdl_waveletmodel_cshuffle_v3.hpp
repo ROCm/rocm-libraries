@@ -182,12 +182,12 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                 karg,
                 GridwiseGemm::template TransformGrid<decltype(a_grid_desc_ak0_m_ak1),
                                                      GridwiseGemm::AK0Number,
-                                                     GridwiseGemm::AK1Number>(
-                    a_grid_desc_ak0_m_ak1),
+                                                     GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
+                                                                              get_device_arch()),
                 GridwiseGemm::template TransformGrid<decltype(b_grid_desc_bk0_n_bk1),
                                                      GridwiseGemm::BK0Number,
-                                                     GridwiseGemm::BK1Number>(
-                    b_grid_desc_bk0_n_bk1),
+                                                     GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
+                                                                              get_device_arch()),
                 c_grid_desc_m_n);
 #endif
         }
@@ -295,7 +295,7 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     static_assert(is_same_v<BElementwiseOperation, element_wise::PassThrough>);
     static_assert(is_same_v<CDEElementwiseOperation, element_wise::PassThrough>);
 
-    static constexpr GemmSpecialization GemmSpec = GemmSpecialization::Default;
+    static constexpr GemmSpecialization GemmSpec = GemmSpecialization::MNKPadding;
 
     // AK0PerBlock = K0PerBlock / K1. Transfer cluster K0 dim must not exceed it,
     // otherwise thread_slice_k0 = AK0PerBlock / K0_cluster truncates to 0.
@@ -554,7 +554,7 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
         AComputeDataType,
         BComputeDataType,
         DirectLoad>;
-    // using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
+    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
     using CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock =
@@ -1209,14 +1209,14 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
 
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            // if(get_warp_size() == 64)
-            // {
-            //     if constexpr(MXdlPerWave64 > 0)
-            //     {
-            //         return RunImp<GridwiseGemm64>(arg, stream_config);
-            //     }
-            // }
-            // else
+            if(get_warp_size() == 64)
+            {
+                if constexpr(MXdlPerWave64 > 0)
+                {
+                    return RunImp<GridwiseGemm64>(arg, stream_config);
+                }
+            }
+            else
             {
                 if constexpr(MXdlPerWave32 > 0)
                 {

@@ -310,9 +310,10 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
             c_grid_desc_g_m0_n0_m1_n1_m2_n2);
     }
 
-    __host__ __device__ static constexpr auto MakeABlockDescriptor_M0_M1_M2_K()
+    template <typename DeviceArch>
+    __host__ __device__ static constexpr auto MakeABlockDescriptor_M0_M1_M2_K(DeviceArch)
     {
-        if constexpr(!DirectLoad)
+        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t>)
         {
             return transform_tensor_descriptor(
                 AK0MK1BlockDesc{},
@@ -345,9 +346,10 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
         }
     }
 
-    __host__ __device__ static constexpr auto MakeBBlockDescriptor_N0_N1_N2_K()
+    template <typename DeviceArch>
+    __host__ __device__ static constexpr auto MakeBBlockDescriptor_N0_N1_N2_K(DeviceArch)
     {
-        if constexpr(!DirectLoad)
+        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t>)
         {
             return transform_tensor_descriptor(
                 BK0NK1BlockDesc{},
@@ -380,8 +382,10 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_v1
         }
     }
 
-    static constexpr auto a_block_desc_m0_m1_m2_k = MakeABlockDescriptor_M0_M1_M2_K();
-    static constexpr auto b_block_desc_n0_n1_n2_k = MakeBBlockDescriptor_N0_N1_N2_K();
+    static constexpr auto a_block_desc_m0_m1_m2_k =
+        MakeABlockDescriptor_M0_M1_M2_K(get_device_arch());
+    static constexpr auto b_block_desc_n0_n1_n2_k =
+        MakeBBlockDescriptor_N0_N1_N2_K(get_device_arch());
 
     template <typename ABlockBuffer, typename BBlockBuffer, typename CThreadBuffer>
     __device__ void Run(const ABlockBuffer& a_block_buf,
@@ -563,33 +567,49 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
             b_thread_desc_.GetElementSpaceSize());
 
         static_for<0, KRepeat, 1>{}([&](auto k) {
-            static_for<0, MRepeat, 1>{}([&](auto m0) {
-                // read A
-                a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                   make_tuple(m0, I0, I0, Number<k * KPack>{}),
-                                   a_block_buf,
-                                   a_thread_desc_,
-                                   make_tuple(I0, I0, k, I0),
-                                   a_thread_buf);
+            static_for<0, NRepeat, 1>{}([&](auto n0) {
+                // read B
+                b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
+                                   make_tuple(n0, I0, I0, Number<k * KPack>{}),
+                                   b_block_buf,
+                                   b_thread_desc_,
+                                   make_tuple(n0, I0, k, I0),
+                                   b_thread_buf);
+                // // read A
+                // a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
+                //                    make_tuple(m0, I0, I0, Number<k * KPack>{}),
+                //                    a_block_buf,
+                //                    a_thread_desc_,
+                //                    make_tuple(m0, I0, k, I0),
+                //                    a_thread_buf);
 
-                if constexpr(m0 == 0)
+                if constexpr(n0 == 0)
                 {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        // read B
-                        b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
-                                           make_tuple(n0, I0, I0, Number<k * KPack>{}),
-                                           b_block_buf,
-                                           b_thread_desc_,
-                                           make_tuple(n0, I0, k, I0),
-                                           b_thread_buf);
+                    static_for<0, MRepeat, 1>{}([&](auto m0) {
+                        // read A
+                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
+                                           make_tuple(m0, I0, I0, Number<k * KPack>{}),
+                                           a_block_buf,
+                                           a_thread_desc_,
+                                           make_tuple(m0, I0, k, I0),
+                                           a_thread_buf);
+
+                        // b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
+                        //                    make_tuple(n0, I0, I0, Number<k * KPack>{}),
+                        //                    b_block_buf,
+                        //                    b_thread_desc_,
+                        //                    make_tuple(n0, I0, k, I0),
+                        //                    b_thread_buf);
                     });
                 }
+                // });
 
                 wait_dscnt();
 
                 __builtin_amdgcn_sched_barrier(0);
 
-                static_for<0, NRepeat, 1>{}([&](auto n0) {
+                // static_for<0, MRepeat, 1>{}([&](auto m0) {
+                static_for<0, MRepeat, 1>{}([&](auto m0) {
                     vector_type<ElementDataTypeA, KPack> a_thread_vec;
                     vector_type<ElementDataTypeB, KPack> b_thread_vec;
 
@@ -598,7 +618,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
                                                  decltype(a_thread_buf),
                                                  decltype(a_thread_desc_),
                                                  ElementDataTypeA,
-                                                 Number<0>,
+                                                 Number<m0>,
                                                  Number<0>,
                                                  decltype(k),
                                                  index_expression::Ik>{a_thread_vec, a_thread_buf};
@@ -622,6 +642,23 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
                     constexpr index_t c_offset =
                         c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
 
+                    // if constexpr(m0 == MRepeat - 1 && n0 == NRepeat - 1 && k == KRepeat - 1)
+                    // {
+                    //     if(threadIdx.x == 0 && blockIdx.x == 0)
+                    //     {
+                    //         printf("A reg = %f %f %f %f \n",
+                    //                type_convert<float>(a_thread_vec.data_[0]),
+                    //                type_convert<float>(a_thread_vec.data_[1]),
+                    //                type_convert<float>(a_thread_vec.data_[2]),
+                    //                type_convert<float>(a_thread_vec.data_[3]));
+                    //         printf("B reg = %f %f %f %f \n",
+                    //                type_convert<float>(b_thread_vec.data_[0]),
+                    //                type_convert<float>(b_thread_vec.data_[1]),
+                    //                type_convert<float>(b_thread_vec.data_[2]),
+                    //                type_convert<float>(b_thread_vec.data_[3]));
+                    //     }
+                    // }
+
                     xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type_a>(),
                                     b_thread_vec.template AsType<mfma_input_type_b>(),
                                     c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
@@ -634,7 +671,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_mnk_v1
     protected:
     // A[M0, M1, M2, KPerThread]
     static constexpr auto a_thread_desc_ = make_naive_tensor_descriptor(
-        make_tuple(Number<1>{}, I1, Number<KRepeat>{}, Number<KPack>{}),
+        make_tuple(Number<MRepeat>{}, I1, Number<KRepeat>{}, Number<KPack>{}),
         make_tuple(
             Number<KPack>{}, Number<KRepeat * MRepeat * KPack>{}, Number<MRepeat * KPack>{}, I1));
 
