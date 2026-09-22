@@ -96,7 +96,7 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     assert rv["CMakeBuildType"] == "Debug"
     assert rv["ValidateMetadata"] is True
     assert rv["ClientExecutionLockPath"] == "/lock"
-    assert rv["PrebuiltClient"] == "/client"
+    assert "PrebuiltClient" not in rv
     assert rv["MXScaleFormat"] == 1
     assert rv["K"] == "V"
 
