@@ -10176,6 +10176,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.defineSgpr("StaggerU", 1)
     self.defineSgpr("WGM", 1)
 
+    # WGM instrumentation: reserve persistent sgprs that carry the
+    # pre-WGM workgroup ids and the original packed WGM value from the prologue
+    # (before workgroup remapping) all the way to the epilogue D store, where
+    # they are written into the output for visualization. See kernel parameter
+    # EnableWGMDebug and KernelWriterAssembly.wgmDebugStoreValues().
+    if kernel.get("EnableWGMDebug", 0):
+      self.defineSgpr("WGMDebugOrigWG0", 1)
+      self.defineSgpr("WGMDebugOrigWG1", 1)
+      self.defineSgpr("WGMDebugOrigWGM", 1)
+
     if kernel["LocalSplitU"] > 1:
       self.defineSgpr("LSUTailLoopOffset", 1)
 

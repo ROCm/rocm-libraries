@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -82,6 +83,53 @@ extern "C" __global__ void flush_icache()
                      "s_nop 0 \n\t"
                      "s_nop 0 \n\t" ::
                          :);
+}
+
+// WGM (workgroup-mapping) instrumentation dump support.
+//
+// When hipBLASLt is built with the per-kernel EnableWGMDebug:1 solution
+// parameter, the generated GEMM kernels overwrite the top-left element of each
+// workgroup's fp32 output tile with workgroup-mapping diagnostics instead of
+// the real result (original 1D WG id, packed post-WGM (WG0<<16)|WG1, XCC id,
+// and the packed WGM sgpr value). This helper writes the raw D-output bytes to
+// a binary file (with a small header) so plot_wgm.py can decode/visualize the
+// mapping. Triggered at runtime by env HIPBLASLT_DEBUG_WGM_DUMP=<output-file>
+// (D on host is in hD_1). Only the first batch of the first GEMM is dumped.
+//
+// Binary layout: int32 magic('WGMD'=0x57474D44), int32 M, int32 N, int32 ldd,
+// int32 bytesPerElement, followed by ldd*N*bytesPerElement raw bytes of D.
+static inline void debug_wgm_dump_d(const std::vector<HipHostBuffer>& hD_1,
+                                    int64_t                           M,
+                                    int64_t                           N,
+                                    int64_t                           ldd,
+                                    int32_t                           bytesPerElement)
+{
+    const char* fname = std::getenv("HIPBLASLT_DEBUG_WGM_DUMP");
+    if(!fname || hD_1.empty())
+        return;
+
+    std::ofstream ofile(fname, std::ios::binary | std::ios::trunc);
+    if(!ofile)
+    {
+        hipblaslt_cerr << "HIPBLASLT_DEBUG_WGM_DUMP: cannot open " << fname << " for writing"
+                       << std::endl;
+        return;
+    }
+
+    const int32_t header[5] = {static_cast<int32_t>(0x57474D44), // 'WGMD'
+                               static_cast<int32_t>(M),
+                               static_cast<int32_t>(N),
+                               static_cast<int32_t>(ldd),
+                               bytesPerElement};
+    ofile.write(reinterpret_cast<const char*>(header), sizeof(header));
+
+    const size_t nbytes = static_cast<size_t>(ldd) * static_cast<size_t>(N)
+                          * static_cast<size_t>(bytesPerElement);
+    ofile.write(hD_1[0].as<char>(), static_cast<std::streamsize>(nbytes));
+
+    hipblaslt_cout << "HIPBLASLT_DEBUG_WGM_DUMP: wrote D output (" << M << "x" << N
+                   << ", ldd=" << ldd << ", " << bytesPerElement << "B/elem) to " << fname
+                   << std::endl;
 }
 
 // Convert element count to byte count, accounting for sub-byte packing.
@@ -6072,6 +6120,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
+                debug_wgm_dump_d(hD_1, M[0], N[0], ldd[0], realDataTypeSize(To));
                 if(arg.dump_matrix)
                 {
                     for(int batchId = 0; batchId < num_batches[0]; batchId++)

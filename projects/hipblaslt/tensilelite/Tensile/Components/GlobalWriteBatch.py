@@ -2480,6 +2480,17 @@ class GlobalWriteBatchWriter:
         module.add(convertModule)
         module.add(packModule)
 
+      # Debug-only WGM instrumentation (fp32 D output only): overwrite the
+      # store-source VGPRs of the top-left element of each workgroup's output
+      # tile with workgroup-mapping diagnostics (origWG, packed post-WGM WGids,
+      # XCC id, packed WGM). Only valid for a >=4-dword fp32 store (the WGM
+      # payload is 4 uint32); bf16/fp16/fp8 dest would pack/convert and destroy
+      # the data. Gated per-kernel via EnableWGMDebug. Produces INCORRECT results.
+      if self.kernel.get("EnableWGMDebug", 0) \
+         and self.kernel["ProblemType"]["DestDataType"].isSingle() \
+         and self.batchIdx == 0 and elementIdx == 0 and self.gwvw >= 4:
+        module.add(self.parentWriter.wgmDebugStoreValues(self.kernel, self.ss.elementSumIdx[elementIdx]))
+
       if not self.kernel["StoreRemapVectorWidth"]:
         # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
         # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both

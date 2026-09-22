@@ -680,6 +680,43 @@ class KernelWriterAssembly(KernelWriter):
       self.setSgprToFreeState(s)
     return ret
 
+  def wgmDebugStoreValues(self, kernel, sumIdx):
+    """Debug-only WGM instrumentation.
+
+    Overwrites the four dwords starting at the absolute store-source VGPR sumIdx
+    (i.e. ss.elementSumIdx[elementIdx], which is what a gwvw>=4 fp32 D store
+    reads) with workgroup-mapping diagnostic data, so the top-left element of
+    each workgroup's output tile encodes:
+      dword0: original pre-WGM 1D workgroup id
+      dword1: packed post-WGM (WorkGroup0 << 16) | WorkGroup1
+      dword2: XCC id (HW_REG_XCC_ID)
+      dword3: original packed WGM sgpr value
+    This replaces the real GEMM result and is only meant for visualization.
+    Requires the persistent WGMDebug* sgprs defined in KernelWriter.allocateResources.
+    """
+    module = Module("DebugWGM store values")
+    module.addComment1("@DebugWGM: overwrite D store data with WG-mapping info (origWG, packedNewWG, XCC, WGM)")
+    with self.allocTmpSgpr(2, tag="wgmDebugStoreValues") as tmpSgprRes:
+      tmpXCC  = tmpSgprRes.idx
+      tmpPack = tmpSgprRes.idx + 1
+      module.add(SGetRegB32(dst=sgpr(tmpXCC), src="hwreg(HW_REG_XCC_ID)",
+                            comment="DebugWGM: read XCC id"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmpPack), shiftHex=16, src=sgpr("WorkGroup0"),
+                                comment="DebugWGM: post-WGM WorkGroup0 << 16"))
+      module.add(SAddU32(dst=sgpr(tmpPack), src0=sgpr(tmpPack), src1=sgpr("WorkGroup1"),
+                         comment="DebugWGM: | post-WGM WorkGroup1"))
+      # sumIdx is an absolute VGPR index (== ss.elementSumIdx[elementIdx]); the
+      # fp32 D store reads vgpr(sumIdx, rpv) directly, so write absolute VGPRs.
+      module.add(VMovB32(dst=vgpr(sumIdx+0), src=sgpr("WGMDebugOrigWG0"),
+                         comment="DebugWGM: original 1D workgroup id"))
+      module.add(VMovB32(dst=vgpr(sumIdx+1), src=sgpr(tmpPack),
+                         comment="DebugWGM: packed (newWG0<<16)|newWG1"))
+      module.add(VMovB32(dst=vgpr(sumIdx+2), src=sgpr(tmpXCC),
+                         comment="DebugWGM: XCC id"))
+      module.add(VMovB32(dst=vgpr(sumIdx+3), src=sgpr("WGMDebugOrigWGM"),
+                         comment="DebugWGM: original packed WGM data"))
+    return module
+
   def defineMultiSgprIndex(self, names: List[str], numSgprs: List[int], align=1):
     assert(len(names) == len(numSgprs))
 
@@ -3030,6 +3067,19 @@ class KernelWriterAssembly(KernelWriter):
       if self.skUsesRawQueueRank(kernel):
         module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr("WorkGroup0"),
                            comment="StreamK: snapshot raw pre-remap launch WG id -> dead-in-window StreamKTileIdx carrier (queue = rawWG %% numQueues)"))
+
+      # WGM instrumentation: snapshot the raw (pre-remap) workgroup
+      # ids and the original packed WGM value before any WGM/XCC remapping
+      # mutates WorkGroup0/WorkGroup1/WGM. These are written into the D output
+      # at the epilogue store for workgroup-mapping visualization.
+      if kernel.get("EnableWGMDebug", 0):
+        module.addComment1("@DebugWGM: snapshot pre-WGM workgroup ids and WGM value")
+        module.add(SMovB32(dst=sgpr("WGMDebugOrigWG0"), src=sgpr("WorkGroup0"),
+                           comment="DebugWGM: original 1D workgroup id (pre-WGM)"))
+        module.add(SMovB32(dst=sgpr("WGMDebugOrigWG1"), src=sgpr("WorkGroup1"),
+                           comment="DebugWGM: original WorkGroup1 (pre-WGM)"))
+        module.add(SMovB32(dst=sgpr("WGMDebugOrigWGM"), src=sgpr("WGM"),
+                           comment="DebugWGM: original packed WGM sgpr data"))
 
       # Reorder WGIDs
       module.add(wgmXCC(self, kernel, tmpSgprNumWorkGroups))
