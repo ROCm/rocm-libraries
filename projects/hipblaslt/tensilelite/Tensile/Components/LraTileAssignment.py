@@ -894,8 +894,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # strideTile into that factor, so a raw *MIWaveTile overshoots by vectorWidth (e.g. TN B:
         # 16*256*4 *4 = 65536 vs correct 16*256*4 = 16384). Transposed path has vectorWidth==1 so
         # this reduces to the original *MIWaveTile.
+        # Exclude MXS (the MX block-scale tensors): the scale reads have their own swizzled LDS layout
+        # (MXScaleFormat=InMemorySwizzle) whose per-wave placement is fixed by the wave-id decomposition
+        # (num1DWaves / hiOffset partner-block), NOT by the output-tile re-layout. Applying the MIWaveTile
+        # multiply over-shifts the scale read so the upper half-wave grabs the wrong E8M0 scale block
+        # (~half-value outputs in an N-band → 1/4 wrong on MXFP8 TN). A/B data reads still re-lay out.
         contigOut = kernel.get("UseSubtileImpl") or kernel.get("WaveContiguousOutput")
-        if contigOut:
+        if contigOut and ("MXS" not in tc):
             strideWave = strideWave // vectorWidth * kernel["MIWaveTile"][tile01]
 
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
