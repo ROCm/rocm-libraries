@@ -11,7 +11,6 @@
 ################################################################################
 import importlib
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -35,13 +34,13 @@ except ImportError as e:
 
 
 # ---------------------------------------------------------------------------
-# Test: createLibraryForBenchmark subprocess wrapping (lines 47–63)
+# Test: createLibraryForBenchmark package-handler invocation
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(M is None, reason="Module import failed")
 def test_create_library_for_benchmark_success():
     """
-    Pin that createLibraryForBenchmark constructs the correct subprocess command
-    and invokes subprocess.run with check=True and correct working directory.
+    Pin that createLibraryForBenchmark forwards the correct argument list to the
+    package-local create-library handler.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -49,40 +48,31 @@ def test_create_library_for_benchmark_success():
         lib_path = str(tmpdir / "lib")
         current_path = str(tmpdir / "work")
 
-        with patch("subprocess.run") as mock_run:
+        with patch.object(M, "createLibrary") as mock_create:
             M.createLibraryForBenchmark(logic_path, lib_path, current_path)
 
-            # Verify subprocess.run was called
-            mock_run.assert_called_once()
-            args, kwargs = mock_run.call_args
-
-            # args[0] is the command list
-            cmd = args[0]
+            mock_create.assert_called_once()
+            cmd = mock_create.call_args.args[0]
 
             # Verify command structure
-            assert len(cmd) == 9
-            assert "TensileCreateLibrary" in cmd[0]
+            assert len(cmd) == 8
             assert "--new-client-only" in cmd
             assert "--no-short-file-names" in cmd
             assert "--architecture=all" in cmd
             assert "--code-object-version=default" in cmd
             assert "--library-format=yaml" in cmd
-            assert logic_path in cmd
-            assert lib_path in cmd
+            assert os.path.abspath(logic_path) in cmd
+            assert os.path.abspath(lib_path) in cmd
             assert "HIP" in cmd
-
-            # Verify kwargs
-            assert kwargs.get("check") is True
-            assert kwargs.get("cwd") == current_path
 
 
 # ---------------------------------------------------------------------------
-# Test: createLibraryForBenchmark subprocess error handling
+# Test: createLibraryForBenchmark handler error handling
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(M is None, reason="Module import failed")
 def test_create_library_for_benchmark_error_handling():
     """
-    Pin that subprocess errors are caught and handled.
+    Pin that package-handler errors are caught and handled.
     This exercises lines 60–63 (the try/except block).
     """
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -91,31 +81,10 @@ def test_create_library_for_benchmark_error_handling():
         lib_path = str(tmpdir / "lib")
         current_path = str(tmpdir)
 
-        # Test CalledProcessError
-        with patch("subprocess.run") as mock_run:
-            error = subprocess.CalledProcessError(1, "test_cmd")
-            mock_run.side_effect = error
-
-            # The function should call printExit on error, which exits
-            # We'll just verify the exception is handled without raising
-            with patch("tensilelite.Common.printExit") as mock_exit:
-                try:
-                    M.createLibraryForBenchmark(logic_path, lib_path, current_path)
-                except SystemExit:
-                    # printExit calls sys.exit, which is expected
-                    pass
-
-        # Test OSError
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = OSError("File not found")
-
-            with patch("tensilelite.Common.printExit") as mock_exit:
-                try:
-                    M.createLibraryForBenchmark(logic_path, lib_path, current_path)
-                except SystemExit:
-                    # printExit calls sys.exit, which is expected
-                    pass
-
+        for error in (RuntimeError("handler failed"), OSError("File not found"), SystemExit(1)):
+            with patch.object(M, "createLibrary", side_effect=error), patch.object(M, "printExit") as mock_exit:
+                M.createLibraryForBenchmark(logic_path, lib_path, current_path)
+                mock_exit.assert_called_once()
 
 
 
