@@ -1,8 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import argparse
 import os
 import sys
+import threading
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -36,6 +38,15 @@ class FakeGitHub:
     def has_budget(self, cost: int = 1) -> bool:
         return self._budget >= cost
 
+    def claim_budget(self, cost: int) -> bool:
+        if self._budget < cost:
+            return False
+        self._budget -= cost
+        return True
+
+    def release_budget(self, cost: int) -> None:
+        self._budget += cost
+
     def get(self, path: str, **params):
         self.paths.append(path)
         if path.startswith(self._failures):
@@ -58,7 +69,7 @@ class EvaluateTest(unittest.TestCase):
     def test_head_containing_cutoff_is_fresh(self):
         for status in ("ahead", "identical"):
             gh = FakeGitHub({f"compare/{CUTOFF}": comparison(status)})
-            verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+            verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
             self.assertTrue(verdict.fresh)
             self.assertEqual(verdict.missing_commits, 0)
             # A fresh PR must cost exactly one request.
@@ -73,7 +84,7 @@ class EvaluateTest(unittest.TestCase):
                 },
             }
         )
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
         self.assertFalse(verdict.fresh)
         self.assertEqual(verdict.missing_commits, 7)
         self.assertAlmostEqual(pbf.stale_days(verdict, NOW), 5.5, places=2)
@@ -83,13 +94,13 @@ class EvaluateTest(unittest.TestCase):
             {f"compare/{CUTOFF}": comparison("behind", behind_by=3)},
             failures=("compare/base1",),
         )
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
         self.assertFalse(verdict.fresh)
         self.assertIsNone(verdict.oldest_missing)
 
     def test_api_failure_fails_open(self):
         gh = FakeGitHub({}, failures=("compare/",))
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
         self.assertTrue(verdict.fresh)
         self.assertIsNotNone(verdict.error)
 
@@ -97,7 +108,7 @@ class EvaluateTest(unittest.TestCase):
 class BudgetTest(unittest.TestCase):
     def test_pr_is_not_started_without_budget_to_publish_it(self):
         gh = FakeGitHub({f"compare/{CUTOFF}": comparison("ahead")}, budget=1)
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
         self.assertTrue(verdict.skipped)
         self.assertEqual(gh.paths, [])
 
@@ -107,7 +118,7 @@ class BudgetTest(unittest.TestCase):
             {f"compare/{CUTOFF}": comparison("diverged", behind_by=7)},
             budget=pbf.REQUESTS_PER_PR,
         )
-        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF, NOW)
+        verdict = pbf.evaluate(gh, PR, "develop", CUTOFF)
         self.assertFalse(verdict.skipped)
         self.assertFalse(verdict.fresh)
         self.assertEqual(verdict.missing_commits, 7)
@@ -121,6 +132,37 @@ class BudgetTest(unittest.TestCase):
         gh.rate_limit_remaining = 260
         self.assertTrue(gh.has_budget(50))
         self.assertFalse(gh.has_budget(61))
+
+    def test_a_claim_is_held_against_later_callers(self):
+        gh = pbf.GitHub("o/r", "t", reserve=100)
+        gh.rate_limit_remaining = 106
+        # Nothing has been spent and `remaining` has not moved, so a plain
+        # check would let all three of these through.
+        self.assertTrue(gh.claim_budget(3))
+        self.assertTrue(gh.claim_budget(3))
+        self.assertFalse(gh.claim_budget(3))
+        gh.release_budget(3)
+        self.assertTrue(gh.claim_budget(3))
+
+    def test_concurrent_workers_cannot_all_clear_the_same_floor(self):
+        gh = pbf.GitHub("o/r", "t", reserve=1000)
+        gh.rate_limit_remaining = 1030
+        # Headroom for exactly ten claims of three, contended by more workers
+        # than that, all starting from the same observed `remaining`.
+        workers = pbf.MAX_WORKERS
+        start = threading.Barrier(workers)
+        admitted = []
+
+        def claim():
+            start.wait()
+            admitted.append(gh.claim_budget(pbf.REQUESTS_PER_PR))
+
+        threads = [threading.Thread(target=claim) for _ in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sum(admitted), 10)
 
     def test_request_exceptions_become_github_errors(self):
         gh = pbf.GitHub("o/r", "t")
@@ -170,7 +212,7 @@ class PublishedStatusTest(unittest.TestCase):
 
     def test_skipped_pr_is_not_read_back(self):
         gh = FakeGitHub({}, budget=0)
-        assessment = pbf.assess(gh, PR, "develop", CUTOFF, NOW, "base-freshness")
+        assessment = pbf.assess(gh, PR, "develop", CUTOFF, "base-freshness")
         self.assertTrue(assessment.verdict.skipped)
         self.assertIsNone(assessment.published)
         self.assertEqual(gh.paths, [])
@@ -196,6 +238,119 @@ class PacerTest(unittest.TestCase):
         start = time.monotonic()
         pacer.wait()
         self.assertLess(time.monotonic() - start, 0.1)
+
+
+class RetryableErrorTest(unittest.TestCase):
+    def test_transport_failures_are_retryable(self):
+        # No response at all, so the next attempt is as good as this one.
+        self.assertTrue(pbf.GitHubError("timed out").retryable)
+
+    def test_rate_limits_and_server_errors_are_retryable(self):
+        for code in (403, 429, 500, 502, 503):
+            self.assertTrue(pbf.GitHubError("x", status_code=code).retryable)
+
+    def test_client_errors_are_not_retryable(self):
+        for code in (404, 422):
+            self.assertFalse(pbf.GitHubError("x", status_code=code).retryable)
+
+
+class RetryBudgetTest(unittest.TestCase):
+    def test_spending_is_capped_at_what_is_left(self):
+        budget = pbf.RetryBudget(10.0)
+        self.assertEqual(budget.spend(4.0), 4.0)
+        self.assertEqual(budget.spend(30.0), 6.0)
+        self.assertEqual(budget.spend(1.0), 0.0)
+
+
+class FakePoster:
+    """Records status posts, raising each queued error before succeeding."""
+
+    def __init__(self, errors: list):
+        self._errors = list(errors)
+        self.attempts = 0
+
+    def post(self, path: str, payload: dict):
+        self.attempts += 1
+        if self._errors:
+            raise self._errors.pop(0)
+        return {}
+
+
+class PublishStatusTest(unittest.TestCase):
+    """A status that never lands is what an enforcing ruleset cannot survive."""
+
+    def publish(self, errors, budget=pbf.POST_RETRY_BUDGET_SECONDS):
+        gh = FakePoster(errors)
+        slept: list[float] = []
+        error = pbf.publish_status(
+            gh,
+            pbf.PostPacer(per_minute=0),
+            pbf.RetryBudget(budget),
+            "deadbeef",
+            {"state": "success"},
+            sleep=slept.append,
+        )
+        return gh, error, slept
+
+    def test_first_attempt_succeeds_without_sleeping(self):
+        gh, error, slept = self.publish([])
+        self.assertIsNone(error)
+        self.assertEqual(gh.attempts, 1)
+        self.assertEqual(slept, [])
+
+    def test_secondary_rate_limit_is_retried_when_told_to_wait(self):
+        # 403 with Retry-After is how the content-generation limit reports
+        # itself, which is the write failure a sweep is most likely to hit.
+        gh, error, slept = self.publish(
+            [pbf.GitHubError("limited", status_code=403, retry_after=7)]
+        )
+        self.assertIsNone(error)
+        self.assertEqual(gh.attempts, 2)
+        self.assertEqual(slept, [7])
+
+    def test_client_errors_are_not_retried(self):
+        gh, error, slept = self.publish(
+            [pbf.GitHubError("gone", status_code=404)] * pbf.POST_ATTEMPTS
+        )
+        self.assertIn("gone", error)
+        self.assertEqual(gh.attempts, 1)
+        self.assertEqual(slept, [])
+
+    def test_persistent_failure_is_reported_not_swallowed(self):
+        gh, error, slept = self.publish(
+            [pbf.GitHubError("down", status_code=503)] * pbf.POST_ATTEMPTS
+        )
+        self.assertIn("down", error)
+        self.assertEqual(gh.attempts, pbf.POST_ATTEMPTS)
+
+    def test_exhausted_retry_budget_stops_the_waiting(self):
+        # Several hundred PRs against a hard-down API must not sleep the job
+        # into its timeout, which would lose the summary as well.
+        gh, error, slept = self.publish(
+            [pbf.GitHubError("down", status_code=503)] * pbf.POST_ATTEMPTS,
+            budget=0.0,
+        )
+        self.assertIsNotNone(error)
+        self.assertEqual(gh.attempts, 1)
+        self.assertEqual(slept, [])
+
+
+class DayCountTest(unittest.TestCase):
+    """``--max-age-days`` is reachable from a manual dispatch."""
+
+    def test_accepts_a_positive_day_count(self):
+        self.assertEqual(pbf.day_count("3"), 3)
+
+    def test_rejects_non_numeric_input(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            pbf.day_count("three")
+
+    def test_rejects_values_that_would_stale_the_whole_queue(self):
+        # Zero or negative puts the cutoff at or after now, making develop's
+        # own tip the cutoff, so every PR not exactly on it reads as stale.
+        for value in ("0", "-1"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                pbf.day_count(value)
 
 
 def stale_verdict(missing_commits: int = 4, days_ago: float = 6.0) -> Verdict:

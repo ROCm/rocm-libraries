@@ -40,13 +40,20 @@ content-generation limit, so a sweep skips any post that would republish an
 identical status and paces the rest. In steady state most of the queue is
 unchanged and costs no write at all.
 
-The one case that is not fail-open is the rate-limit reserve. The allowance is
-shared with every other workflow in the repository, so a sweep stops rather
-than exhaust it, and the PRs it did not reach get no status from that run.
-Their PR-event status (if any) stands. Before enforcement is enabled, confirm
-from the job summary that a full sweep finishes inside the allowance; a sweep
-that routinely hits the reserve would leave PRs with no status at all, which a
-required check would turn into a permanent block.
+Fail-open covers a bad answer, not a missing one. Two things can leave a PR
+with no status at all from a run, and under enforcement a required context
+that is simply absent is a permanent block, so both are reported loudly and
+neither is allowed to pass unnoticed:
+
+* The rate-limit reserve. The allowance is shared with every other workflow in
+  the repository, so a sweep stops rather than exhaust it, and the PRs it did
+  not reach are counted in a warning.
+* A status post that keeps failing. Writes are retried within a per-run time
+  allowance, and any that still do not land are named in the job summary and
+  raised as an annotation.
+
+Before enforcement is enabled, confirm from the job summary that a full sweep
+finishes inside the allowance and publishes every status.
 
 Usage:
   python pr_base_freshness.py --pr 1234
@@ -93,9 +100,44 @@ REQUESTS_PER_PR = 3
 # human-readable day count is the first thing dropped, never the verdict.
 COSMETIC_SLACK = 50
 
+# A write that fails is the one outcome this job cannot shrug off: in enforce
+# mode a required context that is simply absent blocks its PR with no way out,
+# and the job would be green while it happened. Status posts are therefore
+# retried, which matters most for the 403 GitHub returns when the
+# content-generation limit is hit, since that is the limit the pacer aims at.
+POST_ATTEMPTS = 3
+POST_RETRY_BACKOFF_SECONDS = 5.0
+
+# Retries are for a blip, not an outage. Several hundred PRs against an API
+# that is hard down would otherwise leave the job asleep for longer than its
+# timeout, losing the run summary too, so the waiting is capped for the run as
+# a whole rather than per post.
+POST_RETRY_BUDGET_SECONDS = 120.0
+
 
 class GitHubError(RuntimeError):
     """Raised when the GitHub API returns an unusable response."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        retry_after: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+    @property
+    def retryable(self) -> bool:
+        """Whether repeating the request could plausibly succeed."""
+        if self.status_code is None:
+            # A transport failure or an unparseable body; no verdict from the
+            # server at all, so the next attempt is as good as this one.
+            return True
+        # 403 is how the secondary content-generation limit reports itself,
+        # and 429 is the primary one. Both clear on their own.
+        return self.status_code in (403, 429) or self.status_code >= 500
 
 
 class GitHub:
@@ -122,17 +164,49 @@ class GitHub:
         self.request_count = 0
         self.rate_limit_limit: Optional[int] = None
         self.rate_limit_remaining: Optional[int] = None
+        # Requests that have been admitted but not yet sent. Without this a
+        # check-then-spend is not enough: every worker in the pool can read
+        # the same ``remaining`` and then all spend against it, so the floor
+        # they were each respecting gets crossed by the group.
+        self._in_flight = 0
         # The per-PR work runs on a thread pool, so the counters it reads to
         # make budget decisions need to be consistent.
         self._lock = threading.Lock()
 
+    def _fits(self, cost: int) -> bool:
+        """Whether ``cost`` fits above reserve. Caller must hold ``_lock``."""
+        if self.rate_limit_remaining is None:
+            # Nothing observed yet; the first request establishes the floor.
+            return True
+        return self.rate_limit_remaining - self._in_flight - cost >= self.reserve
+
     def has_budget(self, cost: int = 1) -> bool:
-        """Whether ``cost`` more requests can be spent without hitting reserve."""
+        """Whether ``cost`` more requests fit, without claiming them.
+
+        For optional work only, where losing a race costs nothing worse than
+        a missing day count. Anything that must not be started unless it can
+        also be finished goes through ``claim_budget``.
+        """
         with self._lock:
-            if self.rate_limit_remaining is None:
-                # Nothing observed yet; the first request establishes the floor.
-                return True
-            return self.rate_limit_remaining - cost >= self.reserve
+            return self._fits(cost)
+
+    def claim_budget(self, cost: int) -> bool:
+        """Reserves ``cost`` requests, so concurrent callers queue up.
+
+        The claim is released once the work it covers is done, by which time
+        the requests it paid for have refreshed ``rate_limit_remaining``
+        themselves. Counting both for that window overstates the spend, which
+        is the safe direction to be wrong in.
+        """
+        with self._lock:
+            if not self._fits(cost):
+                return False
+            self._in_flight += cost
+            return True
+
+    def release_budget(self, cost: int) -> None:
+        with self._lock:
+            self._in_flight = max(0, self._in_flight - cost)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         with self._lock:
@@ -152,7 +226,9 @@ class GitHub:
             self.rate_limit_remaining = _header_int(response, "x-ratelimit-remaining")
         if not response.ok:
             raise GitHubError(
-                f"{method} {path} -> {response.status_code} {response.text[:200]}"
+                f"{method} {path} -> {response.status_code} {response.text[:200]}",
+                status_code=response.status_code,
+                retry_after=_header_int(response, "retry-after"),
             )
         try:
             return response.json() if response.content else None
@@ -188,6 +264,19 @@ class PostPacer:
             if pause > 0:
                 time.sleep(pause)
         self._last = time.monotonic()
+
+
+class RetryBudget:
+    """A whole-run allowance for sleeping between status-post attempts."""
+
+    def __init__(self, seconds: float) -> None:
+        self.remaining = seconds
+
+    def spend(self, seconds: float) -> float:
+        """Returns how much of ``seconds`` is affordable, and charges for it."""
+        allowed = max(0.0, min(seconds, self.remaining))
+        self.remaining -= allowed
+        return allowed
 
 
 @dataclass
@@ -242,14 +331,21 @@ def find_cutoff_commit(
     return commits[0]["sha"]
 
 
-def evaluate(
-    gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str, now: datetime
-) -> Verdict:
+def evaluate(gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str) -> Verdict:
     """Decides whether ``pr`` contains the cutoff commit."""
-    # Only start a PR we can also publish the answer for.
-    if not gh.has_budget(REQUESTS_PER_PR):
+    # Only start a PR we can also publish the answer for, and hold the claim
+    # so the other workers cannot admit themselves against the same headroom.
+    if not gh.claim_budget(REQUESTS_PER_PR):
         return Verdict(fresh=True, skipped=True)
+    try:
+        return _evaluate(gh, pr, base_branch, cutoff_sha)
+    finally:
+        gh.release_budget(REQUESTS_PER_PR)
 
+
+def _evaluate(
+    gh: GitHub, pr: PullRequest, base_branch: str, cutoff_sha: str
+) -> Verdict:
     try:
         comparison = gh.get(f"compare/{cutoff_sha}...{pr.head_sha}", per_page=1)
     except GitHubError as e:
@@ -300,11 +396,10 @@ def assess(
     pr: PullRequest,
     base_branch: str,
     cutoff_sha: str,
-    now: datetime,
     context: str,
 ) -> Assessment:
     """Evaluates ``pr`` and reads back whatever status it already carries."""
-    verdict = evaluate(gh, pr, base_branch, cutoff_sha, now)
+    verdict = evaluate(gh, pr, base_branch, cutoff_sha)
     if verdict.skipped:
         return Assessment(verdict)
     return Assessment(verdict, current_status(gh, pr.head_sha, context))
@@ -356,6 +451,41 @@ def status_state(verdict: Verdict, enforcing: bool) -> str:
     )
 
 
+def publish_status(
+    gh: GitHub,
+    pacer: PostPacer,
+    retries: RetryBudget,
+    head_sha: str,
+    payload: dict,
+    sleep=time.sleep,
+) -> Optional[str]:
+    """Posts a commit status, retrying failures that can clear on their own.
+
+    Returns ``None`` once the status is up, or the last error if it never got
+    there. A caller that drops the error on the floor would leave an enforcing
+    ruleset waiting on a context that is simply absent, so it is reported
+    rather than merely warned about.
+    """
+    last = ""
+    for attempt in range(1, POST_ATTEMPTS + 1):
+        pacer.wait()
+        try:
+            gh.post(f"statuses/{head_sha}", payload)
+            return None
+        except GitHubError as e:
+            last = str(e)
+            if not e.retryable or attempt == POST_ATTEMPTS:
+                break
+            # GitHub says when to come back for a rate limit; otherwise back
+            # off linearly. Either way it comes out of the run's allowance.
+            delay = retries.spend(e.retry_after or POST_RETRY_BACKOFF_SECONDS * attempt)
+            if not delay:
+                break
+            print(f"::warning::status post failed ({e}); retrying in {delay:.0f}s")
+            sleep(delay)
+    return last
+
+
 def list_open_prs(
     gh: GitHub, base_branch: str, include_drafts: bool, limit: int
 ) -> list[PullRequest]:
@@ -394,6 +524,23 @@ def fetch_pr(gh: GitHub, number: int) -> PullRequest:
     return PullRequest(item["number"], item["head"]["sha"], item["draft"])
 
 
+def day_count(value: str) -> int:
+    """Argparse type for ``--max-age-days``, which a manual dispatch can set.
+
+    Believing a bad value here is worse than refusing it. Zero or negative
+    puts the cutoff at or after now, so ``develop``'s own tip becomes the
+    cutoff and every PR that is not exactly on it reads as stale, which under
+    enforcement is the whole queue blocked at once.
+    """
+    try:
+        days = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a whole number of days: {value!r}")
+    if days < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1 day, got {days}")
+    return days
+
+
 def write_summary(lines: Iterable[str]) -> None:
     """Appends markdown to the GitHub Actions job summary, if there is one."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -407,7 +554,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"))
     parser.add_argument("--base-branch", default="develop")
-    parser.add_argument("--max-age-days", type=int, default=3)
+    parser.add_argument("--max-age-days", type=day_count, default=3)
     parser.add_argument(
         "--context", default="base-freshness", help="Commit status context name"
     )
@@ -492,18 +639,18 @@ def main() -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         assessments = list(
             pool.map(
-                lambda pr: assess(
-                    gh, pr, args.base_branch, cutoff_sha, now, args.context
-                ),
+                lambda pr: assess(gh, pr, args.base_branch, cutoff_sha, args.context),
                 prs,
             )
         )
 
     stale = []
     skipped = []
+    unpublished = []
     posted = 0
     unchanged = 0
     pacer = PostPacer(args.posts_per_minute)
+    retries = RetryBudget(POST_RETRY_BUDGET_SECONDS)
     for pr, assessment in zip(prs, assessments):
         verdict = assessment.verdict
         if verdict.skipped:
@@ -526,12 +673,23 @@ def main() -> int:
         payload = {"state": state, "context": args.context, "description": description}
         if target_url:
             payload["target_url"] = target_url
-        pacer.wait()
-        try:
-            gh.post(f"statuses/{pr.head_sha}", payload)
+        error = publish_status(gh, pacer, retries, pr.head_sha, payload)
+        if error:
+            unpublished.append((pr, error))
+        else:
             posted += 1
-        except GitHubError as e:
-            print(f"::warning::could not post status for #{pr.number}: {e}")
+
+    if unpublished:
+        # An annotation rather than a non-zero exit, because the run did its
+        # job for everything else and a red job here would be read as a
+        # verdict. But this is the one outcome an enforcing ruleset turns into
+        # a permanent block, so it has to be impossible to miss. The next
+        # sweep retries these; it is a standing failure that needs the alarm.
+        print(
+            f"::error::{len(unpublished)} of {len(prs)} PRs have no "
+            f"{args.context} status from this run: "
+            + ", ".join(f"#{pr.number}" for pr, _ in unpublished[:20])
+        )
 
     if skipped:
         # Loud on purpose. Before enforcement is switched on, a sweep that
@@ -563,11 +721,22 @@ def main() -> int:
             shown = f"{days:.1f}" if days else "?"
             summary.append(f"| #{pr.number} | {shown} | {verdict.missing_commits} |")
         summary.append("")
+    if unpublished:
+        # Named individually, because clearing this is per-PR work: these are
+        # the ones an enforcing ruleset would have nothing to check against.
+        summary += [
+            f"**{len(unpublished)} statuses could not be published** after "
+            f"{POST_ATTEMPTS} attempts:",
+            "",
+        ]
+        summary += [f"- #{pr.number}: {error}" for pr, error in unpublished]
+        summary.append("")
     summary.append(
         f"_{gh.request_count} API requests ({posted} statuses written, "
-        f"{unchanged} already correct); rate limit "
-        f"{gh.rate_limit_remaining}/{gh.rate_limit_limit} remaining "
-        f"(reserve {gh.reserve})_"
+        f"{unchanged} already correct"
+        + (f", {len(unpublished)} failed" if unpublished else "")
+        + f"); rate limit {gh.rate_limit_remaining}/{gh.rate_limit_limit} "
+        f"remaining (reserve {gh.reserve})_"
     )
     write_summary(summary)
 

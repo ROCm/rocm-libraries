@@ -53,9 +53,15 @@ on:
         type: choice
         options: [report, enforce]
         default: report
+      # A list rather than free text. This value sets the cutoff date, so a
+      # zero, a negative or a typo would put the cutoff at or after now, make
+      # `develop`'s own tip the cutoff, and mark the entire queue stale. The
+      # script rejects those too, but there is no reason to be able to type
+      # them in the first place.
       max_age_days:
         description: 'Maximum days the base may lag develop'
-        type: string
+        type: choice
+        options: ['1', '2', '3', '5', '7', '14']
         default: '3'
       dry_run:
         description: 'Evaluate and log, but post no statuses'
