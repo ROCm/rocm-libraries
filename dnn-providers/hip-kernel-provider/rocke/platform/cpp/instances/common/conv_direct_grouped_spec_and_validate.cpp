@@ -116,6 +116,7 @@ rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void)
     p.KW = 3;
     p.PAD = 1;
     p.stride = 1;
+    p.dtype = "fp16";
     return p;
 }
 
@@ -200,9 +201,10 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     char bg_buf[32];
     const char* db_part;
     const char* parts[4];
-    const char* flag_names[1];
-    int flag_on[1];
+    const char* flag_names[2];
+    int flag_on[2];
     rocke_status_t st;
+    const char* dtype;
 
     if(spec == NULL || out == NULL)
     {
@@ -220,16 +222,19 @@ rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spe
     db_part = spec->double_buffer ? "db" : "sb";
 
     /* kernel_name_join(name, short, "bq..", "bg..", "db"/"sb",
-     *                  flags={"k32": fold_k32}) */
+     *                  flags={"k32": fold_k32, "bf16": dtype=="bf16"}) */
     parts[0] = short_buf;
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     parts[3] = db_part;
 
+    dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
     flag_names[0] = "k32";
     flag_on[0] = spec->fold_k32 ? 1 : 0;
+    flag_names[1] = "bf16";
+    flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
 
-    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
 rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t* spec,
@@ -242,6 +247,18 @@ rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason != NULL && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv16cSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     /* if p.cpg != 16 or p.kpg != 16: raise ValueError(...) */
     if(p->cpg != 16 || p->kpg != 16)
     {
@@ -309,6 +326,13 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     }
 
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            CK_DCONV16C_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+        }
+    }
     /* if p.cpg != 16 or p.kpg != 16: return False, ... */
     if(p->cpg != 16 || p->kpg != 16)
     {
@@ -322,18 +346,23 @@ bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spe
     }
 
     mma = rocke_archtarget_mma(target);
-    /* if not target.mma.has_shape(f16,f16,fp32, 16,16,16): return False, ... */
-    if(!rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16))
     {
-        CK_DCONV16C_REJECT("missing 16x16x16 f16 MFMA atom on %s", arch);
-    }
-    /* if spec.fold_k32 and not target.mma.has_shape(f16,f16,fp32, 16,16,32): ... */
-    if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
-    {
-        CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 f16 MFMA atom, absent on %s; use "
-                           "fold_k32=False for a %s-capable kernel",
-                           arch,
-                           arch);
+        /* ab_dtype: "f16" or "bf16" based on problem.dtype */
+        const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        /* if not target.mma.has_shape(ab,ab,fp32, 16,16,16): return False, ... */
+        if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+        {
+            CK_DCONV16C_REJECT("missing 16x16x16 %s MFMA atom on %s", ab, arch);
+        }
+        /* if spec.fold_k32 and not target.mma.has_shape(ab,ab,fp32, 16,16,32): ... */
+        if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
+        {
+            CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 %s MFMA atom, absent on %s; use "
+                               "fold_k32=False for a %s-capable kernel",
+                               ab,
+                               arch,
+                               arch);
+        }
     }
 
     if(reason != NULL && reason_cap > 0)
@@ -585,6 +614,71 @@ rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
     return ROCKE_OK;
 }
 
+rocke_status_t rocke_direct_conv_signature_for_dtype(struct rocke_arena* arena,
+                                                     const char* dtype,
+                                                     struct rocke_sig_entry* out,
+                                                     size_t out_cap,
+                                                     size_t* out_count)
+{
+    rocke_status_t st;
+    /* Resolve dtype: "fp16" -> "f16", "bf16" -> "bf16", NULL -> "f16". */
+    const char* dt;
+
+    if(arena == NULL || out == NULL || out_cap < 6)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(dtype == NULL || strcmp(dtype, "fp16") == 0 || strcmp(dtype, "f16") == 0)
+    {
+        dt = "f16";
+    }
+    else if(strcmp(dtype, "bf16") == 0)
+    {
+        dt = "bf16";
+    }
+    else
+    {
+        return ROCKE_ERR_VALUE; /* unsupported dtype */
+    }
+
+    st = rocke_sig_param(arena, "A", dt, NULL, &out[0]);
+    if(st != ROCKE_OK)
+    {
+        return st;
+    }
+    st = rocke_sig_param(arena, "B", dt, NULL, &out[1]);
+    if(st != ROCKE_OK)
+    {
+        return st;
+    }
+    st = rocke_sig_param(arena, "D", dt, NULL, &out[2]);
+    if(st != ROCKE_OK)
+    {
+        return st;
+    }
+    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
+    if(st != ROCKE_OK)
+    {
+        return st;
+    }
+    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
+    if(st != ROCKE_OK)
+    {
+        return st;
+    }
+    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
+    if(st != ROCKE_OK)
+    {
+        return st;
+    }
+
+    if(out_count != NULL)
+    {
+        *out_count = 6;
+    }
+    return ROCKE_OK;
+}
+
 /* ===================================================================== *
  *  DirectConv8cSpec  (cpg = kpg = 8)
  * ===================================================================== */
@@ -630,7 +724,15 @@ rocke_status_t rocke_direct_conv_8c_kernel_name(const rocke_direct_conv_8c_spec_
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     parts[3] = spec->double_buffer ? "db" : "sb";
-    return rocke_kernel_name_join(spec->name, parts, 4, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        /* flags={"bf16": dtype=="bf16"} */
+        const char* flag_names8c[1] = {"bf16"};
+        const char* dt8c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        int flag_on8c[1];
+        flag_on8c[0] = (strcmp(dt8c, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 4, flag_names8c, flag_on8c, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* spec,
@@ -643,6 +745,17 @@ rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv8cSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 8 || p->kpg != 8)
     {
         if(reason && reason_cap > 0)
@@ -689,6 +802,10 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
                                         size_t reason_cap)
 {
     const rocke_direct_conv_problem_t* p;
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const char* ab;
+
     if(spec == NULL)
     {
         if(reason && reason_cap > 0)
@@ -701,12 +818,25 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
     {
         arch = "gfx950";
     }
-    if(rocke_archtarget_from_gfx(arch) == NULL)
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
     {
         rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            }
+            return false;
+        }
+    }
     if(p->cpg != 8 || p->kpg != 8)
     {
         if(reason && reason_cap > 0)
@@ -736,6 +866,16 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
         if(reason && reason_cap > 0)
         {
             snprintf(reason, reason_cap, "DirectConv8cSpec block_q must be a multiple of 16");
+        }
+        return false;
+    }
+    mma = rocke_archtarget_mma(target);
+    ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "missing 16x16x16 %s MFMA atom on %s", ab, arch);
         }
         return false;
     }
@@ -792,7 +932,15 @@ rocke_status_t rocke_direct_conv_32c_kernel_name(const rocke_direct_conv_32c_spe
     parts[1] = bq_buf;
     parts[2] = bg_buf;
     parts[3] = spec->double_buffer ? "db" : "sb";
-    return rocke_kernel_name_join(spec->name, parts, 4, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        /* flags={"bf16": dtype=="bf16"} */
+        const char* flag_names32c[1] = {"bf16"};
+        const char* dt32c = spec->problem.dtype ? spec->problem.dtype : "fp16";
+        int flag_on32c[1];
+        flag_on32c[0] = (strcmp(dt32c, "bf16") == 0) ? 1 : 0;
+        return rocke_kernel_name_join(
+            spec->name, parts, 4, flag_names32c, flag_on32c, 1, out, out_cap, NULL);
+    }
 }
 
 rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t* spec,
@@ -805,6 +953,17 @@ rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason, reason_cap, "DirectConv32cSpec: unsupported dtype '%s'", dt);
+            }
+            return ROCKE_ERR_VALUE;
+        }
+    }
     if(p->cpg != 32 || p->kpg != 32)
     {
         if(reason && reason_cap > 0)
@@ -851,6 +1010,10 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
                                          size_t reason_cap)
 {
     const rocke_direct_conv_problem_t* p;
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const char* ab;
+
     if(spec == NULL)
     {
         if(reason && reason_cap > 0)
@@ -863,12 +1026,25 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
     {
         arch = "gfx950";
     }
-    if(rocke_archtarget_from_gfx(arch) == NULL)
+    target = rocke_archtarget_from_gfx(arch);
+    if(target == NULL)
     {
         rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            if(reason && reason_cap > 0)
+            {
+                snprintf(
+                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            }
+            return false;
+        }
+    }
     if(p->cpg != 32 || p->kpg != 32)
     {
         if(reason && reason_cap > 0)
@@ -898,6 +1074,16 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
         if(reason && reason_cap > 0)
         {
             snprintf(reason, reason_cap, "DirectConv32cSpec block_q must be a multiple of 32");
+        }
+        return false;
+    }
+    mma = rocke_archtarget_mma(target);
+    ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 32, 32, 8))
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "missing 32x32x8 %s MFMA atom on %s", ab, arch);
         }
         return false;
     }

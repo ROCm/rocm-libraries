@@ -89,6 +89,7 @@ typedef struct rocke_dconv_16c_ctx
     const rocke_direct_conv_16c_spec_t* spec; /* the DirectConv16cSpec        */
     const char* arch; /* NULL-normalised "gfx950"     */
     rocke_direct_conv_problem_t p; /* spec->problem (by value)     */
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() depending on p.dtype */
 
     /* ---- block-geometry scalars (Python all-caps locals) -- */
     int BLOCK_Q; /* spec.block_q                              */
@@ -386,6 +387,7 @@ typedef struct rocke_dconv_8c_ctx
     const rocke_direct_conv_8c_spec_t* spec;
     const char* arch;
     rocke_direct_conv_problem_t p;
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() */
 
     int BLOCK_Q;
     int BLOCK_GROUPS;
@@ -485,6 +487,7 @@ typedef struct rocke_dconv_32c_ctx
     const rocke_direct_conv_32c_spec_t* spec;
     const char* arch;
     rocke_direct_conv_problem_t p;
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() */
 
     int BLOCK_Q;
     int BLOCK_GROUPS;
