@@ -23,8 +23,11 @@
 ################################################################################
 
 import hashlib
+import json
 import os
 import shutil
+import stat
+import tempfile
 import time
 
 from pathlib import Path
@@ -40,6 +43,49 @@ _STATIC_HEADER_FILES = [
     "ReductionTemplate.h",
     "memory_gfx.h",
 ]
+
+_CACHE_FORMAT_VERSION = 1
+_CACHE_MANIFEST = "manifest.json"
+
+
+def _fileDigest(path):
+    """Return the SHA256 digest of a file without loading it all into memory."""
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _expectedCacheFiles(kernelPath, cmdlineArchs):
+    """Return the cache-relative helper artifacts required by a build."""
+    kernelName = Path(kernelPath).stem
+    expected = set()
+    for arch in cmdlineArchs:
+        parts = arch.split(":")
+        baseArch = parts[0]
+        xnack = next(
+            (feature for feature in parts[1:] if feature.startswith("xnack")), None
+        )
+        filenameArch = baseArch + ("-" + xnack if xnack else "")
+        expected.add(
+            (Path(baseArch) / f"{kernelName}.so-000-{filenameArch}.hsaco").as_posix()
+        )
+    return expected
+
+
+def _validArtifactName(relativeName):
+    """Whether a manifest name has the canonical <arch>/<file>.hsaco shape."""
+    if not isinstance(relativeName, str):
+        return False
+    path = Path(relativeName)
+    return (
+        not path.is_absolute()
+        and len(path.parts) == 2
+        and all(part not in ("", ".", "..") for part in path.parts)
+        and path.as_posix() == relativeName
+        and path.suffix == ".hsaco"
+    )
 
 
 def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
@@ -58,48 +104,182 @@ def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
     return h.hexdigest()
 
 
-def _checkCache(cacheDir, cacheKey):
-    """Check if a valid cache entry exists. Returns list of .hsaco Paths or None.
-
-    Walks one level: cache entries are organized as <key>/<base-arch>/<*.hsaco>
-    to mirror the on-disk install layout. A flat <key>/<*.hsaco> entry from an
-    older cache version is treated as missing so it gets rewritten in the new
-    structure on the next store.
-    """
-    entryDir = Path(cacheDir) / cacheKey
+def _checkCacheEntry(entryDir, cacheKey, expectedFiles=None):
+    """Validate one cache entry directory against its key and expected files."""
+    entryDir = Path(entryDir)
     if not entryDir.is_dir():
         return None
-    hsacoFiles = list(entryDir.glob("*/*.hsaco"))
-    if not hsacoFiles or any(f.stat().st_size == 0 for f in hsacoFiles):
+
+    try:
+        manifest = json.loads((entryDir / _CACHE_MANIFEST).read_text())
+        if not isinstance(manifest, dict):
+            return None
+        records = manifest.get("files")
+        if (
+            manifest.get("version") != _CACHE_FORMAT_VERSION
+            or manifest.get("cache_key") != cacheKey
+            or not isinstance(records, dict)
+            or not records
+            or not all(_validArtifactName(name) for name in records)
+        ):
+            return None
+
+        recordNames = set(records)
+        if expectedFiles is not None and recordNames != set(expectedFiles):
+            return None
+
+        actualPaths = {
+            p.relative_to(entryDir).as_posix() for p in entryDir.rglob("*.hsaco")
+        }
+        if recordNames != actualPaths:
+            return None
+
+        hsacoFiles = []
+        for relativeName in sorted(records):
+            cachedFile = entryDir / relativeName
+            record = records[relativeName]
+            if (
+                cachedFile.is_symlink()
+                or not cachedFile.is_file()
+                or record["size"] <= 0
+                or cachedFile.stat().st_size != record["size"]
+                or _fileDigest(cachedFile) != record["sha256"]
+            ):
+                return None
+            hsacoFiles.append(cachedFile)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
         return None
+
     return hsacoFiles
 
 
-def _populateCache(cacheDir, cacheKey, hsacoFiles, storedArchNames=None):
-    """Atomically populate a cache entry. Safe under concurrent writes.
+def _checkCache(cacheDir, cacheKey, expectedFiles=None):
+    """Check if a valid cache entry exists. Returns list of .hsaco Paths or None.
+
+    Cache entries are organized as <key>/<base-arch>/<*.hsaco> and contain a
+    versioned manifest written only after every artifact has been staged.  The
+    manifest makes a missing, truncated, or stale subset a miss instead of a
+    false hit. Entries from before the manifest format are intentionally misses
+    and are replaced on the next store. expectedFiles, when supplied, is the
+    exact cache-relative artifact set required by the current build.
+    """
+    entryDir = Path(cacheDir) / cacheKey
+    return _checkCacheEntry(entryDir, cacheKey, expectedFiles)
+
+
+def _removePath(path):
+    """Best-effort removal for an internal cache file or directory."""
+    path = Path(path)
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _populateCache(
+    cacheDir, cacheKey, hsacoFiles, storedArchNames=None, expectedFiles=None
+):
+    """Atomically populate or repair a cache entry.
 
     storedArchNames maps each file's parent subtree back to the base arch the
     entry is keyed on (the key is the compiler target, so a stepping and its base
-    share an entry). Empty/identity for ordinary builds.
+    share an entry). Empty/identity for ordinary builds. Each writer stages in a
+    unique directory. A valid concurrent winner is kept; an invalid entry is
+    quarantined before the complete staged entry is renamed into place.
+    expectedFiles prevents a partial build output from being published.
     """
     storedNames = storedArchNames or {}
     cacheDir = Path(cacheDir)
     finalDir = cacheDir / cacheKey
-    if finalDir.exists():
+    cacheDir.mkdir(parents=True, exist_ok=True)
+
+    if _checkCache(cacheDir, cacheKey, expectedFiles) is not None:
         return
 
-    tmpDir = cacheDir / f".tmp_{cacheKey}_{os.getpid()}"
-    tmpDir.mkdir(parents=True, exist_ok=True)
-    for f in hsacoFiles:
-        src = Path(f)
-        archSubdir = tmpDir / storedNames.get(src.parent.name, src.parent.name)
-        archSubdir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, archSubdir / src.name)
-
+    tmpDir = Path(tempfile.mkdtemp(prefix=f".tmp_{cacheKey}_", dir=cacheDir))
     try:
-        tmpDir.rename(finalDir)
+        manifestFiles = {}
+        for f in hsacoFiles:
+            src = Path(f)
+            archName = storedNames.get(src.parent.name, src.parent.name)
+            relativeName = (Path(archName) / src.name).as_posix()
+            if not _validArtifactName(relativeName) or relativeName in manifestFiles:
+                return
+
+            dst = tmpDir / archName / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            size = dst.stat().st_size
+            if size == 0:
+                return
+            manifestFiles[relativeName] = {
+                "size": size,
+                "sha256": _fileDigest(dst),
+            }
+
+        if not manifestFiles or (
+            expectedFiles is not None and set(manifestFiles) != set(expectedFiles)
+        ):
+            return
+
+        manifest = {
+            "version": _CACHE_FORMAT_VERSION,
+            "cache_key": cacheKey,
+            "files": manifestFiles,
+        }
+        (tmpDir / _CACHE_MANIFEST).write_text(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        # mkdtemp deliberately starts at 0700. Match the configured cache root
+        # only after staging is complete so the published entry retains shared-
+        # cache access without exposing a partially written entry.
+        tmpDir.chmod(stat.S_IMODE(cacheDir.stat().st_mode))
+
+        # A directory rename publishes the artifacts and their manifest as one
+        # unit. If an old/incomplete entry occupies the key, move it aside first;
+        # readers see either that invalid entry (a miss), no entry (a miss), or
+        # the complete replacement. A concurrent valid writer always wins.
+        try:
+            tmpDir.rename(finalDir)
+            tmpDir = None
+            return
+        except OSError:
+            if _checkCache(cacheDir, cacheKey, expectedFiles) is not None:
+                return
+
+        staleDir = cacheDir / f".stale_{cacheKey}_{tmpDir.name}"
+        try:
+            finalDir.rename(staleDir)
+        except OSError:
+            return
+
+        try:
+            tmpDir.rename(finalDir)
+            tmpDir = None
+        except OSError:
+            # The entry moved aside above may be a valid writer that won after
+            # our last check. If our publication fails, put that winner back.
+            if (
+                not finalDir.exists()
+                and _checkCacheEntry(staleDir, cacheKey, expectedFiles) is not None
+            ):
+                try:
+                    staleDir.rename(finalDir)
+                except OSError:
+                    pass
+            return
+        finally:
+            _removePath(staleDir)
     except OSError:
-        shutil.rmtree(tmpDir, ignore_errors=True)
+        # The cache is an optimization; a cache filesystem failure must not
+        # turn a successful helper-kernel build into a failed build.
+        return
+    finally:
+        if tmpDir is not None:
+            _removePath(tmpDir)
 
 
 def _evictStale(cacheDir, maxAgeDays):
@@ -136,6 +316,7 @@ class HelperKernelCache:
         self.dir = Path(os.environ.get("TENSILE_HELPER_CACHE_DIR",
                                        str(self._DEFAULT_DIR)))
         self._cacheKey = None
+        self._expectedFiles = None
         _evictStale(self.dir, self._MAX_AGE_DAYS)
 
     def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destRoot, outputArchNames=None):
@@ -151,7 +332,8 @@ class HelperKernelCache:
             return False, []
 
         self._cacheKey = _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler)
-        cachedFiles = _checkCache(self.dir, self._cacheKey)
+        self._expectedFiles = _expectedCacheFiles(kernelPath, cmdlineArchs)
+        cachedFiles = _checkCache(self.dir, self._cacheKey, self._expectedFiles)
 
         if cachedFiles:
             coPaths = []
@@ -161,8 +343,8 @@ class HelperKernelCache:
                     archSubdir = Path(destRoot) / outArchNames.get(f.parent.name, f.parent.name)
                     archSubdir.mkdir(parents=True, exist_ok=True)
                     dst = archSubdir / f.name
-                    shutil.copy2(f, dst)
                     coPaths.append(str(dst))
+                    shutil.copy2(f, dst)
                 return True, coPaths
             except OSError:
                 for p in coPaths:
@@ -184,5 +366,9 @@ class HelperKernelCache:
         storedArchNames = {out: base for base, out in (outputArchNames or {}).items()}
         self.dir.mkdir(parents=True, exist_ok=True)
         _populateCache(
-            self.dir, self._cacheKey, [Path(p) for p in coPaths], storedArchNames
+            self.dir,
+            self._cacheKey,
+            [Path(p) for p in coPaths],
+            storedArchNames,
+            self._expectedFiles,
         )
