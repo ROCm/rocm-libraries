@@ -10,6 +10,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 const std::vector<IngestorPack>& ingestorPacks()
 {
+    // Function-local static: entries are plain function pointers, so this cannot fail
+    // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
@@ -19,7 +21,8 @@ const std::vector<IngestorPack>& ingestorPacks()
 
 void resetIngestorModuleCachesForTesting()
 {
-    // Packs with a null resetModuleCache are skipped.
+    // Driven off the same table as registration, so a pack that gains a kpack cache
+    // cannot be left out of the reset by someone who only edited its own file.
     for(const auto& pack : ingestorPacks())
     {
         if(pack.resetModuleCache != nullptr)

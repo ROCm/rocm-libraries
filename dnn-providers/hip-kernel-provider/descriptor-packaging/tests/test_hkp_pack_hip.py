@@ -317,9 +317,10 @@ def test_multi_kernel_stored_once(built, rocm_kpack_dir):
     # one TOC entry (one gfx942 ordinal), not one per UKD.
     entries = archive.toc[shared]
     assert list(entries) == ["gfx942"]
-    # The archive stores one blob per distinct toc_key, not per UKD. gfx942 carries
-    # five UKDs (four distinct inline variants) plus one standalone, so a per-UKD
-    # duplication regression shows up as more TOC entries than distinct toc_keys.
+    # And overall the archive stores one blob per distinct toc_key, not per UKD.
+    # gfx942 carries five UKDs (four distinct inline variants) plus one
+    # standalone UKD (a fifth distinct variant), so a per-UKD duplication
+    # regression would show up as more TOC entries than distinct toc_keys.
     all_toc_keys = set()
     for jp in (built["out"] / "gfx942").glob("*.json"):
         if jp.name == "kpack" or not (

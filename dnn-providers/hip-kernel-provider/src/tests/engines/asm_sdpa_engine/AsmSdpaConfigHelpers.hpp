@@ -13,7 +13,6 @@
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 namespace asm_sdpa_engine
 {

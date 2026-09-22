@@ -151,11 +151,11 @@ Next: to build and run the sample programs, see [Building the Samples](#building
 
 ## Building the Samples
 
-The samples build against an existing hipDNN build and load an engine plugin (a provider) at runtime.
+The samples build against a hipDNN you have already built, and at runtime they load an engine plugin (a provider) to execute graphs. There are two ways to satisfy both.
 
-**Superbuild (recommended).** The `hipdnn-samples` preset builds hipDNN, the providers, and the samples in one tree, so the samples find hipDNN and the plugins are present at runtime. See [Superbuild](#superbuild).
+**Superbuild (recommended).** The `hipdnn-samples` preset builds hipDNN, the providers, and the samples together in one tree, so the samples find hipDNN and the provider plugins are present to load at runtime. Nothing extra to install or configure. See [Superbuild](#superbuild).
 
-**Standalone.** Build hipDNN standalone first ([Build hipDNN](#2-build-hipdnn)), which produces a CMake package config under `projects/hipdnn/build/<release|debug>/lib/cmake`. Then build the samples with the matching preset, which already points `CMAKE_PREFIX_PATH` at that build tree:
+**Standalone.** Build hipDNN standalone first ([Build hipDNN](#2-build-hipdnn)); that produces a CMake package config under `projects/hipdnn/build/<release|debug>/lib/cmake`. Then build the samples from the `samples` directory using the matching preset, which already points `CMAKE_PREFIX_PATH` at that build tree:
 
 ```bash
 cd rocm-libraries/projects/hipdnn/samples
@@ -163,7 +163,7 @@ cmake --preset release   # matches the hipDNN build type; use debug for a debug 
 cmake --build build/release
 ```
 
-A standalone hipDNN build produces no provider plugins, so the samples have no engine to load. Build a provider and either install its plugin alongside hipDNN or point `HIPDNN_PLUGIN_DIR` at it.
+A standalone hipDNN build does **not** build any provider plugins, so the samples will have no engine to load at runtime. To run them, build a provider and either install its plugin alongside hipDNN or point `HIPDNN_PLUGIN_DIR` at the plugin's location. Because the superbuild handles this for you, it is the simpler choice for building and running samples against an in-tree hipDNN build.
 
 For running and profiling the built samples, see the [samples README](../samples/README.md).
 
@@ -182,7 +182,7 @@ The methods below are available for both Linux and Windows. First identify your 
 
 ### Pointing the build at ROCm
 
-However you obtain ROCm, the build has to find it:
+However you obtain ROCm below, the build has to be able to find it. There are multiple ways to do this:
 
 - **Add the ROCm `bin` folder to your `PATH`** so it is auto-detected (the presets and the default toolchains discover ROCm from `PATH`). If ROCm is on `PATH`, nothing else is needed. On Windows, adding it to `PATH` is generally required regardless, so the built executables can load the ROCm DLLs at runtime.
 - **Pass the ROCm folder to CMake explicitly** with `-DROCM_PATH=<folder>` at configure time, which uses the compiler and libraries from that folder directly. Use this when ROCm is not on your `PATH`.
@@ -232,7 +232,7 @@ Use the plain distribution tarball; the parallel `...-tests.tar.gz` files hold t
 tar -xf therock-dist-<platform>-<group>-<version>.tar.gz -C ./rocm
 ```
 
-The folder you extracted to is the ROCm folder; point the build at it (see [Pointing the build at ROCm](#pointing-the-build-at-rocm)) with `ROCM_PATH=<absolute path>` or by adding its `bin` subfolder (which should contain `rocminfo`) to `PATH`.
+The folder you extracted to is the ROCm folder. Point the build at it (see [Pointing the build at ROCm](#pointing-the-build-at-rocm)) either by setting `ROCM_PATH` to its absolute path, or by adding its `bin` subfolder to `PATH`. For example, if you extracted to `./rocm`, that folder's absolute path is the `ROCM_PATH` value and its bin folder is `./rocm/bin` (which should contain `rocminfo`).
 
 ### Install script
 
@@ -246,7 +246,7 @@ python TheRock/build_tools/install_rocm_from_artifacts.py --release <version> --
 ```
 `--latest-release` is convenient for development; use `--release <version>` to pull a specific build. Run the script with `--help`, or see [RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md), for the full option list.
 
-The `--output-dir` you chose is the ROCm folder; point the build at it (see [Pointing the build at ROCm](#pointing-the-build-at-rocm)) with `ROCM_PATH=<absolute path>` or by adding its `bin` subfolder to `PATH`.
+The `--output-dir` you chose is the ROCm folder. Point the build at it (see [Pointing the build at ROCm](#pointing-the-build-at-rocm)) either by setting `ROCM_PATH` to its absolute path, or by adding its `bin` subfolder to `PATH`. For example, with `--output-dir ./rocm`, that folder's absolute path is the `ROCM_PATH` value and its bin folder is `./rocm/bin` (which should contain `rocminfo`).
 
 ## Build Configurations
 
@@ -271,9 +271,9 @@ cmake --build build/release --target coverage
 Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
 > [!IMPORTANT]
-> ASAN is a manual process; there is no ASAN coverage in CI. The ROCm build requirement differs by platform:
-> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code. Run the Linux ASAN tests when such a build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows** does not require an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
+> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
+> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
 
 Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
 
@@ -284,11 +284,14 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Every tier (`quick`, `standard`, `comprehensive`, `full`) is expected to run cleanly under an ASAN build; `standard` is the default check. See [Testing § Test Categories](./Testing.md#test-categories) for what each tier covers.
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing § Test Categories](./Testing.md#test-categories) for what each tier covers.
 
-**Not every GPU architecture supports ASAN** on Linux or Windows. Tests that cannot run under ASAN guard themselves with the `SKIP_IF_ASAN()` GTest macro, or have their ctest registration disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`; either way they report as skipped.
+**Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
-On Linux the ASAN suite runs clean. On Windows ASAN builds and runs, but a fully clean run is not yet available.
+**Current status:**
+
+- **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
+- **Windows** - ASAN is supported and builds/runs, but a few issues remain that are expected to be resolved soon, so a fully clean ASAN run is not yet available on Windows.
 
 #### Windows notes
 
@@ -401,15 +404,18 @@ The other lever is the packer's worker count. A CMake-driven build fixes it per 
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
-With the ROCm bin folder on your system path the AMD toolchain is detected automatically. Otherwise these CMake variables drive tool discovery.
+If the ROCm bin folder is included in your system path then the AMD toolchain should be detected automatically. If not, the following CMake variables can be used to assist CMake in the tool discovery.
 
-- **`ROCM_PATH`**: root ROCm folder; the toolchain folders are hard-coded from it, skipping auto-detection. No default. **Do not set it in your environment** — that makes the compiler check fail. Pass it to cmake instead: `-DROCM_PATH=/path/to/rocm`.
-- **`ROCM_CMAKE_PATH`**: same purpose, but relies on CMake's built-in detection (default `/opt/rocm` on Linux, `C:/dist/therock` on Windows). Safe to set in your environment, and set automatically when the ROCm bin folder is on your path. Only the standalone toolchain (`projects/hipdnn/cmake/ClangToolChain.cmake`) understands it; the superbuild's default toolchain uses `ROCM_PATH` only, unless you override it with `-DCMAKE_TOOLCHAIN_FILE=projects/hipdnn/cmake/ClangToolChain.cmake` (see the tip under [Superbuild](#superbuild)).
-- **`CMAKE_INSTALL_PREFIX`**: where `install` puts hipDNN. Defaults to `ROCM_PATH`, then `ROCM_CMAKE_PATH`, then the CMake system default.
+- **`ROCM_PATH`**: Specifies the root ROCM folder location and the toolchain folders are hard-coded using that path, skipping auto-detection of the toolchain (does not have a default value). **DO NOT SET ROCM_PATH IN YOUR ENVIRONMENT.** Setting ROCM_PATH in the environment will cause the compiler check to fail. Instead, use the -D option to cmake. E.g.: `-DROCM_PATH=/path/to/rocm`.
+- **`ROCM_CMAKE_PATH`**: Similar to `ROCM_PATH` but relies on CMake's built-in detection to locate the toolchain. (Default: `/opt/rocm` (Linux) / `C:/dist/therock` (Windows)). Unlike `ROCM_PATH`, it is safe to set in your system environment, so it does not have to be passed on every configure. Will be set automatically if the ROCm bin folder is in your system path.
+  - This variable is understood by the standalone `projects/hipdnn/cmake/ClangToolChain.cmake` toolchain. The superbuild's default toolchain (`cmake/toolchains/rocm-clang.cmake`) does not understand it; it uses `ROCM_PATH` only. You can still use `ROCM_CMAKE_PATH` with the superbuild by overriding its toolchain with `-DCMAKE_TOOLCHAIN_FILE=projects/hipdnn/cmake/ClangToolChain.cmake` (see the tip under [Superbuild](#superbuild)), after which setting `ROCM_CMAKE_PATH` in your environment applies to the superbuild as well.
 
-When both are set, `ROCM_CMAKE_PATH` wins: the standalone toolchain auto-detects from it and does not hard-code the compiler from `ROCM_PATH`. To force the compiler and libraries from one folder, set `ROCM_PATH` and leave `ROCM_CMAKE_PATH` unset.
+If both `ROCM_CMAKE_PATH` and `ROCM_PATH` are set, `ROCM_CMAKE_PATH` takes precedence: the standalone toolchain uses CMake-based auto-detection from `ROCM_CMAKE_PATH` and does not hard-code the compiler from `ROCM_PATH`. To force the compiler and libraries from a specific folder, set `ROCM_PATH` and leave `ROCM_CMAKE_PATH` unset.
 
-The HIP compiler is required for some integration tests, but not for the hipDNN library itself.
+The HIP compiler is required to build some integration tests but is not required for the hipDNN library itself.
+
+Use the following CMake variable to control where the hipDNN library files will be installed when the `install` target is run:
+- **`CMAKE_INSTALL_PREFIX`**: Specifies where hipDNN will be installed (defaults to `ROCM_PATH` if `ROCM_PATH` is set, then `ROCM_CMAKE_PATH` if set, otherwise uses the CMake system default).
 
 These variables can all be set independently by adding them to the preset:
 
@@ -426,15 +432,15 @@ cmake --preset release -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/an
 
 ### Clang Tools
 
-hipDNN needs several Clang tool versions (clang-format 18, clang-tidy 20). Tool discovery offers two mechanisms.
+Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
 
 #### Version Suffix
 
-A version-suffixed name is searched first, then the plain one: `clang-format-18` then `clang-format`, `clang-tidy-20` then `clang-tidy`. Use this if you can name the tools that way in your Clang toolchain folders.
+Before searching for the tool using it's standard name, a search will be made for a tool that has the version appended as a suffix. E.g. before looking for `clang-format` a search for a file named `clang-format-18` will be run first, and if that fails then a search will be made for `clang-format`. Similarly, `clang-tidy-20` will be searched-for first, and then `clang-tidy`. This approach can be used if it is possible to modify the Clang toolchain folder(s) on your system to give the tools the corresponding names.
 
 #### LLVM_TOOLS_SEARCH_PREFIX
 
-Set `LLVM_TOOLS_SEARCH_PREFIX` to a folder-path prefix such that `${LLVM_TOOLS_SEARCH_PREFIX}18/bin` and `${LLVM_TOOLS_SEARCH_PREFIX}20/bin` hold the Clang 18 and 20 tools; configure then picks the required version per tool. For example `-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang` searches:
+As an alternative to the above, `LLVM_TOOLS_SEARCH_PREFIX` can be set as a prefix for the folder path where the Clang tools are installed, such that `${LLVM_TOOLS_SEARCH_PREFIX}18/bin` is where the Clang version 18 tools are located, and `${LLVM_TOOLS_SEARCH_PREFIX}20/bin` is where the Clang version 20 tools are located. The CMake configuration step will automatically select the required version for each tool from these folders. For example with `-DLLVM_TOOLS_SEARCH_PREFIX=c:\tools\clang` the the following folders will be searched for Clang tools (depending on the version of each tool that is needed):
 * `c:\tools\clang18\bin`
 * `c:\tools\clang20\bin`
 * `c:\tools\clang\bin`
@@ -521,9 +527,11 @@ hipDNN-relevant configure presets:
 | `hipdnn-python` | hipDNN core + Python frontend bindings |
 
 > [!TIP]
-> The superbuild presets bake in `cmake/toolchains/rocm-clang.cmake`, which defaults to `/opt/rocm` on Linux and requires `-DROCM_PATH=<rocm-root>` on Windows. Override it with the hipDNN toolchain — `-DCMAKE_TOOLCHAIN_FILE=projects/hipdnn/cmake/ClangToolChain.cmake` — to get ROCm auto-detection via `hipconfig` and PATH (hint it with `-DROCM_CMAKE_PATH=<rocm-root>`) and the same toolchain and override knob as the standalone build on both platforms.
+> The superbuild presets bake in the superbuild toolchain (`cmake/toolchains/rocm-clang.cmake`), which defaults to `/opt/rocm` on Linux and requires `-DROCM_PATH=<rocm-root>` on Windows. hipDNN developers may prefer to override it with the hipDNN toolchain by adding `-DCMAKE_TOOLCHAIN_FILE=projects/hipdnn/cmake/ClangToolChain.cmake` to the configure step. Benefits:
+> - **Auto-detection** of ROCm via `hipconfig` and system PATH, so a non-default ROCm install works without hand-set paths (hint it with `-DROCM_CMAKE_PATH=<rocm-root>` if ROCm is not discoverable).
+> - **Consistency** with the standalone `projects/hipdnn` build and between Windows and Linux: the same toolchain and the same override knob (`ROCM_CMAKE_PATH`) apply everywhere, instead of `ROCM_CMAKE_PATH` for standalone and `ROCM_PATH` for the superbuild default.
 >
-> See [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix) for the discovery details. On Windows, the resource-compiler discovery and the `-DCMAKE_RC_COMPILER=` override described under [Setup Environment Variables](#8-setup-environment-variables) apply to the superbuild toolchain too.
+> See [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix) for the full toolchain-discovery details. On Windows, the resource-compiler discovery (and the `-DCMAKE_RC_COMPILER=` override) described under [Setup Environment Variables](#8-setup-environment-variables) applies to the superbuild toolchain as well.
 
 ### How It Works
 
@@ -632,14 +640,17 @@ Windows 10 and Windows 11 are supported. Windows 11 is recommended.
 > [!WARNING]
 > Some GPU functionality and HIP-related tests are not currently supported on Windows.
 
-A standalone Windows build needs the prerequisites below, a subset of the full TheRock build environment ([TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) documents the rest; building TheRock itself is not needed).
+To do a standalone build of hipDNN, you will need to set up a number of pre-requisites.
+
+> [!NOTE]
+> The standalone build of hipDNN requires a subset of the full environment required for building TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
 
 #### Automated Setup Script (Optional)
-[windows_build_setup.ps1](../scripts/windows/windows_build_setup.ps1) performs the steps below. Review it before running; it may not suit every environment.
+An automated PowerShell script is available to perform the steps outlined below. This script is provided as a convenience and may not work in all environments. Review the script before running it to ensure it meets your needs: [windows_build_setup.ps1](../scripts/windows/windows_build_setup.ps1).
 
 #### 1. Install a Package Manager
 
-The instructions below use [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (included with Windows 11, or available as "App Installer" from the Microsoft Store). Manual installation works too.
+Though dependencies can be installed _and configured_ manually, using [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (the Windows Package Manager, included with Windows 11 and available via the "App Installer" from the Microsoft Store) will streamline the environment setup. The `winget` client is used in the instructions below.
 
 #### 2. Install Utilities
 
@@ -670,30 +681,48 @@ winget install --id Python.Python.3.12
 
 #### 3. Enable Windows 10 Long Paths
 
-Windows limits paths to `MAX_PATH` (260 characters) unless long paths are enabled, which a repository with long file names in a deep folder will hit. Set the registry value
-`HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled` (`REG_DWORD`) to `1` from an Administrative PowerShell, then reboot so every process picks it up:
+A detailed description and instructions for enabling long paths on Windows 10+ are available at https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry#enable-long-paths-in-windows-10-version-1607-and-later.
 
-```PowerShell
-New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
-```
-
-See [Microsoft's documentation](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry#enable-long-paths-in-windows-10-version-1607-and-later) for the full description.
+Abbreviated quotation:
+>In the Windows API (with some exceptions discussed in the following paragraphs), the maximum length for a path is MAX_PATH, which is defined as 260 characters. A local path is structured in the following order: drive letter, colon, backslash, name components separated by backslashes, and a terminating null character. For example, the maximum path on drive D is `"D:\some 256-character path string<NUL>"` where `"<NUL>"` represents the invisible terminating null character for the current system codepage. (The characters `<` `>` are used here for visual clarity and cannot be part of a valid path string.)
+>
+>For example, you may hit this limitation if you are cloning a git repo that has long file names into a folder that itself has a long name.
+>
+>Starting in Windows 10, version 1607, MAX_PATH limitations have been removed from many common Win32 file and directory functions.
+>
+>The registry value `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled` (Type: `REG_DWORD`) must exist and be set to `1`. The registry value will not be reloaded during the lifetime of the process. In order for all apps on the system to recognize the value, a reboot might be required because some processes may have started before the key was set.
+>
+> The following Administrative PowerShell command can be used to set this registry value:
+>```PowerShell
+>New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+>```
 
 #### 4. Enable Windows 10 Symlinks
 
-Verify you can create symlinks. From a command window:
+The instructions below are summarized from web content [here](https://portal.perforce.com/s/article/3472), [here](https://stackoverflow.com/questions/5917249/git-symbolic-links-in-windows/59761201#59761201), and [here](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links).
+
+
+Verify ability to create symlinks. From a command window, run `mklink`:
 ```cmd
 > echo "test" > mklinktest.txt
 > mklink linkedfile.txt mklinktest.txt
 symbolic link created for link.txt <<===>> ExistingFile.txt
 ```
-Without the privilege, `mklink` reports `You do not have sufficient privilege to perform this operation.` The simplest fix is to enable [Developer Mode](https://www.wikihow.com/Enable-Developer-Mode-in-Windows-10):
+If you do not have the ability to create symlinks you will see:
+```cmd
+> echo "test" > mklinktest.txt
+> mklink linkedfile.txt mklinktest.txt
+You do not have sufficient privilege to perform this operation.
+```
+If you do not have the ability to enable symlinks, the simplest way to enable this is to enable "[Developer Mode](https://www.wikihow.com/Enable-Developer-Mode-in-Windows-10)" in Windows 10/11.
 
 **Windows 10**: Settings --> Update & Security --> For Developers --> Developer Mode --> toggle `On` --> confirm `Yes`.
 
 **Windows 11**: Settings --> System --> For Developers --> Developer Mode --> toggle `On`.
 
-A restart may be needed for the setting to take effect. Alternative methods are described [here](https://portal.perforce.com/s/article/3472), [here](https://stackoverflow.com/questions/5917249/git-symbolic-links-in-windows/59761201#59761201), and [here](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links).
+Refer to the links at the beginning of this section for alternative methods to enable symlinks on your system.
+
+You may need to restart your computer for the settings to take effect.
 
 #### 5. Configure Git
 
@@ -707,11 +736,15 @@ git config --global core.longpaths true
 > [!IMPORTANT]
 > The `core.symlinks` setting is required for AI coding tool configuration files (`.clinerules`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc`) which are symlinks to a central `docs/ai-rules.md`. Without this setting, these files will contain the symlink target path as plain text instead of the actual rules content.
 
-`git config --show-scope --show-origin core.symlinks` (and the same for `core.longpaths`) shows the active setting and where it comes from.
+Tip: you can use `git config --show-scope --show-origin core.symlinks` and `git config --show-scope --show-origin core.longpaths` to determine what the current active git configuration is and where that setting is configured.
 
 #### 6. Install Clang Toolchain
 
-hipDNN builds with TheRock toolchain, but utilities such as clang-format come from Clang. Download a recent 20.x.x [Clang toolchain release](https://github.com/llvm/llvm-project/releases?q=20) and unzip it to a path with no spaces; unzipped to `C:\dist\clang`, its bin folder is `C:\dist\clang\bin`.
+Though TheRock toolchain is used to build hipDNN, utilities such as clang-format are currently provided by Clang.
+
+Download and unzip a recent 20.x.x version of the Clang Toolchain: https://github.com/llvm/llvm-project/releases?q=20.
+
+Unzip it to a path with no spaces. E.g. after being unzipped to `C:\dist\clang` the bin folder will be located at `C:\dist\clang\bin`.
 
 #### 7. Install ROCm SDK
 
@@ -749,20 +782,24 @@ On Windows the `bin` folder is typically added to `PATH` so the built executable
    ```cmd
    set PATH=<output of python -m rocm_sdk path --bin>;%PATH%
    ```
-   The Clang toolchain does not need to be on PATH: point CMake at it with [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix). The AMD toolchain is discovered automatically; if not, see [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix).
+   It isn't necessary to add the Clang toolchain to your system PATH to perform the build as these can be specified using the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) option to cmake (refer to that section for more details).
+
+   The AMD toolchain should be discovered automatically. If not, refer to the [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix) section for additional ways to locate the toolchain.
 
 * Set the HIP_PLATFORM environment variable:
    ```cmd
    set HIP_PLATFORM=amd
    ```
 
-* **Resource compiler for version metadata.** hipDNN embeds a Windows VERSIONINFO resource in the backend. Both toolchains prefer `llvm-rc` from the ROCm LLVM toolchain (found next to `clang++`) and fall back to the Windows SDK's `rc.exe` if it is on `PATH`:
+* **Resource compiler for version metadata.** hipDNN embeds a Windows VERSIONINFO resource in the backend, so the built binaries carry version metadata. Both the standalone and superbuild toolchains locate the resource compiler the same way: they prefer `llvm-rc` from the ROCm LLVM toolchain (found automatically next to `clang++`), and fall back to the Windows SDK's `rc.exe` if it is on your `PATH`. To make `rc.exe` available as the fallback, add the Windows SDK `bin` to `PATH`, e.g.:
    ```cmd
    set PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64;%PATH%
    ```
-   (adjust the SDK version to your installed Windows Kit)
+   (adjust the SDK version number to match your installed Windows Kit)
 
-   To choose one explicitly, pass `-DCMAKE_RC_COMPILER=<path-to-llvm-rc-or-rc>`; both toolchains honor it and skip auto-detection. Without a resource compiler, configuration still succeeds and the binaries carry no version metadata.
+   If the toolchain does not locate a resource compiler correctly, point CMake at one explicitly with `-DCMAKE_RC_COMPILER=<path-to-llvm-rc-or-rc>`. This is honored by both toolchains and skips their auto-detection.
+
+   A resource compiler is not strictly required: if none is found, configuration still succeeds and the binaries are built without embedded version metadata.
 
 * If desired, set Ninja as the default generator so that `-g Ninja` doesn't need to be explicitly added to the `cmake` command line:
    ```cmd
@@ -775,7 +812,7 @@ python -m rocm_sdk version
 python -m rocm_sdk path --root
 ```
 
-`hipconfig` confirms the SDK is installed and PATH is set (it requires the ROCm SDK bin directory on PATH). It prints your ROCm folder — the `python -m rocm_sdk path --root` value — and the ROCm clang path:
+Use `hipconfig` to check that the ROCm SDK is installed and the PATH is set up correctly. The output from the command, as shown below, will show the detected ROCm path and ROCm clang path (the paths below will be replaced with your ROCm SDK folder, the `python -m rocm_sdk path --root` value). This command requires that the ROCm SDK bin directory is in your system PATH.
 ```cmd
 hipconfig -rocmpath -n --hipclangpath
 <ROCm SDK folder>
@@ -799,7 +836,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 * When generating the project, be sure to set GPU_TARGETS to your GPU as auto-detection is not currently supported on Windows, e.g. `cmake -DGPU_TARGETS=gfx1103 ..` (replacing gfx1103 with your GPU)
 * When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That's okay for now but it can be resolved by installing the missing version of the toolchain to a parallel directory and setting the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) variable accordingly.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
-* Limit Ninja's thread count (`ninja -j<N>`) if the build saturates your machine.
+* You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.
 * clang-tidy is **off by default on Windows** because it roughly doubles build time. Pass `-DENABLE_CLANG_TIDY=ON` to run it before pushing a branch; it is expected to be clean. Two checks are dropped on Windows only (`bugprone-exception-escape` and `performance-noexcept-move-constructor`) because the Microsoft STL makes them fire on code that is clean against libstdc++ — see the WIN32 block in `cmake/ClangTidy.cmake`. On Linux clang-tidy is on by default and `-DENABLE_CLANG_TIDY=OFF` reduces build time during development. `-DENABLE_CLANG_FORMAT=OFF` does the same for clang-format on both platforms.
 
 ## Troubleshooting

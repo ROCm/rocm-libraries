@@ -19,8 +19,9 @@ add_executable(
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
-# HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the test binary to the plugin
-# engine directory, so the build tree plugin is used rather than the installed one.
+# To use the build tree plugin, we use the path relative to the test binary instead of the installed
+# libhipdnn_backend.so. HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the binary
+# directory to the plugin engine directory, derived from the configured install layout.
 target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
@@ -112,8 +113,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
-    # Parent of the integration descriptor sets: the walk covers every subtree staged
-    # under it, so additional packs there need no edit here.
+    # The parent of the integration descriptor sets, which holds all three. A
+    # walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_integration_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
@@ -123,29 +125,37 @@ endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
-# ENVIRONMENT is passed to add_integration_test_target() rather than applied afterward
-# with set_tests_properties(): under YAML-driven CTest categorization
-# (DNN_PROVIDER_CTEST_CATEGORIES_YAML) only the tiered suites from
-# apply_test_category_labels() in ../CMakeLists.txt are registered, and
-# set_tests_properties() on an unregistered name is a hard configure error.
-# add_integration_test_target() publishes the merged environment as
-# hip_kernel_provider_integration_tests_TEST_ENVIRONMENT for that later call.
+# ENVIRONMENT is forwarded to add_integration_test_target() rather than set
+# afterward via set_tests_properties(): when YAML-driven CTest
+# categorization is active (DNN_PROVIDER_CTEST_CATEGORIES_YAML), the raw
+# hip_kernel_provider_integration_tests CTest test is never registered --
+# only the tiered suites created later by apply_test_category_labels() in
+# ../CMakeLists.txt are, and set_tests_properties() on the unregistered
+# name is a hard CMake configure error. add_integration_test_target()
+# publishes the merged environment as
+# hip_kernel_provider_integration_tests_TEST_ENVIRONMENT so that later call
+# can forward it to whichever suites actually exist.
 #
-# No descriptor entry: the engine resolves its descriptor tree relative to the loaded
-# module, so naming one would pin the build path into the install-time CTest file.
+# No descriptor entry: this suite loads the real plugin, and the engine resolves its
+# descriptor tree relative to the loaded module -- the staged copy in a build tree, the
+# installed copy in an install tree. Naming one explicitly would pin the build path into
+# the install-time CTest file and stop the installed descriptors from ever being read.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS slow
     ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
 
-# Forward the merged raw-test environment to the parent scope for the tiered CTest suites
-# created in ../CMakeLists.txt.
+# Forward the merged raw-test environment (published by add_integration_test_target)
+# to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can
+# pick it up. Setting ENVIRONMENT directly on the raw test name here is a hard
+# configure error when YAML categorization is active, hence the forwarding.
 if(DEFINED hip_kernel_provider_integration_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_integration_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
 endif()
 
-# Cross-provider ASM SDPA gpu-reference integration test target. Standalone provider
-# builds may not have the harness in scope, so import it first.
+# Register the cross-provider ASM SDPA gpu-reference integration test target. In
+# standalone provider builds the harness may not already be in scope, so try to
+# import it first.
 if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()

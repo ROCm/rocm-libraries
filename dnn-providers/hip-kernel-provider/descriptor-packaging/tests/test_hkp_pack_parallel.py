@@ -376,9 +376,10 @@ def _write_corpus(dest, *, hip_only=False, with_embedded=False):
 
 
 # Derived by hand from the corpus above and the three arch filters, never by
-# running the implementation. Cross-KDP order is stable because `load_flat_input`
-# walks `sorted(root.rglob("*.json"))`, so KDP order is lexicographic on path; an
-# unsorted rglob would make this sequence flaky.
+# running the implementation and pasting its output. Cross-KDP order is stable
+# because `load_flat_input` walks `sorted(root.rglob("*.json"))`, so KDP order
+# is lexicographic on path -- if that walk is ever changed to an unsorted rglob
+# this sequence goes flaky with no recorded dependency to point at.
 GOLDEN_SEQUENCE = [
     "ukd-inline-hip",
     "ukd-inline-rocke",

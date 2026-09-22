@@ -95,23 +95,29 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(engines/kernel_ingestor_engine)
 
     # descriptorSearchDirectory()'s tests assert which of its three sources answered, and
-    # branches 2 and 3 are told apart from a failed lookup only by this fixed offset, which
-    # must be the value the provider is compiled with.
+    # the only way to tell branch 2 or 3 from a failed lookup is that both end in this
+    # fixed offset. Same value the provider is compiled with, so the test cannot drift
+    # into asserting a path the provider never builds.
     #
-    # One define per descriptor set: the discovery set is the whole unit root, while the
-    # kpack cases need the one subtree under it that carries an archive. Both are
-    # binary-relative, never an absolute build path, so the cases read the descriptors
-    # beside whichever copy of the binary runs.
+    # One define per descriptor set. A single define cannot serve both: the discovery set is
+    # the whole unit root, and the kpack cases need the one subtree under it that carries an
+    # archive.
+    #
+    # Binary-relative, never an absolute build path. The offset holds in the build tree and
+    # the install tree alike, so these cases read the descriptors beside whichever copy of
+    # the binary is running instead of reaching back into the tree that configured it -- an
+    # installed run would otherwise find nothing, enumerate nothing, and pass.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
-    # The kpack adapter's tests, gated with the sources they exercise and kept together
-    # between the two defines they read: HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, where
-    # the device cases find the archive packed for the local arch, and
+    # The kpack adapter's tests. Gated with the sources they exercise, and kept together
+    # here -- including the dispatch ones, which sit under engines/ -- so they sit between
+    # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
+    # which the device cases find the archive this build packed for the local arch, and
     # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
-    # because they need a real container.
+    # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackArchive.cpp
         compilation/TestKpackKernelLoader.cpp

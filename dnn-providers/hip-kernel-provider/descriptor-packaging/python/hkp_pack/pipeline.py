@@ -1110,9 +1110,11 @@ def pack_arch(
                 f"UKD '{ukd.id}' declares symbol '{ukd.symbol}' not present "
                 f"in code object for variant '{vk}'"
             )
-        # Keyed on (variant, symbol), not the variant alone: two UKDs differing only
-        # by entry point share one blob and one toc_key but have their own argument
-        # lists.
+        # Keyed on (variant, symbol), not on the variant alone: two UKDs
+        # differing only by entry point share one blob and one toc_key, and each
+        # has its own argument list. Caching per variant would give the second
+        # one the first's signature, which no fixture with one symbol per
+        # variant can catch.
         signature_key = (vk, ukd.symbol)
         if signature_key not in variant_signature:
             variant_signature[signature_key] = kernel_signature(
@@ -1144,13 +1146,16 @@ def pack_arch(
 
     for kdp in inter.kdps:
         out_doc = dict(kdp.header)
-        # Each shard targets exactly its own arch, so the authored list (several
-        # arches, or empty for a wildcard) narrows to this shard's. The logical key
-        # is (id, arch): one id ships under several shards with per-arch content.
+        # Each shard targets exactly its own arch, so narrow the authored arch
+        # list (which may span several arches, or be empty for a wildcard) to the
+        # single arch this shard is for. The descriptor's logical key is
+        # (id, arch): the same KDP/UKD id ships under multiple arch shards with
+        # per-arch content, unique per arch rather than globally.
         out_doc["arch"] = [arch]
         # Preserve the authored heterogeneous vector: compiled inline UKDs are
-        # rewritten to kpack form, pass-through inline UKDs take the shard arch, and
-        # standalone-UKD id refs stay bare strings (those UKDs ship as own files).
+        # rewritten to kpack form, pass-through inline UKDs take the shard arch,
+        # and standalone-UKD id refs are kept as bare strings (those UKDs ship
+        # as their own files below).
         out_kds = []
         for e in kdp.entries:
             if isinstance(e, str):
@@ -1168,8 +1173,9 @@ def pack_arch(
                         variant_sha[e.variant_key],
                         signature=variant_signature[(e.variant_key, e.symbol)],
                         toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
-                        # An inline UKD ships INSIDE this KDP file, so the runtime
-                        # anchors its library on the KDP's directory.
+                        # An inline UKD ships INSIDE this KDP file, so the
+                        # runtime anchors its library on the KDP's directory,
+                        # not the UKD's own notion of where it came from.
                         rel_dir=kdp.rel_dir,
                         group=group,
                     )
@@ -1182,8 +1188,9 @@ def pack_arch(
             json.dumps(out_doc, indent=2) + "\n",
         )
 
-    # A standalone UKD stays its own file, rewritten to kpack form with this arch's
-    # details, and only for arches whose surviving KDPs referenced it.
+    # A standalone UKD stays its own file in the shard, rewritten to kpack form
+    # with this arch's kpack details. It is emitted only for arches whose
+    # surviving KDPs referenced it (compile_intermediate only records those).
     for ukd in standalone:
         out_doc = _rewrite_ukd_kpack(
             ukd,
@@ -1283,9 +1290,13 @@ def run_pipeline(
             inter = compile_intermediate(
                 flat, source_root, arch, hipcc, inter_root / arch, log=log
             )
-            # Stage into a sibling temp dir and rename in only once pack_arch
-            # returns cleanly: it creates the arch directory before validating, and
-            # install(DIRECTORY ... OPTIONAL) would install a present-but-empty one.
+            # Stage this arch into a sibling temp dir and rename it into place
+            # only once pack_arch returns cleanly. pack_arch creates the arch
+            # directory before it validates anything, so writing in place
+            # leaves a present-but-empty arch directory behind on failure -- and
+            # install(DIRECTORY ... OPTIONAL) skips only a MISSING directory, so
+            # that partial tree would install. Rename is atomic within a
+            # filesystem, and both paths are under out_root by construction.
             staging = out_root / f".{arch}.staging"
             if staging.exists():
                 shutil.rmtree(staging)
@@ -1315,13 +1326,17 @@ def run_pipeline(
                 kpack_path=kpack_path,
             )
         except HkpPackError as exc:
-            # One arch failing must not destroy the other arches' work. The failed
-            # arch's staged output is discarded so install(... OPTIONAL) skips it;
-            # its intermediate dir stays for debugging and is never shipped.
+            # One arch failing must not destroy the other arches' work: a
+            # wildcard-arch UKD hitting an arch-restricted builder should shrink
+            # one shard, not fail every shard. The failed arch's staged output is
+            # discarded rather than left half-written, so install(... OPTIONAL)
+            # skips it cleanly instead of shipping a partial tree. Its
+            # intermediate dir stays for debugging -- build-only, never shipped.
             failures[arch] = str(exc)
             log(f"ERROR: {arch} failed: {exc}")
-            # Discard the half-written staging dir AND any previous good output for
-            # this arch: a stale shard beside fresh ones is a subtler lie than none.
+            # Discard the half-written staging dir AND any previous good output
+            # for this arch: shipping a stale shard beside fresh ones would be a
+            # subtler lie than shipping none.
             staging = out_root / f".{arch}.staging"
             if staging.exists():
                 shutil.rmtree(staging)
@@ -1332,8 +1347,9 @@ def run_pipeline(
             )
 
     if failures:
-        # Non-zero exit with partial output: the build fails loudly, but a developer
-        # can still inspect what did succeed.
+        # Non-zero exit with partial output: the build fails loudly, but a
+        # developer can still inspect what did succeed. Exiting 0 here would
+        # resurrect the silent-empty-package class of defect.
         detail = "; ".join(f"{a}: {r}" for a, r in sorted(failures.items()))
         raise HkpPackError(
             f"packing failed for {len(failures)} of {len(arches)} arch(es) "
@@ -1341,9 +1357,13 @@ def run_pipeline(
             "output was discarded."
         )
 
-    # The archive clause keys on what the root holds rather than what survived
-    # pruning: a compiling UKD that prunes out of every arch is indistinguishable
-    # downstream from one whose archive went missing.
+    # The archive clause keys on what the root holds rather than on what survived
+    # pruning: a compiling UKD that prunes out of every requested arch is
+    # indistinguishable downstream from one whose archive went missing. Nothing
+    # downstream restates either clause -- the build edge's OUTPUT is a stamp its
+    # recipe touches unconditionally, and a staged tree holding nothing reads the
+    # same there as a root that is legitimately empty. Only the packer knows the
+    # kinds it walked and which arches pruned.
     arch_list = ", ".join(arches)
     if all(r.skipped for r in results.values()):
         raise HkpPackError(

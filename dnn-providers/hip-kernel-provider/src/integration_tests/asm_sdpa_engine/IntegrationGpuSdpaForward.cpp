@@ -115,8 +115,10 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        // MI300 and MI308 both report "gfx942" but load different .co files (MI300/ vs
-        // MI308/ in getKernelCoPath()), so covering both needs CI agents of each.
+        // MI300/MI308 coverage: Both MI300 and MI308 report "gfx942" via getDeviceString()
+        // but load different .co files (MI300/ vs MI308/ subdirectory in getKernelCoPath()).
+        // Integration tests exercise whichever device the CI agent has. Full coverage
+        // requires CI agents with both MI300 and MI308 hardware.
         auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const SdpaFwdTestCase& testCase = this->GetParam();
 

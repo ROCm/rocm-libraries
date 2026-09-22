@@ -105,7 +105,8 @@ std::shared_ptr<Graph> buildPointwiseSubGraph()
 
 /// N=1, C=2, H=4, W=4, K=3, R=3, S=3, unit stride/dilation, no padding, cross-correlation,
 /// NCHW/KCRS. y's dims/strides are left unset -- infer_properties_node() derives NKPQ
-/// from x, w and the attributes.
+/// from x, w and the attributes -- and keeps uid 3 to match executeAndVerify()'s
+/// hardcoded output uid.
 std::shared_ptr<Graph> buildConvFwdGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -183,9 +184,11 @@ size_t countSelectionLogs(const hipdnn_test_sdk::utilities::LogRecorderBase& rec
     }));
 }
 
-/// Captures plugin logs for one test. RAII, so the two process-global states it touches --
-/// the log level and the user callback registration -- are restored even when an early
-/// ASSERT returns from the test body.
+/// Captures plugin logs for one test and restores every piece of process-global state it
+/// touched. Both the global log level and the user callback registration outlive the
+/// test otherwise: a raised level changes what later tests emit, and a callback keyed on
+/// a destroyed fixture would stay registered. Manual teardown at the end of the body is
+/// not enough, because an early ASSERT return skips it.
 class ScopedPluginLogCapture
 {
 public:
@@ -303,9 +306,10 @@ protected:
         buildAndCompile(graph, engineId());
     }
 
-    /// Like buildAndCompile(), but drives create_execution_plan_ext() with explicit knob
-    /// settings. That is the only way to set global.benchmarking, which add_engine_sweep()
-    /// and the default heuristic path both strip.
+    /// Like buildAndCompile(), but drives create_execution_plan_ext() with explicit
+    /// knob settings instead of create_execution_plans()'s heuristic default path.
+    /// That is the only way to set global.benchmarking, which add_engine_sweep() and
+    /// the default heuristic path both strip.
     void buildAndCompileWithKnobs(Graph& graph,
                                   int64_t pinnedEngineId,
                                   const std::vector<KnobSetting>& knobSettings)
@@ -401,8 +405,8 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Two knobs: the engine's own block_size, plus the benchmarking knob every
-    // descriptor-backed engine advertises out-of-band and which is prepended, so look
-    // them up by name.
+    // descriptor-backed engine advertises out-of-band. Found by name rather than by
+    // index, since the out-of-band knob is prepended.
     ASSERT_EQ(knobs.size(), 2U);
     const auto blockSizeKnob = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
         return knob.knobId() == BLOCK_SIZE_KNOB;

@@ -95,16 +95,20 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        // Randomize Q, K, V, dO with identical seeds for both bundles.
+        // Step 1: Randomize Q, K, V, dO with identical seeds for both bundles
         for(auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
         }
 
-        // The backward pass needs O and stats (LSE) mathematically consistent with
-        // Q, K, V, so derive them with the CPU forward reference. UIDs are resolved here
-        // because graph.build() (run by verifyGraph() before initializeBundle()) is what
-        // assigns them; get_uid() before build() returns 0.
+        // Step 2: Compute valid O and stats from Q, K, V using CPU forward reference.
+        // The backward pass requires O and stats (LSE) that are mathematically consistent
+        // with Q, K, V — random values would cause GPU vs CPU divergence.
+        //
+        // UIDs are resolved here (not in runGraphTest) because graph.build() —
+        // called by verifyGraph() before initializeBundle() — is what assigns
+        // UIDs via assignUnsetTensorUids().  Querying get_uid() before build()
+        // returns the default (0) for all tensors.
         auto& qTensor = bundle.getTensor(_qAttr->get_uid());
         auto& kTensor = bundle.getTensor(_kAttr->get_uid());
         auto& vTensor = bundle.getTensor(_vAttr->get_uid());
@@ -283,7 +287,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 {
-    // Same error sources as BF16, with a 10-bit mantissa.
+    // FP16 backward has the same error sources as BF16 but the 10-bit mantissa
+    // (vs BF16's 7) yields tighter results. Worst-case element lands under 0.25.
+    // Use 5e-1 — ~2x margin over that measured floor.
 
     auto tolerance = 5e-1f;
 

@@ -558,7 +558,7 @@ def test_rocke_compiles_and_packs(
     assert ks["symbol"].encode("ascii") in blob
     # Read off the object comgr actually produced. rocke emits argument names,
     # which a HIP extern "C" kernel does not, so the dispatch-time comparison
-    # covers names here too.
+    # covers names here and not only kind and size.
     signature = ks["signature"]
     assert [a["kind"] for a in signature] == [
         "global_buffer",

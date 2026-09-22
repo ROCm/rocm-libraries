@@ -78,11 +78,13 @@ endif()
 option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942)" OFF)
 if(ENABLE_HIP_FLASH2_ENGINE)
     message(STATUS "HIP Flash2 SDPA engine enabled")
-    # Engine sources and compile definitions are wired onto the provider's object library
-    # in src/CMakeLists.txt. The Flash2 kernel ships as a precompiled .co (gfx942), loaded
-    # at runtime via hipModuleLoad in HipFlash2KernelUtils.hpp. HipFlash2FwdPlan.hip is
-    # the offline source for the .co files, requires rocWMMA headers, and is not compiled
-    # here.
+    # Engine sources and compile definitions are wired onto the provider's object
+    # library in src/CMakeLists.txt (hip_kernel_provider target does not exist yet
+    # at this point -- it is created by add_subdirectory(src) below).
+    # The Flash2 kernel is shipped as a precompiled .co file (gfx942).
+    # HipFlash2FwdPlan.hip is NOT compiled here -- it is the offline source for
+    # the .co files and requires rocWMMA headers.
+    # At runtime the .co is loaded via hipModuleLoad in HipFlash2KernelUtils.hpp.
     install(FILES
         src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
         DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
@@ -90,18 +92,23 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     # ------------------------------------------------------------------
     # Kernel variant regeneration (opt-in, requires a HIP compiler)
     #
-    # The dispatcher in Flash2Dispatch.hpp selects among several tilings, each a separate
-    # .co built from HipFlash2FwdPlanVariant.hip with different F2_* macros. The variant
-    # table and this list MUST stay in sync: the builder checks
-    # HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK against the geometry the table claims and
-    # hard-errors on mismatch.
+    # The dispatcher in Flash2Dispatch.hpp selects among several tilings, each
+    # a separate .co built from HipFlash2FwdPlanVariant.hip with different
+    # F2_* macros. The variant table and this list MUST stay in sync: the
+    # builder checks HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK against the
+    # geometry the table claims and hard-errors on mismatch.
     #
-    # Off by default. Only hip_flash2_fwd_gfx942.co is tracked in git, so build this
-    # target before installing to make per-shape dispatch active:
+    # Off by default. Only the legacy hip_flash2_fwd_gfx942.co is tracked in
+    # git; the per-variant objects are not, so build this target before
+    # installing if you want per-shape dispatch to be active:
     #   cmake -DENABLE_HIP_FLASH2_ENGINE=ON -DHIP_FLASH2_BUILD_VARIANTS=ON ...
     #   cmake --build . --target hip_flash2_variants
     #
-    # Build the variants with the same ROCm as the shipped default object, ROCm 10.0.0.
+    # IMPORTANT: build these with the SAME ROCm as the shipped default object.
+    # The current hip_flash2_fwd_gfx942.co was built with ROCm 10.0.0 and is
+    # ~1.4x faster than the identical source built with 7.2 (S=2048 D=128
+    # causal: 54.1 vs 38.3 TFLOPS). Mixing toolchains makes most shapes slower
+    # while looking like an upgrade.
     option(HIP_FLASH2_BUILD_VARIANTS "Regenerate the Flash2 kernel variant .co files" OFF)
     if(HIP_FLASH2_BUILD_VARIANTS)
         find_program(HIP_FLASH2_HIPCC hipcc HINTS ${ROCM_PATH}/bin /opt/rocm/bin)
@@ -109,10 +116,11 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             message(FATAL_ERROR "HIP_FLASH2_BUILD_VARIANTS=ON but hipcc was not found")
         endif()
 
-        # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the flag and
-        # the output filename silently produces mislabelled objects for another arch.
-        # Single-arch only -- the variant filename encodes one arch, so a multi-arch
-        # GPU_TARGETS list takes the first entry.
+        # Respect GPU_TARGETS rather than hardcoding gfx942: hardcoding both the
+        # flag and the output filename silently produces mislabelled objects if
+        # anyone points the build at another arch. Single-arch only -- the
+        # variant filename encodes one arch, so a multi-arch GPU_TARGETS list
+        # takes the first entry.
         set(_f2_arch "gfx942")
         if(GPU_TARGETS)
             list(GET GPU_TARGETS 0 _f2_arch)
@@ -122,8 +130,9 @@ if(ENABLE_HIP_FLASH2_ENGINE)
         set(_f2_out ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels)
 
         # tag;WAVES;QG;KG -- all other knobs stay at the source defaults
-        # (F2_PIPE=0, F2_PAD=8, F2_PADK=8, F2_VTMAJOR=1, F2_SKIPRESCALE=1), which
-        # reproduce the shipped objects' LDS footprint for all five variants.
+        # (F2_PIPE=0, F2_PAD=8, F2_PADK=8, F2_VTMAJOR=1, F2_SKIPRESCALE=1).
+        # Verified: rebuilding at these defaults reproduces the shipped
+        # objects' LDS footprint exactly for all five variants.
         set(_f2_variants
             "w4q1k4 4 1 4"
             "w8q1k4 8 1 4"
@@ -153,8 +162,10 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             list(APPEND _f2_targets ${_co})
         endforeach()
 
-        # The partial-tile correctness probe is a standalone HIP program, built only
-        # under this same opt-in flag.
+        # The partial-tile correctness probe is a standalone HIP program, built
+        # only under this same opt-in flag. Leaving it in no target at all was
+        # the same class of problem as the dispatch test, which was fixed by
+        # registering it with hip_kernel_provider_tests.
         add_executable(hip_flash2_partial_tile_probe EXCLUDE_FROM_ALL
             ${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/tools/partial_tile_probe.cpp)
         target_link_libraries(hip_flash2_partial_tile_probe PRIVATE hip::host)
@@ -164,13 +175,17 @@ if(ENABLE_HIP_FLASH2_ENGINE)
             COMMENT "Regenerating all Flash2 kernel variant objects")
     endif()
 
-    # Install any variant objects that are present. The engine falls back to the legacy
-    # single-kernel object when a variant is absent, so a partial or empty set is safe.
+    # Install any variant objects that are present. The engine falls back to
+    # the legacy single-kernel object when a variant is absent, so a partial
+    # or empty set is safe.
     #
-    # The glob MUST be evaluated at install time, not configure time: the workflow is
-    # configure -> build hip_flash2_variants -> install, so the variant objects do not
-    # exist at configure time. A plain file(GLOB) + install(FILES) would install nothing
-    # and leave the dispatcher inert with no diagnostic.
+    # The glob MUST be evaluated at install time, not configure time. The
+    # documented workflow is configure -> build hip_flash2_variants -> install,
+    # so at configure time the variant objects do not exist yet. A plain
+    # file(GLOB) + install(FILES) silently installs nothing in that order and
+    # leaves the dispatcher inert with no diagnostic (found by S. Reeder, who
+    # measured it: variants staged after configure -> legacy object only;
+    # staged before configure -> all six).
     install(CODE "
         file(GLOB _f2_co
              \"${CMAKE_CURRENT_SOURCE_DIR}/src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_*_*.co\")
@@ -265,12 +280,13 @@ message(STATUS "Plugin install directory (relative): ${HIPDNN_RELATIVE_INSTALL_P
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 # The offset a test binary walks from its own directory to reach the plugin engine
-# directory and the trees hanging off it. Binaries land under CMAKE_INSTALL_BINDIR and
-# the plugin engine directory under HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR; both are
-# relative to ${CMAKE_BINARY_DIR} in the build tree and to the prefix in the install
-# tree, so one offset reaches them in either and no binary carries a configure-machine
-# path. Computed against a synthetic root because file(RELATIVE_PATH) needs two absolute
-# paths and only their relationship matters.
+# directory and the trees hanging off it. Binaries land under CMAKE_INSTALL_BINDIR, the
+# plugin engine directory under HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR; both are
+# relative to ${CMAKE_BINARY_DIR} in the build tree and to the prefix in the install tree,
+# so this one offset reaches them in either -- and a binary carries no path belonging to
+# the machine that configured it. Computed against a synthetic root because
+# file(RELATIVE_PATH) needs two absolute paths, and only the relationship between them
+# matters here.
 set(_synthetic_root "/__hipkernelprovider_root__")
 file(RELATIVE_PATH HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR
      "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
@@ -349,9 +365,10 @@ endif()
 # ============================================================================
 # Hoisted here (rather than src/CMakeLists.txt) so it is available before
 # add_subdirectory(rocke) below: rocke/platform/tests/CMakeLists.txt applies
-# ROCKE_ENGINE_CTEST_CATEGORIES_YAML to its own pre-registered CTest tests in its own
-# directory scope, because set_property(TEST ...) is cross-directory only from CMake 3.28
-# and this project's floor is 3.25.2.
+# ROCKE_ENGINE_CTEST_CATEGORIES_YAML to its own pre-registered CTest tests in
+# its own directory scope (CMake's set_property(TEST ...) predates 3.28's
+# cross-directory support, so this project's 3.25.2 floor requires it run
+# where the tests were add_test()'d).
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories.yaml")
     set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
@@ -396,10 +413,11 @@ endif()
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
 
-    # rocke/ = platform (engine + build-time Python). Its installed CTest entries stage
-    # into EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
-    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake,
-    # and descriptor-packaging, whose ingestor-toolchain assertion reads the
+    # rocke/ = platform (engine + build-time Python). The engine's installed
+    # CTest entries stage into EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider,
+    # so add_subdirectory(rocke) must precede src/ below, which emits
+    # bin/hip_kernel_provider/CTestTestfile.cmake. It must also precede
+    # descriptor-packaging below, whose ingestor-toolchain assertion reads the
     # ROCKE_WHEEL_DIR and ROCKE_WHEEL_VERSION cache variables rocke/ sets.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
@@ -418,9 +436,12 @@ endif()
 # engine is a separate kpack producer on its own gate; it packs but never reads.)
 #
 # The reader is the rocm_kpack shared library ROCm ships, resolved the way this repo's
-# other providers resolve their externals; the guard lets a superbuild that already
-# defines the target win over an installed copy. descriptor-packaging resolves the packer
-# separately, from the rocm_kpack Python package.
+# other providers resolve their externals: miopen-provider finds MIOpen, hipblaslt-provider
+# finds the SDKs. The guard lets a superbuild that already defines the target -- one
+# building rocm-kpack as a sibling component -- win over an installed copy.
+#
+# descriptor-packaging resolves the packer separately, from the rocm_kpack Python
+# package. Both halves come from the platform, so nothing here pins a ref.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
@@ -508,21 +529,32 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # The two descriptor trees are installed here and nowhere else. Every producer
-    # delivers content into one of these two build-tree folders and these two rules ship
-    # them wholesale, so an installed descriptor tree is a copy of its build-tree folder
-    # and a set cannot be staged for testing yet missing from the package.
+    # The two descriptor trees are installed here and nowhere else. Every producer --
+    # the packer, or a step added later -- delivers content into one of these two
+    # build-tree folders, and these two rules ship them wholesale. Each installed
+    # descriptor tree is then a copy of its build-tree folder, so a test that passes
+    # against one is evidence about the other, and a set cannot be staged for testing
+    # yet silently missing from the package.
+    #
+    # This holds for these two trees only. Other content under the engine directory
+    # installs from the source tree, so it has no build-tree counterpart at the same
+    # relative path.
     #
     # Neither rule is OPTIONAL: each is emitted only when something was wired to fill its
-    # tree, so a missing directory at install time means the build did not complete.
-    # hkp_packaging_product exists exactly when the production packer will write;
-    # re-testing the source root here would emit the rule for configurations the packer
-    # skips, turning a supported build into an install-time failure.
+    # tree, so a directory missing at install time means the build did not run to
+    # completion, and saying so beats shipping a package with no descriptors in it.
     #
-    # Every pack marks its output root complete with a stamp file inside it, under one
-    # shared name, so one pattern drops all of them from both trees and from any pack
-    # added later. Asserted rather than defaulted: an empty name installs a pattern
-    # matching nothing, and the stamp would ship with no diagnostic.
+    # hkp_packaging_product exists exactly when the production packer will write -- the
+    # production source root is set and is a real directory. Re-testing the source root
+    # here would emit the rule for configurations the packer skips, turning a supported
+    # build into an install-time failure.
+    # Each pack marks its output root complete with a stamp file inside it, so that
+    # emptying the tree invalidates the stamp too. The stamp belongs to the build and not
+    # to the package, and every pack writes the same name, so one pattern drops all of
+    # them from both trees below and from any pack added later.
+    #
+    # Asserted rather than defaulted: an empty name here would install a pattern that
+    # matches nothing, and the stamp would ship with no diagnostic.
     if(NOT HKP_PACK_STAMP_NAME)
         message(FATAL_ERROR
                 "hkp: HKP_PACK_STAMP_NAME is empty, so the descriptor install rules "
