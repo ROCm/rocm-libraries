@@ -160,7 +160,6 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
                  "attention_dense.bf16_d64_hq64_kv8_b1_s2016_ca_ragged.gfx950",
                  "attention_dense.bf16_d64_hq64_kv8_ca.gfx950",
                  "attention_dense.bf16_d64_hq64_kv8_nm.gfx950",
-                 "attention_dense.bf16_d64_hq64_kv8_sw128.gfx950",
                  "attention_dense.bf16_d64_hq8_kv1_ca.gfx950",
                  "attention_dense.bf16_d64_hq8_kv1_nm.gfx950",
                  "attention_dense.bf16_d64_hq8_kv8_b2_s64_ca_ragged.gfx950",
