@@ -45,7 +45,7 @@ class OutputOptions:
     def __repr__(self) -> str:
         return f"OutputOptions(outputNoComment={self.outputNoComment})"
 
-    # Pickle support — needed because Tensile passes this object across the
+    # Pickle support — needed because TensileLite passes this object across the
     # ParallelMap2 fork/spawn boundary.
     def __getstate__(self) -> tuple:
         return (self.outputNoComment,)
@@ -91,7 +91,7 @@ class KernelInfo:
     """Mirror of ``rocisa::KernelInfo`` (base.hpp:47-57) — per-thread current
     kernel state.
 
-    Only the attributes Tensile actually reads back are typed: ``isa``
+    Only the attributes TensileLite actually reads back are typed: ``isa``
     (a 3-tuple) and ``wavefrontSize``.
     """
 
@@ -117,7 +117,7 @@ class KernelInfo:
 #
 # Module globals ARE the per-process singleton in Python — no Singleton
 # class needed. The ``rocIsa`` class in ``__init__.py`` is a forwarding
-# shell that preserves the rocisa API surface (KernelWriter / Tensile
+# shell that preserves the rocisa API surface (KernelWriter / TensileLite
 # callers can keep doing ``rocIsa.getInstance().getXxx()``); the actual
 # data lives down here.
 #
@@ -138,7 +138,7 @@ Mirror of ``rocisa::rocIsa::m_outputOptions`` (base.hpp:215)."""
 _current_isa: Optional[IsaKey] = None
 """Currently-selected ISA, or ``None`` before ``init()`` / ``setKernel()``.
 No direct C++ analogue (C++ derives the current ISA from the per-thread
-``m_threads[id].isaVersion``); we keep a separate flag because Tensile
+``m_threads[id].isaVersion``); we keep a separate flag because TensileLite
 calls ``init()`` before any ``setKernel()`` to populate caps."""
 
 _is_init: bool = False
@@ -192,7 +192,7 @@ def setOutputOptions(options: OutputOptions) -> None:
     """Replace the process-wide ``OutputOptions`` instance.
 
     Used by ``rocIsa.getInstance().setOutputOptions(...)`` -- which is
-    what Tensile / ParallelMap2 workers call to ship a pickled
+    what TensileLite / ParallelMap2 workers call to ship a pickled
     ``OutputOptions`` from the parent into the worker process.
     """
     global _current_output_options
@@ -313,8 +313,8 @@ def getIsaInfo(arch: Any) -> "IsaInfo":
     """Mirror of ``rocisa::rocIsa::getIsaInfo`` (base.hpp:125-135).
 
     Lazy-populates the cache so callers can ask for any supported ISA
-    without a prior ``init()`` call (Tensile's
-    ``Tensile.Common.Capabilities.makeIsaInfoMap`` relies on this).
+    without a prior ``init()`` call (TensileLite's
+    ``tensilelite.Common.Capabilities.makeIsaInfoMap`` relies on this).
 
     Falls back to native ``_rocisa`` for ISAs not supported by stinkytofu.
     """
@@ -441,7 +441,7 @@ def isaToGfx(arch: Any) -> str:
 def getData() -> Dict[IsaKey, "IsaInfo"]:
     """Mirror of ``rocisa::rocIsa::getData`` (base.hpp:157-160).
 
-    Returns the live dict (NOT a copy). Tensile pickles the result and
+    Returns the live dict (NOT a copy). TensileLite pickles the result and
     ships it to ``ParallelMap2`` workers, which call ``setData`` to
     rehydrate. Mutating the returned dict mutates the process-wide
     state -- usually what you want.

@@ -26,7 +26,7 @@ Read the output conservatively. Each non-empty result line contains a mutant ID
 and a status:
 
 ```text
-    Tensile.Common.Utilities.x__mutmut_1: survived
+    tensilelite.Common.Utilities.x__mutmut_1: survived
 ```
 
 Record every ID exactly once before grouping work. Keep an unknown status as

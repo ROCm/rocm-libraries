@@ -37,7 +37,7 @@ You need a ROCm install (e.g. `/opt/rocm`) and Python 3.8+. For `GPU_TARGETS`, s
 
 ## GPU targets: one, several, or all
 
-**`GPU_TARGETS`** (CMake) controls which AMD GPU architectures are built (Tensile device libraries and any arch-specific code).
+**`GPU_TARGETS`** (CMake) controls which AMD GPU architectures are built (TensileLite device libraries and any arch-specific code).
 
 - **One GPU:** e.g. `-DGPU_TARGETS=gfx90a`
 - **Multiple GPUs:** semicolon-separated, quoted: `-DGPU_TARGETS="gfx90a;gfx942;gfx950"`
@@ -47,16 +47,16 @@ Supported names are in `cmake/tensilelite_supported_architectures.cmake`.
 
 ---
 
-## Device libraries (Tensile): required for matmul tests
+## Device libraries (TensileLite): required for matmul tests
 
-hipBLASLt uses a **build-time** generator (Tensile, in-repo) to produce GPU kernel libraries (`.dat` + `.hsaco`/`.co`), and a **runtime** (TensileLite host) that loads those artifacts when you call the matmul API. Most `hipblaslt-test` cases are matmul tests, so at runtime the library needs that Tensile device library for your GPU. If it's missing, matmul tests fail. You must either:
+hipBLASLt uses a **build-time** generator (TensileLite, in-repo) to produce GPU kernel libraries (`.dat` + `.hsaco`/`.co`), and a **runtime** (TensileLite host) that loads those artifacts when you call the matmul API. Most `hipblaslt-test` cases are matmul tests, so at runtime the library needs that TensileLite device library for your GPU. If it's missing, matmul tests fail. You must either:
 
 1. **Build the device libraries** in this repo (target `tensilelite-device-libraries`), which populates `build/Tensile/library/`, or  
 2. **Use an existing ROCm install** and set `HIPBLASLT_TENSILE_LIBPATH` to the directory that contains `TensileLibrary_lazy_<arch>.dat` and the code objects.
 
 ### Python environment for building device libraries
 
-The `tensilelite-device-libraries` target runs a Python script (`Tensile.TensileCreateLibrary`) that needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the Tensile requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
+The `tensilelite-device-libraries` target runs a Python script (`tensilelite.TensileCreateLibrary`) that needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the TensileLite requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
 
 ```bash
 cd projects/hipblaslt
@@ -133,9 +133,9 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 ## TensileLite Python tests (codegen / characterization)
 
-The sections above cover the **client** tests (`hipblaslt-test`, gtest, YAML data). The in-repo **TensileLite generator** has its own Python test suite under `tensilelite/Tensile/Tests/unit/`, including **characterization tests** that pin current behavior with [syrupy](https://github.com/syrupy-project/syrupy) `.ambr` golden files.
+The sections above cover the **client** tests (`hipblaslt-test`, gtest, YAML data). The in-repo **TensileLite generator** has its own Python test suite under `tensilelite/tensilelite/Tests/unit/`, including **characterization tests** that pin current behavior with [syrupy](https://github.com/syrupy-project/syrupy) `.ambr` golden files.
 
-If your change makes a characterization test fail, do **not** run a blanket `pytest --snapshot-update` (it rewrites every golden and destroys the safety net). Update only the affected node and review the diff. Full policy and the decision tree: [`tensilelite/Tensile/Tests/unit/characterization/README.md`](tensilelite/Tensile/Tests/unit/characterization/README.md).
+If your change makes a characterization test fail, do **not** run a blanket `pytest --snapshot-update` (it rewrites every golden and destroys the safety net). Update only the affected node and review the diff. Full policy and the decision tree: [`tensilelite/tensilelite/Tests/unit/characterization/README.md`](tensilelite/tensilelite/Tests/unit/characterization/README.md).
 
 ---
 
