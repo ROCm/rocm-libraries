@@ -111,6 +111,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceCommon.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdTrain.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests
