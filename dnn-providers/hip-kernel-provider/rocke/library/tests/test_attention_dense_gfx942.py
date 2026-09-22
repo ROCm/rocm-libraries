@@ -460,7 +460,7 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
 
 
 def test_supports_rejects_over_budget_lds():
-    """block_n=128 at D128/bf16 needs 2*128*(128+8)*2 = 69632 B > the 64 KB gfx942 LDS.
+    """block_n=128 at D128/bf16 needs 128*(128+8)*2 + 128*128*2 = 67584 B > the 64 KB gfx942 LDS.
     Without this gate it reaches comgr and dies with an opaque CODEGEN abort.
 
     The pad is set EXPLICITLY on the spec rather than inherited from the field default:
@@ -473,7 +473,7 @@ def test_supports_rejects_over_budget_lds():
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert not ok and "LDS" in why
     # the arithmetic the rejection rests on, spelled out so a capacity/pad change is loud
-    assert "69632" in why, why
+    assert "67584" in why, why
 
 
 def test_lds_budget_boundary_is_accepted_at_exactly_capacity():
@@ -649,6 +649,7 @@ _CONTRACT_GRID = [
     dict(lds_row_pad=0),  # accepted: the unpadded A/B arm
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
     dict(v_row_pad=16),  # accepted
+    dict(v_row_pad=16,use_v_swizzle=False),  # accepted
     dict(v_row_pad=-4),  # REJECTED: negative
     # --- private: use_cfvst (the one tri-state with a rejected direction) ---
     dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
@@ -952,13 +953,13 @@ def test_exp2_fast_policy_bf16_d128_short_seq_guard(head_size, dtype, seqlen, ex
 @pytest.mark.parametrize(
     "head_size, dtype, block_n, expected",
     [
-        # cfvst path (fp16-D128): pad is DERIVED so V_LDROW = block_n + pad is the
+        # cfvst path (D128): pad is DERIVED so V_LDROW = block_n + pad is the
         # smallest pow2 >= max(64, block_n) -> the XOR swizzle engages at EVERY tile
         # width, not only block_n=64.
         (128, "fp16", 64, 0),  # shipped tile; V_LDROW=64 (golden pinned here)
         (128, "fp16", 32, 32),  # small-tile double-K variant; V_LDROW=64, swizzle ON
         (128, "fp16", 128, 0),  # wide tile; V_LDROW=128, swizzle ON
-        (128, "bf16", 64, 8),  # no cfvst (bf16 D128 spills) -> no swizzle
+        (128, "bf16", 64, 0),  # shipped tile; V_LDROW=64, swizzle ON
         (64, "fp16", 64, 8),  # D64 naive-V layout -> no swizzle
         (64, "bf16", 64, 8),
     ],
@@ -966,7 +967,7 @@ def test_exp2_fast_policy_bf16_d128_short_seq_guard(head_size, dtype, seqlen, ex
 def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
     head_size, dtype, block_n, expected
 ):
-    """On the cfvst path (fp16-D128) v_row_pad is DERIVED from block_n so V_lds is the
+    """On the cfvst path (D128) v_row_pad is DERIVED from block_n so V_lds is the
     smallest pow2 >= max(64, block_n) wide and the XOR bank-conflict swizzle engages at
     any tile width; 8 (no swizzle) everywhere else. This
     pins the derived values so a future edit that flips one arm updates this on purpose.
@@ -978,12 +979,11 @@ def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
 def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     """Regression guard for the tile-width axis: on the cfvst path the derived pad keeps
     V_LDROW = block_n + pad a pow2 >= 64 at EVERY block_n, so the swizzle never silently
-    turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
-    path stays unpadded (no swizzle)."""
+    turns off (a constant pad dropped it + wasted LDS at block_n != 64)."""
     v_ldrow = block_n + _v_row_pad(128, "fp16", block_n)
     assert v_ldrow == _v_swizzle_width(block_n), (block_n, v_ldrow)
     assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
-    assert _v_row_pad(128, "bf16", block_n) == 8
+    assert _v_row_pad(128, "bf16", block_n) == _v_row_pad(128, "fp16", block_n)
 
 
 @pytest.mark.parametrize("block_n", [64, 32])
@@ -1027,7 +1027,7 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
 
 def test_default_v_row_pad_resolves_through_policy():
     """The shipped default leaves ``v_row_pad=None`` and resolves through the policy,
-    derived from (head_size, dtype, block_n): fp16-D128 -> a pow2 (>=64) V_LDROW at any
+    derived from (head_size, dtype, block_n): D128 -> a pow2 (>=64) V_LDROW at any
     width (swizzle on), 8 otherwise; an explicit override still wins. Guards that
     production picks up the swizzle without a hand-set pad, at block_n 64 AND 32."""
     fp16_d128 = _spec(head_size=128, dtype="fp16")  # block_n=64 default
@@ -1039,8 +1039,7 @@ def test_default_v_row_pad_resolves_through_policy():
     assert fp16_d128.v_row_pad is None
     assert fp16_d128.resolved_v_row_pad() == 0  # V_LDROW=64, swizzle on
     assert fp16_d128_bn32.resolved_v_row_pad() == 32  # V_LDROW=64 too
-    assert bf16_d128.resolved_v_row_pad() == 8
-    assert dataclasses.replace(fp16_d128, v_row_pad=16).resolved_v_row_pad() == 16
+    assert bf16_d128.resolved_v_row_pad() == 0
 
 
 @pytest.mark.parametrize(
