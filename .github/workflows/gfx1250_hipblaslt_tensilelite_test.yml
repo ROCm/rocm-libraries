@@ -269,8 +269,10 @@ jobs:
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
           HIPBLASLT_TEST_TIMEOUT=3600 \
           HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
-          "$HIPBLASLT_TEST" "${FILTER[@]}" \
-            --gtest_output=xml:test_results/hipblaslt_test.xml 2>&1 \
+          # No --gtest_output=xml: the junit XML records per-test time= regardless of
+          # GTEST_PRINT_TIME=0, so it would leak timing into the public artifact. The
+          # -v console log (timing-free under GTEST_PRINT_TIME=0) is what we keep.
+          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 \
             | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
@@ -299,12 +301,11 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" -rxX \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" -v -rxX \
             --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
-            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++" \
-            --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
+            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
       - name: Upload test results
