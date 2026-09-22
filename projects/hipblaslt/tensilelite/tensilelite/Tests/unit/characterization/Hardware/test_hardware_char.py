@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Hardware``: device-name parsing, chip-id
+"""Characterization tests for ``tensilelite.Hardware``: device-name parsing, chip-id
 extraction, ``HardwarePredicate`` construction (FromISA / FromHardware incl. the
 chip-id supported/unsupported/mixed branches), and the ``__lt__`` ordering."""
 
@@ -11,7 +11,7 @@ import importlib
 
 import pytest
 
-H = importlib.import_module("Tensile.Hardware")
+H = importlib.import_module("tensilelite.Hardware")
 HardwarePredicate = H.HardwarePredicate
 
 pytestmark = pytest.mark.unit

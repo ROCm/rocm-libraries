@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Extended tests for Tensile.ductile.core.survival — targeting uncovered paths.
+"""Extended tests for tensilelite.ductile.core.survival — targeting uncovered paths.
 
 Covers: Survival.get() unknown name, Fitness with non-empty old_pop, Fitness with
 empty old_pop, Current strategy,
@@ -10,8 +10,8 @@ __repr__ for each strategy.
 
 import pytest
 
-from Tensile.ductile.core import Survival
-from Tensile.ductile.core.population import Individual, Population
+from tensilelite.ductile.core import Survival
+from tensilelite.ductile.core.population import Individual, Population
 
 pytestmark = pytest.mark.unit
 
