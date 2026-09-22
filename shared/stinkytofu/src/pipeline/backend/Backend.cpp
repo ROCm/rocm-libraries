@@ -20,9 +20,9 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include <string>
-
 #include "stinkytofu/pipeline/Backend.hpp"
+
+#include <string>
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/ModulePassManager.hpp"
@@ -78,8 +78,20 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     // leaving TileB0 or TileM0 at 0 would pass a TileA0-only gate and schedule
     // for a zero-width tile, which is the same silent default this check exists
     // to stop.
-    const auto rejectUnsetTile = [](const char* name, uint32_t value) {
-        if (value != 0) return;
+    //
+    // Scoped to OptLevel > O0, because that is exactly when the config is
+    // consumed: Gfx1250Backend gates the DAG scheduler on
+    // `runScheduler = optLevel != O0`, and the scheduler and the cycle
+    // estimators are what read the tile shape. At O0 the backend is a
+    // legalization/emission path, and it has real non-GEMM callers that have no
+    // tile shape to give and are not wrong for that -- rocisa drives bare
+    // instruction modules through it (rocisa/test/test_mubuf.py,
+    // test_streamk_fences.py, test_pass_plugin.py all use OptLevel 0), as does
+    // stinkytofu-opt on raw asm. Aborting there would fail a caller for not
+    // supplying something nothing downstream is going to look at.
+    const bool tileConfigIsUsed = opts.OptLevel > 0;
+    const auto rejectUnsetTile = [tileConfigIsUsed](const char* name, uint32_t value) {
+        if (!tileConfigIsUsed || value != 0) return;
         report_fatal_error(std::string("GemmTileConfig::") + name +
                            " is 0 at the backend entry, so the tile configuration was never "
                            "set. Set TileA0, TileB0 and TileM0 in the module options before "
@@ -88,7 +100,7 @@ void Backend::configurePassManager(ModulePassManager& pm) {
     rejectUnsetTile("TileA0", gemmTileConfig.TileA0);
     rejectUnsetTile("TileB0", gemmTileConfig.TileB0);
     rejectUnsetTile("TileM0", gemmTileConfig.TileM0);
-    if (gemmTileConfig.NumWaves == 0) {
+    if (tileConfigIsUsed && gemmTileConfig.NumWaves == 0) {
         report_fatal_error(
             "GemmTileConfig::NumWaves is 0 at the backend entry (WaveGroup0 * WaveGroup1). Set "
             "WaveGroup0 and WaveGroup1 in the module options before running the backend.");

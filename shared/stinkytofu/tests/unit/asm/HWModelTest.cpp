@@ -148,9 +148,7 @@ TEST(HWModelDsIssue, DefaultConfigIsSingleWave) {
     const HWModel& hw = hwModelForArch({12, 5, 0});
     const GemmTileConfig defaults;
     EXPECT_EQ(defaults.NumWaves, 1u) << "a default config must mean one wave, not a sentinel";
-    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1,
-                                    static_cast<int>(defaults.NumWaves)),
-              1);
+    EXPECT_EQ(dsIssueCyclesForWaves(hw, /*issueCycles=*/1, static_cast<int>(defaults.NumWaves)), 1);
     EXPECT_EQ(defaults.TileA0, 0u) << "0 is not a valid tile, so it marks an unset config";
 }
 

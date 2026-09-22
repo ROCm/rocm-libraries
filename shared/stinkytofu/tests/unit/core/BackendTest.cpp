@@ -50,9 +50,9 @@ std::unique_ptr<StinkyAsmModule> makeModule(const std::array<int, 3>& arch = kAr
 
 // A module whose tile options were never filled in, i.e. what a caller that
 // forgot to configure the backend actually produces.
-std::unique_ptr<StinkyAsmModule> makeUnconfiguredModule() {
+std::unique_ptr<StinkyAsmModule> makeUnconfiguredModule(int optLevel = 3) {
     StinkyAsmModule::ModuleOptions opts{};
-    opts.OptLevel = 0;
+    opts.OptLevel = optLevel;
     return std::make_unique<StinkyAsmModule>("test", kArch, opts);
 }
 
@@ -88,6 +88,10 @@ TEST(BackendTest, RunOptimizationWithNoPipelineSucceeds) {
 // misconfigured: 0 is not a valid tile size, and 0 waves is not an occupancy
 // anything runs at. Both used to sail through and leave every downstream pass
 // scheduling for a kernel shape that does not exist, so both now abort.
+//
+// The check is scoped to OptLevel > 0, which is where the config is actually
+// read (Gfx1250Backend gates the scheduler on `optLevel != O0`). These tests
+// therefore run at O3; the O0 exemption has its own test below.
 // ---------------------------------------------------------------------------
 
 TEST(BackendTileConfigDeathTest, UnsetTileSizeAborts) {
@@ -107,7 +111,7 @@ TEST(BackendTileConfigDeathTest, UnsetSecondTileDimensionAborts) {
     EXPECT_DEATH(
         {
             StinkyAsmModule::ModuleOptions opts{};
-            opts.OptLevel = 0;
+            opts.OptLevel = 3;
             opts.TileA0 = 128;  // set
             opts.WaveGroup0 = 2;
             opts.WaveGroup1 = 2;
@@ -122,7 +126,7 @@ TEST(BackendTileConfigDeathTest, UnsetThirdTileDimensionAborts) {
     EXPECT_DEATH(
         {
             StinkyAsmModule::ModuleOptions opts{};
-            opts.OptLevel = 0;
+            opts.OptLevel = 3;
             opts.TileA0 = 128;
             opts.TileB0 = 128;
             opts.WaveGroup0 = 2;
@@ -138,7 +142,7 @@ TEST(BackendTileConfigDeathTest, UnsetWaveGroupsAbort) {
     EXPECT_DEATH(
         {
             StinkyAsmModule::ModuleOptions opts{};
-            opts.OptLevel = 0;
+            opts.OptLevel = 3;
             opts.TileA0 = 128;
             opts.TileB0 = 128;
             opts.TileM0 = 32;
@@ -148,6 +152,19 @@ TEST(BackendTileConfigDeathTest, UnsetWaveGroupsAbort) {
             backend.runOptimization();
         },
         "NumWaves is 0");
+}
+
+// At O0 the DAG scheduler does not run (Gfx1250Backend:
+// `runScheduler = optLevel != O0`), so nothing downstream reads the tile shape
+// and an unconfigured module is not an error. This is not a loophole -- it is
+// the case rocisa actually drives: test_mubuf.py, test_streamk_fences.py and
+// test_pass_plugin.py all push bare, non-GEMM instruction modules through the
+// backend at OptLevel 0, and so does stinkytofu-opt on raw asm. Making that
+// fatal aborted those callers for omitting something no pass was going to read.
+TEST(BackendTest, UnconfiguredModuleIsAllowedAtO0) {
+    auto module = makeUnconfiguredModule(/*optLevel=*/0);
+    Backend backend(*module);
+    EXPECT_TRUE(backend.runOptimization());
 }
 
 TEST(BackendTest, ConfiguredModuleRunsOptimization) {

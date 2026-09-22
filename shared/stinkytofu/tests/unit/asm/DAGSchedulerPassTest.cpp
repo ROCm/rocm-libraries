@@ -1465,8 +1465,8 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_HoldsInABlockWithNoWmma) {
     runPassWithUnrollGemm();
 
     EXPECT_LE(maxConsecutiveDsLoads(*bb), 3)
-        << "the cap must bind with no WMMA in the block; found "
-        << maxConsecutiveDsLoads(*bb) << " consecutive ds_loads";
+        << "the cap must bind with no WMMA in the block; found " << maxConsecutiveDsLoads(*bb)
+        << " consecutive ds_loads";
 }
 
 // ---------------------------------------------------------------------------

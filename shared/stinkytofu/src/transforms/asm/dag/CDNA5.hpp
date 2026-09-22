@@ -462,8 +462,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // from dsReadPerWmma below, which is a manually tuned ceiling, not a cost.
     int dsIssueCost(const StinkyInstruction& inst) const {
         return dsIssueCyclesForWaves(
-            hw_, inst.issueCycles,
-            static_cast<int>(getPassContext().getGemmTileConfig().NumWaves));
+            hw_, inst.issueCycles, static_cast<int>(getPassContext().getGemmTileConfig().NumWaves));
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
@@ -583,9 +582,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // behaving as an assignment -- it, not the queue, is choosing placement --
     // which is the thing to know before rebalancing the cap against the queue.
     // Sampled once per pickOne(), so the four counters partition those samples.
-    int dsBindNeither_ = 0;   // free: could issue now
-    int dsBindCapOnly_ = 0;   // only the [X,Y) cap says stop
-    int dsBindQueueOnly_ = 0; // only the ds queue (full / throttled) says stop
+    int dsBindNeither_ = 0;    // free: could issue now
+    int dsBindCapOnly_ = 0;    // only the [X,Y) cap says stop
+    int dsBindQueueOnly_ = 0;  // only the ds queue (full / throttled) says stop
     int dsBindBoth_ = 0;
     // Synthetic throttle cycles charged to DS placement in the current WMMA.
     // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
@@ -2295,13 +2294,12 @@ void CDNA5ReadyQueue::onFinishBB() {
         const int total = dsBindNeither_ + dsBindCapOnly_ + dsBindQueueOnly_ + dsBindBoth_;
         if (total > 0) {
             auto pct = [total](int n) { return (100 * n + total / 2) / total; };
-            std::cerr << "[CDNA5 dsBind] bb="
-                      << (currentBB_ ? currentBB_->getLabel() : "?") << " samples=" << total
-                      << " free=" << dsBindNeither_ << "(" << pct(dsBindNeither_) << "%)"
-                      << " capOnly=" << dsBindCapOnly_ << "(" << pct(dsBindCapOnly_) << "%)"
-                      << " queueOnly=" << dsBindQueueOnly_ << "(" << pct(dsBindQueueOnly_) << "%)"
-                      << " both=" << dsBindBoth_ << "(" << pct(dsBindBoth_) << "%)"
-                      << " dsReadPerWmma=" << dsReadPerWmma()
+            std::cerr << "[CDNA5 dsBind] bb=" << (currentBB_ ? currentBB_->getLabel() : "?")
+                      << " samples=" << total << " free=" << dsBindNeither_ << "("
+                      << pct(dsBindNeither_) << "%)" << " capOnly=" << dsBindCapOnly_ << "("
+                      << pct(dsBindCapOnly_) << "%)" << " queueOnly=" << dsBindQueueOnly_ << "("
+                      << pct(dsBindQueueOnly_) << "%)" << " both=" << dsBindBoth_ << "("
+                      << pct(dsBindBoth_) << "%)" << " dsReadPerWmma=" << dsReadPerWmma()
                       << " queueDepth=" << dsReadQueueDepth() << "\n";
         }
     });

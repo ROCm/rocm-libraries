@@ -125,9 +125,8 @@ TEST(InFlightQueue, IssueCapNeverAdmits2NAcrossAWindowEdge) {
     EXPECT_EQ(cap.size(), 2) << "only the entry from t=0 aged out";
     EXPECT_FALSE(cap.full()) << "one slot freed";
     cap.push(span);
-    EXPECT_TRUE(cap.full())
-        << "and only one: the edge entries still count, so this is 3 in the "
-           "window, never 2N back-to-back";
+    EXPECT_TRUE(cap.full()) << "and only one: the edge entries still count, so this is 3 in the "
+                               "window, never 2N back-to-back";
 }
 
 TEST(InFlightQueue, IssueCapIgnoresThrottleOnlyTime) {
