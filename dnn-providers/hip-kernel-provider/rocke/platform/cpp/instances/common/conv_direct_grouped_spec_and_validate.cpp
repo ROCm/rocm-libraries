@@ -1549,6 +1549,25 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         }
         return false;
     }
+    /* At stride > 1 the Ho <= H check above stops constraining PAD, which leaves
+     * PAD the one unbounded input to the *host* unroll count
+     * n_iters = (Ho-1)*stride + KH (<= H + 2*PAD): PAD=1e9 keeps Ho small enough
+     * to pass every check above while making the builder emit a billion
+     * mostly-empty rows. PAD >= KH is degenerate anyway -- the first output row's
+     * receptive field is then entirely padding, so it is identically zero. */
+    if(p->PAD >= p->KH || p->PAD >= p->KW)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "PAD %d must be < min(KH, KW) = %d; at or beyond the filter extent "
+                     "the first output row reads only padding",
+                     p->PAD,
+                     (p->KH < p->KW) ? p->KH : p->KW);
+        }
+        return false;
+    }
     if(spec->max_live_f32 < 0)
     {
         if(reason && reason_cap > 0)
@@ -1586,6 +1605,22 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
         if(reason && reason_cap > 0)
         {
             snprintf(reason, reason_cap, "block_waves must be >= 1 (got %d)", spec->block_waves);
+        }
+        return false;
+    }
+    /* The builder derives the per-lane channel index from wave_size, so a spec
+     * whose wave_size disagrees with the target's would emit a kernel that
+     * silently reads the wrong channel; wave_size=0 divides by zero outright. */
+    if(spec->wave_size != target->wave_size)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "wave_size %d does not match the %s wave_size %d",
+                     spec->wave_size,
+                     arch,
+                     target->wave_size);
         }
         return false;
     }

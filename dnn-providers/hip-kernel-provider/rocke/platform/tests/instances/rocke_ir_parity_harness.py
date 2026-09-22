@@ -1114,6 +1114,7 @@ def build_direct_depthwise_col(
         )
         spec = DirectDepthwiseColSpec(
             problem=p,
+            name=name,
             block_w=block_w,
             block_waves=block_waves,
             dtype=dtype,

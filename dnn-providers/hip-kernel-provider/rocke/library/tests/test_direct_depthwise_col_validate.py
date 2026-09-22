@@ -52,7 +52,9 @@ _BASE_PROBLEM = dict(
 )
 
 
-def _spec(*, block_w=1, block_waves=1, dtype="fp16", max_live_f32=None, **pkw):
+def _spec(
+    *, block_w=1, block_waves=1, dtype="fp16", max_live_f32=None, wave_size=64, **pkw
+):
     problem = DirectConvProblem(**{**_BASE_PROBLEM, **pkw})
     return DirectDepthwiseColSpec(
         problem=problem,
@@ -61,6 +63,7 @@ def _spec(*, block_w=1, block_waves=1, dtype="fp16", max_live_f32=None, **pkw):
         block_waves=block_waves,
         dtype=dtype,
         max_live_f32=max_live_f32,
+        wave_size=wave_size,
     )
 
 
@@ -123,6 +126,26 @@ _REJECTIONS = [
     ("pad_negative", dict(PAD=-1), ["PAD", "-1"], _ARCH),
     ("kh_zero", dict(KH=0), ["KH=0"], _ARCH),
     ("kw_zero", dict(KW=0), ["KW=0"], _ARCH),
+    # PAD at/past the filter extent makes the first output row read nothing but
+    # padding. At stride > 1 the Ho <= H check no longer bounds PAD, so without
+    # this the host-side n_iters = (Ho-1)*stride + KH loop is unbounded.
+    (
+        "pad_at_filter_extent",
+        dict(KH=3, KW=3, PAD=3, stride=2),
+        ["PAD 3", "< min(KH, KW) = 3"],
+        _ARCH,
+    ),
+    (
+        "pad_unbounded_at_stride_gt_1",
+        dict(H=28, W=28, KH=3, KW=3, PAD=1_000_000, stride=1_000_000),
+        ["PAD 1000000"],
+        _ARCH,
+    ),
+    # --- wave --------------------------------------------------------------
+    # wave_size feeds the per-lane channel index; 0 divides by zero and a
+    # mismatch silently maps lanes to the wrong channel.
+    ("wave_size_zero", dict(wave_size=0), ["wave_size 0", "64"], _ARCH),
+    ("wave_size_mismatch", dict(wave_size=32), ["wave_size 32", "64"], _ARCH),
     # --- arch --------------------------------------------------------------
     ("unknown_arch", dict(), ["gfx999"], "gfx999"),
 ]

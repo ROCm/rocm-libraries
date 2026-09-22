@@ -4946,6 +4946,17 @@ def is_valid_depthwise_col_spec(
         # the current builder does not need them. Remove this check if a
         # use-case for full-padding at stride=1 arises (author: jakpiase).
         return False, f"requires Ho <= H (got Ho={p.Ho}, H={p.H})"
+    # At stride > 1 the Ho <= H check above stops constraining PAD, which leaves
+    # PAD the one unbounded input to the *host* unroll count
+    # n_iters = (Ho-1)*stride + KH (<= H + 2*PAD): PAD=1e9 keeps Ho small enough
+    # to pass every check above while making the builder emit a billion
+    # mostly-empty rows. PAD >= KH is degenerate anyway -- the first output row's
+    # receptive field is then entirely padding, so it is identically zero.
+    if p.PAD >= p.KH or p.PAD >= p.KW:
+        return False, (
+            f"PAD {p.PAD} must be < min(KH, KW) = {min(p.KH, p.KW)}; at or "
+            "beyond the filter extent the first output row reads only padding"
+        )
 
     if spec.block_w < 1:
         return False, f"block_w must be >= 1 (got {spec.block_w})"
@@ -4956,6 +4967,14 @@ def is_valid_depthwise_col_spec(
         )
     if spec.block_waves < 1:
         return False, f"block_waves must be >= 1 (got {spec.block_waves})"
+    # The builder derives the per-lane channel index from wave_size, so a spec
+    # whose wave_size disagrees with the target's would emit a kernel that
+    # silently reads the wrong channel; wave_size=0 divides by zero outright.
+    if spec.wave_size != target.wave_size:
+        return False, (
+            f"wave_size {spec.wave_size} does not match the {arch} wave_size "
+            f"{target.wave_size}"
+        )
     max_threads = target.limits.max_threads_per_block
     if spec.threads_per_block > max_threads:
         return False, (
