@@ -212,7 +212,7 @@ struct HostTensorDescriptor
         });
     }
 
-    HostTensorDescriptor() : HostTensorDescriptor({}, {}, DefaultLayout()){};
+    HostTensorDescriptor() : HostTensorDescriptor({}, {}, DefaultLayout()) {};
 
     // Helper that invokes a callable with a concrete layout object whose type
     // matches the chosen tag (so template code depending on the layout type
