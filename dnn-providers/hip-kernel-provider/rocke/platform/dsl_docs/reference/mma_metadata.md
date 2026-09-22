@@ -14,6 +14,16 @@ all three fields are `None` for unscaled atoms. Integer 16/32 values from JSON
 are normalized to the enum. Scale types are independent of matrix dtypes and
 packed register types. Matrix fragment and layout accessors retain their A/B/C roles.
 
+Scale dtypes normalize to the string-backed `MmaScaleDType` enum: `E8M0`,
+`E4M3`, or `E5M3`. Existing string inputs remain accepted, and string formatting
+and JSON retain the canonical `e8m0`, `e4m3`, and `e5m3` spellings.
+`fp8e4m3` is an alias for `E4M3`. E5M3 is an unsigned scale format, distinct from
+the signed E5M2 matrix format: `e5m2`, `fp8e5m2`, `bf8e5m2`, and `bf8` are
+rejected as scale dtypes. LLVM defines separate matrix and scale format names
+in [WMMAMods](https://github.com/ROCm/llvm-project/blob/6bd443a039454b7d2d9f34740ce0a6e3c10ac8d4/llvm/lib/Target/AMDGPU/Utils/AMDGPUAsmUtils.h#L146).
+Enum membership describes a format; supported operations still come from the
+target catalog and backend.
+
 ## Scale Layouts
 
 `a_scale_frag_len` and `b_scale_frag_len` count logical scale elements per lane.
@@ -40,12 +50,12 @@ For scaled operations, query the complete contract and pass the selected atom
 to `IRBuilder.mma`:
 
 ```python
-from rocke.core.arch import ArchTarget, MmaScaleBlockK
+from rocke.core.arch import ArchTarget, MmaScaleBlockK, MmaScaleDType
 
 atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
     family="wmma_scaled",
     a_dtype="fp8", b_dtype="fp8", c_dtype="fp32",
-    scales=("e8m0", "e8m0", MmaScaleBlockK.K32),
+    scales=(MmaScaleDType.E8M0, MmaScaleDType.E8M0, MmaScaleBlockK.K32),
     m=16, n=16, k=128,
 )
 assert atom is not None

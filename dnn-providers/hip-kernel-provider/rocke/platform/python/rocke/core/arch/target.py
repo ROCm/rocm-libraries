@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import Enum, IntEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -101,6 +101,27 @@ class LayoutMap:
         return self.fn(builder, lane, slot)
 
 
+class MmaScaleDType(str, Enum):
+    """Scale value formats, independent of matrix dtypes and target support.
+
+    E5M3 is an unsigned scale format, distinct from the signed E5M2 matrix
+    format. Only E4M3 shares the accepted matrix spelling ``fp8e4m3``.
+    """
+
+    E8M0 = "e8m0"
+    E4M3 = "e4m3"
+    E5M3 = "e5m3"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> MmaScaleDType | None:
+        if value == "fp8e4m3":
+            return cls.E4M3
+        return None
+
+
 class MmaScaleBlockK(IntEnum):
     """Number of K elements sharing one scale, common to both matrix inputs."""
 
@@ -110,14 +131,14 @@ class MmaScaleBlockK(IntEnum):
 
 def _normalize_mma_scales(
     a_dtype: str | None, b_dtype: str | None, block_k: int | None
-) -> tuple[str | None, str | None, MmaScaleBlockK | None]:
+) -> tuple[MmaScaleDType | None, MmaScaleDType | None, MmaScaleBlockK | None]:
     """Validate the complete scale contract, independently of backend support."""
     if a_dtype is None and b_dtype is None and block_k is None:
         return None, None, None
-    a = "e4m3" if a_dtype == "fp8e4m3" else a_dtype
-    b = "e4m3" if b_dtype == "fp8e4m3" else b_dtype
-    if a not in ("e8m0", "e4m3", "e5m3") or b not in ("e8m0", "e4m3", "e5m3"):
-        raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3")
+    try:
+        a, b = MmaScaleDType(a_dtype), MmaScaleDType(b_dtype)
+    except ValueError:
+        raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3") from None
     if type(block_k) not in (int, MmaScaleBlockK) or block_k not in (16, 32):
         raise ValueError("MMA scale_block_k must be an integer equal to 16 or 32")
     return a, b, MmaScaleBlockK(block_k)
@@ -162,8 +183,8 @@ class MmaOp:
 
     # All absent means unscaled. The K-group size applies to both inputs;
     # scale types describe values, not the backend's packed register carrier.
-    a_scale_dtype: str | None = None
-    b_scale_dtype: str | None = None
+    a_scale_dtype: MmaScaleDType | str | None = None
+    b_scale_dtype: MmaScaleDType | str | None = None
     scale_block_k: MmaScaleBlockK | None = None
 
     a_scale_frag_len: int = 0
@@ -897,6 +918,7 @@ class MmaCatalog:
     """The arch-selected MMA atoms, with optional exact A/B scale filtering.
 
     ``scales=(a_dtype, b_dtype, block_k)`` selects the complete scale contract.
+    Scale dtypes accept ``MmaScaleDType`` members or their string spellings.
     ``None`` leaves scales unconstrained; ``(None, None, None)`` selects unscaled
     atoms. Exact selection and largest-K ties must be unambiguous.
     """

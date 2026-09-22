@@ -254,6 +254,30 @@ static int test_scale_contracts()
                 &cat, "wmma_scaled", "fp8", "bf8", "fp32", 16, 16, NULL, 0, &scales);
         }));
     }
+    for(const char* dtype : {"e5m2", "fp8e5m2", "bf8e5m2", "bf8"})
+    {
+        for(int input = 0; input < 2; ++input)
+        {
+            rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", ROCKE_MMA_SCALE_K32};
+            (input == 0 ? scales.a_scale_dtype : scales.b_scale_dtype) = dtype;
+            CHECK(rejects_query([&] {
+                rocke_mma_catalog_enumerate(
+                    &cat, "wmma_scaled", "fp8", "bf8", "fp32", 16, 16, NULL, 0, &scales);
+            }));
+            CHECK(rejects_query([&] {
+                rocke_mma_catalog_has_shape(
+                    &cat, "wmma_scaled", "fp8", "bf8", "fp32", 16, 16, 128, &scales);
+            }));
+            CHECK(rejects_query([&] {
+                rocke_mma_catalog_op_for_shape(
+                    &cat, "wmma_scaled", "fp8", "bf8", "fp32", 16, 16, 128, &scales);
+            }));
+            CHECK(rejects_query([&] {
+                rocke_mma_catalog_select_largest_k(
+                    &cat, "wmma_scaled", "fp8", "bf8", "fp32", 16, 16, -1, &scales);
+            }));
+        }
+    }
     const rocke_mma_scale_filter_t valid_missing = {"e5m3", "e5m3", ROCKE_MMA_SCALE_K32};
     CHECK(!rocke_mma_catalog_op_for_shape(
         &cat, "wmma_scaled", "fp8", "bf8", "fp32", 16, 16, 128, &valid_missing));

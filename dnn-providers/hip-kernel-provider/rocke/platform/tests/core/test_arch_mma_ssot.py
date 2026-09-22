@@ -11,13 +11,14 @@ across the arches that list a given op_id.
 
 from __future__ import annotations
 
+import json
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from unittest import mock
 
 import pytest
 
-from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp, MmaScaleBlockK
+from rocke.core.arch import ArchTarget, MmaCatalog, MmaOp, MmaScaleBlockK, MmaScaleDType
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 
 from rocke.core.arch.target import (
@@ -92,7 +93,10 @@ def _contracts():
     return [replace(row, op_id=f"fixture_{i}") for i, row in enumerate(rows)]
 
 
-def test_full_contract_queries_distinguish_each_scale_type_and_shared_block():
+@pytest.mark.parametrize("use_strings", [False, True])
+def test_full_contract_queries_distinguish_each_scale_type_and_shared_block(
+    use_strings,
+):
     rows = _contracts()
     assert len({row.op_id for row in rows}) == len(rows)
     catalog = MmaCatalog(rows)
@@ -102,7 +106,19 @@ def test_full_contract_queries_distinguish_each_scale_type_and_shared_block():
             a_dtype=row.a_dtype,
             b_dtype=row.b_dtype,
             c_dtype=row.c_dtype,
-            scales=(row.a_scale_dtype, row.b_scale_dtype, row.scale_block_k),
+            scales=(
+                (
+                    str(row.a_scale_dtype)
+                    if use_strings and row.a_scale_dtype
+                    else row.a_scale_dtype
+                ),
+                (
+                    str(row.b_scale_dtype)
+                    if use_strings and row.b_scale_dtype
+                    else row.b_scale_dtype
+                ),
+                row.scale_block_k,
+            ),
             m=row.m,
             n=row.n,
         )
@@ -151,8 +167,57 @@ def test_scale_alias_selects_the_same_contract():
         (("e8m0", "fp8e4m3", 32), "b_scale_dtype"),
     ):
         row = catalog.op_for_shape(**query, scales=scales)
-        assert row is not None and getattr(row, field) == "e4m3"
-        assert getattr(replace(row, **{field: "fp8e4m3"}), field) == "e4m3"
+        assert row is not None and getattr(row, field) is MmaScaleDType.E4M3
+        assert getattr(replace(row, **{field: "fp8e4m3"}), field) is MmaScaleDType.E4M3
+
+
+@pytest.mark.parametrize("dtype", list(MmaScaleDType))
+def test_scale_dtype_preserves_string_and_json_behavior(dtype):
+    assert isinstance(dtype, str)
+    assert dtype == dtype.value
+    assert str(dtype) == f"{dtype}" == dtype.value
+    assert {dtype: 1}[dtype.value] == 1
+    assert json.dumps(dtype) == json.dumps(dtype.value)
+    assert MmaScaleDType(json.loads(json.dumps(dtype))) is dtype
+    row = replace(_contracts()[0], a_scale_dtype=dtype.value, b_scale_dtype=dtype)
+    assert row.a_scale_dtype is row.b_scale_dtype is dtype
+    decoded = json.loads(json.dumps(asdict(row)))
+    assert decoded["a_scale_dtype"] == decoded["b_scale_dtype"] == dtype.value
+    restored = MmaOp(**decoded)
+    assert restored == row
+    assert restored.a_scale_dtype is restored.b_scale_dtype is dtype
+
+
+def test_scale_dtype_members_and_alias():
+    assert [dtype.value for dtype in MmaScaleDType] == ["e8m0", "e4m3", "e5m3"]
+    assert MmaScaleDType("fp8e4m3") is MmaScaleDType.E4M3
+
+
+@pytest.mark.parametrize("dtype", ["e5m2", "fp8e5m2", "bf8e5m2", "bf8"])
+@pytest.mark.parametrize("field", ["a_scale_dtype", "b_scale_dtype"])
+def test_e5m2_is_not_a_scale_dtype_alias(dtype, field):
+    with pytest.raises(ValueError):
+        MmaScaleDType(dtype)
+    scales = ["e8m0", "e8m0", 32]
+    scales[0 if field == "a_scale_dtype" else 1] = dtype
+    catalog = MmaCatalog(_contracts())
+    query = dict(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="bf8",
+        c_dtype="fp32",
+        scales=tuple(scales),
+        m=16,
+        n=16,
+    )
+    for method, kwargs in (
+        (catalog.enumerate, query),
+        (catalog.has_shape, {**query, "k": 128}),
+        (catalog.op_for_shape, {**query, "k": 128}),
+        (catalog.select_largest_k, query),
+    ):
+        with pytest.raises(ValueError, match="MMA scale dtype"):
+            method(**kwargs)
 
 
 def test_scaled_catalog_identity_and_backend_contract():
@@ -167,6 +232,7 @@ def test_scaled_catalog_identity_and_backend_contract():
             f"_scale_e8m0_e8m0_k{row.scale_block_k}"
         )
         assert row.a_scale_dtype == row.b_scale_dtype == "e8m0"
+        assert row.a_scale_dtype is row.b_scale_dtype is MmaScaleDType.E8M0
         assert isinstance(row.scale_block_k, MmaScaleBlockK)
         packing = gfx1250_scaled_wmma(row.op_id)
         assert packing.atom is row
@@ -191,7 +257,9 @@ def test_scale_block_k_is_a_two_value_enum():
 
 
 @pytest.mark.parametrize("field", ["a_scale_dtype", "b_scale_dtype"])
-@pytest.mark.parametrize("dtype", ["i32", "fp4", "e5m2", "", None])
+@pytest.mark.parametrize(
+    "dtype", ["i32", "fp4", "e5m2", "fp8e5m2", "bf8e5m2", "bf8", "", None]
+)
 def test_invalid_scale_format(field, dtype):
     with pytest.raises(ValueError, match="e8m0, e4m3, or e5m3"):
         replace(_contracts()[0], **{field: dtype})

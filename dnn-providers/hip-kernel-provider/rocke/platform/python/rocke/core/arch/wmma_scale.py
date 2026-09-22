@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .target import ArchTarget, MmaOp
+from .target import ArchTarget, MmaOp, MmaScaleDType
 
 
 @dataclass(frozen=True)
@@ -85,8 +85,8 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     if (
         atom.a_dtype not in formats
         or atom.b_dtype not in formats
-        or atom.a_scale_dtype != "e8m0"
-        or atom.b_scale_dtype != "e8m0"
+        or atom.a_scale_dtype != MmaScaleDType.E8M0
+        or atom.b_scale_dtype != MmaScaleDType.E8M0
         or atom.scale_block_k not in (16, 32)
         or atom.c_dtype != "fp32"
         or atom.shape != (16, 16, 128)
