@@ -64,7 +64,7 @@ def _make_args(**overrides):
 
 def test_platform_flag_is_no_longer_a_recognised_option():
     """``--platform`` is left over as an unknown argument rather than parsed."""
-    from tensilelite.Tensile import addCommonArguments
+    from tensilelite.tensilelite import addCommonArguments
 
     parser = argparse.ArgumentParser()
     addCommonArguments(parser)
@@ -82,7 +82,7 @@ def test_platform_flag_is_no_longer_a_recognised_option():
 @pytest.mark.parametrize("platform", [1, 0, None], ids=["nonzero", "zero", "omitted"])
 def test_args_platform_is_ignored(platform):
     """Whatever the namespace carries, no 'Platform' key is produced."""
-    from tensilelite.Tensile import argUpdatedGlobalParameters
+    from tensilelite.tensilelite import argUpdatedGlobalParameters
 
     rv = argUpdatedGlobalParameters(_make_args(platform=platform))
     assert "Platform" not in rv, (
@@ -96,7 +96,7 @@ def test_args_platform_is_ignored(platform):
 
 def test_platform_via_global_parameters_exits(capsys):
     """--global-parameters Platform=1 reaches rv, and is rejected there."""
-    from tensilelite.Tensile import argUpdatedGlobalParameters
+    from tensilelite.tensilelite import argUpdatedGlobalParameters
 
     args = _make_args(global_parameters=[("Platform", 1)])
     with pytest.raises(SystemExit) as excinfo:
