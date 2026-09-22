@@ -34,6 +34,14 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     }
 }
 
+inline bool requiresInputQuantization(ScalarType storageType,
+                                      const std::optional<ScalarType>& computeType,
+                                      ScalarType arithmeticType) {
+    // Loading has already applied storageType, and arithmetic takes place in arithmeticType.
+    // Only a distinct intermediate compute type can introduce another quantization boundary.
+    return computeType && *computeType != storageType && *computeType != arithmeticType;
+}
+
 inline void validateRuntimeGemm(const GemmInvocation& problem) {
     requireRank(problem.a.shape(), 2, "Reference GEMM", "A");
     requireRank(problem.b.shape(), 2, "Reference GEMM", "B");

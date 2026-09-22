@@ -23,7 +23,7 @@ inline uint32_t roundRightShiftToNearestEven(uint32_t value, uint32_t shift) {
                                            (remainder == halfway && (rounded & 1U) != 0));
 }
 
-inline float decodeFloat16Arithmetic(uint16_t bits) {
+inline float decodeFloat16(uint16_t bits) {
     const uint32_t sign = static_cast<uint32_t>(bits & 0x8000U) << 16;
     const uint32_t exponent = (bits >> 10) & 0x1fU;
     const uint32_t mantissa = bits & 0x3ffU;
@@ -38,16 +38,6 @@ inline float decodeFloat16Arithmetic(uint16_t bits) {
     if (exponent == 0x1fU)
         return std::bit_cast<float>(sign | (mantissa == 0 ? 0x7f800000U : 0x7fc00000U));
     return std::bit_cast<float>(sign | ((exponent + 112U) << 23) | (mantissa << 13));
-}
-
-inline float decodeFloat16(uint16_t bits) {
-    static const std::array<float, size_t{1} << 16> values = [] {
-        std::array<float, size_t{1} << 16> result{};
-        for (size_t value = 0; value < result.size(); ++value)
-            result[value] = decodeFloat16Arithmetic(static_cast<uint16_t>(value));
-        return result;
-    }();
-    return values[bits];
 }
 
 inline uint16_t encodeFloat16(float value) {

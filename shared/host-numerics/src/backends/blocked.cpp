@@ -172,12 +172,16 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
     if (problem.blockScaleB) blockScaleB.emplace(*problem.blockScaleB);
 
     const bool hasBlockScale = blockScaleA.has_value() || blockScaleB.has_value();
-    const bool loadAWithoutTransforms = !problem.conjugateA && preScalesA.empty() &&
-                                        !problem.computeTypeA &&
-                                        problem.mathMode == MathMode::Default;
-    const bool loadBWithoutTransforms = !problem.conjugateB && preScalesB.empty() &&
-                                        !problem.computeTypeB &&
-                                        problem.mathMode == MathMode::Default;
+    const bool loadAWithoutTransforms =
+        !problem.conjugateA && preScalesA.empty() &&
+        !requiresInputQuantization(problem.a.type(), problem.computeTypeA,
+                                   nativeScalarType<Accumulator>) &&
+        problem.mathMode == MathMode::Default;
+    const bool loadBWithoutTransforms =
+        !problem.conjugateB && preScalesB.empty() &&
+        !requiresInputQuantization(problem.b.type(), problem.computeTypeB,
+                                   nativeScalarType<Accumulator>) &&
+        problem.mathMode == MathMode::Default;
 
     const auto loadA = [&](size_t row, size_t reduction) {
         Accumulator value = conjugateIfNeeded(a(row, reduction), problem.conjugateA);

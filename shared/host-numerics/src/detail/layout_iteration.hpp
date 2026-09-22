@@ -36,9 +36,9 @@ inline bool isContiguous(const Layout& layout, IndexOrder order) {
 }
 
 template <typename Function>
-void forEachLayoutOffsetPairRange(const Layout& firstLayout, const Layout& secondLayout,
-                                  IndexOrder indexOrder, size_t first, size_t pastLast,
-                                  Function&& function) {
+void forEachLayoutOffsetPairRunRange(const Layout& firstLayout, const Layout& secondLayout,
+                                     IndexOrder indexOrder, size_t first, size_t pastLast,
+                                     Function&& function) {
     if (firstLayout.shape() != secondLayout.shape())
         throw std::invalid_argument("Tensor offset traversal shape mismatch.");
     const Shape& shape = firstLayout.shape();
@@ -47,7 +47,8 @@ void forEachLayoutOffsetPairRange(const Layout& firstLayout, const Layout& secon
         throw std::out_of_range("Tensor offset traversal range exceeds shape.");
     if (first == pastLast) return;
     if (shape.rank() == 0) {
-        function(0, firstLayout.offset(), secondLayout.offset());
+        function(0, firstLayout.offset(), ptrdiff_t{0}, secondLayout.offset(), ptrdiff_t{0},
+                 size_t{1});
         return;
     }
 
@@ -80,14 +81,29 @@ void forEachLayoutOffsetPairRange(const Layout& firstLayout, const Layout& secon
         }
 
         const size_t count = std::min(innerSize - firstInner, pastLast - first);
-        for (size_t innerIndex = firstInner; innerIndex < firstInner + count; ++innerIndex) {
-            function(
-                first + innerIndex - firstInner,
-                firstBase + static_cast<ptrdiff_t>(innerIndex) * firstLayout.stride(innerDimension),
-                secondBase +
-                    static_cast<ptrdiff_t>(innerIndex) * secondLayout.stride(innerDimension));
-        }
+        function(
+            first,
+            firstBase + static_cast<ptrdiff_t>(firstInner) * firstLayout.stride(innerDimension),
+            firstLayout.stride(innerDimension),
+            secondBase + static_cast<ptrdiff_t>(firstInner) * secondLayout.stride(innerDimension),
+            secondLayout.stride(innerDimension), count);
         first += count;
     }
+}
+
+template <typename Function>
+void forEachLayoutOffsetPairRange(const Layout& firstLayout, const Layout& secondLayout,
+                                  IndexOrder indexOrder, size_t first, size_t pastLast,
+                                  Function&& function) {
+    forEachLayoutOffsetPairRunRange(
+        firstLayout, secondLayout, indexOrder, first, pastLast,
+        [&](size_t logicalIndex, ptrdiff_t firstOffset, ptrdiff_t firstStride,
+            ptrdiff_t secondOffset, ptrdiff_t secondStride, size_t count) {
+            for (size_t index = 0; index < count; ++index) {
+                function(logicalIndex + index,
+                         firstOffset + static_cast<ptrdiff_t>(index) * firstStride,
+                         secondOffset + static_cast<ptrdiff_t>(index) * secondStride);
+            }
+        });
 }
 }  // namespace roc::host_numerics::detail

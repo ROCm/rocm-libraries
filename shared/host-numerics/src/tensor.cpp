@@ -6,6 +6,7 @@
 #include <limits>
 #include <roc/host_numerics/tensor.hpp>
 
+#include "detail/tensor_conversion.hpp"
 #include "detail/tensor_storage.hpp"
 
 namespace roc::host_numerics {
@@ -167,13 +168,8 @@ void Tensor::copyLogicalElementsFrom(const Tensor& source) const {
         copyLogicalElementsFrom(staged);
         return;
     }
-    const uint16_t bits = scalarTypeInfo(m_type).storageBits;
-    detail::forEachIndex(shape(), [&](std::span<const size_t> indices, size_t) {
-        detail::copyBitRange(source.rawEncodedBackingStorage(),
-                             detail::bitOffset(m_type, source.layout().elementOffset(indices)),
-                             rawEncodedBackingStorage(),
-                             detail::bitOffset(m_type, layout().elementOffset(indices)), bits);
-    });
+    detail::TensorConversion(source, *this, detail::implicitStorageConversionOptions(m_type))
+        .copyAll();
 }
 
 Tensor::SharedStorage::SharedStorage(std::shared_ptr<void> lifetimeAnchor,

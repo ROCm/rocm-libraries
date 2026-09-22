@@ -28,6 +28,13 @@ void testTensorConversions() {
             requireNear(columnMajorFloat16.loadAs<float>({row, column}),
                         matrixSource.loadAs<float>({row, column}), 0.0f,
                         "Tensor conversion changed a logical value in a new layout.");
+    const Tensor roundTripMatrix = columnMajorFloat16.copyConvertedTo(
+        ScalarType::Float32, Layout::contiguousLastDimensionFastest(matrixSource.shape()));
+    for (size_t row = 0; row < 2; ++row)
+        for (size_t column = 0; column < 3; ++column)
+            requireNear(roundTripMatrix.loadAs<float>({row, column}),
+                        matrixSource.loadAs<float>({row, column}), 0.0f,
+                        "Tensor conversion changed a value in the reverse relayout direction.");
     requireInvalidArgument(
         [&] {
             (void)matrixSource.copyConvertedTo(ScalarType::Float16, Layout(Shape{2, 3}, {0, 1}));
@@ -50,6 +57,45 @@ void testTensorConversions() {
     require(std::equal(expectedRelaidEncodings.begin(), expectedRelaidEncodings.end(),
                        relaidBFloat16.rawEncodedBackingStorage().begin()),
             "Same-type Tensor relayout did not preserve exact logical encodings.");
+
+    const Shape stridedShape{2, 3, 4};
+    Tensor stridedSource(ScalarType::BFloat16, Layout(stridedShape, {20, -5, 1}, 10));
+    for (size_t first = 0; first < stridedShape[0]; ++first)
+        for (size_t second = 0; second < stridedShape[1]; ++second)
+            for (size_t third = 0; third < stridedShape[2]; ++third)
+                stridedSource.storeFrom({first, second, third},
+                                        static_cast<float>(first * 100 + second * 10 + third));
+    const Tensor stridedConverted =
+        stridedSource.copyConvertedTo(ScalarType::Float32, Layout(stridedShape, {-15, 5, 1}, 15));
+    for (size_t first = 0; first < stridedShape[0]; ++first)
+        for (size_t second = 0; second < stridedShape[1]; ++second)
+            for (size_t third = 0; third < stridedShape[2]; ++third)
+                requireNear(stridedConverted.loadAs<float>({first, second, third}),
+                            static_cast<float>(first * 100 + second * 10 + third), 0.0f,
+                            "Tensor conversion changed an arbitrary strided-layout value.");
+
+    const Shape bulkShape{513, 513};
+    std::vector<float> bulkValues(bulkShape.elementCount());
+    for (size_t index = 0; index < bulkValues.size(); ++index)
+        bulkValues[index] = static_cast<float>(static_cast<int>(index % 17) - 8);
+    const Tensor bulkFloat16 = Tensor::copyValuesWithConversion(ScalarType::Float16, bulkShape,
+                                                                std::span<const float>(bulkValues));
+    const Tensor bulkConverted = bulkFloat16.copyConvertedTo(
+        ScalarType::Float32, Layout::contiguousFirstDimensionFastest(bulkShape));
+    for (size_t row : {size_t{0}, size_t{256}, size_t{512}})
+        for (size_t column : {size_t{0}, size_t{257}, size_t{512}})
+            requireNear(bulkConverted.loadAs<float>({row, column}),
+                        bulkFloat16.loadAs<float>({row, column}), 0.0f,
+                        "Bulk tiled Tensor conversion changed a logical value.");
+
+    const Shape emptyShape{2, 0};
+    const Tensor emptyConverted =
+        Tensor(ScalarType::Float16, emptyShape)
+            .copyConvertedTo(ScalarType::Float32,
+                             Layout::contiguousFirstDimensionFastest(emptyShape));
+    require(emptyConverted.shape() == emptyShape && emptyConverted.elementCount() == 0 &&
+                emptyConverted.rawEncodedBackingStorage().empty(),
+            "Tensor conversion did not preserve an empty shape as a no-op.");
 
     Tensor int4(ScalarType::Int4, Shape{5});
     auto int4View = int4;

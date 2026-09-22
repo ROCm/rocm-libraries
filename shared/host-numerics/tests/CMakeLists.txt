@@ -296,6 +296,16 @@ if(HOST_NUMERICS_BUILD_BENCHMARKS)
     )
 
     add_executable(
+        host-numerics-tensor-conversion-benchmark
+        tensor_conversion_benchmark.cpp
+    )
+    target_link_libraries(
+        host-numerics-tensor-conversion-benchmark
+        PRIVATE
+            roc::host-numerics
+    )
+
+    add_executable(
         host-numerics-gemm-benchmark
         gemm_benchmark.cpp
     )

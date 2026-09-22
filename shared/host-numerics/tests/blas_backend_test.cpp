@@ -207,13 +207,19 @@ void testPlainLowPrecisionMaterialization() {
                 for (size_t row = 0; row < b.shape()[0]; ++row)
                     b.storeFrom({row, column}, bValues[column * b.shape()[0] + row]);
 
-            const auto checkOutput = [&](ScalarType outputType, const Layout& outputLayout) {
+            const auto checkOutput = [&](ScalarType outputType, const Layout& outputLayout,
+                                         ScalarType computeType) {
                 Tensor output(outputType, outputLayout);
                 GemmTestOptions options(ScalarType::Float32);
-                options.computeTypeA = ScalarType::Float32;
-                options.computeTypeB = ScalarType::Float32;
+                options.computeTypeA = computeType;
+                options.computeTypeB = computeType;
                 GemmTestCase problem(a, b, output, options);
                 referenceGemmWithBlasBackend(problem, GemmBackend::Blas);
+                Tensor blockedOutput(outputType, outputLayout);
+                GemmTestCase blockedProblem(a, b, blockedOutput, options);
+                referenceGemm(blockedProblem, GemmBackend::Blocked);
+                require(compare(output, blockedOutput).passed(),
+                        "Identity compute-type handling differs between BLAS and Blocked.");
                 for (size_t row = 0; row < output.shape()[0]; ++row) {
                     for (size_t column = 0; column < output.shape()[1]; ++column) {
                         float expected = 0.0f;
@@ -225,10 +231,12 @@ void testPlainLowPrecisionMaterialization() {
                     }
                 }
             };
-            checkOutput(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}, 1));
-            checkOutput(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}, 1));
-            if (inputType == ScalarType::Float16 || inputType == ScalarType::BFloat16)
-                checkOutput(inputType, Layout(Shape{2, 2}, {-1, 3}, 1));
+            for (const ScalarType computeType : {ScalarType::Float32, inputType}) {
+                checkOutput(ScalarType::Float32, Layout(Shape{2, 2}, {1, 3}, 1), computeType);
+                checkOutput(ScalarType::Float32, Layout(Shape{2, 2}, {3, 1}, 1), computeType);
+                if (inputType == ScalarType::Float16 || inputType == ScalarType::BFloat16)
+                    checkOutput(inputType, Layout(Shape{2, 2}, {-1, 3}, 1), computeType);
+            }
         }
     }
 }
@@ -256,6 +264,17 @@ int main() {
     const Tensor ones = Tensor::copyNativeStorage<float>(
         d.layout(), std::span<const float>(std::array<float, 4>{1, 1, 1, 1}));
     d.copyLogicalElementsFrom(ones);
+    problem.computeTypeA = ScalarType::Float32;
+    problem.computeTypeB = ScalarType::Float32;
+    const GemmTestRunInfo explicitIdentity = referenceGemmWithBlasBackend(problem);
+    require(explicitIdentity.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 58 &&
+                d.loadAs<float>({1, 0}) == 139 && d.loadAs<float>({0, 1}) == 64 &&
+                d.loadAs<float>({1, 1}) == 154,
+            "Automatic GEMM did not reuse explicit identity compute types.");
+
+    d.copyLogicalElementsFrom(ones);
+    problem.computeTypeA.reset();
+    problem.computeTypeB.reset();
     const GemmTestRunInfo automatic = referenceGemmWithBlasBackend(problem);
     require(automatic.backendUsed == GemmBackend::Blas && d.loadAs<float>({0, 0}) == 58 &&
                 d.loadAs<float>({1, 0}) == 139 && d.loadAs<float>({0, 1}) == 64 &&
