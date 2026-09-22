@@ -567,11 +567,8 @@ validParameters = { # we need to make sure this matches develop
     # .sqtt_funcmap section naming the markers, for rocprofv3 --att capture.
     #   0 = off
     #   1 = s_ttracedata_imm -- 1 instruction per marker, no register touched
-    #   2 = m0 form with a packed gfx12 shader clock (funcmap M: row) --
-    #       7 instructions per marker; buys 16-cycle-resolution timestamps at
-    #       the cost of ~7x the instrumentation in the hot loop.
     # Debug instrumentation. Forced 0 off gfx1250 and off UseSubtileImpl.
-    "SubtileSqttMarkers": [0, 1, 2],
+    "SubtileSqttMarkers": [0, 1],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

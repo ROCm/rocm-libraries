@@ -27,16 +27,20 @@ instruction, no hazard.  Two costs follow, and both shape this module:
 
 * hardware captures only the low 8 bits of SIMM16, which after the two flag bits
   leaves ids 1..63 (``MAX_MARKER_ID``);
-* it is incompatible with gfx12 shader-clock packing, which needs the high bits.
-  No ``M:`` row is emitted, and timestamps therefore carry the usual SQTT drain
-  skew.
+* it cannot carry gfx12 shader-clock packing, which needs the high bits, so no
+  ``M:`` row is emitted and timestamps carry the usual SQTT drain skew.  A
+  packed word would not survive the trip anyway: ``rocprofv3`` flattens
+  ``.sqtt_funcmap`` into ``code.json`` as ``(id, kind, name)`` rows, which an
+  ``M:`` row is not, and RCV's marker walker decodes ``id = value >> 2`` with no
+  clock mask -- so the clock bits would land in the id and every marker would
+  resolve as Unknown.
 
 ``s_ttracedata_imm`` does not exist on gfx9, which is why this is gfx1250-only.
 
 Scopes via the fused transition
 -------------------------------
-The mainloop iteration is a *scope*, not a point, because every consumer that
-attributes time -- the RCV marker flamegraph, ``sqtt_flamegraph.py`` -- works on
+The mainloop iteration is a *scope*, not a point, because the consumer that
+attributes time -- ROCprof Compute Viewer's marker flamegraph -- works on
 scopes.  A point gets ``enter_time == exit_time`` in RCV's marker walker and is
 never pushed on the stack, so it contributes zero width and shows up only as an
 instant on the timeline.  Markers that cannot be attributed time are close to
@@ -81,29 +85,6 @@ The cluster-barrier markers stay points: they are genuinely instantaneous, and
 as points they now nest *inside* the iteration scope at depth 1, which is where
 they belong.
 
-Modes
------
-``SubtileSqttMarkers`` selects how a marker word reaches the trace:
-
-``1`` -- ``s_ttracedata_imm``.  One instruction, no register touched.  The
-default, and what every consumer handles.
-
-``2`` -- the ``m0`` form carrying a packed gfx12 shader clock, advertised by an
-``M:`` funcmap row.  SQTT stamps a record when it *drains*, not when it issued,
-with an unknown fixed phase per physical SIMD; the packed clock lets the decoder
-recover issue time.  The immediate form cannot express this -- the clock sits in
-the top bits and ``s_ttracedata_imm`` reaches only the low 8 -- so every marker
-becomes seven instructions.  Known caveats before reaching for it:
-
-* ROCprof Compute Viewer's marker walker decodes ``id = value >> 2`` with no
-  clock mask and its funcmap reader ignores ``M:``, so unless ``rocprofv3``
-  normalizes packed headers upstream, RCV will resolve every marker as Unknown.
-  The decoder *library* handles the layout correctly -- verified -- so the
-  Python tools are the safer consumer.
-* it is mutually exclusive with ``R:`` payload records;
-* decoders older than the ``M:``-aware ones (e.g. ROCm 7.15) warn "unknown row
-  prefix" and then misread every packed id.
-
 Using it
 --------
 Build the kernel with ``SubtileSqttMarkers: [1]`` in the solution YAML.  The
@@ -115,10 +96,9 @@ never dedup against, or be cached as, a production one.  Then::
 Then open the resulting ``ui_output_agent_<id>_dispatch_<id>/`` directory in
 ROCprof Compute Viewer.  RCV reads markers natively: ``rocprofv3`` already
 extracts ``.sqtt_funcmap`` into ``code.json``, and RCV's marker walker turns the
-records into spans.  No Python post-processing and no Perfetto step is needed --
-``sqtt_perfetto.py`` / ``sqtt_flamegraph.py`` are an alternative consumer, not a
-prerequisite.  The iteration scopes appear in RCV's marker flamegraph; the
-cluster-barrier points appear as instants nested inside them.
+records into spans.  No post-processing step is needed.  The iteration scopes
+appear in RCV's marker flamegraph; the cluster-barrier points appear as instants
+nested inside them.
 
 Note this is also why the mainloop marker must be a scope.  RCV's marker view is
 a flamegraph weighted by latency, so a zero-width point contributes nothing to
@@ -138,9 +118,6 @@ from __future__ import annotations
 import re
 
 from rocisa.code import Module, TextBlock
-from rocisa.container import HWRegContainer, mgpr
-from rocisa.instruction import (SBfeU32, SGetRegB32, SLShiftLeftB32, SMovB32,
-                                SNop, SOrB32, STtraceData)
 
 from .ClusterBarrier import CB_SIGNAL_COMMENT, CB_WAIT_COMMENT
 
@@ -155,20 +132,10 @@ except ImportError:  # pragma: no cover - backend-dependent
     STtraceDataImm = None
 
 
-# Marker modes (the SubtileSqttMarkers solution parameter).
+# The SubtileSqttMarkers solution parameter: 0 off, 1 on (s_ttracedata_imm).
 MODE_OFF = 0
-MODE_IMM = 1    # s_ttracedata_imm: 1 instruction, no register touched
-MODE_CLOCK = 2  # m0 form with a packed gfx12 shader clock: 7 instructions
 
-# gfx12 shader-clock packing layout, advertised in the funcmap's M: row. The
-# clock occupies the TOP `bits` of the marker word, sourced from that window of
-# HW_REG_SHADER_CYCLES_LO -- so 16-cycle resolution over a 65536-cycle window,
-# and the id field shrinks from 30 bits to 30 - bits.
-SHADER_CLOCK_BITS = 12
-SHADER_CLOCK_SHIFT = 4
-
-# 8 captured payload bits minus the 2 flag bits. This bounds MODE_IMM; MODE_CLOCK
-# could address 2**18 ids but there is no reason to let the two modes disagree.
+# 8 captured payload bits minus the 2 flag bits.
 MAX_MARKER_ID = 63
 
 FLAG_EXIT_PREV = 0x1
@@ -220,9 +187,6 @@ class MarkerRegistry:
         self._ids = {}     # name -> id
         self._kinds = {}   # name -> KIND_*
         self._next = 1
-        # Emit context, set by _configure() from the kernel on first use.
-        self.mode = MODE_IMM
-        self.ldsClamp = 0
 
     def idFor(self, name: str, kind: str = KIND_POINT) -> int:
         if name not in self._ids:
@@ -271,7 +235,7 @@ def sqttMarkersEnabled(writer, kernel) -> bool:
         return False
     if tuple(kernel["ISA"])[:2] != (12, 5):
         return False
-    if mode == MODE_IMM and STtraceDataImm is None:
+    if STtraceDataImm is None:
         raise RuntimeError(
             "SubtileSqttMarkers requires s_ttracedata_imm, which the active "
             "rocisa backend does not provide (the stinkytofu backend has only "
@@ -279,59 +243,13 @@ def sqttMarkersEnabled(writer, kernel) -> bool:
     return True
 
 
-def _configure(writer, kernel) -> "MarkerRegistry":
-    """Stamp the per-kernel emit context onto the registry."""
-    reg = registryFor(writer)
-    reg.mode = int(kernel.get("SubtileSqttMarkers", MODE_OFF) or MODE_OFF)
-    reg.ldsClamp = int(kernel.get("LdsNumBytes", 0) or 0)
-    return reg
-
-
-def _emitWord(writer, word: int, comment: str) -> Module:
-    """Emit one marker word in whichever form the mode calls for.
-
-    MODE_IMM is a single ``s_ttracedata_imm``: the payload rides in SIMM16 and
-    no register is touched.
-
-    MODE_CLOCK cannot use that form at all -- the packed clock lives in the top
-    bits and the immediate form only reaches the low 8 -- so the word is built
-    in ``m0`` and emitted with plain ``s_ttracedata``.  It is computed *into*
-    ``m0`` rather than via a scratch SGPR, which costs no register pressure in
-    kernels that sit near the SGPR ceiling.  ``m0`` is restored afterwards to
-    the LDS clamp the prologue set; that value is a codegen constant, so the
-    restore is one instruction and needs no save.
-    """
-    reg = registryFor(writer)
-    mod = Module("sqtt_word")
-
-    if reg.mode != MODE_CLOCK:
-        mod.add(STtraceDataImm(word, comment))
-        return mod
-
-    shiftUp = 32 - SHADER_CLOCK_BITS
-    mod.add(SGetRegB32(dst=mgpr(0),
-                       src=HWRegContainer(reg="HW_REG_SHADER_CYCLES_LO", value=[]),
-                       comment="sqtt: m0 = shader clock"))
-    mod.add(SBfeU32(dst=mgpr(0), src0=mgpr(0),
-                    src1=hex((SHADER_CLOCK_BITS << 16) | SHADER_CLOCK_SHIFT),
-                    comment=f"sqtt: take {SHADER_CLOCK_BITS} clock bits from bit {SHADER_CLOCK_SHIFT}"))
-    mod.add(SLShiftLeftB32(dst=mgpr(0), shiftHex=shiftUp, src=mgpr(0),
-                           comment=f"sqtt: clock -> marker bits [31:{shiftUp}]"))
-    mod.add(SOrB32(dst=mgpr(0), src0=mgpr(0), src1=hex(word),
-                   comment=f"sqtt: | id/flags ({comment})"))
-    mod.add(SNop(0))
-    mod.add(STtraceData(comment))
-    mod.add(SMovB32(dst=mgpr(0), src=hex(reg.ldsClamp),
-                    comment="sqtt: restore LDS clamp"))
-    return mod
-
-
 def _marker(writer, name: str, flags: int, kind: str, note: str) -> Module:
+    """One ``s_ttracedata_imm``: the payload rides in SIMM16, no register is
+    touched, and there is no hazard to pad against."""
     markerId = registryFor(writer).idFor(name, kind)
     mod = Module(f"sqtt_{name}")
-    for i in _emitWord(writer, encodeMarker(markerId, flags),
-                       f"sqtt {note} {name} (id={markerId})").flatitems():
-        mod.add(i)
+    mod.add(STtraceDataImm(encodeMarker(markerId, flags),
+                           f"sqtt {note} {name} (id={markerId})"))
     return mod
 
 
@@ -357,10 +275,7 @@ def markerTransition(writer, name: str) -> Module:
 def markerExit(writer) -> Module:
     """Pop the top scope.  The id field is ignored on exit, so the word is 0x1."""
     mod = Module("sqtt_exit")
-    # A bare exit carries no id, but is packed like any other word when the
-    # clock layout is active -- the decoder expects that.
-    for i in _emitWord(writer, FLAG_EXIT_PREV, "sqtt exit").flatitems():
-        mod.add(i)
+    mod.add(STtraceDataImm(FLAG_EXIT_PREV, "sqtt exit"))
     return mod
 
 
@@ -387,7 +302,6 @@ def insertSqttMarkers(module, writer, kernel, label: str):
     """
     if not sqttMarkersEnabled(writer, kernel):
         return module
-    _configure(writer, kernel)
 
     items = module.flatitems()
     out = Module(module.name)
@@ -443,7 +357,6 @@ def sqttMainloopScopeOpen(writer, kernel) -> Module:
     mod = Module("sqtt_mainloop_scope_open")
     if not sqttMarkersEnabled(writer, kernel):
         return mod
-    _configure(writer, kernel)
     for m in markerEnter(writer, MARKER_MAINLOOP_ITER).flatitems():
         mod.add(m)
     return mod
@@ -459,7 +372,6 @@ def sqttMainloopScopeClose(writer, kernel) -> Module:
     mod = Module("sqtt_mainloop_scope_close")
     if not sqttMarkersEnabled(writer, kernel):
         return mod
-    _configure(writer, kernel)
     for m in markerExit(writer).flatitems():
         mod.add(m)
     return mod
@@ -470,8 +382,8 @@ def sqttFuncmapSection(writer, kernel) -> Module:
 
     A non-alloc ``@progbits`` blob of newline-separated rows.  The TensileLite
     link step passes no ``--gc-sections``, so it survives into the linked
-    ``.co``, where ``sqtt_decode_funcmap.py`` (or ``llvm-objcopy
-    --dump-section``) reads it back.
+    ``.co``, where ``rocprofv3`` (or ``llvm-objcopy --dump-section``) reads it
+    back.
 
     No ``M:`` row: that advertises shader-clock packing, which the immediate
     marker form cannot carry.  Emitted after the body so every marker the body
@@ -481,18 +393,13 @@ def sqttFuncmapSection(writer, kernel) -> Module:
     if not sqttMarkersEnabled(writer, kernel):
         return mod
 
-    reg = _configure(writer, kernel)
+    reg = registryFor(writer)
     if reg.isEmpty():
         return mod
 
     rows = [f"W:{kernel['WavefrontSize']}",
             f"K:{writer.states.kernelName}"]
     rows += reg.rows()
-    if reg.mode == MODE_CLOCK:
-        # Tells the decoder the top bits are a clock, not id. Omitting it while
-        # emitting packed words would make every id decode as garbage.
-        rows.append(f"M:shader_clock_bits={SHADER_CLOCK_BITS};"
-                    f"shader_clock_shift={SHADER_CLOCK_SHIFT}")
 
     # '\n' must reach the assembler as the two-character escape inside .asciz.
     payload = "".join(r + "\\n" for r in rows)

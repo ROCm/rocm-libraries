@@ -47,15 +47,12 @@ def _make_writer(kernel_name="TestKernel"):
     return SimpleNamespace(states=SimpleNamespace(kernelName=kernel_name))
 
 
-LDS_CLAMP = 0x44000
-
-
 def _kernel(enabled=True, isa=GFX1250_ISA, wavesize=WAVESIZE_32, mode=None):
     # `enabled` stays bool-shaped so the pre-mode tests read naturally; True is
     # mode 1 (int(True) == 1), which is exactly how existing YAML behaves.
     return {"SubtileSqttMarkers": mode if mode is not None else enabled,
             "ISA": list(isa), "WavefrontSize": wavesize,
-            "LdsNumBytes": LDS_CLAMP}
+            "LdsNumBytes": 0x44000}
 
 
 def _module(*items):
@@ -481,85 +478,41 @@ class TestNestedPhaseScopes:
         assert _markers(out) == []
 
 
-class TestClockPackedMode:
-    """MODE_CLOCK: the m0 form with a packed gfx12 shader clock.
+class TestMarkerForm:
+    """Every marker is one s_ttracedata_imm and touches no register.
 
-    The immediate form cannot carry this -- the clock sits in the top bits and
-    s_ttracedata_imm only reaches the low 8 -- so every marker becomes a
-    7-instruction sequence computed into m0.
+    The alternative -- an m0-sourced s_ttracedata carrying a packed gfx12 shader
+    clock -- is deliberately not offered. rocprofv3 flattens .sqtt_funcmap into
+    code.json as (id, kind, name) rows, which the M: row announcing such a
+    layout is not, and RCV's marker walker decodes id = value >> 2 with no clock
+    mask; a packed word therefore resolves as Unknown. See the module docstring.
     """
 
-    def _text(self, mode, **kw):
+    def _text(self, mode=1, **kw):
         from Tensile.Components.Subtile.SqttMarkers import insertSqttMarkers
         return str(insertSqttMarkers(_module(_nop()), _make_writer(),
                                      _kernel(mode=mode, **kw), "MAINLOOP"))
 
-    def test_mode_1_uses_the_immediate_form(self):
-        t = self._text(1)
+    def test_uses_the_immediate_form(self):
+        t = self._text()
         assert "s_ttracedata_imm" in t
         assert "m0" not in t
 
-    def test_mode_2_uses_m0_and_the_shader_clock(self):
-        t = self._text(2)
-        assert "s_ttracedata_imm" not in t
-        assert "hwreg(HW_REG_SHADER_CYCLES_LO)" in t
-        assert "s_ttracedata" in t
-
-    def test_mode_2_restores_the_lds_clamp(self):
-        # The prologue's m0 value is a codegen constant, so the restore needs no
-        # save and no scratch SGPR.
-        assert f"s_mov_b32 m0, {hex(LDS_CLAMP)}" in self._text(2)
-
-    def test_mode_2_uses_no_scratch_sgpr(self):
-        # Computing into m0 keeps register pressure at zero; these kernels sit
-        # near the SGPR ceiling.
+    def test_touches_no_register(self):
+        # No scratch SGPR and no m0 save/restore: these kernels sit near the
+        # SGPR ceiling, and m0 may hold a live DirectToLds base address.
         import re
-        assert not re.search(r"\bs\[?\d", self._text(2))
+        assert not re.search(r"\bs\[?\d", self._text())
 
-    def test_mode_2_places_the_clock_in_the_top_bits(self):
-        from Tensile.Components.Subtile.SqttMarkers import (
-            SHADER_CLOCK_BITS, SHADER_CLOCK_SHIFT)
-        t = self._text(2)
-        assert hex((SHADER_CLOCK_BITS << 16) | SHADER_CLOCK_SHIFT) in t
-        assert f"m0, {32 - SHADER_CLOCK_BITS}" in t
-
-    def test_mode_2_costs_seven_instructions_per_marker(self):
-        from Tensile.Components.Subtile.SqttMarkers import markerExit, _configure
+    def test_costs_one_instruction_per_marker(self):
+        from Tensile.Components.Subtile.SqttMarkers import markerExit
         w = _make_writer()
-        _configure(w, _kernel(mode=2))
-        assert len([l for l in str(markerExit(w)).splitlines() if l.strip()]) == 7
+        assert len([l for l in str(markerExit(w)).splitlines() if l.strip()]) == 1
+
+    def test_mode_2_is_not_a_valid_parameter_value(self):
+        from Tensile.Common.ValidParameters import validParameters
+        assert validParameters["SubtileSqttMarkers"] == [0, 1]
 
     def test_mode_0_is_off(self):
         from Tensile.Components.Subtile.SqttMarkers import sqttMarkersEnabled
         assert not sqttMarkersEnabled(_make_writer(), _kernel(mode=0))
-
-
-class TestClockFuncmapRow:
-
-    def _fm(self, mode):
-        from Tensile.Components.Subtile.SqttMarkers import (
-            insertSqttMarkers, sqttFuncmapSection)
-        w, k = _make_writer(), _kernel(mode=mode)
-        insertSqttMarkers(_module(_nop()), w, k, "MAINLOOP")
-        return str(sqttFuncmapSection(w, k))
-
-    def test_m_row_only_when_packing(self):
-        # An M: row without packed words makes the decoder mask real id bits
-        # away; packed words without it make the clock decode as id.
-        assert "M:shader_clock_bits" not in self._fm(1)
-        assert "M:shader_clock_bits=12;shader_clock_shift=4" in self._fm(2)
-
-    def test_m_row_matches_the_emitted_layout(self):
-        from Tensile.Components.Subtile.SqttMarkers import (
-            SHADER_CLOCK_BITS, SHADER_CLOCK_SHIFT)
-        assert (f"M:shader_clock_bits={SHADER_CLOCK_BITS};"
-                f"shader_clock_shift={SHADER_CLOCK_SHIFT}") in self._fm(2)
-
-    def test_layout_stays_within_the_decoder_validity_rule(self):
-        # MarkerEncoding::is_valid(): bits <= 29 and bits <= 32 - shift.
-        from Tensile.Components.Subtile.SqttMarkers import (
-            SHADER_CLOCK_BITS, SHADER_CLOCK_SHIFT, MAX_MARKER_ID)
-        assert SHADER_CLOCK_BITS <= 29
-        assert SHADER_CLOCK_BITS <= 32 - SHADER_CLOCK_SHIFT
-        # Ids must still fit the shrunken field: 30 - bits.
-        assert MAX_MARKER_ID < (1 << (30 - SHADER_CLOCK_BITS))
