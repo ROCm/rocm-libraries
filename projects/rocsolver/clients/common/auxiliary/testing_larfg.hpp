@@ -134,24 +134,6 @@ void larfg_getError(const rocblas_handle handle,
     // initialize data
     larfg_initData<true, true, T>(handle, singular, n, da, dx, inc, dtau, ha, hx, htau);
 
-    if (true) {
-        fmt::print( "input, n {}, inc {}, singular {}\n\t"
-                    "alpha {:7.4f} + {:7.4f}i, x=[\n\t",
-                    n, inc, singular,
-                    real( ha[0][0] ), imag( ha[0][0] ) );
-        for (int i = 0; i < n-1; ++i) {
-            // print 4 boundary elements; skip middle
-            if(i == 4 && i < n-1-4)
-            {
-                fmt::print( "      ...\n\t" );
-                i = n-1-4;
-            }
-            fmt::print( "      {:7.4f} + {:7.4f}i\n\t",
-                        real( hx[0][i*inc] ), imag( hx[0][i*inc] ) );
-        }
-        fmt::print( "]\n" );
-    }
-
     // Degenerate case counts as "singular", where imag( alpha ) = 0 and x = 0.
     if(n == 1 && imag(ha[0][0]) == 0)
         singular = 1;
@@ -171,62 +153,27 @@ void larfg_getError(const rocblas_handle handle,
     //               |tau - tau_res| ).
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
-    // using norm-1 which is infinity norm for this 1-by-(n-1) data setup
-    double err_alpha, err_tau;
-    *max_err = norm_error('O', 1, n - 1, inc, hx[0], hx_res[0]);
+
     // For "singular" vector, tau = 2 instead of LAPACK's convention that tau = 0.
     // Hence alpha = -alpha_lapack.
+    double err_alpha, err_tau;
     if(singular)
     {
         err_alpha = abs(ha[0][0] + ha_res[0][0]);
-        fmt::print( "{}: alpha {:7.2e} = ({:7.2e} + {:7.2e}i) + ({:7.2e} + {:7.2e}i)\n",
-                    __LINE__, err_alpha,
-                    real( ha[0][0] ), imag( ha[0][0] ),
-                    real( ha_res[0][0] ), imag( ha_res[0][0] ) );
-
         err_tau = abs(htau_res[0][0] - 2);
     }
     else
     {
         err_alpha = abs(ha[0][0] - ha_res[0][0]);
-        fmt::print( "{}: alpha {:7.2e} = ({:7.2e} + {:7.2e}i) - ({:7.2e} + {:7.2e}i)\n",
-                    __LINE__, err_alpha,
-                    real( ha[0][0] ), imag( ha[0][0] ),
-                    real( ha_res[0][0] ), imag( ha_res[0][0] ) );
-
         err_tau = abs(htau[0][0] - htau_res[0][0]);
     }
     if(abs(ha[0][0]) != 0)
         err_alpha /= abs(ha[0][0]);
-    fmt::print( "error x     {:7.2e}\n"
-                "      alpha {:7.2e}\n"
-                "      tau   {:7.2e}\n",
-                *max_err, err_alpha, err_tau );
+
+    // using norm-1 which is infinity norm for this 1-by-(n-1) data setup
+    *max_err = norm_error('O', 1, n - 1, inc, hx[0], hx_res[0]);
     *max_err = rocblas_max_nan(*max_err, err_alpha);
     *max_err = rocblas_max_nan(*max_err, err_tau);
-
-    if (true) {
-        fmt::print( "output\n\t"
-                    "tau   {:7.4f} + {:7.4f}i ?= {:7.4f} + {:7.4f}i\n\t"
-                    "alpha {:7.4f} + {:7.4f}i ?= {:7.4f} + {:7.4f}i, v=[\n\t",
-                    real( htau[0][0] ),     imag( htau[0][0] ),
-                    real( htau_res[0][0] ), imag( htau_res[0][0] ),
-                    real( ha[0][0] ),       imag( ha[0][0] ),
-                    real( ha_res[0][0] ),   imag( ha_res[0][0] ) );
-
-        for (int i = 0; i < n-1; ++i) {
-            // print 4 boundary elements; skip middle
-            if(i == 4 && i < n-1-4)
-            {
-                fmt::print( "      ...\n\t" );
-                i = n-1-4;
-            }
-            fmt::print( "      {:7.4f} + {:7.4f}i ?= {:7.4f} + {:7.4f}i\n\t",
-                        real( hx[0][i*inc] ), imag( hx[0][i*inc] ),
-                        real( hx_res[0][i*inc] ), imag( hx_res[0][i*inc] ) );
-        }
-        fmt::print( "]\n" );
-    }
 }
 
 template <typename T, typename I, typename Td, typename Th>

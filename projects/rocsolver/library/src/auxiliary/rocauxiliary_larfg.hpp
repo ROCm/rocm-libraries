@@ -45,7 +45,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 //      norms is norm( x[1:n-1] )^2
 // On exit:
 //      tau   is Householder scalar, tau = (beta - x[0]) / beta.
-//            For real x, this is 2 / (v^T v).
+//            In real case, this is 2 / (v^T v).
 //      norms is scaling factor, 1 / (alpha - norm( x )), to normalize v[0] = 1.
 //      if beta is null:
 //          Like LAPACK, store beta in place over alpha.
@@ -67,7 +67,6 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     const auto ignore_beta = (beta == nullptr);
     if(norms[0] > 0)
     {
-printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, norms[0] );
         T norm = sqrt(norms[0] + alpha[0] * alpha[0]);
         norm = alpha[0] >= 0 ? -norm : norm;
 
@@ -91,7 +90,6 @@ printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, norms[0] );
     else
     {
 #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
-printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, norms[0] );
         // Set tau = 2. Differs from LAPACK, which sets tau = 0, H = I.
         norms[0] = 1;
         tau[0] = 2;
@@ -107,7 +105,6 @@ printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, norms[0] );
             alpha[0] = 1;
         }
 #else
-printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, norms[0] );
         norms[0] = 1;
         tau[0] = 0;
 
@@ -132,7 +129,6 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     const auto ignore_beta = (beta == nullptr);
     if(norms[0].real() > 0 || ai != 0)
     {
-printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, std::real( norms[0] ) );
         S norm = sqrt(norms[0].real() + ai * ai + ar * ar);
         norm = ar >= 0 ? -norm : norm;
 
@@ -163,7 +159,6 @@ printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, std::real( norms[0] ) );
     else
     {
 #ifdef ROCSOLVER_ENABLE_LARFG_TAU2
-printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, std::real( norms[0] ) );
         // Set tau = 2. Differs from LAPACK, which sets tau = 0, H = I.
         norms[0] = 1;
         tau[0] = 2;
@@ -179,7 +174,6 @@ printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, std::real( norms[0] ) );
             alpha[0] = 1;
         }
 #else
-printf( "run_set_taubeta %d norms %7.2e\n", __LINE__, std::real( norms[0] ) );
         norms[0] = 1;
         tau[0] = 0;
 
@@ -311,7 +305,6 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     // Use small-size kernel by default; no workspace needed.
     if(true)
     {
-printf( "%s: %d: call small\n", __func__, __LINE__ );
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
         const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
         if(props->warpSize >= 64)
@@ -321,7 +314,6 @@ printf( "%s: %d: call small\n", __func__, __LINE__ );
         }
     }
 
-printf( "%s: %d: regular\n", __func__, __LINE__ );
     // everything must be executed with scalars on the device
     rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 

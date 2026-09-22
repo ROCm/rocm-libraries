@@ -35,7 +35,6 @@ rocblas_status
     rocsolver_larfg_impl(rocblas_handle handle, const I n, T* alpha, T* x, const I incx, T* tau)
 try
 {
-printf( "%s: %d\n", __func__, __LINE__ );
     // TODO: How to get alpha for bench logging
     ROCSOLVER_ENTER_TOP("larfg", "-n", n, "--incx", incx);
 
@@ -74,9 +73,6 @@ printf( "%s: %d\n", __func__, __LINE__ );
 
     work = mem[0];
     norms = mem[1];
-
-printf( "%s: %d, size_work %lld, size_norms %lld\n",
-        __func__, __LINE__, (long long) size_work, (long long) size_norms );
 
     // execution
     return rocsolver_larfg_template<T>(handle, n, alpha, shifta, x, shiftx, incx, stridex, tau,

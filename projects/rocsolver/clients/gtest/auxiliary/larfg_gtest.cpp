@@ -40,8 +40,8 @@ using larfg_tuple = std::tuple<I, I, int>;
 // (null handle, null pointers and invalid values)
 
 const vector<int> singular_range = {
-    0,  // alpha random, x[:] random,
-    1,  // alpha random, x[:] = 0
+    0,  // alpha random, x random,
+    1,  // alpha random and real, x = 0
 };
 
 const vector<int> incx_range = {

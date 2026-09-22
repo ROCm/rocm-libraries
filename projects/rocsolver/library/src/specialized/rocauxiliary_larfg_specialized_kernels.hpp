@@ -98,7 +98,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) larfg_kernel_small(const I n,
     // set tau, beta, and put scaling factor into sval[0]
     if(tid == 0)
     {
-printf( "larfg_small %d\n", __LINE__ );
         run_set_taubeta<T>(tau, sval, a, b);
     }
     __syncthreads();
@@ -129,7 +128,6 @@ rocblas_status larfg_run_small(rocblas_handle handle,
                                const rocblas_stride strideP,
                                const I batch_count)
 {
-printf( "%s: %d\n", __func__, __LINE__ );
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
