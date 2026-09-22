@@ -261,7 +261,11 @@ def run(
         logger.info("No optimizations to run")
         return
 
-    build_tensilelite_client(hipblaslt_path, build_dir=client_build_dir)
+    build_tensilelite_client(
+        hipblaslt_path,
+        build_dir=client_build_dir,
+        gpu_targets=_gpu_targets_from_configs(configs),
+    )
 
     _timing_lock = Lock()
 

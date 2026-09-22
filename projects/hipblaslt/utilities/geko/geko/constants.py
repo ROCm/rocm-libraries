@@ -164,4 +164,5 @@ SUPPORTED_ARCH: tuple[str, ...] = (
     "gfx942_38cu",
     "gfx942_20cu",
     "gfx942_228cu",
+    "gfx1250",
 )

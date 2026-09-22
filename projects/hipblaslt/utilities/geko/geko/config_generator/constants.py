@@ -228,11 +228,27 @@ ONLY_INCLUDE_MIs_GFX942 = {
 
 }
 
+# commenting out other data types so that if and when required it fails and
+# we confirm exact MIs needed for each data type.
+ONLY_INCLUDE_MIs_MI45X = {
+    'H': [[16, 16, 32, 1]],
+    'B': [[16, 16, 32, 1]],
+    # 'X': [[16, 16, 32, 1]],
+    # 'X1': [[16, 16, 32, 1]],
+    # 'S': [[16, 16, 4, 1]],
+    # 'I8': [[16, 16, 32, 1], [16, 16, 64, 1]],
+    # 'F8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'F8B8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'B8F8': [[16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]],
+    # 'F4': [[16, 16, 128, 1], [32, 16, 128, 1]],
+}
+
 from geko.constants import SUPPORTED_ARCH
 
 # Tensile LibraryLogic ``DeviceNames`` as emitted in YAML (asm_full conventions).
 LIBRARY_LOGIC_DEVICE_NAMES_GFX950 = '["Device 75a0"]'
 LIBRARY_LOGIC_DEVICE_NAMES_GFX942 = '["Device 0049", "Device 0050"]'
+LIBRARY_LOGIC_DEVICE_NAMES_GFX1250 = '["Device 73f0"]'
 
 # Shared Tensile LibraryLogic fields (ScheduleName / ArchitectureName / DeviceNames) per silicon family.
 _LIBRARY_LOGIC_FIELDS_GFX950 = {
@@ -244,6 +260,11 @@ _LIBRARY_LOGIC_FIELDS_GFX942 = {
     "ScheduleName": '"aquavanjaram"',
     "ArchitectureName": '"gfx942"',
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX942,
+}
+_LIBRARY_LOGIC_FIELDS_GFX1250 = {
+    "ScheduleName": '"gfx1250"',
+    "ArchitectureName": '"gfx1250"',
+    "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX1250,
 }
 
 # gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value
@@ -257,6 +278,7 @@ _ARCH_SPECS = {
     "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
     "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
     "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx1250": (256, 8, ONLY_INCLUDE_MIs_MI45X, _LIBRARY_LOGIC_FIELDS_GFX1250, 0),
 }
 
 HARDWARE_MAP = {
@@ -310,7 +332,7 @@ MAX_NUM_KERNELS_PER_CONFIG = 180_000_000
 
 
 VALID_BACKENDS = ("ductile", "tensile")
-VALID_SEARCH_SPACES = ("heuristic", "generic")
+VALID_SEARCH_SPACES = ("heuristic", "generic", "subtile")
 
 
 # Ductile validation profile: caps elements validated after the last generation.
@@ -351,6 +373,7 @@ ENV_UPDATABLE_KEYS = {
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}
 _CMS_DEFAULTS_GFX942_FAMILY = {"CMS": False, "CMS_PRIORITY": False, "StreamK": False}
+_CMS_DEFAULTS_GFX1250 = {"CMS": False, "CMS_PRIORITY": False}
 
 CONFIG_DEFAULTS_BY_ARCH = {
     "gfx950": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX950},
@@ -360,6 +383,7 @@ CONFIG_DEFAULTS_BY_ARCH = {
     "gfx942_38cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_20cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_228cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
+    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
 }
 
 assert set(CONFIG_DEFAULTS_BY_ARCH) == set(SUPPORTED_ARCH), (

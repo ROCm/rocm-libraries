@@ -102,7 +102,7 @@ def test_registry_and_fork_generator_paths(monkeypatch: pytest.MonkeyPatch) -> N
     assert get_post_processor(c4) is None
 
     class _MI:
-        def generate_for_size(self, _size):
+        def generate_for_size(self, _size, **_kwargs):
             return [{"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[1, 2, 3])}]
 
     class _OPT:
@@ -259,7 +259,7 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     class _CSG2:
         def __init__(self, _cfg):
-            pass
+            self._problem_type = {}
 
         def build_config(self, entry, **_k):
             return {"entry": entry.nkernels}

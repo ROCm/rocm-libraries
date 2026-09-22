@@ -18,7 +18,7 @@ import sys
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from geko.config_generator.constants import *
 from geko.config_generator.shared_utils import ForkParameter, GroupDimension
@@ -235,8 +235,16 @@ class MIDesign:
       logger.info(" Total number of valid MatrixInstructions: %s", len(valid_mfmas))
       return valid_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA
 
-  def _find_mi_for_size(self, valid_mfmas: Sequence[MFMA], smallest_M_in_MFMA: int, smallest_N_in_MFMA: int, size: Tuple[int, int, int, int]) -> Tuple[List[MFMACandidate], float]:
-    """Filter MIs for a single size: level 1 + level 2."""
+  def _find_mi_for_size(self, valid_mfmas: Sequence[MFMA], smallest_M_in_MFMA: int, smallest_N_in_MFMA: int, size: Tuple[int, int, int, int], wavefront_size: int = 64) -> Tuple[List[MFMACandidate], float]:
+    """Filter MIs for a single size: level 1 + level 2.
+
+    Args:
+        valid_mfmas: List of valid MFMA configurations.
+        smallest_M_in_MFMA: Smallest M dimension in MFMA list.
+        smallest_N_in_MFMA: Smallest N dimension in MFMA list.
+        size: Problem size (M, N, B, K).
+        wavefront_size: Wavefront size for SubGroup calculations (default 64).
+    """
 
     mfma_list: List[MFMACandidate] = []
     max_TilesPerCU = 0.0
@@ -244,7 +252,7 @@ class MIDesign:
     max_totalGranularity = -1.0
 
     for mfma in valid_mfmas:
-        mfma_params = self.calculate_mfma_parameters(MI=mfma)
+        mfma_params = self.calculate_mfma_parameters(MI=mfma, waveFrontSize=wavefront_size)
 
         # remove MI4x4 for larger MN
         if self.config["MI_FILTER"] > 0 and (mfma.M == 4 and (size[0] >= 16 and size[1] >= 16)):
@@ -269,6 +277,12 @@ class MIDesign:
             # to remove all MIs that one dimension is edge
             # for M=16< we still want to test MI16x16, rather than just MI4x4
             if ((mfma_params.MT0 > 16 and mfma_params.MT0 // coe > size[0] and size[0] >= smallest_M_in_MFMA) or (mfma_params.MT1 > 16 and mfma_params.MT1 // coe > size[1] and size[1] >= smallest_N_in_MFMA)):
+                continue
+
+        # reject0: UseSubtileImpl=1 with MX datatype requires even MIWaveTile
+        if self._mx_enabled and self._subtile_enabled:
+            if mfma.waveTileM % 2 != 0 or mfma.waveTileN % 2 != 0:
+                logger.debug("reject0: MX+subtile requires even MIWaveTile, filtered MI: %s (WaveTileM=%d, WaveTileN=%d)", mfma, mfma.waveTileM, mfma.waveTileN)
                 continue
 
         for LSU in range(1, max_possible_LSU+1):
@@ -461,15 +475,115 @@ class MIDesign:
     # TODO: match the name with the lib name convention
     return self.outputfile / (GEMM_type + catName + '.log')
 
-  def _create_mi_groups(self, size: Tuple[int, int, int, int], mfma_list: List[MFMACandidate]) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]:
+  def _create_mi_groups(
+      self,
+      size: Tuple[int, int, int, int],
+      mfma_list: List[MFMACandidate],
+      depthu_values: Optional[Sequence[int]] = None,
+      wavefront_size: int = 64,
+  ) -> Tuple[List[Dict[str, Any]], List[str], List[Dict[str, Any]]]:
     """Build MFMA group dicts and comments for a single size.
+
+    For each MFMA:
+    - Constructs a base group dict
+    - If MX or subtile enabled, validates and expands into multiple groups (one per valid DepthU)
+    - Otherwise, emits one group per MFMA
+
+    Args:
+        size: Problem size (M, N, B, K).
+        mfma_list: Filtered list of MFMA candidates.
+        depthu_values: Available DepthU candidates for validation. Required if MX or subtile enabled.
+        wavefront_size: Wavefront size for SubGroup calculations (default 64).
 
     Returns:
         (mi_groups, comments, metadata) — parallel lists of group dicts, comment strings, and metadata dicts.
     """
+
+    def _get_valid_depthu_for_mfma(mfma_cand: MFMACandidate) -> List[int]:
+      """Return list of valid DepthU values for a single MFMA candidate.
+
+      Validates reject3 (DepthU divisibility for subtile) and reject1/reject2
+      (MXSA/MXSB scale loading).
+
+      Args:
+          mfma_cand: MFMACandidate with MFMA configuration and derived metrics.
+
+      Returns:
+          List of valid DepthU values for this MFMA, or empty list if none pass validation.
+      """
+      if depthu_values is None or not depthu_values:
+        raise ValueError("No valid DepthU values available for MX/subtile validation.")
+
+      mfma = mfma_cand.mfma
+      MatrixInstK = mfma.K
+      valid_depthu_list = []
+
+      logger.debug("Validating DepthU for mfma=%s, LSU=%d, MT0=%d, MT1=%d, WG=(%d,%d)",
+                   mfma, mfma_cand.LSU, mfma_cand.MT0, mfma_cand.MT1, mfma_cand.WG0, mfma_cand.WG1)
+
+      for depthu in depthu_values:
+        # reject3: DepthU must be multiple of (numSubIterK * MatrixInstK * LSU) for subtile
+        if self._subtile_enabled:
+          # numSubIterK=1 for F8 variants, 2 for others
+          numSubIterK = 1 if self._gt.data_type in ("F8", "F8N", "F8B8", "B8F8") else 2
+          depthu_unit = numSubIterK * MatrixInstK * mfma_cand.LSU
+          if depthu % depthu_unit != 0:
+            logger.debug("reject3: DepthU=%d not multiple of %d for MI mfma=%s, LSU=%d",
+                        depthu, depthu_unit, mfma, mfma_cand.LSU)
+            continue
+
+        # reject1/reject2: bytesLoaded >= required bytes for MXSA/MXSB
+        if self._mx_enabled:
+          # Compute SubGroup sizes matching Solution.py logic
+          # From Solution.py: SubGroup0/SubGroup1 derived from MatrixInst dims, MIWaveGroup, and wavefront size
+          MatrixInstM = mfma.M
+          MatrixInstN = mfma.N
+          MatrixInstBM = min(mfma_cand.WG0 // mfma.M, mfma.B)
+          MatrixInstBN = mfma.B // MatrixInstBM
+
+          waves = mfma.waveM * mfma.waveN
+          miwg0 = min((mfma_cand.WG0 // MatrixInstM) // MatrixInstBM, waves)
+          MIWaveGroup = [miwg0, waves // miwg0]
+          MIOutputVectorWidth = 1 if self._gt.data_type in ("D", "Z") else 4
+
+          # Solution.py: if MIBlock[0] == 4 (which is mfma.M in our notation - the MI M dimension)
+          if mfma.M == 4:
+            # For MI4x4: SubGroup0 = MIWaveGroup[0] * MatrixInstM * MatrixInstBM // MIOutputVectorWidth
+            SG0 = MIWaveGroup[0] * MatrixInstM * MatrixInstBM // MIOutputVectorWidth
+            SG1 = MIWaveGroup[1] * MatrixInstN * MatrixInstBN
+          else:
+            # For non-MI4x4: SubGroup0 = MIWaveGroup[0] * (WavefrontSize // MatrixInstN)
+            SG0 = MIWaveGroup[0] * (wavefront_size // MatrixInstN)
+            SG1 = MIWaveGroup[1] * MatrixInstN
+
+          NumThreads = int(SG0 * SG1 * mfma_cand.LSU)
+          bytesLoaded = NumThreads * 16
+
+          # reject1: MXSA
+          MXBlockA = self._mx_block[0]
+          numBytesMXSA = (depthu // MXBlockA) * mfma_cand.MT0
+          if bytesLoaded < numBytesMXSA:
+            logger.debug("reject1: DepthU=%d: bytesLoaded=%d < numBytesMXSA=%d (MT0=%d, MXBlockA=%d, WG=(%d,%d), LSU=%d)",
+                        depthu, bytesLoaded, numBytesMXSA, mfma_cand.MT0, MXBlockA, mfma_cand.WG0, mfma_cand.WG1, mfma_cand.LSU)
+            continue
+
+          # reject2: MXSB
+          MXBlockB = self._mx_block[1]
+          numBytesMXSB = (depthu // MXBlockB) * mfma_cand.MT1
+          if bytesLoaded < numBytesMXSB:
+            logger.debug("reject2: DepthU=%d: bytesLoaded=%d < numBytesMXSB=%d (MT1=%d, MXBlockB=%d, WG=(%d,%d), LSU=%d)",
+                          depthu, bytesLoaded, numBytesMXSB, mfma_cand.MT1, MXBlockB, mfma_cand.WG0, mfma_cand.WG1, mfma_cand.LSU)
+            continue
+
+        valid_depthu_list.append(depthu)
+
+      return valid_depthu_list
+
     mi_groups: List[Dict[str, Any]]  = []
     comments: List[str] = []
     metadata: List[Dict[str, Any]] = []
+
+    mx_or_subtile = self._mx_enabled or self._subtile_enabled
 
     mi_log_path = self.get_mi_finder_log_name(size)
     log_output = f"Size - {size}\n"
@@ -477,49 +591,98 @@ class MIDesign:
     for idx, mfma_cand in enumerate(mfma_list):
         comment = "MT {:7} - TT {:6} - WG {:6} - MIBlockM {:2} - GSU {:3} - LSU {:2} - totalGranularity {:8.5f} - TilesPerCU: {:8.5f} - TotalTiles: {:8} -- sizes [{}]".format(
             "{}x{}".format(mfma_cand.MT0, mfma_cand.MT1), "{}x{}".format(mfma_cand.TT0, mfma_cand.TT1), "{}x{}".format(mfma_cand.WG0, mfma_cand.WG1), mfma_cand.MIBlockM, mfma_cand.GSU, mfma_cand.LSU, mfma_cand.totalGranularity, mfma_cand.TilesPerCU, mfma_cand.TotalTiles, size)
-        mfma_dict = {"MatrixInstruction": [mfma_cand.mfma.M, mfma_cand.mfma.N, mfma_cand.mfma.K, mfma_cand.mfma.B, mfma_cand.mfma.MIBlockM, mfma_cand.mfma.waveTileM, mfma_cand.mfma.waveTileN, mfma_cand.mfma.waveM, mfma_cand.mfma.waveN]}
-        log_output += "# - MatrixInstruction: [{:2}, {:2}, {:2}, {:2}, {:2}, {:2}, {:2}, {:2}, {:2}] # {}\n".format(mfma_cand.mfma.M, mfma_cand.mfma.N, mfma_cand.mfma.K, mfma_cand.mfma.B, mfma_cand.mfma.MIBlockM, mfma_cand.mfma.waveTileM, mfma_cand.mfma.waveTileN, mfma_cand.mfma.waveM, mfma_cand.mfma.waveN, comment)
+        base_mfma_dict = {"MatrixInstruction": [mfma_cand.mfma.M, mfma_cand.mfma.N, mfma_cand.mfma.K, mfma_cand.mfma.B, mfma_cand.mfma.MIBlockM, mfma_cand.mfma.waveTileM, mfma_cand.mfma.waveTileN, mfma_cand.mfma.waveM, mfma_cand.mfma.waveN]}
 
         if mfma_cand.LSU > 1:
-            mfma_dict["WorkGroup"] = [mfma_cand.WG0, mfma_cand.WG1, mfma_cand.LSU]
-            log_output += f"#   WorkGroup: [{mfma_cand.WG0},{mfma_cand.WG1},{mfma_cand.LSU}]\n"
-        if mfma_cand.GSU > 1:
-            log_output += f"#   GlobalSplitU: [{mfma_cand.GSU}]\n"
-            if (not self.config["StreamK"]):
-                mfma_dict["GlobalSplitU"] = [mfma_cand.GSU]
-        
-        if mfma_dict not in mi_groups: # This is to avoid duplicate MIs in StreamK.
-            mi_groups.append(mfma_dict)
-            comments.append(comment)
-            metadata.append({
-                "MT": (mfma_cand.MT0, mfma_cand.MT1),
-                "GSU": mfma_cand.GSU,
-                "LSU": mfma_cand.LSU,
-                "wave": (mfma_cand.mfma.waveM, mfma_cand.mfma.waveN),
-            })
+            base_mfma_dict["WorkGroup"] = [mfma_cand.WG0, mfma_cand.WG1, mfma_cand.LSU]
+        if mfma_cand.GSU > 1 and not self.config["StreamK"]:
+            base_mfma_dict["GlobalSplitU"] = [mfma_cand.GSU]
+
+        # Determine which DepthU values to emit
+        if mx_or_subtile:
+            valid_depthu_list = _get_valid_depthu_for_mfma(mfma_cand)
+            depthu_to_emit = valid_depthu_list if valid_depthu_list else []
+        else:
+            depthu_to_emit = [None]
+
+        for depthu in depthu_to_emit:
+            mfma_dict = dict(base_mfma_dict)  # Copy base dict
+
+            if depthu is not None:
+                mfma_dict["DepthU"] = [depthu]
+
+            log_output += "# - MatrixInstruction: [{:2}, {:2}, {:2}, {:2}, {:2}, {:2}, {:2}, {:2}, {:2}] # {}\n".format(mfma_cand.mfma.M, mfma_cand.mfma.N, mfma_cand.mfma.K, mfma_cand.mfma.B, mfma_cand.mfma.MIBlockM, mfma_cand.mfma.waveTileM, mfma_cand.mfma.waveTileN, mfma_cand.mfma.waveM, mfma_cand.mfma.waveN, comment)
+            if mfma_cand.LSU > 1:
+                log_output += f"#   WorkGroup: [{mfma_cand.WG0},{mfma_cand.WG1},{mfma_cand.LSU}]\n"
+            if mfma_cand.GSU > 1:
+                log_output += f"#   GlobalSplitU: [{mfma_cand.GSU}]\n"
+            if depthu is not None:
+                log_output += f"#   DepthU: [{depthu}]\n"
+
+            if mfma_dict not in mi_groups: # This is to avoid duplicate MIs in StreamK.
+                mi_groups.append(mfma_dict)
+                comments.append(comment)
+                meta = {
+                    "MT": (mfma_cand.MT0, mfma_cand.MT1),
+                    "GSU": mfma_cand.GSU,
+                    "LSU": mfma_cand.LSU,
+                    "wave": (mfma_cand.mfma.waveM, mfma_cand.mfma.waveN),
+                }
+                if depthu is not None:
+                    meta["DepthU"] = depthu
+                metadata.append(meta)
 
     with open(mi_log_path,'w') as out:
         out.write(log_output)
 
     return mi_groups, comments, metadata
 
-  def __init__(self, outputfile: str | Path, config: Dict[str, Any]) -> None:
+  def __init__(
+      self,
+      outputfile: str | Path,
+      config: Dict[str, Any],
+      mx_block_values: Optional[Tuple[int, int]] = None,
+      subtile_enabled: bool = False,
+  ) -> None:
       """Initialize MI designer. Enumerates all valid MFMA configurations
-      once (one-time setup). Call generate_for_size() per size."""
+      once (one-time setup). Call generate_for_size() per size.
+
+      Args:
+          outputfile: Output directory for MI finder logs.
+          config: Configuration dict with GemmProblem, ARCH, etc.
+          mx_block_values: (MXBlockA, MXBlockB) tuple if MX enabled, else None.
+          subtile_enabled: Whether UseSubtileImpl=1 is active.
+      """
 
       self.config = config
       self.outputfile = Path(outputfile)
       self._gt = config["GemmProblem"].gemm_type
+
+      # MX and subtile configuration
+      self._mx_block = mx_block_values
+      self._mx_enabled = (mx_block_values is not None)
+      self._subtile_enabled = subtile_enabled
 
       # Config must include GemmProblem (from load_prepared_config_from_yaml, optim.configure,
       # or equivalent) and ARCH/hardware defaults from apply_input_config_defaults.
 
       self._valid_mfmas, self._smallest_M, self._smallest_N = self.generate_all_mfmas()
 
-  def generate_for_size(self, size: Tuple[int, int, int, int]) -> GroupDimension:
+  def generate_for_size(
+      self,
+      size: Tuple[int, int, int, int],
+      depthu_values: Optional[Sequence[int]] = None,
+      wavefront_size: int = 64,
+  ) -> GroupDimension:
       """Run the per-size MI pipeline: filter, sort, dedup, build groups.
 
       *size* is ``(M, N, B, K)``.
+
+      Args:
+          size: Problem size (M, N, B, K).
+          depthu_values: Available DepthU candidates. Required if MX or subtile
+              enabled, used to validate/expand groups per DepthU.
+          wavefront_size: Wavefront size for SubGroup calculations (default 64).
 
       Returns:
           GroupDimension — list of dicts mapping param names to
@@ -528,14 +691,15 @@ class MIDesign:
       size = tuple(size)
 
       mfma_list, max_TilesPerCU = self._find_mi_for_size(
-          self._valid_mfmas, self._smallest_M, self._smallest_N, size)
+          self._valid_mfmas, self._smallest_M, self._smallest_N, size, wavefront_size=wavefront_size)
 
       mfma_list = self._sort_mfmas(mfma_list)
       if self.config.get("StreamK", False):
         logger.debug("Removing GSU duplicates for StreamK")
         mfma_list = self._remove_GSU_duplicates(mfma_list)
 
-      raw_groups, comments, metadata = self._create_mi_groups(size, mfma_list)
+      raw_groups, comments, metadata = self._create_mi_groups(
+          size, mfma_list, depthu_values=depthu_values, wavefront_size=wavefront_size)
 
       return self._to_group_dimension(raw_groups, comments, metadata)
 
