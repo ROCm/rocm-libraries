@@ -36,12 +36,15 @@ compiler/wheel interpreter. Full artifact checking also needs `rocm_kpack` and i
 dependencies (`zstandard`, `msgpack`) importable from `$PY`; `--kpack-python-dir`
 supplies an import root, not missing dependencies.
 
-Verify every path on the execution host. A symlink backed by login-local **`/var/tmp` is
-invisible from compute nodes** even when the link name is on shared storage: use shared
-source, or stage the exact checkout and artifacts to compute-local scratch through the
-active scheduler skill. Do not run GPU work on a login host. Retain command logs plus
-source/artifact, machine, device and allocation identities under the workspace evidence
-policy.
+Verify every path on the actual execution host. Host-local backing paths and symlink
+targets are not automatically visible on a different host, even when the link itself
+is on shared storage. On a cluster with shared login and compute nodes, do not run GPU
+work on a shared login node: use shared source, or stage the exact checkout and
+artifacts to the execution host through your scheduler or remote-execution tooling.
+Record commands and source/artifact, machine and device identities, plus allocation
+identity when applicable. Follow a configured local evidence policy when one exists;
+otherwise retain logs, manifests and outcomes in a user-selected per-run evidence
+directory outside product source.
 
 ## 1. Entry and early feasibility
 
@@ -51,7 +54,7 @@ Establish representability and a capable independent numerical reference using
 [graph-contract.md](graph-contract.md); a reference's skip is not verification, and
 unavailable semantics require an explicit scope/reference decision.
 
-On the actual allocated execution host:
+On the actual execution host:
 
 ```bash
 "$PY" "$GEN/tools/device_probe.py" \
@@ -643,6 +646,6 @@ invalidate old evidence and return to stages 3–5.
 ## 8. Handoff
 
 Report [SKILL.md](SKILL.md)'s completion evidence and exact limitations. Keep experiment
-copies and probes disposable and retain their inputs/results under the workspace
-evidence policy. For blocked work, name the last completed stage and missing
-prerequisite; do not substitute a proposed command or queued job for proof.
+copies and probes disposable and retain their inputs/results in the evidence directory
+defined under **Paths and interpreters**. For blocked work, name the last completed
+stage and missing prerequisite; do not substitute a proposed command or queued job for proof.

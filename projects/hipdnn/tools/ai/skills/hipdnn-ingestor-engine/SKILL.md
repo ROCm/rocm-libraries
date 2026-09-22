@@ -25,8 +25,9 @@ Record create/extend, source revision, target architecture, exact UED engine nam
 source/builder and requested scope. Extensions also record the known-good installed
 baseline and retained identities. Missing source, dependencies, representability or a
 capable numerical reference blocks the corresponding gate; scope changes require
-explicit approval. Keep local scheduling and experiment evidence outside product source
-per workspace policy.
+explicit approval. Keep local scheduling and experiment artifacts outside product source.
+Follow a configured local evidence policy when one exists; otherwise use a user-selected
+per-run evidence directory as described in [RUNBOOK.md](RUNBOOK.md#paths-and-interpreters).
 
 | | `direct_load` | `packaged` |
 |---|---|---|

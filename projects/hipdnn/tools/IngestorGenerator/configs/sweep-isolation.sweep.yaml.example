@@ -2,14 +2,17 @@
 #
 #   <venv-python> $GEN/tools/sweep.py --config my-sweep.yaml
 #
+# Paths, architecture/engine IDs, counts and run settings below are illustrative,
+# not defaults to copy blindly. Replace them with real inputs for your run.
+#
 # DATA, NOT CODE: read with a safe YAML loader that refuses duplicate and non-string
 # keys, never sourced, expanded or executed. Paths resolve relative to THIS FILE's
 # directory, and commands are argument ARRAYS -- no quoting, no word splitting, no
 # shell. `tools/README-sweeps.md` specifies every key's full contract and the gates.
 
-# One root holding everything this sweep reads and writes. Must already exist, and must
-# be visible from the compute node: a submit-host-only path fails when the job lands
-# elsewhere.
+# One root holding everything this sweep reads and writes. Must already exist and be
+# visible on the local execution host, or on the execution node for scheduled/remote
+# runs: a submit-host-only path fails when the job lands elsewhere.
 sweep_root: /shared/sweeps/ingestor
 
 # Where this run's evidence lands: a dedicated child of sweep_root overlapping no input
@@ -43,10 +46,10 @@ corpora:
     path: /shared/sweeps/ingestor/corpora/servable
     expected_graphs: 283
 
-# ARMS RUN IN THIS ORDER, EVERY ROUND, NEVER ROTATED. Clocks cannot be pinned here, so
-# drift penalises whichever arm runs later; with the BASELINE FIRST, an effect moving the
-# opposite way to that penalty cannot be explained by position. For an isolation sweep
-# these are the arms `knob_sweep.py --isolate` emitted.
+# ARMS RUN IN THIS ORDER, EVERY ROUND, NEVER ROTATED. If clocks cannot be pinned,
+# drift may penalise whichever arm runs later; with the BASELINE FIRST, an effect moving
+# the opposite way to that penalty cannot be explained by position. For an isolation
+# sweep these are the arms `knob_sweep.py --isolate` emitted.
 #
 # expected_descriptors is the count each install tree MUST have. An isolation arm has the
 # SAME count as parity by construction, so a different number means a different corpus.
@@ -78,11 +81,10 @@ rounds: 3
 # the engine is rejected at load. Set it near the expected served count.
 min_served: 60
 
-# Tensor names whose presence makes a graph UNSERVABLE by the kernel under test, and so
-# dangerous: such a graph falls through to whichever engine takes it, and one faulted the
-# device mid-warmup with every later phase measuring dead hardware. For attention that
-# class is backward graphs, marked by their gradient tensors; the filename is not
-# authoritative.
+# Tensor names whose presence makes a graph UNSERVABLE by the kernel under test.
+# Unsupported graphs may fall through to another engine, and a device fault invalidates
+# subsequent measurements. For attention that class is backward graphs, marked by their
+# gradient tensors; the filename is not authoritative.
 #
 # BOTH spellings are required -- `sample_sdpa_backward` names its gradients
 # `dq`/`dk`/`dv`/`do` -- and this value must always match `tools/mine_shapes.py`'s

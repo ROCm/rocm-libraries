@@ -135,7 +135,7 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and for a setup script in a separate benchmarking checkout external to this repository. Keep the two in sync.
+- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is available for interactive users.
 - `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.
