@@ -66,6 +66,40 @@ def mxTdmTile0(sizeTile1: int, mxUnit: int, mxTile: int, numComp: int, kSplit: b
     return per if per > 0 else tileM * mxUnit
 
 
+def mxTdmKRowPitch(size: int, mxTile: int) -> int:
+    """2D TDM stride0: K-row pitch in scale e8s.
+
+    1D sets stride0 = Size (elements along M or N in one K-block). 2D
+    compresses that axis by MXBlockFree, so the same field is
+    Size/MXBlockFree. Tile0 e8s in a K-block are packed with implicit
+    stride 1; stride0 is the dim1 pitch, not the in-tile M step.
+    A constant-1 stride0 makes dim1*stride0 a 12-byte window and the
+    K-split MXSB pointer (Size/MXBlockFree) lands outside it.
+    """
+    mxTile = max(1, int(mxTile))
+    if mxTile <= 1:
+        raise ValueError("mxTdmKRowPitch is the 2D K-row pitch; 1D uses Size")
+    return max(1, int(size) // mxTile)
+
+
+def mxGl2CoalescedDim(mt: int, numTileWGs: int, mxUnit: int, mxTile: int = 1) -> int:
+    """Cluster coalesced e8s for MX GL2 prefetch.
+
+    1D is MT * numTileWGs * mxUnit. 2D replaces MT with scale-rows
+    (ceil(MT/MXBlockFree)); otherwise a CD4_2 cluster along M prefetches
+    1024 1D-sized e8s from a 48-byte MXSA buffer.
+    """
+    return mxTdmTileM(mt, mxTile) * max(1, int(numTileWGs)) * max(1, int(mxUnit))
+
+
+def mxGl2TileStep(mt: int, mxUnit: int, mxTile: int = 1) -> int:
+    """e8s one macro-tile steps along the MXS free dim for GL2 MT offset.
+
+    1D: mxUnit * MT. 2D: mxUnit * ceil(MT/MXBlockFree).
+    """
+    return max(1, int(mxUnit)) * mxTdmTileM(mt, mxTile)
+
+
 def mxLdsAlign(mxTile: int, macLdsAlign: int) -> int:
     """LDS alignment for an MXS buffer.
 

@@ -16,8 +16,11 @@ from Tensile.Common.MxScaleLayout import (
     mxLraFreeShift,
     mxLraScaleRow,
     mxTdmMSplitStride,
+    mxTdmKRowPitch,
     mxTdmTile0,
     mxTdmTileM,
+    mxGl2CoalescedDim,
+    mxGl2TileStep,
     mxTileSpanPartnerDelta,
 )
 
@@ -64,6 +67,27 @@ def test_mx_tdm_tile0_2d_divides_m_by_128():
     assert mxTdmTile0(256, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 1
     assert mxTdmTile0(224, mxUnit=1, mxTile=128, numComp=2, kSplit=True) == 2
     assert mxTdmTile0(512, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 2
+
+
+def test_mx_tdm_k_row_pitch_2d_matches_1d_size_over_free():
+    # 1D stride0 = Size. 2D analog is Size/MXBlockFree (K-row pitch).
+    assert mxTdmKRowPitch(512, 128) == 4
+    assert mxTdmKRowPitch(65536, 128) == 512
+    assert mxTdmKRowPitch(256, 128) == 2
+    with pytest.raises(ValueError):
+        mxTdmKRowPitch(512, 1)
+
+
+def test_mx_gl2_2d_uses_scale_rows_not_mt():
+    # 1D CD4_2 MXSA: 256*4*1 = 1024 coalesced e8s (OOB of a 48-byte 2D MXSA).
+    assert mxGl2CoalescedDim(256, 4, 1, mxTile=1) == 1024
+    assert mxGl2TileStep(256, 1, mxTile=1) == 256
+    # 2D: 2 scale-rows * 4 WGs = 8, tile step 2. Fits 4*12 MXSA.
+    assert mxGl2CoalescedDim(256, 4, 1, mxTile=128) == 8
+    assert mxGl2CoalescedDim(256, 2, 1, mxTile=128) == 4
+    assert mxGl2TileStep(256, 1, mxTile=128) == 2
+    assert mxTdmKRowPitch(512, 128) * 2 == 8  # DepthU/MXBlock increment
+    assert mxTdmKRowPitch(65536, 128) * 2 == 1024
 
 
 def test_mx_tdm_tile0_2d_does_not_floor_to_zero():
