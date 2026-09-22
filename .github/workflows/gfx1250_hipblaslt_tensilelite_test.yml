@@ -222,7 +222,7 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35526244729' }}  # SCRATCH: develop HEAD 3082a49c5c8 build (includes new gfx1250 gemm tests decouple/rap)
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35659355728' }}  # SCRATCH: PR #12355 build (rm-spmm-gate-xfail) — tests un-xfail + gfx1250 markers on HW
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -295,14 +295,10 @@ jobs:
           mkdir -p tensilelite_test_results
           export PYTHONPATH="$ROCM/share/hipblaslt/tensilelite:${PYTHONPATH:-}"
           cd "$ROCM/share/hipblaslt/tensilelite"
-          echo "::group::rocisa import"
-          python3 -c "import rocisa; print('rocisa import OK')" 2>&1 \
-            || echo "::warning::rocisa import failed from the artifact PYTHONPATH"
-          echo "::endgroup::"
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
-          # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
-          TL_TARGET=gfx1250v0  # SCRATCH: CI HW is the v0 stepping; pin it (probe unreliable in prebuilt-client container)
+          # Common GEMM tests run against the prebuilt client. Per-test cap 5400s (90 min).
+          TL_TARGET=gfx1250v0
           # HIP device compiles through ccache.
           # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
           if ! command -v ccache >/dev/null 2>&1; then
@@ -314,7 +310,7 @@ jobs:
             ccache -z >/dev/null 2>&1 || true
           fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n "${TL_WORKERS:-1}" -rxX \
             --gpu-targets "$TL_TARGET" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
