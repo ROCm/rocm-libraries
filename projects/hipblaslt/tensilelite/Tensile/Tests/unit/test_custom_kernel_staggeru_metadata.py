@@ -514,7 +514,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 139,
+    "kernels": 141,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -525,7 +525,7 @@ EXPECTED_CENSUS = {
     # Includes the six kernels built outside Tensile (aiter, ck, rocroller,
     # triton, wave), which declare StaggerU: 0 because they do not implement
     # the in-loop wrap at all; the disassembly confirms none of them staggers.
-    "declaredZero": 79,
+    "declaredZero": 81,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 32,
 }
