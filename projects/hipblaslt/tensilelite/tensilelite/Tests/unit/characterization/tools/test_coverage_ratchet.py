@@ -127,8 +127,8 @@ def test_default_tolerance_absorbs_sub_arc_noise():
     # from a 770-unit file, moving it 88.16 -> 88.05 with identical missed
     # statements and branch coverage. Nothing became less tested, so it must not
     # fail the gate.
-    baseline = {"Tensile/Contractions.py": 88.16}
-    current = {"Tensile/Contractions.py": 88.05}
+    baseline = {"tensilelite/Contractions.py": 88.16}
+    current = {"tensilelite/Contractions.py": 88.05}
     assert ratchet.find_regressions(baseline, current, ratchet.DEFAULT_TOLERANCE) == []
 
 
