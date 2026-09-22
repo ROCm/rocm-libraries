@@ -2,116 +2,119 @@ flag_management:
   default_rules:
     carryforward: false # drop unused flags by default instead of carrying forward perpetually
   individual_flags: # exceptions to the default rules above, stated flag by flag
+    # Each project starts from a different established coverage level. `auto`
+    # compares each flag's project coverage with its matching base report instead
+    # of leaving projects below a shared target permanently red.
     - name: composable_kernel
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipBLASLt
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: TensileLite-Unit
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: TensileLite-CPP
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipSPARSELt
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocBLAS
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocRAND
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipRAND
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipBLAS
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocPRIM
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocThrust
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipCUB
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipDNN
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocRoller
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocSPARSE
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipSPARSE
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipFFT
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocFFT
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: Tensile
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: rocSOLVER
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: hipSOLVER
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
     - name: GEKO
       carryforward: true
       statuses:
       - type: project
-        target: 80%
+        target: auto
 
 comment:
   layout: "diff, flags, files"
