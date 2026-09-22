@@ -130,11 +130,9 @@ namespace rocsparse
                     }
                     else
                     {
-                        my_val[0]
-                            = (k < block_row_end)
-                                  ? static_cast<T>(
+                        my_val[0] = (k < block_row_end) ? static_cast<T>(
                                         bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
-                                  : static_cast<T>(0);
+                                                        : static_cast<T>(0);
                         if(BSR_BLOCK_DIM >= 2)
                         {
                             my_val[1]
@@ -318,10 +316,9 @@ namespace rocsparse
                 }
                 else
                 {
-                    my_val[0] = (k < block_row_end)
-                                    ? static_cast<T>(
-                                          bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
-                                    : static_cast<T>(0);
+                    my_val[0] = (k < block_row_end) ? static_cast<T>(
+                                    bsr_val[BSR_BLOCK_DIM * BSR_BLOCK_DIM * k + local_row])
+                                                    : static_cast<T>(0);
                     if(BSR_BLOCK_DIM >= 2)
                     {
                         my_val[1] = (k < block_row_end)
