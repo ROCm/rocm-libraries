@@ -160,6 +160,8 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
 
         // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
         // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+        // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+        // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
         __builtin_amdgcn_sched_barrier(0);
         a_blockwise_copy.PrecomputeIdx(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
@@ -181,6 +183,9 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
 
         // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
         // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+        // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+        // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+
         __builtin_amdgcn_sched_barrier(0);
         a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
         b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
@@ -205,6 +210,14 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 wait_dscnt();
                 block_sync_lds_direct_load();
 
+                // __builtin_amdgcn_sched_barrier(0);
+
+                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
+                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
+
+                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+
                 __builtin_amdgcn_sched_barrier(0);
                 b_blockwise_copy.Load(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
                 a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
@@ -222,18 +235,18 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 wait_dscnt();
                 block_sync_lds_direct_load();
 
-                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I0));
-                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
-
-                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
-
                 // wait_dscnt();
                 // block_sync_lds_direct_load();
 
                 __builtin_amdgcn_sched_barrier(0);
                 asm volatile(";; HotLoop Mid Load");
                 __builtin_amdgcn_sched_barrier(0);
+
+                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
+                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
+
+                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
                 __builtin_amdgcn_sched_barrier(0);
                 a_blockwise_copy.Load(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
@@ -247,12 +260,6 @@ struct GridwiseGemmLoadWave<TileLoadThreadGroup, 1>
                 b_blockwise_copy.PrecomputeIdx(
                     b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I0));
                 __builtin_amdgcn_sched_barrier(0);
-
-                // a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(I1));
-                // b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(I1));
-
-                // a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                // b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
                 __builtin_amdgcn_sched_barrier(0);
                 asm volatile(";; HotLoop End Load");

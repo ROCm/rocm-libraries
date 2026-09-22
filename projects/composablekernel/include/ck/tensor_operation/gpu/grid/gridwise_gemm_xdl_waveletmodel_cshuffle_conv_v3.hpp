@@ -332,11 +332,11 @@ struct GridwiseGemm_xdl_waveletmodel_cshuffle_conv_v3
         }
     }
 
-    template <typename GridDesc_K0_MN_K1_T, index_t K0Number, index_t K1Value>
-    __host__ __device__ static auto TransformGrid(GridDesc_K0_MN_K1_T& desc)
+    template <typename GridDesc_K0_MN_K1_T, index_t K0Number, index_t K1Value, typename DeviceArch>
+    __host__ __device__ static auto TransformGrid(GridDesc_K0_MN_K1_T& desc, DeviceArch)
     {
-
-        if constexpr(!DirectLoad)
+        // gfx1250 doesn't need swizzling for DirectLoad pipeline
+        if constexpr(!DirectLoad || !is_same_v<DeviceArch, gfx950_t>)
         {
             return desc;
         }
