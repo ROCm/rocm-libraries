@@ -3493,6 +3493,11 @@ class LogicalScheduler:
         # that sync); the wait is appended at the end to hide its cross-CU latency.
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
+        # SQTT markers last: they anchor on the cluster-barrier halves spliced
+        # just above, and being post-schedule keeps them pinned to the code they
+        # timestamp.  No-op unless SubtileSqttMarkers is enabled.
+        from Tensile.Components.Subtile.SqttMarkers import insertSqttMarkers
+        module = insertSqttMarkers(module, writer, kernel, label)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -3663,6 +3668,12 @@ class LogicalScheduler:
         exitValue = self.config.pgr
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
+        # Prime the SQTT iteration scope outside the loop, so the first fused
+        # transition at the body head has something to pop. No-op when markers
+        # are off.
+        from Tensile.Components.Subtile.SqttMarkers import (
+            sqttMainloopScopeOpen, sqttMainloopScopeClose)
+        module.add(sqttMainloopScopeOpen(writer, kernel))
         module.add(loopBegin)
         # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
         # every mainloop iteration so SQTT / trace decoders can identify iterations
@@ -3703,6 +3714,9 @@ class LogicalScheduler:
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
         module.add(Label("SkipMainloop", ""))
+        # Every mainloop exit path converges here: close the iteration scope
+        # once, so the last span does not run to the end of the trace.
+        module.add(sqttMainloopScopeClose(writer, kernel))
         if hasNGLL:
             module.add(Label("SkipToNGLL", ""))
 

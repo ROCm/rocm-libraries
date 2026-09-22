@@ -16,6 +16,11 @@ from rocisa.instruction import (SBarrier, BranchInstruction, SCBranchSCC0,
                                 SCmpEQU32,
                                 MFMAInstruction, MXMFMAInstruction)
 
+# Comment text on the two handshake halves.  SqttMarkers anchors its markers on
+# these: the rendered mnemonic varies with arch caps, the comment does not.
+CB_SIGNAL_COMMENT = "cluster_barrier signal"
+CB_WAIT_COMMENT = "cluster_barrier wait"
+
 _isWgBarrier = lambda x: isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x)
 
 
@@ -39,7 +44,7 @@ def subtileClusterBarrierSignal(writer, kernel) -> Module:
     # Elect wave 0 to issue the single cluster_barrier signal.
     mod.add(SCmpEQU32(sgpr("WaveIdx"), 0, "wave 0?"))
     mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only wave 0 signals the cluster"))
-    mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
+    mod.add(SBarrier(True, False, True, CB_SIGNAL_COMMENT))
     mod.add(skipPreSignal)
     return mod
 
@@ -47,7 +52,7 @@ def subtileClusterBarrierSignal(writer, kernel) -> Module:
 def subtileClusterBarrierWait(writer, kernel) -> Module:
     """The all-waves cluster_barrier wait that closes the handshake."""
     mod = Module("subtile_cluster_barrier_wait")
-    mod.add(SBarrier(True, True, True, "cluster_barrier wait"))
+    mod.add(SBarrier(True, True, True, CB_WAIT_COMMENT))
     return mod
 
 

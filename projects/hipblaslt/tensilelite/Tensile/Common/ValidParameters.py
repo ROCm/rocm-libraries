@@ -563,6 +563,15 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # SQTT marker instrumentation for the subtile mainloop, plus the
+    # .sqtt_funcmap section naming the markers, for rocprofv3 --att capture.
+    #   0 = off
+    #   1 = s_ttracedata_imm -- 1 instruction per marker, no register touched
+    #   2 = m0 form with a packed gfx12 shader clock (funcmap M: row) --
+    #       7 instructions per marker; buys 16-cycle-resolution timestamps at
+    #       the cost of ~7x the instrumentation in the hot loop.
+    # Debug instrumentation. Forced 0 off gfx1250 and off UseSubtileImpl.
+    "SubtileSqttMarkers": [0, 1, 2],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

@@ -24,6 +24,7 @@
 #include "enum.hpp"
 #include "instruction.hpp"
 
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -2153,6 +2154,59 @@ namespace rocisa
         {
             return formatWithComment(instStr);
         }
+    };
+
+    /**
+     * @brief s_ttracedata_imm -- SQTT marker with an inline payload.
+     *
+     * Unlike s_ttracedata, which implicitly sources its 32-bit payload from m0,
+     * this SOPP form carries the payload in SIMM16, so it clobbers no register.
+     * Hardware captures only the low 8 bits of that field. gfx10+ only (gfx9
+     * has no such opcode); callers must gate on the target.
+     */
+    struct STtraceDataImm : public Instruction
+    {
+        STtraceDataImm(const int simm16, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , simm16(simm16)
+        {
+            setInst("s_ttracedata_imm");
+        }
+
+        STtraceDataImm(const STtraceDataImm& other)
+            : Instruction(other)
+            , simm16(other.simm16)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<STtraceDataImm>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {simm16};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {simm16};
+        }
+
+        std::string toString() const override
+        {
+            std::stringstream ss;
+            ss << instStr << " " << std::hex << std::showbase << simm16;
+            return formatWithComment(ss.str());
+        }
+
+        int simm16;
     };
 
     struct SSleep : public Instruction

@@ -1132,6 +1132,12 @@ class Solution(collections.abc.Mapping):
     isgfx1250 = isa[:2] == (12, 5)
     state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
+    # SQTT markers need s_ttracedata_imm, which does not exist before gfx10,
+    # and are only placed by the subtile emitter. Ignore the request elsewhere
+    # rather than rejecting the solution.
+    state["SubtileSqttMarkers"] = (int(state.get("SubtileSqttMarkers", 0) or 0)
+                                   if (isgfx1250 and state["UseSubtileImpl"]) else 0)
+
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 

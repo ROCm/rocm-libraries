@@ -5308,6 +5308,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
+    # Fresh SQTT marker registry for this kernel: ids are allocated while the
+    # body below is built, and read back for the funcmap once it is done.
+    from Tensile.Components.Subtile.SqttMarkers import resetRegistry, sqttFuncmapSection
+    resetRegistry(self)
+
     ####################################
     # Begin String
     moduleKernelBody = KernelBody("kernelBody")
@@ -5614,6 +5619,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
+
+    # Name every marker the body registered.  Must follow the body; no-op when
+    # SubtileSqttMarkers is off.
+    module.add(sqttFuncmapSection(self, kernel))
 
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not

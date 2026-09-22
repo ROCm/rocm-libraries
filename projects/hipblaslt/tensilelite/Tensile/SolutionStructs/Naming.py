@@ -224,6 +224,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.discard("TDMFuse")
 
+  # Same reasoning for SQTT markers: every shipped kernel is uninstrumented, so
+  # naming the parameter unconditionally would rename all of them. An
+  # instrumented kernel does take the tag, and must -- it carries extra
+  # instructions and may never dedup against a production kernel.
+  if state.get("SubtileSqttMarkers", False):
+    requiredParametersTemp.add("SubtileSqttMarkers")
+  else:
+    requiredParametersTemp.discard("SubtileSqttMarkers")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":
       continue

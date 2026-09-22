@@ -174,5 +174,6 @@ def getRequiredParametersMin() -> set:
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
+        'SubtileSqttMarkers',
         'ClusterDim',
     })
