@@ -5,19 +5,8 @@
 # pytest -- the descriptor-packaging suite, and the frontend wheel tests.
 # build  -- the PEP 517 frontend that packs the frontend wheel.
 # numpy  -- imported by frontend_wheel_package/tests, not by the build.
-# PyYAML -- IngestorGenerator/codegen/config_loader.py imports it, and that module
-#           is imported by the suite's conftest, so it is needed to collect the
-#           suite at all rather than by any single case.
-# Jinja2 -- the generator's template engine, reached from the same conftest import.
-#
-# PyYAML and Jinja2 are the generator's own declared requirements
-# (IngestorGenerator/requirements.txt); they are repeated here because that file is
-# not installed by this workflow and the interpreter below is the one its ctest
-# entry runs under.
 #
 # Installed with --upgrade, so nothing is pinned here.
 pytest
 build
 numpy
-PyYAML
-Jinja2

@@ -296,11 +296,12 @@ any more.**
 The argument exists per call site because every root is a separate custom target with
 no ordering edge between them, so the generator runs them at once and unbounded pools
 multiply. All six wire calls name a value: `1` selects the packer's serial path for
-the small roots, and `2` goes to the two roots with enough distinct variants to repay
-a pool — the production root and the `integration` test root, which is the one that
-exercises the parallel path in a real build. Omitting the argument lets the packer
-size itself against the machine, which fits only a root large enough to repay the
-startup cost.
+the small roots. The `integration` test root and the production packing target use
+`2`. The default production root holds no bundle and is dormant. Linux superbuild
+CI sets `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to the `examples/descriptors`
+fixture, exercising the production target. Omitting `PACK_JOBS` lets the packer size
+itself against the machine, which fits only a root large enough to repay the startup
+cost.
 
 ## Running the tests
 

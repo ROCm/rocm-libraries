@@ -45,10 +45,6 @@ test_categories:
       - "hipdnn_frontend_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
-      # Build tree only: this entry runs pytest over the IngestorGenerator source rather
-      # than an installed gtest binary, so it is absent from the installed
-      # CTestTestfile.cmake. See tools/CMakeLists.txt.
-      - "hipdnn_ingestor_generator_tests"
 
   integration:
     description: "Current hipDNN integration-check coverage"

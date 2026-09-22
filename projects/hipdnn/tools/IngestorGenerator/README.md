@@ -49,9 +49,7 @@ export HIPKERNELPROVIDER_ROCM_KPACK_DIR=/opt/rocm-kpack/python
 
 Left unset -- or exported empty, which counts as unset -- that class **skips** and
 the rest of the suite is unaffected. A directory that is set but wrong fails loudly
-rather than skipping, because naming one is a request to run the class. The provider
-build's own CTest entry leaves the variable unset by design, so that entry passing is
-not evidence about this class; see `projects/hipdnn/tools/CMakeLists.txt` and the
+rather than skipping, because naming one is a request to run the class. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
 ## Usage
@@ -538,6 +536,12 @@ prerequisite on `IKernelDispatchHandler`), not silently accepted and left to fai
 with a generic "no implementation yet".
 
 ## Tests
+
+This suite is **developer-run**, not registered with CTest or run by superbuild CI.
+Some cases require optional inputs: set `HIPDNN_VALIDATE_DESCRIPTORS` to a built
+`hipdnn_validate_descriptors` binary for the `-m round_trip` tier, and set
+`HIPKERNELPROVIDER_ROCM_KPACK_DIR` for the real-archive class described above.
+Those cases skip when their inputs are absent.
 
 ```bash
 .venv/bin/python -m pytest

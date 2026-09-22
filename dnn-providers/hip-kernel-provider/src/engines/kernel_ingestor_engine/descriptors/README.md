@@ -52,6 +52,9 @@ this README turns a clean configure into a `FATAL_ERROR`.
 
 ## Relationship to the examples tree
 
-`descriptor-packaging/examples/descriptors/` is a **test fixture** tree, not a production
-one. Bundles are authored and proved there first, against the packaging suite, and are
+`descriptor-packaging/examples/descriptors/` is a **test fixture** tree, not the default
+production source root. Bundles are authored and proved there against the packaging suite, and are
 relocated onto this root once a native pack registers the symbols their UKDs name.
+The Linux superbuild CI lane overrides `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to
+that fixture tree, so the production packing rule this root would use is exercised
+there even while this root stays empty and dormant.

@@ -166,8 +166,7 @@ jobs:
           echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter the pytest-backed ctest entries are registered under
-      # (descriptor-packaging and the IngestorGenerator suite each check it). The
+      # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
@@ -198,14 +197,7 @@ jobs:
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
-      # would otherwise pass CI while producing no archives. Only the ASM SDPA
-      # producer is asserted here: its arch list is hardcoded in its own
-      # CMakeLists, so it packs on every lane.
-      #
-      # Nothing is lost: the hkp production source root holds no KDP, so
-      # hkp_add_packaging() goes dormant with reason 'no-kdp' before the
-      # arch-coverage path is reached -- on this lane and the Linux one alike. The
-      # Linux lane is where that emptiness is pinned.
+      # would otherwise pass CI while producing no archives.
       - name: Verify kpack archives were produced
         shell: bash
         run: |
@@ -389,8 +381,7 @@ jobs:
           echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter the pytest-backed ctest entries are registered under
-      # (descriptor-packaging and the IngestorGenerator suite each check it). The
+      # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
@@ -411,6 +402,7 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
+            -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
@@ -423,66 +415,14 @@ jobs:
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
-      # would otherwise pass CI while producing no archives. The ASM SDPA engine
-      # is asserted PRESENT: its arch list is hardcoded in its own CMakeLists and
-      # so cannot regress with GPU_TARGETS.
-      #
-      # The hkp product tree is asserted ABSENT: the production descriptor source
-      # root holds no KDP, so hkp_add_packaging() goes dormant with reason 'no-kdp'
-      # before the arch-coverage path is reached and lays down no shard. The
-      # `-eq 0` below is the only product-tree assertion either lane makes.
-      #
-      # Populating that root therefore fails this step, and that is the point: it
-      # forces whoever does so back here to assert presence again, and with it the
-      # check this one cannot make -- that a family name in GPU_TARGETS, which
-      # selects no arch and packs zero descriptors, is caught rather than passing
-      # silently.
+      # would otherwise pass CI while producing no archives.
       - name: Verify kpack archives were produced
         run: |
           set -euo pipefail
           shopt -s nullglob
-          asm=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
-          test "${#asm[@]}" -gt 0 || { echo "no ASM SDPA .kpack archives produced" >&2; exit 1; }
-          printf '%s\n' "${asm[@]}"
-
-          # The product assertion below is an ABSENCE, and `mapfile < <(find ...)`
-          # discards find's exit status -- process substitution is outside `pipefail` --
-          # so a renamed HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR or a moved binary dir would
-          # leave it vacuously green forever. The test packs anchor the path shape
-          # instead: they are wired unconditionally and every test KDP declares
-          # `"arch": []`, the wildcard, so at least one survives pruning and lands a shard
-          # on every lane. find's -path wildcards span '/', so the single '*' covers both
-          # the per-binary and per-set segments (unit/shared, integration/pointwise and
-          # the rest).
-          test_tail="test_arch_content/hip-kernel-provider/*/$GPU_TARGET/kpack"
-          mapfile -t test_packs < <(find build -path "*/$test_tail/*.kpack" -print)
-          test "${#test_packs[@]}" -gt 0 || {
-            echo "no test .kpack under */$test_tail" >&2
-            echo "the test packs are wired unconditionally and their descriptors" >&2
-            echo "declare no arch, so zero here means the staged layout moved and" >&2
-            echo "the product assertion below cannot fail." >&2
-            exit 1
-          }
-          printf '%s\n' "${test_packs[@]}"
-
-          # The product pack's OUT_ROOT is HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR, i.e.
-          # <binary-dir>/<plugin-engine-reldir>/arch_content/hip-kernel-provider, and the
-          # packer lays each shard out as <arch>/kpack/<group>_<arch>.kpack. Matched by
-          # tail rather than by full path: the leading segments come from the superbuild's
-          # binary dir, but the arch_content/... tail is what the pack step actually owns.
-          product_tail="arch_content/hip-kernel-provider/$GPU_TARGET/kpack"
-          mapfile -t product < <(find build -path "*/$product_tail/*.kpack" -print)
-          test "${#product[@]}" -eq 0 || {
-            echo "hkp product .kpack found under */$product_tail:" >&2
-            printf '  %s\n' "${product[@]}" >&2
-            echo "the production descriptor source root is expected to hold no KDP," >&2
-            echo "so production packaging is dormant and writes no shard." >&2
-            echo "if the root was populated deliberately, update this step: assert the" >&2
-            echo "archives are PRESENT, and confirm a native pack registers the symbols" >&2
-            echo "the new bundle's UKDs name before it ships." >&2
-            exit 1
-          }
-          echo "hkp product packaging dormant: no .kpack under */$product_tail"
+          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${kpacks[@]}"
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure

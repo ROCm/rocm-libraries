@@ -4,22 +4,27 @@ A minimal but **real** authored source root for `hkp_pack`. Both producers are
 exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half
 lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
 
-This is a **test fixture** tree, not a production one. It is read by the packaging
-suite's real-bundle regressions and is not wired as a production source root.
-The shipped root is `src/engines/kernel_ingestor_engine/descriptors/`, the default of
-the `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` cache variable, and it holds no bundle,
-so a default configure packs no product at all. That root's README states the gate and
-the rules a bundle authored there has to meet.
+This is a **test fixture** tree, not the default production source root. It is read by the packaging
+suite's real-bundle regressions, and the Linux superbuild CI lane points
+`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` at it explicitly, so the product packing
+wiring is exercised against this fixture there.
+The default production root is `src/engines/kernel_ingestor_engine/descriptors/`,
+and it holds no bundle, so a default configure packs no product
+at all. That root's README states the gate and the rules a bundle authored there has
+to meet.
 
 ## Disposition
 
 | Set | Verdict |
 |---|---|
-| `hip/pointwise_add/` | not shipped — CI production-path exercise, and layout fixture |
-| `rocKE/gfx942_tiled_attention/` | not shipped — CI production-path exercise, and layout fixture |
+| `hip/pointwise_add/` | test fixture — CI production-path exercise and layout fixture |
+| `rocKE/gfx942_tiled_attention/` | test fixture — CI production-path exercise and layout fixture |
 
-Neither set reaches a product build: no CMake rule packs this tree and no install rule
-copies it. `test_hkp_pack_layout.py` packs the tree directly, which is what makes its
+Neither set is included by a default configure. When
+`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` names this tree, as in Linux superbuild CI,
+the ordinary production rules pack it and install the packed output into that build's
+install prefix.
+`test_hkp_pack_layout.py` packs the tree directly, which is what makes its
 layout assertion strict, and `test_desk_check_invariants.py` reads its bundles as real
 authored input: changing anything here changes what those tests pin.
 
