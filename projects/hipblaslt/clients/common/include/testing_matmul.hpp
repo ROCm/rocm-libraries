@@ -1880,8 +1880,10 @@ void testing_matmul(const Arguments& arg)
             why = "does not support grouped GEMM";
         else if(arg.batch_count > 1)
             why = "does not support batch_count > 1 (the scale tensor has no batch dimension)";
-        else if(arg.lda[0] != arg.K[0])
-            why = "requires lda == K: the packed int4 stream has no room for padding";
+        else if(arg.lda[0] < arg.K[0] || arg.lda[0] % 8 != 0)
+            why = "requires lda >= K and lda %% 8 == 0: A is a packed int4 stream "
+                  "indexed as row*lda + k, so a row stride that is not a whole "
+                  "number of dwords would shift the nibble grouping per row";
         else if(arg.K[0] % groupSize != 0)
             why = "requires K to be a multiple of the scale group size";
         else if(arg.K[0] % 8 != 0)
