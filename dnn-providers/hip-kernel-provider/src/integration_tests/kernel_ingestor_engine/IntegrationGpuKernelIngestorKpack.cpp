@@ -18,7 +18,6 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
