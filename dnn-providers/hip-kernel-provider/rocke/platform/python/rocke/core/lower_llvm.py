@@ -608,6 +608,18 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
         "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
     ),
+    "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
+        "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
+    ),
+    "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
+        "i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
@@ -3786,6 +3798,26 @@ class _Lowerer:
             f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
             f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
             f"i32 {dpp_ctrl}, i32 15, i32 15, i1 true)"
+        )
+
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        ``ctrl`` packs four two-bit lane selectors
+        (``p0 | p1 << 2 | p2 << 4 | p3 << 6``), so every value in
+        ``0..255`` is legal and anything outside it is malformed IR.
+        Reject rather than mask: truncation would turn an out-of-range
+        control into a different, silently valid permutation.
+        """
+        (data,) = op.operands
+        self._need("update.dpp.i32")
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {ctrl}, i32 15, i32 15, i1 true)"
         )
 
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:

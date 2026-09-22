@@ -403,6 +403,77 @@ def test_the_pack_supplies_only_geometries_worth_ranking(tmp_path, sources):
     assert all(shape.seqlen_q != 128 for shape in (item.shape for item in found))
 
 
+def _custom_pack(path: Path, geometries) -> Path:
+    """A pack whose per-geometry kernel counts the caller chooses."""
+    descriptors = []
+    for index, count in enumerate(geometries):
+        for variant in range(count):
+            descriptors.append({
+                "version": "1.0", "id": f"g{index}-{variant}",
+                "name": f"kernel_{index}_{variant}", "priority": 0,
+                "metadata": {"dtype": "BF16", "head_size": 64, "num_query_heads": 8,
+                             "num_kv_heads": 8, "seqlen_q": 256 * (index + 1),
+                             "seqlen_kv": 256 * (index + 1), "batch": 1, "causal": 0,
+                             "block_m": 128 + variant}})
+    path.write_text(json.dumps({"version": "1.0", "id": "pack", "name": "custom",
+                                "arch": ["gfx950"], "kernelDescriptors": descriptors}),
+                    encoding="utf-8")
+    return path
+
+
+def test_a_pack_with_one_kernel_per_geometry_is_reported_as_deterministic(tmp_path):
+    """No --min-candidates admits it, so the operator must be told to change role
+    rather than to lower the gate."""
+    pack = _custom_pack(tmp_path / "dense.kdp.json", [1, 1, 1, 1])
+    _, stats = kernels.from_pack(pack, min_candidates=2, max_bytes=2 ** 31)
+    assert stats["deterministic"] is True
+    assert stats["max_candidates"] == 1
+    assert stats["eligible"] == 0
+    assert "predict_engine_tflops" in stats["shut_out"]
+
+
+def test_a_pack_emptied_by_too_high_a_gate_says_where_to_set_it(tmp_path):
+    pack = _custom_pack(tmp_path / "dense.kdp.json", [2, 2, 2])
+    _, stats = kernels.from_pack(pack, min_candidates=3, max_bytes=2 ** 31)
+    assert stats["deterministic"] is False
+    assert stats["max_candidates"] == 2
+    assert stats["eligible"] == 0
+    assert "Lower the gate to 2" in stats["shut_out"]
+
+
+def test_a_pack_that_contributed_something_is_not_reported_as_shut_out(tmp_path):
+    pack = _custom_pack(tmp_path / "dense.kdp.json", [1, 3])
+    _, stats = kernels.from_pack(pack, min_candidates=2, max_bytes=2 ** 31)
+    assert stats["eligible"] == 1
+    assert stats["shut_out"] is None
+
+
+def test_a_pack_with_no_geometry_at_all_is_not_diagnosed_as_a_catalog(tmp_path):
+    """`pointwise_add` carries no attention geometry. It has nothing to say about
+    ranking roles, and saying anything would be noise on every corpus build."""
+    pack = tmp_path / "empty.kdp.json"
+    pack.write_text(json.dumps({"version": "1.0", "id": "p", "name": "n",
+                                "arch": ["gfx950"], "kernelDescriptors": []}),
+                    encoding="utf-8")
+    _, stats = kernels.from_pack(pack, min_candidates=2, max_bytes=2 ** 31)
+    assert stats["deterministic"] is False
+    assert stats["shut_out"] is None
+
+
+def test_the_shut_out_note_reaches_the_operator(tmp_path, sources, capsys):
+    """The corpus reads as healthy without it -- the other sources make up the count --
+    so the finding has to be printed, not merely recorded in the manifest."""
+    root = tmp_path / "solo"
+    root.mkdir()
+    _custom_pack(root / "dense.kdp.json", [1, 1, 1])
+    out = tmp_path / "corpus"
+    assert main(["--out", str(out), "--count", "20", "--kdp-root", str(root),
+                 "--model-catalog", str(sources["catalog"])]) == 0
+    printed = capsys.readouterr().out
+    assert "dense.kdp.json contributed no geometry" in printed
+    assert "predict_engine_tflops" in printed
+
+
 def test_the_catalog_yields_the_geometries_it_records():
     """Against the real `MODEL_CATALOG.md`, because that is the file that will be
     edited. Every value asserted is one the catalog states: llama's 32/8 GQA at D=64
@@ -636,7 +707,17 @@ def test_the_command_line_produces_a_corpus_offline(tmp_path, capsys):
     assert manifest["emitted"] == 50
     assert len(list((out / "graphs").glob("*.json"))) == 50
     assert (out / "manifest.csv").is_file()
-    assert set(manifest["mix"]) == {"model", "kernel", "sweep"}
+    # The kernel source contributes only what the packs in this tree can serve: a
+    # geometry needs `--min-candidates` kernels claiming it before it is rankable, so a
+    # checkout shipping the pipeline without a multi-kernel pack has nothing to draw
+    # there. Derived rather than hardcoded, so this still demands all three sources
+    # wherever such a pack is installed.
+    servable, _ = kernels.collect(
+        kernels.discover([pipeline.REPO / kernels.DEFAULT_KDP_ROOT]),
+        min_candidates=pipeline.DEFAULT_MIN_CANDIDATES,
+        max_bytes=pipeline.DEFAULT_MAX_BYTES,
+    )
+    assert set(manifest["mix"]) == {"model", "sweep"} | ({"kernel"} if servable else set())
     assert manifest["seed"] == 1
     assert all(entry["sha256"] for entry in manifest["inputs"])
     printed = capsys.readouterr().out

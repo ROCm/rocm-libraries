@@ -15,17 +15,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
     install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-    # TestUhdGenArtifact drives `uhd_gen train`, which stamps features_hash with this
-    # binary for every signature (RFC 0019 §6.3 leaves the digest one definition, and it
-    # is FeatureExtractor::computeHash). Wired here rather than beside the test target
-    # because `tools` is configured after `plugin_sdk`, so hipdnn_uhd_features does not
-    # exist yet when that target is declared.
-    if(TARGET hipdnn_plugin_sdk_tests)
-        target_compile_definitions(hipdnn_plugin_sdk_tests PRIVATE
-            HIPDNN_UHD_GEN_FEATURE_EVALUATOR="$<TARGET_FILE:hipdnn_uhd_features>")
-        add_dependencies(hipdnn_plugin_sdk_tests hipdnn_uhd_features)
-    endif()
 endif()
 
 add_executable(hipdnn_list_engines ListEngines.cpp)

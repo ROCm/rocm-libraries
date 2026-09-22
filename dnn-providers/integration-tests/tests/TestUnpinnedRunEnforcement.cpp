@@ -16,15 +16,16 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
-#include "ScratchDirectory.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -42,7 +43,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("unpinned_run_"));
+        _scopedDir.emplace(claimScratchDirectory("unpinned_run"));
         _tempDir = _scopedDir->path();
     }
 

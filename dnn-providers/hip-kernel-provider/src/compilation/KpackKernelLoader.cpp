@@ -15,7 +15,9 @@ namespace hip_kernel_provider::compilation
 std::unique_ptr<ICompiledProgram> KpackKernelLoader::load(const std::filesystem::path& archive,
                                                           const std::string& tocKey,
                                                           const std::string& deviceArch,
+                                                          int deviceOrdinal,
                                                           const std::string& symbol,
+                                                          const std::string& expectedSha256,
                                                           const std::string& descriptorLabel) const
 {
     const std::string archivePath = archive.string();
@@ -23,17 +25,26 @@ std::unique_ptr<ICompiledProgram> KpackKernelLoader::load(const std::filesystem:
     CachedKpackModule module;
     try
     {
-        // The cache key is (archivePath, tocKey, deviceArch). `symbol` is deliberately
-        // absent: kernels differing only by entry point name the same blob and must
-        // share one hipModule_t. It is used below for the message only.
-        module = _moduleCache.getOrLoad(archivePath, tocKey, deviceArch);
+        // The cache key is (archivePath, tocKey, deviceArch, deviceOrdinal,
+        // expectedSha256). `symbol` is deliberately absent: kernels differing only by
+        // entry point name the same blob and must share one hipModule_t. It is used below
+        // for the message only.
+        module = _moduleCache.getOrLoad(
+            archivePath, tocKey, deviceArch, deviceOrdinal, expectedSha256);
     }
     catch(const KpackModuleLoadFailure& failure)
     {
         // The cache knows the stage and what went wrong; only this layer knows who
         // asked. Prefixing here is what lets every message name the descriptor and the
         // symbol without either entering the key.
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        //
+        // A digest mismatch is the one stage that indicts the authored data rather than
+        // this machine: the descriptor's declared sha256 does not describe the bytes the
+        // archive holds. Every other stage is a fault of the environment.
+        const auto status = failure.stage() == KpackLoadStage::DIGEST_MISMATCH
+                                ? HIPDNN_PLUGIN_STATUS_INVALID_VALUE
+                                : HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(status,
                                                        "kpack kernel source for " + descriptorLabel
                                                            + ", symbol '" + symbol
                                                            + "': " + failure.what());

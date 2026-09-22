@@ -425,6 +425,30 @@ Runtime path:
 
 This is why benchmark methodology matters: first-run compile and cache creation are not kernel steady-state.
 
+## Runtime Param Fields
+
+Step 1 above builds the key from the spec. By default *every* spec field participates, so each distinct batch/seqlen combination compiles its own kernel — the AOT instance explosion.
+
+A **runtime param field** is a spec field the kernel body reads as a kernel argument instead of baking into the body. The spec declares them by overriding `runtime_param_fields`, and `attention_dense_cache_key` excludes exactly those fields from the key, so one compiled binary serves every value of them:
+
+```text
+attention_dense_cache_key(spec, arch) -> (arch, type(spec), <fields not in runtime_param_fields>)
+```
+
+The declaration lives on the spec that owns the body, not in the shared key function, because the two must agree: declaring a field the body still bakes is a cache collision — different problems served by the wrong binary. `library/tests/test_attention_builds.py::TestAttentionDenseRuntimeShapeCollision` guards that direction by asserting specs sharing a key lower to identical IR.
+
+Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window — declare nothing and keep per-shape identity. `library/kernels/gfx942/attention_dense.py` and every other family also declare nothing, so their identity is unchanged.
+
+A spec on the runtime path also drops the `sq`/`sk` tokens from its symbol name, since one symbol now covers all shapes. See `## Runtime Assumptions` in [runtime/limitations.md](../runtime/limitations.md) for why partial specialization (baking `batch` while keeping the seqlens runtime) is not safe to ship yet.
+
+### Shape validity moves from compile time to launch time
+
+Declaring a field runtime also moves *when* its validity can be checked. A baked shape is a constant the builder can inspect at emission; a runtime shape is a device-side `mul` of two kernargs, so there is nothing in the IR to look at — and because the field no longer splits the cache key, a check that only ran on a cache miss would be skipped for every later shape served by the same binary.
+
+So shape validity belongs in `supports_attention_dense`, which runs **per launch**: `run_attention_dense` calls it before the launcher-cache lookup, on a spec still carrying the real shape. The checks that are properties of the base spec — dataclass re-validation, positive extents, `block_m % block_n`, and the 32-bit K/V and Q/O extent bounds — live in one shared `check_dense_spec_preflight` in `library/kernels/common/attention_dense_spec.py`, which each arch's `supports_attention_dense` calls before adding its own scope. A check belongs there only if it reads base-spec fields **and** its verdict is the same for every dense body; the LDS budget, dtype/head-size sets, mode rejections, and private knobs all stay per-arch.
+
+The 32-bit bound is **signed**: offsets are built from IRBuilder `add`/`mul`, which lower to `add nsw` / `mul nsw` i32, where overflow is UB rather than a wrap. The buffer-resource `num_records` field is unsigned in hardware, but it is emitted through `const_i32` with no range check and the voffset feeding it is signed, so 2³¹ binds on both paths.
+
 ## Attention Failure Modes
 
 - Comparing 2D CK against 3D Triton or vice versa without labeling algorithm.

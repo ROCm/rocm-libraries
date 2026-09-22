@@ -18,7 +18,7 @@
 # Sharding: UHD_SHARDS/UHD_SHARD take an interleaved slice of the corpus (every Nth graph,
 # offset by the shard index), so each shard keeps the whole shape distribution instead of
 # one contiguous alphabetical block of it. Shards collect and train independently; their
-# rows are merged by `results_import` afterwards when a single model is wanted.
+# rows are merged by `uhd_gen.dataset` afterwards when a single model is wanted.
 set -uo pipefail
 
 BRANCH=${UHD_BRANCH:-users/jscampb/uhd-integration-test-branch}

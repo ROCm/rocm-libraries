@@ -203,6 +203,23 @@ class Exclusions:
     problems_single_candidate: int = 0
     problems_non_positive_oracle: int = 0
 
+    def deterministic_catalog(self, scored: int) -> bool:
+        """Nothing was scored, and single-candidate problems are the whole reason.
+
+        The distinction this draws is the one an operator cannot draw from an empty
+        report: a corpus where every problem offered one candidate is an engine whose
+        kernel choice is a total function of the problem, and there was never a ranking
+        to learn. A corpus emptied by unmeasured or degenerate problems is a collection
+        failure. Both print "problems scored: 0", and they want opposite responses --
+        train L1, versus go and fix the sweep.
+        """
+        return (
+            scored == 0
+            and self.problems_single_candidate > 0
+            and self.problems_no_measured_candidate == 0
+            and self.problems_non_positive_oracle == 0
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "invalid_rows": self.invalid_rows,
@@ -1143,6 +1160,9 @@ def _build_report(
         "exclusions": exclusions.as_dict(),
         "metrics": {
             "problems_scored": len(results),
+            # Recorded even when false, so a reader of two reports can tell "this engine
+            # ranks nothing" from "this report predates the check".
+            "deterministic_catalog": exclusions.deterministic_catalog(len(results)),
             "top1_regret": _summarise(regrets),
             "regret_tail": {
                 "threshold": regret_tail_threshold,
@@ -1793,6 +1813,18 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
     print(f"  problems scored:    {metrics['problems_scored']}")
     if regret["mean"] is None:
         print("  top-1 regret:       n/a (no problem had two measured candidates)")
+        if metrics.get("deterministic_catalog"):
+            # The arithmetic above was already right; what was missing was the reason. An
+            # empty report reads as a broken corpus, and the operator goes to debug a
+            # sweep that worked -- when the engine simply has one kernel per problem and
+            # wanted the other role all along.
+            print(
+                "                      all "
+                f"{report['exclusions']['problems_single_candidate']} problem(s) had a "
+                "single candidate: this engine's kernel choice is a total function of the\n"
+                "                      problem, so there is no ordering for a ranking "
+                "model to learn. Train --role predict_engine_tflops instead."
+            )
     else:
         print(
             "  top-1 regret:       mean {mean:.4f}  p50 {p50:.4f}  p95 {p95:.4f}  max {max:.4f}".format(

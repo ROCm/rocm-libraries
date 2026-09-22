@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,17 @@ const vector<int> n_size_range = {
     100,
 };
 
+// cuBLAS getrfBatched only supports square matrices (m == n).
+// Each entry is {{m, lda}, n} with n == m to ensure square inputs.
+const vector<getrf_tuple> batched_square_range = {
+    // invalid (triggers bad-args test when m == -1 and n == -1)
+    {{-1, 1}, -1},
+    // normal (valid) square samples
+    {{32, 32}, 32},
+    {{50, 50}, 50},
+    {{70, 100}, 70},
+};
+
 // // for daily_lapack tests
 // const vector<vector<int>> large_matrix_size_range = {
 //     {192, 192},
@@ -108,7 +119,7 @@ protected:
         if(arg.peek<rocblas_int>("m") == -1 && arg.peek<rocblas_int>("n") == -1)
             testing_getrf_bad_arg<API, BATCHED, STRIDED, T, I, SIZE>();
 
-        arg.batch_count = 1;
+        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
         testing_getrf<API, BATCHED, STRIDED, NPVT, T, I, SIZE>(arg);
     }
 };
@@ -134,6 +145,14 @@ class GETRF_COMPAT_64 : public GETRF_BASE<API_COMPAT, false, int64_t, size_t>
 };
 
 class GETRF_COMPAT_NPVT_64 : public GETRF_BASE<API_COMPAT, true, int64_t, size_t>
+{
+};
+
+class GETRF_BATCHED : public GETRF_BASE<API_NORMAL, false, int, int>
+{
+};
+
+class GETRF_NPVT_BATCHED : public GETRF_BASE<API_NORMAL, true, int, int>
 {
 };
 
@@ -259,6 +278,48 @@ TEST_P(GETRF_COMPAT_NPVT_64, __double_complex)
     run_tests<false, false, hipsolverDoubleComplex>();
 }
 
+// batched tests
+
+TEST_P(GETRF_BATCHED, batched__float)
+{
+    run_tests<true, false, float>();
+}
+
+TEST_P(GETRF_BATCHED, batched__double)
+{
+    run_tests<true, false, double>();
+}
+
+TEST_P(GETRF_BATCHED, batched__float_complex)
+{
+    run_tests<true, false, hipsolverComplex>();
+}
+
+TEST_P(GETRF_BATCHED, batched__double_complex)
+{
+    run_tests<true, false, hipsolverDoubleComplex>();
+}
+
+TEST_P(GETRF_NPVT_BATCHED, batched__float)
+{
+    run_tests<true, false, float>();
+}
+
+TEST_P(GETRF_NPVT_BATCHED, batched__double)
+{
+    run_tests<true, false, double>();
+}
+
+TEST_P(GETRF_NPVT_BATCHED, batched__float_complex)
+{
+    run_tests<true, false, hipsolverComplex>();
+}
+
+TEST_P(GETRF_NPVT_BATCHED, batched__double_complex)
+{
+    run_tests<true, false, hipsolverDoubleComplex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          GETRF,
 //                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(large_n_size_range)));
@@ -306,3 +367,7 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GETRF_COMPAT_NPVT_64,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GETRF_BATCHED, ValuesIn(batched_square_range));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, GETRF_NPVT_BATCHED, ValuesIn(batched_square_range));

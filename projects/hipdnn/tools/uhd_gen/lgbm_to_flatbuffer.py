@@ -85,6 +85,10 @@ def convert(
             detection at runtime.
         model_version: Optional semantic version (e.g., "1.0.0").
         training_date: ISO 8601 stamp to record; see `resolve_training_date`.
+        group_by_feature_index: Feature slot layer 1 groups on, or -1 for a
+            single-layer model.
+        group_models: One `(grouping value, booster)` pair per group's layer 2.
+            None writes a single-layer model.
 
     Returns:
         The SHA-256 of the bytes written, as `TreeDataAdapter` recomputes them: the
@@ -140,6 +144,10 @@ def build_gbdt_model(
         training_arches: GPU architectures the model was trained on.
         model_version: Semantic version string.
         training_date: ISO 8601 stamp to record; see `resolve_training_date`.
+        group_by_feature_index: Feature slot layer 1 groups on, or -1 for a
+            single-layer model.
+        groups: One `(grouping value, dumped ensemble)` pair per group, in the
+            order layer 1 decides between them. None writes a single-layer model.
 
     Returns:
         FlatBuffer bytes for GbdtModel.

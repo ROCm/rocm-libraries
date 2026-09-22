@@ -42,26 +42,25 @@ struct StockhamKernelCC : public StockhamKernel
     //
     Variable intrinsic_mode{"intrinsic_mode", "IntrinsicAccessType"};
     Variable apply_large_twiddle{"apply_large_twiddle", "bool"};
-    Variable large_twiddle_steps{"large_twiddle_steps", "size_t"};
-    Variable large_twiddle_base{"large_twiddle_base", "size_t"};
+    Variable large_twiddle_steps{"large_twiddle_steps", rtc_kint_type(KIntType::U32)};
+    Variable large_twiddle_base{"large_twiddle_base", rtc_kint_type(KIntType::U32)};
 
     //
     // arguments
     //
     Variable large_twiddles{"large_twiddles", "const scalar_type", true};
-    Variable trans_local{"trans_local", "size_t"};
+    Variable trans_local{"trans_local", rtc_kint_type(KIntType::U32)};
 
     //
     // locals
     //
-    Variable tile_index{"tile_index", "size_t"};
-    Variable num_of_tiles{"num_of_tiles", "size_t"};
+    Variable tile_index{"tile_index", "integer_type"};
+    Variable num_of_tiles{"num_of_tiles", "integer_type"};
     Variable in_bound{"in_bound", "bool"};
-    Variable thread{"thread", "unsigned int"}; // replacing tid_ver
-    Variable tid_hor{"tid_hor", "unsigned int"}; // id along row
-    Variable stride_in{"stride_in", "const size_t", true};
-    Variable stride_out{"stride_out", "const size_t", true};
-    Variable length_M_blue{"length_M_blue", "const size_t"};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)}; // replacing tid_ver
+    Variable tid_hor{"tid_hor", rtc_kint_type(KIntType::U32)}; // id along row
+    Variable stride_in{"stride_in", "const integer_type", true};
+    Variable stride_out{"stride_out", "const integer_type", true};
 
     // large twiddle support
     Multiply ltwd_entries{Parens{ShiftLeft{1, large_twiddle_base}}, 3};
@@ -193,12 +192,12 @@ struct StockhamKernelCC : public StockhamKernel
 
     StatementList calculate_offsets() override
     {
-        Variable d{"d", "int"};
-        Variable index_along_d{"index_along_d", "size_t"};
-        Variable remaining{"remaining", "size_t"};
-        Variable plength{"plength", "size_t"};
-        Variable global_stride_in{"global_stride_in", "const size_t"};
-        Variable global_stride_out{"global_stride_out", "const size_t"};
+        Variable d{"d", rtc_kint_type(KIntType::U32)};
+        Variable index_along_d{"index_along_d", "integer_type"};
+        Variable remaining{"remaining", "integer_type"};
+        Variable plength{"plength", "integer_type"};
+        Variable global_stride_in{"global_stride_in", "const integer_type"};
+        Variable global_stride_out{"global_stride_out", "const integer_type"};
 
         StatementList stmts;
         stmts += Declaration{tile_index};
@@ -229,10 +228,10 @@ struct StockhamKernelCC : public StockhamKernel
 
         if(emitGlobalId)
         {
-            stmts += Declaration{Variable{"global_stride_in[3]", "const size_t"},
+            stmts += Declaration{Variable{"global_stride_in[3]", "const integer_type"},
                                  Literal{"{global_stride_in_0, global_stride_in_1, global_idist}"}};
             stmts
-                += Declaration{Variable{"global_stride_out[3]", "const size_t"},
+                += Declaration{Variable{"global_stride_out[3]", "const integer_type"},
                                Literal{"{global_stride_out_0, global_stride_out_1, global_odist}"}};
 
             stmts += For{
@@ -539,7 +538,7 @@ struct StockhamKernelCC : public StockhamKernel
 
     StatementList large_twiddles_load() override
     {
-        Variable ltwd_id{"ltwd_id", "size_t"};
+        Variable ltwd_id{"ltwd_id", rtc_kint_type(KIntType::U32)};
 
         StatementList stmts;
         stmts += CommentLines{

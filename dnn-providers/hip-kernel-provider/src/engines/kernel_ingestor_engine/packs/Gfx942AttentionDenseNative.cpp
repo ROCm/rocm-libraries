@@ -1058,23 +1058,38 @@ double scoreKernel(const MatchContext& /*context*/,
 // Dispatch
 // ---------------------------------------------------------------------------
 
+/// The argument list this pack marshals, matching the launch() below one for one:
+/// `(q_ptr, k_ptr, v_ptr, o_ptr, scale)`. It sits beside that launch so the two are
+/// edited together -- a stale copy rejects the correct kernel rather than the drifted
+/// one. Names are empty and offsets zero because neither is compared for a
+/// HIP-produced kernel; see requireSignatureMatch.
+const std::vector<KernelArgument>& gfx942AttentionDenseKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const KernelArgument s_scale{
+        "by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{
+        s_buffer, s_buffer, s_buffer, s_buffer, s_scale};
+    return s_signature;
+}
+
 /// The compiled kernel plus everything launch() needs, resolved once and owning
 /// nothing that points back into the MatchContext or BoundTokens it came from.
 class PreparedGfx942AttentionDense : public PreparedDispatch
 {
 public:
-    PreparedGfx942AttentionDense(std::unique_ptr<compilation::ICompiledProgram> program,
-                                 std::unique_ptr<compilation::IRunnableKernel> kernel,
-                                 AttentionDenseBinding binding)
-        : _program(std::move(program))
-        , _kernel(std::move(kernel))
+    PreparedGfx942AttentionDense(IngestorKernelCode code, AttentionDenseBinding binding)
+        : _code(std::move(code))
         , _binding(binding)
     {
     }
 
-    const compilation::IRunnableKernel& kernel() const
+    /// The kernel for the device this dispatch is running on. Resolved here rather than
+    /// at prepare() because a plan outlives the handle it was built from.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
-        return *_kernel;
+        return _code.kernelForStream(stream);
     }
 
     const AttentionDenseBinding& binding() const
@@ -1083,10 +1098,9 @@ public:
     }
 
 private:
-    // The runnable kernel is a VIEW into its program's module; both are held for the
-    // plan's lifetime or the kernel dangles.
-    std::unique_ptr<compilation::ICompiledProgram> _program;
-    std::unique_ptr<compilation::IRunnableKernel> _kernel;
+    // Owns each device's program alongside the kernel viewing into it, so a module
+    // outlives every function resolved from it for the plan's lifetime.
+    IngestorKernelCode _code;
     AttentionDenseBinding _binding;
 };
 
@@ -1170,8 +1184,12 @@ public:
         const compilation::KernelCompileOptions options(standIn,
                                                         context.deviceProperties.gcnArchName);
 
-        auto code
-            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
+        auto code = buildIngestorKernelCode(_kernelCompiler,
+                                            _kpackLoader,
+                                            context,
+                                            kernel,
+                                            options,
+                                            gfx942AttentionDenseKernelSignature());
 
         // Geometry, restated from the builder's own helpers, INCLUDING the persistent
         // branch. The arithmetic and its guards live in attentionDenseGeometry() so a
@@ -1188,11 +1206,10 @@ public:
                                      kernel.getIntMetadata(std::string(NUM_PERSISTENT_FIELD)),
                                      toString(kernel.kernelId));
 
-        code.kernel->setBlockSize(geometry.blockX, 1, 1);
-        code.kernel->setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
+        code.setBlockSize(geometry.blockX, 1, 1);
+        code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
 
-        return std::make_unique<PreparedGfx942AttentionDense>(
-            std::move(code.program), std::move(code.kernel), binding);
+        return std::make_unique<PreparedGfx942AttentionDense>(std::move(code), binding);
     }
 
     /// The ABI is `attention_dense_signature` (attention_dense.py:1819-1839):
@@ -1218,8 +1235,10 @@ public:
         const auto o
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
-        preparedDense.kernel().launch(
-            handle.getStream(), q.ptr, k.ptr, v.ptr, o.ptr, binding.scale);
+        // Changing this argument list means changing gfx942AttentionDenseKernelSignature()
+        // with it.
+        preparedDense.kernelForStream(handle.getStream())
+            .launch(handle.getStream(), q.ptr, k.ptr, v.ptr, o.ptr, binding.scale);
     }
 
 private:

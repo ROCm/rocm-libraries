@@ -330,6 +330,34 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
                                           size_t reason_cap);
 
 /* ===================================================================== *
+ *  DirectDepthwiseSpatialSpec  (cpg = kpg = 1, groups <= wave_size)
+ *
+ *  Thread layout: ch = tid % groups, w_in_wave = tid // groups.
+ *  Each wave covers n_w_per_wave = wave_size // groups output W positions.
+ *  block_w = block_waves * n_w_per_wave.
+ *  Grid: (ceil(Wo / block_w), 1, N) — no channel tile.
+ * ===================================================================== */
+typedef struct rocke_direct_depthwise_spatial_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_depthwise_spatial" */
+    int block_waves; /* default 1  */
+    int wave_size; /* default 64 */
+} rocke_direct_depthwise_spatial_spec_t;
+
+rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);
+int rocke_direct_depthwise_spatial_n_w_per_wave(const rocke_direct_depthwise_spatial_spec_t* spec);
+int rocke_direct_depthwise_spatial_block_w(const rocke_direct_depthwise_spatial_spec_t* spec);
+int rocke_direct_depthwise_spatial_threads_per_block(
+    const rocke_direct_depthwise_spatial_spec_t* spec);
+rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
+    const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap);
+bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_spatial_spec_t* spec,
+                                                  const char* arch,
+                                                  char* reason,
+                                                  size_t reason_cap);
+
+/* ===================================================================== *
  *  BUILD ENTRIES
  * ===================================================================== */
 
@@ -385,6 +413,13 @@ rocke_kernel_def_t* rocke_build_direct_depthwise(rocke_ir_builder_t* b,
 rocke_kernel_def_t* rocke_build_direct_depthwise_new(rocke_ir_builder_t* b,
                                                      const rocke_direct_depthwise_spec_t* spec,
                                                      const char* arch);
+
+/* build_direct_depthwise_spatial(spec, arch). Small-group spatial depthwise kernel
+ * (cpg=kpg=1, groups <= wave_size). Thread layout: ch=tid%groups, w=tid//groups. */
+rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_spatial_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_spatial_new(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_spatial_spec_t* spec, const char* arch);
 
 /* ===================================================================== *
  *  SIGNATURE (manifest)  --  both kernels share the 6-entry ABI:

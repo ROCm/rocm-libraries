@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import addressing
+from .catalog import DeterministicCatalogError, candidate_density
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import build_features_signature, signature_references
@@ -434,6 +435,24 @@ def run_generate(args: argparse.Namespace) -> int:
                         & frame["numerically_valid"].ne(False)].copy())
         if usable.empty:
             raise ValueError("the benchmark produced no successful valid timings")
+        # Checked here, the first moment it is knowable, rather than at the
+        # `problems_scored` gate below. Without this the run trains a model and evaluates
+        # it before dying on "held-out corpus has no evaluable candidate ranking" -- a true
+        # statement that names the symptom and not the cause, and whose documented remedy
+        # ("give the catalog a knob its matcher does not pin") is right for an engine whose
+        # variants were collapsed by an over-broad match and wrong for one whose kernel
+        # choice is a total function of the problem by design. Those two want opposite
+        # things, and only the second wants L1. The collected measurements survive into the
+        # preserved stage either way, which is the point: they are exactly the labels the
+        # L1 run needs, so the sweep is not wasted, only the role was.
+        density = None
+        if not immediate:
+            density = candidate_density(usable)
+            if density.deterministic:
+                raise DeterministicCatalogError(density.diagnosis(args.engine))
+            thin = density.near_deterministic_warning()
+            if thin:
+                logger.warning("%s", thin)
         if immediate:
             target, objective, units, calibrated, statistic = "tflops", "max", "tflops", True, LABEL_STATISTIC
         elif "tflops" in usable.columns and bool(usable["tflops"].gt(0).all()):
@@ -521,6 +540,16 @@ def run_generate(args: argparse.Namespace) -> int:
         report_path = stage / "model" / "eval_report.json"
         report = json.loads(report_path.read_text(encoding="utf-8"))
         if not report["metrics"]["problems_scored"]:
+            # The density check above already refused a wholly deterministic catalog, so
+            # reaching here that way means the holdout alone came out single-candidate --
+            # a thin corpus rather than an inert engine. Say which, because the remedies
+            # differ and this message has historically been read as the other one.
+            if report["metrics"].get("deterministic_catalog"):
+                raise DeterministicCatalogError(
+                    "every held-out problem has a single candidate, though the corpus as a "
+                    "whole does not: the evaluation slice landed entirely on problems with "
+                    "nothing to rank. Collect more contested problems, or -- if this engine "
+                    "pins its kernel choice by design -- train --role predict_engine_tflops.")
             raise ValueError("held-out corpus has no evaluable immediate predictions" if immediate
                              else "held-out corpus has no evaluable candidate ranking")
         evaluated_keys = {tuple(key) for key in report["split"]["eval_problem_keys"]}
@@ -534,6 +563,11 @@ def run_generate(args: argparse.Namespace) -> int:
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
             "training_arguments": train_args, "evaluation_arguments": eval_args,
             "device_coverage": coverage, "training_problem_keys": sorted(training_keys),
+            # How much of this corpus the ranker could actually learn from. A run that
+            # reaches here had *some* contested problems, but "some" spans a model fitted
+            # on every problem and one fitted on four of them, and the metrics beside it
+            # report only the second without saying so.
+            "catalog_density": density.as_dict() if density else None,
             "eval_problem_keys": sorted(evaluated_keys), "seed": args.seed, "eval_fraction": args.eval_fraction,
             "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", []),
             # The runtime derives the same tables from the same inventory, so this is recorded

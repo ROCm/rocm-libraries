@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -559,8 +560,7 @@ ConvFwdBinding convFwdBinding(const BoundTokens& bound)
 class PreparedConvFwd : public PreparedDispatch
 {
 public:
-    PreparedConvFwd(std::unique_ptr<compilation::ICompiledProgram> program,
-                    std::unique_ptr<compilation::IRunnableKernel> kernel,
+    PreparedConvFwd(IngestorKernelCode code,
                     ConvFwdBinding binding,
                     int n,
                     int c,
@@ -569,8 +569,7 @@ public:
                     int k,
                     int r,
                     int s)
-        : _program(std::move(program))
-        , _kernel(std::move(kernel))
+        : _code(std::move(code))
         , _binding(binding)
         , _n(n)
         , _c(c)
@@ -582,9 +581,11 @@ public:
     {
     }
 
-    const compilation::IRunnableKernel& kernel() const
+    /// The kernel for the device this dispatch is running on. Resolved here rather than
+    /// at prepare() because a plan outlives the handle it was built from.
+    compilation::IRunnableKernel& kernelForStream(hipStream_t stream) const
     {
-        return *_kernel;
+        return _code.kernelForStream(stream);
     }
 
     const ConvFwdBinding& binding() const
@@ -622,10 +623,9 @@ public:
     }
 
 private:
-    // The runnable kernel is a view into its program's module, so the program must
-    // outlive it; both are held here for the plan's lifetime.
-    std::unique_ptr<compilation::ICompiledProgram> _program;
-    std::unique_ptr<compilation::IRunnableKernel> _kernel;
+    // Owns each device's program alongside the kernel viewing into it, so a module
+    // outlives every function resolved from it for the plan's lifetime.
+    IngestorKernelCode _code;
     ConvFwdBinding _binding;
     int _n;
     int _c;
@@ -666,6 +666,32 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
             "matched conv_fwd graph has no tensor for uid " + std::to_string(uid));
     }
     return *it->second;
+}
+
+/// The argument list this pack launches ConvFwd with, mirroring the launch() below one
+/// for one. It sits here rather than in the adapter that consumes it so that it is edited
+/// alongside that launch -- a stale copy rejects the correct kernel rather than the
+/// drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& convFwdKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    // The seven trailing extents (n, c, h, width, k, r, s), each an int.
+    static const KernelArgument s_extent{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer,
+                                                         s_buffer,
+                                                         s_buffer,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent};
+    return s_signature;
 }
 
 /**
@@ -724,8 +750,8 @@ public:
         options.add("HIP_PLUGIN_CONV_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_CONV_BLOCK_SIZE", blockSize);
 
-        auto code
-            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, convFwdKernelSignature());
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
@@ -736,11 +762,10 @@ public:
         const auto gridSize = static_cast<unsigned int>(
             (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
 
-        code.kernel->setBlockSize(blockSize, 1, 1);
-        code.kernel->setGridSize(gridSize, 1, 1);
+        code.setBlockSize(blockSize, 1, 1);
+        code.setGridSize(gridSize, 1, 1);
 
-        return std::make_unique<PreparedConvFwd>(
-            std::move(code.program), std::move(code.kernel), binding, n, c, h, width, k, r, s);
+        return std::make_unique<PreparedConvFwd>(std::move(code), binding, n, c, h, width, k, r, s);
     }
 
     void launch(const Handle& handle,
@@ -759,17 +784,18 @@ public:
         const auto y
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.y, deviceBuffers, numDeviceBuffers);
 
-        preparedConvFwd.kernel().launch(handle.getStream(),
-                                        x.ptr,
-                                        w.ptr,
-                                        y.ptr,
-                                        preparedConvFwd.n(),
-                                        preparedConvFwd.c(),
-                                        preparedConvFwd.h(),
-                                        preparedConvFwd.width(),
-                                        preparedConvFwd.k(),
-                                        preparedConvFwd.r(),
-                                        preparedConvFwd.s());
+        preparedConvFwd.kernelForStream(handle.getStream())
+            .launch(handle.getStream(),
+                    x.ptr,
+                    w.ptr,
+                    y.ptr,
+                    preparedConvFwd.n(),
+                    preparedConvFwd.c(),
+                    preparedConvFwd.h(),
+                    preparedConvFwd.width(),
+                    preparedConvFwd.k(),
+                    preparedConvFwd.r(),
+                    preparedConvFwd.s());
     }
 
 private:

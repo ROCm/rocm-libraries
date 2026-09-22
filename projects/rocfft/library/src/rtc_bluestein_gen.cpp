@@ -42,6 +42,7 @@ std::string bluestein_single_rtc_kernel_name(const BluesteinSingleSpecs& specs)
     kernel_name += "_dim";
     kernel_name += std::to_string(specs.dim);
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
 
     if(specs.placement == rocfft_placement_inplace)
@@ -74,6 +75,7 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
@@ -158,6 +160,7 @@ std::string bluestein_multi_rtc_kernel_name(const BluesteinMultiSpecs& specs)
         throw std::runtime_error("invalid bluestein rtc scheme");
     }
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -236,6 +239,7 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(specs.precision);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
@@ -254,9 +258,9 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable input{"input", "scalar_type", true, true};
     Variable output{"output", "scalar_type", true, true};
     Variable dim{"dim", "const size_t"};
-    Variable lengths{"lengths", "const size_t", true, true};
-    Variable stride_in{"stride_in", "const size_t", true, true};
-    Variable stride_out{"stride_out", "const size_t", true, true};
+    Variable lengths{"lengths", "const integer_type", true, true};
+    Variable stride_in{"stride_in", "const integer_type", true, true};
+    Variable stride_out{"stride_out", "const integer_type", true, true};
     Variable scale_factor{"scale_factor", "const real_type_t<scalar_type>"};
 
     Function func{kernel_name};

@@ -25,6 +25,8 @@ add_executable(
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
+    device/TestScopedDevice.cpp
+    utilities/TestDigest.cpp
 )
 
 # Add the dummy kernel for running the tests
@@ -137,9 +139,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # here -- including the dispatch ones, which sit under engines/ -- so they sit between
     # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
     # which the device cases find the archive this build packed for the local arch, and
-    # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE below, which the parse-level cases open because
-    # they need a real container rather than a matching device.
+    # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
+    # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
+        compilation/TestKpackArchive.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp
@@ -151,8 +154,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # test assets: the reader is now the platform's shared library, so there is no
     # fetched source tree to take it from, and a 518-byte container is cheaper to carry
     # than a build-time dependency on one.
+    #
+    # Staged into the test descriptor tree and named by a path relative to this binary,
+    # as the descriptor sets are, so the cases open the archive that ships with whichever
+    # copy of this binary runs. That binary also runs from a packaged artifact carrying no
+    # checkout, where a relative path is the only form that resolves. install(DIRECTORY)
+    # on that tree ships the archive with the descriptors.
+    set(_hkp_test_kpack_subdir "test_kpack_binary")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
+        "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack"
+        COPYONLY)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
-        HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack")
+        HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack")
 
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.

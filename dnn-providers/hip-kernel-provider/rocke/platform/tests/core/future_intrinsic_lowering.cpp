@@ -20,7 +20,9 @@
 #include <string>
 
 #include "rocke/ir.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/strbuf.h"
 
 namespace
 {
@@ -98,6 +100,38 @@ std::string lower_one(const char* name,
     return ir;
 }
 
+/* Build the same kernel through the public HIP-source lowerer. */
+template <typename BuildFn>
+std::string lower_one_hip(const char* name, BuildFn build, const char* arch)
+{
+    rocke_ir_builder_t b;
+    rocke_strbuf_t out;
+    rocke_lower_hip_opts_t opts{};
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return std::string();
+    }
+    build(&b);
+    rocke_b_ret(&b);
+    rocke_strbuf_init(&out, 0);
+    opts.arch = arch;
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    std::string hip;
+    if(st != ROCKE_OK)
+    {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "HIP lower failed (status %d)", (int)st);
+        fail(msg, __LINE__);
+    }
+    else
+        hip.assign(rocke_strbuf_cstr(&out));
+    rocke_strbuf_free(&out);
+    rocke_ir_builder_free(&b);
+    return hip;
+}
+
 rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem);
 
 void case_gfx1250_standalone_bridge()
@@ -146,6 +180,41 @@ void case_gfx1250_standalone_bridge()
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
 }
 
+/* Build one kernel and return the C++ engine's HIP source. */
+template <typename BuildFn>
+std::string lower_one_hip(const char* name, BuildFn build)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
+        fail("rocke_ir_builder_init", __LINE__);
+        return std::string();
+    }
+    build(&b);
+    rocke_b_ret(&b);
+
+    rocke_strbuf_t out;
+    if(rocke_strbuf_init(&out, 256) != 0)
+    {
+        fail("rocke_strbuf_init", __LINE__);
+        rocke_ir_builder_free(&b);
+        return std::string();
+    }
+    rocke_lower_hip_opts_t opts{};
+    opts.include_prologue = false;
+    opts.include_prologue_set = true;
+    opts.arch = "gfx950";
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    std::string hip;
+    if(st != ROCKE_OK)
+        fail("rocke_lower_kernel_to_hip", __LINE__);
+    else
+        hip.assign(rocke_strbuf_cstr(&out));
+    rocke_strbuf_free(&out);
+    rocke_ir_builder_free(&b);
+    return hip;
+}
 rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem)
 {
     return rocke_b_param(b, name, rocke_ptr_type(b, elem, "global"), nullptr);
@@ -170,6 +239,163 @@ void case_ds_swizzle_xor()
     });
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 2079)");
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)");
+}
+
+/* ---- quad_perm ---- */
+void case_quad_perm()
+{
+    /* [1,0,3,2] -> 1 | (0 << 2) | (3 << 4) | (2 << 6) == 177. */
+    const std::string ir = lower_one("qperm", [](rocke_ir_builder_t* b) {
+        rocke_b_quad_perm(b, rocke_b_const_i32(b, 1), 1, 0, 3, 2);
+    });
+    EXPECT_IR(ir,
+              "declare i32 @llvm.amdgcn.update.dpp.i32("
+              "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)");
+    EXPECT_IR(ir,
+              "call i32 @llvm.amdgcn.update.dpp.i32("
+              "i32 1, i32 1, i32 177, i32 15, i32 15, i1 true)");
+}
+
+void case_quad_perm_hip()
+{
+    const std::string hip = lower_one_hip("qperm_hip", [](rocke_ir_builder_t* b) {
+        rocke_b_quad_perm(b, rocke_b_const_i32(b, 1), 1, 0, 3, 2);
+    });
+    EXPECT_IR(hip, "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)");
+}
+
+void expect_quad_perm_rejected(const char* name, bool use_f32, int p0, int p1, int p2, int p3)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, name);
+    bool rejected = false;
+    try
+    {
+        rocke_value_t* data = use_f32 ? rocke_b_const_f32(&b, 1.0) : rocke_b_const_i32(&b, 1);
+        rocke_value_t* r = rocke_b_quad_perm(&b, data, p0, p1, p2, p3);
+        rejected = (r == nullptr || rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE);
+    }
+    catch(...)
+    {
+        rejected = true;
+    }
+    if(!rejected)
+        fail(name, __LINE__);
+    rocke_ir_builder_free(&b);
+}
+
+void case_quad_perm_rejects_invalid_input()
+{
+    expect_quad_perm_rejected("quad_perm must reject selector -1", false, -1, 0, 3, 2);
+    expect_quad_perm_rejected("quad_perm must reject selector 4", false, 1, 0, 3, 4);
+    expect_quad_perm_rejected("quad_perm must reject non-i32 data", true, 1, 0, 3, 2);
+}
+
+void case_quad_perm_hip_rejects_missing_ctrl()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "qperm_missing_ctrl");
+    rocke_value_t* data = rocke_b_const_i32(&b, 1);
+    rocke_value_t* operands[] = {data};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_b_op(&b,
+               ROCKE_OP_TILE_QUAD_PERM,
+               operands,
+               1,
+               result_types,
+               1,
+               nullptr,
+               nullptr,
+               0,
+               "qperm",
+               nullptr);
+    rocke_b_ret(&b);
+
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 256);
+    rocke_lower_hip_opts_t opts{};
+    opts.include_prologue = false;
+    opts.include_prologue_set = true;
+    opts.arch = "gfx950";
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    if(st != ROCKE_ERR_KEY)
+        fail("quad_perm HIP lowering must reject missing ctrl", __LINE__);
+    rocke_strbuf_free(&out);
+    rocke_ir_builder_free(&b);
+}
+
+/* Build a kernel whose quad_perm carries a raw, out-of-range `ctrl`. The
+ * builder validates selectors, so this shape can only arrive from IR that
+ * skipped it (deserialized, rewritten by a pass, hand-built) -- exactly the
+ * case masking to eight bits used to swallow: 256 became 0 ([0,0,0,0], a
+ * lane-0 broadcast) and -1 became 255 ([3,3,3,3]). Both are legal permutes,
+ * so the kernel computed wrong numbers instead of failing. */
+void build_quad_perm_raw_ctrl(rocke_ir_builder_t* b, int64_t ctrl)
+{
+    rocke_value_t* data = rocke_b_const_i32(b, 1);
+    rocke_value_t* operands[] = {data};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    rocke_attr_set_int(b, &attrs, "ctrl", ctrl);
+    rocke_b_op(b,
+               ROCKE_OP_TILE_QUAD_PERM,
+               operands,
+               1,
+               result_types,
+               1,
+               &attrs,
+               nullptr,
+               0,
+               "qperm",
+               nullptr);
+    rocke_b_ret(b);
+}
+
+void expect_quad_perm_ctrl_rejected(int64_t ctrl)
+{
+    /* HIP lowerer. */
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "qperm_bad_ctrl_hip");
+        build_quad_perm_raw_ctrl(&b, ctrl);
+
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 256);
+        rocke_lower_hip_opts_t opts{};
+        opts.include_prologue = false;
+        opts.include_prologue_set = true;
+        opts.arch = "gfx950";
+        const rocke_status_t st
+            = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+        if(st != ROCKE_ERR_VALUE)
+            fail("quad_perm HIP lowering must reject out-of-range ctrl", __LINE__);
+        rocke_strbuf_free(&out);
+        rocke_ir_builder_free(&b);
+    }
+    /* LLVM lowerer. */
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "qperm_bad_ctrl_ll");
+        build_quad_perm_raw_ctrl(&b, ctrl);
+
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err));
+        if(st != ROCKE_ERR_VALUE)
+            fail("quad_perm LLVM lowering must reject out-of-range ctrl", __LINE__);
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+void case_quad_perm_rejects_out_of_range_ctrl()
+{
+    expect_quad_perm_ctrl_rejected(256);
+    expect_quad_perm_ctrl_rejected(-1);
 }
 
 /* ---- mov_dpp8 ---- */
@@ -512,6 +738,78 @@ void case_global_load_async_to_lds_b8()
     EXPECT_IR(ir, "getelementptr inbounds");
 }
 
+/* ---- HIP zero-extension source signedness ---- */
+void case_hip_zext_uses_unsigned_source_cast()
+{
+    const std::string hip = lower_one_hip(
+        "zext_i8",
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* byte = rocke_b_param(b, "byte", rocke_i8(), nullptr);
+            rocke_b_zext(b, byte, rocke_i32());
+            rocke_b_zext(b, byte, rocke_i64());
+        },
+        "gfx950");
+    EXPECT_IR_COUNT(hip, "(int)(uint8_t)byte", 1);
+    EXPECT_IR_COUNT(hip, "(int64_t)(uint8_t)byte", 1);
+    EXPECT_NO_IR(hip, "(int)byte");
+    EXPECT_NO_IR(hip, "(int64_t)byte");
+}
+
+/* ---- gfx1250 native SCALE / SCALE16 FP8 WMMA ---- */
+void case_gfx1250_scaled_wmma()
+{
+    struct Variant
+    {
+        bool scale16;
+        const rocke_type_t* (*scale_type)(void);
+        const char* intrinsic;
+        const char* builtin;
+        const char* scale_llvm_type;
+    };
+    static const Variant variants[] = {
+        {false,
+         rocke_i32,
+         "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+         "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+         "i32"},
+        {true,
+         rocke_i64,
+         "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+         "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+         "i64"},
+    };
+
+    for(const Variant& v : variants)
+    {
+        const auto build = [&v](rocke_ir_builder_t* b) {
+            rocke_value_t* matrix = global_ptr_param(b, "matrix", rocke_i32());
+            rocke_value_t* accum = global_ptr_param(b, "accum", rocke_f32());
+            rocke_value_t* scales = global_ptr_param(b, "scales", v.scale_type());
+            rocke_value_t* lane = rocke_b_thread_id_x(b);
+            rocke_value_t* lo = rocke_b_global_load_vN(b, matrix, lane, rocke_i32(), 8, 0);
+            rocke_value_t* eight = rocke_b_const_i32(b, 8);
+            rocke_value_t* hi_idx = rocke_b_add(b, lane, eight);
+            rocke_value_t* hi = rocke_b_global_load_vN(b, matrix, hi_idx, rocke_i32(), 8, 0);
+            rocke_value_t* fragment = rocke_b_vec_concat(b, lo, hi);
+            rocke_value_t* c = rocke_b_global_load_vN(b, accum, lane, rocke_f32(), 8, 0);
+            rocke_value_t* scale = rocke_b_global_load(b, scales, lane, v.scale_type(), 1);
+            rocke_value_t* d = v.scale16 ? rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(
+                                               b, fragment, fragment, c, scale, scale)
+                                         : rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(
+                                               b, fragment, fragment, c, scale, scale);
+            rocke_b_global_store(b, accum, lane, rocke_b_vec_extract(b, d, 0), 1);
+        };
+        const char* name = v.scale16 ? "wmma_scale16" : "wmma_scale";
+        const std::string ir = lower_one(name, build, "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+        EXPECT_IR(ir, v.intrinsic);
+        const std::string scale_arg = std::string(", ") + v.scale_llvm_type + " %";
+        EXPECT_IR(ir, scale_arg.c_str());
+
+        const std::string hip = lower_one_hip(name, build, "gfx1250");
+        EXPECT_IR(hip, v.builtin);
+    }
+}
+
 /* ---- opcode table alignment ---- */
 
 /* These opcodes were spliced into rocke_opcode_t's family groups rather than
@@ -534,6 +832,7 @@ void case_opcode_names_are_aligned()
         {ROCKE_OP_TILE_DS_SWIZZLE, "tile.ds_swizzle"},
         {ROCKE_OP_TILE_DS_SWIZZLE_XOR, "tile.ds_swizzle_xor"},
         {ROCKE_OP_TILE_MOV_DPP8, "tile.mov_dpp8"},
+        {ROCKE_OP_TILE_QUAD_PERM, "tile.quad_perm"},
         {ROCKE_OP_TILE_WAVE_REDUCE, "tile.wave_reduce"},
         {ROCKE_OP_TILE_READLANE, "tile.readlane"},
         {ROCKE_OP_TILE_WRITELANE, "tile.writelane"},
@@ -580,6 +879,8 @@ void case_opcode_names_are_aligned()
         }
         if(rocke_opcode_from_name(e.name) != e.opcode)
             fail(e.name, __LINE__);
+        if(e.opcode == ROCKE_OP_TILE_QUAD_PERM && !rocke_opcode_is_pure(e.opcode))
+            fail("tile.quad_perm must be pure", __LINE__);
     }
 }
 
@@ -591,8 +892,13 @@ struct TestCase
 
 const TestCase k_cases[] = {
     {"ds_swizzle_raw_offset", case_ds_swizzle_raw_offset},
+    {"quad_perm_hip", case_quad_perm_hip},
+    {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
+    {"quad_perm_hip_rejects_missing_ctrl", case_quad_perm_hip_rejects_missing_ctrl},
+    {"quad_perm_rejects_out_of_range_ctrl", case_quad_perm_rejects_out_of_range_ctrl},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},
+    {"quad_perm", case_quad_perm},
     {"mov_dpp8_f32", case_mov_dpp8_f32},
     {"mov_dpp8_both_types_coexist", case_mov_dpp8_both_types_coexist},
     {"wave_reduce", case_wave_reduce},
@@ -614,6 +920,8 @@ const TestCase k_cases[] = {
     {"s_prefetch_inst", case_s_prefetch_inst},
     {"buffer_load_lds_async", case_buffer_load_lds_async},
     {"global_load_async_to_lds_b8", case_global_load_async_to_lds_b8},
+    {"hip_zext_uses_unsigned_source_cast", case_hip_zext_uses_unsigned_source_cast},
+    {"gfx1250_scaled_wmma", case_gfx1250_scaled_wmma},
     {"gfx1250_standalone_bridge", case_gfx1250_standalone_bridge},
     {"opcode_names_are_aligned", case_opcode_names_are_aligned},
 };

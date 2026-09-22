@@ -301,7 +301,7 @@ def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
     assert scores[1] == pytest.approx(np.expm1(9.0))
 
 
-def test_a_generated_encoding_survives_train_then_score(tmp_path):
+def test_a_generated_encoding_survives_train_then_score(tmp_path, evaluator):
     """The round trip the whole mechanism rests on.
 
     A string field outside the fixed table can only be a feature if the tool observes its
@@ -333,12 +333,17 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path):
         "umd": [],
     }), encoding="utf-8")
 
+    # `evaluator` because training stamps a features_hash, and that digest has one
+    # definition -- the binary. Named on the command line rather than left to the child's
+    # own lookup so the subprocess resolves what the fixture resolved: a checkout with
+    # nothing built skips here instead of failing on a search that came up empty.
     out = tmp_path / "model"
     result = subprocess.run(
         [sys.executable, "-m", "uhd_gen", "train",
          "--input", str(corpus), "--provenance", str(snapshot),
          "--features", "q.size", "kernel.pipeline",
          "--target", "tflops", "--group-by", "q.size",
+         "--feature-evaluator", str(evaluator),
          "--output-dir", str(out), "--name", "encoding round trip"],
         capture_output=True, text=True,
         cwd=str(Path(__file__).resolve().parents[2]),
