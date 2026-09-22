@@ -33,9 +33,10 @@ struct SupportClaimCoverage
     // Of the selected graphs, how many reached a test body. The difference against
     // graphsSelectedWithClaims is exactly the bundles SetUp() skipped -- arch guard,
     // TOML skip-list, no device -- which is why the two are separate counters rather
-    // than one bumped somewhere in between. Both are bumped from the sidecar's presence
-    // on disk and *not* from shouldObserveClaims(), which goes false in exactly the case
-    // the run-level guard exists to catch (engine plugin failed to load).
+    // than one bumped somewhere in between. Both are bumped from shouldObserveClaims(),
+    // the same predicate registration seeds graphsWithClaims from, so the four nest and
+    // countersAreConsistent() below can say so. A plugin that failed to load needs no
+    // special handling here: main() exits non-zero on it before a body runs.
     size_t graphsReachedBody = 0;
     // Bumped once per graph whose sidecar was read, from SupportObservation::sidecar
     // — never from the verdict count. A sidecar naming only engines this build does

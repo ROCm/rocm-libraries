@@ -919,16 +919,21 @@ TEST_F(TestSupportClaimEnforcement, ClaimsOffCountsNeitherSelectedNorReached)
     drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
 }
 
-// Both bumps are keyed on the sidecar being on disk, not on shouldObserveClaims(),
-// which goes false when no engine loaded. That divergence is deliberate: a build
-// whose plugin never loaded is the run verifiedNothing() exists to catch, and
-// keying on the predicate would zero the numerator it is measured against.
-TEST_F(TestSupportClaimEnforcement, MissingEngineStillCountsSelectedAndReached)
+// Both bumps go through shouldObserveClaims(), which needs an engine -- the same
+// thing registration needs before it seeds graphsWithClaims. Key either bump on the
+// sidecar alone and report mode without --test-engine reports zero graphs with
+// claims beside a positive selected count, which the summary then reads as a gap it
+// must explain and attributes to a harness defect. It is a missing flag.
+//
+// Nothing is lost by declining to count here: --enforce-support-claims exits
+// non-zero without --test-engine, and a named engine that did not load exits too,
+// both before a body runs. See countersAreConsistent() for the invariant this keeps.
+TEST_F(TestSupportClaimEnforcement, MissingEngineCountsNeitherSelectedNorReached)
 {
     ::testing::TestPartResultArray results;
 
-    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(1);
-    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(1);
+    EXPECT_CALL(_mocks.reporter, recordSelectedWithClaims()).Times(0);
+    EXPECT_CALL(_mocks.reporter, recordReachedBody()).Times(0);
 
     IntegrationBundleVerificationHarness harness(_mocks.dependencies(
         testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::ENFORCE)));

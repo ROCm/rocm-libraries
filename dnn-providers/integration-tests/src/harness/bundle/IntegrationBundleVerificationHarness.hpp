@@ -119,10 +119,15 @@ public:
         // Before the first skip exit, so a bundle this SetUp() goes on to skip is still
         // counted as selected. That is the whole point of the counter: the gap between it
         // and the bodies that ran is exactly what SetUp() skipped, and the gap above it is
-        // --gtest_filter. Keyed on the sidecar being on disk rather than
-        // shouldObserveClaims(), which goes false when the engine plugin fails to load --
-        // the run the coverage guard exists to catch.
-        if(_deps.policy.claims != ClaimMode::OFF && carriesSidecar())
+        // --gtest_filter.
+        //
+        // shouldObserveClaims(), not a bare sidecar check, because registration seeds
+        // graphsWithClaims only when an engine was named (BundleRegistration.hpp) and the
+        // two counters have to nest or the subtraction above is arithmetic on unrelated
+        // sets. Report mode is allowed to run without --test-engine, and keying this on
+        // the file alone made that run report 0 with claims against a positive selected
+        // count -- a summary that blames the harness for a missing flag.
+        if(shouldObserveClaims())
         {
             _deps.reporter->recordSelectedWithClaims();
         }
@@ -154,9 +159,9 @@ public:
         // First line of the body, ahead of everything that can throw. The fact is
         // already true here, and both openGraph() below and the sidecar read inside
         // the try can throw -- either would otherwise lose it and leave the summary
-        // blaming SetUp() for a skip that never happened. Same key as the selected
-        // counter above, so the two subtract cleanly.
-        if(_deps.policy.claims != ClaimMode::OFF && carriesSidecar())
+        // blaming SetUp() for a skip that never happened. Same predicate as the
+        // selected counter above, so the two subtract cleanly.
+        if(shouldObserveClaims())
         {
             _deps.reporter->recordReachedBody();
         }
