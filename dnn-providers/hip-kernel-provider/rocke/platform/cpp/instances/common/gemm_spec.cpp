@@ -202,6 +202,12 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.emit_sched_hints = false;
     s.trait.split_k = 1; /* default 1 (single-K-pass body) */
     s.trait.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+    s.trait.wmma_async_lds = false;
+    s.trait.tdm_lds = false;
+    s.trait.tdm_scalarize = true; /* NOTE: Python default is True, not False */
+    s.trait.tdm_prefetch = false;
+    s.trait.tdm_prefetch_depth = 2; /* default 2 (issue N+1 while computing N) */
+    s.trait.tdm_split_barrier = false;
 
     /* DataSpec defaults. */
     s.data.dtype_a = "fp16"; /* default "fp16" */
