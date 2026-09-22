@@ -39,10 +39,10 @@ namespace rocsparse
 
         for(I idx = gid; idx < nnz; idx += stride)
         {
-            I i = x_ind[idx] - idx_base;
+            const I i = x_ind[idx] - idx_base;
 
-            T xr = x_val[idx];
-            T yr = y[i];
+            const T xr = x_val[idx];
+            const T yr = y[i];
 
             x_val[idx] = rocsparse::fma<T>(c, xr, s * yr);
             y[i]       = rocsparse::fma<T>(c, yr, -s * xr);

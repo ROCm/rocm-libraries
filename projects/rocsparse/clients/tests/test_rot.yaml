@@ -32,9 +32,6 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-# Regression test for AISPARSE-651: rot/roti with a 64-bit index type and
-# nnz just past 2^32 exercises the block-index overflow that was fixed. Needs a
-# large-memory device (~52 GB of index/value data); skipped elsewhere.
 - name: rot_extra
   category: nightly
   function: rot_extra

@@ -175,8 +175,6 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 void testing_rot_extra(const Arguments& arg)
 {
-    // Regression test for AISPARSE-651.
-    //
     // Before the fix, roti_device computed the element index as
     //   hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x
     // entirely in 32-bit unsigned arithmetic. Once nnz reaches 2^32 the
