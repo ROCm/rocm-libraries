@@ -7786,15 +7786,26 @@ class KernelWriterAssembly(KernelWriter):
                                           sgprOffset=hex(base + layout["FusedMyRank"]),
                                           dword=1))
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedW and FusedMyRank"))
-    module.add(SMovB32(dst=sgpr("A2AShardIdx"), src=0, comment="start at shard 0"))
-    tmpVgpr = self.vgprPool.checkOut(2, tag="openA2AShardLoop_divide")
+    tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="openA2AShardLoop_divide")
+    vgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
     with self.allocTmpSgpr(1, tag="openA2AShardLoop_tmpSgprInfo") as tmpSgprInfo:
       module.add(scalarUInt32DivideAndRemainder(
           qReg="A2AKLocal", dReg="SizesSum+%u" % self.states.unrollIdx,
           divReg="A2AShardCounter", rReg=tmpSgprInfo.idx,
-          tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=2),
+          tmpVgprRes=vgprRes,
           wavewidth=kernel["WavefrontSize"], doRemainder=False,
           comment="k_local = K / W"))
+      module.add(SSubU32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("A2AShardCounter"), src1=1,
+                         comment="W - 1"))
+      module.add(SMaxU32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr(tmpSgprInfo.idx), src1=1,
+                         comment="peer queue count, at least 1"))
+      module.add(scalarUInt24DivideAndRemainder(
+          qReg=-1, dReg="WorkGroup1", divReg=tmpSgprInfo.idx, rReg="A2AShardIdx",
+          tmpVgprRes=vgprRes, wavewidth=kernel["WavefrontSize"],
+          doRemainder=True, doQuotient=False,
+          comment="this block's first peer queue = b % (W-1)"))
+    module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
+                       comment="gathered segment = peer queue + 1"))
     self.vgprPool.checkIn(tmpVgpr)
     module.add(self.a2aShiftSrd(kernel, tPA, "A2AFeatIdx"))
     module.add(self.a2aBatchSpan(kernel, tPB))
@@ -7951,11 +7962,14 @@ class KernelWriterAssembly(KernelWriter):
       prePad = int(self.states.srdShiftLeft["B"] * bpe)
 
     qLoop = Label(self.labels.getNameInc("a2a_queue_loop"), "one reservation per peer queue")
-    pLoop = Label(self.labels.getNameInc("a2a_packet_loop"), "packet pairs on this queue")
+    gLoop = Label(self.labels.getNameInc("a2a_group_loop"),
+                  "blocks this queue feeds to one consumption round")
+    gNext = Label(self.labels.getNameInc("a2a_group_next"), "advance to the next group")
+    pLoop = Label(self.labels.getNameInc("a2a_packet_loop"), "packet pairs in this group")
 
-    vState = self.vgprPool.checkOut(8, tag="a2aEnq_packetState")
-    vSrc, vDst, vFlag, vPitch, vRectY = (vState, vState + 2, vState + 4,
-                                         vState + 6, vState + 7)
+    vState = self.vgprPool.checkOut(9, tag="a2aEnq_packetState")
+    vSrc, vDst, vFlag, vPitch, vRectY, vGStart = (vState, vState + 2, vState + 4,
+                                                  vState + 6, vState + 7, vState + 8)
 
     size    = self.sgprPool.checkOut(1, tag="a2aEnq_size", preventOverflow=False)
     srank   = self.sgprPool.checkOut(1, tag="a2aEnq_srank", preventOverflow=False)
@@ -7967,6 +7981,7 @@ class KernelWriterAssembly(KernelWriter):
     cached  = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_cachedIdx", preventOverflow=False)
     cur     = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_cur", preventOverflow=False)
     pending = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_pending", preventOverflow=False)
+    row     = self.sgprPool.checkOut(1, tag="a2aEnq_row", preventOverflow=False)
 
     module.add(SSubU32(dst=sgpr(qLeft), src0=sgpr("A2AShardCounter"), src1=1,
                        comment="W-1 peer queues to serve"))
@@ -7984,6 +7999,26 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCmpLgU32(src0=sgpr(srank), src1=sgpr("A2AShardCounter"), comment="s != W?"))
     module.add(SCSelectB32(dst=sgpr(srank), src0=sgpr(srank), src1=0, comment="wrap s to 0 at W"))
 
+    # Group starts are the batch's top W-1 blocks; queue i takes the one == i mod (W-1).
+    tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="a2aEnq_groupSeed")
+    with self.allocTmpSgpr(3, tag="a2aEnq_groupSeedSgpr") as tmpSgprInfo:
+      wm1  = tmpSgprInfo.idx
+      bTop = tmpSgprInfo.idx + 1
+      gRes = tmpSgprInfo.idx + 2
+      module.add(SSubU32(dst=sgpr(wm1), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+      module.add(SAddU32(dst=sgpr(bTop), src0=sgpr("A2ABlockLo"), src1=sgpr("A2ABlockCount"),
+                         comment="bHi"))
+      module.add(SSubU32(dst=sgpr(bTop), src0=sgpr(bTop), src1=1, comment="bHi - 1"))
+      module.add(scalarUInt24DivideAndRemainder(
+          qReg=-1, dReg=bTop, divReg=wm1, rReg=gRes,
+          tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
+          wavewidth=kernel["WavefrontSize"], doRemainder=True, doQuotient=False,
+          comment="(bHi-1) % (W-1)"))
+      module.add(SSubU32(dst=sgpr(gRes), src0=sgpr(bTop), src1=sgpr(gRes),
+                         comment="queue 0's group start, == 0 mod (W-1)"))
+      module.add(VMovB32(dst=vgpr(vGStart), src=sgpr(gRes), comment="group start -> packet state"))
+    self.vgprPool.checkIn(tmpVgpr)
+
     module.add(qLoop)
     module.add(SMulI32(dst=sgpr(peerGrp), src0=sgpr(srank), src1=PEER_GROUP_BYTES,
                        comment="peer group offset = s * %u" % PEER_GROUP_BYTES))
@@ -8000,7 +8035,17 @@ class KernelWriterAssembly(KernelWriter):
     self.sgprPool.checkIn(cached)
     self.sgprPool.checkIn(curOff)
 
-    module.addComment1("A2A: seed this queue's packet state at the batch tail block")
+    module.add(SMovB32(dst=sgpr(pLeft), src=sgpr("A2ABlockCount"),
+                       comment="pairs left on this queue"))
+    module.add(VReadfirstlaneB32(dst=sgpr(row), src=vgpr(vGStart),
+                                 comment="first block of this group"))
+
+    module.add(gLoop)
+    module.add(SCmpLtI32(src0=sgpr(row), src1=sgpr("A2ABlockLo"),
+                         comment="group start below the batch?"))
+    module.add(SCBranchSCC1(labelName=gNext.getLabelName(), comment="empty group"))
+
+    module.addComment1("A2A: seed this group's packet state at its first block")
     sTmp  = self.sgprPool.checkOut(1, tag="a2aEnq_seedTmp", preventOverflow=False)
     sRow  = self.sgprPool.checkOut(1, tag="a2aEnq_seedRow", preventOverflow=False)
     sSlot = self.sgprPool.checkOut(1, tag="a2aEnq_seedSlot", preventOverflow=False)
@@ -8010,9 +8055,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SSubU32(dst=sgpr(sTmp), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
     module.add(SSubU32(dst=sgpr(sSlot), src0=sgpr(sTmp), src1=sgpr(qLeft),
                        comment="queue index i = (W-1) - qLeft"))
-    module.add(SAddU32(dst=sgpr(sRow), src0=sgpr("A2ABlockLo"), src1=sgpr("A2ABlockCount"),
-                       comment="bHi"))
-    module.add(SSubU32(dst=sgpr(sRow), src0=sgpr(sRow), src1=1, comment="tail block b = bHi - 1"))
+    module.add(SMovB32(dst=sgpr(sRow), src=sgpr(row), comment="this group's first block"))
 
     module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sRow), src1=sgpr(sTmp), comment="b * (W-1)"))
     module.add(SAddU32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sSlot),
@@ -8081,7 +8124,6 @@ class KernelWriterAssembly(KernelWriter):
 
     pktS = self.sgprPool.checkOutAligned(COPY_PACKET_DWORDS, 4, tag="a2aEnq_packet",
                                          preventOverflow=False)
-    module.add(SMovB32(dst=sgpr(pLeft), src=sgpr("A2ABlockCount"), comment="pairs left on this queue"))
     module.add(pLoop)
 
     fSrc   = self.sgprPool.checkOutAligned(2, 2, tag="a2aEnq_fSrc", preventOverflow=False)
@@ -8099,9 +8141,12 @@ class KernelWriterAssembly(KernelWriter):
                             fPitch, fRect)
     module.add(SLShiftLeftB32(dst=sgpr(fSlice), shiftHex=log2(mt) + pkt.packetElementLog2,
                               src=sgpr(fPitch), comment="one token block in bytes"))
+    module.add(SSubU32(dst=sgpr(fRect), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+    module.add(SMulI32(dst=sgpr(fSlice), src0=sgpr(fSlice), src1=sgpr(fRect),
+                       comment="W-1 token blocks in bytes"))
     for baseS in (fSrc, fDst):
       module.add(SSubU32(dst=sgpr(baseS), src0=sgpr(baseS), src1=sgpr(fSlice),
-                         comment="step back one block"))
+                         comment="step back W-1 blocks"))
       module.add(SSubBU32(dst=sgpr(baseS + 1), src0=sgpr(baseS + 1), src1=0, comment="borrow"))
     for dstV, srcS in ((vSrc, fSrc), (vSrc + 1, fSrc + 1), (vDst, fDst), (vDst + 1, fDst + 1)):
       module.add(VMovB32(dst=vgpr(dstV), src=sgpr(srcS), comment="scalar -> packet state"))
@@ -8118,10 +8163,12 @@ class KernelWriterAssembly(KernelWriter):
     module.add(VReadfirstlaneB32(dst=sgpr(fFlag + 1), src=vgpr(vFlag + 1), comment="flag addr hi"))
     pkt.emitBuildAtomicPacket(module, pktS, fFlag)
     module.add(SSubU32(dst=sgpr(fStep), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+    module.add(SMulI32(dst=sgpr(fStep), src0=sgpr(fStep), src1=sgpr(fStep),
+                       comment="W-1 blocks of flag slots"))
     module.add(SLShiftLeftB32(dst=sgpr(fStep), shiftHex=2, src=sgpr(fStep),
-                              comment="one block of flag slots"))
+                              comment="flag slots in bytes"))
     module.add(SSubU32(dst=sgpr(fFlag), src0=sgpr(fFlag), src1=sgpr(fStep),
-                       comment="step back one block"))
+                       comment="step back W-1 blocks"))
     module.add(SSubBU32(dst=sgpr(fFlag + 1), src0=sgpr(fFlag + 1), src1=0, comment="borrow"))
     module.add(VMovB32(dst=vgpr(vFlag), src=sgpr(fFlag), comment="flag addr lo"))
     module.add(VMovB32(dst=vgpr(vFlag + 1), src=sgpr(fFlag + 1), comment="flag addr hi"))
@@ -8131,9 +8178,38 @@ class KernelWriterAssembly(KernelWriter):
     ring.emitPlacePacket(module, self, peerGrp, pktS, ATOMIC_PACKET_DWORDS, pending, pad)
 
     module.add(SSubU32(dst=sgpr(pLeft), src0=sgpr(pLeft), src1=1, comment="one pair placed"))
-    module.add(SCmpLgU32(src0=sgpr(pLeft), src1=0, comment="more pairs?"))
+    module.add(SSubU32(dst=sgpr(row), src0=sgpr(row), src1=sgpr("A2AShardCounter"),
+                       comment="row -= W"))
+    module.add(SAddU32(dst=sgpr(row), src0=sgpr(row), src1=1, comment="net row -= W-1"))
+    module.add(SCmpGeI32(src0=sgpr(row), src1=sgpr("A2ABlockLo"),
+                         comment="still inside the batch?"))
     module.add(SCBranchSCC1(labelName=pLoop.getLabelName(), comment="next pair"))
     self.sgprPool.checkIn(pktS)
+
+    module.add(gNext)
+    with self.allocTmpSgpr(3, tag="a2aEnq_groupWrap") as tmpSgprInfo:
+      g  = tmpSgprInfo.idx
+      lo = tmpSgprInfo.idx + 1
+      up = tmpSgprInfo.idx + 2
+      module.add(VReadfirstlaneB32(dst=sgpr(g), src=vgpr(vGStart), comment="this group's start"))
+      module.add(SSubU32(dst=sgpr(g), src0=sgpr(g), src1=1,
+                         comment="next group starts one block lower"))
+      module.add(SAddU32(dst=sgpr(lo), src0=sgpr("A2ABlockLo"), src1=sgpr("A2ABlockCount"),
+                         comment="bHi"))
+      module.add(SSubU32(dst=sgpr(lo), src0=sgpr(lo), src1=sgpr("A2AShardCounter"),
+                         comment="bHi - W"))
+      module.add(SAddU32(dst=sgpr(lo), src0=sgpr(lo), src1=1, comment="bHi - (W-1)"))
+      module.add(SSubU32(dst=sgpr(up), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+      module.add(SAddU32(dst=sgpr(up), src0=sgpr(g), src1=sgpr(up),
+                         comment="group start wrapped up by W-1"))
+      module.add(SCmpLtI32(src0=sgpr(g), src1=sgpr(lo),
+                           comment="below the batch's top W-1 blocks?"))
+      module.add(SCSelectB32(dst=sgpr(g), src0=sgpr(up), src1=sgpr(g),
+                             comment="wrap the group start"))
+      module.add(VMovB32(dst=vgpr(vGStart), src=sgpr(g), comment="group start -> packet state"))
+      module.add(SMovB32(dst=sgpr(row), src=sgpr(g), comment="first block of the next group"))
+    module.add(SCmpLgU32(src0=sgpr(pLeft), src1=0, comment="more pairs on this queue?"))
+    module.add(SCBranchSCC1(labelName=gLoop.getLabelName(), comment="next group"))
 
     curOff = self.sgprPool.checkOut(1, tag="a2aEnq_cursorOff2", preventOverflow=False)
     module.add(SLShiftLeftB32(dst=sgpr(curOff), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
@@ -8145,11 +8221,28 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddU32(dst=sgpr(srank), src0=sgpr(srank), src1=1, comment="s += 1"))
     module.add(SCmpLgU32(src0=sgpr(srank), src1=sgpr("A2AShardCounter"), comment="s != W?"))
     module.add(SCSelectB32(dst=sgpr(srank), src0=sgpr(srank), src1=0, comment="wrap s to 0 at W"))
+    with self.allocTmpSgpr(3, tag="a2aEnq_queueWrap") as tmpSgprInfo:
+      g  = tmpSgprInfo.idx
+      hi = tmpSgprInfo.idx + 1
+      dn = tmpSgprInfo.idx + 2
+      module.add(VReadfirstlaneB32(dst=sgpr(g), src=vgpr(vGStart), comment="this queue's start"))
+      module.add(SAddU32(dst=sgpr(g), src0=sgpr(g), src1=1,
+                         comment="the next queue's group start is one block higher"))
+      module.add(SAddU32(dst=sgpr(hi), src0=sgpr("A2ABlockLo"), src1=sgpr("A2ABlockCount"),
+                         comment="bHi"))
+      module.add(SSubU32(dst=sgpr(hi), src0=sgpr(hi), src1=1, comment="bHi - 1"))
+      module.add(SSubU32(dst=sgpr(dn), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
+      module.add(SSubU32(dst=sgpr(dn), src0=sgpr(g), src1=sgpr(dn),
+                         comment="group start wrapped down by W-1"))
+      module.add(SCmpGtI32(src0=sgpr(g), src1=sgpr(hi), comment="above the top block?"))
+      module.add(SCSelectB32(dst=sgpr(g), src0=sgpr(dn), src1=sgpr(g),
+                             comment="wrap the group start"))
+      module.add(VMovB32(dst=vgpr(vGStart), src=sgpr(g), comment="group start -> packet state"))
     module.add(SSubU32(dst=sgpr(qLeft), src0=sgpr(qLeft), src1=1, comment="one queue done"))
     module.add(SCmpLgU32(src0=sgpr(qLeft), src1=0, comment="more queues?"))
     module.add(SCBranchSCC1(labelName=qLoop.getLabelName(), comment="next queue"))
 
-    for reg in (pending, cur, pad, pLeft, peerGrp, qLeft, srank):
+    for reg in (row, pending, cur, pad, pLeft, peerGrp, qLeft, srank):
       self.sgprPool.checkIn(reg)
     self.vgprPool.checkIn(vState)
     return module
@@ -8168,7 +8261,7 @@ class KernelWriterAssembly(KernelWriter):
   def a2aWaitFlag(self, kernel):
     """Spin until the next shard's segment has landed in gathered.
 
-    Polls flag[b][A2AShardIdx]; must be emitted before A2AShardIdx advances.
+    Polls flag[b][A2AShardIdx - 1]; must be emitted before A2AShardIdx advances.
     """
     from .Components.Signature import (FUSED_A2A_MODE1_FLAG_OFFSET,
                                        fusedA2AKernArgLayout)
@@ -8186,7 +8279,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SSubU32(dst=sgpr(s), src0=sgpr(s), src1=1, comment="W - 1"))
       module.add(SMulI32(dst=sgpr(s), src0=sgpr("WorkGroup1"), src1=sgpr(s), comment="b * (W-1)"))
       module.add(SAddU32(dst=sgpr(s), src0=sgpr(s), src1=sgpr("A2AShardIdx"),
-                         comment="flag slot = b*(W-1) + i"))
+                         comment="flag slot = b*(W-1) + segment"))
+      module.add(SSubU32(dst=sgpr(s), src0=sgpr(s), src1=1, comment="i = segment - 1"))
       module.add(SLShiftLeftB32(dst=sgpr(s), shiftHex=2, src=sgpr(s),
                                 comment="flag slot byte offset"))
       module.add(VMovB32(dst=vgpr(vOff), src=sgpr(s), comment="poll offset"))
@@ -8246,19 +8340,21 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
                             comment="skip the next round's setup"))
     module.add(self.a2aWaitFlag(kernel))
-    with self.allocTmpSgpr(1, tag="a2aFeatWrap") as tmpSgprInfo:
-      w = tmpSgprInfo.idx
+    layout = fusedA2AKernArgLayout()
+    base   = self.states.fusedA2AKernArgBase
+    with self.allocTmpSgpr(2, tag="a2aFeatWrap") as tmpSgprInfo:
+      w    = tmpSgprInfo.idx
+      rank = tmpSgprInfo.idx + 1
       module.add(self.argLoader.loadKernArg(w, "KernArgAddress",
-          sgprOffset=hex(self.states.fusedA2AKernArgBase + fusedA2AKernArgLayout()["FusedW"]),
-          dword=1))
-      module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
-                         comment="next shard"))
-      module.add(SAddU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=1,
-                         comment="next feature shard"))
-      module.add(SWaitCnt(kmcnt=0, comment="wait FusedW"))
-      module.add(SSubU32(dst=sgpr(w), src0=sgpr("A2AFeatIdx"), src1=sgpr(w),
+          sgprOffset=hex(base + layout["FusedW"]), dword=1))
+      module.add(self.argLoader.loadKernArg(rank, "KernArgAddress",
+          sgprOffset=hex(base + layout["FusedMyRank"]), dword=1))
+      module.add(SWaitCnt(kmcnt=0, comment="wait FusedW and FusedMyRank"))
+      module.add(SAddU32(dst=sgpr("A2AFeatIdx"), src0=sgpr(rank), src1=sgpr("A2AShardIdx"),
+                         comment="feature shard = myRank + gathered segment"))
+      module.add(SSubU32(dst=sgpr(rank), src0=sgpr("A2AFeatIdx"), src1=sgpr(w),
                          comment="feature shard - W, underflowing while below W"))
-      module.add(SMinU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=sgpr(w),
+      module.add(SMinU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=sgpr(rank),
                          comment="wrap the feature shard at W"))
     for tP in (tPA, tPB):
       tc = tP["tensorChar"]
@@ -8269,6 +8365,16 @@ class KernelWriterAssembly(KernelWriter):
       # A is indexed by the feature shard, B by the gathered segment.
       module.add(self.a2aShiftSrd(kernel, tP,
                                   "A2AFeatIdx" if tP["isA"] else "A2AShardIdx"))
+    with self.allocTmpSgpr(1, tag="a2aSegWrap") as tmpSgprInfo:
+      w = tmpSgprInfo.idx
+      module.add(self.argLoader.loadKernArg(w, "KernArgAddress",
+          sgprOffset=hex(base + layout["FusedW"]), dword=1))
+      module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
+                         comment="step to the next peer queue"))
+      module.add(SWaitCnt(kmcnt=0, comment="wait FusedW"))
+      module.add(SCmpLtU32(src0=sgpr("A2AShardIdx"), src1=sgpr(w), comment="segment < W?"))
+      module.add(SCSelectB32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
+                             comment="wrap the gathered segment back to 1 at W"))
     module.add(endLabel)
     module.addComment1("A2A_TRANSITION end")
     return module

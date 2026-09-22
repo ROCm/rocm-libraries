@@ -323,11 +323,17 @@ class TestA2AGemmEnqueueLoops:
         import re
 
         body = self._queue_loop_body(self._src())
-        assert re.search(
-            r"s_mov_b32 s\d+, s\[sgprA2ABlockCount\][^\n]*\n"
-            r"label_a2a_packet_loop\w*:",
+        m = re.search(
+            r"s_mov_b32 s(\d+), s\[sgprA2ABlockCount\][^\n]*\n"
+            r"v_readfirstlane_b32 s\d+, v\d+[^\n]*\n"
+            r"label_a2a_group_loop\w*:",
             body,
-        ), "the packet loop is not seeded from A2ABlockCount"
+        )
+        assert m, "the pair counter is not seeded from A2ABlockCount before the group loop"
+        assert re.search(
+            r"s_sub_u32 s%s, s%s, 1[^\n]*// one pair placed" % (m.group(1), m.group(1)),
+            body,
+        ), "the pair counter does not count one packet pair at a time"
 
     def test_single_rank_skips_the_packing_pass(self):
         import re
@@ -337,6 +343,76 @@ class TestA2AGemmEnqueueLoops:
             r"s_cbranch_scc1 label_A2ASkipEnqueue",
             self._src(),
         ), "W == 1 does not skip the packing pass"
+
+
+class TestA2AGemmRoundGroupOrder:
+    """Each queue emits its blocks in stride-(W-1) groups, one group per round.
+
+    Round r reads block b from queue (b + r - 1) mod (W-1).
+    """
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _queue_loop_body(self, src):
+        import re
+
+        head = re.search(r"^label_a2a_queue_loop\w*:", src, re.M)
+        tail = re.search(r"^s_cbranch_scc1 label_a2a_queue_loop\w*", src, re.M)
+        assert head and tail, "no a2a queue loop in the emitted kernel"
+        return src[head.end() : tail.start()]
+
+    def test_copy_bases_step_a_whole_group(self):
+        import re
+
+        assert re.search(
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_mul_i32 s(\d+), s\2, s\1[^\n]*\n"
+            r"s_sub_u32 s\d+, s\d+, s\2[^\n]*// step back W-1 blocks",
+            self._queue_loop_body(self._src()),
+        ), "the copy bases walk consecutive blocks instead of one round's group"
+
+    def test_flag_address_steps_a_whole_group(self):
+        import re
+
+        assert re.search(
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_mul_i32 s\1, s\1, s\1[^\n]*\n"
+            r"s_lshl_b32 s\1, s\1, 2[^\n]*\n"
+            r"s_sub_u32 s\d+, s\d+, s\1[^\n]*// step back W-1 blocks",
+            self._queue_loop_body(self._src()),
+        ), "the flag address walks consecutive blocks instead of one round's group"
+
+    def test_the_packet_loop_stops_at_the_batch_floor(self):
+        import re
+
+        assert re.search(
+            r"s_sub_u32 s(\d+), s\1, s\[sgprA2AShardCounter\][^\n]*\n"
+            r"s_add_u32 s\1, s\1, 1[^\n]*\n"
+            r"s_cmp_ge_i32 s\1, s\[sgprA2ABlockLo\][^\n]*\n"
+            r"s_cbranch_scc1 label_a2a_packet_loop",
+            self._queue_loop_body(self._src()),
+        ), "the group does not end at the batch's first block"
+
+    def test_empty_groups_are_branched_over(self):
+        import re
+
+        assert re.search(
+            r"label_a2a_group_loop\w*:[^\n]*\n"
+            r"s_cmp_lt_i32 s\d+, s\[sgprA2ABlockLo\][^\n]*\n"
+            r"s_cbranch_scc1 label_a2a_group_next",
+            self._queue_loop_body(self._src()),
+        ), "a group holding no block still places a packet pair"
+
+    def test_one_reservation_and_one_doorbell_cover_every_group(self):
+        body = self._queue_loop_body(self._src())
+        assert body.count("s_atomic_cmpswap_x2") == 1, "the groups reserve separately"
+        assert body.count("s_store_dwordx2") == 3, "the groups ring the doorbell separately"
+        assert body.index("s_atomic_cmpswap_x2") < body.index("label_a2a_group_loop"), (
+            "the reservation sits inside the group loop"
+        )
 
 
 class TestA2AGemmPacketBody:
@@ -615,7 +691,7 @@ class TestA2AGemmTransitionPhase:
 
 
 class TestA2AGemmFeatureShardIndex:
-    """A is indexed by feature shard (my_rank + r) mod W, B by gathered segment r."""
+    """A is indexed by feature shard (my_rank + segment) mod W, B by the segment."""
 
     _SHIFT = (
         r"s_mul_i32 s(\d+), s\d+, s\[sgpr%s\][^\n]*\n"
@@ -667,13 +743,14 @@ class TestA2AGemmFeatureShardIndex:
 
         body = self._body(self._src())
         m = re.search(
-            r"s_add_u32 s\[sgprA2AFeatIdx\], s\[sgprA2AFeatIdx\], 1[^\n]*\n"
-            r"s_waitcnt[^\n]*\n"
-            r"s_sub_u32 s(\d+), s\[sgprA2AFeatIdx\], s\1[^\n]*\n"
+            r"s_add_u32 s\[sgprA2AFeatIdx\], s(\d+), s\[sgprA2AShardIdx\][^\n]*\n"
+            r"s_sub_u32 s\1, s\[sgprA2AFeatIdx\], s\d+[^\n]*\n"
             r"s_min_u32 s\[sgprA2AFeatIdx\], s\[sgprA2AFeatIdx\], s\1",
             body,
         )
-        assert m, "the feature shard advances without wrapping at W"
+        assert m, (
+            "the feature shard is not myRank + this block's segment, wrapped at W"
+        )
         assert m.end() < body.index("s[sgprSrdA+0], s[sgprSrdA+0]"), (
             "srdA is rebound before the feature shard wraps"
         )
@@ -687,6 +764,63 @@ class TestA2AGemmFeatureShardIndex:
         )
         assert re.search(self._SHIFT % ("A2AShardIdx", "B", "B"), body), (
             "srdB no longer steps by the gathered segment"
+        )
+
+
+class TestA2AGemmPerBlockMisphase:
+    """Token block b walks the peer queues from b % (W-1), rotating one per round.
+
+    A2AShardIdx holds the gathered segment of the round about to be entered;
+    the queue it names is that segment minus one.
+    """
+
+    def _src(self):
+        from config_harness import emit_kernels_from_config
+
+        return emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")[0][1]
+
+    def _prologue(self, src):
+        return src[:src.index("label_A2AShardLoopBegin:")]
+
+    def _body(self, src):
+        return src[src.index("A2A_TRANSITION begin"):src.index("A2A_TRANSITION end")]
+
+    def test_the_divisor_is_the_peer_queue_count_clamped_to_one(self):
+        import re
+
+        assert re.search(
+            r"s_sub_u32 s(\d+), s\[sgprA2AShardCounter\], 1[^\n]*\n"
+            r"s_max_u32 s\1, s\1, 1",
+            self._prologue(self._src()),
+        ), "W == 1 divides by zero instead of landing every block on queue 0"
+
+    def test_round_zero_seeds_the_segment_from_the_token_block(self):
+        import re
+
+        assert re.search(
+            r"v_sub_u32 v(\d+), s\[sgprWorkGroup1\], v\d+[^\n]*\n"
+            r"(?:s_nop[^\n]*\n)?"
+            r"v_readfirstlane_b32 s\[sgprA2AShardIdx\], v\1[^\n]*\n"
+            r"s_add_u32 s\[sgprA2AShardIdx\], s\[sgprA2AShardIdx\], 1",
+            self._prologue(self._src()),
+        ), "every token block opens on the same peer queue"
+
+    def test_the_segment_rotates_back_to_one_at_w(self):
+        import re
+
+        assert re.search(
+            r"s_add_u32 s\[sgprA2AShardIdx\], s\[sgprA2AShardIdx\], 1[^\n]*\n"
+            r"s_waitcnt[^\n]*\n"
+            r"s_cmp_lt_u32 s\[sgprA2AShardIdx\], s(\d+)[^\n]*\n"
+            r"s_cselect_b32 s\[sgprA2AShardIdx\], s\[sgprA2AShardIdx\], 1",
+            self._body(self._src()),
+        ), "the segment runs past W-1 instead of wrapping to the first peer queue"
+
+    def test_the_segment_advances_after_both_rebinds(self):
+        body = self._body(self._src())
+        assert body.index("s_add_u32 s[sgprA2AShardIdx], s[sgprA2AShardIdx], 1") \
+            > body.rindex("base += shard offset"), (
+            "the segment advances before the rebinds"
         )
 
 
@@ -747,6 +881,7 @@ class TestA2AGemmFlagSpin:
             r"s_sub_u32 s(\d+), s\d+, 1[^\n]*\n"
             r"s_mul_i32 s\1, s\[sgprWorkGroup1\], s\1[^\n]*\n"
             r"s_add_u32 s\1, s\1, s\[sgprA2AShardIdx\][^\n]*\n"
+            r"s_sub_u32 s\1, s\1, 1[^\n]*\n"
             r"s_lshl_b32 s\1, s\1, 2",
             body,
         )
