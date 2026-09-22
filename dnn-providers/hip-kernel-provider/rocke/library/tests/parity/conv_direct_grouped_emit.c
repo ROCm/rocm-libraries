@@ -29,7 +29,9 @@ enum
     KIND_32C = 3,
     KIND_DW = 4,
     KIND_SPATIAL = 5,
-    KIND_DWCOL = 6
+    KIND_DWCOL = 6,
+    KIND_DGRAD = 7,
+    KIND_DW_DGRAD = 8
 };
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
@@ -43,6 +45,8 @@ static int make_cfg(int idx,
                     rocke_direct_depthwise_spec_t* sdw,
                     rocke_direct_depthwise_spatial_spec_t* ssp,
                     rocke_direct_depthwise_col_spec_t* sdwc,
+                    rocke_direct_conv_dgrad_spec_t* sdgrad,
+                    rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad,
                     const char** arch)
 {
     rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
@@ -372,6 +376,82 @@ static int make_cfg(int idx,
         *kind = KIND_DWCOL;
         *arch = "gfx950";
         return 0;
+    case 20:
+        /* dgrad: baseline grouped dgrad stride=1 */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 8;
+        *kind = KIND_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 21:
+        /* dgrad: larger groups / different block_groups */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 32;
+        p.kpg = 32;
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 4;
+        *kind = KIND_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 22:
+        /* dgrad: gfx942 target */
+        p.N = 1;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        *sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sdgrad->problem = p;
+        sdgrad->block_q = 16;
+        sdgrad->block_groups = 8;
+        *kind = KIND_DGRAD;
+        *arch = "gfx942";
+        return 0;
+    case 23:
+        /* depthwise_dgrad: stride=1 */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        *sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+        sdw_dgrad->problem = p;
+        sdw_dgrad->block_w = 8;
+        sdw_dgrad->block_waves = 1;
+        *kind = KIND_DW_DGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 24:
+        /* depthwise_dgrad: stride=2 exercises divisibility checks */
+        p.N = 2;
+        p.H = 14;
+        p.W = 14;
+        p.groups = 64;
+        p.cpg = 1;
+        p.kpg = 1;
+        p.stride = 2;
+        *sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+        sdw_dgrad->problem = p;
+        sdw_dgrad->block_w = 8;
+        sdw_dgrad->block_waves = 1;
+        *kind = KIND_DW_DGRAD;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
@@ -395,8 +475,10 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_spec_t sdw;
     rocke_direct_depthwise_spatial_spec_t ssp;
     rocke_direct_depthwise_col_spec_t sdwc;
+    rocke_direct_conv_dgrad_spec_t sdgrad;
+    rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdwc, &arch) != 0)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdwc, &sdgrad, &sdw_dgrad, &arch) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -416,6 +498,10 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_depthwise_spatial_new(&b, &ssp, arch);
     else if(kind == KIND_DWCOL)
         kernel = rocke_build_direct_depthwise_col_new(&b, &sdwc, arch);
+    else if(kind == KIND_DGRAD)
+        kernel = rocke_build_direct_conv_dgrad_new(&b, &sdgrad, arch);
+    else if(kind == KIND_DW_DGRAD)
+        kernel = rocke_build_direct_depthwise_dgrad_new(&b, &sdw_dgrad, arch);
     else
         kernel = rocke_build_direct_depthwise_new(&b, &sdw, arch);
     if(kernel == NULL)
