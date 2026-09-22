@@ -208,13 +208,16 @@ int main(int argc, char** argv)
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hip-kernel-provider-unit");
 
 #ifdef HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR
-    // Point this binary at the descriptors staged beside it. The engine is linked in
-    // statically, so its module-relative lookup measures from this executable and would
-    // otherwise fall through to the install prefix, which a build tree never writes. Done
-    // here rather than in the CTest environment so the binary runs standalone and nothing
-    // machine-specific reaches the install-time CTest file. A resolved root holding no
-    // descriptor fails, being otherwise indistinguishable from a run on a device the
-    // descriptors do not cover.
+    // Point this binary at the descriptors staged beside it. The engine implementation is
+    // linked in statically here, so its module-relative lookup measures from this
+    // executable and would otherwise fall through to the install prefix, which a build
+    // tree has never written. Done here rather than in the CTest environment so the binary
+    // runs standalone, and so nothing machine-specific reaches the install-time CTest
+    // file, which is generated from that same environment.
+    //
+    // Never overrides a value the caller set. Fail the process when the resolved root
+    // holds no descriptor, which is otherwise indistinguishable from a run on a device
+    // the descriptors do not cover.
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
     {
         const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
@@ -233,12 +236,14 @@ int main(int argc, char** argv)
     }
 #endif
 
-    // Forward logs to std::cerr according to HIPDNN_LOG_LEVEL. The recordingCallback
-    // returned here does not route logs to the backend, which is what a plugin unit test
-    // harness wants.
+    // Initialize test logging infrastructure to forward logs to std::cerr based
+    // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
+    // NOTE: Logs are not routed to the backend by the recordingCallback returned here
+    // which is the desired behaviour because this is a plugin unit test harness.
     auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
 
-    // Route plugin logs to the recorder so unit tests can capture them.
+    // Initialize plugin logger with test recording callback so that plugin logs
+    // are first routed to the log recorder for capture and use by the unit tests.
     hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
                                                           recordingCallback);
 

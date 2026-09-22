@@ -123,8 +123,10 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
+    // Determine data type
     const DataType dataType = toDataType(config.dtype);
 
+    // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
     const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
     const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
@@ -190,7 +192,7 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         break;
     }
 
-    // GROUP mode requires sequence-length tensors.
+    // Configure batch mode (GROUP requires sequence length tensors)
     auto batchMode = static_cast<BatchMode>(config.mode);
     if(batchMode == BatchMode::GROUP)
     {

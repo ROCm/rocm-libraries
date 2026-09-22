@@ -147,8 +147,8 @@ def test_build_spec_post_init_rejection_propagates():
 # --- B. adapter contract via a stub builder module (quick, comgr-free) ------
 def _write_stub_pkg(tmp_path, body, pkg="stubpkg", sub="sub", mod="mod"):
     """Place an importable stub package on sys.path and return its dotted source
-    path ('pkg/sub/mod.py'). Each test patches rocke_compile._load_compiler to a
-    fake, so no comgr is touched."""
+    path ('pkg/sub/mod.py'). The stub monkeypatches nothing itself; each test
+    patches rocke_compile._load_compiler to a fake so no comgr is touched."""
     base = tmp_path / pkg
     (base / sub).mkdir(parents=True)
     (base / "__init__.py").write_text("", encoding="utf-8")
@@ -179,10 +179,16 @@ STUB_ARGUMENTS = [
 def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     """Stub the comgr entry, recording the backend the producer requested.
 
-    The recorder lets a test assert the producer PINS the backend rather than
-    tolerating one. The default artifact is a real ELF carrying the AMDGPU metadata
-    note comgr emits, because the packer reads a signature out of every object it
-    packs; synthesising that note needs msgpack, so only the default is gated on it.
+    The recorder exists so a test can assert the producer PINS the backend
+    rather than merely tolerating one. Without it, dropping the pin would leave
+    every one of these tests green.
+
+    The default artifact is a real ELF carrying the AMDGPU metadata note, which
+    is what comgr emits: the packer reads a signature out of every object it
+    packs, so a placeholder that only spells the symbol in its bytes fails
+    before any guard under test is reached. Synthesising that note needs
+    msgpack, so the default -- and only the default -- is gated on it; a caller
+    supplying its own bytes needs nothing.
     """
     if data is None:
         requires_msgpack()
@@ -226,7 +232,7 @@ def test_adapter_import_build_capture(tmp_path, monkeypatch):
     assert co.name.startswith("mod_") and co.suffix == ".co"
     # The producer must PIN the lowering backend rather than inherit rocke's
     # default: the wheel has no C++ engine, so an unpinned request degrades to
-    # Python and the artifact misreports which engine built it.
+    # Python via a fallback and the artifact misreports which engine built it.
     assert seen["backend"] == "python"
 
 
@@ -604,8 +610,8 @@ def test_rocke_arch_scoping(
     tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
 ):
     """A gfx950-scoped rocke UKD under a gfx942+gfx950 KDP packs only for gfx950;
-    targeting gfx942 excludes the UKD before compile, so the gfx950-only builder is
-    never invoked and no gfx942 shard is produced."""
+    targeting gfx942 excludes the UKD before compile, so the gfx950-only builder
+    is never invoked and no gfx942 shard is produced."""
     _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
@@ -668,10 +674,11 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 # --- real-corpus guards (rocke importable, no comgr needed) -----------------
 @pytest.mark.quick
 def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
-    """gfx942's dense builder satisfies the `(spec, *, arch)` contract. Asserting
-    against the real builder catches a regression reintroducing an unsuppliable
-    keyword-only knob; `test_hkp_pack_producer_guards.py` covers the rejection
-    shapes synthetically.
+    """gfx942's dense builder must stay packageable.
+
+    Its sweep knobs are flat fields on the spec, so the signature is the
+    ``(spec, *, arch)`` the gate requires. Asserting against the real builder
+    catches a regression that reintroduces an unsuppliable keyword-only knob.
     """
     from kernels.gfx942 import attention_dense as m
 
@@ -682,8 +689,10 @@ def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
 
 @pytest.mark.quick
 def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
-    """The builder the example descriptor tree uses must pass the gate, which has
-    to be narrow enough that real kernels remain packageable.
+    """The builder the example descriptor tree uses must pass the gate.
+
+    The gate has to be narrow enough that real kernels remain packageable, not
+    just strict.
     """
     from kernels.gfx942 import attention_tiled_2d as m
 
@@ -696,10 +705,12 @@ def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
 
 @pytest.mark.quick
 def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_dir):
-    """The collision guard must see rocke's real inputs, not (source, build): rocke
-    UKDs always have build=None, so that signature is identical for every UKD
-    sharing a source module and two differing in builder or spec would collide
-    undetected, shipping one kernel's bytes under the other.
+    """The collision guard must see rocke's real inputs, not (source, build).
+
+    rocke UKDs always have build=None, so a signature of (source, build) is
+    identical for every UKD sharing a source module. Two rocke UKDs differing in
+    builder or spec would then collide undetected and one would ship the other's
+    bytes -- the same silent-substitution class the layout work removed.
     """
     from hkp_pack import pipeline
 

@@ -126,11 +126,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         ingestor/TestPackedDescriptorLoad.cpp
     )
 
-    # A real archive, so the arch-mismatch and missing-toc_key cases meet the actual reader
-    # rather than a hand-forged header. Vendored from rocm-kpack's test assets: the reader
-    # is the platform's shared library, so there is no fetched source tree to take one from.
-    # Staged into the test descriptor tree and named relative to this binary, as the
-    # descriptor sets are, so a packaged artifact carrying no checkout still resolves it.
+    # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
+    # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own
+    # test assets: the reader is now the platform's shared library, so there is no
+    # fetched source tree to take it from, and a 518-byte container is cheaper to carry
+    # than a build-time dependency on one.
+    #
+    # Staged into the test descriptor tree and named by a path relative to this binary,
+    # as the descriptor sets are, so the cases open the archive that ships with whichever
+    # copy of this binary runs. That binary also runs from a packaged artifact carrying no
+    # checkout, where a relative path is the only form that resolves. install(DIRECTORY)
+    # on that tree ships the archive with the descriptors.
     set(_hkp_test_kpack_subdir "test_kpack_binary")
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
@@ -139,17 +145,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack")
 
-    # This binary reads the per-arch descriptors and archives staged under
-    # test_arch_content/, and each packing target is reachable only through ALL, so name
-    # each staging target: `ninja check` builds the binary by name.
+    # This binary reads the per-arch descriptors and archives the packing roots stage under
+    # test_arch_content/, and each packing target is reachable only through ALL.
+    # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
+    # against a directory that does not exist yet, and they skip rather than fail.
+    # Each descriptor set has its own staging target. Name each one individually.
     foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()
     endforeach()
 
-    # The parent of the unit descriptor sets, and the only root this binary reads. The walk
-    # covers every subtree staged under it, so further packs need no edit here.
+    # The parent of the unit descriptor sets, and the only root this binary reads.
+    # A walk of a parent reaches every subtree staged under it, so a further pack
+    # there comes under the check with no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
@@ -186,13 +195,16 @@ endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
 
-# No ENVIRONMENT for the descriptors: main() applies the compiled-in path, so nothing
-# machine-specific reaches the generated or install-time CTest files.
+# No ENVIRONMENT for the descriptors: main() applies the compiled-in path, so the binary
+# runs standalone and nothing machine-specific reaches the generated CTest files. The
+# install-time file is written from this same list, where a build-tree path would name a
+# directory that does not exist on the machine running the installed suite.
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# Published one scope up, as the integration tests do: under YAML categorization the raw
-# test name is never registered, so the tiered suites from apply_test_category_labels() in
-# ../CMakeLists.txt are the only place the ambient test environment can land.
+# Published one scope up for the same reason the integration tests do it: under YAML
+# categorization the raw test name is never registered, so the tiered suites created by
+# apply_test_category_labels() in ../CMakeLists.txt are the only place the ambient test
+# environment -- an ASAN symbolizer path, a coverage profile destination -- can land.
 if(DEFINED hip_kernel_provider_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)

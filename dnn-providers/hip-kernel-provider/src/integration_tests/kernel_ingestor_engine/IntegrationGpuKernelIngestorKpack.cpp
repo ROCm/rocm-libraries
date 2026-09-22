@@ -37,11 +37,14 @@ using namespace hip_kernel_provider::test_utilities;
 
 /**
  * @file IntegrationGpuKernelIngestorKpack.cpp
- * @brief Executes a build-time compiled and packed kernel end to end through the public
- *        frontend API. The descriptor set reaches the runtime through the integration root
- *        main() publishes, the KPACK kernel source resolves its archive relative to the
- *        declaring descriptor, and this suite locates that archive by a binary-relative
- *        offset rather than a compiled-in build path.
+ * @brief A kernel that was compiled and packed at build time, executed end to end through
+ *        the public frontend API. Nothing here names a loader type or a build path: the
+ *        descriptor set reaches the runtime through the integration root main() publishes,
+ *        and the kernel binary reaches the device because the KPACK kernel source resolved
+ *        its archive relative to the descriptor that declared it.
+ *
+ * The archive this suite damages is found by the binary-relative offset the packaging rule
+ * staged it to, so no absolute build path is compiled in.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -49,13 +52,15 @@ namespace hip_kernel_provider::kernel_ingestor_engine::integration
 namespace
 {
 
-/// The packaged fixture declares its own engine: reusing the shipped pointwise engine's
-/// identity would collide on the completed metadata tuple.
+/// The packaged fixture declares its own engine. Reusing the shipped pointwise engine's
+/// identity would collide on the completed metadata tuple and take that engine down with
+/// it, so this name appears nowhere in src/engines.
 constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 
-/// Staged beside the fixture in the integration descriptor root. It claims the same
-/// single-node FLOAT add from a different archive, so it is the fallback
-/// ...SurvivesABrokenArchive needs.
+/// The engine the integration descriptor root stages beside the fixture. Its kernels read
+/// a different archive, so it is reachable whatever state the packaged fixture's archive is
+/// in, and it claims the same single-node FLOAT add. That makes it the fallback
+/// ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
 
 /// In epsilons of the fixture's element type; an elementwise op accumulates nothing, so
@@ -68,8 +73,8 @@ constexpr size_t CORRUPTION_BYTE_COUNT = 64;
 /// Holds the pristine archive while ...SurvivesABrokenArchive breaks the staged one.
 constexpr const char* BACKUP_DIR_NAME = "kpack-fixture-backup";
 
-/// Names an archive's backup. It must not end in .kpack, or the backup would be mistaken
-/// for a staged archive.
+/// Appended to an archive's filename to name its backup. The backup must not end in
+/// .kpack, so that nothing can mistake it for a staged archive.
 constexpr const char* PRISTINE_SUFFIX = ".pristine";
 
 std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::string& name)
@@ -325,8 +330,9 @@ protected:
                          << arch << " to GPU_TARGETS to exercise this suite here.";
         }
 
-        // Before any case reads the staged tree, so a killed run is undone whichever case
-        // runs first.
+        // Before any case reads the staged tree, not just the one that damages it: gtest runs
+        // the cases in declaration order, so recovering here means a killed run is undone
+        // whichever case happens to go first.
         const auto recoveryError = recoverAbandonedBackups(_archives);
         ASSERT_TRUE(recoveryError.empty()) << recoveryError;
     }
@@ -336,8 +342,8 @@ protected:
         if(_ownedStream != nullptr)
         {
             EXPECT_EQ(hipStreamSynchronize(_stream), hipSuccess);
-            // Restore the concrete stream even after a fatal assertion. The inherited
-            // teardown owns it; default-stream tokens must never be destroyed.
+            // Restore the concrete stream even when a fatal assertion interrupted execution.
+            // The inherited teardown owns it; default-stream tokens must never be destroyed.
             _stream = _ownedStream;
             EXPECT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
             _ownedStream = nullptr;
@@ -372,7 +378,7 @@ protected:
     }
 
     /// Pins the packaged engine and compiles. Every step asserts: the artifact is on disk,
-    /// so a failure here is a regression, never a skip.
+    /// so a failure here is the regression this suite exists to catch, never a skip.
     void buildAndCompilePacked(Graph& graph)
     {
         graph.set_preferred_engine_id_ext(packedEngineId());
@@ -380,9 +386,9 @@ protected:
         auto result = graph.build_operation_graph(_handle);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-        // The packaged engine adds to the catalog rather than replacing the shipped
-        // pointwise engine, which claims this graph too; the serving engine is checked
-        // after build_plans() below.
+        // The packaged engine is an addition to the catalog, not a replacement: the shipped
+        // pointwise engine claims this graph too. Check catalog membership here and the
+        // actual execution plan's engine identity after building below.
         std::vector<int64_t> rankedEngineIds;
         result = graph.get_ranked_engine_ids(rankedEngineIds);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -428,14 +434,25 @@ private:
     hipStream_t _ownedStream = nullptr;
 };
 
+// ---------------------------------------------------------------------------
+// The artifact fails without taking the process with it
+// ---------------------------------------------------------------------------
+
 /// A truncated archive must produce a diagnosable failure, never a crash, and must leave
 /// nothing behind for the next test in this binary.
 ///
-/// The staged tree is shared process state -- descriptor discovery memoizes into a
-/// function-local static, so this suite cannot redirect it. A ScopedDirectory holds the
-/// pristine archive. TearDown restores it even after a fatal assertion and removes the
-/// backup directory. A leftover backup indicates a killed run; recoverAbandonedBackups()
-/// in the base fixture's SetUp restores it.
+/// The staged tree is shared process state: descriptor discovery memoizes into a
+/// function-local static, so the engine can only ever read the one tree it found first,
+/// and this suite is forbidden from redirecting it. Breaking a private copy would
+/// therefore corrupt bytes nothing reads. A ScopedDirectory holds the pristine archive
+/// instead, and TearDown puts it back unconditionally (not at the end of the body, which
+/// an assertion failure would skip).
+///
+/// The staged archive is also durable state that outlives the process. TearDown always
+/// removes the backup directory, so a leftover backup means an earlier run was killed while
+/// the archive was corrupt; recoverAbandonedBackups(), run from the base fixture's SetUp,
+/// puts those last known good bytes back, costing a re-run rather than cementing the
+/// damage into every later build.
 class IntegrationGpuKernelIngestorKpackBroken : public IntegrationGpuKernelIngestorKpack
 {
 protected:
@@ -592,17 +609,20 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
         << result.err_msg << "\nRecorded logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    // An unreadable archive is reported at ERROR against the engine that owns it. A
-    // failure here while the plan below still builds means the packaged engine was never
-    // asked, so this also detects a registration-order regression.
+    // An unreadable archive is reported at ERROR against the engine that owns it. If this
+    // fails while the plan below still builds, the packaged engine was never asked -- a
+    // resident module served it, and nothing read the corrupt bytes. That is the
+    // failure mode the suite's position at the top of this file exists to prevent, so read
+    // this assertion as the detector for a registration-order regression as well as for a
+    // swallowed diagnostic.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
                                           std::string("engine '") + PACKED_ENGINE_NAME
                                               + "' could not build a plan"))
         << "no ERROR reports the packaged engine's failure. Recorded logs:\n"
         << recorder.getRecordedLogsAsString();
 
-    // Which archive failed, and why, comes from the per-candidate record the plan builder
-    // emits for each failure.
+    // The kernel-level detail -- which archive, and why it could not be read -- is carried
+    // by the per-candidate record the plan builder emits as it walks past each failure.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, _victim.filename().string()))
         << "no diagnostic names the archive that failed. Recorded logs:\n"
         << recorder.getRecordedLogsAsString();

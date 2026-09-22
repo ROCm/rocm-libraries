@@ -1,9 +1,11 @@
 """Selection, worker-knob, and failure-reporting tests for the parallel prewarm.
 
-The corpus backs both the in-process golden-sequence assertion and an
-out-of-process staged-tree capture a plain script runs against a pristine checkout,
-which is why `_write_corpus` is a standalone standard-library-only function the
-capture script copies verbatim.
+The corpus below has a double duty. It backs the in-process golden-sequence
+assertion pytest runs against a `tmp_path`, and it backs the out-of-process
+staged-tree capture a plain script runs against a pristine checkout of the base
+commit. That second consumer is why `_write_corpus` is a standalone
+standard-library-only function rather than a fixture body: the capture script
+copies it verbatim into a tree that has never seen this file.
 """
 
 import ast
@@ -27,9 +29,10 @@ from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
 
-# The one arch the corpus is authored for. Every consumer references this constant
-# instead of restating the literal: a capture script running a different arch would
-# take the copy-through branch for every KDP and compile nothing.
+# The one arch the corpus is authored for. Every consumer references this
+# constant instead of restating the literal: a capture script that ran a
+# different arch would take the copy-through branch for every KDP, compile
+# nothing, and report two trees identical over nothing at all.
 TARGET_ARCH = "gfx942"
 
 # The arch the corpus uses to express exclusion. Never packed for.
@@ -142,29 +145,43 @@ def _write_json(dest, name, doc):
 def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     """Write the selection corpus into `dest`, returning `dest`.
 
-    Standard library only and no interpreter state touched, so it can be copied
-    into a checkout without this test file and run outside pytest.
+    Standard library only, and no interpreter state is touched, so the whole
+    function can be copied into a checkout that does not contain this test file
+    and run outside pytest.
 
-    `hip_only=True` omits the two rocke cases, which would otherwise reach comgr
-    for real; the dedup pair and the shared standalone UKD are authored hip so the
-    subset keeps them. `with_embedded=True` appends the two embedded_source cases
-    and is purely additive.
+    `hip_only=True` omits the two rocke cases (an inline rocke UKD and a KDP
+    referencing a standalone rocke one). Outside pytest there is no stub for the
+    rocke compiler, so a rocke UKD would reach comgr for real. Every other case
+    stays: the variant-key dedup pair and the shared standalone UKD are authored
+    hip precisely so the subset keeps them.
+
+    `with_embedded=True` appends the two embedded_source cases. It is purely
+    additive: the default corpus, and the `hip_only` subset of it, are what
+    every other consumer here pins.
 
     The cases, in the order the loader sees them (`sorted(rglob("*.json"))`):
 
-    1.  c01 -- an arch-excluded KDP carrying a wildcard standalone-UKD ref; the
-        KDP-level filter must short-circuit it, so the ref is expected ABSENT.
-    2.  c02 -- inline hip UKD.      3.  c03 -- inline rocke UKD.
-    4.  c04 -- one admitted inline UKD and one excluded by its own arch.
-    5.  c05 -- standalone hip UKD by id.  6.  c06 -- standalone rocke UKD by id.
-    7.  c07 -- an arch-excluded standalone ref plus an admitted inline UKD.
-    8.  c08 -- two entries hashing to one variant key.
-    9.  c09a / c09b -- one standalone UKD referenced by two KDPs: listed by both,
-        compiled once.
-    10. an orphan standalone UKD: legal, warns, and expected ABSENT.
+    1.  c01 -- a KDP whose arch excludes the target, carrying a standalone-UKD
+        ref whose own (wildcard) arch matches. The KDP-level filter must
+        short-circuit the standalone branch, so the ref is expected ABSENT.
+    2.  c02 -- a matching KDP with an inline hip UKD.
+    3.  c03 -- a matching KDP with an inline rocke UKD.
+    4.  c04 -- a matching KDP with one admitted inline UKD and one whose own
+        arch excludes the target.
+    5.  c05 -- a matching KDP referencing a standalone hip UKD by id.
+    6.  c06 -- a matching KDP referencing a standalone rocke UKD by id.
+    7.  c07 -- a matching KDP referencing a standalone UKD whose own arch
+        excludes the target, plus an admitted inline UKD so the KDP survives.
+    8.  c08 -- two entries that hash to the same variant key.
+    9.  c09a / c09b -- one standalone UKD referenced from two KDPs: listed by
+        both, compiled once.
+    10. an orphan standalone UKD no KDP references. Legal, warns, packs on, and
+        is expected ABSENT from the selection.
     11. c11 -- a matching KDP whose entries all filter out, so it is dropped.
-    12/13. c12/c13 -- inline and standalone embedded_source (`with_embedded`),
-        which run no producer, so neither keys a variant nor stages a .co.
+    12. c12 -- a matching KDP with an inline embedded_source UKD (`with_embedded`).
+    13. c13 -- a matching KDP referencing a standalone embedded_source UKD
+        (`with_embedded`). Both pass-through cases run no producer, so neither
+        yields a variant key and neither stages a .co.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -453,10 +470,17 @@ def _observed_sequence(corpus_dir):
 
 @pytest.mark.quick
 def test_selected_entries_matches_golden_sequence(corpus):
-    """The shared generator selects what the serial walk's loop selected, compared
-    as a sequence because yield order flows into the emitted KDP JSON and
-    `pack_arch`'s variant map. The absences assert as much as the presences: the
-    orphan UKD and the ref inside an arch-excluded KDP are never compiled.
+    """The shared generator selects what the serial walk's loop selected.
+
+    Compared as a sequence, not a set. Order is load-bearing: the walk appends
+    to `new_kds` in yield order, that order flows into the emitted KDP JSON, and
+    `pack_arch` builds its variant map by iterating the recorded UKDs in walk
+    order, which fixes archive layout. A reordering defect is invisible to a set
+    comparison and visible to this one.
+
+    The absences are as much the assertion as the presences: the orphan
+    standalone UKD and the standalone ref inside an arch-excluded KDP are both
+    legal input the walk never compiles, and the generator must not yield them.
     """
     observed = _observed_sequence(corpus)
     assert observed == GOLDEN_SEQUENCE
@@ -466,8 +490,12 @@ def test_selected_entries_matches_golden_sequence(corpus):
 
 @pytest.mark.quick
 def test_selected_entries_matches_golden_sequence_hip_only(tmp_path):
-    """The same sequence over the hip-only corpus the pool tests use. Dropping the
-    two rocke cases must remove exactly those entries and disturb nothing else.
+    """The same sequence over the hip-only corpus the pool tests are built on.
+
+    The pool tests all run on `hip_only=True` so they need no rocKE toolchain,
+    which means the corpus they select from is not the one the sequence above
+    pins. Dropping the two rocke cases must remove exactly those entries and
+    disturb the order of nothing else.
     """
     corpus = _write_corpus(tmp_path / "hip-only-golden", hip_only=True)
     assert _observed_sequence(corpus) == HIP_ONLY_GOLDEN_SEQUENCE
@@ -475,9 +503,11 @@ def test_selected_entries_matches_golden_sequence_hip_only(tmp_path):
 
 @pytest.mark.quick
 def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
-    """The pool never compiles one variant twice: case 8 puts two UKDs on one
-    variant key and case 9 shares a standalone UKD, so a job list that failed to
-    dedup would be longer than the set of keys it carries.
+    """The pool never compiles one variant twice.
+
+    Corpus case 8 authors two UKDs onto one variant key and case 9 references
+    one standalone UKD from two KDPs, so a job list that failed to dedup would
+    be longer than the set of keys it carries.
     """
     flat = load_flat_input(corpus, log=_silent)
     jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
@@ -487,7 +517,9 @@ def test_prewarm_jobs_are_deduped_on_variant_key(corpus):
 
 def _arch_matches_call_sites():
     """`arch_matches` call counts in pipeline.py, keyed by enclosing function.
-    Parsed rather than grepped: a comment naming it is not a call.
+
+    Parsed rather than counted as strings: an explanatory comment naming
+    `arch_matches` is not a call.
     """
     tree = ast.parse(inspect.getsource(pipeline))
     counts = {}
@@ -514,9 +546,12 @@ def _arch_matches_call_sites():
 @pytest.mark.quick
 def test_arch_matches_call_sites_are_pinned():
     """All three selection filters live in the generator and nowhere else.
-    `compile_intermediate`'s one call is not a filter -- it decides KDP disposition
-    before the deepcopy the generator consumes -- so a call elsewhere is a fourth
-    selection site.
+
+    `compile_intermediate` keeps exactly one call, and it is not a filter: it
+    decides KDP disposition -- copy the authored KDP through verbatim -- before
+    the deepcopy the generator would consume. A call in any other function is a
+    fourth selection site, which is the divergence a single shared generator
+    exists to make impossible.
     """
     assert _arch_matches_call_sites() == {
         "_selected_entries": 3,
@@ -547,8 +582,8 @@ def test_pack_jobs_env_parsing(monkeypatch):
     with pytest.raises(HkpPackError, match="HKP_PACK_JOBS"):
         pipeline._pack_jobs()
 
-    # A negative clears the parse, so the rejection is pinned here: clamped onto
-    # the serial path it would produce a correct pack and no signal at all.
+    # A negative clears the parse, so the rejection is pinned here: clamped
+    # onto the serial path it would produce a correct pack and no signal at all.
     monkeypatch.setenv("HKP_PACK_JOBS", "-4")
     with pytest.raises(HkpPackError, match="1 or greater"):
         pipeline._pack_jobs()
@@ -562,9 +597,11 @@ def test_pack_jobs_env_parsing(monkeypatch):
 
 @pytest.mark.quick
 def test_cpu_budget_takes_the_narrowest_limit(monkeypatch):
-    """The budget is the smallest limit in force, not the host core count. The
-    failure defended against is silent and container-only: the pack succeeds, just
-    several times slower than a correctly sized pool.
+    """The budget is the smallest limit in force, not the host core count.
+
+    The failure defended against is silent and container-only: the pack still
+    succeeds, just several times slower than a correctly sized pool, which no
+    assertion about output can catch.
     """
     monkeypatch.setattr(os, "cpu_count", lambda: 384)
     monkeypatch.setattr(pipeline, "_cgroup_v2_cpu_quota", lambda: None)
@@ -610,8 +647,9 @@ def _fake_cgroup(monkeypatch, tmp_path, own, limits):
 def test_cgroup_quota_reads_whole_cpus(tmp_path, monkeypatch):
     """`cpu.max` parses to whole CPUs, and `max` means no limit.
 
-    Parsed here because the real files do not exist on Windows and are unlimited on
-    most Linux hosts, so running the suite never exercises them.
+    Parsed here rather than trusted because the real files are read from fixed
+    paths that do not exist on Windows and are unlimited on most Linux hosts,
+    so the parsing is never exercised by simply running the suite.
     """
 
     trees = itertools.count()
@@ -631,10 +669,15 @@ def test_cgroup_quota_reads_whole_cpus(tmp_path, monkeypatch):
 
 @pytest.mark.quick
 def test_cgroup_quota_walks_up_from_the_process_cgroup(tmp_path, monkeypatch):
-    """A limit on an ancestor cgroup counts, not just one at the root: with a
-    cgroup namespace the limit sits at the root, without one (Slurm, a systemd
-    session) the process sits in a nested scope and the root has no `cpu.max`, so
-    reading only the root reports every such host as unlimited.
+    """A limit on an ancestor cgroup counts, not just one at the root.
+
+    Where the limit sits depends on the cgroup namespace. Docker and Kubernetes
+    give one, so the limit is at the root; Slurm and a systemd login session do
+    not, and the root then has no `cpu.max` whatsoever. Measured on a real
+    cgroup-v2 login node: the process sat in
+    `/user.slice/user-N.slice/session-N.scope` and only those three levels
+    carried the file. Reading the root alone reports every such host as
+    unlimited, which is the case this pins.
     """
     scope = "user.slice/user-1.slice/session-9.scope"
 
@@ -681,8 +724,10 @@ _HSACO_SOURCE = "hsaco_kernel.cpp"
 def hsaco_corpus(tmp_path):
     """A KDP carrying an hsaco UKD ahead of a compilable hip one.
 
-    Kept out of the selection corpus because it makes `compile_intermediate` raise.
-    The hsaco entry is first so the walk reaches its error before needing hipcc.
+    Kept out of the selection corpus deliberately: it makes
+    `compile_intermediate` raise, which would stop the golden-sequence corpus
+    from being walkable. The hsaco entry is authored first so the walk reaches
+    its error before it would need a real hipcc for the hip entry.
     """
     dest = tmp_path / "hsaco-corpus"
     dest.mkdir()
@@ -708,8 +753,11 @@ def hsaco_corpus(tmp_path):
 def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
     """An hsaco UKD produces no job, and the walk stays the sole error reporter.
 
+    `_variant_key_for` declines the kind, so the prewarm drops it and the walk
+    reaches it and raises the unsupported-kind error itself.
+
     The raise is asserted first on purpose: with the job-list assertion ahead of
-    it, a stub job list would end the test before the walk runs.
+    it, a stub job list ends the test before the walk is ever exercised.
     """
     flat = load_flat_input(hsaco_corpus, log=_silent)
 
@@ -737,8 +785,10 @@ def test_prewarm_skips_hsaco_kind(hsaco_corpus, tmp_path):
 def _synthetic_job(corpus, block):
     """One prewarm job over a real corpus source, keyed by its build block.
 
-    Distinct blocks give distinct keys and output names, which lets a test fail
-    exactly one job. The key is computed the way the walk computes it.
+    Distinct blocks give distinct variant keys and so distinct output names,
+    which is what lets a test fail exactly one job out of many. The key is
+    computed the way the walk computes it rather than invented, so the output
+    the producer writes is the one the caches are checked against.
     """
     ks = _hip_ks(_K1_SOURCE, "K1", block)
     return pipeline._VariantJob(
@@ -757,12 +807,21 @@ def _synthetic_job(corpus, block):
 def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     """The pack stops on the first failure in walk order and cancels the rest.
 
-    One job fails and the rest sleep, so an abandoned queue is distinguishable from
-    a drained one; the attempt count is bounded rather than pinned, since the
-    executor dispatches a few jobs beyond the running two. The failing job is not
-    the first (otherwise the empty-cache assertions hold by construction), and the
-    job list is synthesised because the corpus's six jobs sit below the executor's
-    dispatch depth.
+    Exactly one job fails, and every other one sleeps, so a pool that ran the
+    queue to the end is distinguishable from one that abandoned it. The attempt
+    count is bounded rather than pinned: the executor dispatches a few jobs
+    beyond the running two before the parent observes the failure, so the exact
+    number depends on scheduling even though `< len(jobs)` does not.
+
+    The failing job is deliberately not the first. With `jobs[0]` failing, no
+    job ever succeeds, so the empty-cache assertions below hold by construction
+    and would survive the caches being filled on the failure path.
+
+    The job list is synthesised rather than taken from the corpus, which yields
+    six -- below the executor's own dispatch depth, so every job would reach a
+    worker before the first result is consumed and cancellation would have
+    nothing left to cancel. A queue long enough for the property to exist is
+    part of the setup.
     """
     corpus = _write_corpus(tmp_path / "fail-fast", hip_only=True)
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
@@ -816,10 +875,13 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
 
 @pytest.mark.quick
 def test_variant_key_for_uses_module_globals(monkeypatch):
-    """Both key functions resolve through the `pipeline` module globals: two
-    existing tests patch them to a constant to force the serial path, and a
-    function-local import, import-time alias, or child-side recomputation would
-    bypass those patches.
+    """Both key functions resolve through the `pipeline` module globals.
+
+    Two existing tests monkeypatch `pipeline.hip_variant_key` and
+    `pipeline.rocke_variant_key` to a constant so every job collapses onto one
+    key and the pack stays on the serial path. A function-local import, an alias
+    bound at import time, or a key computed inside a worker process would all
+    bypass those patches and silently disagree with the walk.
     """
     monkeypatch.setattr(pipeline, "hip_variant_key", lambda *a, **k: "SENTINEL-HIP")
     monkeypatch.setattr(pipeline, "rocke_variant_key", lambda *a, **k: "SENTINEL-ROCKE")
@@ -846,10 +908,17 @@ def _conftest_inserted_paths():
 
 @pytest.mark.quick
 def test_worker_inherits_parent_sys_path():
-    """A pool worker starts with the parent's `sys.path`, conftest inserts and all,
-    so it imports `hkp_pack` and the rocKE platform without a `PYTHONPATH` export.
-    A probe of the interpreter rather than this package: if CPython ever stops
-    propagating `sys.path`, every rocKE variant fails to import in its worker.
+    """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
+
+    CPython propagates `sys.path` to children under both `spawn` and
+    `forkserver`, so a worker can import `hkp_pack` and the rocKE platform
+    without a `PYTHONPATH` export.
+
+    A probe of the interpreter rather than of this package -- no change to
+    `pipeline.py` can fail it. Should a future interpreter stop propagating
+    `sys.path`, every rocKE variant fails to import in its worker, and this
+    says why. The related constraint it does not check, that the pool must be
+    built after parent-side path setup, is documented at the construction site.
     """
     expected = _conftest_inserted_paths()
     assert expected, "conftest inserts at least the hkp_pack package root"
@@ -865,10 +934,13 @@ _MISSING_MODULE = "hkp_parallel_absent/kernels/nowhere.py"
 
 @pytest.fixture
 def failing_corpus(tmp_path):
-    """A KDP with two rocke UKDs naming a module that does not exist: two entries
-    because a single job returns without a pool and the failure must come from a
-    real worker, with differing specs so they key apart. The absent module means
-    the child raises before reaching rocKE, so no toolchain is needed.
+    """A KDP with two rocke UKDs naming a module that does not exist.
+
+    Two entries rather than one because the prewarm returns without a pool for
+    a single job, and the failure has to come from a real worker process. They
+    carry different specs so they key apart and stay two jobs. The module is
+    absent, so the child raises before it reaches the rocKE compiler and the
+    case needs no toolchain at all.
     """
     dest = tmp_path / "failing-corpus"
     dest.mkdir()
@@ -890,10 +962,17 @@ def failing_corpus(tmp_path):
 
 @pytest.mark.quick
 def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
-    """A pool failure names one variant, not N tracebacks, and the named variant is
-    asserted exactly: the first failure in submission (walk) order, so the parallel
-    path names what the serial path would. How many others failed is deliberately
-    not asserted and the message carries no count.
+    """A pool failure names one variant, not N tracebacks.
+
+    Which variant is named is not host-dependent and is asserted exactly: it is
+    the first failure in submission order, which is walk order, so the parallel
+    path names the variant the serial path would have named. How many others
+    would have failed is deliberately not asserted, and the message carries no
+    count.
+
+    No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
+    start methods, which `test_worker_inherits_parent_sys_path` is the detector
+    for.
     """
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
     flat = load_flat_input(failing_corpus, log=_silent)
@@ -919,9 +998,12 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
 
 @pytest.mark.quick
 def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monkeypatch):
-    """The worker returns its failure and never computes a key: raising would lose
-    an unpicklable diagnosis, and recomputing `vk` would bypass the patches in
-    force when the parent computed it.
+    """The worker returns its failure and never computes a key.
+
+    Both halves are asserted because both are invisible from the parent: a
+    worker that raised instead of returning would lose an unpicklable
+    diagnosis, and one that recomputed `vk` would bypass the patches in force
+    when the parent computed it.
     """
     calls = []
 
@@ -994,14 +1076,21 @@ with open(out, "wb") as fh:
 
 
 def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
-    """Path to a hipcc stand-in that writes a .co and exits 0, so the pool can run
-    to success with no toolchain. The bytes derive from every argument except the
-    output path, so two variants of one source differ.
+    """Path to a hipcc stand-in that writes a .co and exits 0.
 
-    `fail_out` matches the output basename, so exactly one variant fails even where
-    several share a source; `delay` makes cancellation observable rather than a
-    race; `tally` collects one marker per attempt. A launcher script because the
-    producer invokes `hipcc` as argv[0].
+    Lets the pool run to success on a box with no toolchain, which is what makes
+    the success path testable at all. The bytes are derived from every argument
+    except the output path, so two variants of one source differ in content and
+    a variant cannot pass by being confused with its sibling.
+
+    `fail_out` is matched against the output basename rather than the source, so
+    exactly one variant fails even where several share a source file -- the
+    fail-fast test needs the other jobs to survive long enough to be cancelled.
+    `delay` slows every other job so cancellation is observable rather than a
+    race, and `tally` collects one marker per attempt.
+
+    A launcher script rather than the interpreter directly, because the producer
+    invokes `hipcc` as argv[0] of a subprocess.
     """
     stub = tmp_path / "stub_hipcc.py"
     stub.write_text(
@@ -1028,10 +1117,17 @@ def _stub_hipcc(tmp_path, *, fail_out=None, delay=0.0, tally=None):
 def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
     """A pool that runs to success fills both caches, each with its own value.
 
-    The one test exercising the pool's success path -- the others raise first, run
-    a single job, or call the selection helpers directly -- so without it, swapping
-    the two cache assignments changes no test result. `_prewarm_jobs` supplies the
-    expected symbols rather than a vk-to-symbol table the corpus would outgrow.
+    The one test that exercises the pool's success path. Every other test in
+    this file stops short of it: the failure test raises before the unpack loop,
+    the hsaco test has a single job so no pool starts, and the rest call the
+    selection helpers directly. The inherited suite never starts a pool either
+    -- its packs are below the two-job threshold or patch the compile out -- so
+    without this, swapping the two cache assignments changes no test result.
+
+    `_prewarm_jobs` supplies the expected symbols. It is pinned independently by
+    the golden-sequence test, and reading the authored `entry` back out of the
+    jobs keeps this test from restating a vk-to-symbol table that the corpus
+    would silently outgrow.
     """
     corpus = _write_corpus(tmp_path / "hip-only", hip_only=True)
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
@@ -1094,8 +1190,10 @@ def _staged_tree(corpus, out_dir):
 def test_serial_and_parallel_stage_identical_trees(tmp_path, monkeypatch):
     """Serial and parallel packs stage byte-identical trees.
 
-    Asserted over the tree, not the caches: a prewarm writing artefacts where the
-    walk does not read would leave both caches looking correct.
+    Asserted over the whole staged tree rather than the two caches, because the
+    caches are the mechanism and the tree is the product. A prewarm writing its
+    artefacts somewhere the walk does not read would leave both caches looking
+    correct, and every other test here passing, while the tree diverged.
     """
     corpus = _write_corpus(tmp_path / "equiv", hip_only=True)
 
@@ -1112,11 +1210,17 @@ def test_serial_and_parallel_stage_identical_trees(tmp_path, monkeypatch):
 
 @pytest.mark.quick
 def test_mixed_kinds_stage_identical_trees_under_a_real_pool(tmp_path, monkeypatch):
-    """A corpus mixing compiled and pass-through kinds packs the same either way:
-    `_variant_key_for` declines every embedded_source entry, and those KDPs must
-    reach the tree regardless. The pool's construction is asserted, since below two
-    jobs or two workers the second pack would be serial and the trees would match
-    over nothing.
+    """A corpus mixing compiled and pass-through kinds packs the same either way.
+
+    The equivalence above runs on a corpus every entry of which the prewarm
+    keys, so a KDP the pool contributes nothing to is never staged in a parallel
+    pack. `_variant_key_for` declines every embedded_source entry, and those
+    KDPs must reach the tree regardless of which path compiled the rest.
+
+    The pool's construction is asserted rather than assumed. `_prewarm_variants`
+    returns without one below two jobs or two workers, so a selection change
+    that took the corpus under that threshold would leave the second pack serial
+    too -- the trees would still match, over a property no longer exercised.
     """
     corpus = _write_corpus(tmp_path / "mixed", hip_only=True, with_embedded=True)
 
@@ -1146,9 +1250,12 @@ def test_mixed_kinds_stage_identical_trees_under_a_real_pool(tmp_path, monkeypat
 
 @pytest.mark.quick
 def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
-    """`HKP_PACK_JOBS=1` returns before any pool is constructed -- the documented
-    escape hatch and the only path with a serial traceback. A one-worker pool would
-    still pack correctly, so the pool's absence is asserted directly.
+    """`HKP_PACK_JOBS=1` returns before any pool is constructed.
+
+    The documented escape hatch, and the only path with a serial traceback.
+    Relaxing the guard to `workers < 1` would start a one-worker pool that
+    still packs correctly, so no assertion on the output can catch it -- the
+    pool's absence is the property, so it is asserted directly.
     """
     corpus = _write_corpus(tmp_path / "serial", hip_only=True)
     monkeypatch.setenv("HKP_PACK_JOBS", "1")

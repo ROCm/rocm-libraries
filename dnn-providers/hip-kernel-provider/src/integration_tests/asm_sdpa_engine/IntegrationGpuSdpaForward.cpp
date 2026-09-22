@@ -25,7 +25,9 @@ using namespace asm_sdpa_engine;
 namespace
 {
 
-/// Fixture parameterized on GraphTestCase.
+/**
+ * @brief Test fixture that takes a GraphTestCase as parameter.
+ */
 template <typename DataType>
 class IntegrationSdpaFwd : public IntegrationGraphVerificationHarness<DataType, GraphTestCase>
 {
@@ -45,6 +47,7 @@ protected:
         auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const GraphTestCase& testCase = this->GetParam();
 
+        // Skip if device is not supported
         if(testCase.arch != deviceString)
         {
             GTEST_SKIP() << "Skipped: Test case requires " << testCase.arch
@@ -95,9 +98,12 @@ protected:
 
 using IntegrationGpuSdpaFwdBf16 = IntegrationSdpaFwd<bfloat16>;
 
-/// Fixture for shape-sweep tests parameterized on SdpaFwdTestCase: builds a forward SDPA
-/// graph from explicit dimensions, covering shape sweeps, GQA, and asymmetric sequence
-/// lengths.
+/**
+ * @brief Test fixture for shape-sweep tests parameterized on SdpaFwdTestCase.
+ *
+ * Builds a forward SDPA graph from explicit tensor dimensions, enabling
+ * shape sweeps, GQA, and asymmetric sequence-length testing.
+ */
 template <typename DataType>
 class IntegrationSdpaFwdShapeSweep
     : public IntegrationGraphVerificationHarness<DataType, SdpaFwdTestCase>

@@ -93,11 +93,20 @@ struct SdpaFwdTestCase
     static std::string getName(const testing::TestParamInfo<SdpaFwdTestCase>& info);
 };
 
-/// A human-readable description of a kernel config.
+/**
+ * @brief Generates a descriptive string for a kernel config.
+ *
+ * @param config The kernel configuration
+ * @return A human-readable description of the config
+ */
 std::string getConfigDescription(const fmha_v3_fwdConfig& config);
 
-/// Wraps a kernel config in a GraphTestCase descriptor with default dimensions.
-/// @p withStats sets the withStats flag on the test case.
+/**
+ * @brief Wraps a kernel config in a GraphTestCase descriptor with default dimensions.
+ *
+ * @param config The kernel configuration
+ * @param withStats When true, sets the withStats flag on the test case
+ */
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
 /// An SDPA forward graph together with its STATS output attribute.

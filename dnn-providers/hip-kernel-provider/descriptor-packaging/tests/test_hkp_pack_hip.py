@@ -265,11 +265,16 @@ def test_rewrite_kpack_form_and_provenance(built):
 
 
 def test_rewrite_stamps_the_signature_read_from_the_object(built, rocm_kpack_dir):
-    """The stamped list comes from the compiled object, per symbol, recomputed from
-    the archived blob rather than compared against a literal a descriptor-derived
-    stamp would also satisfy. Both inline UKDs are checked because they share one
-    toc_key and one blob, and caching per variant would give the second its
-    neighbour's signature.
+    """The stamped list comes from the compiled object, per symbol.
+
+    Recomputed from the archived blob rather than compared against a literal: a
+    hand-written expectation would be satisfied just as well by a stamp derived
+    from the authored descriptor, and derivation from the binary is the entire
+    reason the field is worth comparing at dispatch.
+
+    Both inline UKDs are checked because they share one toc_key and one blob.
+    Extracting once per variant and reusing the result would give the second its
+    neighbour's signature and pass every fixture with one symbol per variant.
     """
     kpack = _load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(
@@ -428,10 +433,16 @@ def _author_kpack_source(src, drop=None):
 @pytest.mark.quick
 @pytest.mark.parametrize("field", sorted(set(_KPACK_SOURCE) - {"kind"}))
 def test_neg_kpack_source_missing_field(tmp_path, main_fixture, field):
-    """The validator's kpack key list names what the loader will demand. Nothing
-    here authors a kpack kernel_source, but this is the only place the tool can
-    reject a descriptor the loader would reject later, and the list went a field
-    stale once the loader began requiring `signature`.
+    """The validator's kpack key list names what the loader will demand.
+
+    Nothing in this tree authors a kpack kernel_source -- it is the form the
+    packer rewrites into, and the fields it carries are read out of a compiled
+    object rather than written by hand. The list is pinned anyway because it is
+    the only place the tool can reject a descriptor the loader would reject
+    later, and it went a field stale once the loader began requiring
+    `signature`. Pinned as a list rather than one member, because going stale by
+    a field is the failure this exists to catch and the next field will go the
+    same way. Validation runs at load, so this needs no compiler.
     """
     src = _copy_fixture(tmp_path, main_fixture)
     _author_kpack_source(src, drop=field)
@@ -1107,9 +1118,8 @@ def test_scoped_ued_name_loads_clean(main_fixture):
 def test_authored_provenance_cannot_hijack(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # The shipped provenance block is the generated traceability record: an authored
-    # value for a field the producer writes is overwritten, while an authored field
-    # the producer does not write survives.
+    # An authored top-level 'provenance' is dropped; the shipped block is the
+    # generated traceability record, not the authored value.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)

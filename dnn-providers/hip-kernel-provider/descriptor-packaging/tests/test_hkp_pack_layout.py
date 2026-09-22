@@ -1,12 +1,14 @@
 """Nested-layout behaviour for the single authored source root.
 
-There is exactly ONE source root. Child folders under it scope the content, and
+There is exactly ONE source root. Child folders under it scope the content
+(a `hip/` tree, a `rocKE/` tree, per-integration folders beneath those), and
 each descriptor's authored subpath is preserved verbatim into the staged and
 installed trees. Producer selection is per-UKD on `kernel_source.kind`, never
 per-folder.
 
-Invariants held here: whole-set id validation, descriptor-relative hip source
-resolution, hip+rocKE coexistence in one kpack, and the comgr diagnostic.
+The invariants this file holds: whole-set id validation, descriptor-relative
+hip source resolution, hip+rocKE coexistence in one kpack, and the comgr
+diagnostic.
 """
 
 import hashlib
@@ -103,8 +105,10 @@ def test_rel_dir_is_root_relative_parent(tmp_path, main_fixture, empty_arch_fixt
 def test_same_filename_in_two_folders_both_survive(
     tmp_path, main_fixture, empty_arch_fixture
 ):
-    """Two child folders may carry the same filename; distinct rel_dirs keep them
-    apart, as the in-tree ingestor corpus does with
+    """Two child folders may carry the same filename; distinct rel_dirs keep
+    them apart.
+
+    The in-tree ingestor corpus does exactly this with
     kernel_dtype_matches_graph.umd.json.
     """
     root = tmp_path / "root"
@@ -137,9 +141,11 @@ def test_duplicate_id_across_folders_rejected(tmp_path, empty_arch_fixture):
 
 @pytest.mark.quick
 def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
-    """A dot-prefixed folder is passed over and every file it holds is named in the
-    log, so a `.git/` or `.venv/` under a user-supplied root becomes no descriptors
-    and the skip is not invisible.
+    """A dot-prefixed folder is passed over, and every file it holds is named.
+
+    The source root is user-supplied, so a `.git/` or `.venv/` under it must
+    not become descriptors. A silent skip would be the same invisible omission
+    the verifier exists to prevent, so the log line is part of the behaviour.
     """
     root = tmp_path / "root"
     _nest(root, "hip/a", empty_arch_fixture)
@@ -177,9 +183,11 @@ def test_output_mirrors_authored_subpath(
 def test_hip_source_resolves_relative_to_its_descriptor(
     tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
 ):
-    """Two folders, same source relpath and build, different .cpp bytes: resolution
-    is descriptor-relative, so each compiles its own neighbour file. Root-relative
-    resolution would ship one kernel's bytes under the other.
+    """Two folders, same source relpath and build, different .cpp bytes.
+
+    Resolution is descriptor-relative, so each compiles its OWN neighbour file
+    and the two ship distinct blobs. Under root-relative resolution both would
+    bind to the same file and one kernel would silently ship the other's bytes.
     """
     root = tmp_path / "root"
     a = _nest(root, "hip/a", empty_arch_fixture)
@@ -216,9 +224,11 @@ def test_hip_source_resolves_relative_to_its_descriptor(
 
 @pytest.mark.quick
 def test_missing_descriptor_local_source_is_an_error(tmp_path, empty_arch_fixture):
-    """No root-relative fallback: a descriptor naming a source it does not have
-    beside it is an error even when a same-named file exists at the root, since
-    falling back turns a typo into a silent bind to the wrong kernel.
+    """No root-relative fallback.
+
+    A descriptor naming a source it does not have beside it is an error, even
+    when a same-named file exists at the root. Falling back would turn a typo
+    into a silent bind to the wrong kernel.
     """
     from hkp_pack.hip_compile import compile_hip_variant
 
@@ -299,8 +309,10 @@ def test_variant_key_is_location_independent(
 
 @pytest.mark.quick
 def test_flat_layout_keys_on_source_alone(empty_arch_fixture):
-    """A flat root keys on `source` alone: rel_dir is "." at the root, so
-    hip_source_relpath is the identity and the key matches the no-rel_dir one.
+    """A flat root keys on `source` alone.
+
+    rel_dir is "." at the root, so hip_source_relpath is the identity on
+    `source` and the variant key is the same as it would be with no rel_dir.
     """
     from hkp_pack.hip_compile import hip_source_relpath
 
@@ -370,9 +382,14 @@ def test_mixed_hip_rocke_one_kpack_per_arch(
 def test_non_hkp_failure_still_leaves_no_partial_tree(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
 ):
-    """Staging protects the output even when no cleanup handler runs: run_pipeline's
-    `except HkpPackError` misses a MemoryError, a bug's TypeError or a SIGKILL, and
-    pack_arch creates <out>/kpack/ before validating anything.
+    """Staging must protect the output even when no cleanup handler runs.
+
+    run_pipeline's `except HkpPackError` tidies up after an expected failure, so
+    it alone makes an in-place write look safe. It does not run for a
+    MemoryError, a TypeError from a bug, or a SIGKILL -- and pack_arch creates
+    <out>/kpack/ before it validates anything. Only staging-then-rename makes
+    the output directory safe against a failure nobody caught, which is the
+    actual reason to do it.
     """
     from hkp_pack import pipeline
 
@@ -399,8 +416,8 @@ def test_non_hkp_failure_still_leaves_no_partial_tree(
         )
 
     # The shipped path must not exist. A staging directory may survive -- it is
-    # never installed -- but <out>/<arch> must be absent so
-    # install(DIRECTORY ... OPTIONAL) skips the arch entirely.
+    # never installed, and leaving it aids debugging -- but <out>/<arch> must be
+    # absent so install(DIRECTORY ... OPTIONAL) skips the arch entirely.
     assert not (
         out_root / ARCH
     ).exists(), "an uncaught failure left a partial arch tree that install() would ship"
@@ -410,9 +427,12 @@ def test_non_hkp_failure_still_leaves_no_partial_tree(
 def test_failed_arch_leaves_no_partial_tree(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
 ):
-    """A failing arch must leave NO directory behind, not an empty one: pack_arch
-    creates <out>/kpack/ before validating, and install(DIRECTORY ... OPTIONAL)
-    skips only a MISSING directory, so a partial tree would install.
+    """A failing arch must leave NO directory behind, not an empty one.
+
+    pack_arch creates <out>/kpack/ before it validates anything, so an in-place
+    write leaves a present-but-empty arch dir on failure. install(DIRECTORY ...
+    OPTIONAL) skips only a MISSING directory, so that partial tree would install
+    -- shipping an arch with no kernels in it.
     """
     from hkp_pack import pipeline
 
@@ -489,9 +509,12 @@ EXAMPLE_ROOT = Path(__file__).resolve().parent.parent / "examples" / "descriptor
 def test_example_tree_packs_both_producers(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    """The in-repo example tree must drive both producers end to end. It is the
-    only thing in the repository exercising the production path, and packing the
-    real committed tree rather than a fixture is what keeps it honest.
+    """The in-repo example tree must actually drive both producers end to end.
+
+    This is the only thing in the repository that exercises the production path,
+    which is how a silent-empty install and a silent descriptor drop both
+    survived unnoticed. Packing the real committed tree -- not a fixture -- is
+    what keeps it honest: if the example rots, this fails.
     """
     results = run_pipeline(
         source_root=EXAMPLE_ROOT,
@@ -527,8 +550,9 @@ def test_example_tree_packs_both_producers(
 def test_example_tree_keeps_both_shared_filenames(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    """The example tree deliberately reuses `shared.umd.json` across its two child
-    folders. A flat packer drops one silently; path preservation keeps both.
+    """The example tree deliberately reuses `shared.umd.json` across its two
+    child folders. A flat packer drops one silently; path preservation keeps
+    both.
     """
     run_pipeline(
         source_root=EXAMPLE_ROOT,
@@ -546,8 +570,10 @@ def test_example_tree_keeps_both_shared_filenames(
 
 @pytest.mark.quick
 def test_example_tree_is_self_consistent():
-    """Load-time validation of the committed tree, no toolchain required, so a
-    broken example is caught on a box with neither hipcc nor comgr.
+    """Load-time validation of the committed tree, no toolchain required.
+
+    Catches a broken example on any box, including one with neither hipcc nor
+    comgr, so the tree cannot rot silently between full runs.
     """
     flat = load_flat_input(EXAMPLE_ROOT)
 
@@ -561,9 +587,11 @@ def test_example_tree_is_self_consistent():
 def test_provenance_records_the_toolchain_that_built_each_kernel(
     tmp_path, hipcc, rocm_kpack_dir, rocke_available
 ):
-    """Authored fields say what was asked for; these say what answered. Without
-    them two builds of byte-identical descriptors are indistinguishable even when a
-    hipcc, comgr, or rocKE wheel change is the whole difference.
+    """Authored fields say what was asked for; these say what answered.
+
+    Without them two builds of byte-identical descriptors are indistinguishable
+    after the fact, even though a hipcc, comgr, or rocKE wheel change may be the
+    whole difference between them.
     """
     stamp = tmp_path / "wheels.sha256"
     stamp.write_text("deadbeefcafe\n", encoding="utf-8")
@@ -600,8 +628,10 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
 
 @pytest.mark.quick
 def test_wheel_digest_absent_stamp_is_not_fatal(tmp_path):
-    """Provenance is a record, not a gate: a hip-only build has no wheel stamp, and
-    that must omit the field rather than fail the pack.
+    """Provenance is a record, not a gate.
+
+    A hip-only build has no wheel stamp at all; that must degrade to omitting
+    the field rather than failing the pack.
     """
     from hkp_pack import toolchain
 
@@ -621,24 +651,32 @@ def test_hipcc_version_probe_is_best_effort():
 
 # --- G. The library field, resolved the way the runtime resolves it ---------
 def _resolve_library_like_runtime(descriptor_path, library):
-    """Mirror IngestorKernelCode.hpp's `originDirectory / library` join, where
-    originDirectory is the descriptor FILE's parent; os.path.normpath stands in for
-    the C++ weakly_canonical on a path that need not exist.
+    """Mirror IngestorKernelCode.hpp's `originDirectory / library` join.
+
+    originDirectory is the parent of the descriptor FILE (DescriptorLoader.hpp
+    sets it from `path.parent_path()`), and the C++ applies weakly_canonical to
+    the join. os.path.normpath is the equivalent for a path that need not exist.
     """
     return Path(os.path.normpath(Path(descriptor_path).parent / library))
 
 
 def _assert_runtime_would_load(descriptor_path, library, tree_root):
-    """Both halves of what the runtime does with `library`: the join resolves to a
-    real archive AND stays inside the descriptor TREE (IngestorKernelCode.hpp,
-    KPACK branch).
+    """Both halves of what the runtime does with `library`, not just one.
 
-    Resolution and containment are separate rules -- the packer emits `../..` for a
-    nested descriptor while the guard refuses anything leaving the tree -- so a
-    test asking only "does the file exist" sees nothing wrong. The authoritative
-    check is the C++
-    `TestPackedDescriptorLoad.PackedKernelsSatisfyTheRuntimeContainmentGuard`; this
-    copy is kept because it fails at pack time.
+    Resolution and CONTAINMENT are separate rules and only the first was checked
+    here. That gap is exactly how the packer and the guard shipped mutually
+    incompatible behaviour with this suite green: the packer emitted `../..` for
+    a nested descriptor, the guard refused anything leaving the descriptor's own
+    directory, and a test that only asked "does the file exist" saw nothing wrong.
+
+    So assert what the runtime asserts (IngestorKernelCode.hpp, KPACK branch):
+    the join resolves to a real archive, AND it stays inside the descriptor TREE
+    -- which is the boundary, not the descriptor's own folder.
+
+    This is still a reimplementation; the authoritative check is the C++
+    `TestPackedDescriptorLoad.PackedKernelsSatisfyTheRuntimeContainmentGuard`,
+    which reads the loader's own fields. Keeping a Python copy is worth it only
+    because it fails at pack time, where the packer's author is looking.
     """
     resolved = _resolve_library_like_runtime(descriptor_path, library)
     assert resolved.is_file(), (
@@ -658,9 +696,13 @@ def _assert_runtime_would_load(descriptor_path, library, tree_root):
 def test_library_resolves_from_a_nested_descriptor(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """A packed UKD's `library` must resolve against ITS OWN directory: the runtime
-    joins the descriptor's parent with `library` while the archive is written once
-    per arch at the ARCH ROOT, so a nested descriptor climbs back out.
+    """A packed UKD's `library` must resolve against ITS OWN directory.
+
+    The runtime joins originDirectory (the descriptor's parent) with `library`.
+    Writing it arch-root-relative works only for a flat layout and silently
+    breaks the moment a descriptor nests -- which path preservation made the
+    normal case. The archive is written once per arch at the ARCH ROOT, so a
+    nested descriptor has to climb back out to reach it.
     """
     root = tmp_path / "root"
     _nest(root, "hip/deep/deeper", main_fixture)
@@ -713,8 +755,10 @@ def test_library_resolves_for_a_flat_descriptor(
 @pytest.mark.quick
 def test_authored_kpack_folder_is_rejected(tmp_path, empty_arch_fixture):
     """`kpack/` is where the archive lands; an authored folder cannot claim it.
-    Descriptors placed there land in the reserved directory alongside the archive,
-    surviving today only because the archive is written last.
+
+    Descriptors placed there would be written into the reserved directory
+    alongside the archive. Nothing corrupts today only because the archive is
+    written last -- a write-order accident, not a guarantee.
     """
     root = tmp_path / "root"
     _nest(root, "kpack", empty_arch_fixture)
@@ -748,9 +792,13 @@ def _descriptor_files(root):
 
 @pytest.mark.quick
 def test_example_tree_uses_the_runtime_descriptor_version():
-    """Every descriptor must be major version 1, which `DescriptorLoader.hpp` reads
-    (UKD_VERSION_MAJOR). Authored at the packer-only fixture version "0.1" the
-    whole tree is unloadable while every packer test still passes.
+    """Every descriptor must be major version 1, which is what the loader reads.
+
+    `DescriptorLoader.hpp` gates each type on a major/minor and this build reads
+    major 1 (UKD_VERSION_MAJOR). An earlier version of this tree was authored at
+    "0.1" -- copied from tests/fixtures/, which is packer-only test data and
+    never passes through the C++ loader -- so the whole tree was unloadable
+    while every packer test still passed.
     """
     for path in _descriptor_files(EXAMPLE_ROOT):
         version = _read(path).get("version")
@@ -776,9 +824,12 @@ def test_example_tree_ids_are_uuids():
 @pytest.mark.quick
 def test_example_tree_field_shape_matches_the_runtime_fixture():
     """Per descriptor type, carry the fields the runtime fixture carries.
-    `archive_fixture/` is the tree the C++ integration test loads, so it is the
-    authority on shape and catches an invented field set such as a UDD with
-    `grid`/`block`/`args` instead of `dispatch_symbol`.
+
+    `archive_fixture/` is the tree the C++ integration test actually loads
+    and dispatches, so it is the authority on shape. Comparing against it catches an
+    invented field set -- the failure that shipped here once already, where UDD
+    had `grid`/`block`/`args` instead of `dispatch_symbol` and UMD had
+    `criteria`/`nodes` instead of `match_symbol`.
     """
     if not RUNTIME_FIXTURE.is_dir():
         pytest.skip(f"runtime fixture not present at {RUNTIME_FIXTURE}")
@@ -807,9 +858,11 @@ def test_example_tree_field_shape_matches_the_runtime_fixture():
 
 @pytest.mark.quick
 def test_example_tree_native_symbols_are_registered():
-    """Symbols the descriptors name must exist in a compiled native pack: an
-    unregistered symbol produces a tree that packs cleanly and then fails to
-    dispatch, which the packer cannot see.
+    """Symbols the descriptors name must exist in a compiled native pack.
+
+    A descriptor can only resolve to something the C++ side registered. Naming
+    an unregistered symbol produces a tree that packs cleanly and then fails to
+    dispatch -- the packer has no way to know the difference.
     """
     packs_dir = (
         Path(__file__).resolve().parent.parent.parent
@@ -838,9 +891,11 @@ def test_example_tree_native_symbols_are_registered():
 def test_library_resolves_for_a_nested_standalone_ukd(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """The standalone-UKD branch of the library rule: a standalone UKD ships as its
-    own file and anchors on its own directory, a different code path from an inline
-    UKD, which anchors on its KDP's.
+    """The standalone-UKD branch of the library rule.
+
+    A standalone UKD ships as its own file and anchors on its own directory --
+    a different code path from an inline UKD, which ships inside its KDP and
+    anchors on the KDP's.
     """
     root = tmp_path / "root"
     _nest(root, "hip/deep", main_fixture)
@@ -869,13 +924,17 @@ def test_library_resolves_for_a_nested_standalone_ukd(
 def test_standalone_ukd_anchors_on_its_own_dir_not_the_kdps(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """A standalone UKD in a different folder from the KDP that references it,
-    since they resolve by global id rather than co-location.
+    """A standalone UKD in a different folder from the KDP that references it.
 
-    Pins both consequences of the rel_dir it is packed with: the shipped file keeps
-    its authored subpath, and its `library` resolves from that subpath. The path
-    assertion is load-bearing -- anchoring on the KDP moves the file and recomputes
-    the climb-out to match, consistently wrong.
+    Standalone UKDs resolve by global id, not co-location, so the two may live
+    apart. Pins both consequences of the rel_dir the UKD is packed with: the
+    shipped file keeps its authored subpath, and its `library` resolves from
+    that subpath.
+
+    The path assertion is the load-bearing one. rel_dir drives placement and
+    depth together, so anchoring on the KDP moves the file and recomputes the
+    climb-out to match -- the library still resolves, consistently wrong, and
+    only the path reveals it.
     """
     root = tmp_path / "root"
     _nest(root, "hip/packs", main_fixture)
@@ -959,9 +1018,13 @@ def test_generic_descriptors_are_validated_against_the_loader_schema(
 def test_reserved_kpack_folder_is_case_insensitive(
     tmp_path, empty_arch_fixture, spelling
 ):
-    """Every spelling is reserved, because Windows cannot tell them apart. On Linux
-    `KPACK/` and `kpack/` are distinct directories, but this tree is consumed on
-    Windows too, where they are one and the collision returns.
+    """Every spelling is reserved, because Windows cannot tell them apart.
+
+    On Linux `KPACK/` and `kpack/` are distinct directories and coexist without
+    colliding -- verified -- so a case-sensitive check would be correct here.
+    But this tree is authored and consumed on Windows too, where they are the
+    same directory and the collision returns. Rejecting all spellings keeps the
+    rule identical on every platform and costs an author nothing.
     """
     root = tmp_path / "root"
     _nest(root, spelling, empty_arch_fixture)
@@ -972,9 +1035,11 @@ def test_reserved_kpack_folder_is_case_insensitive(
 
 @pytest.mark.quick
 def test_example_tree_cross_references_resolve_to_the_right_types():
-    """Every id reference must exist AND name the correct descriptor kind: a
-    dangling or mistyped reference loads and then fails to match, with a diagnostic
-    pointing at the runtime rather than the descriptor that lied.
+    """Every id reference must exist AND name the correct descriptor kind.
+
+    A dangling or mistyped reference is worse than a parse error: the tree loads
+    and then fails to match, with a diagnostic that points at the runtime rather
+    than at the descriptor that lied. Field-shape parity does not catch it.
     """
     by_id = {}
     for path in _descriptor_files(EXAMPLE_ROOT):
@@ -1009,9 +1074,11 @@ def test_example_tree_cross_references_resolve_to_the_right_types():
 
 @pytest.mark.quick
 def test_example_tree_metadata_matches_its_kmd_schema():
-    """A UKD's metadata keys and types must match what its KMD declares. The loader
-    does not reconcile the two, so an undeclared key or a wrong type is silent
-    until something selects on it.
+    """A UKD's metadata keys and types must match what its KMD declares.
+
+    Another failure that loads cleanly and breaks at match time: the loader does
+    not reconcile the two, so an undeclared key or a wrong type is silent until
+    something tries to select on it.
     """
     schemas = {
         _read(p)["id"]: {f["name"]: f["type"] for f in _read(p).get("fields", [])}
@@ -1043,10 +1110,15 @@ def test_example_tree_metadata_matches_its_kmd_schema():
 
 @pytest.mark.quick
 def test_example_tree_ids_do_not_collide_with_other_shipped_trees():
-    """Ids must be unique against every tree that could share a catalog, since the
-    example tree and any in-tree ingestor set can load into one process. Each
-    ingestor set is compared against the example only: the two pointwise sets share
-    ids by design (one engine, two dialects, two roots that never merge).
+    """Ids must be unique against every tree that could share a catalog.
+
+    The example tree and any in-tree ingestor set can be loaded into one
+    process. A duplicate id across them is a load-time rejection that would look
+    like a bug in whichever tree loaded second.
+
+    Each ingestor set is compared against the example only. The two pointwise
+    sets share ids with each other by design: one engine, two dialects, two
+    discovery roots that never merge.
     """
 
     def ids(root):
@@ -1141,8 +1213,11 @@ def test_embedded_source_requires_source_file_and_entry_point(
 def test_unhandled_kind_aborts_the_walk_and_lists_the_accepted_kinds(
     tmp_path, empty_arch_fixture
 ):
-    """A kind no producer handles is an error, and the message names the kinds that
-    are handled, so an author can see the intended spelling next to theirs.
+    """A kind no producer handles is an error, and the message names the kinds
+    that are handled.
+
+    A misspelling is the common case, so the diagnostic must let an author see
+    the intended spelling next to theirs.
     """
     root = _embedded_source_root(
         tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE, kind="embedded_sources")
@@ -1179,8 +1254,9 @@ def test_a_kind_no_producer_handles_fails_the_compile(
 ):
     """The compile dispatch refuses a kind it has no arm for.
 
-    The message must NOT carry the accepted-kind list, which belongs to the
-    load-time raise: matching it here would pass without reaching the dispatch.
+    The message must NOT carry the accepted-kind list: that list belongs to the
+    load-time raise, and matching it here would let this test pass green
+    without the walk ever reaching the dispatch.
     """
     root = _embedded_source_root(
         tmp_path, empty_arch_fixture, _UNPRODUCED_SOURCES[kind]
@@ -1252,8 +1328,10 @@ def test_a_compiling_kind_without_a_contract_is_still_refused(
 def test_embedded_source_rejects_a_parent_segment(
     tmp_path, empty_arch_fixture, source_file
 ):
-    """source_file is the embedded source's identity and is never normalised, so
-    two spellings of one file would take two keys and embed it twice.
+    """source_file is the embedded source's identity and is never normalised.
+
+    Two spellings of one file would take two keys, so the file would be
+    embedded twice.
     """
     root = _embedded_source_root(
         tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE, source_file=source_file)
@@ -1270,8 +1348,10 @@ def test_embedded_source_rejects_a_parent_segment(
 def test_embedded_source_rejects_an_absolute_path(
     tmp_path, empty_arch_fixture, source_file
 ):
-    """The emitted key must be the same string on every machine, and an absolute
-    path passes through the key computation unchanged.
+    """The emitted key must be the same string on every machine.
+
+    An absolute path passes through the key computation unchanged, so it would
+    name one machine's filesystem in a shipped descriptor.
     """
     root = _embedded_source_root(
         tmp_path, empty_arch_fixture, dict(_EMBEDDED_SOURCE, source_file=source_file)
@@ -1325,10 +1405,10 @@ def _expected_provenance(
 def _make_embedded(folder, arch=None):
     """Put every kernel in a copied `empty_arch` folder on the embedded kind.
 
-    The KDP keeps one inline UKD and gains a standalone-UKD reference, so both
-    authoring forms travel the pass-through path. `arch` is the authored KDP arch
-    list, None the wildcard. The kernel sources move into a `kernels/` child the
-    packer must not carry into a shard.
+    The KDP keeps one inline UKD and gains a reference to a standalone UKD, so
+    both authoring forms travel the pass-through path. `arch` is the authored
+    KDP arch list; None authors the wildcard. The kernel sources move into a
+    `kernels/` child, which the packer must not carry into a shard.
     """
     kernels = folder / "kernels"
     kernels.mkdir()
@@ -1417,9 +1497,11 @@ def _pack_embedded(root, tmp_path, rocm_kpack_dir, arches, log=print, out="out")
 def test_embedded_source_shard_holds_the_authored_descriptors(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """The shard carries the authored documents plus this shard's arch: the KDP and
-    the standalone UKD are arch-stamped, keep their authored kernel_source, and
-    record what was authored, while the generics stay byte-identical.
+    """The shard carries the authored documents plus this shard's arch.
+
+    The KDP and the standalone UKD are arch-stamped, they keep their authored
+    kernel_source, and their provenance records what was authored. The generics
+    are byte-identical to their files and carry no provenance.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     authored = root / "pointwise"
@@ -1455,9 +1537,11 @@ def test_embedded_source_shard_holds_the_authored_descriptors(
 def test_inline_embedded_ukd_is_narrowed_to_the_shard_arch(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """An inline UKD must not reach past the arch of the KDP that holds it: a
-    wildcard KDP admits a wider inline arch list and narrows to the shard on
-    emission, since a wider list makes the loader reject the whole KDP.
+    """An inline UKD must not reach past the arch of the KDP that holds it.
+
+    A wildcard KDP admits a wider inline arch list, and the KDP narrows to the
+    shard on emission. An inline list left wider makes the loader reject the
+    whole KDP, so the emitted inline UKD names this shard alone.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     kdp_path = root / "pointwise" / "solo.kdp.json"
@@ -1496,9 +1580,10 @@ def test_embedded_source_shard_writes_no_archive_and_no_sources(
 def test_embedded_source_generics_are_identical_across_shards(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Two copies of a generic that differ poison the catalogue entry: the loader
-    deduplicates untagged descriptors by content equality, so every shard's copy
-    must be byte-identical.
+    """Two copies of a generic that differ poison the catalogue entry.
+
+    The loader deduplicates untagged descriptors by content equality, so every
+    shard's copy must be byte-identical to every other shard's.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     authored = root / "pointwise"
@@ -1556,8 +1641,12 @@ def test_standalone_passthrough_two_kdps_share_is_emitted_once(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
     """A standalone pass-through UKD is processed once per arch, not once per ref.
-    Processing it twice is idempotent, so the log line is the only observable;
-    listing precedes the process-once check, so both KDPs still name the id.
+
+    Processing it a second time is idempotent -- the same document lands under
+    the same key -- so the shard is byte-identical either way and cannot witness
+    the difference. The pass-through log line is the only observable, hence the
+    count. Listing precedes the process-once check, so both KDPs still name the
+    id.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
     _add_sharing_embedded_kdp(root / "pointwise")
@@ -1582,9 +1671,10 @@ def test_standalone_passthrough_two_kdps_share_is_emitted_once(
 def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
     tmp_path, empty_arch_fixture, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """One invocation over a root holding both dialects: the hip half produces an
-    archive and kpack descriptors, the embedded half keeps its authored
-    kernel_source.
+    """One invocation over a root holding both dialects.
+
+    The hip half produces an archive and kpack descriptors; the embedded half
+    keeps its authored kernel_source.
     """
     root = tmp_path / "root"
     _nest(root, "hip/pointwise", main_fixture)
@@ -1607,7 +1697,9 @@ def test_mixed_hip_and_embedded_source_root_packs_in_one_invocation(
 
 def _embedded_copy(root, sub, fixture, suffix=""):
     """Copy the fixture to `root/sub`, put it on the embedded kind, re-stem it.
-    `suffix` re-stems every file name and id so two copies coexist under one root.
+
+    `suffix` re-stems every file name and every id, so two copies of one fixture
+    coexist under one root.
     """
     dest = root / sub if sub else root
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1626,9 +1718,10 @@ def _embedded_copy(root, sub, fixture, suffix=""):
 def test_a_field_the_packer_left_alone_is_not_reported_as_rewritten(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """A descriptor that needed no change says so: the block tells a reader what
-    happened on the way here, so it must not claim a rewrite the packer did not
-    make.
+    """A descriptor that needed no change says so.
+
+    The block tells a reader what happened on the way here, so it must not
+    claim a rewrite the packer did not make.
     """
     root = tmp_path / "root"
     folder = _embedded_copy(root, "", empty_arch_fixture)
@@ -1669,9 +1762,10 @@ def test_embedded_source_shards_are_reproducible(
 def test_packing_without_a_source_label_is_refused(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Every pass-through descriptor records the build rule that packs it. The
-    message names the descriptor, so an author of a hand-run sees which document
-    the packer stopped on.
+    """Every pass-through descriptor records the build rule that packs it.
+
+    The message names the descriptor, so an author of a hand-run sees which
+    document the packer stopped on.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
 
@@ -1718,9 +1812,10 @@ def test_a_root_that_prunes_for_every_arch_is_a_failure(
 def test_a_passthrough_only_root_passes_with_no_archive(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Zero archives is the correct outcome for a root that compiles nothing: the
-    unit descriptor set is authored exactly this way, so the archive clause must
-    stay off a root whose every UKD is a pass-through kind.
+    """Zero archives is the correct outcome for a root that compiles nothing.
+
+    The unit descriptor set is authored exactly this way, so the archive clause
+    must stay off a root whose every UKD is a pass-through kind.
     """
     root = _embedded_root(tmp_path, empty_arch_fixture)
 
@@ -1735,9 +1830,12 @@ def test_a_passthrough_only_root_passes_with_no_archive(
 def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
     tmp_path, empty_arch_fixture, rocm_kpack_dir
 ):
-    """Descriptors alone are not enough once a compiling source is present. A mixed
-    root is the only shape reaching this clause: the pass-through half keeps a
-    shard alive while the hip half prunes out of the one arch packed.
+    """Descriptors alone are not enough once a compiling source is present.
+
+    A mixed root is the only shape that reaches this clause: the pass-through
+    half keeps a shard alive, so nothing is skipped and a descriptor count is
+    satisfied, while the hip half prunes out of the one arch packed and its
+    kernels ship nowhere.
     """
     root = tmp_path / "root"
     _nest(root, "hip/pointwise", empty_arch_fixture)

@@ -87,25 +87,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
     )
-    # Links only the SDKs, not hip_kernel_provider_private, so the gate is not inherited.
+    # This target links only the SDKs, not hip_kernel_provider_private, so it does not
+    # inherit the provider's gate and needs the definition set directly.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
     )
-    # Descriptor set resolved as an offset from the binary to the staged tree, applied by
-    # main() when the environment names no set. The offset holds in the install tree too.
+    # The one descriptor set this binary's cases resolve, as the offset from the binary to
+    # the staged tree. main() applies it when the environment names no set, so the binary
+    # runs standalone, and the offset holds in the install tree too, so no machine-specific
+    # path is compiled in or reaches the CTest files.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
-    # The shared descriptor-root resolver lives with the unit tests.
+    # The shared descriptor-root resolver lives with the unit tests
     target_include_directories(hip_kernel_provider_integration_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests
     )
-    # Relative layout only: the kpack suite walks from the loaded plugin as the loader
-    # does and needs the same subdirectory spelling the provider compiled in.
+    # The relative layout only, never an absolute build path: the kpack suite locates the
+    # staged tree by walking from the loaded plugin exactly as the loader does, and needs
+    # the same spelling of the subdirectory the provider compiled in. An absolute path
+    # here would be baked into the installed test binary as well, naming a build tree it
+    # cannot see.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
     )
-    # The integration root is staged by three packaging targets; name each one.
+    # The integration root is packed by three roots, and each stages under its own
+    # packaging target. Name each one individually.
     foreach(_hkp_set hkp_packaging_integration hkp_packaging_integration_shared
                      hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})

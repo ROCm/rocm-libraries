@@ -300,21 +300,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # Test content lives in a sibling of arch_content/, under a provider segment for the
-    # same reason arch_content/ has one: the engines directory is shared, so an
-    # unqualified test_arch_content/ would let two providers collide on a set name and
-    # let this provider's install(DIRECTORY) ship another provider's content.
+    # same reason arch_content/ has one: the engines directory is shared by every provider,
+    # so an unqualified test_arch_content/ would let two providers collide on a set name --
+    # and would let this provider's install(DIRECTORY) ship another provider's content.
 
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR "test_arch_content/hip-kernel-provider")
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR
         "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"
     )
 
-    # Two test descriptor roots, one per test binary: the unit root holds two packed
-    # subtrees and the integration root three, all five wired in
+    # Two test descriptor roots, one per test binary. The unit root holds two packed
+    # subtrees and the integration root holds three, all five wired in
     # descriptor-packaging/cmake/HkpPackaging.cmake. The packer stages each authored
-    # subtree per architecture, rewriting an authored hip descriptor to kpack and writing
-    # the archive beside it; an embedded_source subtree gets descriptors and no archive.
-    # Both roots stage into the build tree, so it matches the install tree.
+    # subtree per architecture: it rewrites an authored hip descriptor to kpack and writes
+    # the archive beside it. An embedded_source descriptor names a kernel compiled into a
+    # binary and JIT-compiled at load; for one of those the packer stamps the shard
+    # architecture and records the authored values in a provenance block, and the subtree
+    # gets descriptors and no archive. Both roots stage into the build tree rather than
+    # being read from the source tree, so the build tree matches the install tree.
     set(HIPKERNELPROVIDER_TEST_SET_UNIT "unit")
     set(HIPKERNELPROVIDER_TEST_SET_INTEGRATION "integration")
     set(HIPKERNELPROVIDER_UNIT_BUILD_DIR
@@ -331,19 +334,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
     # The name of each authored set, which is also the name it stages under. Named here
-    # because the test subdirectories compile these segments into their binaries as a
-    # relative offset; HkpPackaging.cmake joins them to the two roots above directly.
+    # only because the test subdirectories compile these same segments into their binaries
+    # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two
+    # roots above directly.
     #
-    # Every set is a top-level folder under test_descriptors/ and is packed WHOLE. Each
-    # descriptor lands in a CHILD of its shard root while the archive is written at the
-    # shard root itself, so it must climb out of its own folder to reach the archive --
-    # the climb the runtime containment guard checks.
+    # Every set is a top-level folder under test_descriptors/, and every one is packed
+    # WHOLE rather than by the set inside it. Each descriptor therefore lands in a CHILD of
+    # its shard root while the archive is written at the shard root itself, so it must
+    # climb out of its own folder to reach the archive -- the climb the runtime containment
+    # guard checks, which a set packed from its own leaf folder never produces.
     #
-    # One archive is written per pack, so a folder added under one of these roots joins
-    # that root's archive. A set that must be able to fail on its own needs a top-level
-    # folder here and an OUT_ROOT of its own: archive_fixture/ is authored beside the
-    # others because the broken-archive test corrupts its archive and asserts the shipped
-    # pointwise engine still serves.
+    # One archive is written per pack. A folder added under one of these roots joins that
+    # root's archive rather than getting its own; a set that has to be able to fail on its
+    # own needs a top-level folder here and an OUT_ROOT of its own. That is why
+    # archive_fixture/ is authored beside the others rather than inside integration/: the
+    # broken-archive test corrupts its archive and asserts the shipped pointwise engine
+    # still serves, which needs the two archives to be separate files.
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
@@ -352,9 +358,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
          "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
          "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
 
-    # No HIPDNN_DESCRIPTOR_DIR is published for the test suites: the integration binary
-    # resolves the tree from the plugin module it loads, and the unit binary from its own
-    # module in main().
+    # No HIPDNN_DESCRIPTOR_DIR is published for the test suites: the integration binary loads
+    # the plugin and resolves the tree from that module, and the unit binary resolves it
+    # from its own module in main().
     message(STATUS "Kernel ingestor enabled. Descriptors build into:")
     message(STATUS "  production: ${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
     message(STATUS "  test:       ${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}")

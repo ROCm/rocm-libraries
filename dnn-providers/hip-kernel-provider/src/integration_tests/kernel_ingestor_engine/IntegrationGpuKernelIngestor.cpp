@@ -38,8 +38,9 @@ using namespace hip_kernel_provider::test_utilities;
 
 /**
  * @file IntegrationGpuKernelIngestor.cpp
- * @brief The kernel ingestor pack driven end to end through the hipDNN frontend API,
- *        exercising the descriptor set, matchers, heuristic and dispatch handler.
+ * @brief The kernel ingestor pack, end to end through the hipDNN frontend API: proves
+ *        the descriptor set, matchers, heuristic, and dispatch handler compose in
+ *        production, driving the same path a real caller takes.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -105,8 +106,7 @@ std::shared_ptr<Graph> buildPointwiseSubGraph()
 
 /// N=1, C=2, H=4, W=4, K=3, R=3, S=3, unit stride/dilation, no padding, cross-correlation,
 /// NCHW/KCRS. y's dims/strides are left unset -- infer_properties_node() derives NKPQ
-/// from x, w and the attributes -- and keeps uid 3 to match executeAndVerify()'s
-/// hardcoded output uid.
+/// from x, w and the attributes. uids are assigned in input order, so y takes 3.
 std::shared_ptr<Graph> buildConvFwdGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -250,10 +250,27 @@ class IntegrationGpuKernelIngestor
                                                                                       ExecuteCase>
 {
 protected:
-    /// A cache root private to one test case: cases in this suite write and read back
-    /// kernel selection records, so they must not share a root. Scope::TEST takes over the
-    /// redirect main() installed, and the fixture's destructor restores it and removes the
-    /// scratch tree on passing and failing paths alike.
+    /// A cache root private to ONE test case, not merely to this binary.
+    ///
+    /// main() already scopes HIPDNN_CACHE_DIR away from the developer's ~/.cache/hipdnn,
+    /// which stops one RUN inheriting another's shards. It does not stop one CASE
+    /// inheriting another's: every case in this process shares that single root.
+    /// ExecutesCorrectlyWithBenchmarkingEnabled records a measured ranking for a
+    /// single-node FLOAT add, and ReportsAKnobWhoseValuesComeFromTheCatalog and
+    /// ReportsTheMaximumWorkspaceAcrossSurvivingKernels then read it back: a benchmarked
+    /// record replaces the heuristic order, so the knob default and the plan's workspace
+    /// both follow the measured winner instead of the catalog's own ranking.
+    ///
+    /// That made those two cases fail under --gtest_shuffle, and -- because the shard
+    /// outlives the process -- in default order too, on any machine where an earlier run
+    /// left one behind. It is also nondeterministic rather than merely order-dependent:
+    /// the two surviving FLOAT candidates differ by a few nanoseconds, so which one the
+    /// sweep records is a coin flip.
+    ///
+    /// Scope::TEST rather than the default: a deferring instance nested inside main()'s
+    /// would see HIPDNN_CACHE_DIR already set and quietly own nothing, isolating exactly
+    /// nothing. Destroyed with the fixture, so the redirect is undone and the scratch
+    /// tree removed on the failing path as well as the passing one.
     hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
         "ingestor-case", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
 
@@ -462,10 +479,16 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 
 // global.benchmarking: the composite plan built when the knob is set
 
-/// Drives global.benchmarking=1 through the frontend against the shipped pointwise pack,
-/// checking the result against the CPU reference and confirming from the plugin's logs
-/// that the composite plan ran a sampling sweep and resolved a winner once. Which
-/// candidate wins is not asserted: either is correct if the result is right.
+/// Drives global.benchmarking=1 through the frontend against the shipped pointwise
+/// pack, verifying the numerical result against the CPU reference and confirming from
+/// the plugin's own logs that the composite plan actually ran a sampling sweep and
+/// resolved a winner once.
+///
+/// Which candidate wins is deliberately not asserted: the two block-size-64/256 FLOAT
+/// candidates surviving knob filtering for this graph may be indistinguishable within
+/// noise, and either winner is correct so long as it produces the right answer. What
+/// must hold is that benchmarking happened at all -- otherwise the case would pass
+/// identically with the feature removed.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 {
     const ScopedPluginLogCapture capture(this);
@@ -502,10 +525,14 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
 
     verifyBuiltGraph(context, /*seed=*/1);
 
-    // The winner is resolved once for the plan's life, so no re-sampling here.
+    // The winner is resolved once for the plan's life: a second execute() must reuse it
+    // rather than re-sample.
     EXPECT_EQ(countSelectionLogs(recorder), selectionsAfterFirstExecute)
         << "the second execute() re-sampled instead of reusing the winner. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
+
+    // The capture guard restores the global log level and unregisters the callback,
+    // including on an early ASSERT return above.
 }
 
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)
@@ -523,6 +550,12 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
     verifyBuiltGraph(contextB, 1);
 }
 
+// ---------------------------------------------------------------------------
+// Three packs, one provider: the topology commit 2 exists to prove
+// ---------------------------------------------------------------------------
+
+// The pack-based design's core claim: hipDNN routes each operation to the pack that
+// claims it, with nothing above the packs aware any of them exist.
 TEST_F(IntegrationGpuKernelIngestor, ResolvesEveryPointwiseOperationToTheOneEngine)
 {
     auto addGraph = buildPointwiseAddGraph();
@@ -549,6 +582,8 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesEveryPointwiseOperationToTheOneEngi
     EXPECT_TRUE(offers(subEngines, engineId()));
 }
 
+// Numeric proof, not just routing: a-b and b-a are both plausible, so only comparing
+// against the CPU reference catches an operand swap in the third pack's binding.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
 {
     auto graph = buildPointwiseSubGraph();
@@ -559,6 +594,8 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
     verifyBuiltGraph(context, 0);
 }
 
+// Numeric, not just routing: a+b and a*b are both plausible for the same operands, so
+// only the CPU reference catches the engine reaching the wrong pack's kernel.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDifferentPacks)
 {
     auto addGraph = buildPointwiseAddGraph();
@@ -579,7 +616,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDif
     verifyBuiltGraph(addContext, 2);
 }
 
-// Catalogs are cached under (graph, device) keys in the engine's state manager.
+// Catalogs are cached under (graph, device) keys in the engine's state manager; running
+// a third pack between two runs of the first proves no pack's cached state leaks into
+// another's -- a failure mode that only exists once one descriptor set serves several.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
 {
     auto addGraph = buildPointwiseAddGraph();
@@ -597,6 +636,12 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
     verifyBuiltGraph(addContext, 2);
 }
 
+// ---------------------------------------------------------------------------
+// A second engine, split by graph node type
+// ---------------------------------------------------------------------------
+
+// Numeric proof for the second engine: only the CPU reference catches a swapped operand
+// or a wrong accumulation order in the naive kernel.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
 {
     auto graph = buildConvFwdGraph();
@@ -609,6 +654,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
     verifyBuiltGraph(context, 0);
 }
 
+// The claim the graph-node-type split exists to make: the two engines don't overlap.
+// Complements ResolvesEveryPointwiseOperationToTheOneEngine, which already shows every
+// pointwise operation lands on the one engine.
 TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotThePointwiseOne)
 {
     auto convGraph = buildConvFwdGraph();

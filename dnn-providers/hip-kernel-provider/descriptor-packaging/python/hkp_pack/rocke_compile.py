@@ -21,19 +21,26 @@ def _is_union(origin):
     return _UnionType is not None and origin is _UnionType
 
 
-# Pin the backend explicitly: rocKE defaults to "cpp" (core/backend.py), but
-# rocke_engine is built via CMake and excluded from the wheel (platform/pyproject.toml).
-# Without that extension, a "cpp" request warns and falls back to Python. Pinning
-# keeps the artifact's backend record accurate; tools/check_byte_identity.py checks
-# byte identity between backends.
+# The lowering backend the packer pins. rocKE's own default is "cpp"
+# (core/backend.py `_DEFAULT_BACKEND`), but the C++ engine's pybind extension
+# `rocke_engine` is deliberately not part of the rocke wheel -- "the C++ engine
+# and its rocke_engine pybind binding are built via CMake, not pip; they are
+# intentionally NOT part of this wheel" (platform/pyproject.toml). So in the
+# wheel venv the packer runs in, a "cpp" request cannot find its engine and
+# rocKE falls back to the Python lowerer with a warning on stderr.
+#
+# Packaged kernels must not be produced by an accident of which engine happened
+# to be importable. Pin the backend explicitly, and verify it: the two engines
+# are held byte-identical by rocKE's own gate (tools/check_byte_identity.py), so
+# this is about provenance being true, not about the bytes differing.
 _BACKEND = "python"
 
 
 def _reset_backend_audit():
     """Clear rocKE's fallback ledger before a compile, if it exposes one.
 
-    Best-effort: a rocKE without the audit API loses the check rather than
-    breaking packing.
+    Best-effort: a rocKE without the audit API must not break packing, it just
+    loses this check. _assert_no_backend_fallback degrades to a no-op with it.
     """
     try:
         from rocke.core.backend import reset_cpp_fallbacks
@@ -46,7 +53,9 @@ def _assert_no_backend_fallback(source, builder, arch):
     """Fail if the lowering silently degraded to a different backend.
 
     Checked via rocKE's `cpp_fallbacks()` ledger rather than by scraping the
-    warning, which pytest and CMake routinely capture.
+    warning: pytest and CMake both capture stderr, so the warning is routinely
+    invisible while the ledger is not. Confirmed empirically -- a fallback that
+    printed nothing under capture still registered here.
     """
     try:
         from rocke.core.backend import cpp_fallbacks
@@ -76,9 +85,11 @@ def _build_field(field_type, value):
             f"unsupported spec field type {field_type!r} (multi-arm union)"
         )
     if origin is typing.Literal:
-        # Validate membership; the allowed set is one call away. Without this a
-        # typo'd enum-ish value constructs happily and reaches codegen: FmhaMaskMode
-        # is a Literal, so {"mode": "casual"} would build a silently wrong mask.
+        # Validate membership. The allowed set is already one call away -- the
+        # union arm above uses get_args on the same field -- and without this a
+        # typo'd enum-ish value constructs happily and reaches codegen. Real
+        # fields are exposed to it: FmhaMaskMode is a Literal, so
+        # {"mode": "casual"} would build a kernel with a silently wrong mask.
         allowed = typing.get_args(field_type)
         if value not in allowed:
             raise HkpPackError(
@@ -98,11 +109,14 @@ def _build_field(field_type, value):
 def build_spec(cls, data):
     """Construct a builder spec dataclass from a UKD spec dict, recursively.
 
-    Field types resolve via typing.get_type_hints (not field.type, a string under
-    `from __future__ import annotations`): scalar passes through, nested dataclass
-    recurses, Optional[X] gives None or a built X. A list/tuple field type and an
-    unknown input key are hard-rejected; missing fields and a __post_init__
-    rejection propagate from cls(**kwargs). No rocke import.
+    Walks the target dataclass's fields, resolving each field's type via
+    typing.get_type_hints (not field.type, which is a string under
+    `from __future__ import annotations`) and dispatching: scalar -> passthrough;
+    nested dataclass -> recurse into a real instance; Optional[X] -> None or a
+    built X; Literal / other plain -> passthrough. A list/tuple field type and an
+    input key that is not a field are hard-rejected. Missing/mis-typed fields and
+    a spec __post_init__ rejection propagate from cls(**kwargs) for the caller to
+    wrap. No rocke import: directly unit-testable with local stub dataclasses.
     """
     field_names = {f.name for f in dataclasses.fields(cls)}
     extra = set(data) - field_names
@@ -114,7 +128,9 @@ def build_spec(cls, data):
         hints = typing.get_type_hints(cls)
     except Exception as exc:
         # One unresolvable forward reference must not kill the whole spec with a
-        # bare NameError from deep inside typing.
+        # bare NameError from deep inside typing. The sibling resolution in
+        # _resolve_spec_class already guards this way; encountered for real
+        # during review verification.
         raise HkpPackError(
             f"cannot resolve type hints for {cls.__name__} "
             f"({type(exc).__name__}: {exc})"
@@ -129,8 +145,10 @@ def build_spec(cls, data):
 def rocke_variant_key(source, builder, spec):
     """Stable input hash over (source, builder, spec) for a rocke variant.
 
-    All three are keyed: two rocke UKDs sharing source+spec but naming different
-    builders produce different kernels and must not collapse to one blob.
+    Keyed on all three: two rocke UKDs sharing source+spec but naming different
+    builders produce different kernels and must not collapse to one blob, so the
+    builder is part of the key. The nested spec dict hashes deterministically
+    (sort_keys) regardless of key order.
     """
     return _hash_payload(
         Path(source).stem,
@@ -141,8 +159,8 @@ def rocke_variant_key(source, builder, spec):
 def _resolve_spec_class(module, builder_fn):
     """The builder's spec dataclass, from its first-parameter type hint.
 
-    A future UKD `spec_class` override would resolve here first; that seam is
-    intentionally left unbuilt.
+    A future UKD `spec_class` override would resolve here, ahead of the type-hint
+    lookup; that seam is intentionally left unbuilt.
     """
     try:
         hints = typing.get_type_hints(builder_fn)
@@ -159,12 +177,19 @@ def _resolve_spec_class(module, builder_fn):
 
 
 def _require_spec_arch_signature(builder_fn, builder):
-    """Require exactly `(spec, *, arch)` -- nothing the UKD cannot supply.
+    """Require exactly `(spec, *, arch)` — nothing the UKD cannot supply.
 
-    Keyword-only parameters beyond `arch` are the dangerous case: a defaulted
-    tuning object stays frozen at its default on every pack with nothing in the
-    descriptor able to influence it and nothing in the output recording it. Having
-    a default is what makes it invisible, so it is still rejected.
+    Keyword-only parameters beyond `arch` are the dangerous case. A builder that
+    takes a defaulted tuning object would leave that tuning value silently frozen
+    at its default on every pack, with nothing in the descriptor able to
+    influence it and nothing in the output recording that.
+
+    That is not a hypothetical: a silently defaulted knob is exactly how a real
+    regression got mis-reported in this tree. Defaulting a performance knob out
+    of sight is worse than refusing to build, because the artifact looks fine.
+
+    A parameter with a default is still rejected. Having a default is what makes
+    it invisible; it does not make it unimportant.
     """
     params = inspect.signature(builder_fn).parameters
     names = list(params)
@@ -205,8 +230,10 @@ def _require_spec_arch_signature(builder_fn, builder):
 
 
 def _load_compiler():
-    """Lazy handle for the rocke compile entrypoint and its comgr error type, so
-    the hip-only path never imports rocke and tests can substitute a stub.
+    """Lazy handle for the rocke compile entrypoint and its comgr error type.
+
+    Behind a function so the hip-only path never imports rocke and tests can
+    substitute a stub compiler.
     """
     from rocke.helpers import compile_kernel
     from rocke.runtime.comgr import ComgrError
@@ -217,8 +244,9 @@ def _load_compiler():
 def _resolved_comgr_path():
     """Best-effort path of the comgr the rocke loader resolved, for diagnostics.
 
-    Returns 'unknown' rather than raising, so a comgr compile error is never masked
-    by a secondary import failure.
+    Returns 'unknown' rather than raising when rocke is not importable, so a
+    comgr compile error is never masked by a secondary import failure while
+    reporting where comgr came from.
     """
     try:
         from rocke.runtime.comgr import resolved_lib_path
@@ -233,10 +261,10 @@ def _module_from_source(source):
     return ".".join(stem.split("/"))
 
 
-# Builders whose validation predicate is not derivable from the builder name. The
-# tiled family is the largest kernel group in the corpus and none of its
-# predicates follow the naming convention, so name derivation alone reaches 14 of
-# 30 builders.
+# Builders whose validation predicate is not derivable from the builder name.
+# The tiled family is the largest kernel group in the corpus and none of its
+# predicates follow the naming convention, so name derivation alone reaches
+# fewer than half of all builders (measured: 14 of 30).
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d",
     "build_gfx942_4warp_gqa": "supports_tiled_2d",
@@ -263,13 +291,18 @@ def _resolve_support_predicate(module, builder):
 def _check_support_predicate(module, builder, spec_obj, arch):
     """Consult the builder's own support predicate before building.
 
-    Several builders validate only from an external launcher, so an
-    out-of-envelope spec otherwise reaches codegen unchecked.
+    Several builders validate only from an external launcher, not inside the
+    builder itself, so an out-of-envelope spec reaches codegen unchecked and
+    fails late (or worse, succeeds and ships something untested).
 
-    Only spec-shaped predicates are callable generically: the tiled family's
-    `supports_tiled_2d/3d` take keyword-only parameters with no spec object and are
-    skipped rather than guessed at, leaving coverage partial (roughly 14 of 30
-    builders) rather than validating the wrong thing.
+    Only spec-shaped predicates can be called generically. The tiled family's
+    `supports_tiled_2d/3d` take their parameters individually as keyword-only
+    arguments with no spec object at all, so there is nothing to pass them from a
+    spec instance; those are skipped rather than guessed at. Coverage is
+    therefore partial by construction -- roughly 14 of 30 builders by name, and
+    the kwargs-only predicates stay out of reach absent an upstream signature
+    change. Partial and honest beats a fabricated mapping of spec fields onto
+    positional kwargs, which would silently validate the wrong thing.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
@@ -312,12 +345,13 @@ def compile_rocke_variant(
 ):
     """Compile one variant, returning (code object, captured symbol, observations).
 
-    Imports the builder module named by `source` -- a dotted module path resolved
-    through the importable `kernels` package, never a file path -- resolves
-    `builder`, constructs its spec dataclass from the UKD `spec` dict, calls the
-    builder for a KernelDef, and lowers it via rocke's comgr `compile_kernel`.
-    Writes the HSACO to <rocke_variant_key>.co and returns that path plus
-    `artifact.kernel_name`. Every deviation is a hard HkpPackError.
+    Imports the builder module named by `source` — a dotted module path resolved
+    through the importable `kernels` package, never a file path under the source
+    root — resolves `builder`, introspects and constructs its spec dataclass from
+    the UKD `spec` dict, calls the builder for a KernelDef, and lowers it via
+    rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
+    returns that path plus the captured launch symbol (`artifact.kernel_name`).
+    Every deviation is a hard HkpPackError.
     """
     dotted = _module_from_source(source)
     try:

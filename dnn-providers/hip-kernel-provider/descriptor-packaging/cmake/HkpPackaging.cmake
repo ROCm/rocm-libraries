@@ -302,8 +302,10 @@ function(hkp_wire_pack_target)
                       DEPENDS "${_stamp}"
                       COMMENT "hkp: descriptor packaging (${ARG_NAME})")
     if(TARGET hkp_rocke_wheel_python_interp)
-        # Every root shares one venv. A file-level edge alone lets per-directory
-        # generators reprovision the venv while a parallel pack is using it.
+        # Every root shares one venv. A file-level edge alone leaves generators
+        # that build per directory copying the provisioning recipe into each pack
+        # target, so a parallel fresh build can reprovision the venv while
+        # another pack is using it.
         add_dependencies(hkp_packaging_${ARG_NAME} hkp_rocke_wheel_python_interp)
     endif()
     set_property(GLOBAL PROPERTY HKP_PACK_STAMP_${ARG_NAME} "${_stamp}")
@@ -334,11 +336,18 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # _hkp_key_manifest_args(<out_arg> <out_dep> <target>)
-#   Resolve the key manifest <target> published, as a command argument and a dependency.
-#   embed_kernel_sources() records the path on the target; reading it back stops a
-#   consumer in another directory scope from naming a file nothing writes, which reads as
-#   an empty table and passes. A target that never called embed_kernel_sources() has no
-#   property and gets no flag.
+#   Resolve the key manifest <target> published, as a command argument and a
+#   dependency.
+#
+#   embed_kernel_sources() records the path on the target. Reading it back is
+#   what stops a consumer in another directory scope from spelling the same rule
+#   a second time and naming a file nothing writes -- which reads as an empty
+#   table and passes, exactly as a target that embeds nothing does.
+#
+#   A target that never called embed_kernel_sources() has no property and gets
+#   no flag, which is a fact about the target rather than about a directory. A
+#   target with kernels registered but no manifest is neither case: the check
+#   has been ordered before the embedding.
 # ---------------------------------------------------------------------------
 function(_hkp_key_manifest_args out_arg out_dep target)
     get_target_property(_manifest ${target} KERNELEMBEDDING_KEY_MANIFEST)
@@ -1147,8 +1156,9 @@ the one named here.")
     # what both of them see. An explicitly-set value is left alone.
     hkp_default_rocke_comgr_lib()
 
-    # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: our
-    # cache entry's value is forwarded into the environment rocke reads.
+    # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
+    # value comes from our own cache entry and is forwarded into the environment rocke
+    # reads.
     set(_rocke_comgr_lib "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
 
     hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
@@ -1164,8 +1174,9 @@ the one named here.")
     hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready "${_rocke_wheel_stamp}")
 
     # One list for every root, so "every root is wired to rocKE identically" is
-    # structural. COMGR_LIB is appended only when set: an empty element does not survive
-    # unquoted expansion, and losing one shifts every following keyword out of slot.
+    # structural rather than six sites that have to agree. COMGR_LIB is appended
+    # only when set: an empty element does not survive unquoted expansion, and
+    # losing one would shift every following keyword into the wrong slot.
     set(_rocke_args
         ROCKE_INTERP "${_rocke_interp}"
         ROCKE_READY "${_rocke_ready}"
@@ -1269,8 +1280,8 @@ function(hkp_add_packaging)
     endif()
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
-    # test roots, so both test binaries see the same authored descriptors; the two roots
-    # need distinct NAMEs.
+    # test roots, so both test binaries see the same authored descriptors; the two need
+    # distinct NAMEs.
     set(_authored "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT}")
     set(_unit "${HIPKERNELPROVIDER_UNIT_BUILD_DIR}")
     set(_integration "${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}")
