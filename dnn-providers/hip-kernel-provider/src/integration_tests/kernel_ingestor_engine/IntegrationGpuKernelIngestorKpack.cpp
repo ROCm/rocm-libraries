@@ -153,17 +153,10 @@ std::vector<std::filesystem::path> findKpackArchives(const std::filesystem::path
 std::vector<std::filesystem::path> findKpackArchivesForArch(const std::filesystem::path& root,
                                                             const std::string& arch)
 {
-    std::vector<std::filesystem::path> matching;
-    for(const auto& archive : findKpackArchives(root))
-    {
-        // The shard directory is named for its arch: <root>/<arch>/kpack/<file>.kpack.
-        const auto shard = archive.parent_path().parent_path().filename().string();
-        if(shard == arch)
-        {
-            matching.push_back(archive);
-        }
-    }
-    return matching;
+    // The shard is a directory named for its arch, so searching starts inside it rather
+    // than at the root: a walk from the root crosses the arch segment, which is the only
+    // thing distinguishing packed from packed-for-this-device.
+    return findKpackArchives(root / arch);
 }
 
 /// The directory holding the pristine archive. It sits beside the descriptor tree rather
