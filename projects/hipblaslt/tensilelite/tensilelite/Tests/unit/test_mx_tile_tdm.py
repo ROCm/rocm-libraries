@@ -23,6 +23,7 @@ from Tensile.Common.MxScaleLayout import (
     mxTdmTileM,
     mxGl2CoalescedDim,
     mxGl2TileOffset,
+    mxIssueTpList,
     mxTileSpanPartnerDelta,
 )
 from Tensile.Components.GL2Prefetch import GL2PrefetchLoad
@@ -251,3 +252,19 @@ def test_mx_tile_span_partner_delta_non_split():
     # MIWG=1: 16 * VW
     assert mxTileSpanPartnerDelta(_partner_delta_kernel(4, (1, 1)), "MXSA", 0) == 64
     assert mxTileSpanPartnerDelta(_partner_delta_kernel(8, (1, 1)), "MXSA", 0) == 128
+
+
+def test_mx_issue_tp_list_mxs_then_ab():
+    tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
+    tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
+    kernel = {"ProblemType": {"MXBlockA": 32, "MXBlockB": 32}}
+    chars = [tp["tensorChar"] for tp in mxIssueTpList(kernel, tPA, tPB)]
+    assert chars == ["MXSA", "MXSB", "A", "B"]
+
+
+def test_mx_issue_tp_list_without_mx_is_ab():
+    tPA = {"tensorChar": "A"}
+    tPB = {"tensorChar": "B"}
+    kernel = {"ProblemType": {"MXBlockA": 0, "MXBlockB": 0}}
+    chars = [tp["tensorChar"] for tp in mxIssueTpList(kernel, tPA, tPB)]
+    assert chars == ["A", "B"]
