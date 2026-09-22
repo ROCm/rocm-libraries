@@ -2576,7 +2576,16 @@ class Solution(collections.abc.Mapping):
 
     # Give each wave a contiguous block of MIWaveTile output tiles (like subtile) via the shared
     # gate contigOut = UseSubtileImpl or WaveContiguousOutput; does not enable subtile itself.
-    state["WaveContiguousOutput"] = state["enableLDSTrB"] and not state["UseSubtileImpl"]
+    # Gated by the raw store REQUEST (not enableLDSTrB) so a normal store never gets the re-layout,
+    # and TN/NN qualify (dropping the enableLDSTrB/TransposeB=T coupling). SourceSwap must be False:
+    # the wave-contiguous store's staging geometry (N_local=lane&15, Mhalf=lane>>4) assumes the
+    # non-SourceSwap WMMA output->(M,N) mapping (SourceSwap flips MFMAContinuousOutputs/OutputsPerMIMN).
+    _wcoReq  = (state.get("WaveTransposeStore", 0) != 0) or state.get("WaveTransposeStoreTDM", 0)
+    _wcoDtype = state["ProblemType"]["DestDataType"]
+    _wcoDtypeOK = _wcoDtype.is8bitFloat() or _wcoDtype.isBFloat16() or _wcoDtype.isHalf()
+    state["WaveContiguousOutput"] = (bool(_wcoReq) and not state["UseSubtileImpl"]
+        and state["WavefrontSize"] == 32 and state["ProblemType"]["HighPrecisionAccumulate"]
+        and _wcoDtypeOK and not state.get("SourceSwap", False))
 
     # WaveTransposeStore: in-register wave-local block-lane-permutation store, valid on the classic
     # LDSTr contiguous-output path (wave32, HPA) for f8/bf16/fp16 dest. The value T is the MERGE
@@ -2625,6 +2634,14 @@ class Solution(collections.abc.Mapping):
               and isaInfoMap[isa].asmCaps.get("HasTDM", False)):
         state["WaveTransposeStoreTDM"] = 0
 
+    # Safety net: if the requested wave-contiguous store was disabled by its OWN extra check
+    # (T-divisibility for WaveTransposeStore>0, HasTDM for TDM), the kernel falls back to a normal
+    # store — so turn the re-layout back off, otherwise a normal store would run with a scrambled
+    # WaveContiguousOutput accumulator layout. (WaveTransposeStore=-1 plain baseline stays: != 0.)
+    if state["WaveContiguousOutput"] and state.get("WaveTransposeStore", 0) == 0 \
+        and not state.get("WaveTransposeStoreTDM", 0):
+      state["WaveContiguousOutput"] = False
+
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
     # if state["LDSTrInst"] != finalLDSTrInst:
@@ -2641,10 +2658,15 @@ class Solution(collections.abc.Mapping):
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
 	  
-    if state["enableLDSTrA"] or state["enableGLTrA"]:
+    # WaveContiguousOutput: the wave-contiguous store (WaveTransposeStore / WaveTransposeStoreTDM) stages
+    # accumulator tiles by their (tt0,tt1) tile indices. With VW>1 the store enumeration folds those tiles
+    # into vector components (vc0/vc1) of a single (0,0) tile (NotLocalFullTileElementsMFMA), so the store's
+    # per-tile trigger never fires. The NT/TT path gets VW=1 for free via enableLDSTr; force it here too so
+    # the non-transposed TN/NN path enumerates the same 4x4 tile grid.
+    if state["enableLDSTrA"] or state["enableGLTrA"] or state["WaveContiguousOutput"]:
       state["VectorWidthA"] = 1
 
-    if state["enableLDSTrB"] or state["enableGLTrB"]:
+    if state["enableLDSTrB"] or state["enableGLTrB"] or state["WaveContiguousOutput"]:
       state["VectorWidthB"] = 1
 
     if state["_ScheduleIterAlg"] == 2:
