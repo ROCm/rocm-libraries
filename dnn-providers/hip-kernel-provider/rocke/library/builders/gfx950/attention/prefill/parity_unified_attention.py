@@ -1425,6 +1425,14 @@ def _run_rocke(
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
         num_cus=120,
+        # Mirror production's num_kv_blocks inference (run_unified_attention_torch
+        # fills this from key_cache.shape[0]). The direct "2d"/"3d" lanes below
+        # build the spec straight from _tiled_spec_from_problem and bypass that
+        # inference, so without this the paged-cache size is unknown (0) and
+        # _enable_i64_kv_addr stays on the i32 voffset path -- which silently
+        # overflows once the cache exceeds 2 GiB (e.g. num_kv_heads=8 x 32768
+        # blocks = 4 GiB), corrupting KV loads for high physical-block indices.
+        num_kv_blocks=int(data["key_cache"].shape[0]),
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
         waves_per_eu=force_wpe,
     )
