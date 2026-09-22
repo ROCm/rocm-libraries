@@ -138,7 +138,8 @@ namespace rocsparse
                                           bool                 add)
     {
         // Grid-stride over the (sub)wavefront rows so a grid clamped to maxGridSize[0] covers all
-        for(int64_t block_offset = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE); block_offset < m;
+        for(int64_t block_offset = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE);
+            block_offset < m;
             block_offset += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
             rocsparse::
