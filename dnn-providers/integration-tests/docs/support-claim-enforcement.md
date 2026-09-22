@@ -383,6 +383,7 @@ binary by hand, as above, is the other local route and needs no reconfigure.
 | Symptom | Cause |
 |---|---|
 | `--enforce-support-claims requires --test-engine` | No engine named; there is nothing to check claims against |
+| `HSA_OVERRIDE_GFX_VERSION … is demoted to --report-support-claims` | Claims resolve by exact match on the *reported* arch, so the override does not miss — it hits another arch's claims. Enforcing those against absent hardware would fabricate failures, so the run reports instead. Unset the variable to enforce. Authoring (`--write-support-claims`) is refused outright |
 | `support claims exist for X but were never queried` | A code path short-circuited above the query — a harness bug, not a data problem |
 | `FATAL: … not one of them was ever queried` | Claim-bearing graphs ran and none was queried: the GPU or the engine plugin failed to load, or every one of them failed to open (already red on its own account). A filter that selected only unclaimed graphs is *not* a cause |
 | `CLAIM_BROKEN … not in ranked list` | The engine dropped support for a graph the sidecar promises. Fix the engine, or update the sidecar |

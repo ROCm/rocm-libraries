@@ -363,10 +363,11 @@ int main(int argc, char** argv) noexcept
 
         // HSA_OVERRIDE_GFX_VERSION rewrites the gcnArchName hipGetDeviceProperties
         // reports, and that string is all the harness knows about the device
-        // (DeviceQuery.hpp). A read-only run only mislabels its own output, so it
-        // is warned; a write lands the wrong arch in a checked-in sidecar no run on
-        // real hardware can match or clear -- the class SupportClaimWriter.cpp
-        // already rejects for an empty arch -- so that one is refused.
+        // (DeviceQuery.hpp). Each claim mode gets the weakest response that keeps it
+        // honest: a write lands the wrong arch in a checked-in sidecar no run on real
+        // hardware can match or clear -- the class SupportClaimWriter.cpp already
+        // rejects for an empty arch -- so it is refused; a report only mislabels its
+        // own output, so it is warned; enforcement sits between the two and is demoted.
         const std::string archOverride
             = hipdnn_data_sdk::utilities::getEnv("HSA_OVERRIDE_GFX_VERSION");
         if(!archOverride.empty())
@@ -380,11 +381,30 @@ int main(int argc, char** argv) noexcept
                              "you mean to claim.\n";
                 return 1;
             }
-            if(opts.enforceSupportClaims || opts.reportSupportClaims)
+            if(opts.enforceSupportClaims)
+            {
+                // Demoted rather than refused. Lookup is an exact map::find on the
+                // reported arch, so the override does not miss -- it hits another
+                // arch's cell, and those claims are then held against silicon nobody
+                // asked. Failing on that fabricates a result; printing it still tells
+                // you what the other arch would do, which is what report mode is for.
+                // Done before initialize() so claimMode() and everything downstream
+                // see one consistent decision.
+                opts.enforceSupportClaims = false;
+                opts.reportSupportClaims = true;
+                std::cerr << "Warning: HSA_OVERRIDE_GFX_VERSION=" << archOverride
+                          << " is set; --enforce-support-claims is\n"
+                             "         demoted to --report-support-claims. Claims resolve "
+                             "against the overridden\n"
+                             "         arch, so a failure here would be about hardware that is "
+                             "not present.\n"
+                             "         Unset it to enforce.\n";
+            }
+            else if(opts.reportSupportClaims)
             {
                 std::cerr << "Warning: HSA_OVERRIDE_GFX_VERSION=" << archOverride
-                          << " is set; support-claim verdicts will be\nlabelled with the "
-                             "overridden arch, not the physical one.\n";
+                          << " is set; support-claim verdicts will be\n         labelled with "
+                             "the overridden arch, not the physical one.\n";
             }
         }
 
