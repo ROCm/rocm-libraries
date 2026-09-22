@@ -2872,60 +2872,34 @@ void cpu_getrf<hipsolverDoubleComplex>(
 
 // getri
 template <>
-void cpu_getri<float>(int n, float* A, int lda, int* ipiv, int* info)
+void cpu_getri<float>(int n, float* A, int lda, int* ipiv, float* work, int lwork, int* info)
 {
-    // Query optimal workspace size
-    int   lwork = -1;
-    float work_query;
-    sgetri_(&n, A, &lda, ipiv, &work_query, &lwork, info);
-
-    // Allocate workspace and perform computation
-    lwork = static_cast<int>(work_query);
-    std::vector<float> work(lwork);
-    sgetri_(&n, A, &lda, ipiv, work.data(), &lwork, info);
+    sgetri_(&n, A, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
-void cpu_getri<double>(int n, double* A, int lda, int* ipiv, int* info)
+void cpu_getri<double>(int n, double* A, int lda, int* ipiv, double* work, int lwork, int* info)
 {
-    // Query optimal workspace size
-    int    lwork = -1;
-    double work_query;
-    dgetri_(&n, A, &lda, ipiv, &work_query, &lwork, info);
-
-    // Allocate workspace and perform computation
-    lwork = static_cast<int>(work_query);
-    std::vector<double> work(lwork);
-    dgetri_(&n, A, &lda, ipiv, work.data(), &lwork, info);
+    dgetri_(&n, A, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
-void cpu_getri<hipsolverComplex>(int n, hipsolverComplex* A, int lda, int* ipiv, int* info)
+void cpu_getri<hipsolverComplex>(
+    int n, hipsolverComplex* A, int lda, int* ipiv, hipsolverComplex* work, int lwork, int* info)
 {
-    // Query optimal workspace size
-    int              lwork = -1;
-    hipsolverComplex work_query;
-    cgetri_(&n, A, &lda, ipiv, &work_query, &lwork, info);
-
-    // Allocate workspace and perform computation
-    lwork = static_cast<int>(work_query.real());
-    std::vector<hipsolverComplex> work(lwork);
-    cgetri_(&n, A, &lda, ipiv, work.data(), &lwork, info);
+    cgetri_(&n, A, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
-void cpu_getri<hipsolverDoubleComplex>(
-    int n, hipsolverDoubleComplex* A, int lda, int* ipiv, int* info)
+void cpu_getri<hipsolverDoubleComplex>(int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       int*                    ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
 {
-    // Query optimal workspace size
-    int                    lwork = -1;
-    hipsolverDoubleComplex work_query;
-    zgetri_(&n, A, &lda, ipiv, &work_query, &lwork, info);
-
-    // Allocate workspace and perform computation
-    lwork = static_cast<int>(work_query.real());
-    std::vector<hipsolverDoubleComplex> work(lwork);
-    zgetri_(&n, A, &lda, ipiv, work.data(), &lwork, info);
+    zgetri_(&n, A, &lda, ipiv, work, &lwork, info);
 }
 
 // getrs

@@ -161,7 +161,7 @@ void getri_initData(const hipsolverHandle_t handle,
             if(!NPVT)
             {
                 // shuffle rows to test pivoting
-                // always the same permuation for debugging purposes
+                // always the same permutation for debugging purposes
                 for(rocblas_int i = 0; i < n / 2; i++)
                 {
                     for(rocblas_int j = 0; j < n; j++)
@@ -218,6 +218,9 @@ void getri_getError(const hipsolverHandle_t handle,
                     INTh&                   hInfoRes,
                     double*                 max_err)
 {
+    rocblas_int    sizeW = n;
+    std::vector<T> hW(sizeW);
+
     // input data initialization (includes cpu_getrf to compute LU factorization)
     getri_initData<NPVT, true, true, T>(
         handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
@@ -245,7 +248,7 @@ void getri_getError(const hipsolverHandle_t handle,
 
     // CPU lapack - compute inverse from LU factorization
     for(int b = 0; b < bc; ++b)
-        cpu_getri(n, hA[b], lda, hIpiv[b], hInfo[b]);
+        cpu_getri(n, hA[b], lda, hIpiv[b], hW.data(), sizeW, hInfo[b]);
 
     // expecting original matrix to be non-singular
     // error is ||hA - hCRes|| / ||hA||
@@ -303,13 +306,16 @@ void getri_getPerfData(const hipsolverHandle_t handle,
 {
     if(!perf)
     {
+        rocblas_int    sizeW = n;
+        std::vector<T> hW(sizeW);
+
         getri_initData<NPVT, true, false, T>(
             handle, n, dA, lda, dIpiv, stP, dC, ldc, dInfo, bc, hA, hIpiv, hC, hInfo);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
         for(int b = 0; b < bc; ++b)
-            cpu_getri(n, hA[b], lda, hIpiv[b], hInfo[b]);
+            cpu_getri(n, hA[b], lda, hIpiv[b], hW.data(), sizeW, hInfo[b]);
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
