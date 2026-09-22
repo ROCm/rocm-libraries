@@ -1096,8 +1096,15 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     # forwarded here regardless of which variable resolved it.
     #
     # HKP_HIPCC names the hipcc that configure found.
+    #
+    # HKP_CMAKE_COMMAND and HKP_CMAKE_MAKE_PROGRAM name this build's own CMake
+    # and build tool. The python environment tests drive real sub-configures and
+    # sub-builds; without these they would resolve `cmake` and `ninja` from PATH
+    # and could exercise a different CMake than the one running them.
     set(_pyenv "PYTHONPATH=${HKP_PYTHON_ROOT}"
-        "HKP_HIPCC=${hipcc}")
+        "HKP_HIPCC=${hipcc}"
+        "HKP_CMAKE_COMMAND=${CMAKE_COMMAND}"
+        "HKP_CMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
     if(rocm_kpack_dir)
         list(APPEND _pyenv "HIPKERNELPROVIDER_ROCM_KPACK_DIR=${rocm_kpack_dir}")
     endif()

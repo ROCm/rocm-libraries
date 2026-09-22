@@ -10,23 +10,6 @@ option(ALLOW_FETCH_DEPS
        OFF
 )
 
-# HIPDNN_NO_DOWNLOAD is the previous, inverted spelling, honoured for one
-# release. Only a truthy value counts: the previous release declared it with
-# option(), so every existing build tree caches HIPDNN_NO_DOWNLOAD:BOOL=OFF and
-# a DEFINED test would fire on any reconfigure.
-if(HIPDNN_NO_DOWNLOAD)
-    message(DEPRECATION
-        "HIPDNN_NO_DOWNLOAD is deprecated and will be removed. Use "
-        "ALLOW_FETCH_DEPS, which has the inverse meaning. Interpreting "
-        "HIPDNN_NO_DOWNLOAD=${HIPDNN_NO_DOWNLOAD} as ALLOW_FETCH_DEPS=OFF."
-    )
-    set(ALLOW_FETCH_DEPS OFF CACHE BOOL
-        "Allow fetching third-party dependencies the build environment does not provide"
-        FORCE
-    )
-endif()
-unset(HIPDNN_NO_DOWNLOAD CACHE)
-
 # Backstop for fetches that bypass hipdnn_add_dependency(). Uncached, so it
 # applies to this directory and below and not to sibling subprojects, which run
 # their own FetchContent and never opted into this policy.
@@ -72,39 +55,75 @@ set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps)
 
+# _hipdnn_require_provided(dep_name provides)
+#
+# Fails unless dep_name needs no acquisition, which an explicitly supplied
+# source tree satisfies. The source-tree variables match the FetchContent
+# declarations, not necessarily package names. A non-empty provides names the
+# part of the dependency a found-but-unusable package lacked.
+function(_hipdnn_require_provided dep_name provides)
+    set(_source_dir_GTest "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}")
+    set(_source_dir_flatbuffers "${FETCHCONTENT_SOURCE_DIR_FLATBUFFERS}")
+    set(_source_dir_spdlog "${FETCHCONTENT_SOURCE_DIR_SPDLOG}")
+    set(_source_dir_nlohmann_json "${FETCHCONTENT_SOURCE_DIR_JSON}")
+    set(_source_dir "${_source_dir_${dep_name}}")
+    if(_source_dir AND IS_DIRECTORY "${_source_dir}")
+        return()
+    endif()
+    if(provides)
+        set(_subject "${dep_name} with ${provides}")
+    else()
+        set(_subject "${dep_name}")
+    endif()
+    message(FATAL_ERROR
+        "${_subject} was not found, and hipDNN does not fetch "
+        "third-party dependencies. They are provided by the build "
+        "environment: TheRock's third-party tree, or an install "
+        "prefix on CMAKE_PREFIX_PATH. Provide ${dep_name}, or "
+        "configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
+        "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
+    )
+endfunction()
+
 # hipdnn_add_dependency( dep_name [NO_LOCAL] [VERSION version] [FIND_PACKAGE_ARGS args...]
 # [COMPONENT component] [PACKAGE_NAME [package_name] [DEB deb_package_name] [RPM rpm_package_name]]
+# [REQUIRED_TARGETS targets...] [PROVIDES description]
 # )
 #
 # Adds a dependency to the project.
+#
+# REQUIRED_TARGETS names imported targets a found package must define to be
+# usable here. A package missing any of them cannot build this project, so it is
+# treated as not found and takes the same acquisition path as an absent one.
+# PROVIDES describes those targets in the diagnostics, e.g. "GoogleMock
+# (GTest::gmock)".
 function(hipdnn_add_dependency dep_name)
     set(options NO_LOCAL)
-    set(oneValueArgs VERSION HASH)
-    set(multiValueArgs FIND_PACKAGE_ARGS PACKAGE_NAME COMPONENTS)
+    set(oneValueArgs VERSION HASH PROVIDES)
+    set(multiValueArgs FIND_PACKAGE_ARGS PACKAGE_NAME COMPONENTS REQUIRED_TARGETS)
     cmake_parse_arguments(PARSE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     if(dep_name IN_LIST _hipdnn_all_local_deps)
         message(VERBOSE "----------- Finding ${dep_name} -----------")
         if(NOT PARSE_NO_LOCAL)
             find_package(${dep_name} ${PARSE_VERSION} QUIET ${PARSE_FIND_PACKAGE_ARGS})
         endif()
+        set(_incomplete_package FALSE)
+        foreach(_required_target IN LISTS PARSE_REQUIRED_TARGETS)
+            if(${dep_name}_FOUND AND NOT TARGET ${_required_target})
+                message(STATUS
+                    "Ignoring the ${dep_name} package at ${${dep_name}_DIR}: it "
+                    "does not provide ${PARSE_PROVIDES}, which this build links."
+                )
+                set(${dep_name}_FOUND FALSE)
+                set(_incomplete_package TRUE)
+            endif()
+        endforeach()
         if(NOT ${dep_name}_FOUND)
             if(NOT ALLOW_FETCH_DEPS)
-                # Explicit source trees need no acquisition. These names match
-                # the FetchContent declarations, not necessarily package names.
-                set(_source_dir_GTest "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}")
-                set(_source_dir_flatbuffers "${FETCHCONTENT_SOURCE_DIR_FLATBUFFERS}")
-                set(_source_dir_spdlog "${FETCHCONTENT_SOURCE_DIR_SPDLOG}")
-                set(_source_dir_nlohmann_json "${FETCHCONTENT_SOURCE_DIR_JSON}")
-                set(_source_dir "${_source_dir_${dep_name}}")
-                if(NOT _source_dir OR NOT IS_DIRECTORY "${_source_dir}")
-                    message(FATAL_ERROR
-                        "${dep_name} was not found, and hipDNN does not fetch "
-                        "third-party dependencies. They are provided by the build "
-                        "environment: TheRock's third-party tree, or an install "
-                        "prefix on CMAKE_PREFIX_PATH. Provide ${dep_name}, or "
-                        "configure with -DALLOW_FETCH_DEPS=ON to fetch it. See "
-                        "https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md"
-                    )
+                if(_incomplete_package)
+                    _hipdnn_require_provided(${dep_name} "${PARSE_PROVIDES}")
+                else()
+                    _hipdnn_require_provided(${dep_name} "")
                 endif()
             endif()
             message(STATUS "Did not find ${dep_name}, it will be built locally")

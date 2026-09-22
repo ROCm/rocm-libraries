@@ -14,13 +14,25 @@ set(EXAMPLE_PROVIDER_GTEST_VERSION "1.17.0" CACHE STRING
 # fallback when no package is available.
 find_package(GTest CONFIG QUIET)
 
+# These tests link GoogleMock, which a GTest package exports only when it was
+# built with BUILD_GMOCK=ON and INSTALL_GTEST=ON. A package without it is
+# unusable here, so it is treated as not found.
+if(GTest_FOUND AND NOT TARGET GTest::gmock)
+    message(STATUS
+        "Ignoring the GTest package at ${GTest_DIR}: it does not provide "
+        "GoogleMock (GTest::gmock), which these tests link."
+    )
+    set(GTest_FOUND FALSE)
+endif()
+
 if(NOT GTest_FOUND)
     # An explicitly supplied source tree needs no acquisition.
     if(NOT ALLOW_FETCH_DEPS AND
        (NOT FETCHCONTENT_SOURCE_DIR_GOOGLETEST OR
         NOT IS_DIRECTORY "${FETCHCONTENT_SOURCE_DIR_GOOGLETEST}"))
         message(FATAL_ERROR
-            "GTest was not found, and ${PROJECT_NAME} does not fetch "
+            "GTest with GoogleMock (GTest::gmock) was not found, and "
+            "${PROJECT_NAME} does not fetch "
             "third-party dependencies. They are provided by the build "
             "environment: TheRock's third-party tree, or an install prefix on "
             "CMAKE_PREFIX_PATH. Provide GTest, disable this project's tests, "

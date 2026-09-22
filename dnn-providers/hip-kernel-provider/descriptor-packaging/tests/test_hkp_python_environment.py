@@ -107,7 +107,9 @@ def _module(directory, name, value):
 
 
 class _Environment:
-    def __init__(self, root, *, pip=True, user_site=False):
+    def __init__(self, root, *, cmake, make_program, pip=True, user_site=False):
+        self.cmake = cmake
+        self.make_program = make_program
         self.root = root
         self.source = root / "source with spaces"
         self.build_dir = root / "build with spaces"
@@ -216,14 +218,17 @@ endforeach()
         )
 
     def configure(self, *, python=None, success=True):
+        # CMAKE_MAKE_PROGRAM is supplied rather than discovered so the Ninja the
+        # surrounding build uses drives this sub-build too.
         return self.run(
-            "cmake",
+            self.cmake,
             "-S",
             self.source,
             "-B",
             self.build_dir,
             "-G",
             "Ninja",
+            f"-DCMAKE_MAKE_PROGRAM={self.make_program}",
             f"-DPython3_EXECUTABLE={python or self.python}",
             f"-DROCKE_WHEEL_DIR={self.wheels}",
             f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB={self.root / 'comgr with spaces'}",
@@ -234,7 +239,7 @@ endforeach()
         # Both consumers share the actual provisioning producer. Let Ninja select
         # its normal parallelism instead of serializing this regression.
         return self.run(
-            "cmake",
+            self.cmake,
             "--build",
             self.build_dir,
             "--target",
@@ -279,8 +284,20 @@ def _assert_wheels(environment, value):
         assert result["digest"] == environment.digest.read_text().strip()
 
 
-def test_pth_runtime_and_parent_inventory_preserved(tmp_path):
-    env = _Environment(tmp_path)
+@pytest.fixture
+def build_environment(tmp_path, cmake, cmake_make_program):
+    """Build an _Environment wired to the CMake and build tool of this build."""
+
+    def factory(**kwargs):
+        return _Environment(
+            tmp_path, cmake=cmake, make_program=cmake_make_program, **kwargs
+        )
+
+    return factory
+
+
+def test_pth_runtime_and_parent_inventory_preserved(tmp_path, build_environment):
+    env = build_environment()
     parent_wheels = tmp_path / "parent wheels"
     parent_rocke = _wheel(
         parent_wheels, "rocke", {"rocke/__init__.py": "VALUE = 'parent'\n"}
@@ -311,8 +328,8 @@ def test_pth_runtime_and_parent_inventory_preserved(tmp_path):
     assert env.snapshot() == before
 
 
-def test_enabled_user_site_runtime_preserved(tmp_path):
-    env = _Environment(tmp_path, user_site=True)
+def test_enabled_user_site_runtime_preserved(tmp_path, build_environment):
+    env = build_environment(user_site=True)
     (env.site / "hkp_fixture_runtime.pth").unlink()
     user_site = Path(
         env.run(
@@ -334,8 +351,8 @@ def test_enabled_user_site_runtime_preserved(tmp_path):
     assert env.snapshot() == before
 
 
-def test_execution_time_pythonpath_and_startup_precedence(tmp_path):
-    env = _Environment(tmp_path)
+def test_execution_time_pythonpath_and_startup_precedence(tmp_path, build_environment):
+    env = build_environment()
     first, second = tmp_path / "ambient first", tmp_path / "ambient second"
     _module(first, "ambient", "first")
     _module(second, "ambient", "second")
@@ -368,8 +385,10 @@ def test_execution_time_pythonpath_and_startup_precedence(tmp_path):
 
 
 @pytest.mark.parametrize("missing", ["interpreter", "pip", "msgpack", "zstandard"])
-def test_missing_supplied_prerequisite_fails_early(tmp_path, missing):
-    env = _Environment(tmp_path, pip=missing != "pip")
+def test_missing_supplied_prerequisite_fails_early(
+    tmp_path, missing, build_environment
+):
+    env = build_environment(pip=missing != "pip")
     python = env.python
     if missing == "interpreter":
         python = tmp_path / "absent interpreter"
@@ -385,8 +404,8 @@ def test_missing_supplied_prerequisite_fails_early(tmp_path, missing):
     assert not (env.build_dir / "first" / "imports.json").exists()
 
 
-def test_same_version_refresh_removes_old_modules(tmp_path):
-    env = _Environment(tmp_path)
+def test_same_version_refresh_removes_old_modules(build_environment):
+    env = build_environment()
     env.configure()
     env.build()
     assert env.consumer()["modules"]["removed_module"]["value"] == "old-only"
@@ -401,8 +420,8 @@ def test_same_version_refresh_removes_old_modules(tmp_path):
     assert env.ready.stat().st_mtime_ns != before
 
 
-def test_identical_wheels_do_not_reinstall(tmp_path):
-    env = _Environment(tmp_path)
+def test_identical_wheels_do_not_reinstall(build_environment):
+    env = build_environment()
     env.configure()
     env.build()
     marker = env.private / "installation-must-survive"
@@ -418,8 +437,8 @@ def test_identical_wheels_do_not_reinstall(tmp_path):
     _assert_wheels(env, "wheel-one")
 
 
-def test_deleted_private_directory_recovers(tmp_path):
-    env = _Environment(tmp_path)
+def test_deleted_private_directory_recovers(build_environment):
+    env = build_environment()
     env.configure()
     env.build()
     sibling = env.build_dir / "unrelated-build-output"
@@ -432,8 +451,8 @@ def test_deleted_private_directory_recovers(tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["corrupt-wheel", "invalid-import"])
-def test_failed_refresh_clears_readiness_and_recovers(tmp_path, failure):
-    env = _Environment(tmp_path)
+def test_failed_refresh_clears_readiness_and_recovers(failure, build_environment):
+    env = build_environment()
     env.configure()
     env.build()
     outputs = [env.build_dir / label / "imports.json" for label in ("first", "second")]

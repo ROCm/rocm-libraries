@@ -42,7 +42,7 @@ The SDK packages can come from either:
 
 Either approach works as long as the installed SDK version is compatible with the plugin version being built.
 
-The [hipDNN developer image](../../projects/hipdnn/dockerfiles/README.md) supplies GoogleTest/GoogleMock and spdlog automatically in `/usr/local`. The steps below need no dependency download, install, or fetch flag in that image; ROCm and the compatible hipDNN SDKs must still be available.
+The [hipDNN developer image](../../projects/hipdnn/dockerfiles/README.md) supplies the third-party libraries. The steps below need no dependency download, install, or fetch flag in that image; ROCm and the compatible hipDNN SDKs must still be available.
 
 > **Avoiding header conflicts:** If you have hipDNN installed system-wide (e.g., from ROCm or TheRock) and also build hipDNN from source in the repository, the two sets of headers may conflict. To avoid this, use `CMAKE_PREFIX_PATH` to point at exactly the installation you intend to use:
 >
@@ -58,21 +58,14 @@ The [hipDNN developer image](../../projects/hipdnn/dockerfiles/README.md) suppli
     - If you would like to enable/disable a specific engine, add the argument `-DENABLE_<engine>=0` (example: `-DENABLE_ASM_SDPA_ENGINE=0`)
 4. Finally, run `ninja` to build the plugin.
 
-Outside the image, choose one configure command from this provider's build directory:
+Outside the image, this provider resolves third-party libraries like every other hipDNN component; see [Third-Party Libraries](../../projects/hipdnn/docs/Building.md#third-party-libraries) for the installed-package and fetch options. Configure from this provider's build directory:
 
 ```bash
-# Installed packages only, using absolute paths.
 cmake -GNinja -DCMAKE_CXX_COMPILER=/path/to/amdclang/clang++ \
-    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" \
-    -DALLOW_FETCH_DEPS=OFF ..
-
-# Alternatively, allow this standalone provider to fetch missing GoogleTest.
-cmake -GNinja -DCMAKE_CXX_COMPILER=/path/to/amdclang/clang++ \
-    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" \
-    -DALLOW_FETCH_DEPS=ON ..
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
 ```
 
-The combined prefixes must provide HIP/HIPRTC, `hipdnn_data_sdk`, `hipdnn_flatbuffers_sdk`, `hipdnn_plugin_sdk`, and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), plus GoogleTest including GoogleMock for tests. `GTest_DIR` can identify an installed GoogleTest package instead of adding its prefix. The `ON` alternative only fetches GoogleTest; it does not fetch the SDKs or other prerequisites. This independent configure does not inherit a previous hipDNN build's fetch setting.
+Beyond the shared third-party set, the prefixes must provide HIP/HIPRTC, `hipdnn_data_sdk`, `hipdnn_flatbuffers_sdk`, `hipdnn_plugin_sdk`, and their transitive dependencies. The fetch opt-in supplies none of those.
 
 ### Build Requirements
 
@@ -81,7 +74,7 @@ The combined prefixes must provide HIP/HIPRTC, `hipdnn_data_sdk`, `hipdnn_flatbu
 - CMake 3.25+
 - Ninja build system
 - C++17 compatible compiler (amdclang++ recommended)
-- GoogleTest including GoogleMock for tests, supplied automatically by the developer image or through `CMAKE_PREFIX_PATH` or `GTest_DIR`; standalone fetching requires `-DALLOW_FETCH_DEPS=ON` and defaults to version 1.17.0
+- GoogleTest including GoogleMock for tests (see [Third-Party Libraries](../../projects/hipdnn/docs/Building.md#third-party-libraries))
 
 Descriptor packaging (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`) additionally requires a supplied `Python3_EXECUTABLE` with pip, `msgpack`, and `zstandard`, a kpack source tree, and local rocKE wheels. The `hkp_rocke_wheel_python_interp` target installs those wheels only into build-owned storage with no index access or dependency resolution, then uses the supplied interpreter with a subprocess-scoped private import path. It does not install rocKE into the parent Python environment. See [Kernel packing](../../projects/hipdnn/docs/Building.md#kernel-packing-rocm_kpack) for wheel supply modes and prerequisites.
 

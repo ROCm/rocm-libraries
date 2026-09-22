@@ -4,6 +4,7 @@
 - [Prerequisites](#prerequisites)
   - [System Requirements](#system-requirements)
   - [Dependencies](#dependencies)
+    - [Third-Party Libraries](#third-party-libraries)
 - [Superbuild vs. Standalone Build](#superbuild-vs-standalone-build)
 - [Quick Start Guide](#quick-start-guide)
 - [Building the Samples](#building-the-samples)
@@ -55,7 +56,7 @@
 | Python3 | Latest | For test name validation |
 
 #### Third-Party Libraries
-These libraries are resolved with `find_package` (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
+This section applies to every hipDNN component: hipDNN itself, the providers in `dnn-providers/`, the samples, and the example engine plugin. Each is configured independently, and each resolves the same libraries the same way, with `find_package` (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
 - [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
 - [GoogleTest and GoogleMock](https://github.com/google/googletest) - Unit testing and mocking frameworks
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
@@ -69,9 +70,7 @@ Outside the image, supply a **complete** set of installed packages. With ROCm av
 
 To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. Standalone hipDNN, providers, and samples default to `OFF`. The developer superbuild defaults to `ON`, but preserves an explicit `-DALLOW_FETCH_DEPS=OFF`.
 
-This policy also applies to standalone samples and the example engine plugin's GoogleTest dependency. Samples forward `ALLOW_FETCH_DEPS` to the plugin's separate CMake build; an explicit `OFF` is preserved. In TheRock, `hipDNN_samples` must declare its GoogleTest build dependency even when the lookup uses `QUIET`.
-
-From `projects/hipdnn`, choose one outside-image configuration:
+From `projects/hipdnn`, choose one outside-image configuration; every other component offers the same two options from its own build directory:
 
 ```bash
 # Installed packages only; /path/to/dependencies contains the third-party packages.
@@ -82,9 +81,9 @@ cmake --preset release -DALLOW_FETCH_DEPS=OFF \
 cmake --preset release -DALLOW_FETCH_DEPS=ON
 ```
 
-The fetch opt-in does not install ROCm, HIP, hipDNN SDKs, or provider libraries. Each independently configured provider, samples tree, or copied plugin needs its own package inputs or explicit fetch opt-in; configuring hipDNN with `ON` does not enable it for later standalone builds.
+Because each component configures independently, a provider build directory, a samples tree, or a copied plugin needs its own package inputs or its own fetch opt-in; configuring hipDNN with `ON` does not enable it for a later standalone build. The samples forward `ALLOW_FETCH_DEPS` to the example plugin's separate CMake build, preserving an explicit `OFF`. In TheRock, `hipDNN_samples` must declare its GoogleTest build dependency even when the lookup uses `QUIET`.
 
-For one release, a truthy `HIPDNN_NO_DOWNLOAD` value still emits a deprecation warning and disables fetching, even when `ALLOW_FETCH_DEPS=ON`. Legacy `OFF` values are ignored: neither a fresh nor a cached `HIPDNN_NO_DOWNLOAD=OFF` opts into downloads. Remove the legacy setting and use `ALLOW_FETCH_DEPS` instead.
+The opt-in covers only the third-party libraries listed above. It does not install ROCm, HIP, the hipDNN SDK packages, or provider libraries such as hipBLASLt and MIOpen; those always come from the prefixes you supply.
 
 GoogleTest fetch fallbacks default to **1.17.0** in hipDNN, the providers, and the example plugin. Installed packages and explicitly supplied source trees take precedence over fallback versions. The copied plugin retains its own matching default so it works outside the monorepo; this is default alignment, not one shared declaration or a forced package upgrade.
 
@@ -191,7 +190,7 @@ cmake --preset release   # matches the hipDNN build type; use debug for a debug 
 cmake --build build/release
 ```
 
-Inside the developer image, GoogleTest/GoogleMock and spdlog are found automatically. Outside it, this is a separate configure: it does not inherit hipDNN's `ALLOW_FETCH_DEPS`. For installed dependencies, retain the matching hipDNN build-tree prefix when adding complete ROCm and third-party prefixes:
+The samples are a separate configure and resolve third-party libraries as described in [Third-Party Libraries](#third-party-libraries); they do not inherit hipDNN's `ALLOW_FETCH_DEPS`. For installed dependencies, retain the matching hipDNN build-tree prefix when adding complete ROCm and third-party prefixes:
 
 ```bash
 # From projects/hipdnn/samples; replace paths with absolute locations.
@@ -202,7 +201,7 @@ cmake --preset release -DALLOW_FETCH_DEPS=OFF \
 cmake --preset release -DALLOW_FETCH_DEPS=ON
 ```
 
-The installed paths must satisfy the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies, plus HIP/HIPRTC and GoogleTest including GoogleMock. The opt-in only covers GoogleTest here; it does not fetch missing SDK packages or their other dependencies. See the [samples README](../samples/README.md#how-to-build) for the separate installed-hipDNN route.
+The installed paths must satisfy the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies, plus HIP/HIPRTC and GoogleTest including GoogleMock. Only GoogleTest is fetchable here; the SDK packages and their other dependencies must be installed. See the [samples README](../samples/README.md#how-to-build) for the separate installed-hipDNN route.
 
 A standalone hipDNN build does **not** build any provider plugins, so the samples will have no engine to load at runtime. To run them, build a provider and either install its plugin alongside hipDNN or point `HIPDNN_PLUGIN_DIR` at the plugin's location. Because the superbuild handles this for you, it is the simpler choice for building and running samples against an in-tree hipDNN build.
 

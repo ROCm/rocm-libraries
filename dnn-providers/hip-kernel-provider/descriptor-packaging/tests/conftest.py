@@ -81,6 +81,37 @@ def hipcc():
     return exe
 
 
+@pytest.fixture(scope="session")
+def cmake():
+    """The CMake used to drive the sub-configures and sub-builds.
+
+    Resolved from HKP_CMAKE_COMMAND (set by CMake to its own ${CMAKE_COMMAND})
+    or PATH, so the tests exercise the CMake that is running them rather than
+    whichever one happens to come first on PATH.
+    """
+    exe = os.environ.get("HKP_CMAKE_COMMAND")
+    if not exe:
+        exe = shutil.which("cmake")
+    if not exe:
+        pytest.fail("cmake not found (set HKP_CMAKE_COMMAND or put cmake on PATH)")
+    return exe
+
+
+@pytest.fixture(scope="session")
+def cmake_make_program():
+    """The build tool handed to the sub-configures' Ninja generator.
+
+    Resolved from HKP_CMAKE_MAKE_PROGRAM (set by CMake to its own
+    ${CMAKE_MAKE_PROGRAM}) or PATH.
+    """
+    exe = os.environ.get("HKP_CMAKE_MAKE_PROGRAM")
+    if not exe:
+        exe = shutil.which("ninja")
+    if not exe:
+        pytest.fail("ninja not found (set HKP_CMAKE_MAKE_PROGRAM or put ninja on PATH)")
+    return exe
+
+
 def _probe_rocke():
     """Attempt to import rocke/kernels and load comgr; return (ok, reason).
 
