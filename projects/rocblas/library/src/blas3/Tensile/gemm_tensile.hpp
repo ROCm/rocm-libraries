@@ -172,7 +172,7 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
         // Note: k==0 is a valid BLAS operation (D = beta*C), must not skip it.
         // Tensile kernels use 32-bit offset = column * stride, which overflows
         // when stride (=lda or ldb) is large and k is large.
-        // Safe k_chunk: k_chunk * max(lda,ldb) * sizeof(element) < 2^31
+        // Safe k_chunk: k_chunk * max(k_stride_a,k_stride_b) * sizeof(element) < 2^31
         const auto A_base = A_ptr + offset_a;
         const auto B_base = B_ptr + offset_b;
         const auto C_base = C_ptr + offset_c;
@@ -180,9 +180,14 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
 
         // Calculate safe k_chunk_size to keep offsets within signed 32-bit
         constexpr int64_t overflow_limit_2_to_31 = 2147483647; // 2^31 - 1
-        int64_t           max_stride             = std::max(int64_t(ld_a), int64_t(ld_b));
-        int64_t           bytes_per_element      = sizeof(Ti);
-        int64_t           safe_k
+        // The summation index only multiplies the leading dimension when it is the
+        // column index: A is k-major for trans_a == none, B is k-major otherwise.
+        // In the other orientations k walks unit stride.
+        int64_t k_stride_a        = (trans_a == rocblas_operation_none) ? int64_t(ld_a) : 1;
+        int64_t k_stride_b        = (trans_b == rocblas_operation_none) ? 1 : int64_t(ld_b);
+        int64_t max_stride        = std::max(k_stride_a, k_stride_b);
+        int64_t bytes_per_element = sizeof(Ti);
+        int64_t safe_k
             = (max_stride > 0 && max_stride * bytes_per_element > 0)
                   ? std::max(int64_t(1), overflow_limit_2_to_31 / (max_stride * bytes_per_element))
                   : int64_t(k);

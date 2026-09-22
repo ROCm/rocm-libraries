@@ -421,6 +421,24 @@ def _run_one(
 
     out_f32 = dW_cpu.float()
     ref_f32 = ref.float()
+
+    # Row coverage, checked before the tolerance test so the reason names the
+    # actual failure. A grouped split-K bug that drops whole groups leaves
+    # entire dW output-channel rows at zero -- the epilogue bounded a
+    # group-shifted row against the per-group wg_M (= kpg), so the guard was
+    # false for every group above 0 and those groups' atomics were dropped.
+    # A max-relative-error assertion does report that, but as a generic
+    # tolerance miss that gives no hint which groups vanished.
+    nz_out = out_f32.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_ref = ref_f32.reshape(p.K, -1).abs().sum(dim=1) > 0
+    n_missing = int((nz_ref & ~nz_out).sum())
+    if n_missing:
+        return False, (
+            f"{n_missing}/{p.K} dW output-channel rows are zero while the "
+            f"reference is non-zero (groups={p.groups}, kpg={p.K // p.groups}, "
+            f"spk{split_k}) -- whole groups are not being written"
+        )
+
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
@@ -643,13 +661,18 @@ class TestConvWgradCorrectness(unittest.TestCase):
         self._sweep_pipeline("basic")
 
     def test_split_k(self):
-        # Split-K shares the vectorised load path; the direct-store epilogue is
-        # used (cshuffle + split_k>1 is rejected by the spec validator).
+        # Split-K shares the vectorised load path. cshuffle is REQUIRED here,
+        # not optional: for a 16-bit dW the packed-atomic epilogue needs
+        # cshuffle's contiguous pairs, so the validator rejects
+        # epilogue="default" at split_k > 1. The previous comment had the rule
+        # backwards ("cshuffle + split_k>1 is rejected") and the test passed
+        # "default", so every subtest here skipped on _DTYPES = (fp16, bf16) --
+        # this test asserted nothing at all.
         for dtype in _DTYPES:
             for shape in (_SHAPES[0], _SHAPES[2]):  # dense 3x3 + C=24 edge
                 for split_k in (4, -1):  # fixed degree + CK auto-select
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
-                        self._check(shape, dtype, "mem", "default", split_k)
+                        self._check(shape, dtype, "mem", "cshuffle", split_k)
 
     def test_grouped(self):
         # Grouped wgrad (grid-per-group, group index on block_id_z).  Includes the
@@ -788,7 +811,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
             for shape in grouped:
                 for split_k in (4, -1):  # fixed degree + CK auto-select
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
-                        self._check(shape, dtype, "mem", "default", split_k)
+                        # cshuffle for the same reason as test_split_k: a 16-bit
+                        # dW on the packed-atomic split-K path requires it, so
+                        # "default" made every subtest here skip. That is how the
+                        # grouped split-K group-drop bug (only group 0's dW slab
+                        # written) reached develop with a green test suite.
+                        self._check(shape, dtype, "mem", "cshuffle", split_k)
 
     def test_grouped_depthwise(self):
         # Depthwise (groups == C, cpg == 1): each input channel is its own group.
@@ -1689,6 +1717,82 @@ class TestConvWgradTwoStage(unittest.TestCase):
     def test_bf16_grouped(self):
         shape = _Shape("3x3_G2_bf16", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1)
         self._check(shape, "bf16", "mem", groups=2, seed=42)
+
+
+class TestWgradAdmitsImpliesBuilds(unittest.TestCase):
+    """``is_valid_wgrad_spec(spec) is True`` must imply the builder accepts it.
+
+    ``TestWgradValidatorAgreement`` below pins the predicate against
+    ``validate()``; this pins it against the *whole* builder, which enforces
+    constraints ``validate()`` never sees -- the epilogue's store-vector parity,
+    for one. That gap is what broke depthwise wgrad: the predicate blessed a
+    cpg==1 split-K spec and ``build_implicit_gemm_conv_wgrad`` then raised, so
+    the only thing a caller saw was "no valid configurations found".
+
+    Host-side only: both halves are pure spec inspection plus IR construction,
+    so this runs without a GPU.
+    """
+
+    _SHAPES = [
+        # dense, even cpg, odd cpg, depthwise (cpg == 1), and a channel
+        # multiplier (kpg == 2) -- the axes the packed-atomic gate keys on.
+        _Shape("dense_C64K64", N=2, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+        _Shape("g2_cpg32", N=2, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=2),
+        _Shape("g8_cpg8", N=2, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=8),
+        _Shape("dw_cpg1", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32),
+        _Shape("dw_kpg2", N=2, Hi=8, Wi=8, C=32, K=64, Y=3, X=3, pH=1, pW=1, groups=32),
+        # odd wg_N via an odd Y*X on an even cpg, and even wg_N via an even X
+        # on an odd cpg -- the two cases that separate "even cpg" (the old,
+        # over-broad rule) from "even wg_N" (the real one).
+        _Shape(
+            "g16_cpg2_3x3", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=16
+        ),
+        _Shape(
+            "g8_cpg3_3x2", N=2, Hi=8, Wi=8, C=24, K=24, Y=3, X=2, pH=1, pW=0, groups=8
+        ),
+    ]
+
+    def test_admits_implies_builds(self):
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+        )
+
+        arch = "gfx950"
+        checked = 0
+        for shape in self._SHAPES:
+            for dtype in _DTYPES:
+                for epilogue in ("default", "cshuffle"):
+                    for split_k in (1, 2, 4, -1):
+                        spec, _problem, _wtk = _make_spec(
+                            arch, shape, dtype, "mem", epilogue, split_k
+                        )
+                        if spec is None:
+                            continue
+                        ok, why = is_valid_wgrad_spec(spec, arch)
+                        if not ok:
+                            continue
+                        checked += 1
+                        with self.subTest(
+                            shape=shape.id,
+                            dtype=dtype,
+                            epilogue=epilogue,
+                            split_k=split_k,
+                        ):
+                            try:
+                                build_implicit_gemm_conv_wgrad(spec, arch=arch)
+                            except ValueError as e:
+                                self.fail(
+                                    f"is_valid_wgrad_spec admitted {shape.id} "
+                                    f"{dtype} {epilogue} spk{split_k} "
+                                    f"(groups={shape.groups}, "
+                                    f"cpg={shape.C // shape.groups}) but the "
+                                    f"builder rejected it: {e}"
+                                )
+        # Guard against the matrix silently collapsing to nothing -- a predicate
+        # that rejects everything would otherwise make this test vacuously green,
+        # which is the failure mode the split-K tests above actually had.
+        self.assertGreater(checked, 0, "no spec was admitted; matrix is vacuous")
 
 
 class TestWgradValidatorAgreement(unittest.TestCase):
