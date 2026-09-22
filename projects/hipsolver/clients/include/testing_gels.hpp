@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, typename U>
 void gels_checkBadArgs(const hipsolverHandle_t handle,
@@ -790,14 +791,14 @@ void gels_getPerfData(const hipsolverHandle_t handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         gels_initData<false, true, T>(
             handle, m, n, nrhs, dA, lda, stA, dB, ldb, stB, dInfo, bc, hA, hB, hX, hInfo);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_gels(API,
                        INPLACE,
                        handle,
@@ -818,9 +819,9 @@ void gels_getPerfData(const hipsolverHandle_t handle,
                        hNIters.data(),
                        dInfo.data(),
                        bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -978,7 +979,7 @@ void testing_gels(Arguments& argus)
                                          &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gelsBatched_getPerfData<API, T>(handle,
                                             m,
                                             n,
@@ -1057,7 +1058,7 @@ void testing_gels(Arguments& argus)
                                            &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gels_getPerfData<API, INPLACE, T>(handle,
                                               m,
                                               n,

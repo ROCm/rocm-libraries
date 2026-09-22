@@ -27,6 +27,13 @@
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# The 'amdgpu-waves-per-eu' diagnostic that -Wno-pass-failed hides is re-emitted by lld, where
+# that flag does not reach, so the device linker is silenced as well. This lives here rather than
+# at the top level because the option is only meaningful while compiling device code: on a host
+# only translation unit clang never runs the offload linker and warns that the argument is unused.
+# The CK kernels that provoke the diagnostic are all built from this directory.
+add_compile_options("SHELL: -Xoffload-linker -w")
+
 # Create test executables and deploy
 function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
