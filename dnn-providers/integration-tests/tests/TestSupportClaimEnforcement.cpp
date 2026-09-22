@@ -848,7 +848,7 @@ TEST_F(TestSupportClaimEnforcement, ReportModeStillPromotesAnAcceptedClaimToConf
 // Inverts MismatchDemotesTheClaimToFailedInUse. The run is red on its own merits
 // and stays red -- report mode promises not to fail a test *over a claim*, not to
 // suppress a comparison failure. The verdict is still demoted, which is what
-// keeps the summary's "accepted but unconfirmed" section honest.
+// keeps the summary's "failed in use" section honest.
 TEST_F(TestSupportClaimEnforcement, ReportModeLeavesAnUnrelatedFailureAloneAndStillDemotes)
 {
     ::testing::TestPartResultArray results;

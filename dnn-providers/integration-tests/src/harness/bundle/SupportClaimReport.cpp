@@ -225,7 +225,7 @@ void printSupportClaimSummary(const SupportClaimCoverage& coverage,
     // working support", so it gets named rather than counted.
     if(failedInUse > 0)
     {
-        os << "\n---- ACCEPTED BUT UNCONFIRMED (" << failedInUse << ") ----\n";
+        os << "\n---- FAILED IN USE (" << failedInUse << ") ----\n";
         for(const auto& r : records)
         {
             if(r.verdict != SupportVerdict::CLAIM_FAILED_IN_USE)

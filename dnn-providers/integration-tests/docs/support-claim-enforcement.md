@@ -316,9 +316,9 @@ Three detail sections follow the counters when non-empty:
 
 - **`CLAIM FAILURES`** — every `isFailure()` verdict, with bundle, engine, cell, and
   the backend's own message for an errored query.
-- **`ACCEPTED BUT UNCONFIRMED`** — cells where the engine accepted the graph and the
-  test then failed. Not a claim failure, but the one signal that says *do not
-  publish this cell as working support*.
+- **`FAILED IN USE`** — cells where the engine accepted the graph and the test then
+  failed. Not a claim failure, but the one signal that says *do not publish this
+  cell as working support*.
 - **`UNCLAIMED SUPPORT`** — cells that work but are not written down. This is the
   positive-drift signal: add them to the sidecar.
 

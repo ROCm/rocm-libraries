@@ -329,7 +329,9 @@ TEST_F(TestSupportClaimReport, PrintNamesBundlesThatFailedInUse)
 
     const auto output = summary();
 
-    EXPECT_NE(output.find("ACCEPTED BUT UNCONFIRMED"), std::string::npos);
+    // The header names the same bucket as the counter line ("failed-in-use"), so a
+    // reader never has to translate between two words for one verdict.
+    EXPECT_NE(output.find("FAILED IN USE"), std::string::npos);
     EXPECT_NE(output.find("test/bundle"), std::string::npos);
     EXPECT_NE(output.find("ENGINE_A"), std::string::npos);
     // Not a claim failure, so it must not appear under the failure header.
