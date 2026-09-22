@@ -46,14 +46,9 @@ def make_pack(**overrides) -> PackSpec:
 
 
 def make_minimal_config(**overrides) -> IngestorConfig:
-    """A minimal valid single-pack IngestorConfig, for unit tests.
-
-    ``specialization`` is DERIVED from whatever ``kmd_fields`` the caller ends up
-    with, as the all-matcher-only declaration the direct-load dialect requires, so
-    a test that overrides ``kmd_fields`` still gets a declaration that partitions
-    them rather than a stale one. A test that IS about the declaration passes its
-    own.
-    """
+    """A minimal valid single-pack IngestorConfig. ``specialization`` is derived from
+    the caller's final ``kmd_fields`` as the all-matcher-only declaration the
+    direct-load dialect requires; pass your own to test the declaration itself."""
     defaults = dict(
         engine=make_engine(),
         kmd_fields=[make_kmd_field(), KmdField(name="dtype", type="string")],
@@ -62,9 +57,8 @@ def make_minimal_config(**overrides) -> IngestorConfig:
     )
     defaults.update(overrides)
     if defaults.get("dialect", DIALECT_DIRECT_LOAD) == DIALECT_DIRECT_LOAD:
-        # Required of a direct-load bundle, so a config that omits it is not
-        # "minimal" -- it is one the loader refuses. Left alone for the packaged
-        # dialect, whose subpath legitimately falls back to <kind>/<slug>.
+        # Required of a direct-load bundle; the loader refuses one without it. The
+        # packaged dialect legitimately falls back to <kind>/<slug>.
         defaults.setdefault("authored_subpath", "unit")
     defaults.setdefault(
         "specialization",

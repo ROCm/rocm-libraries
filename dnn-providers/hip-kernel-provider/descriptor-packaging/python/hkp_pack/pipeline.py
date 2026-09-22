@@ -25,11 +25,9 @@ from .errors import HkpPackError
 from .kernel_signature import kernel_signature
 from .kpack_resolver import load_kpack
 
-# The archive group every root packs under unless it names its own. One archive ships per
-# (group, arch), and the filename carries both, so two roots staged into one descriptor
-# tree must not share a group -- otherwise they emit the same
-# `<arch>/kpack/<group>_<arch>.kpack` and whichever copy lands second silently overwrites
-# the other, leaving descriptors naming an archive that no longer holds their kernels.
+# The archive group every root packs under unless it names its own. One archive
+# ships per (group, arch) and the filename carries both, so two roots staged into
+# one descriptor tree must not share a group: the second would overwrite the first.
 GROUP_NAME = "hip_kernel_provider"
 
 # The kernel_source kinds the packer ships as authored. No producer runs for
@@ -59,11 +57,8 @@ class InlineUKD:
 
 @dataclass
 class StandaloneUKD(InlineUKD):
-    """A UKD authored as its own `<name>.ukd.json` and referenced by a KDP.
-
-    Carries the same compiled fields as an inline UKD plus the original filename,
-    since it stays a standalone file in the shipped shard (rather than being
-    folded into the KDP).
+    """A UKD authored as its own `<name>.ukd.json` and referenced by a KDP: an
+    inline UKD's compiled fields plus the original filename it keeps in the shard.
     """
 
     filename: str = ""
@@ -74,13 +69,9 @@ class StandaloneUKD(InlineUKD):
 class PassthroughUKD:
     """A UKD the packer emits without running a producer.
 
-    `embedded_source` names a key into a table that the consuming binary
-    compiles in. The packer builds no code object for it, so the authored
-    document is what ships, with `arch` narrowed to the shard. `rel_dir` is the
-    descriptor's position under the source root, which provenance records: for
-    an inline UKD it is the directory of the KDP that holds it, and for a
-    standalone UKD its own. `filename` is set only for the standalone form,
-    which stays its own file in the shard.
+    The authored document ships with `arch` narrowed to the shard. `rel_dir` is the
+    descriptor's position under the source root (the KDP's directory for an inline
+    UKD, its own for a standalone); `filename` is set only for the standalone form.
     """
 
     doc: dict
@@ -95,10 +86,9 @@ class ArchKDP:
     header: dict
     rel_dir: Path = Path(".")
     ukds: list = field(default_factory=list)
-    # Ordered kernelDescriptors output spec: each element is an InlineUKD
-    # (rewritten inline in the shipped KDP), a PassthroughUKD (shipped inline as
-    # authored), or a str (a standalone-UKD id ref, kept verbatim). Preserves
-    # authored order across the heterogeneous vector.
+    # Ordered kernelDescriptors output spec, preserving authored order across the
+    # heterogeneous vector: an InlineUKD (rewritten inline), a PassthroughUKD
+    # (shipped as authored), or a str (a standalone-UKD id ref, kept verbatim).
     entries: list = field(default_factory=list)
 
 
@@ -124,16 +114,9 @@ class ArchResult:
 
 
 def _sha256(data):
-    """Digest of a packed blob, recorded on the shipped UKD.
-
-    Hashed here over the decompressed code object, before the archive's
-    compressor sees it, because that is the buffer the runtime hashes back:
-    KpackModuleCache compares this digest against what it decompressed and
-    refuses the load on a mismatch. Hashing the compressed blob or the source
-    file instead would make every kpack load fail.
-
-    `expected_sha256` cross-checks it at pack time as well, so a disagreement
-    is caught at the producing end rather than only at the consuming one.
+    """Digest of a packed blob, recorded on the shipped UKD. Hashed over the
+    decompressed code object, the buffer KpackModuleCache hashes back;
+    `expected_sha256` cross-checks it at pack time.
     """
     return hashlib.sha256(data).hexdigest()
 
@@ -145,19 +128,10 @@ def _kpack_filename(arch, group=GROUP_NAME):
 def _kpack_rel(arch, rel_dir=Path("."), group=GROUP_NAME):
     """`library` for a descriptor living at `rel_dir` within the arch shard.
 
-    The runtime resolves this as `originDirectory / library`, where
-    originDirectory is the parent directory of the descriptor FILE. The archive
-    itself lives once per arch, at the arch root.
-
-    So a nested descriptor has to climb back out to the arch root before
-    descending into `kpack/`. A root-relative value happens to be correct only
-    when rel_dir is "." -- true of every flat layout, which is why this was not
-    caught until descriptors could nest.
-
-    Climbing out of the descriptor's own directory is legal because the runtime
-    anchors containment on the descriptor TREE, not on the individual
-    descriptor's folder (`IngestorKernelCode.hpp`, the KPACK case). The archive
-    is a sibling inside that tree by construction.
+    The runtime resolves `originDirectory / library` against the descriptor FILE's
+    parent, while the archive lives once per arch at the arch root, so a nested
+    descriptor climbs back out. Containment is anchored on the descriptor TREE
+    (`IngestorKernelCode.hpp`, KPACK case), which makes the climb legal.
     """
     rel_dir = Path(rel_dir)
     prefix = (
@@ -207,18 +181,15 @@ def _compile_ukd_variant(
 ):
     """Compile one UKD variant for arch, deduped into variant_co per kind.
 
-    Dispatches on kernel_source.kind — producer selection is per-UKD, never
-    per-folder. hip resolves its source relative to the descriptor that named it
-    (`source_root / rel_dir / source`) and keys on (source, build). rocke keys on
-    (source, builder, spec) and is location-independent (its source is a dotted
-    module resolved by import), so source_root/rel_dir are accepted only for
-    signature uniformity. Returns (variant_key, symbol, record_fields).
+    Dispatches on kernel_source.kind: hip resolves its source relative to the
+    descriptor that named it and keys on (source, build); rocke keys on
+    (source, builder, spec) and is location-independent, so source_root/rel_dir are
+    accepted only for signature uniformity. Returns (variant_key, symbol, fields).
     """
     ks = ukd["kernel_source"]
     kind = ks["kind"]
-    # Only the two producer kinds carry a `source`, so it is read per-arm:
-    # hoisting the read above the dispatch turns the unsupported-kind raise
-    # below into a KeyError.
+    # Only the two producer kinds carry a `source`, so it is read per-arm: hoisting
+    # the read above the dispatch turns the unsupported-kind raise into a KeyError.
     if kind == "hip":
         source = ks["source"]
         entry = ks["entry"]
@@ -264,12 +235,9 @@ def _compile_ukd_variant(
             variant_observations[vk] = observations
         observations = variant_observations[vk]
         symbol = variant_symbol[vk]
-        # A reused compile result is checked exactly as hard as a fresh one. The
-        # arch and symbol bind these observations to the artifact in hand, and the
-        # comparison runs for EVERY consumer of this UKD -- the first consumer's
-        # agreement says nothing about a second one that completes different
-        # metadata from the same builder decisions, which is precisely the case a
-        # shared variant creates.
+        # A reused compile result is checked as hard as a fresh one, for EVERY
+        # consumer: the first's agreement says nothing about a second completing
+        # different metadata from the same decisions.
         if observations.get("arch") != arch:
             raise HkpPackError(
                 f"{where}: compile observations were taken for "
@@ -309,12 +277,9 @@ def _is_passthrough(ukd):
 
 
 def _root_holds_compiling_source(flat):
-    """Whether the authored root holds a UKD that a producer compiles.
-
-    The complement of _is_passthrough over both authoring forms -- a standalone
-    `<name>.ukd.json` and an inline entry of a KDP's kernelDescriptors -- so the
-    two spellings of the same distinction cannot drift. Only such a UKD yields a
-    code object, so only a root holding one implies an archive.
+    """Whether the authored root holds a UKD that a producer compiles, and so an
+    archive. The complement of _is_passthrough over both authoring forms, so the
+    two spellings cannot drift.
     """
     for desc in flat.ukds():
         if not _is_passthrough(desc.doc):
@@ -327,12 +292,9 @@ def _root_holds_compiling_source(flat):
 
 
 def _dest_at(base, rel_dir, name):
-    """Destination for an authored file, preserving its subpath under base.
-
-    The authored subpath is meaningful: it scopes producers and integrations in
-    the source tree, and the staged and installed trees mirror it verbatim. Two
-    descriptors cannot share a path within the single source root, so the
-    destination is unique by construction — no de-duplication or renaming.
+    """Destination for an authored file, preserving its subpath under base: the
+    staged and installed trees mirror the authored subpath verbatim, and two
+    descriptors cannot share a path under one source root.
     """
     dest = Path(base) / rel_dir / name
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -349,12 +311,9 @@ def _write_text_at(base, rel_dir, name, text):
 
 @dataclass(frozen=True)
 class _VariantJob:
-    """One distinct variant the prewarm compiles, as a picklable record.
-
-    Every field is a str or a plain dict so the record crosses a process
-    boundary without a custom reducer. `hipcc` and `arch` travel by value
-    rather than through an environment variable or a module global, so the
-    worker is a pure function of its argument.
+    """One distinct variant the prewarm compiles, as a picklable record: every
+    field is a str or plain dict and `hipcc`/`arch` travel by value, so the worker
+    is a pure function of its argument.
     """
 
     vk: str
@@ -371,17 +330,11 @@ class _VariantJob:
 def _selected_entries(doc, arch, ukd_by_id):
     """Yield the entries of doc that ship for arch.
 
-    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref, the id
-    string, that UKD's doc, and its Descriptor; for an inline UKD, `None`, the
-    entry dict itself, and `None`. The Descriptor rather than its rel_dir,
-    because the walk needs its `path.name` for the error context and for the
-    shipped filename as well as its `rel_dir` for the variant key.
-
-    All three arch filters live here and nowhere else, so the prewarm and the
-    serial walk cannot select different variant sets. `ukd_by_id` arrives as a
-    parameter rather than being reached for through `flat`, which leaves the
-    generator no way to enumerate a standalone UKD no KDP references: an orphan
-    is legal input the walk never compiles.
+    Yields `(entry_id, ukd_doc, sdesc)`: for a standalone-UKD id ref the id, its doc
+    and its Descriptor; for an inline UKD `None`, the entry dict and `None`. All
+    three arch filters live here alone, so the prewarm and the serial walk cannot
+    select different variant sets, and `ukd_by_id` is a parameter so an orphan
+    standalone UKD is unreachable.
     """
     if not arch_matches(doc, arch):
         return
@@ -397,19 +350,13 @@ def _selected_entries(doc, arch, ukd_by_id):
 def _agreement_inputs(flat, arch):
     """Every consumer's declaration and observation request, before any compile.
 
-    The requests a compile must satisfy belong to the whole selected set, not to the
-    descriptor the walk happens to reach first: two variants of one builder share a
-    compile result, and two KDPs can reference one standalone UKD. Collecting them
-    up front is what lets a single pass over the builder object capture every
-    consumer's readouts -- a request discovered later could only be answered by
-    recompiling, or by certifying one consumer against another's observations.
-
-    References resolve by UUID, never by filename, stem or sibling. Returns
-    `({ukd id: [consumer record]}, {variant key: {digest: request}})`.
-
-    A KDP may author `engine` as null, leaving its UKDs no consumer and no KMD
-    fields for a claim to be about. That is an EMPTY specialization obligation, not
-    a waived one, so a contract declared under an engine-less KDP is rejected.
+    The requests belong to the whole selected set, since two variants of one
+    builder share a compile result and two KDPs can reference one standalone UKD;
+    collecting up front lets a single pass over the builder object capture every
+    consumer's readouts. References resolve by UUID. Returns
+    `({ukd id: [consumer record]}, {variant key: {digest: request}})`. A KDP
+    authoring `engine` as null leaves an EMPTY obligation, not a waived one, so a
+    contract declared under it is rejected.
     """
     generics = {d.id: d.doc for d in flat.generics()}
     schemas = {d.id: d.doc for d in flat.generics() if d.type == "kmd"}
@@ -446,14 +393,12 @@ def _agreement_inputs(flat, arch):
         header = _kdp_header(kdp.doc)
         header["arch"] = [arch]
         for sid, ukd, sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
-            # Completion is checked here, against the KMD the chain actually
-            # resolved to, so a metadata value of the wrong type or a missing
-            # mandatory field fails before a compile is spent on it.
+            # Completion is checked against the KMD the chain actually resolved to,
+            # so a mis-typed or missing mandatory value fails before a compile.
             agreement.complete_metadata(ukd["metadata"], kmd)
             kind = ukd["kernel_source"]["kind"]
-            # A passthrough kind is emitted exactly as authored and no producer ever
-            # runs for it, so there is no producing compiler whose specialization a
-            # contract could state and no observation for one to certify.
+            # A passthrough kind runs no producer, so there is no producing compiler
+            # whose specialization a contract could state.
             if kind in _PASSTHROUGH_KINDS:
                 continue
             # A standalone UKD is its own file and several KDPs may reference it,
@@ -486,18 +431,10 @@ def _agreement_inputs(flat, arch):
 def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
     """The distinct variant jobs the walk will compile.
 
-    Selection comes from the same generator the walk consumes, so the job set
-    equals the walk's set by construction rather than by a second reading of
-    the same filters. Dedup is on the variant key and keeps first-seen order,
-    which is walk order: the pool compiles each distinct variant once, in the
-    order the serial path would have reached them.
-
-    A kind `_variant_key_for` declines to key is dropped here, leaving the walk
-    to reach it and report whatever it produces.
-
-    `out_dir` and `hipcc` are left empty because they belong to the pack run
-    rather than to the selection; `_prewarm_variants` fills them in before
-    dispatch.
+    Selection comes from the generator the walk consumes, and dedup on the variant
+    key keeps first-seen (walk) order. A kind `_variant_key_for` declines is dropped
+    here, leaving the walk to report it; `out_dir` and `hipcc` are filled in by
+    `_prewarm_variants`.
     """
     ukd_by_id = flat.ukd_by_id()
     if observation_requests is None:
@@ -531,19 +468,11 @@ def _compile_one_variant(job):
     """Compile one variant in a worker process, returning a result tuple.
 
     `(vk, co_path, symbol, None, observations, origins)` on success,
-    `(vk, None, None, "Name: text", None, {})` on any failure. Failures are
-    returned rather than raised: rocke and comgr
-    exceptions are not guaranteed picklable, and an exception that cannot cross
-    the process boundary takes the diagnosis with it.
-
-    `origins` is this variant's producer file identities in picklable form. A
-    worker cannot share the parent's observer, so returning them is the only
-    route by which a pooled variant reaches the cross-variant producer check
-    (`agreement.OriginObserver.absorb`).
-
-    No key is computed here. `job.vk` was computed in the parent, under
-    whatever key functions were in force there; a key recomputed in the child
-    would resolve the real functions and disagree with the walk.
+    `(vk, None, None, "Name: text", None, {})` on failure: failures are returned
+    rather than raised because rocke and comgr exceptions may not pickle. `origins`
+    is this variant's producer file identities in picklable form, the only route to
+    `OriginObserver.absorb`. No key is computed here, since a child-side
+    recomputation would resolve the real functions and disagree with the walk.
     """
     origins = agreement.OriginObserver()
     try:
@@ -559,8 +488,7 @@ def _compile_one_variant(job):
                 job.arch,
                 job.out_dir,
             )
-            # The hip symbol is authored, not captured from the artifact, which
-            # is why it is read here rather than returned by the producer.
+            # The hip symbol is authored, not captured from the artifact.
             symbol = ks["entry"]
         elif job.kind == "rocke":
             co_path, symbol, observations = compile_rocke_variant(
@@ -573,10 +501,9 @@ def _compile_one_variant(job):
                 origins,
             )
         else:
-            # Unreachable while `_variant_key_for` keys only these two kinds. A
-            # raise rather than a fall-through, because a third keyable kind
-            # added there would otherwise compile as rocke and yield a plausible
-            # artefact from the wrong producer.
+            # Unreachable while `_variant_key_for` keys only these two kinds; a
+            # raise rather than a fall-through, since a third keyable kind would
+            # otherwise compile as rocke from the wrong producer.
             raise HkpPackError(
                 f"no variant compiler for kernel source kind '{job.kind}'"
             )
@@ -588,18 +515,10 @@ def _compile_one_variant(job):
 def _cgroup_v2_cpu_quota():
     """Whole CPUs allowed by cgroup v2, or None when unlimited or absent.
 
-    Linux only; the other probes in `_cpu_budget` bound the pool elsewhere.
-    Read from the filesystem because no Python API reports it. A container
-    given `--cpus=8` keeps a full affinity mask and is throttled instead, so
-    this is the only source that sees the limit at all.
-
-    Walked from this process's own cgroup up to the root, taking the tightest
-    limit: where the limit sits depends on whether a cgroup namespace is in
-    play, not on which framework imposed it. With one (Docker, Kubernetes) the
-    container's cgroup appears as the root and `/sys/fs/cgroup/cpu.max` carries
-    the limit; without one (Slurm, a systemd login session) the process sits in
-    a nested scope whose root has no `cpu.max` at all, so reading only the root
-    would report "unlimited" for every limited job on such a host.
+    Linux only, read from the filesystem because no API reports it and a container
+    given `--cpus=8` keeps a full affinity mask. Walked from this process's cgroup
+    to the root taking the tightest limit: without a cgroup namespace (Slurm, a
+    systemd session) the root carries no `cpu.max` at all.
     """
     root = Path("/sys/fs/cgroup")
     try:
@@ -633,20 +552,17 @@ def _read_cpu_max(path):
     if quota == "max":
         return None
     try:
-        # Floors to at least one: a sub-CPU allocation would otherwise disable
-        # the pool entirely.
+        # Floors to at least one: a sub-CPU allocation would otherwise disable the
+        # pool entirely.
         return max(1, int(quota) // int(period))
     except (ValueError, ZeroDivisionError):
         return None
 
 
 def _cpu_budget():
-    """CPUs this process may actually use, rather than the host's core count.
-
-    `os.cpu_count()` reports the machine, but a containerised or scheduled pack
-    -- Docker, Kubernetes and Slurm alike -- is usually given a slice of it, and
-    one worker per host core oversubscribes that slice badly. Each source below
-    sees a limit the others cannot, so the smallest wins.
+    """CPUs this process may actually use, rather than the host's core count: a
+    containerised or scheduled pack gets a slice of the machine, and each source
+    below sees a limit the others cannot, so the smallest wins.
     """
     limits = [_cgroup_v2_cpu_quota()]
 
@@ -655,8 +571,8 @@ def _cpu_budget():
         # 3.13+, and honours the affinity mask on every platform that has one.
         limits.append(process_cpu_count())
     elif hasattr(os, "sched_getaffinity"):
-        # Linux only, so it cannot be the only affinity source -- this packer
-        # runs on Windows too, where the host count below is all there is.
+        # Linux only, so it cannot be the only affinity source -- this packer runs
+        # on Windows too, where the host count below is all there is.
         limits.append(len(os.sched_getaffinity(0)))
 
     limits = [limit for limit in limits if limit]
@@ -666,33 +582,16 @@ def _cpu_budget():
 def _pack_jobs():
     """Worker count for the prewarm, from `HKP_PACK_JOBS`.
 
-    Unset means `min(32, _cpu_budget())`. The cap is per-worker startup, not
-    memory: a worker costs roughly 250 ms to stand up its rocke+comgr import,
-    so past a few dozen the next worker costs more than the compile work it
-    takes on. Measured on gfx942, a 1672-variant pack bottoms out near 48
-    workers -- 19.5 s against 402 s serial -- and by 128 is back to its
-    16-worker time, while peaking at 2.2 GiB throughout.
+    Unset means `min(32, _cpu_budget())`. The cap is per-worker startup (~250 ms of
+    rocke+comgr import), and the optimum moves with pack size -- about 12 workers
+    for 200 variants, 48 for 1672 -- so 32 sits below the large-pack optimum, since
+    overshooting costs more than undershooting.
 
-    32 is a compromise, not an optimum: the turnover moves with pack size, and
-    the same host wants about 12 workers for 200 variants and 48 for 1672.
-    Overshooting costs far more than undershooting -- 200 variants take 6.8 s
-    on 12 workers and 16.9 s on 32 -- so the constant sits below the large-pack
-    optimum deliberately.
-
-    `HKP_PACK_JOBS=1` forces serial execution: the prewarm returns without a
-    pool and the walk compiles every variant itself, which is the escape hatch
-    for debugging a compile failure with a single clean traceback.
-
-    Anything that is not an integer of 1 or more is a hard error, including `0`
-    and negatives. Neither is clamped, because clamping lands them on the serial
-    path: `-4` would read as "compiled on 4 workers" and run on one, and `0`
-    means "auto" elsewhere in this repository while it would mean "serial" here.
-
-    An explicit value is never reduced to `_cpu_budget()` -- choosing to
-    oversubscribe is the caller's call to make.
-
-    An environment variable rather than a CLI flag or a CMake cache variable
-    because it reaches through the CMake custom command with no plumbing.
+    `HKP_PACK_JOBS=1` forces serial execution, the escape hatch for a single clean
+    traceback. Anything not an integer of 1 or more is a hard error, including `0`
+    and negatives, and an explicit value is never reduced to `_cpu_budget()`. An
+    environment variable because it reaches through the CMake custom command with
+    no plumbing.
     """
     env = os.environ.get("HKP_PACK_JOBS")
     if env is None:
@@ -710,18 +609,9 @@ def _variant_key_for(ukd, rel_dir):
     """Content-hash variant key, or None for a kind the prewarm skips.
 
     The single place either key function is called, so the walk and the prewarm
-    cannot key one variant two ways.
-
-    `hip_variant_key` and `rocke_variant_key` are resolved as globals of this
-    module on every call -- never through a function-local import, an alias
-    bound at import time, or a recomputation inside a worker process. Each of
-    those shortcuts binds the real function past any substitution made on this
-    module.
-
-    A kind that carries no compilable source yields None rather than raising.
-    The walk stays the sole reporter of whatever failure such a UKD produces:
-    were this to raise, the prewarm would pre-empt it with an error of its own,
-    from a different call site and with a different traceback.
+    cannot key one variant two ways; both resolve as module globals on every call,
+    since an alias or child-side recomputation would bind past any substitution. A
+    kind with no compilable source yields None, leaving the walk the sole reporter.
     """
     ks = ukd["kernel_source"]
     kind = ks["kind"]
@@ -746,19 +636,11 @@ def _prewarm_variants(
 ):
     """Compile this arch's distinct variants concurrently into the caches.
 
-    The walk then finds each key already present and skips the expensive call.
-    Records, symbols and doc rewriting stay entirely the walk's: this only
-    populates the variant caches.
-
-    Returns one producer-origin map per compiled variant, as its worker
-    observed it. The caller must fold these into the observer spanning the
-    arch: a prewarmed variant is read out of the cache by the walk and
-    observed nowhere else.
-
-    Fails fast, matching the serial path: the first failing variant in walk
-    order raises and the queued jobs are cancelled, so a broken builder costs
-    the jobs already in flight rather than the whole pack. Nothing is written
-    into either cache when that happens -- a partly-filled cache would let the
+    The walk then finds each key present and skips the expensive call; records,
+    symbols and doc rewriting stay the walk's. Returns one producer-origin map per
+    compiled variant, which the caller must fold into the observer spanning the
+    arch, since a prewarmed variant is observed nowhere else. Fails fast and writes
+    nothing into either cache when it does: a partly-filled cache would let the
     walk skip compiles whose artefacts were never produced.
     """
     jobs = [
@@ -768,35 +650,30 @@ def _prewarm_variants(
 
     workers = _pack_jobs()
     if len(jobs) < 2 or workers < 2:
-        # Nothing was compiled here, so the walk observes every producer
-        # against the caller's own observer.
+        # Nothing was compiled here, so the walk observes every producer against
+        # the caller's own observer.
         return []
     workers = min(workers, len(jobs))
     log(f"hkp_pack: compiling {len(jobs)} variants for {arch} on {workers} workers")
 
-    # The pool is built here, per arch, and never kept in a module global.
-    # Workers snapshot `sys.path` at process start, so a pool reused across
-    # runs would freeze whichever path list existed when it was first built and
-    # break imports the parent has since arranged.
+    # Built per arch and never kept in a module global: workers snapshot `sys.path`
+    # at process start, so a reused pool would freeze the path list it was built
+    # with.
     pool = ProcessPoolExecutor(max_workers=workers)
     results = []
     failure = None
     try:
-        # Consumed lazily rather than collected with `list`, so the first
-        # failure stops the pack instead of riding out every remaining job.
-        # `map` yields in submission order, which is walk order, so the variant
-        # this stops on is the one the serial path would have named -- breaking
-        # on the first result to *complete* would hand that choice to the
-        # scheduler.
+        # Consumed lazily so the first failure stops the pack. `map` yields in
+        # submission (walk) order, so this stops on the variant the serial path
+        # would have named.
         for result in pool.map(_compile_one_variant, jobs, chunksize=1):
             if result[3] is not None:
                 failure = result
                 break
             results.append(result)
     except Exception as exc:
-        # A worker that is killed rather than raising surfaces here, and
-        # the exception is not an HkpPackError -- so unconverted it would
-        # sail past run_pipeline's per-arch handler and discard every other
+        # A killed worker surfaces here as a non-HkpPackError, which unconverted
+        # would sail past run_pipeline's per-arch handler and discard every other
         # arch's work.
         raise HkpPackError(
             f"the variant compile pool for {arch} failed "
@@ -806,18 +683,14 @@ def _prewarm_variants(
         ) from exc
     finally:
         # `map` submits every job up front, so the queue outlives the break.
-        # Finalising its result generator already cancels the pending futures;
-        # `cancel_futures` restates that next to the `wait` it qualifies. Jobs
-        # already running finish either way, bounding the waste at the worker
-        # count rather than the pack size.
+        # Finalising its result generator already cancels pending futures;
+        # `cancel_futures` restates that beside the `wait` it qualifies.
         pool.shutdown(wait=True, cancel_futures=True)
 
     if failure is not None:
-        # One variant named, no failure count: the pack stops at the first
-        # failure, so a count would describe how far the pool happened to get
-        # rather than how many variants are broken. Named by UKD id, which is
-        # what a reader can look up in the descriptors; the content-hash key is
-        # not.
+        # One variant named, no failure count: the pack stops at the first failure,
+        # so a count would only say how far the pool got. Named by UKD id, which a
+        # reader can look up; the content-hash key is not.
         named = next((job.ukd.get("id") for job in jobs if job.vk == failure[0]), None)
         raise HkpPackError(
             f"variant '{named or failure[0]}' failed to compile for {arch}: "
@@ -836,16 +709,12 @@ def _prewarm_variants(
 def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
     """Compile every hip UKD in the KDPs targeting arch and stage a per-arch tree.
 
-    Writes inter_arch_dir with: hsaco-form KDP JSON (inline UKDs rewritten
-    hip->hsaco, build lifted to top-level) + one .co per distinct (source,build)
-    variant + every generic copied through + any non-matching KDP copied in its
-    authored hip form (so pruning has a KDP to drop). Standalone UKDs a surviving
-    KDP references by Id are compiled here too and tracked per arch, to be
-    emitted as their own files by pack_arch. Returns an IntermediateArch carrying
-    the origin data the pack step needs for provenance.
-
-    A UKD of a pass-through kind runs no producer. It stays in the intermediate
-    JSON as authored and is recorded for verbatim emission.
+    Writes inter_arch_dir with hsaco-form KDP JSON (inline UKDs rewritten
+    hip->hsaco, build lifted to top-level), one .co per distinct (source,build)
+    variant, every generic copied through, and any non-matching KDP copied in its
+    authored form so pruning has a KDP to drop. Standalone UKDs a surviving KDP
+    references are compiled and tracked per arch for pack_arch. A pass-through kind
+    runs no producer and stays as authored.
     """
     inter_arch_dir = Path(inter_arch_dir)
     inter_arch_dir.mkdir(parents=True, exist_ok=True)
@@ -889,10 +758,9 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
         new_kds = []
         for sid, entry, sdesc in _selected_entries(new_doc, arch, ukd_by_id):
             if sid is not None:
-                # A reference to a standalone UKD: compile it once per arch and
-                # keep the string in the KDP; it ships as its own file. Listing
-                # it precedes the compile-once check, so a UKD two KDPs
-                # reference appears in both and is compiled for the first only.
+                # A standalone-UKD reference: compiled once per arch, shipped as its
+                # own file, and kept as a string here. Listing precedes the
+                # compile-once check, so a UKD two KDPs reference appears in both.
                 entries.append(sid)
                 new_kds.append(sid)
                 if sid in passthrough_standalone_ukds:
@@ -982,9 +850,8 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             )
             ukds.append(record)
             entries.append(record)
-        # A KDP whose UKDs all filter out for this arch is dropped from the
-        # shard: no intermediate JSON, no record, and its exclusive generics
-        # prune away with it.
+        # A KDP whose UKDs all filter out for this arch is dropped from the shard:
+        # no intermediate JSON, no record, and its exclusive generics prune with it.
         if not new_kds:
             log(f"KDP {kdp.path.name}: all UKDs filtered out for {arch}, dropping")
             continue
@@ -1054,22 +921,14 @@ def _rewrite_ukd_kpack(
 ):
     """Rewrite a compiled UKD into shipped kpack form.
 
-    `toolchain_fields` carries the fields describing what actually produced the kernel
-    (hipcc version, resolved comgr, rocKE wheel digest) as opposed to what the
-    descriptor asked for. Merged into provenance rather than the variant key: in
-    the key, a wheel bump would rename every rocKE artifact including ones it
-    could not affect.
+    `toolchain_fields` (hipcc version, resolved comgr, rocKE wheel digest) merges
+    into provenance rather than the variant key, where a wheel bump would rename
+    every rocKE artifact. A `specialization_contract` declared once on the enclosing
+    KDP stays there, since the KDP header ships verbatim.
 
-    A `specialization_contract` declared once on the enclosing KDP stays there: the
-    KDP header ships verbatim, so the packed tree is self-describing without the
-    declaration being copied onto every kernel it covers.
-
-    PRODUCER EVIDENCE IS RESERVED. `provenance.effective_spec` is the compiler's
-    statement about what it observed, so an authored input may not supply one and no
-    authored passthrough may land on top of one. Authored fields are merged UNDER the
-    produced block, and the authored `extra` passthrough cannot name a key this
-    function writes -- `provenance` among them, so the produced block is the one
-    that ships.
+    Producer evidence is reserved: an authored input may not supply
+    `provenance.effective_spec`, authored fields merge UNDER the produced block, and
+    the authored `extra` passthrough cannot name a key this function writes.
     """
     if "effective_spec" in ukd.provenance:
         raise HkpPackError(
@@ -1114,13 +973,12 @@ def _rewrite_ukd_kpack(
             f"{sorted(set(doc) & ukd.extra.keys())}"
         )
     doc.update(ukd.extra)
-    # Every shipped UKD carries the single shard arch, matching the KDP. Set it
-    # after the extra passthrough so a source multi-arch list can't leak through.
+    # Every shipped UKD carries the single shard arch, matching the KDP. Set after
+    # the extra passthrough so a source multi-arch list cannot leak through.
     doc["arch"] = [arch]
     if ukd.origin_kind == "rocke":
         # Published last, onto the finished document, so `descriptor_digest` binds
-        # the bytes that actually ship rather than an intermediate form the
-        # passthrough and the shard arch had yet to touch.
+        # the bytes that actually ship.
         agreement.publish(doc, ukd.observations, ukd.consumers)
     return doc
 
@@ -1128,16 +986,11 @@ def _rewrite_ukd_kpack(
 def _rewrite_passthrough_ukd(passthrough, arch, source_label=None):
     """Rewrite a pass-through UKD into shipped form.
 
-    One field may change: `arch` narrows to the shard. `kernel_source` ships as
-    authored, so the `source_file` the descriptor names is the key the consuming
-    binary's source table is keyed on.
-
-    The provenance block records the authored values for a person reading the
-    build output. `rewritten` names the fields whose emitted value differs from
-    the authored one. It holds nothing machine-specific and nothing
-    time-varying, so two runs over one source tree write the same bytes. Nothing
-    at runtime reads it. It sits at the top level, because `kernel_source`
-    accepts only the keys the loader parses.
+    Only `arch` changes, narrowing to the shard; `kernel_source` ships as authored,
+    so `source_file` stays the consuming binary's table key. The provenance block
+    records the authored values and the rewritten fields, holds nothing
+    machine-specific or time-varying, and sits at the top level because
+    `kernel_source` accepts only loader-parsed keys.
     """
     authored = passthrough.doc
     rel_dir = Path(passthrough.rel_dir).as_posix()
@@ -1196,16 +1049,12 @@ def pack_arch(
 ):
     """Pack a pruned intermediate arch into the shipped kpack release tree.
 
-    Each distinct (source,build) variant .co is packed once under its own
-    toc_key; inline UKDs are rewritten hsaco->kpack, stamping toc_key + sha256 +
-    signature and moving build into a sibling provenance block. Guarded against
-    toc_key collisions (distinct inputs mapping to one key).
-
-    A UKD of a pass-through kind takes the shard arch, keeps its authored
-    kernel_source, and carries a provenance block naming its authored values. A
-    shard with no compiled variant holds no archive and no `kpack/` directory,
-    and its ArchResult carries kpack_path=None.
-
+    Each distinct (source,build) variant .co is packed once under its own toc_key;
+    inline UKDs are rewritten hsaco->kpack, stamping toc_key + sha256 + signature
+    and moving build into a sibling provenance block, guarded against toc_key
+    collisions. A pass-through UKD takes the shard arch and keeps its authored
+    kernel_source. A shard with no compiled variant holds no archive, no `kpack/`
+    directory, and an ArchResult with kpack_path=None.
     """
     arch = inter.arch
     out_arch_dir = Path(out_arch_dir)
@@ -1227,14 +1076,10 @@ def pack_arch(
     for ukd in _all_ukds():
         vk = ukd.variant_key
         toc_key = vk
-        # The signature must cover everything that determines the compiled
-        # bytes, per producer. Keying on (source, build) alone is blind on the
-        # rocke path, where build is ALWAYS None: two rocke UKDs sharing a
-        # source module but differing in builder or spec would present identical
-        # signatures, so a genuine toc_key collision would pass undetected and
-        # one kernel would silently ship the other's bytes -- the same
-        # silent-substitution class as the cross-root collision this work
-        # removed.
+        # The signature must cover everything that determines the compiled bytes.
+        # (source, build) alone is blind on the rocke path, where build is ALWAYS
+        # None: two rocke UKDs sharing a source module would present identical
+        # signatures and a real toc_key collision would pass undetected.
         if ukd.origin_kind == "rocke":
             sig = (
                 ukd.source,
@@ -1265,11 +1110,9 @@ def pack_arch(
                 f"UKD '{ukd.id}' declares symbol '{ukd.symbol}' not present "
                 f"in code object for variant '{vk}'"
             )
-        # Keyed on (variant, symbol), not on the variant alone: two UKDs
-        # differing only by entry point share one blob and one toc_key, and each
-        # has its own argument list. Caching per variant would give the second
-        # one the first's signature, which no fixture with one symbol per
-        # variant can catch.
+        # Keyed on (variant, symbol), not the variant alone: two UKDs differing only
+        # by entry point share one blob and one toc_key but have their own argument
+        # lists.
         signature_key = (vk, ukd.symbol)
         if signature_key not in variant_signature:
             variant_signature[signature_key] = kernel_signature(
@@ -1301,16 +1144,13 @@ def pack_arch(
 
     for kdp in inter.kdps:
         out_doc = dict(kdp.header)
-        # Each shard targets exactly its own arch, so narrow the authored arch
-        # list (which may span several arches, or be empty for a wildcard) to the
-        # single arch this shard is for. The descriptor's logical key is
-        # (id, arch): the same KDP/UKD id ships under multiple arch shards with
-        # per-arch content, unique per arch rather than globally.
+        # Each shard targets exactly its own arch, so the authored list (several
+        # arches, or empty for a wildcard) narrows to this shard's. The logical key
+        # is (id, arch): one id ships under several shards with per-arch content.
         out_doc["arch"] = [arch]
         # Preserve the authored heterogeneous vector: compiled inline UKDs are
-        # rewritten to kpack form, pass-through inline UKDs take the shard arch,
-        # and standalone-UKD id refs are kept as bare strings (those UKDs ship
-        # as their own files below).
+        # rewritten to kpack form, pass-through inline UKDs take the shard arch, and
+        # standalone-UKD id refs stay bare strings (those UKDs ship as own files).
         out_kds = []
         for e in kdp.entries:
             if isinstance(e, str):
@@ -1328,9 +1168,8 @@ def pack_arch(
                         variant_sha[e.variant_key],
                         signature=variant_signature[(e.variant_key, e.symbol)],
                         toolchain_fields=_toolchain_for(e, hipcc, rocke_wheel_stamp),
-                        # An inline UKD ships INSIDE this KDP file, so the
-                        # runtime anchors its library on the KDP's directory,
-                        # not the UKD's own notion of where it came from.
+                        # An inline UKD ships INSIDE this KDP file, so the runtime
+                        # anchors its library on the KDP's directory.
                         rel_dir=kdp.rel_dir,
                         group=group,
                     )
@@ -1343,9 +1182,8 @@ def pack_arch(
             json.dumps(out_doc, indent=2) + "\n",
         )
 
-    # A standalone UKD stays its own file in the shard, rewritten to kpack form
-    # with this arch's kpack details. It is emitted only for arches whose
-    # surviving KDPs referenced it (compile_intermediate only records those).
+    # A standalone UKD stays its own file, rewritten to kpack form with this arch's
+    # details, and only for arches whose surviving KDPs referenced it.
     for ukd in standalone:
         out_doc = _rewrite_ukd_kpack(
             ukd,
@@ -1404,17 +1242,14 @@ def run_pipeline(
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
 
-    Loads the one source root once — recursively, preserving each descriptor's
-    authored subpath — then for each arch compiles the targeting KDPs' variants,
-    prunes, and packs. Producer selection is per-UKD on `kernel_source.kind`, so
-    hip and rocKE descriptors coexist under one root (in child folders that scope
-    them) and combine into one kpack per arch. A hip UKD's source resolves
-    relative to the descriptor that named it. A UKD of a pass-through kind runs
-    no producer and is emitted as authored, so a root that holds only
-    pass-through UKDs writes descriptors and no archive. An arch with no
-    surviving KDP is skipped cleanly (no folder, no kpack) and logged with 'no
-    kernels for <arch>, skipping'; every arch skipping is a failure, not a
-    pack. Empty arch list installs nothing (exit 0).
+    Loads the one source root once, recursively, preserving each descriptor's
+    authored subpath, then per arch compiles, prunes and packs. Producer selection
+    is per-UKD on `kernel_source.kind`, so hip and rocKE descriptors combine into
+    one kpack per arch, and a hip UKD's source resolves relative to the descriptor
+    that named it. A pass-through kind is emitted as authored, so a root holding
+    only those writes descriptors and no archive. An arch with no surviving KDP is
+    skipped cleanly and logged 'no kernels for <arch>, skipping'; every arch
+    skipping is a failure. An empty arch list installs nothing (exit 0).
     """
     out_root = Path(out_root)
     results = {}
@@ -1448,13 +1283,9 @@ def run_pipeline(
             inter = compile_intermediate(
                 flat, source_root, arch, hipcc, inter_root / arch, log=log
             )
-            # Stage this arch into a sibling temp dir and rename it into place
-            # only once pack_arch returns cleanly. pack_arch creates the arch
-            # directory before it validates anything, so writing in place
-            # leaves a present-but-empty arch directory behind on failure -- and
-            # install(DIRECTORY ... OPTIONAL) skips only a MISSING directory, so
-            # that partial tree would install. Rename is atomic within a
-            # filesystem, and both paths are under out_root by construction.
+            # Stage into a sibling temp dir and rename in only once pack_arch
+            # returns cleanly: it creates the arch directory before validating, and
+            # install(DIRECTORY ... OPTIONAL) would install a present-but-empty one.
             staging = out_root / f".{arch}.staging"
             if staging.exists():
                 shutil.rmtree(staging)
@@ -1484,17 +1315,13 @@ def run_pipeline(
                 kpack_path=kpack_path,
             )
         except HkpPackError as exc:
-            # One arch failing must not destroy the other arches' work: a
-            # wildcard-arch UKD hitting an arch-restricted builder should shrink
-            # one shard, not fail every shard. The failed arch's staged output is
-            # discarded rather than left half-written, so install(... OPTIONAL)
-            # skips it cleanly instead of shipping a partial tree. Its
-            # intermediate dir stays for debugging -- build-only, never shipped.
+            # One arch failing must not destroy the other arches' work. The failed
+            # arch's staged output is discarded so install(... OPTIONAL) skips it;
+            # its intermediate dir stays for debugging and is never shipped.
             failures[arch] = str(exc)
             log(f"ERROR: {arch} failed: {exc}")
-            # Discard the half-written staging dir AND any previous good output
-            # for this arch: shipping a stale shard beside fresh ones would be a
-            # subtler lie than shipping none.
+            # Discard the half-written staging dir AND any previous good output for
+            # this arch: a stale shard beside fresh ones is a subtler lie than none.
             staging = out_root / f".{arch}.staging"
             if staging.exists():
                 shutil.rmtree(staging)
@@ -1505,9 +1332,8 @@ def run_pipeline(
             )
 
     if failures:
-        # Non-zero exit with partial output: the build fails loudly, but a
-        # developer can still inspect what did succeed. Exiting 0 here would
-        # resurrect the silent-empty-package class of defect.
+        # Non-zero exit with partial output: the build fails loudly, but a developer
+        # can still inspect what did succeed.
         detail = "; ".join(f"{a}: {r}" for a, r in sorted(failures.items()))
         raise HkpPackError(
             f"packing failed for {len(failures)} of {len(arches)} arch(es) "
@@ -1515,13 +1341,9 @@ def run_pipeline(
             "output was discarded."
         )
 
-    # The archive clause keys on what the root holds rather than on what survived
-    # pruning: a compiling UKD that prunes out of every requested arch is
-    # indistinguishable downstream from one whose archive went missing. Nothing
-    # downstream restates either clause -- the build edge's OUTPUT is a stamp its
-    # recipe touches unconditionally, and a staged tree holding nothing reads the
-    # same there as a root that is legitimately empty. Only the packer knows the
-    # kinds it walked and which arches pruned.
+    # The archive clause keys on what the root holds rather than what survived
+    # pruning: a compiling UKD that prunes out of every arch is indistinguishable
+    # downstream from one whose archive went missing.
     arch_list = ", ".join(arches)
     if all(r.skipped for r in results.values()):
         raise HkpPackError(

@@ -24,14 +24,14 @@ SPDX-License-Identifier: MIT
 
 // Every census diagnostic in this file is matched as text by the CTest entries in
 // descriptor-packaging/cmake/HkpPackaging.cmake: each control keys on one refusal's
-// wording, and the census entry itself fails on the "Census: " prefix. Reword that prefix
-// and a run that refuses still reads as a clean census.
+// wording, and the census entry keys on the "Census: " prefix. Rewording either breaks
+// those gates silently.
 namespace
 {
 
 // Comma-separated, because the value arrives through the CTest ENVIRONMENT property,
-// which is itself a semicolon-separated list of VAR=VALUE. Empty entries are dropped so
-// a trailing separator is not read as a case named "".
+// itself a semicolon-separated list of VAR=VALUE. Empty entries are dropped so a trailing
+// separator is not read as a case named "".
 std::set<std::string> splitCaseNames(const std::string& packed)
 {
     std::set<std::string> names;
@@ -52,16 +52,13 @@ std::set<std::string> splitCaseNames(const std::string& packed)
     return names;
 }
 
-// The inventory includes disabled, filtered and sharded-out cases. Only callbacks
-// from a complete passing iteration can satisfy a declared census obligation.
+// The inventory includes disabled, filtered and sharded-out cases; only callbacks from a
+// complete passing iteration satisfy a census obligation. Obligations are built from the
+// suite itself, so a suite that loses cases loses obligations with them. The pinned set
+// closes that hole and is compared by name in both directions, since a lost case and a new
+// one cancel in a count but call for opposite remedies.
 //
-// That proves everything REGISTERED ran and passed. It cannot prove that everything
-// EXPECTED was registered: the obligation set is built from the suite itself, so a suite
-// that loses cases loses obligations with them and still reports a complete census. The
-// pinned set closes that hole. It is compared by NAME and in both directions -- a lost
-// case and a new one cancel in a count, and the two call for opposite remedies.
-//
-// The pin is optional. Absent, only the execution guard runs.
+// The pin is optional; absent, only the execution guard runs.
 class CensusExecutionListener : public testing::EmptyTestEventListener
 {
 public:
@@ -166,9 +163,9 @@ int main(int argc, char** argv)
 
     std::unique_ptr<CensusExecutionListener> census;
     const auto censusSuite = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_SUITE");
-    // The caller's own values, captured and validated ahead of the default-root block
-    // below, which can write HIPDNN_DESCRIPTOR_DIR itself: the shard a census is verdicted
-    // against, and the root its diagnostics name, are never ones this binary chose.
+    // Captured and validated ahead of the default-root block below, which can write
+    // HIPDNN_DESCRIPTOR_DIR itself: the shard a census is verdicted against is never one
+    // this binary chose.
     const auto censusArch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
     const auto censusRoot = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
     if(!censusSuite.empty())
@@ -199,9 +196,8 @@ int main(int argc, char** argv)
             std::cerr << "Census suite '" << censusSuite << "' is absent or empty.\n";
             return 1;
         }
-        // The registration comparison happens here, before RUN_ALL_TESTS, because it
-        // reads the static registration rather than any result -- and because a suite
-        // that shrank should say so even if the surviving cases all pass.
+        // Before RUN_ALL_TESTS: this reads the static registration rather than results, and
+        // a suite that shrank should say so even when the surviving cases pass.
         const auto expectedCases
             = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_EXPECTED_CASES");
         census = std::make_unique<CensusExecutionListener>(*suite, expectedCases);
@@ -212,15 +208,13 @@ int main(int argc, char** argv)
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hip-kernel-provider-unit");
 
 #ifdef HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR
-    // Point this binary at the descriptors staged beside it. The engine implementation is
-    // linked in statically here, so its module-relative lookup measures from this
-    // executable and would otherwise fall through to the install prefix, which a build
-    // tree has never written. Done here rather than in the CTest environment so the binary
-    // runs standalone, and so nothing machine-specific reaches the install-time CTest
-    // file, which is generated from that same environment.
-    //
-    // Failing on a resolved root that holds no descriptor is deliberate: it is otherwise
-    // indistinguishable from a run on a device the descriptors do not cover.
+    // Point this binary at the descriptors staged beside it. The engine is linked in
+    // statically, so its module-relative lookup measures from this executable and would
+    // otherwise fall through to the install prefix, which a build tree never writes. Done
+    // here rather than in the CTest environment so the binary runs standalone and nothing
+    // machine-specific reaches the install-time CTest file. A resolved root holding no
+    // descriptor fails, being otherwise indistinguishable from a run on a device the
+    // descriptors do not cover.
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
     {
         const auto descriptors = hip_kernel_provider::testing::descriptorSetRoot(
@@ -239,38 +233,28 @@ int main(int argc, char** argv)
     }
 #endif
 
-    // Initialize test logging infrastructure to forward logs to std::cerr based
-    // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
-    // NOTE: Logs are not routed to the backend by the recordingCallback returned here
-    // which is the desired behaviour because this is a plugin unit test harness.
+    // Forward logs to std::cerr according to HIPDNN_LOG_LEVEL. The recordingCallback
+    // returned here does not route logs to the backend, which is what a plugin unit test
+    // harness wants.
     auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
 
-    // Initialize plugin logger with test recording callback so that plugin logs
-    // are first routed to the log recorder for capture and use by the unit tests.
+    // Route plugin logs to the recorder so unit tests can capture them.
     hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
                                                           recordingCallback);
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     if(!censusSuite.empty())
     {
-        // What HIPDNN_TEST_EXPECTED_ARCH is for. The packer stamps every emitted copy of
-        // a pack with the architecture of the shard it writes that copy into, so the
-        // stamps the loaded packs carry are what say which shard actually arrived. Left
-        // uncompared, the entry declared for one architecture passes identically on
-        // another's shard, because every case in the suite reads its architecture out of
-        // the descriptors it was handed.
+        // The packer stamps every emitted copy of a pack with the architecture of the
+        // shard it writes into, so those stamps say which shard arrived. Uncompared, an
+        // entry declared for one architecture passes identically on another's shard.
         //
-        // Below the logging setup because this is the call that loads and its result is
-        // memoized for the process: every loader diagnostic is dispatched exactly once,
-        // and discarded outright when no callback is registered yet, so raising
-        // HIPDNN_LOG_LEVEL cannot bring back what a load above the setup dropped. The
-        // shard is still the caller's -- the preflight proved HIPDNN_DESCRIPTOR_DIR
-        // nonempty, which makes the default-root block in between a no-op.
+        // Below the logging setup because this call loads and memoizes for the process:
+        // each loader diagnostic is dispatched once.
         //
-        // A second stamp means the root spans shards -- the shared stage tree a per-arch
-        // entry exists to avoid. A pack may legitimately declare no architecture (the
-        // arch-independent form), but one still cannot demonstrate which shard arrived,
-        // so it is refused too.
+        // A second stamp means the root spans shards, which a per-arch entry exists to
+        // avoid. An arch-independent pack is refused too: it cannot show which shard
+        // arrived.
         std::size_t loadedSets = 0;
         std::size_t loadedPacks = 0;
         std::set<std::string> stamped;

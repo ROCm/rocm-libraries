@@ -3,36 +3,25 @@
 
 """The launch-surface audit must fail on each defect class it exists to catch.
 
-The headline class, drawn from a real defect in this tree: a profile whose
-``kmd_fields`` omits a field its own engine dereferences unconditionally --
-``Gfx942AttentionDenseNative.cpp`` reads ``block_m`` through
-``kernel.getIntMetadata`` on both the matcher path (``kernelMatches``) and the
-prepare path (``attentionDenseGeometry``). Nothing else cross-references the
-fields a launch surface's C++ mirror needs against the fields the KMD declares.
+The headline class: a profile whose ``kmd_fields`` omits a field its own engine
+dereferences unconditionally -- ``Gfx942AttentionDenseNative.cpp`` reads ``block_m``
+through ``kernel.getIntMetadata`` on both ``kernelMatches`` and
+``attentionDenseGeometry``. Nothing else cross-references a mirror against the KMD.
 
-``TestKmdFieldsCheck`` runs on fresh minimal fixtures rather than a whole profile, so
-what it pins is the CHECK's behaviour on one defect at a time. The classes further
-down drive the same check over a WHOLE profile, reading the committed fixtures in
-``tests/fixtures/profiles/``, so every class here runs on a bare checkout with
-nothing set in the environment.
+``TestKmdFieldsCheck`` uses fresh minimal fixtures; the classes below drive the same
+check over a WHOLE profile from ``tests/fixtures/profiles/``, so every class runs on a
+bare checkout. Those fixtures are controlled INPUTS: a literal like
+``set(unguarded) == {"kernargs", "spec_resolution"}`` describes the fixture, not the
+real pack.
 
-Those fixtures are controlled INPUTS, not shipped artifacts. A literal like
-``set(unguarded) == {"kernargs", "spec_resolution"}`` describes what the tool does
-with ``tests/fixtures/profiles/gfx942.profile.yaml``, not which surfaces the real
-gfx942 attention-dense pack leaves unguarded. Each class's docstring names the
-literals that are fixture-keyed.
-
-An author auditing their own profile overrides the fixture per arch:
+An author auditing their own profile overrides the fixture per arch, one variable each
+because the two profiles are not interchangeable:
 
     HIPDNN_INGESTOR_PROFILE_GFX942=/abs/path/to/gfx942.profile.yaml \\
     HIPDNN_INGESTOR_PROFILE_GFX950=/abs/path/to/gfx950.profile.yaml \\
         .venv/bin/python -m pytest tests/test_launch_surface.py
 
-The two are separate variables because the profiles are not interchangeable: each
-class asserts the set of surfaces ITS profile honestly declares unguarded, so a
-single variable would let one arch's profile be audited against the other's
-expectations and report a failure that is really a mix-up. See
-``tests/fixtures/profiles/README.md`` for the rest.
+See ``tests/fixtures/profiles/README.md`` for the rest.
 """
 
 from __future__ import annotations
@@ -56,19 +45,15 @@ _REPO_ROOT = launch_surface.find_repo_root(_TOOLS)
 _PROFILE_VAR_942 = "HIPDNN_INGESTOR_PROFILE_GFX942"
 _PROFILE_VAR_950 = "HIPDNN_INGESTOR_PROFILE_GFX950"
 
-#: The committed synthetic profiles these classes audit by default. See that
-#: directory's README for what each one is wired to demonstrate.
+#: The committed synthetic profiles these classes audit by default; see that
+#: directory's README for what each demonstrates.
 _FIXTURE_PROFILES = Path(__file__).resolve().parent / "fixtures" / "profiles"
 
 
 def _profile_path(var: str, fixture: str) -> Path:
-    """The override named by ``var`` if it is set, else the committed fixture.
-
-    A variable set to a path that is not a file raises rather than falling back:
-    silently auditing the fixture under the author's own variable would report the
-    fixture's clean result as their profile's, which is the one outcome a typo must
-    not produce.
-    """
+    """The override named by ``var`` if set, else the committed fixture. A variable
+    naming a non-file raises rather than reporting the fixture's clean result as the
+    author's."""
     raw = os.environ.get(var)
     if not raw:
         return _FIXTURE_PROFILES / fixture
@@ -91,13 +76,9 @@ def _profile(kmd_fields, surfaces) -> dict:
 
 
 def _surface(**overrides) -> dict:
-    """A structurally-complete surface, so a test overriding one key does not also
-    have to restate every other required key.
-
-    cpp_mirror/test default to THIS tool's own files, relative to the REPO ROOT,
-    because every direct check()/CLI call in this file passes _REPO_ROOT as the
-    root those paths resolve against.
-    """
+    """A structurally-complete surface, so a test overriding one key need not restate
+    the rest. cpp_mirror/test default to this tool's own files, relative to the REPO
+    ROOT, which every check()/CLI call here passes."""
     base = {
         "name": "grid",
         "python_source": "kernels/x.py:grid_fn (~line 10)",
@@ -115,9 +96,8 @@ def _surface(**overrides) -> dict:
 
 
 class TestKmdFieldsCheck:
-    """The check this tool exists for: a surface cannot name a kmd_fields entry the
-    profile itself does not declare -- that is exactly the shape of the block_m
-    defect."""
+    """A surface cannot name a kmd_fields entry the profile does not declare: the shape
+    of the block_m defect."""
 
     def test_an_undeclared_kmd_field_is_caught(self):
         profile = _profile(
@@ -175,8 +155,7 @@ class TestTestPathExistence:
         assert any("test path does not exist" in f for f in failures)
 
     def test_the_literal_none_is_not_a_missing_path(self):
-        """`test: none` is a deliberate admission, not a broken path -- it must land
-        in unguarded/untested, never in failures."""
+        """`test: none` is a deliberate admission, so it lands in unguarded/untested."""
         profile = _profile(
             kmd_fields=[],
             surfaces=[_surface(guard="something", test="none")],
@@ -272,18 +251,13 @@ class TestMalformedProfile:
 
 
 class TestAgainstTheGfx942Profile:
-    """A whole gfx942-shaped profile must --check clean, modulo the surfaces it
-    honestly declares unguarded.
+    """A whole gfx942-shaped profile must --check clean, modulo the surfaces it honestly
+    declares unguarded.
 
-    What this pins is the TOOL's verdict on a controlled input -- by default
-    `tests/fixtures/profiles/gfx942.profile.yaml`, whose four surfaces are wired so
-    that `grid` and `applicability` split their shared mirror's two required metadata
-    fields between them. Passing therefore means the union-over-shared-mirror rule
-    fired.
-
-    The unguarded set is a literal keyed to that fixture. Under
-    `HIPDNN_INGESTOR_PROFILE_GFX942` it describes the author's profile instead and
-    will fail whenever their honest admissions differ.
+    By default `tests/fixtures/profiles/gfx942.profile.yaml`, whose `grid` and
+    `applicability` surfaces split their shared mirror's two required metadata fields,
+    so passing means the union-over-shared-mirror rule fired. The unguarded set is a
+    literal keyed to that fixture.
     """
 
     def test_the_profile_check_names_only_genuinely_unguarded_surfaces(self):
@@ -295,8 +269,8 @@ class TestAgainstTheGfx942Profile:
         )
         # The fixture declares kernargs and spec_resolution guard: none / test: none,
         # modelling the two surfaces a real integration cannot defend: nothing
-        # cross-checks kernarg order against the Python ABI, and nothing re-derives
-        # the dispatcher's resolution at runtime.
+        # cross-checks kernarg order against the Python ABI, and nothing re-derives the
+        # dispatcher's resolution at runtime.
         assert set(unguarded) == {"kernargs", "spec_resolution"}
 
     def test_the_profile_passes_with_allow_unguarded(self):
@@ -311,10 +285,9 @@ class TestAgainstTheGfx942Profile:
 
 
 class TestMetadataFieldCoverage:
-    """Check 1b: a metadata field a declared cpp_mirror reads through a REQUIRED
-    accessor (getIntMetadata/getStringMetadata) must be declared by SOME surface
-    naming that same mirror -- see TestUndeclaredSurfaceLimit for the shape this
-    cannot catch."""
+    """Check 1b: a metadata field a cpp_mirror reads through a REQUIRED accessor must be
+    declared by SOME surface naming that mirror. See TestUndeclaredSurfaceLimit for the
+    shape this cannot catch."""
 
     _CPP_DIRECT = """
         constexpr std::string_view SEQLEN_Q_FIELD = "seqlen_q";
@@ -367,7 +340,7 @@ class TestMetadataFieldCoverage:
 
     def test_the_forwarding_lambda_idiom_is_recognised(self, tmp_path):
         """The pack files' own idiom -- one lambda forwarding several field constants
-        through a single accessor -- must resolve the same as a direct call."""
+        through a single accessor -- must resolve like a direct call."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_WRAPPER_LAMBDA)
         profile = _profile(
@@ -380,9 +353,8 @@ class TestMetadataFieldCoverage:
         assert any("batch" in f for f in failures), failures
 
     def test_two_surfaces_sharing_one_mirror_combine_their_kmd_fields(self, tmp_path):
-        """grid and block in the real profiles both cite the same geometry header;
-        the union of their kmd_fields, not either one alone, must cover what the
-        header reads."""
+        """grid and block cite the same geometry header, so the union of their
+        kmd_fields, not either alone, must cover what it reads."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_DIRECT)
         profile = _profile(
@@ -409,8 +381,7 @@ class TestMetadataFieldCoverage:
         assert failures == []
 
     def test_trygetmetadata_fields_are_not_required(self, tmp_path):
-        """tryGetMetadata is how this codebase spells 'may legitimately be absent'
-        (the four ABI-extending features)."""
+        """tryGetMetadata is how this codebase spells 'may legitimately be absent'."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(
             """
@@ -431,9 +402,9 @@ class TestMetadataFieldCoverage:
     def test_the_positive_control_a_field_named_only_in_a_comment_is_ignored(
         self, tmp_path
     ):
-        """A regex scan over raw text (not a parse) risks matching a call site
-        spelled out in a comment or string rather than real code, so the extraction
-        function's comment/string exclusion is exercised directly."""
+        """A regex scan over raw text risks matching a call site spelled out in a
+        comment or string, so the extraction's comment/string exclusion is exercised
+        directly."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(
             """
@@ -447,8 +418,8 @@ class TestMetadataFieldCoverage:
         assert fields == set(), fields
 
     def test_the_positive_control_a_real_call_site_is_found(self, tmp_path):
-        """The other half: the exclusion above must be discriminating real code
-        from text, not just matching nothing."""
+        """The exclusion must discriminate real code from text, not just match
+        nothing."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text(self._CPP_DIRECT)
         fields = launch_surface.extract_required_metadata_fields(cpp.read_text())
@@ -456,8 +427,8 @@ class TestMetadataFieldCoverage:
 
 
 class TestSymbolExistence:
-    """Checks 1c: a cpp_mirror/python_source locator's leading symbol, when it
-    parses as one, must be real."""
+    """Checks 1c: a cpp_mirror/python_source locator's leading symbol, when it parses as
+    one, must be real."""
 
     def test_a_nonexistent_cpp_symbol_is_caught(self, tmp_path):
         cpp = tmp_path / "Mirror.cpp"
@@ -533,9 +504,8 @@ class TestSymbolExistence:
         assert failures == []
 
     def test_a_prose_locator_with_no_leading_symbol_is_not_checked(self, tmp_path):
-        """spec_resolution's real cpp_mirror is prose from the first token on
-        ('prepare() trusts persistent...' -- 'prepare()' with the parens is not a
-        bare identifier)."""
+        """spec_resolution's real cpp_mirror is prose from the first token on:
+        'prepare()' with parens is not a bare identifier."""
         cpp = tmp_path / "Mirror.cpp"
         cpp.write_text("void unrelated() {}\n")
         profile = _profile(
@@ -552,21 +522,14 @@ class TestSymbolExistence:
 
 
 class TestUndeclaredSurfaceLimit:
-    """The documented residual gap: check 1b catches an undeclared/deleted surface
-    only when it uniquely covered a required metadata field.
-
-    Both branches are reproduced by deleting a surface from the gfx950 profile, whose
-    `applicability` and `kernargs` deliberately cite the SAME cpp_mirror with only
-    `applicability` declaring the fields that mirror reads -- so the gap has both a
-    visible and an invisible side to tell apart.
-    """
+    """The documented residual gap: check 1b catches a deleted surface only when it
+    uniquely covered a required metadata field. Both branches come from the gfx950
+    profile, whose `applicability` and `kernargs` cite the SAME cpp_mirror."""
 
     def test_deleting_the_kernargs_surface_is_not_caught(self):
-        """kernargs declares no kmd_fields of its own and shares its mirror with
-        applicability, which still covers every field that mirror reads through a
-        required accessor. Nothing stops being declared, so the metadata-field scan
-        has no observable to notice -- exactly the real shape of a kernarg surface,
-        whose mirror forwards positional device-buffer pointers and reads nothing."""
+        """kernargs declares no kmd_fields and shares its mirror with applicability,
+        which covers every required field, so the scan has no observable -- the real
+        shape of a kernarg surface."""
         profile = yaml.safe_load(_PROFILE_950.read_text(encoding="utf-8"))
         profile["launch_surface"] = [
             s for s in profile["launch_surface"] if s["name"] != "kernargs"
@@ -578,10 +541,8 @@ class TestUndeclaredSurfaceLimit:
         )
 
     def test_deleting_a_surface_with_unique_required_fields_is_caught(self):
-        """The contrast case: applicability is the sole declarer of the fields its
-        cpp_mirror -- the same file kernargs cites -- reads through a required
-        accessor, so deleting it leaves those fields undeclared and check 1b names
-        them."""
+        """The contrast: applicability is the sole declarer of the fields its cpp_mirror
+        reads through a required accessor, so deleting it leaves them undeclared."""
         profile = yaml.safe_load(_PROFILE_950.read_text(encoding="utf-8"))
         profile["launch_surface"] = [
             s for s in profile["launch_surface"] if s["name"] != "applicability"
@@ -591,18 +552,10 @@ class TestUndeclaredSurfaceLimit:
 
 
 class TestAgainstTheGfx950Profile:
-    """The second profile shape this tool audits, through the same checks
-    `TestAgainstTheGfx942Profile` runs over the gfx942 one.
-
-    This class passing says the checks hold on the gfx950 shape -- one shared mirror
-    with an exclusive declarer, one unguarded surface -- and says nothing about the
-    gfx942 shape, whose mirror coverage is split across two surfaces instead. Two
-    differently-wired inputs is what shows the checks are not tuned to one
-    arrangement.
-
-    Its unguarded set is a literal keyed to the committed fixture, for the reason
-    given on `TestAgainstTheGfx942Profile`.
-    """
+    """The second profile shape, through the checks `TestAgainstTheGfx942Profile` runs
+    over gfx942: one shared mirror with an exclusive declarer and one unguarded surface,
+    where gfx942 splits mirror coverage across two surfaces. Its unguarded set is a
+    literal keyed to the committed fixture."""
 
     def test_the_gfx950_profile_check_names_only_genuinely_unguarded_surfaces(self):
         profile = yaml.safe_load(_PROFILE_950.read_text(encoding="utf-8"))
@@ -611,9 +564,9 @@ class TestAgainstTheGfx950Profile:
             f"the gfx950 profile's launch_surface block must be structurally "
             f"sound: {failures}"
         )
-        # spec_resolution alone, so that a second honest admission creeping into the
-        # fixture cannot pass unnoticed. It models the surface where prepare() trusts
-        # the KMD's own numbers rather than re-deriving them at launch.
+        # spec_resolution alone, so a second honest admission creeping into the fixture
+        # cannot pass unnoticed. It models the surface where prepare() trusts the KMD's
+        # own numbers.
         assert set(unguarded) == {"spec_resolution"}
 
     def test_the_gfx950_profile_passes_with_allow_unguarded(self):
@@ -623,9 +576,8 @@ class TestAgainstTheGfx950Profile:
 
 
 class TestRepoRootResolution:
-    """The CLI must resolve cpp_mirror/test paths against the REPO ROOT, not the
-    process working directory -- the same profile checked from the repo root and from
-    an unrelated directory must report the same result."""
+    """The CLI resolves cpp_mirror/test paths against the REPO ROOT, not the process
+    cwd, so the same profile reports the same result from anywhere."""
 
     def test_find_repo_root_locates_the_git_checkout(self):
         found = launch_surface.find_repo_root(_TOOLS)

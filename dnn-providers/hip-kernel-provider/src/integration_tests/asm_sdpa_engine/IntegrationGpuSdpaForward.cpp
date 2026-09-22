@@ -25,9 +25,7 @@ using namespace asm_sdpa_engine;
 namespace
 {
 
-/**
- * @brief Test fixture that takes a GraphTestCase as parameter.
- */
+/// Fixture parameterized on GraphTestCase.
 template <typename DataType>
 class IntegrationSdpaFwd : public IntegrationGraphVerificationHarness<DataType, GraphTestCase>
 {
@@ -47,7 +45,6 @@ protected:
         auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const GraphTestCase& testCase = this->GetParam();
 
-        // Skip if device is not supported
         if(testCase.arch != deviceString)
         {
             GTEST_SKIP() << "Skipped: Test case requires " << testCase.arch
@@ -63,7 +60,6 @@ protected:
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
-        // Register output tensor validator
         GraphVerificationContext context(*graph);
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
@@ -74,8 +70,8 @@ protected:
                 }
                 if(tensorAttr == stats)
                 {
-                    // Every fully masked causal row has a log-sum-exp of -inf in the CPU
-                    // reference and in the device result alike.
+                    // A fully masked causal row has a log-sum-exp of -inf in both the CPU
+                    // reference and the device result.
                     this->registerValidator(context,
                                             tensorAttr,
                                             createAllCloseMatchingInfinitiesValidator(
@@ -99,12 +95,9 @@ protected:
 
 using IntegrationGpuSdpaFwdBf16 = IntegrationSdpaFwd<bfloat16>;
 
-/**
- * @brief Test fixture for shape-sweep tests parameterized on SdpaFwdTestCase.
- *
- * Builds a forward SDPA graph from explicit tensor dimensions, enabling
- * shape sweeps, GQA, and asymmetric sequence-length testing.
- */
+/// Fixture for shape-sweep tests parameterized on SdpaFwdTestCase: builds a forward SDPA
+/// graph from explicit dimensions, covering shape sweeps, GQA, and asymmetric sequence
+/// lengths.
 template <typename DataType>
 class IntegrationSdpaFwdShapeSweep
     : public IntegrationGraphVerificationHarness<DataType, SdpaFwdTestCase>
@@ -122,10 +115,8 @@ protected:
 
     void runGraphTest(float tolerance)
     {
-        // MI300/MI308 coverage: Both MI300 and MI308 report "gfx942" via getDeviceString()
-        // but load different .co files (MI300/ vs MI308/ subdirectory in getKernelCoPath()).
-        // Integration tests exercise whichever device the CI agent has. Full coverage
-        // requires CI agents with both MI300 and MI308 hardware.
+        // MI300 and MI308 both report "gfx942" but load different .co files (MI300/ vs
+        // MI308/ in getKernelCoPath()), so covering both needs CI agents of each.
         auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
         const SdpaFwdTestCase& testCase = this->GetParam();
 

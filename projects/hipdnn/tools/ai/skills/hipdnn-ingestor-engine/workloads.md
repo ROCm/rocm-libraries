@@ -1,10 +1,9 @@
 # Workload identity and runtime evidence
 
-**This page is authoritative for the measurement and accounting rules** — cohort
-conditions, sweep terminal statuses, the runtime outcome ledger and the required
-reporting statistics. [RUNBOOK.md](RUNBOOK.md) owns execution and command sequencing and
-cites this page rather than restating it; where the two appear to differ on a measurement
-rule, this page governs.
+**Authoritative for the measurement and accounting rules** — cohort conditions, sweep
+terminal statuses, the runtime outcome ledger and the required reporting statistics.
+[RUNBOOK.md](RUNBOOK.md) owns execution and command sequencing; where the two appear to
+differ on a measurement rule, this page governs.
 
 The sweep reference — from the repository root in
 `projects/hipdnn/tools/IngestorGenerator/tools/README-sweeps.md`, RUNBOOK's
@@ -12,73 +11,73 @@ The sweep reference — from the repository root in
 
 ## Provenance, scope and semantic identity
 
-Inventory external workloads and the owners' benchmarks/published results. Kernel
-predicates say what can build or serve, not what callers ask for. Keep populations
-separate by source. The external `ROCm/dnn-benchmarking` project supplies the benchmark
-CLI and graph corpora; use its current setup and workload manifests, not an assumed
+Inventory external workloads and the owners' benchmarks and published results, keeping
+populations separate by source. Kernel predicates say what can build or serve, not what
+callers ask for. The external `ROCm/dnn-benchmarking` project supplies the benchmark CLI
+and graph corpora; use its current setup and workload manifests, not an assumed
 provider-installed executable. `microbench/` is a provenance label, not proof of
 synthetic data.
 
 Each declared source needs total, parsed, servable, covered and excluded counts with
-reasons and original identities. Missing/unreadable input is not an empty population.
-Request JSON feeds mining/parity; actual graph JSON directories feed the sweep.
+reasons and original identities. Missing or unreadable input is not an empty population.
+Request JSON feeds mining and parity; actual graph JSON directories feed the sweep.
 `mine_shapes.py` accepts published CSV, graph directories and optional `--rocke-bench`
 input. Omit sources only when outside the approved scope.
 
 Every semantic request field participates in identity, including unmasked/causal/window
 and sink semantics and independent Q/K/V dimensions. Provenance does not split the
 semantic key, but deduplication must retain **all original corpus/source/graph
-occurrences**. Inspect real dims/strides, attributes and UID topology; filenames do
-not define semantics. Distinguish unsupported, malformed/unrepresentable and missing-
-variant outcomes. Never reduce the denominator to successful timing rows.
+occurrences**. Inspect real dims/strides, attributes and UID topology, not filenames.
+Distinguish unsupported, malformed/unrepresentable and missing-variant outcomes, and
+never reduce the denominator to successful timing rows.
 
 ## Applicability and reference contract
 
-rocKE profiles scope the candidate registry to the actual kernel family/algorithm
-and required opt-in selector. Reference candidates must implement
-`admits(request) -> (bool, str)`; **there is no `_supports` fallback**. False requires
-a nonempty reason. Missing/noncallable APIs, bad signatures, exceptions, invalid
-returns and generic constructor/factory failures are operational errors: reconciliation
-exits 2, including under escape flags. They are not unsupported-shape evidence.
+rocKE profiles scope the candidate registry to the actual kernel family/algorithm and
+required opt-in selector. Reference candidates must implement
+`admits(request) -> (bool, str)`; **there is no `_supports` fallback**, and False
+requires a nonempty reason. Missing or noncallable APIs, bad signatures, exceptions,
+invalid returns and generic constructor/factory failures are operational errors:
+reconciliation exits 2, including under escape flags. They are not unsupported-shape
+evidence.
 
-Reference-only support requires investigation of variants, matcher semantics or the
-reference claim and an explicit scope decision for exclusions. Applicability does
-not prove numerical truth; use [graph-contract.md](graph-contract.md)'s reference
-capability rules. Direct-load engines use their own explicit corpus/reference,
-without a fictitious rocKE profile.
+Reference-only support requires investigating variants, matcher semantics or the
+reference claim, plus an explicit scope decision for exclusions. Applicability does not
+prove numerical truth — use [graph-contract.md](graph-contract.md)'s reference
+capability rules. Direct-load engines use their own explicit corpus and reference.
 
 ## Installed measurement contract
 
 Each arm retains source/config, descriptor/payload, plugin/runtime and installation
 identities from a coherent stack. The exact installed UED name must map to the expected
 benchmark engine name/ID; another engine, a name prefix or a reference-provider row
-cannot satisfy attribution. The sweep supplies the benchmark's `--engine` argument
-from that discovered ID; phase-owned arguments must not be overridden.
+cannot satisfy attribution. The sweep supplies the benchmark's `--engine` argument from
+that discovered ID; phase-owned arguments must not be overridden.
 
 The YAML example is not an inventory. Replace corpus counts, total installed KDP-entry
 counts, paths and served floors with actual inputs. Paths resolve from the YAML
-directory with no shell/environment interpolation. Hazard exclusions fail if present,
-not silently filter; use `exclude_tensors: none` when appropriate.
+directory with no shell or environment interpolation. Hazard exclusions fail if present
+rather than silently filtering; use `exclude_tensors: none` when appropriate.
 
 ### Conditions a comparative cohort must satisfy
 
-All of these hold simultaneously, or the numbers are not comparable:
+All hold simultaneously, or the numbers are not comparable:
 
 - **One session.** A single device, node, session and job for every arm. A diagnostic
   cross-session resume is not a comparative cohort, whatever its status token says.
-- **Baseline first, fixed order.** Arms run in a fixed order with the baseline first, so
-  ordering effects land identically on each arm.
-- **Gated warmup, discarded.** The warmup is gated on the arm actually being served, and
-  its results are discarded. An ungated warmup can time a decline.
+- **Baseline first, fixed order**, so ordering effects land identically on each arm.
+- **Gated warmup, discarded.** The warmup is gated on the arm actually being served; an
+  ungated warmup can time a decline.
 - **At least three rounds**, with the round drift reported, not averaged away.
 - **Isolated caches and logs** per arm, so no arm inherits another's compiled or tuned
   state.
-- **Correctness separately, once per corpus per arm** — never inferred from a timing row.
+- **Correctness separately, once per corpus per arm** — never inferred from a timing
+  row.
 
-Reference capability must cover the approved features and shapes. Runtime may be kept
-affordable by narrowing the corpus under an explicit scope decision, never by silently
-dropping correctness obligations. Final measurements use fresh output produced after the
-final generation, build and install — not a surviving earlier run.
+Reference capability must cover the approved features and shapes. Narrow the corpus
+under an explicit scope decision to keep runtime affordable, never by dropping
+correctness obligations. Final measurements use fresh output produced after the final
+generation, build and install.
 
 ### Terminal sweep statuses
 
@@ -89,14 +88,14 @@ final generation, build and install — not a surviving earlier run.
 | `SWEEP_INCOMPLETE` | 1 | One or more required gates unmet | No |
 | — | 2 | Invalid config, operational error, or interruption | No |
 
-Exit 0 alone therefore proves nothing: read the status token. Timing results cannot
-excuse a failed or missing comparison, a numerical mismatch, a NaN, or unwritten output,
-and an infrastructure failure is never reportable as a kernel test result.
+Exit 0 alone proves nothing: read the status token. Timing results cannot excuse a
+failed or missing comparison, a numerical mismatch, a NaN or unwritten output, and an
+infrastructure failure is never reportable as a kernel test result.
 
 ## Complete final runtime join
 
-Every input in every final corpus/phase needs an outcome ledger row. These fields are the
-complete required set — a ledger missing any one of them does not support acceptance:
+Every input in every final corpus/phase needs an outcome ledger row. These fields are
+the complete required set:
 
 | Field | Required evidence |
 |---|---|
@@ -108,13 +107,12 @@ complete required set — a ledger missing any one of them does not support acce
 | Evidence | Result/log path and actually observed decline reason where applicable |
 
 Absence of a timing row is not a decline. A decline is only what runtime evidence
-actually recorded; reasons unavailable there cannot be reconstructed from offline policy.
+recorded; reasons unavailable there cannot be reconstructed from offline policy.
 
-The join is **corpus/phase-local** — never across corpora or phases — and rejects:
-
-- an input with no outcome row;
-- a graph name that is duplicated or otherwise ambiguous within its corpus;
-- an input-binding fingerprint that does not match the final artifact identities.
+The join is **corpus/phase-local** — never across corpora or phases — and rejects an
+input with no outcome row, a graph name duplicated or otherwise ambiguous within its
+corpus, and an input-binding fingerprint that does not match the final artifact
+identities.
 
 Semantic deduplication must not discard original occurrences: the ledger carries one row
 per original occurrence even when several share a semantic key. Missing, ambiguous and

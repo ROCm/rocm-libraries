@@ -95,29 +95,23 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(engines/kernel_ingestor_engine)
 
     # descriptorSearchDirectory()'s tests assert which of its three sources answered, and
-    # the only way to tell branch 2 or 3 from a failed lookup is that both end in this
-    # fixed offset. Same value the provider is compiled with, so the test cannot drift
-    # into asserting a path the provider never builds.
+    # branches 2 and 3 are told apart from a failed lookup only by this fixed offset, which
+    # must be the value the provider is compiled with.
     #
-    # One define per descriptor set. A single define cannot serve both: the discovery set is
-    # the whole unit root, and the kpack cases need the one subtree under it that carries an
-    # archive.
-    #
-    # Binary-relative, never an absolute build path. The offset holds in the build tree and
-    # the install tree alike, so these cases read the descriptors beside whichever copy of
-    # the binary is running instead of reaching back into the tree that configured it -- an
-    # installed run would otherwise find nothing, enumerate nothing, and pass.
+    # One define per descriptor set: the discovery set is the whole unit root, while the
+    # kpack cases need the one subtree under it that carries an archive. Both are
+    # binary-relative, never an absolute build path, so the cases read the descriptors
+    # beside whichever copy of the binary runs.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
-    # The kpack adapter's tests. Gated with the sources they exercise, and kept together
-    # here -- including the dispatch ones, which sit under engines/ -- so they sit between
-    # the two defines they read. Those are HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, under
-    # which the device cases find the archive this build packed for the local arch, and
+    # The kpack adapter's tests, gated with the sources they exercise and kept together
+    # between the two defines they read: HIPKERNELPROVIDER_UNIT_KPACK_RELDIR above, where
+    # the device cases find the archive packed for the local arch, and
     # HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH below, which the parse-level cases open
-    # because they need a real container rather than a matching device.
+    # because they need a real container.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackArchive.cpp
         compilation/TestKpackKernelLoader.cpp
@@ -126,17 +120,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         ingestor/TestPackedDescriptorLoad.cpp
     )
 
-    # A real archive to open, so the arch-mismatch and missing-toc_key cases meet the
-    # actual reader rather than a hand-forged header. Vendored from rocm-kpack's own
-    # test assets: the reader is now the platform's shared library, so there is no
-    # fetched source tree to take it from, and a 518-byte container is cheaper to carry
-    # than a build-time dependency on one.
-    #
-    # Staged into the test descriptor tree and named by a path relative to this binary,
-    # as the descriptor sets are, so the cases open the archive that ships with whichever
-    # copy of this binary runs. That binary also runs from a packaged artifact carrying no
-    # checkout, where a relative path is the only form that resolves. install(DIRECTORY)
-    # on that tree ships the archive with the descriptors.
+    # A real archive, so the arch-mismatch and missing-toc_key cases meet the actual reader
+    # rather than a hand-forged header. Vendored from rocm-kpack's test assets: the reader
+    # is the platform's shared library, so there is no fetched source tree to take one from.
+    # Staged into the test descriptor tree and named relative to this binary, as the
+    # descriptor sets are, so a packaged artifact carrying no checkout still resolves it.
     set(_hkp_test_kpack_subdir "test_kpack_binary")
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
@@ -145,20 +133,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack")
 
-    # This binary reads the per-arch descriptors and archives the packing roots stage under
-    # test_arch_content/, and each packing target is reachable only through ALL.
-    # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
-    # against a directory that does not exist yet, and they skip rather than fail.
-    # Each descriptor set has its own staging target. Name each one individually.
+    # This binary reads the per-arch descriptors and archives staged under
+    # test_arch_content/, and each packing target is reachable only through ALL, so name
+    # each staging target: `ninja check` builds the binary by name.
     foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()
     endforeach()
 
-    # The parent of the unit descriptor sets, and the only root this binary reads.
-    # A walk of a parent reaches every subtree staged under it, so a further pack
-    # there comes under the check with no edit here.
+    # The parent of the unit descriptor sets, and the only root this binary reads. The walk
+    # covers every subtree staged under it, so further packs need no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
@@ -166,27 +151,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     )
 
     # One census entry per architecture the `unit` pack was wired for, each running this
-    # binary against that pack's own shard. Declared here because a census entry names one
-    # shard and the listener requires every case in the suite to pass without skipping, so
-    # only a suite confined to a single pack qualifies: every TestPointwisePacks case reads
-    # loadedSet("hipkernel:Pointwise") and nothing else, which the `unit` root holds.
-    # Suites that read a second shard -- TestConvFwdPack, which reaches across unit and
-    # unit_shared -- would fail by construction and are censused nowhere.
+    # binary against that pack's own shard. A census entry names one shard and the listener
+    # requires every case in the suite to pass without skipping, so only a single-pack suite
+    # qualifies: every TestPointwisePacks case reads loadedSet("hipkernel:Pointwise"), which
+    # the `unit` root holds, while TestConvFwdPack reaches across unit and unit_shared and
+    # is censused nowhere.
     #
-    # EXPECTED_CASES pins the suite's case-name set. The listener's execution guard
-    # builds its obligations from the suite itself, so it proves only that everything
-    # registered ran -- a case commented out, or a source file dropped from
-    # target_sources, takes its own obligation with it and the census still reports
-    # complete. The pin is the half that notices. It is maintained by hand for this
-    # hand-written suite: adding or removing a TEST() below without editing this list is
-    # a red census, which is the point.
-    #
-    # Each entry arrives with its controls, registered by the same call: one running the
-    # suite with every case filtered out, one pointed at a root that does not exist, one
-    # whose pin names a case the suite does not register. Each is matched against the
-    # diagnostic it must provoke, so a control cannot pass on an unrelated failure. They
-    # are what make the census observable as a gate rather than as a suite that happens
-    # to be green.
+    # EXPECTED_CASES pins the suite's case-name set: the listener builds its obligations
+    # from the suite itself, so a dropped case takes its obligation with it and the pin is
+    # what notices. Each entry is registered with three controls -- the suite with every
+    # case filtered out, a root that does not exist, and a pin naming an unregistered case
+    # -- each matched against the diagnostic it must provoke.
     hkp_register_census_tests(
         TARGET hip_kernel_provider_tests
         PACK_NAME unit
@@ -205,16 +180,13 @@ endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
 
-# No ENVIRONMENT for the descriptors: main() applies the compiled-in path, so the binary
-# runs standalone and nothing machine-specific reaches the generated CTest files. The
-# install-time file is written from this same list, where a build-tree path would name a
-# directory that does not exist on the machine running the installed suite.
+# No ENVIRONMENT for the descriptors: main() applies the compiled-in path, so nothing
+# machine-specific reaches the generated or install-time CTest files.
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
 
-# Published one scope up for the same reason the integration tests do it: under YAML
-# categorization the raw test name is never registered, so the tiered suites created by
-# apply_test_category_labels() in ../CMakeLists.txt are the only place the ambient test
-# environment -- an ASAN symbolizer path, a coverage profile destination -- can land.
+# Published one scope up, as the integration tests do: under YAML categorization the raw
+# test name is never registered, so the tiered suites from apply_test_category_labels() in
+# ../CMakeLists.txt are the only place the ambient test environment can land.
 if(DEFINED hip_kernel_provider_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)

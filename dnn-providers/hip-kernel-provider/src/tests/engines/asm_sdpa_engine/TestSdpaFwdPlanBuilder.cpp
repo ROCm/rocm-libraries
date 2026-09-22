@@ -410,8 +410,8 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor)
 {
-    // Existing withScale=true path uses a compile-time constant scale tensor
-    // (Float32Value baked in). Verify it still passes after the PBV changes.
+    // The withScale=true path uses a compile-time constant scale tensor (Float32Value
+    // baked in), which remains applicable alongside the pass-by-value form.
     SKIP_IF_NO_DEVICES();
 
     const std::string deviceString
@@ -650,16 +650,11 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 // Canonical mask-attribute policy (plan_utils::getMaskType)
 // =============================================================================
 //
-// These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. When a deprecated
-// causal boolean is set it takes precedence over the modern bounds trio; only
-// setting both deprecated booleans at once throws. The policy is
-// hardware-agnostic (it runs before any device dispatch and independent of the
-// kernel registry), so testing the helper keeps the assertions meaningful on
-// any device — including this gfx950 box. Driving the policy through
-// isApplicable would not discriminate the policy result from the unrelated "no
-// matching kernel" rejection that gfx950 produces for causal configurations
-// (the gfx950 forward registry carries NO_MASK rows only).
+// These tests drive the shared mask-precedence policy through plan_utils::getMaskType
+// rather than isApplicable. A deprecated causal boolean takes precedence over the modern
+// bounds trio; setting both deprecated booleans at once throws. The policy runs before any
+// device dispatch and is independent of the kernel registry, so isApplicable would confuse
+// its result with a "no matching kernel" rejection.
 
 // Build a forward SDPA graph that sets the deprecated causal booleans and the
 // modern bounds trio explicitly, so contradictory combinations can be

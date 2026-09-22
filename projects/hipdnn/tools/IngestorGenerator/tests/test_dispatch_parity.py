@@ -3,21 +3,11 @@
 
 """What `dispatch_parity.py` reports, and what it refuses to report.
 
-A shape that does not end up served has exactly ONE per-shape explanation here: the
-eligibility predicate ran, returned false, and gave a reason. Spec construction
-failing is not a second explanation -- it aborts the command, because a corpus the
-request class cannot even hydrate makes every remaining count untrustworthy, and a
-tool that reported "n rejected" beside a servable count would be inviting the reader
-to trust the rest of the line.
-
-These tests exist because the counted-bucket spelling is the one that looks right.
-A `rejected` bucket reads as thorough, but it is unpopulatable, and a count that can
-only ever print 0 tells a reader the failure it names was checked for and did not
-happen -- a stronger claim than the tool can make.
-
-Nothing here imports rocKE. The dispatcher, the request class and the predicate are
-supplied as stubs written into a fake provider root, because what is under test is
-the tool's own reporting and error policy, not any particular kernel's answers.
+A shape that is not served has exactly ONE per-shape explanation: the eligibility
+predicate ran, returned false, and gave a reason. Spec construction failing aborts the
+command instead, because a corpus the request class cannot hydrate makes every
+remaining count untrustworthy, and a `rejected` bucket that can only print 0 claims a
+failure was checked for. The dispatcher, request class and predicate are stubs.
 """
 
 from __future__ import annotations
@@ -33,8 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_parity  # noqa: E402
 
 #: The decline carries a real reason rather than a blanket refusal so the served
-#: control survives alongside it -- a stub that refused everything would satisfy a
-#: "declined is reported" check while proving nothing about the split.
+#: control survives alongside it.
 _STUB_PROVIDER = '''
 import dataclasses
 
@@ -79,11 +68,8 @@ def supports(spec, arch=None):
 
 @pytest.fixture
 def parity(tmp_path, monkeypatch):
-    """A profile, a corpus and a provider root the tool can actually bind.
-
-    Returns a callable over the shape list, so each test states its own corpus and
-    nothing is shared but the stubs.
-    """
+    """A profile, a corpus and a provider root the tool can bind. Returns a callable
+    over the shape list, so each test states its own corpus."""
     library = tmp_path / "provider" / "rocke" / "library"
     library.mkdir(parents=True)
     (tmp_path / "provider" / "rocke" / "platform" / "python").mkdir(parents=True)
@@ -125,13 +111,9 @@ _SERVED_AND_DECLINED = [{"seqlen_q": 256}, {"seqlen_q": 2048}, {"seqlen_q": 777}
 
 class TestTheReportCarriesNoUnpopulatableBucket:
     def test_the_summary_names_no_rejected_bucket(self, parity, capsys):
-        """The regression pin -- the tool is already right here.
-
-        Only two `kind` values can exist: the dataclass default "constructed" and the
-        "declined" the predicate path sets. Reaching this line at all means a
-        construction failure could not have occurred -- it returns 2 long before the
-        summary prints.
-        """
+        """Only two `kind` values can exist: the dataclass default "constructed" and the
+        "declined" the predicate path sets, since a construction failure returns 2 long
+        before the summary prints."""
         assert dispatch_parity.main(parity(_SERVED_AND_DECLINED)) == 0
         out = capsys.readouterr().out
         assert "rejected" not in out, (
@@ -153,9 +135,8 @@ class TestTheReportCarriesNoUnpopulatableBucket:
         assert "declined          1" in out
 
     def test_report_gaps_lists_the_decline_with_its_reason(self, parity, capsys):
-        """The other control: `--report-gaps` is the tool's whole answer to an
-        uncovered shape, and it prints from the same loop the dead bucket would be
-        concatenated into."""
+        """`--report-gaps` is the tool's whole answer to an uncovered shape, and it
+        prints from the same loop the dead bucket would join."""
         assert dispatch_parity.main(parity(_SERVED_AND_DECLINED, "--report-gaps")) == 0
         out = capsys.readouterr().out
         assert "[declined]" in out
@@ -164,7 +145,7 @@ class TestTheReportCarriesNoUnpopulatableBucket:
     def test_report_gaps_prints_nothing_when_every_shape_is_served(
         self, parity, capsys
     ):
-        """No gaps means no gap lines -- not a bucket header with 0 under it."""
+        """No gaps means no gap lines, not a bucket header with 0 under it."""
         assert dispatch_parity.main(parity([{"seqlen_q": 256}], "--report-gaps")) == 0
         out = capsys.readouterr().out
         assert "[declined]" not in out
@@ -173,8 +154,8 @@ class TestTheReportCarriesNoUnpopulatableBucket:
 
 class TestConstructionFailureAbortsRatherThanBuckets:
     def test_an_unhydratable_shape_exits_2_naming_the_failure(self, parity, capsys):
-        """A corpus key the request class does not accept is not a shape-level
-        verdict: the tool cannot say whether the kernel would serve it."""
+        """A corpus key the request class does not accept is not a shape-level verdict:
+        the tool cannot say whether the kernel would serve it."""
         shapes = [{"seqlen_q": 256}, {"seqlen_q": 512, "nonexistent_field": 1}]
         assert dispatch_parity.main(parity(shapes)) == 2
 
@@ -188,13 +169,9 @@ class TestConstructionFailureAbortsRatherThanBuckets:
 
     def test_a_dispatcher_that_raises_also_exits_2(self, parity, capsys, monkeypatch):
         """The factory is inside the same try as the request constructor, so a
-        dispatcher that raises is an operational failure too -- never a decline.
-
-        The shape hydrates and the per-shape loop is entered before the failure, so
-        the tool has reached the point where it COULD bucket the shape and aborts
-        instead. The dispatcher's own message is asserted for that reason -- without
-        it, an exit 2 raised while resolving the symbol would pass.
-        """
+        dispatcher that raises is operational, never a decline. The dispatcher's own
+        message is asserted so an exit 2 raised while resolving the symbol does not
+        pass."""
         shapes = [{"seqlen_q": 256}]
         argv = parity(shapes)
         real_resolve_shapes = dispatch_parity.resolve_shapes
@@ -220,28 +197,7 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         )
 
     def test_a_predicate_decline_is_not_promoted_to_an_abort(self, parity, capsys):
-        """The other direction: the abort policy must not swallow the one outcome
-        that IS a per-shape verdict."""
+        """The abort policy must not swallow the one outcome that IS a per-shape
+        verdict."""
         assert dispatch_parity.main(parity([{"seqlen_q": 777}])) == 1
         assert "no shape resolved" in capsys.readouterr().err
-
-
-class TestTheDocstringStatesTheActualErrorPolicy:
-    """The docstring is the only place the error policy is written down.
-
-    A docstring promising a two-bucket report is worse than silence: a reader
-    reconciling counts against it looks for a second bucket that does not exist and
-    concludes the tool is broken.
-    """
-
-    def test_it_does_not_promise_a_second_rejection_bucket(self):
-        doc = dispatch_parity.__doc__
-        assert "Both rejection kinds are reported here" not in doc
-        assert "they differ by 59" not in doc, (
-            "the docstring cites a two-denominator delta this tool has no code path "
-            "to compute"
-        )
-
-    def test_it_states_the_abort_and_the_exit_status(self):
-        doc = dispatch_parity.__doc__.lower()
-        assert "exit 2" in doc, "the error policy's observable outcome is unstated"

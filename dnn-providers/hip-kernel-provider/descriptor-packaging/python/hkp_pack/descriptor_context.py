@@ -107,8 +107,8 @@ class Index:
 class Entry:
     """A UKD and its runtime library origin and effective arch coverage.
 
-    Standalone origins are the UKD's directory; inline origins are the KDP's.
-    Only inline entries inherit the enclosing KDP's declaration. Empty arch is a
+    Standalone origins are the UKD's directory, inline origins the KDP's, and only
+    inline entries inherit the enclosing KDP's declaration. Empty arch is a
     wildcard; None is disjoint coverage, retained for structural-only readers.
     """
 
@@ -189,8 +189,8 @@ def resolve_bundles(index: Index) -> list[Bundle]:
 def declarations(bundles: list[Bundle], schemas: dict) -> dict:
     """(engine_id, kmd_id, ukd_id) -> the declaration for that consumer.
 
-    Agreement owns inheritance and whole-UKD overrides. This aggregate is not a
-    substitute for requiring a selected entry's own resolved declaration.
+    Agreement owns inheritance and whole-UKD overrides; this aggregate never
+    substitutes for a selected entry's own resolved declaration.
     """
     found = {}
     for bundle in bundles:
@@ -211,7 +211,7 @@ def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
     """UKD id -> canonical records over EVERY consumer inside the caller root.
 
     Shared standalone UKDs carry all KDP/engine/KMD bindings, not just the selected
-    bundle's. Agreement remains the sole record-construction/canonical authority.
+    bundle's. Agreement stays the sole record-construction authority.
     """
     collected: dict = {}
     for bundle in bundles:

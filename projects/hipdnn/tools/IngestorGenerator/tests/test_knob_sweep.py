@@ -3,17 +3,10 @@
 
 """An arm may only carry shapes the engine will actually serve at that setting.
 
-An illegal knob combination raises from the spec constructor; an unsupported one --
-an unsupported head_size, a `use_cfvst` combination the kernel declines --
-constructs perfectly well, and only the engine's own eligibility predicate knows.
-That makes the answer depend on this arm's overrides, so the predicate has to be
-asked about the FINAL spec: after promotion to the builder's class and after the
-overrides. Asked earlier it answers about a different kernel, and the arm ships a
-variant nothing will ever serve while the sweep reads as a clean comparison.
-
-Nothing here imports rocKE: the dispatcher's resolution, the builder's spec class
-and the engine's predicate are all supplied as stubs, because what is under test is
-WHEN the predicate is asked, not what any particular kernel answers.
+An unsupported knob combination constructs fine and only the engine's eligibility
+predicate knows, so the predicate must be asked about the FINAL spec: after
+promotion to the builder's class and after the arm's overrides. The dispatcher,
+spec class and predicate are stubs, because what is under test is WHEN it is asked.
 """
 
 from __future__ import annotations
@@ -84,9 +77,8 @@ def sweep(tmp_path, monkeypatch):
 
 class TestSupportIsCheckedOnTheFinalSpec:
     def test_the_baseline_arm_carries_every_resolved_shape(self, sweep):
-        """The control: with no overrides both shapes are supported, so an exclusion
-        below is caused by the perturbation and not by a predicate that refuses this
-        corpus outright."""
+        """Control: with no overrides both shapes are supported, so an exclusion below
+        comes from the perturbation."""
         profile, resolutions = sweep
         config, unbuildable = knob_sweep._arm(resolutions, profile, {})
         assert unbuildable == []
@@ -95,8 +87,7 @@ class TestSupportIsCheckedOnTheFinalSpec:
     def test_a_shape_unsupported_only_after_the_override_is_excluded_and_named(
         self, sweep
     ):
-        """Naming the excluded shape is what makes an arm covering a subset of the
-        corpus measurable; a silently narrowed one is not."""
+        """Naming the excluded shape is what makes a narrowed arm measurable."""
         profile, resolutions = sweep
         config, unbuildable = knob_sweep._arm(resolutions, profile, {"head_size": 64})
 
@@ -110,8 +101,8 @@ class TestSupportIsCheckedOnTheFinalSpec:
         assert kernels[0]["kernel_source"]["spec"]["head_size"] == 64
 
     def test_a_profile_with_no_predicate_still_builds_every_arm(self, sweep):
-        """A profile that declares no eligibility API has said nothing about support,
-        and this tool must not invent an answer."""
+        """A profile declaring no eligibility API has said nothing about support, and
+        this tool must not invent an answer."""
         profile, resolutions = sweep
         profile.pop("predicate")
         _config, unbuildable = knob_sweep._arm(resolutions, profile, {"head_size": 64})
@@ -120,9 +111,9 @@ class TestSupportIsCheckedOnTheFinalSpec:
 
 class TestTheDeclarationReachesTheEmittedConfig:
     def test_the_arm_carries_the_specialization_block(self, sweep):
-        """Without the declaration the arm emits descriptors carrying no
-        specialization_contract, leaving the machine that receives the archive
-        nothing to check the compiled bytes against."""
+        """Without the declaration the arm emits descriptors with no
+        specialization_contract, leaving the receiving machine nothing to check the
+        compiled bytes against."""
         profile, resolutions = sweep
         config, _unbuildable = knob_sweep._arm(resolutions, profile, {})
         assert config["specialization"] == profile["specialization"]
@@ -134,12 +125,10 @@ class TestTheDeclarationReachesTheEmittedConfig:
             knob_sweep._arm(resolutions, profile, {})
 
     def test_a_callback_resolved_knob_with_no_declared_readout_is_refused(self, sweep):
-        """A knob settled by this profile's own policy callback must name the
-        builder-owned attribute or zero-argument accessor answering the same question
-        on the object the compiler hands the builder. There is nothing to infer one
-        from, copying the formula in would certify the compile against something other
-        than what built it, and matcher_only_fields would claim the compiler does not
-        specialize on a field it does."""
+        """A knob settled by the policy callback must name the builder-owned attribute
+        or zero-argument accessor answering the same question on the object the compiler
+        hands the builder; copying the formula in certifies the compile against
+        something else."""
         profile, resolutions = sweep
         profile["policies"] = {
             "use_cfvst": {"module": "stub_engine", "function": "supports"}

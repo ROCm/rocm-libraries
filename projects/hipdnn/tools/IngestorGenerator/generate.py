@@ -99,8 +99,7 @@ def main() -> None:
 
     if args.check_placeholders:
         expected = generator.preview_files(config)
-        # No --emitted-root means the output dir IS the one root, so the existing
-        # single-tree invocation keeps meaning exactly what it says.
+        # No --emitted-root means the output dir is the one root.
         roots = args.emitted_roots or [args.output_dir]
         shown = ", ".join(f"'{root}'" for root in roots)
         try:
@@ -129,11 +128,10 @@ def main() -> None:
             )
             failed = True
         if missing:
-            # A file the engine ships but nobody can find is an UNFINISHED SPLICE,
-            # not a pass. "No unfilled placeholders" across a set the scan never
-            # located is the exact false green this gate exists to prevent, so a
-            # located set that does not cover every shippable file fails here even
-            # when every file it DID read was clean.
+            # A shippable file nobody can find is an unfinished splice, not a
+            # pass: "no unfilled placeholders" over a set the scan never
+            # located is a false green, so this fails even when every located
+            # file was clean.
             print(
                 f"{len(missing)} expected file(s) not found under any of those roots:"
             )
@@ -180,9 +178,9 @@ def main() -> None:
     for f in written:
         print(f"  {f}")
 
-    # A fresh generation wrote everything into one tree, so that tree is the root.
-    # A file this run just wrote and cannot read back fails the run: the count
-    # printed below would otherwise be read as the whole bundle's.
+    # A fresh generation wrote everything into one tree, so that tree is the
+    # root. A file this run wrote and cannot read back fails the run, since the
+    # count below would otherwise read as the whole bundle's.
     try:
         unfilled = generator.unfilled_placeholders([args.output_dir], written)
     except ValueError as e:

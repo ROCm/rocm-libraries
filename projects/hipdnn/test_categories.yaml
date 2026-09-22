@@ -1,13 +1,12 @@
 # hipDNN Test Categories Configuration (CTest)
 #
-# Category names are the public CTest filter surface. Each category creates
-# hipdnn-<category>-check and hipdnn-<category>-check-verbose targets, and the
-# category itself becomes the CTest label used by those targets.
+# Category names are the public CTest filter surface: each creates
+# hipdnn-<category>-check and hipdnn-<category>-check-verbose targets, and the category is
+# the CTest label those targets use.
 #
-# The shared CTest parser keeps tier semantics for quick/standard/comprehensive/full:
-# quick tests are also labelled standard, comprehensive, and full; standard tests
-# are also labelled comprehensive and full; comprehensive tests are also labelled
-# full. Non-tier categories such as unit and integration label only themselves.
+# Tier semantics for quick/standard/comprehensive/full: quick tests are also labelled
+# standard, comprehensive and full; standard also comprehensive and full; comprehensive
+# also full. Non-tier categories such as unit and integration label only themselves.
 
 test_categories:
   quick:
@@ -53,8 +52,8 @@ test_categories:
       - "hipdnn_public_backend_tests"
       - "hipdnn_backend_logging_shutdown_tests"
       - "hipdnn_public_frontend_tests"
-      # Build tree only: the two smoke tests below each run a CMake driver script rather than
-      # an installed gtest binary, so they are absent from the installed CTestTestfile.cmake.
-      # See tools/CMakeLists.txt.
+      # Build tree only: these two smoke tests run CMake driver scripts rather than
+      # installed gtest binaries, so they are absent from the installed
+      # CTestTestfile.cmake. See tools/CMakeLists.txt.
       - "hipdnn_list_engines_smoke"
       - "hipdnn_validate_descriptors_smoke"

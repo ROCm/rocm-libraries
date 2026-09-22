@@ -105,9 +105,8 @@ def test_validate_skill_flags_slash_command_reference(validate_mod, tmp_path):
 def test_validate_skill_allows_relative_link_to_a_sibling_skill(validate_mod, tmp_path):
     """A markdown link into a sibling skill directory is a path, not a command.
 
-    The two read alike after the leading slash, so the check keys on what precedes
-    it. Paired with the test above, which shares the '/hipdnn' text and must still
-    be rejected, so this passing cannot mean the check stopped firing.
+    Paired with the test above, which shares the '/hipdnn' text and must still be
+    rejected, so this passing cannot mean the check stopped firing.
     """
     skill = tmp_path / "demo-skill"
     _write_skill(
@@ -120,11 +119,8 @@ def test_validate_skill_allows_relative_link_to_a_sibling_skill(validate_mod, tm
 def test_validate_skill_flags_link_escaping_the_installed_skill_root(
     validate_mod, tmp_path
 ):
-    """A link above skills/<name>/ resolves in the checkout and dies on install.
-
-    install-skills.py copies one skill directory and nothing above it, so this
-    is the case a checkout-relative link checker would wrongly pass.
-    """
+    """A link above skills/<name>/ resolves in the checkout and dies on install:
+    install-skills.py copies one skill directory and nothing above it."""
     skill = tmp_path / "demo-skill"
     _write_skill(
         skill, body="See [the generator](../../../IngestorGenerator/README.md).\n"
@@ -137,9 +133,7 @@ def test_validate_skill_allows_link_into_a_sibling_skill_directory(
     validate_mod, tmp_path
 ):
     """Sibling skills install side by side, so ../<sibling>/ still resolves.
-
-    Paired with the escape test above, which must still fail.
-    """
+    Paired with the escape test above, which must still fail."""
     skill = tmp_path / "demo-skill"
     _write_skill(skill, body="See [the runbook](../other-skill/RUNBOOK.md#setup).\n")
     errors = validate_mod.validate_skill(skill)
@@ -147,11 +141,8 @@ def test_validate_skill_allows_link_into_a_sibling_skill_directory(
 
 
 def test_validate_skill_flags_a_dangling_link_inside_the_skill(validate_mod, tmp_path):
-    """Surviving the install copy is not the same as leading somewhere.
-
-    A typo that stays inside skills/<name>/ passes the escape check, so the
-    escape check alone cannot be what proves a link resolves.
-    """
+    """A typo that stays inside skills/<name>/ passes the escape check, so the
+    escape check alone cannot be what proves a link resolves."""
     skill = tmp_path / "demo-skill"
     _write_skill(skill, body="See [the runbook](./RUNBOOK.md) for steps.\n")
     errors = validate_mod.validate_skill(skill)
@@ -202,9 +193,7 @@ def test_validate_skill_flags_missing_skill_relative_path(validate_mod, tmp_path
 
 def test_validate_skill_allows_resolvable_and_ambiguous_paths(validate_mod, tmp_path):
     """Only an anchored miss is flagged -- the conservative half of the check.
-
-    Paired with the two tests above, which share the token shape and must fail.
-    """
+    Paired with the two tests above, which share the token shape and must fail."""
     skill = tmp_path / "demo-skill"
     (skill / "scripts").mkdir(parents=True, exist_ok=True)
     (skill / "scripts" / "helper.py").write_text("pass\n", encoding="utf-8")
@@ -275,10 +264,8 @@ def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_pat
 
 def test_symlink_target_recognises_a_git_materialized_link(validate_mod, tmp_path):
     """Windows checkouts store a mode-120000 entry as a file holding the target.
-
     The duplicate-script pair is a symlink upstream, so it must not read as a
-    byte-identity violation just because the checkout cannot make real links.
-    """
+    byte-identity violation."""
     real = tmp_path / "a" / "script.py"
     real.parent.mkdir(parents=True)
     real.write_text("print('hello')\n", encoding="utf-8")

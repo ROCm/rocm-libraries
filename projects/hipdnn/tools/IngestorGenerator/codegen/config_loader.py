@@ -3,10 +3,9 @@
 
 """YAML config loading and validation for the generic-kernel-ingestor generator.
 
-Every check runs **before** ``generator.py`` mints a single UUID. The five below
-each catch a failure mode ``DescriptorLoader.hpp`` either lets through silently
-(knobs, arch shape) or only reports after dropping an entire pack/engine with a
-generic message (metadata, arch-covers, engine name collision).
+Every check runs before ``generator.py`` mints a UUID. The five numbered checks
+catch failures ``DescriptorLoader.hpp`` either accepts silently or reports only
+after dropping a whole pack or engine.
 """
 
 import gzip
@@ -55,50 +54,32 @@ class ConfigError(Exception):
     pass
 
 
-#: Private, and never authored: an expanded kernel dict carries under this key the
-#: ``(where, mapping)`` of the AUTHORED ``kernel_source`` its generated one was built
-#: from, so the closed per-kind vocabulary is applied to the author's keys and named
-#: at the place the author can edit. `_expand_axis_kernels` and `_expand_one_arm`
-#: write it; `load_config` is the only reader, and drops it on the way to `KernelSpec`.
+#: Private, never authored: an expanded kernel dict carries the
+#: ``(where, mapping)`` of the authored ``kernel_source`` it was built from, so
+#: the closed per-kind vocabulary is applied to the author's keys and reported
+#: where the author can edit. Written by `_expand_axis_kernels` and
+#: `_expand_one_arm`; read and dropped by `load_config`.
 _AUTHORED_KERNEL_SOURCE = "_authored_kernel_source"
 
-#: Private, and never authored: the ``kernel_defaults`` keys an expander CONSUMED
-#: while building this kernel. The same reasoning as `_AUTHORED_KERNEL_SOURCE`, one
-#: level up -- a consumed key is read by the expander rather than written into the
-#: kernel's ``kernel_source``, so the closed per-kind vocabulary does not apply to
-#: it and the "dropped when the descriptor is written" diagnostic would be false.
-#: `_expand_one_arm` writes it; `load_config` is the only reader.
+#: Private, never authored: the ``kernel_defaults`` keys an expander consumed
+#: while building this kernel. A consumed key is read by the expander rather
+#: than written into ``kernel_source``, so the closed per-kind vocabulary does
+#: not apply to it. Written by `_expand_one_arm`; read by `load_config`.
 _EXPANDER_CONSUMED_DEFAULTS = "_expander_consumed_defaults"
 
 
 def _unique_arch(raw_arch, where: str) -> list[str]:
-    """An arch list with repeats collapsed, authored order preserved.
-
-    A repeated entry is inert everywhere the value is READ: ``archCovers`` and the
-    subset check are membership tests, and the emitted KDP's ``arch`` is a
-    membership list. It is not inert where the value is COUNTED -- the emitted
-    inventory files a descriptor under every arch the descriptor names, so a repeat
-    files it twice and reports a per-arch descriptor count larger than the number
-    of descriptors that ship. Normalising here settles it once for every consumer
-    rather than at each counting site.
-
-    Order is preserved because arch order reaches the descriptor bytes.
-
-    The shape guard comes first: ``dict.fromkeys(5)`` raises a bare ``TypeError``
-    generate.py does not catch, and a bare string is worse -- it collapses to its
-    distinct CHARACTERS, each of which then reads as an implausible arch id.
-    """
+    """Collapse repeats in an arch list, preserving authored order, which
+    reaches the descriptor bytes. The shape guard runs first: ``dict.fromkeys``
+    accepts a bare string and collapses it to characters."""
     return list(dict.fromkeys(_require_sequence(raw_arch, where, what="arch ids")))
 
 
 def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
-    A ``.gz`` path is decompressed transparently.
-
-    Raises ``ConfigError`` on any structural problem or failed pre-mint check. No
-    UUID is minted here or anywhere reachable from here -- only in ``generator.py``,
-    after a config has fully survived this function.
+    A ``.gz`` path is decompressed transparently. Raises ``ConfigError`` on any
+    structural problem or failed pre-mint check; no UUID is minted here.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt") as f:
@@ -107,11 +88,11 @@ def load_config(path: Path) -> IngestorConfig:
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: YAML document must be a top-level mapping.")
 
-    # Shapes first: both key walks below index into these containers, and a scalar
-    # where a mapping belongs raises an AttributeError generate.py does not catch.
+    # Shapes first: both key walks below index into these containers, and a
+    # scalar where a mapping belongs raises an uncaught AttributeError.
     _require_config_shapes(raw)
-    # Deprecated before unknown: `optional`, `default` and `schema` are unknown keys
-    # too, so the generic diagnostic would otherwise win and bury the specific prose.
+    # Deprecated before unknown: `optional`, `default` and `schema` are also
+    # unknown keys, so the generic diagnostic would bury the specific one.
     _reject_deprecated_keys(raw)
     _reject_unknown_keys(raw)
 
@@ -154,21 +135,21 @@ def load_config(path: Path) -> IngestorConfig:
         # `kernel_source`, so a kernel overrides it by simply restating the key.
         defaults = pack_raw.get("kernel_defaults", {}) or {}
         _require_mapping(defaults, f"pack '{pack_raw['name']}' kernel_defaults")
-        # One key below the mapping just guarded, and merged the same way: a scalar
-        # here reaches `dict("oops")`, whose "dictionary update sequence element #0"
-        # ValueError names neither the pack nor the key.
+        # One key below the mapping just guarded, and merged the same way: a
+        # scalar here reaches `dict("oops")`, whose ValueError names neither
+        # the pack nor the key.
         if "spec" in defaults:
             _require_mapping(
                 defaults["spec"], f"pack '{pack_raw['name']}' kernel_defaults.spec"
             )
         default_spec = dict(defaults.get("spec", {}))
-        # `kernel_defaults` collapses repetition ACROSS kernels; `axes` collapses
-        # repetition WITHIN a variant set driven by tuning knobs, which grows
-        # multiplicatively rather than merely repeating. See `_expand_axis_kernels`.
+        # `kernel_defaults` collapses repetition across kernels; `axes`
+        # collapses the multiplicative repetition within a knob-driven variant
+        # set. See `_expand_axis_kernels`.
         axis_kernels_raw = _expand_axis_kernels(pack_raw, kmd_field_names)
-        # `variants` collapses the OTHER shape of repetition: a set where every
-        # shape carries its own dispatcher-resolved spec, so there is no single
-        # kernel_template for `axes` to cross. See `_expand_variant_kernels`.
+        # `variants` collapses the other shape: a set where every shape carries
+        # its own dispatcher-resolved spec, with no single kernel_template for
+        # `axes` to cross. See `_expand_variant_kernels`.
         variant_kernels_raw = _expand_variant_kernels(
             pack_raw, {f.name: f.type for f in kmd_fields}
         )
@@ -182,10 +163,9 @@ def load_config(path: Path) -> IngestorConfig:
                         f"pack '{pack_raw['name']}' kernel entry missing required key "
                         f"'{required}': {kernel_raw!r}"
                     )
-            # Type-guard BEFORE the dict merges below: `dict("oops")` raises a
-            # ValueError about "dictionary update sequence element #0" from deep
-            # inside the merge -- a traceback generate.py does not catch, naming
-            # neither the kernel nor the key.
+            # Type-guard before the dict merges below: `dict("oops")` raises an
+            # uncaught ValueError from deep inside the merge, naming neither
+            # the kernel nor the key.
             _require_mapping(
                 kernel_raw["kernel_source"],
                 f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
@@ -215,14 +195,9 @@ def load_config(path: Path) -> IngestorConfig:
                     "kernel_source missing required key 'kind' and the pack declares "
                     "no kernel_defaults.kind."
                 )
-            # Both halves of the merge, each named where it is written. This is the
-            # ONE gate every kernel reaches -- hand-authored, axis- and
-            # variant-expanded alike.
-            #
-            # The closed vocabulary is a check on what an AUTHOR wrote, and an
-            # expanded kernel's `kernel_source` is not authored: both expanders
-            # write a `spec` into it whatever the kind. So an expanded kernel names
-            # the mapping it came from -- see `_AUTHORED_KERNEL_SOURCE`.
+            # The one gate every kernel reaches, hand-authored or expanded.
+            # An expanded kernel's `kernel_source` is generated, so it names
+            # the authored mapping instead -- see `_AUTHORED_KERNEL_SOURCE`.
             authored_where, authored_source = kernel_raw.get(
                 _AUTHORED_KERNEL_SOURCE,
                 (
@@ -237,10 +212,9 @@ def load_config(path: Path) -> IngestorConfig:
             authored_defaults = {
                 key: value for key, value in defaults.items() if key not in consumed
             }
-            # The defaults are a PACK-level block judged against ONE kernel's merged
-            # kind, so the kernel is half of what makes them wrong: named against
-            # the block alone, the author is sent to a block that is correct for the
-            # kernel it was written for.
+            # The defaults are a pack-level block judged against one kernel's
+            # merged kind, so the diagnostic names both: the block alone may be
+            # correct for the kernel it was written for.
             for source_keys, source_where in (
                 (
                     authored_defaults,
@@ -283,8 +257,8 @@ def load_config(path: Path) -> IngestorConfig:
             )
         )
 
-    # Once, over the whole engine, rather than per pack inside the loop above: the
-    # scope of the check is the scope of the identity it protects.
+    # Once over the whole engine rather than per pack: the scope of the check
+    # is the scope of the identity it protects.
     _check_kernel_names_unique(packs)
 
     gm_raw = raw.get("graph_match") or {}
@@ -317,18 +291,11 @@ def load_config(path: Path) -> IngestorConfig:
 
 
 def _check_kernel_names_unique(packs: list) -> None:
-    """Every kernel of one ENGINE has its own name -- hand-authored or expanded.
+    """Require a unique kernel name per engine, hand-authored or expanded.
 
-    Scoped to the engine rather than to a pack because that is the scope of the
-    identity it protects: the loader collects an engine's packs into one
-    ``DescriptorSet`` by engine id, so two kernels sharing a name in two packs are
-    exactly as indistinguishable to the runtime as two sharing one pack.
-
-    NOTHING downstream catches a collision: the de-duplication pass in
-    ``generator.py`` keys on resolved METADATA rather than the name, so two entries
-    sharing a name but differing in metadata are emitted as two descriptors the
-    runtime cannot tell apart, and two sharing a name AND metadata are reduced to
-    whichever came first, silently.
+    Engine-scoped because the loader collects an engine's packs into one
+    ``DescriptorSet`` by engine id, and de-duplication keys on metadata rather
+    than the name.
     """
     packs_by_name: dict = {}
     for pack in packs:
@@ -340,7 +307,7 @@ def _check_kernel_names_unique(packs: list) -> None:
     if not collisions:
         return
     # The pack list is de-duplicated for display while the count is not: a name
-    # twice in one pack reads 'x2 in pack(s) 'p'', which still says both halves.
+    # twice in one pack reads "x2 in pack(s) 'p'", which says both halves.
     shown = ", ".join(
         f"{name!r} x{len(where)} in pack(s) "
         + ", ".join(repr(p) for p in dict.fromkeys(where))
@@ -359,14 +326,9 @@ def _check_kernel_names_unique(packs: list) -> None:
 
 
 def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
-    """Expand a pack's ``axes`` cross-product into ordinary kernel dicts.
-
-    The expansion runs entirely at load time and hands the per-kernel loop dicts it
-    cannot tell apart from hand-authored ones, so ``generator.py``, the emitters and
-    the dedup pass only ever see the ``KernelSpec`` shape they already handle.
-
-    Returns ``[]`` if the pack declares no ``axes``.
-    """
+    """Expand a pack's ``axes`` cross-product into ordinary kernel dicts at load
+    time, indistinguishable downstream from hand-authored ones. Returns ``[]``
+    if the pack declares no ``axes``."""
     axes_raw = pack_raw.get("axes")
     pack_name = pack_raw.get("name", "<unnamed>")
     template = pack_raw.get("kernel_template")
@@ -396,9 +358,9 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
         template["kernel_source"], f"pack '{pack_name}' kernel_template kernel_source"
     )
 
-    # Sorted once, up front: naming and value-list order below both walk axis names
-    # in this same fixed order, which is what makes the encoded name a deterministic
-    # function of the combination rather than of dict iteration order.
+    # Sorted once: naming and value-list order below both walk axis names in
+    # this fixed order, which makes the encoded name a deterministic function
+    # of the combination rather than of dict iteration order.
     axis_names = sorted(axes_raw)
     for axis_name in axis_names:
         if axis_name not in kmd_field_names:
@@ -437,9 +399,8 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
     expanded = []
     for combo in itertools.product(*value_lists):
         axis_values = dict(zip(axis_names, combo))
-        # The name must encode EVERY axis value, not a hand-picked subset: encoding
-        # every axis in this fixed sorted order makes each cross-product entry's name
-        # an injective function of its own combination, not unique only by luck.
+        # The name encodes every axis value in this fixed order, making each
+        # cross-product entry's name an injective function of its combination.
         suffix = "_".join(f"{name}{axis_values[name]}" for name in axis_names)
         kernel_name = f"{template_name}.{suffix}"
 
@@ -451,10 +412,9 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
         spec = dict(template_spec)
         for axis_name, value in axis_values.items():
             spec.setdefault(axis_name, value)
-        # Written for every kind, and owned by `rocke` alone: a kind that does not
-        # read a spec drops it when the descriptor is written. What must NOT happen
-        # is this generated key being read back as an authored one -- see
-        # `_AUTHORED_KERNEL_SOURCE`.
+        # Written for every kind and owned by `rocke` alone: a kind that reads
+        # no spec drops it when the descriptor is written. This generated key
+        # must not be read back as authored -- see `_AUTHORED_KERNEL_SOURCE`.
         kernel_source["spec"] = spec
 
         metadata = dict(template_metadata)
@@ -478,13 +438,8 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
 
 
 def _require_sequence(value, scope: str, what: str = "field names") -> list:
-    """A key the loader is about to iterate as a list of names must be one.
-
-    A bare string is the trap: `policy_knobs: use_exp2_fast` is valid YAML and
-    iterates as CHARACTERS, so the knob is never recognised and the specific
-    policy-knob diagnostic never fires. `spec_order: dtype` is worse -- it silently
-    reorders nothing, and key order is part of the descriptor bytes.
-    """
+    """Require a list of names: a bare string is valid YAML and iterates as
+    characters, so ``policy_knobs: use_exp2_fast`` is never recognised."""
     if value is None:
         return []
     if isinstance(value, str) or not isinstance(value, (list, tuple)):
@@ -516,19 +471,14 @@ _SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal"})
 
 
 def _expand_variant_kernels(pack_raw: dict, kmd_field_names: dict) -> list:
-    """Expand a pack's ``variants`` groups into ordinary kernel dicts, at load time.
+    """Expand a pack's ``variants`` groups into ordinary kernel dicts at load
+    time, crossing each shape list with a named knob set. Returns ``[]`` if the
+    pack declares no ``variants``.
 
-    A group is a shape LIST crossed per-shape with a NAMED knob set, rather than the
-    single ``kernel_template`` ``axes`` crosses: a dispatcher-derived set carries its
-    own resolved values per shape, and the arm counts are not a clean cross-product.
-
-    THE TRI-STATE. A knob absent from an arm is absent from the emitted
-    ``kernel_source.spec``, which tells the builder "your own policy decides this at
-    build time". That is NOT the same as pinning it to ``false``, and both reach the
-    metadata as the same ``0``, so the shape states the policy's answer under
-    ``resolved`` and the arm states an override by naming the knob.
-
-    Returns ``[]`` if the pack declares no ``variants``.
+    A knob absent from an arm is absent from the emitted
+    ``kernel_source.spec``, meaning the kernel's policy decides it at build
+    time -- not the same as pinning ``false``, though both reach metadata as
+    ``0`` -- so the shape records the policy's answer under ``resolved``.
     """
     groups = pack_raw.get("variants")
     pack_name = pack_raw.get("name", "<unnamed>")
@@ -577,15 +527,15 @@ def _expand_one_variant_group(
     name_template = group["name"]
     metadata_fields = list(group["metadata"])
     vocabulary = dict(group.get("vocabulary") or {})
-    # Knobs whose value the KERNEL'S OWN POLICY decides when the spec leaves them
-    # absent. Naming them here makes "absent" legible as a third state, and obliges
-    # each shape to state what the policy resolved to.
+    # Knobs the kernel's own policy decides when the spec leaves them absent.
+    # Naming them makes "absent" legible as a third state and obliges each
+    # shape to state what the policy resolved to.
     policy_knobs = set(
         _require_sequence(group.get("policy_knobs"), f"{where} policy_knobs")
     )
-    # A key naming a field the group does not emit has NO effect: a mistyped
-    # `vocabulary` entry leaves the builder's spelling in the metadata, which loads
-    # cleanly, reconciles on every count, and matches nothing.
+    # A key naming a field the group does not emit has no effect: a mistyped
+    # `vocabulary` entry leaves the builder's spelling in the metadata, which
+    # loads cleanly, reconciles on every count, and matches nothing.
     for label, names in (
         ("vocabulary", sorted(vocabulary)),
         ("policy_knobs", sorted(policy_knobs)),
@@ -598,8 +548,8 @@ def _expand_one_variant_group(
                 f"{metadata_fields}."
             )
     spec_order = list(_require_sequence(group.get("spec_order"), f"{where} spec_order"))
-    # Spec fields constant across THIS group. Distinct from pack-level
-    # `kernel_defaults.spec` because the key ORDER of the emitted spec differs
+    # Spec fields constant across this group. Distinct from pack-level
+    # `kernel_defaults.spec` because the emitted spec's key order differs
     # between groups of one set, and order is part of the descriptor bytes.
     if group.get("spec_defaults") is not None:
         _require_mapping(group["spec_defaults"], f"{where} spec_defaults")
@@ -645,10 +595,10 @@ def _expand_one_variant_group(
                 f"{shape_where} names knob_set {set_name!r}, which this group does "
                 f"not declare. Declared: {sorted(knob_sets)}."
             )
-        # A near-miss control key -- `ordinl` for `ordinal` -- would otherwise fall
-        # through into the SPEC, changing the binary the descriptor names while the
-        # config still loads. Only checkable where the group declares `spec_order`,
-        # which is what enumerates its spec fields.
+        # A near-miss control key (`ordinl` for `ordinal`) would otherwise fall
+        # through into the spec, changing the binary the descriptor names while
+        # the config still loads. Only checkable where the group declares
+        # `spec_order`, which enumerates its spec fields.
         if spec_order:
             allowed = set(spec_order) | set(spec_defaults) | _SHAPE_CONTROL_KEYS
             stray = sorted(k for k in shape if k not in allowed)
@@ -722,16 +672,16 @@ def _expand_one_arm(
                 f"field silently, which changes the binary the descriptor names."
             )
     if arm.get("metadata") is not None:
-        # Easy to get wrong: a group's `metadata` IS a list of field names, while an
-        # arm's is a mapping of field to value. Same key, one level apart.
+        # A group's `metadata` is a list of field names while an arm's is a
+        # mapping of field to value: same key, one level apart.
         _require_mapping(arm["metadata"], f"{shape_where}: knob_set arm metadata")
     arm_metadata = dict(arm.get("metadata") or {})
     arm_spec = {k: v for k, v in arm.items() if k not in _ARM_CONTROL_KEYS}
     spec = {**shape_spec, **arm_spec}
     if spec_order:
-        # The emitted spec's KEY ORDER is part of the descriptor bytes, and the
-        # shipped sets use an order that is neither the shape's nor sorted. Stating
-        # it once per group reproduces those bytes without reordering the config.
+        # The emitted spec's key order is part of the descriptor bytes, and the
+        # shipped sets use an order that is neither the shape's nor sorted.
+        # Stating it per group reproduces those bytes without reordering.
         ordered = {key: spec[key] for key in spec_order if key in spec}
         ordered.update({k: v for k, v in spec.items() if k not in ordered})
         spec = ordered
@@ -739,22 +689,21 @@ def _expand_one_arm(
     metadata = {}
     for field_name in metadata_fields:
         if field_name in arm_metadata:
-            # The arm states the matcher-visible value directly. This is how a knob
-            # the SPEC does not carry gets swept: pinning one changes which descriptor
-            # the matcher selects without changing the binary the spec builds.
+            # The arm states the matcher-visible value directly, which is how a
+            # knob the spec does not carry gets swept: pinning one changes the
+            # selected descriptor without changing the binary.
             value = arm_metadata[field_name]
-        # NOT `field_name in spec`. A spec key present with value None means the
-        # kernel's own policy decides it at build time -- the SAME tri-state as
-        # omitting the key (`dispatch_parity.build_config` dumps the builder's
-        # dataclass, so every unset policy knob arrives present-and-None). A
-        # membership test would take None for a pinned value and skip `resolved`.
+        # Not `field_name in spec`: a spec key present with value None means
+        # the kernel's policy decides at build time, the same tri-state as
+        # omitting it (`dispatch_parity.build_config` dumps the builder's
+        # dataclass, so every unset policy knob arrives present-and-None).
         elif spec.get(field_name) is not None:
             value = spec[field_name]
         elif field_name in resolved:
-            # Absent from the spec but known: the binary is definite and the shape
-            # says what it is. Without this the loader would substitute the KMD
-            # default_value as the catalog key while the kernel was compiled from
-            # something else -- two defaults that are not required to agree.
+            # Absent from the spec but known: the binary is definite and the
+            # shape says what it is. Otherwise the loader would use the KMD
+            # default_value as the catalog key while the kernel was compiled
+            # from the builder's own default.
             value = resolved[field_name]
         elif field_name in policy_knobs:
             raise ConfigError(
@@ -776,13 +725,13 @@ def _expand_one_arm(
             value = float(value)
         if field_name in vocabulary and isinstance(value, str):
             # The matcher compares the hipDNN spelling; the spec carries the
-            # builder's. Copying one over the other declines every graph while the
-            # engine still loads and every count reconciles.
+            # builder's. Copying one over the other declines every graph while
+            # the engine still loads and every count reconciles.
             value = vocabulary[field_name].get(value, value)
         metadata[field_name] = value
 
-    # A bool renders as `True`/`False` under str.format, but every shipped grammar
-    # spells these flags `c1`/`p0`. Normalise so a template slot for `causal` reads
+    # A bool renders as `True`/`False` under str.format, but every shipped
+    # grammar spells these flags `c1`/`p0`. Normalise so a template slot reads
     # the same as the metadata mirror of the same field.
     fields = {k: int(v) if isinstance(v, bool) else v for k, v in spec.items()}
     fields.update({f"md_{k}": v for k, v in metadata.items()})
@@ -791,10 +740,10 @@ def _expand_one_arm(
         fields["tag"] = str(arm.get("tag", "")).format(**fields)
         template = name_template
         if not fields["tag"]:
-            # An empty tag would leave `..._p0__e1` or a trailing `_`. Drop ONE
-            # adjacent separator from the TEMPLATE, where the slot's position is
-            # known: a rendered-name fixup cannot tell its own separator from one
-            # inside a value, so it can land two distinct kernels on one name.
+            # An empty tag would leave `..._p0__e1` or a trailing `_`. Drop one
+            # adjacent separator from the template, where the slot's position
+            # is known: a rendered-name fixup cannot tell its own separator
+            # from one inside a value and could collide two kernels.
             template = re.sub(r"_?\{tag\}_?", _drop_tag_slot, template, count=1)
         name = template.format(**fields)
     except KeyError as exc:
@@ -810,16 +759,12 @@ def _expand_one_arm(
             f"be a plain {{field}} naming a spec field, an md_<field> metadata "
             f"mirror, {{tag}} or {{ordinal}}."
         )
-    # The `spec` is this expander's own product, and an arm authors spec VALUES
-    # rather than kernel_source keys: the only authored keys a variant kernel's
-    # kernel_source can carry come from the pack's `kernel_defaults`, which is
-    # checked on its own. Hence an empty authored mapping rather than this one.
-    #
-    # That separate check must skip `spec` for this kernel, though: `spec` is the
-    # one `kernel_defaults` key this expander READS, whatever the kind -- it is the
-    # group's spec floor, and reaches `shape_spec`, the resolved metadata and the
-    # rendered name above. Judging it as a kernel_source key would reject a
-    # `variants` pack under any kind but `rocke`.
+    # An arm authors spec values, not kernel_source keys, so the authored
+    # mapping is empty; a variant kernel's only authored kernel_source keys
+    # come from the pack's `kernel_defaults`, checked separately. That check
+    # must skip `spec`, the one `kernel_defaults` key this expander reads for
+    # every kind, or a `variants` pack would be rejected under any kind but
+    # `rocke`.
     return {
         "name": name,
         "kernel_source": {"spec": spec},
@@ -847,12 +792,9 @@ def _reject_deprecated_dict_key(
 
 
 def _require_mapping(value, scope: str) -> None:
-    """A key the loader is about to merge as a dict must actually be one.
-
-    Without this the merge itself raises a ``ValueError`` from inside a dict
-    comprehension, naming neither the kernel nor the key; generate.py catches only
-    ``ConfigError``, so the raw traceback reaches the author.
-    """
+    """Require a mapping: the merge would otherwise raise a ``ValueError`` from
+    inside a dict comprehension, naming neither the kernel nor the key, and
+    generate.py catches only ``ConfigError``."""
     if not isinstance(value, dict):
         raise ConfigError(
             f"{scope} must be a mapping; got {type(value).__name__} ({value!r}). "
@@ -885,18 +827,9 @@ def _require_list(mapping: dict, key: str, where: str) -> None:
 
 
 def _require_config_shapes(raw: dict) -> None:
-    """Every container the key walks index into is the container they expect.
-
-    A scalar is not caught by the "required key missing" tests further down:
-    `'name' not in 'namey'` is False, so a mistyped scalar whose own text contains
-    the key name walks past them and reaches `.get` or `[]` on a str.
-
-    The list-valued keys are checked before the walks below, which spell
-    `raw.get(key) or []` and so read a null as an empty config rather than as a
-    problem. `load_config` iterates the value itself, where a null raises
-    `TypeError: 'NoneType' object is not iterable` -- which generate.py does not
-    catch.
-    """
+    """Require every container the key walks index into to be the expected
+    type. ``'name' not in 'namey'`` is False, so a mistyped scalar reaches
+    ``.get`` on a str; and a null list key reads as an empty config."""
     _require_list(raw, "packs", "packs")
     _require_list(raw, "kmd_fields", "kmd_fields")
     engine_raw = raw.get("engine")
@@ -985,10 +918,10 @@ _KNOWN_KERNEL_SOURCE_BY_KIND: dict = {
     kind: frozenset({"kind", *required, *_OPTIONAL_KERNEL_SOURCE_FIELDS.get(kind, ())})
     for kind, required in _REQUIRED_KERNEL_SOURCE_FIELDS.items()
 }
-#: The top-level ``specialization`` block's own keys. ``engine_id``/``kmd_id`` are
-#: deliberately NOT here -- ``generator.mint_ids`` stamps them onto the emitted
-#: contract, so an authored one would be a second source of truth -- and neither is
-#: ``consumers``, which one config contributes exactly one entry to.
+#: The top-level ``specialization`` block's own keys. ``engine_id``/``kmd_id``
+#: are absent because ``generator.mint_ids`` stamps them onto the emitted
+#: contract, and so is ``consumers``, which one config contributes exactly one
+#: entry to.
 _KNOWN_SPECIALIZATION = frozenset(
     {
         "metadata_fields",
@@ -1000,17 +933,11 @@ _KNOWN_SPECIALIZATION = frozenset(
 
 
 def _check_kernel_source_keys(keys, kind, where: str) -> None:
-    """A ``kernel_source`` (or a ``kernel_defaults``) spells only its kind's keys.
+    """Require a ``kernel_source`` (or ``kernel_defaults``) to spell only its
+    kind's keys -- the closed set ``KernelSource.as_document`` writes and the
+    runtime enforces (``parseKernelSource``, ``requireKnownKeys``).
 
-    ``KernelSource.as_document`` writes the keys the kind owns and nothing else, and
-    the runtime is closed over this object too (``parseKernelSource``,
-    ``requireKnownKeys``).
-
-    A ``kind`` that is not a string is not this check's to report: the lookup below
-    is a ``dict.get``, and an unhashable kind -- an over-indented ``kind:`` block --
-    raises a bare ``TypeError`` generate.py does not catch.
-    `_check_kernel_source_kind_implemented` reports the value itself, with a
-    membership test that takes any type.
+    A non-string ``kind`` is left to `_check_kernel_source_kind_implemented`.
     """
     if not isinstance(kind, str):
         return
@@ -1029,14 +956,9 @@ def _check_kernel_source_keys(keys, kind, where: str) -> None:
 
 
 def _reject_unknown_keys(raw: dict) -> None:
-    """Refuse a key no level of this loader reads.
-
-    An unrecognised key is otherwise dropped by ``raw.get(key, default)``: the bundle
-    generates cleanly, missing whatever the author thought they configured --
-    `engine.knobbs` for `engine.knobs` emits a UED with no knobs and says nothing.
-    The vocabularies are closed, so a new key must be declared here to be honoured: a
-    typo and a new feature are indistinguishable to a loader that accepts anything.
-    """
+    """Refuse a key no level of this loader reads. The vocabularies are closed:
+    an unrecognised key would otherwise be dropped by ``raw.get(key, default)``
+    and ``engine.knobbs`` would emit a UED with no knobs."""
 
     def check(scope: str, mapping, allowed: frozenset) -> None:
         if not isinstance(mapping, dict):
@@ -1064,9 +986,9 @@ def _reject_unknown_keys(raw: dict) -> None:
         check(f"pack {pack.get('name', '<unnamed>')!r}", pack, _KNOWN_PACK)
         for kernel in pack.get("kernels", []) or []:
             check(f"kernel {kernel.get('name', '<unnamed>')!r}", kernel, _KNOWN_KERNEL)
-        # `kernel_template` is a kernel envelope too, and every kernel the pack ships
-        # comes out of it -- a key misspelled here is dropped from the whole
-        # cross-product rather than from one entry.
+        # `kernel_template` is a kernel envelope too, and every kernel the pack
+        # ships comes out of it: a key misspelled here is dropped from the
+        # whole cross-product rather than from one entry.
         template = pack.get("kernel_template")
         if template is not None:
             check(
@@ -1077,18 +999,13 @@ def _reject_unknown_keys(raw: dict) -> None:
 
 
 def _reject_deprecated_keys(raw: dict) -> None:
-    """Reject YAML keys that look plausible -- often copied from RFC 0017's own
-    worked examples -- but name nothing this loader or the runtime reads.
+    """Reject YAML keys that look plausible but name nothing this loader or the
+    runtime reads.
 
-    Both rejected ``kmd_fields[]`` keys are exactly RFC 0017 §4's own example field
-    (``{"name":"tile_m","type":"int","optional":true,"default":1}``), which the real
-    loader rejects on both: only ``default_value`` is a real field, and there is no
-    ``optional`` key at all, ever.
-
-    The three retired top-level keys are a different case: they were spelled by no RFC
-    but were carried in `_KNOWN_TOP`, so an out-of-tree config may legitimately still
-    set them. They name themselves here so that config gets told the key was retired
-    rather than a generic "this generator does not read it" alongside a key list.
+    The ``kmd_fields[]`` keys come from RFC 0017 §4's example field: only
+    ``default_value`` is real, and there is no ``optional`` key. The three
+    retired top-level keys are named so an out-of-tree config still setting
+    them is told they were retired.
     """
     _reject_deprecated_dict_key(
         raw.get("kmd_fields", []),
@@ -1168,11 +1085,11 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
         )
 
 
-#: What ``hipdnn_data_sdk::utilities::Version``'s constructor accepts: three SEPARATE
-#: integers parsed with ``istringstream >>``, which skips whitespace around each token
-#: and stops at the first character that cannot continue the number -- so a sign is
-#: legal and trailing text ignored. Matched exactly rather than tightened: a check
-#: stricter than the runtime's would break a config the runtime loads.
+#: What ``hipdnn_data_sdk::utilities::Version``'s constructor accepts: three
+#: separate integers parsed with ``istringstream >>``, which skips surrounding
+#: whitespace and stops at the first character that cannot continue the number,
+#: so a sign is legal and trailing text ignored. Matched exactly rather than
+#: tightened: a stricter check would reject a config the runtime loads.
 _SDK_VERSION_PATTERN = re.compile(r"\s*([+-]?\d+)\s*\.\s*([+-]?\d+)\s*\.\s*([+-]?\d+)")
 #: The range each component is read into (``int``), and the range a descriptor's
 #: ``priority`` is read into (``int64_t``, via ``requireInt64``).
@@ -1183,8 +1100,8 @@ _INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
 def _reject_repeats(values: list, what: str, where: str) -> None:
     """``DescriptorLoader.hpp``'s ``requireNoDuplicates`` (634-645), in Python.
 
-    Walks the list rather than building a set, so an entry YAML read as a list or a
-    mapping is reported rather than raising ``TypeError: unhashable``.
+    Walks the list rather than building a set, so an entry YAML read as a list
+    or a mapping is reported rather than raising ``TypeError: unhashable``.
     """
     repeated: list = []
     for index, value in enumerate(values):
@@ -1199,16 +1116,10 @@ def _reject_repeats(values: list, what: str, where: str) -> None:
 
 
 def _check_engine_declaration(config: IngestorConfig) -> None:
-    """The engine block's own values, as ``parseEngineDescriptor`` reads them.
-
-    ``sdk_version`` goes through ``requireString`` (260-266) and then the ``Version``
-    constructor (770-781).
-
-    ``knobs`` and ``behavior_notes`` are checked for repeats (750, 753). The arch
-    lists are not: `_unique_arch` collapses their repeats at load, so nothing
-    repeated ever reaches the descriptor for ``requireArchList`` (714) to find.
-    ``numerical_notes`` (764) has no key in this config's vocabulary at all.
-    """
+    """Check the engine block as ``parseEngineDescriptor`` reads it:
+    ``sdk_version`` through ``requireString`` (260-266) and the ``Version``
+    constructor (770-781), ``knobs`` and ``behavior_notes`` for repeats (750,
+    753). Arch lists are exempt; `_unique_arch` collapses their repeats."""
     version = config.engine.sdk_version
     if not isinstance(version, str):
         raise ConfigError(
@@ -1235,12 +1146,8 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
 
 def _check_knobs_int_typed(config: IngestorConfig) -> None:
     """Pre-mint check #2: every knob names a declared, int-typed KMD field.
-
-    A non-int knob is accepted by the real loader and produces **no** knob at all,
-    silently -- ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t``
-    alternatives only. This is the only point in the pipeline where that drop is
-    reachable at generation time.
-    """
+    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives,
+    so the loader silently produces no knob at all for any other type."""
     declared = config.kmd_field_by_name
     for knob in config.engine.knobs:
         kmd_field = declared.get(knob)
@@ -1272,15 +1179,10 @@ _METADATA_TYPE_CHECKS = {
 
 
 def _int64_overflow(value, field_type: str):
-    """The first part of an ``int``/``int_list`` value that does not fit int64.
-
-    ``metadataValueFromJson`` reads every integer -- scalar or array element --
-    through ``requireInt64`` (``DescriptorLoader.hpp``:511-519, 531, 550), the same
-    function `_check_kernel_priority` bounds against.
-
-    Returns ``None`` when every integer fits; the type checks above run first, so
-    the value is already known to be an int or a list of ints.
-    """
+    """The first part of an ``int``/``int_list`` value that does not fit int64,
+    or ``None`` when every integer fits. ``metadataValueFromJson`` reads every
+    integer through ``requireInt64`` (``DescriptorLoader.hpp``:511-519, 531,
+    550)."""
     if field_type not in ("int", "int_list"):
         return None
     for item in value if field_type == "int_list" else [value]:
@@ -1291,11 +1193,8 @@ def _int64_overflow(value, field_type: str):
 
 def _check_kernel_metadata_against_kmd(config: IngestorConfig) -> None:
     """Pre-mint check #3: every kernel's metadata type-checks against the KMD,
-    with no mandatory field omitted.
-
-    Mirrors the loader's own consequence exactly: a wrong type, an undeclared field,
-    or an omitted mandatory field drops the whole pack.
-    """
+    with no mandatory field omitted. A wrong type, an undeclared field or an
+    omitted mandatory field drops the whole pack at load."""
     declared = config.kmd_field_by_name
     for field_type in {f.type for f in config.kmd_fields}:
         if field_type not in KMD_FIELD_TYPES:
@@ -1342,15 +1241,10 @@ def _check_kernel_metadata_against_kmd(config: IngestorConfig) -> None:
 
 
 def _check_kmd_default_values(config: IngestorConfig) -> None:
-    """A KMD field's ``default_value`` agrees with its declared ``type``.
-
-    ``coerceToDeclaredType`` (``DescriptorLoader.hpp``:604-610) applies exactly the
-    rules `_METADATA_TYPE_CHECKS` already applies to a kernel's metadata, so the
-    default and the values it stands in for are held to one contract.
-
-    A field with no ``default_value`` is MANDATORY rather than defaulting to null
-    (``KmdField.is_mandatory``), and has nothing here to check.
-    """
+    """Check each KMD field's ``default_value`` against its declared ``type``,
+    by the rules ``coerceToDeclaredType`` applies
+    (``DescriptorLoader.hpp``:604-610). A field with no ``default_value`` is
+    mandatory (``KmdField.is_mandatory``)."""
     for kmd_field in config.kmd_fields:
         if kmd_field.default_value is None:
             continue
@@ -1373,13 +1267,10 @@ def _check_kmd_default_values(config: IngestorConfig) -> None:
 
 
 def _check_kernel_priority(config: IngestorConfig) -> None:
-    """Every kernel's ``priority`` is a signed 64-bit integer.
-
-    ``parseKernelDescriptor`` gates the key on ``is_number_integer()`` and reads it
-    through ``requireInt64`` (``DescriptorLoader.hpp``:977-984). nlohmann reports
-    ``true`` as ``is_boolean`` and never as an integer, which is why Python's
-    ``bool`` is refused here despite being an ``int`` subclass.
-    """
+    """Require every kernel ``priority`` to be a signed 64-bit integer.
+    ``parseKernelDescriptor`` gates on ``is_number_integer()`` and reads
+    through ``requireInt64`` (``DescriptorLoader.hpp``:977-984); nlohmann
+    reports ``true`` as ``is_boolean``, so Python ``bool`` is refused."""
     for pack in config.packs:
         for kernel in pack.kernels:
             priority = kernel.priority
@@ -1402,10 +1293,8 @@ def _check_kernel_priority(config: IngestorConfig) -> None:
 def _check_kernel_arch_subset_of_pack(config: IngestorConfig) -> None:
     """Pre-mint check #4: a kernel's arch must be a subset of its pack's.
 
-    Mirrors ``DescriptorLoader.hpp``'s ``archCovers(pack.arch, kernel.arch)``,
-    enforced at parse for an inline kernel. An empty pack.arch covers everything
-    (arch-independent); an empty kernel.arch inherits the pack's and is always
-    covered.
+    Mirrors ``DescriptorLoader.hpp``'s ``archCovers(pack.arch, kernel.arch)``.
+    An empty pack.arch covers everything; an empty kernel.arch inherits it.
     """
     for pack in config.packs:
         if not pack.arch:
@@ -1427,14 +1316,10 @@ def _check_kernel_arch_subset_of_pack(config: IngestorConfig) -> None:
 def _check_arch_shape(config: IngestorConfig) -> list[str]:
     """Pre-mint check #5: arch entries are plausible gfx-prefixed base ids.
 
-    A shape violation (``GFX942``, ``" gfx942"``, a feature suffix) is a hard
-    ``ConfigError``, mirroring ``DescriptorLoader.hpp``'s own eager
-    ``isPlausibleArchBaseId`` check: match-time evidence (an ordinary INFO decline)
-    is indistinguishable from a correctly-authored arch that legitimately excludes
-    the running device. A well-formed but *unrecognized* id (e.g. ``gfx94``) is only
-    a warning -- maintaining an exhaustive arch list is not this tool's job.
-
-    Returns the list of warning messages emitted (also raised via ``warnings.warn``).
+    A shape violation (``GFX942``, ``" gfx942"``, a feature suffix) is a
+    ``ConfigError``, mirroring ``isPlausibleArchBaseId``; a well-formed but
+    unrecognized id (``gfx94``) is a warning. Returns the warnings emitted,
+    also raised via ``warnings.warn``.
     """
     messages: list[str] = []
 
@@ -1470,12 +1355,9 @@ def _check_arch_shape(config: IngestorConfig) -> list[str]:
 
 
 def _check_dialect(config: IngestorConfig) -> None:
-    """The dialect is one of the two, and a packaged bundle names its arch.
-
-    ``hkp_pack._validate_kdp`` REQUIRES ``arch`` on every KDP, where the runtime
-    loader treats absence as a wildcard. Letting it through produces a missing-key
-    error from the packager about a file this tool wrote.
-    """
+    """Require a known dialect, and an ``arch`` on a packaged bundle:
+    ``hkp_pack._validate_kdp`` requires it where the runtime loader treats
+    absence as a wildcard."""
     if config.dialect not in DIALECTS:
         raise ConfigError(
             f"dialect '{config.dialect}' must be one of {DIALECTS}. "
@@ -1499,27 +1381,20 @@ def _check_dialect(config: IngestorConfig) -> None:
 
 
 def _check_authored_subpath(config: IngestorConfig) -> None:
-    """Each dialect's ``authored_subpath`` names a place that dialect can write.
+    """Check ``authored_subpath`` against the dialect's tree.
 
-    ``direct_load``: one of the authored sets. The four are separate pack targets,
-    each walked by directory and each reaching a different binary, and nothing in the
-    config implies which one a bundle belongs to -- defaulting would file it in one
-    shard while its suite reads another, surfacing as an engine that loads nothing
-    rather than as a path mistake.
-
-    ``packaged``: free-form, but a subpath of the ``descriptors/`` source root, which
-    is the packager's and is mirrored verbatim into the staged and installed layouts.
-    ``descriptor_dir`` joins the two as a string, so a ``..`` component survives the
-    join and ``render()`` writes above ``--output-dir``; an absolute subpath is the
-    same hole with a different shape. Both are checked lexically because no output
-    directory exists yet: every check in this module runs before ``generate.py`` is
-    given one.
+    ``direct_load`` must name one of the authored sets, each a separate pack
+    target reaching a different binary. ``packaged`` is free-form but must be a
+    relative subpath of the ``descriptors/`` source root: ``descriptor_dir``
+    joins the two as a string, so ``..`` or an absolute path would let
+    ``render()`` write above ``--output-dir``. Checked lexically, since no
+    output directory exists yet.
     """
     if config.is_packaged:
         subpath = config.authored_subpath
         if not subpath:
             return
-        # Read with Windows semantics on either host, so a config validated on
+        # Read with Windows semantics on either host so a config validated on
         # Linux and generated on Windows gets the same answer: backslash is a
         # separator there, and ``C:x`` is drive-relative rather than rooted.
         stated = PureWindowsPath(subpath)
@@ -1561,9 +1436,8 @@ def _check_authored_subpath(config: IngestorConfig) -> None:
 def _check_kernel_source_kind_implemented(config: IngestorConfig) -> None:
     """Reject a ``kernel_source.kind`` the configured dialect cannot emit.
 
-    Each rejection names the dialect, because the common mistake is a kind that IS
-    real but belongs to the other one -- a bare 'unsupported' would send an author
-    looking for a missing feature instead of a one-line ``dialect:`` change.
+    Each rejection names the dialect, because the common mistake is a real kind
+    belonging to the other one, which a bare "unsupported" would hide.
     """
     emittable = EMITTABLE_KINDS_BY_DIALECT[config.dialect]
     for kind_source, where in [(config.kernel_source_kind, "kernel_source_kind")] + [
@@ -1653,24 +1527,18 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
 
 
 def _check_specialization_declaration(config: IngestorConfig) -> None:
-    """The ``specialization`` block says which metadata fields the COMPILER
-    specialized on, and how each one is read off the builder object.
+    """Check the ``specialization`` block: which metadata fields the compiler
+    specialized on, and how each is read off the builder object.
 
-    It becomes the ``provenance.specialization_contract`` the emitted KDP carries,
-    and it is the ONLY thing a machine checking a shipped bundle has: the rocKE that
-    compiled the kernel is not installed on the machine that received the archive.
-    So the declaration must be self-contained and exact -- every claim is one
-    ``hkp_pack.agreement.validate_consumer`` tests rather than trusts.
+    It becomes the ``provenance.specialization_contract`` the emitted KDP
+    carries, which is all a machine checking a shipped bundle has; every claim
+    is one ``hkp_pack.agreement.validate_consumer`` tests.
 
-    The partition over ``kmd_fields`` is exhaustive and disjoint: every field is
-    either one the builder consumed (``metadata_fields``, with a binding saying how
-    to read it back) or one only the matcher reads (``matcher_only_fields``). A
-    ``rocke`` kernel's spec keys demonstrably reached the compiler, so they cannot be
-    called matcher-only; the direct-load and ``hip`` paths hydrate no builder object,
-    so they state ``metadata_fields: []`` explicitly rather than staying silent.
-
-    Presence is enforced at EMISSION (``generator.build_specialization_contract``)
-    rather than here: a config is also loaded by tools that never emit anything.
+    The partition over ``kmd_fields`` is exhaustive and disjoint: each field is
+    either consumed by the builder (``metadata_fields``, with a binding) or
+    matcher-only. A ``rocke`` kernel's spec keys reached the compiler, so they
+    cannot be matcher-only; direct-load and ``hip`` state
+    ``metadata_fields: []`` explicitly. Presence is enforced at emission.
     """
     declaration = config.specialization
     if not declaration:
@@ -1839,10 +1707,9 @@ def _check_pack_discriminators(config: IngestorConfig) -> None:
                 )
     if not config.packs:
         raise ConfigError("packs must declare at least one pack.")
-    # Pack names key the pack's descriptor id AND its output filename
-    # (`<engine-slug>_<pack-name>.kdp.json`), so two packs sharing a name collide
-    # twice over: same id, and the second file overwrites the first, dropping a whole
-    # pack's kernels with no error.
+    # Pack names key the pack's descriptor id and its output filename
+    # (`<engine-slug>_<pack-name>.kdp.json`), so two packs sharing a name
+    # collide twice: same id, and the second file overwrites the first.
     pack_names = [pack.name for pack in config.packs]
     duplicate_names = sorted({n for n in pack_names if pack_names.count(n) > 1})
     if duplicate_names:
@@ -1856,56 +1723,28 @@ def _check_pack_discriminators(config: IngestorConfig) -> None:
             raise ConfigError(f"pack '{pack.name}' declares no kernels.")
 
 
-#: The ``<STEM>_MATCHER_SYMBOL`` constants ``native.cpp.j2`` emits with a literal
-#: stem, outside its per-pack loop, for every engine it renders.
-#:
-#: They share the matcher-symbol namespace with the per-pack constants built from
-#: the discriminators, so a discriminator folding onto one of these stems redefines
-#: it. ``tests/test_config_loader.py`` reads the literal stems back out of the
-#: template and compares them with this tuple, so adding a fixed constant there
-#: without adding it here fails rather than silently reopening the hole.
+#: The ``<STEM>_MATCHER_SYMBOL`` constants ``native.cpp.j2`` emits with a
+#: literal stem, outside its per-pack loop. They share the matcher-symbol
+#: namespace with the per-pack constants, so a discriminator folding onto one
+#: redefines it. ``tests/test_config_loader.py`` compares this tuple with the
+#: stems in the template.
 RESERVED_MATCHER_SYMBOL_STEMS = ("GRAPH", "KERNEL")
 
 
 def _check_emitted_identifiers(config: IngestorConfig) -> None:
-    """Every name spliced into a generated C++ identifier is shaped like one, no two
-    of them land on the same identifier, and every name spliced into an emitted path
-    is a single path component.
+    """Check every name spliced into a generated C++ identifier or emitted path
+    for shape and collisions.
 
     ``native.cpp.j2`` interpolates each kmd field name uppercased into
     ``<NAME>_FIELD`` and each pack discriminator into ``<NAME>_MATCHER_SYMBOL``
-    and ``<name>OperationMatches``. A hyphen -- the separator an author reaches
-    for when the same word appears in a JSON key -- is legal everywhere else in
-    this config and is a syntax error there, reported by the C++ compiler against
-    a file the author never edited. The uppercasing also folds names the rest of
-    the config keeps apart, so two fields, or two discriminators, differing only in
-    case emit one constant twice; a discriminator also has the template's own fixed
-    stems to avoid.
+    and ``<name>OperationMatches``; the two suffixes are independent
+    namespaces, and a discriminator must also avoid the reserved stems.
 
-    The two suffixes are two INDEPENDENT namespaces: a field and a discriminator
-    sharing a name emit ``<NAME>_FIELD`` and ``<NAME>_MATCHER_SYMBOL``. Each suffix
-    therefore gets its own claim map, and every collision -- field/field,
-    discriminator/discriminator, discriminator/reserved -- is the same claim failing.
-
-    The engine's local name is checked the same way and first, because it is the
-    outer scope: a defect there renames the file rather than one constant inside
-    it. It reaches TWO shapes, not one -- `pascal_name` and `camel_name` are
-    spliced into C++, while `slug` is a directory name and a file stem -- so each
-    is held to the rule for where it lands. Kebab-case is the case that separates
-    them: `_to_pascal_case` folds ``-`` away, so ``attn-v2`` is a good stem AND a
-    good identifier once derived, and one rule covering both would refuse a
-    spelling this tool converts on purpose.
-
-    The derived spellings are read through `EngineSpec`, which splits the name on
-    ':', so this runs after check #1 has established that there is a local half.
-
-    A pack's name is the other half of that same file stem: `kdp_stem` builds
-    ``<engine-slug>_<pack-name>`` for a multi-pack engine, so the two names reach one
-    filename and are held to one rule. It is checked for every engine rather than
-    only the multi-pack ones, because the pack COUNT is what decides whether the name
-    is spliced, and a second pack is added by an edit that says nothing about the
-    first pack's spelling -- making a name good today and a path tomorrow. Its
-    discriminator is the field that reaches C++ and keeps the identifier rule.
+    The engine's local name is checked against two rules, since
+    `pascal_name`/`camel_name` are C++ identifiers while `slug` is a directory
+    name and file stem. It is read through `EngineSpec`, so this runs after
+    check #1. A pack's name is the other half of that stem (`kdp_stem` builds
+    ``<engine-slug>_<pack-name>``) and is checked for every engine.
     """
     for derived, emitted_as in (
         (
@@ -1973,10 +1812,9 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
             )
 
     def claim(claims: dict, name: str, suffix: str, claimant: str) -> None:
-        # Presence, not inequality: two entries spelled identically describe
-        # themselves identically, so comparing descriptions lets an exact duplicate
-        # claim a constant already taken. The identifier is emitted once per entry
-        # either way, which is what the compiler rejects.
+        # Presence, not inequality: comparing descriptions would let an exact
+        # duplicate claim a constant already taken, and the identifier is
+        # emitted once per entry either way.
         constant = f"{name.upper()}{suffix}"
         if constant in claims:
             raise ConfigError(
@@ -2028,8 +1866,8 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     _check_engine_declaration(config)
     _check_knobs_int_typed(config)  # #2
     _check_kernel_metadata_against_kmd(config)  # #3
-    # After #3, which is what establishes that every declared type is one of
-    # KMD_FIELD_TYPES -- the default_value check indexes _METADATA_TYPE_CHECKS by it.
+    # After #3, which establishes that every declared type is one of
+    # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.
     _check_kmd_default_values(config)
     _check_kernel_priority(config)
     _check_kernel_arch_subset_of_pack(config)  # #4
@@ -2039,18 +1877,18 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
     _check_kernel_source_fields(config)
-    # After the kind checks: the declaration's obligations depend on which kinds
-    # this config actually builds, so an unrecognized kind is named as a kind
-    # problem rather than as a specialization one.
+    # After the kind checks: the declaration's obligations depend on which
+    # kinds this config builds, so an unrecognized kind is named as a kind
+    # problem rather than a specialization one.
     _check_specialization_declaration(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
-    # After the discriminator check, which is what decides whether a pack carries
-    # one at all: a single-pack engine emits no matcher symbol, so there is no
-    # identifier to shape.
+    # After the discriminator check, which decides whether a pack carries one:
+    # a single-pack engine emits no matcher symbol, so there is no identifier
+    # to shape.
     _check_emitted_identifiers(config)
-    # Last, because it is about WHERE the bundle is written rather than what is in
-    # it: a config with a content defect should hear about the content first.
+    # Last, because it is about where the bundle is written rather than what is
+    # in it.
     _check_authored_subpath(config)
 
     for note in config.engine.behavior_notes:

@@ -670,11 +670,11 @@ def evaluate_phase(
     served = {e["graph_name"] for e in ledger if e["outcome"] == "served"}
     gates["served"] = len(served) >= config["min_served"]
     gates["outcomes"] = all(e["outcome"] in ("served", "declined") for e in ledger)
-    # Suite metadata is a second, independent readout of the same run: the suite
-    # counts every engine-role row itself, and the phase command pins the engine, so
-    # a nonzero fail/error count is this engine's. gpu_arch corroborates the device
-    # the rocminfo gate already established; the suite reports "unknown" when it has
-    # no torch to ask, so an absent readout is not evidence against the run.
+    # Suite metadata is an independent readout of the same run: the suite
+    # counts every engine-role row itself and the phase command pins the
+    # engine, so a nonzero fail/error count is this engine's. gpu_arch
+    # corroborates the rocminfo gate; the suite reports "unknown" with no torch
+    # to ask, so an absent readout is not evidence against the run.
     observed_arch = (metadata or {}).get("gpu_arch")
     gates["metadata"] = bool(metadata) and (
         metadata.get("total_graphs") == len(inventory)
@@ -830,10 +830,10 @@ def run_phase(
     counts = (
         config["correctness"] if key["kind"] == "correctness" else config["benchmark"]
     )
-    # The engine is SELECTED, never left to per-graph ranking: an unranked engine
-    # produces no row at all, which is indistinguishable from a graph the suite never
-    # reached. Selecting it turns that into an explicit decline, and it makes the
-    # suite's own exit status and combination counts refer to this engine alone.
+    # The engine is selected, never left to per-graph ranking: an unranked
+    # engine produces no row at all, indistinguishable from a graph the suite
+    # never reached. Selecting it makes that an explicit decline and scopes the
+    # suite's exit status and counts to this engine.
     command = [
         *config["benchmark"]["argv"],
         "--graph",
@@ -1273,10 +1273,9 @@ def main(argv=None):
         print(f"SWEEP_INCOMPLETE: {exc}", file=sys.stderr)
         return 1
     except (ProbeUnavailable, OSError, ValueError, KeyError, TypeError) as exc:
-        # An operational failure is NOT an incomplete sweep. A KeyError or TypeError
-        # is a defect in this driver and an OSError is a broken execution host;
-        # rendering either as SWEEP_INCOMPLETE reads as a measured decline and lets
-        # a harness carry on as though the corpus had simply been gated out.
+        # An operational failure is not an incomplete sweep: a KeyError or
+        # TypeError is a defect in this driver and an OSError a broken host.
+        # Rendering either as SWEEP_INCOMPLETE would read as a measured decline.
         print(f"SWEEP ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

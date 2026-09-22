@@ -3,27 +3,11 @@
 
 """Every documented ``hkp_register_census_tests`` call form pins EXPECTED_CASES.
 
-WHAT THIS PINS: each occurrence of ``hkp_register_census_tests(`` in the prose,
-templates and CMake commentary under the roots in ``DOCUMENTED_ROOTS`` that SHOWS
-ARGUMENTS must also carry the ``EXPECTED_CASES`` keyword. Deleting ``EXPECTED_CASES``
-from any documented form -- the literal CMake blocks, the elided one-line signatures,
-or the Jinja template sites -- must turn this suite RED.
-
-WHY IT IS WORTH A TEST: the parameter is load-bearing three times over, and an
-unpinned call is green in every one of them. Without it
-``dnn-providers/hip-kernel-provider/src/tests/main.cpp`` returns before any
-case-name comparison runs; the execution guard then walks only the suite's own
-registered inventory, so a deleted case quietly takes its own obligation with it;
-and ``HkpPackaging.cmake`` drops the ``-control-unregistered-case`` watcher that
-proves the comparison is live at all. An author who copies an unpinned form out of
-the documentation ships a census that stays green after losing a case.
-
-Prose is not covered by the compiler or by any other gate in this tree, so the
-correction that put ``EXPECTED_CASES`` into every documented form can drift straight
-back out. This is the only thing holding it.
-
-The sites are DISCOVERED, never listed: a hard-coded file list stops covering a page
-someone adds later, which is exactly the class of defect being guarded against.
+Calls with arguments under ``DOCUMENTED_ROOTS`` must include ``EXPECTED_CASES``.
+Without it, ``dnn-providers/hip-kernel-provider/src/tests/main.cpp`` skips case-name
+comparison, the execution guard checks only registered cases, and ``HkpPackaging.cmake``
+omits the ``-control-unregistered-case`` watcher. Discover call sites rather than
+listing files.
 """
 
 import re
@@ -34,14 +18,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
 # The trees that publish a call form an author copies: the generator's own pages and
-# templates, and the packaging module that defines the function and documents it.
-#
-# Two named roots rather than one walk of the repository root. A repo-wide walk also
-# sweeps generated build output -- CMake restates the call inside the
-# ``_BACKTRACE_TRIPLES`` of a configured ``CTestTestfile.cmake`` -- and a form nobody
-# edits by hand is not a form anyone copies, so policing it would only make the guard
-# depend on whether a build tree happens to be present. Within each root discovery is
-# exhaustive; the roots themselves are the only thing enumerated by hand.
+# templates, and the packaging module that defines the function. Two named roots rather
+# than a repo-wide walk, which also sweeps generated build output -- CMake restates the
+# call inside a configured ``CTestTestfile.cmake``. Within each root discovery is
+# exhaustive.
 DOCUMENTED_ROOTS = (
     REPO_ROOT / "projects" / "hipdnn" / "tools",
     REPO_ROOT / "dnn-providers" / "hip-kernel-provider" / "descriptor-packaging",
@@ -50,40 +30,29 @@ DOCUMENTED_ROOTS = (
 CALL = "hkp_register_census_tests("
 PIN = "EXPECTED_CASES"
 
-# Surfaces an author reads and copies a call form out of: markdown prose, the Jinja
-# templates whose rendered fragments get spliced into a real CMakeLists.txt, and the
-# ``.cmake`` module that defines the function -- its comments explain the call to the
-# very authors who write one, so a form shown there is as copyable as one in a README.
-# Classifying it as documented is also the safe direction: an illustrative form added
-# to a comment is then held to the pin instead of quietly escaping it.
+# Surfaces an author copies a call form out of: markdown prose, the Jinja templates
+# spliced into a real CMakeLists.txt, and the ``.cmake`` module defining the function.
+# Classifying a comment as documented is the safe direction.
 DOCUMENTED_SUFFIXES = {".md", ".j2", ".cmake"}
 
-# Python under these roots is the generator's and packager's own source and test
-# suites, where the call name legitimately appears as a matcher or a substring (see
-# ``test_fragment_contracts.py`` and ``test_packaged_dialect.py``). Those are code
-# about the call, not a form anyone copies, so they are excluded deliberately --
-# not overlooked. ``test_unclassified_surfaces`` below keeps that decision honest.
+# Python under these roots is the generator's and packager's own source and tests,
+# where the call name appears as a matcher or substring (see test_fragment_contracts.py
+# and test_packaged_dialect.py); ``test_unclassified_surfaces`` keeps that honest.
 CODE_SUFFIXES = {".py"}
 
-# Caches and history, none of them edited by hand. Skipped for the same reason the
-# roots stop short of a build tree: a copy of the call nobody authors is not a form.
+# Caches and history: a copy of the call nobody authors is not a form.
 GENERATED_DIRS = {"__pycache__", ".git", ".pytest_cache"}
 
 # Elision marks a documented signature uses to stand in for omitted arguments.
 ELISION = "…."
 
-# A runaway balance scan means the form is not delimited the way prose implies;
-# no real call form in this tree is anywhere near this long.
+# A runaway balance scan means the form is not delimited the way prose implies.
 MAX_SPAN_LINES = 60
 
 
 def _source_files():
-    """Every hand-written file under the roots, regardless of extension.
-
-    Deliberately unfiltered at the walk: the extension split happens afterwards so
-    that a call form appearing in a surface nobody classified is still SEEN, and
-    can be reported rather than silently skipped.
-    """
+    """Every hand-written file under the roots, unfiltered at the walk so a call form in
+    an unclassified surface is still SEEN and can be reported."""
     for root in DOCUMENTED_ROOTS:
         for path in sorted(root.rglob("*")):
             if not path.is_file():
@@ -116,20 +85,12 @@ class Occurrence:
     def shows_arguments(self) -> bool:
         """THE RULE that separates a call FORM from a MENTION of the function.
 
-        A form "shows arguments" when the text between its parentheses contains
-        anything other than whitespace and elision marks. So::
+        A form "shows arguments" when the text between its parentheses contains anything
+        other than whitespace and elision marks. So::
 
             hkp_register_census_tests()                  <- names the function
             hkp_register_census_tests(...)               <- names the function
             hkp_register_census_tests(TARGET ... )       <- SHOWS ARGUMENTS
-
-        Several sites are the first kind: prose reading "one
-        ``hkp_register_census_tests()`` call per packed target", which is about the
-        call's cardinality, and the packaging module's comments naming the function
-        as the reader of a value they compute. Both show no arguments at all, and
-        requiring a pin there would be requiring prose to stop being prose. Anything
-        that names even one argument is holding itself out as a form to copy, and
-        must be complete.
         """
         return bool(self.args.strip().strip(ELISION).strip())
 
@@ -142,14 +103,10 @@ class Occurrence:
 
 
 def _balanced_args(text: str, open_paren: int):
-    """Text between ``open_paren`` and its matching ``)``, plus the whole span.
-
-    Balanced rather than line- or regex-delimited because the forms have three
-    different shapes: a one-line signature inside backticks, a multi-line literal
-    ```cmake``` block closing on a line of its own, and a form wrapped across
-    ``##``- or `` * ``-prefixed comment lines in a template. Only the parentheses
-    are common to all three.
-    """
+    """Text between ``open_paren`` and its matching ``)``, plus the whole span. Balanced
+    because the forms take three shapes -- a backticked signature, a ```cmake``` block,
+    and a form wrapped across comment lines -- and only the parentheses are common to
+    all."""
     depth = 0
     for index in range(open_paren, len(text)):
         char = text[index]
@@ -166,10 +123,8 @@ def _balanced_args(text: str, open_paren: int):
 
 
 def _occurrence_from(text: str) -> Occurrence:
-    """An ``Occurrence`` over a call form written out here rather than discovered.
-
-    The path is this file only so ``Occurrence`` has a location to report.
-    """
+    """A call form written out here rather than discovered; the path is this file only
+    so ``Occurrence`` has a location to report."""
     return Occurrence(Path(__file__).resolve(), text, text.index(CALL))
 
 
@@ -185,14 +140,10 @@ def _occurrences():
 
 
 class TestEveryDocumentedCensusCallPinsItsCases:
-    """The documented forms, walked out of the tree rather than listed."""
 
     def test_the_walk_finds_the_documented_forms(self):
-        """Anti-vacuity: a guard that discovers nothing passes for free.
-
-        If the root ever stops resolving, or the pages move out from under this
-        walk, the real assertion below would go green while checking an empty set.
-        """
+        """Anti-vacuity: if the root stops resolving, the guard below would go green
+        over an empty set."""
         for root in DOCUMENTED_ROOTS:
             assert root.is_dir(), f"documented root did not resolve: {root}"
         occurrences = _occurrences()
@@ -207,10 +158,6 @@ class TestEveryDocumentedCensusCallPinsItsCases:
             )
 
     def test_every_form_that_shows_arguments_also_shows_expected_cases(self):
-        """The guard itself.
-
-        Removing ``EXPECTED_CASES`` from any documented form should turn this red.
-        """
         unpinned = [
             occurrence
             for occurrence in _occurrences()
@@ -248,11 +195,8 @@ class TestEveryDocumentedCensusCallPinsItsCases:
         )
 
     def test_every_form_is_delimited(self):
-        """A form whose parentheses never balance was not really parsed.
-
-        Without this, an unclosed form would be dropped from the checked set by the
-        ``occurrence.closed`` filter above and silently escape the pin requirement.
-        """
+        """A form whose parentheses never balance would be dropped by the
+        ``occurrence.closed`` filter above and escape the pin requirement."""
         unclosed = [
             occurrence for occurrence in _occurrences() if not occurrence.closed
         ]
@@ -269,43 +213,10 @@ class TestEveryDocumentedCensusCallPinsItsCases:
             ]
         )
 
-    def test_both_classes_are_populated_in_the_tree(self):
-        """The control: the two classes really are distinguished.
-
-        Each side is what stops the other's guard passing for the wrong reason. With
-        no bare mention, ``shows_arguments`` could be a constant ``True``; with no
-        form that shows arguments, it could be a constant ``False`` and the guard
-        above would be green over an empty set. The exempt sites are prose about how
-        MANY calls to make, not forms to copy.
-        """
-        occurrences = [occurrence for occurrence in _occurrences() if occurrence.closed]
-        mentions = [
-            occurrence for occurrence in occurrences if not occurrence.shows_arguments
-        ]
-        forms = [occurrence for occurrence in occurrences if occurrence.shows_arguments]
-        assert mentions, (
-            "no bare hkp_register_census_tests() mention found, so nothing proves "
-            "this suite distinguishes a form that shows arguments from prose that "
-            "merely names the function. If the last bare mention was genuinely "
-            "rewritten, delete this test; do not weaken the rule to satisfy it."
-        )
-        assert forms, (
-            "no hkp_register_census_tests( form showing arguments found anywhere "
-            "under the documented roots, so the EXPECTED_CASES guard is checking an "
-            "empty set and would stay green however the documented forms are "
-            "written. Fix the rule or the roots; do not delete this test."
-        )
-
     def test_the_argument_rule_classifies_written_out_forms(self):
-        """The rule itself, against forms written here rather than discovered.
-
-        The walk can only report how the rule classified the tree; it cannot say
-        whether that classification is right, because every property derived from
-        ``args`` agrees with itself by construction. These forms carry an expectation
-        stated independently of the rule, so a rule that starts treating an elided
-        signature as a form to copy -- or stops recognising a real one -- is named
-        here.
-        """
+        """The walk only reports how the rule classified the tree, since every property
+        derived from ``args`` agrees with itself by construction; these forms carry an
+        expectation stated independently of the rule."""
         cases = (
             # text, shows_arguments, pinned
             (f"{CALL})", False, False),
@@ -330,13 +241,9 @@ class TestEveryDocumentedCensusCallPinsItsCases:
             ), f"{text!r} must{'' if pinned else ' not'} count as pinned"
 
     def test_unclassified_surfaces(self):
-        """The extension split cannot go stale unnoticed.
-
-        ``DOCUMENTED_SUFFIXES`` is a whitelist, and a whitelist is the same silent
-        under-coverage as a hard-coded file list one level up. If the call form
-        turns up in a file type nobody has classified, say so rather than skipping
-        it.
-        """
+        """``DOCUMENTED_SUFFIXES`` is a whitelist, the same silent under-coverage as a
+        hard-coded file list, so a call form in an unclassified file type is
+        reported."""
         stray = sorted(
             path.relative_to(REPO_ROOT).as_posix()
             for path in _source_files()

@@ -123,10 +123,8 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
-    // Determine data type
     const DataType dataType = toDataType(config.dtype);
 
-    // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
     const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
     const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
@@ -145,7 +143,6 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     auto v = std::make_shared<TensorAttributes>();
     v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(dataType);
 
-    // Configure SDPA attributes based on config
     SdpaAttributes attributes;
     attributes.set_name(testCase.withStats ? "SdpaFwdKernelConfigStatsTest"
                                            : "SdpaFwdKernelConfigTest");
@@ -160,12 +157,10 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         attributes.set_attn_scale(testCase.attnScale.value());
     }
 
-    // Configure mask type
     auto maskType = static_cast<MaskType>(config.mask);
     switch(maskType)
     {
     case MaskType::NO_MASK:
-        // No mask - default behavior
         break;
 
     case MaskType::TOP_LEFT_CAUSAL:
@@ -183,7 +178,7 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         break;
 
     case MaskType::SLIDING_WINDOW:
-        // Sliding window mask with arbitrary bounds
+        // Arbitrary bounds; the kernel only needs a bounded window here.
         attributes.set_diagonal_band_left_bound(64);
         attributes.set_diagonal_band_right_bound(64);
         break;
@@ -192,7 +187,7 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
         break;
     }
 
-    // Configure batch mode (GROUP requires sequence length tensors)
+    // GROUP mode requires sequence-length tensors.
     auto batchMode = static_cast<BatchMode>(config.mode);
     if(batchMode == BatchMode::GROUP)
     {

@@ -42,8 +42,7 @@ std::shared_ptr<TensorAttributes> makePointwise(Graph& graph, DataType dataType)
     return output;
 }
 
-/// Accepts every comparison, so a verdict this comparator reaches is distinguishable from the
-/// one a tolerance-built validator would reach on the same tensors.
+/// Accepts every comparison, so its verdict differs from a tolerance-built validator's.
 class AcceptEverythingValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
 public:
@@ -54,8 +53,8 @@ public:
     }
 };
 
-/// Refuses every comparison, so which of two caller comparators is in effect is decidable from
-/// the verdict alone, on data both a tolerance-built validator and its rival would accept.
+/// Refuses every comparison, so the verdict names which comparator is in effect on data a
+/// tolerance-built validator would accept.
 class RejectEverythingValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
 {
 public:
@@ -66,8 +65,7 @@ public:
     }
 };
 
-// Capture only the intentionally rejected registration, which reports nonfatally so the caller
-// sees every offending tensor rather than the first one.
+// Captures only the intentionally rejected registration, which fails nonfatally.
 template <typename Register>
 void expectRegistrationFailure(Register&& registration, const std::string& expectedMessage)
 {
@@ -84,7 +82,7 @@ void expectRegistrationFailure(Register&& registration, const std::string& expec
         << result.message();
 }
 
-// Capture only the intentionally rejected verification, not setup or its positive control.
+// Captures only the intentionally rejected verification, not setup or the positive control.
 template <typename Verify>
 void expectVerificationFailure(Verify&& verify)
 {
@@ -129,8 +127,8 @@ TEST_F(IntegrationGraphVerificationContext, NewGraphCannotBorrowPreviousRegistra
     auto currentOutput = makePointwise(current, DataType::FLOAT);
     GraphVerificationContext currentContext(current);
     expectVerificationFailure([&] { verifyGraph(currentContext, 0); });
-    // Two per verification call, and initializeBundle's cpu parity above holds only while
-    // verifyBuiltGraph seeds the GPU bundle before the CPU one.
+    // Two initializations per verification call; the cpu parity in initializeBundle holds
+    // only while verifyBuiltGraph seeds the GPU bundle before the CPU one.
     EXPECT_EQ(_initializations, 4);
 
     registerValidator(currentContext, currentOutput, 0.0f);
@@ -173,8 +171,8 @@ TEST_F(IntegrationGraphVerificationContext, ToleranceCannotDisplaceACallerCompar
                               "Duplicate validator for tensor "
                                   + std::to_string(output->get_uid()));
 
-    // The caller's comparator still decides this output: it accepts inputs that the rejected
-    // tolerance would reject, and it is a live validator rather than one the rejected call cleared.
+    // The caller's comparator still decides this output: it accepts inputs the rejected
+    // tolerance would reject, and the rejected call did not clear it.
     _differentInputs = true;
     ASSERT_NO_FATAL_FAILURE(verifyGraph(context, 0));
 }
@@ -190,8 +188,8 @@ TEST_F(IntegrationGraphVerificationContext, ACallerComparatorCannotDisplaceAnoth
         [&] { registerValidator(context, output, std::make_unique<AcceptEverythingValidation>()); },
         "Duplicate validator for tensor " + std::to_string(output->get_uid()));
 
-    // Both the rejected comparator and a tolerance-built validator accept these matching outputs,
-    // so only the first comparator can produce a mismatch: the verdict names which one survived.
+    // A tolerance-built validator also accepts these matching outputs, so a mismatch can
+    // only come from the surviving comparator.
     expectVerificationFailure([&] { verifyGraph(context, 0); });
 }
 
@@ -199,8 +197,8 @@ TEST_F(IntegrationGraphVerificationContext, ACallerComparatorCannotDisplaceAnoth
 class IntegrationGraphVerificationOutputs : public IntegrationGraphVerificationHarness<float, int>
 {
 protected:
-    // This regression exercises real frontend output discovery and registration resolution;
-    // it does not execute an SDPA engine.
+    // Exercises frontend output discovery and registration resolution only; no SDPA engine
+    // is executed.
     void SetUp() override {}
     void TearDown() override {}
 

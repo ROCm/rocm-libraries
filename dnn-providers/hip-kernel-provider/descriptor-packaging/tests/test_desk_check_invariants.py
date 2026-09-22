@@ -1,32 +1,15 @@
-"""The four desk-check invariants of the packaging README's "Desk-check a
-variant set", exercising the SHIPPED `hkp_pack.desk_check` module (not a
-private copy of its logic -- a copy is exactly how invariant 1 went dead in
-the first place: the RUNBOOK's prose snippet and reality drifted apart with
-nothing to notice).
+"""The four desk-check invariants of the packaging README's "Desk-check a variant
+set", exercising the SHIPPED `hkp_pack.desk_check` module rather than a copy.
 
-Those four invariants hold over a shipped variant set at RUNBOOK §4's host
-boundary. Before this module existed they lived only as a shell-embedded
-Python snippet in the markdown -- untestable prose --
-and that snippet was WRONG on the exact data it is documented to run against
-("KDP=<the shipped .kdp.json under the packed tree>"): after packing,
-``kernel_source`` is rewritten to kpack form (``{kind, library, toc_key,
-symbol, sha256}``); the authored ``spec`` dict moves to ``provenance.spec``.
-So the RUNBOOK's original ``kernel_source.get("spec", {})`` was always ``{}``
-on real packed output, and invariant 1 (metadata/spec drift) silently
-reported "none" regardless of real drift. Verified here with a real
-``run_pipeline`` pack (real hipcc + comgr + rocm_kpack) and an injected
-genuine drift the old literal script missed
-(``test_runbook_scripts_invariant_1_is_dead_on_packed_output`` below).
+Invariant 1 reads the authored spec, which packing moves from ``kernel_source`` to
+``provenance.spec``, so a check reading ``kernel_source.spec`` on packed output
+always sees ``{}`` and reports "none" regardless of real drift
+(``test_runbook_scripts_invariant_1_is_dead_on_packed_output`` pins that against a
+real ``run_pipeline`` pack with injected drift). Invariants 2-4 read only
+``metadata`` and post-pack ``kernel_source`` fields, which packing populates.
 
-Invariants 2-4 (duplicate matcher tuple, toc_key uniqueness, symbol
-non-uniqueness tolerance) are verified CORRECT on real packed output -- they
-read only ``metadata`` and post-pack ``kernel_source`` fields
-(``toc_key``/``symbol``), which the pack step does populate.
-
-Each invariant gets a POSITIVE case (a real packed fixture that satisfies
-it) and a NEGATIVE case (a fixture engineered to violate it, proving the
-check would actually catch the real defect it exists for -- a check that
-only ever sees valid data is decoration).
+Each invariant gets a positive case (a real packed fixture) and a negative one (a
+fixture engineered to violate it), so no check only ever sees valid data.
 """
 
 import json
@@ -68,10 +51,8 @@ def _kernels(shipped_kdp):
     return shipped_kdp["kernelDescriptors"]
 
 
-# ---------------------------------------------------------------------------
 # Fixtures: pack the real desk_check fixture bundle (valid) plus small
 # purpose-built variants that violate one invariant each.
-# ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def desk_check_fixture(fixtures_dir):
     return fixtures_dir / "desk_check"
@@ -120,9 +101,9 @@ class TestInvariant1MetadataSpecDrift:
     def test_runbook_scripts_invariant_1_is_dead_on_packed_output(
         self, packed_desk_check
     ):
-        """The RUNBOOK's literal script (kernel_source.get('spec', {})) must
-        report 'none' even when a real drift is injected -- proving it is a
-        dead check on the exact data it is documented to run against."""
+        """The RUNBOOK's literal script (kernel_source.get('spec', {})) reports
+        'none' even when a real drift is injected: a dead check on the exact data
+        it is documented to run against."""
         kernels = _kernels(packed_desk_check)
         # Inject a genuine drift: corrupt one kernel's metadata so it
         # disagrees with its own real provenance.spec.
@@ -158,9 +139,8 @@ class TestInvariant1MetadataSpecDrift:
 
     def test_corrected_check_raises_when_no_spec_found_anywhere(self):
         """A tree that is neither authored (kernel_source.spec) nor packed
-        (provenance.spec) -- e.g. a hip-producer UKD, or a badly hand-edited
-        one -- must not silently report 'no drift'. Distinguishing 'clean'
-        from 'nothing to check' is the whole point of this check."""
+        (provenance.spec) must not silently report 'no drift'. Distinguishing
+        'clean' from 'nothing to check' is the point of this check."""
         kernel = {
             "name": "mystery",
             "kernel_source": {"kind": "kpack"},
@@ -170,8 +150,8 @@ class TestInvariant1MetadataSpecDrift:
             metadata_spec_drift([kernel], ["head_size"])
 
     def test_corrected_check_also_works_on_the_authored_tree(self, desk_check_fixture):
-        """The fix must not regress the pre-pack case the RUNBOOK's script
-        DID handle correctly: an authored tree's kernel_source.spec."""
+        """The pre-pack case still works: an authored tree's
+        kernel_source.spec."""
         authored = _read(desk_check_fixture / "attention.kdp.json")
         assert metadata_spec_drift(_kernels(authored), _MATCHER_FIELDS) == []
 
@@ -195,14 +175,14 @@ class TestInvariant2DuplicateMatcherTuples:
 
     def test_one_tuple_on_disjoint_arches_is_not_a_duplicate(self):
         """Each is the only candidate on its own device, so neither is
-        unreachable and dropping either leaves a device uncovered. The runtime
-        refuses a duplicate only on an arch both kernels reach."""
+        unreachable. The runtime refuses a duplicate only on an arch both kernels
+        reach."""
         kernels = self._twins(["gfx942"], ["gfx950"])
         assert duplicate_matcher_tuples(kernels, ("dtype",)) == {}
 
     def test_one_tuple_on_a_shared_arch_is_still_a_duplicate(self):
-        """The control for the case above: the arch scoping must narrow the
-        check, not switch it off. A single overlapping arch is enough."""
+        """Control for the case above: arch scoping narrows the check rather than
+        switching it off. A single overlapping arch is enough."""
         kernels = self._twins(["gfx942", "gfx950"], ["gfx950"])
         assert duplicate_matcher_tuples(kernels, ("dtype",)) == {("FLOAT",): 2}
 
@@ -215,9 +195,9 @@ class TestInvariant2DuplicateMatcherTuples:
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
     ):
-        """Negative case, packed for real: two kernels whose spec differs
-        only in a field NOT in the matcher tuple (seqlen_q) collapse to one
-        (batch, head_size) tuple -- one variant would be unreachable."""
+        """Negative case, packed for real: two kernels whose spec differs only in a
+        field outside the matcher tuple (seqlen_q) collapse to one
+        (batch, head_size) tuple, leaving one variant unreachable."""
 
         def mutate(doc):
             dup = json.loads(json.dumps(doc["kernelDescriptors"][0]))
@@ -247,8 +227,7 @@ class TestInvariant3TocKeyUniqueness:
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
     ):
         """Negative case, packed for real: two UKDs with byte-identical
-        (source, builder, spec) collapse onto ONE toc_key -- exactly the
-        'two variants share one blob' case invariant 3 exists to catch."""
+        (source, builder, spec) collapse onto ONE toc_key."""
 
         def mutate(doc):
             twin = json.loads(json.dumps(doc["kernelDescriptors"][0]))
@@ -281,13 +260,10 @@ class TestInvariant4SymbolNonUniquenessTolerated:
     def test_real_pack_where_symbol_is_shared_but_toc_key_disambiguates(
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
     ):
-        """Negative-for-uniqueness / positive-for-tolerance case, packed for
-        real: attention_dense's kernel_name() omits `batch`
-        (attention_dense.py; rocke-mining.md's stated omission), so two
-        variants differing ONLY in batch legitimately share one symbol while
-        remaining two distinct, individually-addressable toc_keys. A desk
-        check that key on symbol alone would wrongly flag this as a
-        collision; invariant 4 exists to say that is fine."""
+        """Packed for real: attention_dense's kernel_name() omits `batch`, so two
+        variants differing only in batch share one symbol while remaining two
+        distinct, individually-addressable toc_keys. Invariant 4 exists to say
+        that is fine."""
 
         def mutate(doc):
             other_batch = json.loads(json.dumps(doc["kernelDescriptors"][1]))
@@ -313,19 +289,16 @@ class TestInvariant4SymbolNonUniquenessTolerated:
         assert distinct_toc == 2
 
 
-# ---------------------------------------------------------------------------
-# The CLI itself, end to end: `tools/hkp_desk_check.py` is the shipped thing
-# an agent runs at RUNBOOK §4's host boundary. The invariant-function tests
-# above import the library directly and would stay green even if the CLI's
-# argument parsing, exit-code mapping, or output path were broken.
-# ---------------------------------------------------------------------------
+# The CLI itself, end to end: `tools/hkp_desk_check.py` is what an agent runs at
+# RUNBOOK §4's host boundary. The invariant-function tests above import the library
+# directly and would stay green even if the CLI's argument parsing, exit-code
+# mapping, or output path were broken.
 _TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_desk_check.py"
 
 
 def _run_cli(*args, mode="structural"):
     """The CLI as an agent runs it. The mode is always explicit, because the tool
-    requires it -- a call site that omitted it would be testing argparse's error
-    path rather than the invariant it names."""
+    requires it."""
     return subprocess.run(
         [sys.executable, str(_TOOL), "--mode", mode, *args],
         capture_output=True,
@@ -347,9 +320,8 @@ class TestCliEndToEnd:
     def test_structural_mode_never_reports_compiled_agreement(
         self, packed_desk_check, tmp_path
     ):
-        """A structural pass is a statement about the documents. Letting it read
-        as a statement about the binary is the substitution the two modes exist to
-        prevent, so the clean structural run must say what it did NOT check.
+        """A structural pass is a statement about the documents, so a clean
+        structural run must say what it did NOT check.
         """
         kdp_path = tmp_path / "clean.kdp.json"
         kdp_path.write_text(
@@ -362,7 +334,7 @@ class TestCliEndToEnd:
 
     def test_the_mode_is_required(self, packed_desk_check, tmp_path):
         """No default: a run whose mode is unstated cannot be read back out of a
-        log, and the weaker result would be indistinguishable from the stronger."""
+        log, and the weaker result would read as the stronger."""
         kdp_path = tmp_path / "clean.kdp.json"
         kdp_path.write_text(
             json.dumps({"kernelDescriptors": _kernels(packed_desk_check)})
@@ -376,12 +348,10 @@ class TestCliEndToEnd:
         assert "--mode" in proc.stderr
 
     def test_full_mode_refuses_the_unpacked_dialect(self, desk_check_fixture):
-        """A rocKE tree read BEFORE it was packed has no bytes, so no
-        producing-build record can bind and full mode has nothing to check. It must
-        refuse rather than report an unverified pass: this tree will carry a
-        compiled claim once packed, and reading "no claim" off it is how a stale or
-        pre-pack tree slips through. `verify_variant_sets` already refuses the same
-        artifact, so a pass here would make the two readers disagree."""
+        """A rocKE tree read BEFORE packing has no bytes, so no producing-build
+        record can bind and full mode must refuse rather than report an unverified
+        pass. `verify_variant_sets` refuses the same artifact, so a pass here would
+        make the two readers disagree."""
         proc = _run_cli(str(desk_check_fixture / "attention.kdp.json"), mode="full")
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "packed dialect" in proc.stdout
@@ -389,10 +359,9 @@ class TestCliEndToEnd:
         assert "NOT VERIFIED HERE" not in proc.stdout
 
     def test_real_injected_drift_exits_nonzero(self, packed_desk_check, tmp_path):
-        """The exact defect this whole tool exists for: a real packed tree
-        with a genuine metadata/spec mismatch must fail the CLI, not just
-        the underlying function -- proving the shipped script wires the
-        library's `report.ok` into its own exit code correctly."""
+        """A real packed tree with a genuine metadata/spec mismatch must fail the
+        CLI, not just the underlying function: the script wires `report.ok` into
+        its exit code."""
         kernels = json.loads(json.dumps(_kernels(packed_desk_check)))
         kernels[1]["metadata"]["head_size"] = 999
         kdp_path = tmp_path / "drifted.kdp.json"
@@ -406,33 +375,20 @@ class TestCliEndToEnd:
     def test_authored_tree_reports_toc_key_not_applicable_and_exits_zero(
         self, desk_check_fixture
     ):
-        """A pre-pack authored tree has no toc_key/symbol yet -- that must
-        read as NOT-APPLICABLE, never as a false 'None == None' collision,
-        and must not fail the run on its own."""
+        """A pre-pack authored tree has no toc_key/symbol yet: that reads as
+        NOT-APPLICABLE, never as a false 'None == None' collision, and does not
+        fail the run on its own."""
         proc = _run_cli(str(desk_check_fixture / "attention.kdp.json"))
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "NOT-APPLICABLE" in proc.stdout
 
 
-# ---------------------------------------------------------------------------
-# Real-bundle regressions. Every test above this line runs against a fixture
-# built for the test; these run against every real, git-tracked bundle this
-# repository carries -- no pack, no hipcc, no GPU, so they run everywhere the
-# suite does.
-#
-# Two such roots are wired and both are read. `examples/descriptors` is the
-# documented sample tree; the root under the engine is what a consumer
-# actually loads. The two differ in where the specialization contract is
-# declared, how many kernels a shard carries, and which dtype spellings
-# appear -- so a check that reads only one of them covers half the bundles
-# that can exist.
-#
-# The engine root ships no bundle, so `examples/descriptors` is the only root
-# supplying anything to check and every `kernel_ingestor_engine`
-# parametrization below skips -- the half-coverage warning above is this suite
-# as it stands. Authoring a bundle under the engine root closes that with no
-# change here: the roots are globbed, not enumerated per bundle.
-# ---------------------------------------------------------------------------
+# Real-bundle regressions: everything above runs against a purpose-built fixture,
+# these against every git-tracked bundle the repository carries -- no pack, no
+# hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
+# documented sample tree, and the engine root is what a consumer loads. The engine
+# root ships no bundle today, so its parametrizations skip; authoring one closes
+# that with no change here, since the roots are globbed.
 _PACKAGING = Path(__file__).resolve().parent.parent
 _EXAMPLES = [
     _PACKAGING / "examples" / "descriptors",
@@ -445,13 +401,10 @@ _ROOT_IDS = [root.parent.name for root in _EXAMPLES]
 
 
 def _require_bundles(producer_root):
-    """Every `.kdp.json` under one producer subtree of one root, or a NAMED
-    skip when that subtree holds none.
-
-    A root a downstream checkout has overridden to an empty directory, and a
-    producer a given root simply does not carry, are both legitimately absent
-    -- but the skip has to say which root and which producer, or a root that
-    quietly stopped being read is indistinguishable from one that passed."""
+    """Every `.kdp.json` under one producer subtree of one root, or a NAMED skip
+    when it holds none: an emptied root and an absent producer are both legitimate,
+    but the skip must name which, or a root that stopped being read looks like one
+    that passed."""
     kdps = sorted(producer_root.glob("*/*.kdp.json"))
     if not kdps:
         pytest.skip(
@@ -463,16 +416,11 @@ def _require_bundles(producer_root):
 
 @pytest.mark.quick
 class TestRealBundleDtypeVocabulary:
-    """rocKE specs and hipDNN KMDs spell dtype in two DELIBERATE
-    vocabularies: `spec.dtype` is what the builder's Python takes ("bf16"),
-    `metadata.dtype` is the hipDNN DataType enum name the matcher compares
-    against the graph ("BF16" here, "BFLOAT16"/"HALF" in the gfx950 dense
-    bundle -- data_types.fbs:6-26). A raw string compare called that drift
-    and false-positived on EVERY rocKE kernel that ships; the 32-kernel
-    gfx950 bundle reported 32 failures out of the box. `grep -c
-    "BFLOAT16\\|bf16"` on this file returned 0 before these tests, which is
-    exactly why it shipped.
-    """
+    """rocKE specs and hipDNN KMDs spell dtype in two DELIBERATE vocabularies:
+    `spec.dtype` is the builder's Python spelling ("bf16"), `metadata.dtype` the
+    hipDNN DataType enum name ("BF16" here, "BFLOAT16"/"HALF" in the gfx950 dense
+    bundle -- data_types.fbs:6-26), and a raw string compare false-positives on
+    every rocKE kernel that ships."""
 
     @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
     def test_real_rocke_example_dtype_vocabularies_are_not_drift(self, rocke_root):
@@ -480,8 +428,8 @@ class TestRealBundleDtypeVocabulary:
             kernels = _kernels(_read(kdp))
             spec = kernels[0]["kernel_source"]["spec"]
             meta = kernels[0]["metadata"]
-            # The premise: two different spellings of one type. If this ever
-            # fails, the bundle changed and the regression needs re-grounding.
+            # The premise: two different spellings of one type. A failure here
+            # means the bundle changed and the regression needs re-grounding.
             assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
             assert metadata_spec_drift(kernels, ("dtype",)) == [], kdp
 
@@ -515,9 +463,9 @@ class TestRealBundleDtypeVocabulary:
         ],
     )
     def test_genuine_dtype_drift_still_fails(self, spec_dtype, meta_dtype):
-        """Normalising the vocabulary must not disarm the check. Silencing
-        this row with `--field` -- the tool's original advice -- would have
-        made the field most worth checking the one field never checked."""
+        """Normalising the vocabulary must not disarm the check: silencing this
+        row with `--field` would make the field most worth checking the one field
+        never checked."""
         kernels = [
             {
                 "name": "k",
@@ -533,8 +481,7 @@ class TestDriftAndTupleFieldsAreIndependent:
     """Invariant 1's drift fields and invariant 2's matcher-tuple fields are
     separate lists. Dropping `dtype` to silence the false drift above must not
     remove it from the tuple identity, which would manufacture false duplicate
-    collisions in the check whose entire job is catching unreachable
-    variants."""
+    collisions."""
 
     def _two_variants_differing_only_in_dtype(self):
         return [
@@ -551,10 +498,9 @@ class TestDriftAndTupleFieldsAreIndependent:
         ]
 
     def _two_variants_with_a_translated_field(self):
-        """Two distinct variants whose `layout` the engine deliberately
-        translates (spec spelling vs KMD spelling), which no alias table
-        can know about -- the general case `--drift-field` exists for, and
-        the only shape that proves the two lists are really independent."""
+        """Two distinct variants whose `layout` the engine deliberately translates
+        (spec spelling vs KMD spelling), which no alias table can know about: the
+        general case `--drift-field` exists for."""
         return [
             {
                 "name": "nhwc",
@@ -618,15 +564,11 @@ class TestDriftAndTupleFieldsAreIndependent:
         assert not report.ok
 
     def test_the_drift_default_is_wider_than_the_matcher_field_list(self):
-        """The independence runs in BOTH directions. A caller narrowing the
-        matcher tuple is answering a question about reachability, not granting
-        invariant 1 permission to stop comparing a field -- so the drift default
-        is every field with a spec value and a metadata value, in
-        first-appearance order, and owes nothing to `fields`.
+        """The independence runs in both directions: narrowing the matcher tuple
+        never grants invariant 1 leave to stop comparing a field.
 
         Breaking mutation: `drift_comparable_fields`'s `return tuple(fields)`
-        -> `return tuple(fields[:1])`, which drops `head_size` and reports the
-        injected drift as clean."""
+        -> `return tuple(fields[:1])`."""
         kernels = self._two_variants_differing_only_in_dtype()
         kernels[0]["metadata"]["head_size"] = 999  # real drift
         report = DeskCheckReport(kernels, fields=("dtype",), mode="structural")
@@ -665,17 +607,16 @@ class TestHeterogeneousMetadataTupleIdentity:
         assert forward == reverse == {}
 
     def test_two_kernels_both_missing_the_field_still_collide(self):
-        """A field NO kernel declares drops out of the identity entirely --
-        it distinguishes nothing, so the two kernels are genuinely
-        indistinguishable to the matcher and must collide."""
+        """A field no kernel declares drops out of the identity entirely, so the
+        two kernels are indistinguishable to the matcher and must collide."""
         kernels = self._mixed()
         del kernels[0]["metadata"]["block_n"]
         assert duplicate_matcher_tuples(kernels, ("head_size", "block_n")) == {(64,): 2}
 
     def test_absent_marker_distinguishes_only_when_some_kernel_declares_it(self):
-        """The complement of the case above: once ANY kernel declares the
-        field, "declares no block_n" and "declares block_n=64" are different
-        variants and must not collide -- which is what `_ABSENT` encodes."""
+        """Complement of the case above: once any kernel declares the field,
+        "declares no block_n" and "declares block_n=64" are different variants,
+        which is what `_ABSENT` encodes."""
         kernels = self._mixed() + [
             {
                 "name": "third_without_block_n",
@@ -706,9 +647,9 @@ class TestCliOnRealShippedBundles:
     def test_hip_producer_bundle_reports_could_not_check_not_a_false_clean(
         self, hip_root
     ):
-        """A non-rocKE producer has no authored spec anywhere. That is
-        "nothing to check", and must exit non-zero rather than render
-        identically to "checked, found nothing wrong"."""
+        """A non-rocKE producer has no authored spec anywhere. That is "nothing to
+        check", and must exit non-zero rather than render identically to
+        "checked, found nothing wrong"."""
         for kdp in _require_bundles(hip_root):
             proc = _run_cli(str(kdp))
             assert proc.returncode == 1, str(kdp) + proc.stdout + proc.stderr
@@ -745,12 +686,9 @@ class TestCliOnRealShippedBundles:
 @pytest.mark.quick
 class TestMatcherFieldsComeFromTheBundlesOwnContract:
     """The matcher-tuple identity is the bundle's OWN declaration of what the
-    producing compiler specialized on. A generic list standing in for that
-    declaration collapses genuinely distinct kernels onto one tuple: a
-    2733-kernel rocKE attention bundle declares fourteen fields, five of which
-    the generic list never carried, and it reported 661 false duplicate-matcher
-    collisions and exited 1 the first time the CLI was pointed at it. The scale
-    is what makes the count meaningful, so the two are quoted together."""
+    producing compiler specialized on. A generic list standing in for it collapses
+    distinct kernels: a 2733-kernel rocKE attention bundle declares fourteen
+    fields, five outside the generic list, and reported 661 false collisions."""
 
     def _two_kernels_differing_only_in_a_declared_field(self):
         return [
@@ -795,13 +733,9 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
     def test_a_bundle_declaring_no_contract_is_keyed_on_its_own_metadata(
         self, tmp_path
     ):
-        """A bundle with nothing to say about its specialization is still keyed
-        on something, and on the fields it actually carries.
-
-        Keyed on a fixed list instead, these two kernels differ only in a field
-        that list does not carry and report a collision neither the runtime nor
-        the bundle has. Keyed on nothing, every kernel would collide with every
-        other; the derivation is what stands between those two.
+        """A bundle with nothing to say about its specialization is still keyed on
+        the fields it carries. A fixed list reports a collision neither the runtime
+        nor the bundle has; keyed on nothing, every kernel collides.
         """
         kdp = self._bundle(tmp_path, None)
         assert load_variant_set(kdp)[1] is None
@@ -815,11 +749,8 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
 
     def test_a_kernel_carrying_no_metadata_derives_an_empty_identity(self):
         """Nothing stated is nothing to key on, and the empty identity is the
-        honest answer rather than a placeholder.
-
-        No fallback follows it: `duplicate_matcher_tuples` drops every field no
-        kernel carries, so on this input any list it could fall back to and the
-        empty one produce the same verdict.
+        honest answer. No fallback follows it, since `duplicate_matcher_tuples`
+        drops every field no kernel carries.
         """
         assert metadata_identity_fields([{"name": "k"}]) == ()
         assert duplicate_matcher_tuples(
@@ -829,8 +760,8 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
         )
 
     def test_an_explicit_field_still_outranks_the_declaration(self, tmp_path):
-        """A caller who names the fields is answering a different question
-        than the bundle is, and must not be overruled by it."""
+        """A caller who names the fields is answering a different question than
+        the bundle is, and must not be overruled by it."""
         kdp = self._bundle(tmp_path, ("head_size", "waves_per_eu"))
         proc = _run_cli(str(kdp), "--field", "head_size")
         assert proc.returncode == 1, proc.stdout + proc.stderr
@@ -839,19 +770,10 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
 
 @pytest.mark.quick
 class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
-    """The declared contract sets the matcher-tuple identity (invariant 2) and
-    must NOT set the drift comparison (invariant 1). The two relationships are
-    opposite in kind: for the tuple the bundle's declaration is the authority on
-    what distinguishes its own variants, while for drift the bundle is the thing
-    under audit. Feeding the declaration into both lets an artifact set the width
-    of the check that polices it -- declare one field, and a metadata value that
-    disagrees with the spec the compiler actually consumed on any other field is
-    never compared and the CLI exits 0.
-
-    Each case here uses a bundle declaring ONE field and drifting on a second,
-    which is the shape that separates the two lists; a bundle whose declaration
-    happens to cover everything cannot tell them apart.
-    """
+    """The declared contract sets the matcher-tuple identity (invariant 2) and must
+    NOT set the drift comparison (invariant 1): for the tuple the bundle is the
+    authority, for drift it is the thing under audit. Each case declares ONE field
+    and drifts on a second."""
 
     #: Deliberately narrow: `block_m` is real, specialized and undeclared.
     _NARROW_CONTRACT = ("head_size",)
@@ -882,10 +804,8 @@ class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
         return kdp
 
     def test_drift_outside_the_declared_contract_is_reported(self, tmp_path):
-        """The decisive case. `block_m` 256 was compiled in; the metadata the
-        matcher reads says 128. The bundle declares only `head_size`, so a drift
-        list drawn from the declaration compares one column, finds it clean, and
-        exits 0 on a kernel that is not the kernel the matcher thinks it picked.
+        """The decisive case: `block_m` 256 was compiled in and the metadata says
+        128, so a drift list drawn from the narrow declaration exits 0.
 
         Breaking mutation: `DeskCheckReport.__init__`'s
         `drift_comparable_fields(kernels)` -> `self.fields`."""
@@ -898,25 +818,21 @@ class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
         assert "block_m" in proc.stdout
 
     def test_the_same_bundle_without_drift_stays_clean(self, tmp_path):
-        """The control the case above is worthless without: the identical narrow
-        bundle whose `block_m` agrees reports none and exits 0, so the failure
-        above is a detected disagreement rather than a check that fails
-        everything it is now allowed to look at.
+        """The control: the identical bundle whose `block_m` agrees exits 0, so the
+        failure above is a detected disagreement rather than a check that fails
+        everything.
 
-        Breaking mutation: `_values_agree`'s final
-        `return str(spec_v).lower() == str(meta_v).lower()` -> `return False`."""
+        Breaking mutation: `_values_agree`'s final compare -> `return False`."""
         kdp = self._bundle(tmp_path, metadata_block_m=256)
         proc = _run_cli(str(kdp))
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "metadata/authored-spec drift: none" in proc.stdout
 
     def test_the_generic_fallback_would_also_miss_this_field(self, tmp_path):
-        """`DEFAULT_MATCHER_FIELDS` is independent of the artifact, which is the
-        property the declared list lacks -- but it is a fixed attention-shaped
-        guess, and `block_m` is not in it. A real dense-attention bundle
-        specializes on fields like block_m, waves_per_eu, persistent,
-        num_persistent and use_exp2_fast, none of them in that list.
-        Independence alone is not width.
+        """`DEFAULT_MATCHER_FIELDS` is artifact-independent, the property the
+        declared list lacks, but it is a fixed attention-shaped guess without
+        `block_m` while a real dense bundle specializes on block_m, waves_per_eu,
+        persistent, num_persistent and use_exp2_fast.
 
         Breaking mutation: `DeskCheckReport.__init__`'s
         `drift_comparable_fields(kernels)` -> `DEFAULT_MATCHER_FIELDS`."""
@@ -929,27 +845,21 @@ class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
         assert report.drift == [("narrow", "block_m")]
 
     def test_drift_field_still_narrows_deliberately(self, tmp_path):
-        """A wide default is not a locked one. `--drift-field` remains the
-        explicit escape for a field whose two sides speak vocabularies no alias
-        table can bridge, and naming `head_size` confines the comparison to it
-        even though `block_m` is drifting -- the narrowing is a decision in the
-        command line and in the log, not a property the artifact asserted.
+        """`--drift-field` stays the explicit escape for a field whose sides speak
+        vocabularies no alias table bridges, confining the comparison to
+        `head_size` even though `block_m` drifts.
 
-        Breaking mutation: `hkp_desk_check.main`'s `drift_fields =
-        tuple(args.drift_fields) if args.drift_fields else None` ->
-        `drift_fields = None`."""
+        Breaking mutation: `hkp_desk_check.main`'s `drift_fields = ... else None`
+        -> `drift_fields = None`."""
         kdp = self._bundle(tmp_path, metadata_block_m=128)
         proc = _run_cli(str(kdp), "--drift-field", "head_size")
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "metadata/authored-spec drift: none" in proc.stdout
 
     def test_widening_the_drift_list_does_not_widen_the_matcher_tuple(self, tmp_path):
-        """Invariant 2 is untouched. Two kernels agreeing with their own specs
-        but differing in the undeclared `block_m` are genuinely indistinguishable
-        to a matcher keyed on the declared `head_size` alone, so the collision
-        must still be reported. Had the wider drift list leaked into the tuple
-        identity, `block_m` would separate them and the real unreachable-variant
-        finding would vanish.
+        """Invariant 2 is untouched: two kernels differing only in the undeclared
+        `block_m` are indistinguishable to a matcher keyed on `head_size`, so the
+        collision is still reported.
 
         Breaking mutation: `DeskCheckReport.__init__`'s
         `duplicate_matcher_tuples(kernels, self.fields)` ->
@@ -1018,12 +928,10 @@ class TestStructuralDescriptorContext:
         assert kernel["id"] in result.stderr and str(root) in result.stderr
 
 
-# ---------------------------------------------------------------------------
-# A shard the FULL mode can walk. Full mode resolves every KDP under the root
-# to its engine and the KMD that governs it before either path lookup runs, so
-# the minimal structural fixtures above -- a lone KDP with no `engine` -- fail
-# on that hop and never reach the code these last two classes cover.
-# ---------------------------------------------------------------------------
+# A shard the FULL mode can walk. Full mode resolves every KDP under the root to
+# its engine and the KMD that governs it before either path lookup runs, so the
+# minimal structural fixtures above -- a lone KDP with no `engine` -- fail on that
+# hop and never reach the code these last two classes cover.
 def _bundle_root(root, ukd):
     """One resolvable shard holding `ukd` inline: a KDP walking by id to a UED
     and to the KMD that governs it. Returns the KDP's path."""
@@ -1104,19 +1012,12 @@ def _inline_ukd():
 
 @pytest.mark.quick
 class TestAKdpPathMatchingNothingIsReportedNotRaised:
-    """A `kdp` argument naming no indexed descriptor is a mistyped or stale
-    path -- a finding about what the caller pointed at, and one only the failing
-    path itself can name.
+    """A `kdp` argument naming no indexed descriptor is a mistyped or stale path.
 
-    Both entry points look the file up in an index built from its parent
-    directory, and a lookup that answered with a bare `StopIteration` escaped the
-    CLI's `HkpPackError` handlers entirely: a traceback out of a gate reads as a
-    broken tool rather than as a broken artifact, which is the substitution
-    `hkp_desk_check.main` exists to prevent.
-
-    The two modes reach two different lookups -- structural drives `_resolve`,
-    full reaches `compiled_agreement`'s bundle selection first and never gets to
-    the other -- so each is covered on its own.
+    Both entry points look the file up in an index built from its parent directory,
+    and a bare `StopIteration` escapes the CLI's `HkpPackError` handlers. Structural
+    drives `_resolve` and full reaches `compiled_agreement`'s bundle selection
+    first, so each lookup is covered.
     """
 
     def _typo_beside_a_real_shard(self, tmp_path):
@@ -1154,13 +1055,10 @@ class TestAKdpPathMatchingNothingIsReportedNotRaised:
 
 @pytest.mark.quick
 class TestAnIdLessInlineKernelIsReportedNotAKeyError:
-    """Full mode keys every consumer record on the UKD id, and nothing on the
-    READ path requires one: `descriptors.py`'s `_require(ukd, ["id", ...])` runs
-    in the packing pipeline, while `descriptor_context.Index` only parses JSON
-    and `resolve_entries` takes an inline `kernelDescriptors` object as it
-    stands. An inline entry is the whole of the hole -- a standalone UKD is
-    reached through `by_id`, which indexes nothing id-less -- and it reached
-    `consumer_records` as a bare `KeyError: 'id'` with no descriptor named.
+    """Full mode keys every consumer record on the UKD id, and nothing on the READ
+    path requires one: `_require(ukd, ["id", ...])` runs in the packing pipeline,
+    while `descriptor_context.Index` only parses JSON. Only an inline entry can
+    reach `consumer_records` id-less, since `by_id` indexes nothing id-less.
     """
 
     def test_an_id_less_inline_kernel_names_itself_in_the_failure(self, tmp_path):

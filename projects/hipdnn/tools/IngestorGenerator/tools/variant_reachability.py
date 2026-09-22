@@ -1,14 +1,10 @@
-"""The converse of the desk check: can any graph SELECT this variant at all?
+"""The converse of the desk check: can any graph select this variant at all?
 
-The backwards question is where dead weight hides -- a real integration shipped 48
-variants of which 24 no graph could select, with the suite green throughout.
-
-Applicability and ranking are DECLARED (`--divides`, `--score-field`), never
-inferred from field names: the scorer is native C++ per engine and this tool cannot
-call it. WHAT THIS CANNOT KNOW follows from that: a corpus field no rule names is
-invisible to applicability, and without a declared ranking every applicable variant
-is reported reachable -- the output says so rather than implying the native scorer
-was checked.
+Applicability and ranking are declared (`--divides`, `--score-field`), never
+inferred from field names: the scorer is native C++ per engine and this tool
+cannot call it. So a corpus field no rule names is invisible to applicability,
+and without a declared ranking every applicable variant is reported reachable
+-- the output says so rather than implying the native scorer was checked.
 """
 
 from __future__ import annotations
@@ -53,11 +49,10 @@ def _load_profile(path: str) -> dict:
 def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict]]:
     """(name -> KMD default_value, kernelDescriptors) for one *.kdp.json.
 
-    The schema is reached BY REFERENCE through the id chain the documents declare,
-    resolved across `tree` by the shared `hkp_pack.descriptor_context` so no two
-    offline readers disagree about which KMD governs a bundle. Its defaults are what
-    make "wrote the default explicitly" and "left it absent" the same variant at
-    runtime -- see `_resolved_metadata`.
+    The schema is reached by reference through the id chain the documents
+    declare, resolved across `tree` by `hkp_pack.descriptor_context`. Its
+    defaults make "wrote the default explicitly" and "left it absent" the same
+    variant at runtime -- see `_resolved_metadata`.
     """
     kdp = Path(kdp_path)
     if not kdp.name.endswith(".kdp.json"):
@@ -91,12 +86,9 @@ def _resolved_metadata(descriptor: dict, defaults: dict) -> dict:
 
 
 def _remap(shape: dict, field_map: dict) -> dict:
-    """Rename a corpus field to the metadata name it corresponds to.
-
-    The corpus speaks its producer's vocabulary, KMD metadata the matcher's; where
-    they differ, --field-map declares the mapping rather than this tool guessing one
-    from field names alone.
-    """
+    """Rename a corpus field to the metadata name it corresponds to. The corpus
+    speaks its producer's vocabulary and KMD metadata the matcher's; where they
+    differ, --field-map declares the mapping rather than this tool guessing."""
     out = dict(shape)
     for old, new in field_map.items():
         if old in out:
@@ -105,12 +97,10 @@ def _remap(shape: dict, field_map: dict) -> dict:
 
 
 def _same_value(shape_value, metadata_value) -> bool:
-    """Are these the same value, allowing for the two vocabularies?
-
-    Numbers compare numerically (a bool is an int here, so a `causal` metadata 1 and
-    a corpus `True` are the same graph); strings compare case-insensitively, for the
-    reason `applicable` gives.
-    """
+    """Are these the same value, allowing for the two vocabularies? Numbers
+    compare numerically (a bool is an int, so metadata 1 and corpus True are
+    one graph); strings compare case-insensitively, for the reason `applicable`
+    gives."""
     if isinstance(shape_value, str) and isinstance(metadata_value, str):
         return shape_value.strip().lower() == metadata_value.strip().lower()
     if isinstance(shape_value, (int, float)) and isinstance(
@@ -123,25 +113,16 @@ def _same_value(shape_value, metadata_value) -> bool:
 def applicable(metadata: dict, shape: dict, divides: dict) -> bool:
     """True when `metadata` (a variant, defaults resolved) is legal for `shape`.
 
-    Two kinds of shape-valued field, matching the two kinds a real matcher
-    decides between:
+    Two kinds of shape-valued field:
 
-      * a metadata field sharing a name with a shape field must be EQUAL to it,
-        unless that field is declared as a divisor (divisor fields never compare
-        by equality -- a shape rarely carries a field literally named `block_n`);
+      * a metadata field sharing a name with a shape field must be equal to it,
+        unless that field is declared as a divisor;
       * a declared divisor field must evenly divide the shape field it is
         declared against, and non-positive tiles never divide anything.
 
-    A field the caller never declared and that shares no name with any shape key
-    is invisible here -- see the module docstring's "what this cannot know".
-
-    STRING COMPARISON IS CASE-INSENSITIVE, and that is not laziness. Metadata
-    carries the hipDNN spelling the matcher compares (`"BF16"`); a request corpus
-    carries the builder's (`"bf16"`). They are the same value in two vocabularies,
-    and the whole pipeline elsewhere translates between them deliberately. Comparing
-    them raw makes EVERY variant unreachable -- observed: 91 of 91 on a set generated
-    from the very corpus it was tested against, which is a false alarm so total it
-    would train an author to pass --allow-unreachable and stop reading.
+    A field the caller never declared and sharing no name with any shape key is
+    invisible here. String comparison is case-insensitive: metadata carries the
+    matcher's spelling (``"BF16"``) and a corpus the builder's (``"bf16"``).
     """
     for field, value in metadata.items():
         if field in divides:
@@ -184,12 +165,10 @@ def classify(
     field_map: dict,
     score: dict | None,
 ) -> list[Verdict]:
-    """One Verdict per descriptor, against the whole corpus.
-
-    `score` is `{"field": ..., "prefer": "max" | "min"}` or None. None means no
-    ranking was declared, so every applicable variant wins by construction and
-    UNREACHABLE is the only finding left.
-    """
+    """One Verdict per descriptor, against the whole corpus. `score` is
+    `{"field": ..., "prefer": "max" | "min"}` or None; None means no ranking
+    was declared, so every applicable variant wins and UNREACHABLE is the only
+    finding left."""
     if score is not None and score.get("prefer") not in ("max", "min"):
         raise ReachabilityError("score.prefer must be 'max' or 'min'")
 
@@ -202,9 +181,9 @@ def classify(
         for s in remapped
     ]
 
-    # shape index -> [variant names that WIN there] (ties all win: without the
-    # real scorer's own tie-break this tool cannot rule either side out, and
-    # picking one arbitrarily would manufacture a false APPLICABLE-BUT-NEVER-WINS).
+    # shape index -> [variant names that win there] (ties all win: without the
+    # real scorer's tie-break this tool cannot rule either side out, and
+    # picking one would manufacture a false APPLICABLE-BUT-NEVER-WINS).
     winners_at: list[list[str]] = []
     for idx, names in enumerate(applicable_at):
         if not names:

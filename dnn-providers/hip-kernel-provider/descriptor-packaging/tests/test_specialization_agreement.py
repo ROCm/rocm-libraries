@@ -1,17 +1,14 @@
 """Compiled-specialization agreement: what a declaration observes and what binds it.
 
-Every case here is DISCRIMINATING -- each one passes before the property it names is
-broken and fails after, and no two of them fail for the same reason. They run with no
-GPU, no comgr and no rocKE: the observer takes readouts off whatever object it is
-handed, so a spec class defined in this file exercises the same code path the real
-builder does, deterministically.
+Every case is DISCRIMINATING -- each passes before the property it names is broken
+and fails after, and no two fail for the same reason. They need no GPU, comgr or
+rocKE: the observer takes readouts off whatever object it is handed.
 
-The spec classes below mirror the coupling shapes the real gfx942 kernel has
-(`rocke/library/kernels/gfx942/attention_dense.py`): a tri-state field whose accessor
-consults a policy only when the raw value is None, and a second accessor that returns
-False whenever its partner is off -- including when its own raw field is explicitly
-True. Mirrored rather than imported, because importing the producer to test the
-verifier is exactly the dependency this design refuses.
+The spec classes mirror the coupling shapes of the real gfx942 kernel
+(`rocke/library/kernels/gfx942/attention_dense.py`): a tri-state field whose
+accessor consults a policy when the raw value is None, and a second accessor that
+returns False whenever its partner is off. Mirrored rather than imported, because
+importing the producer to test the verifier is the dependency this design refuses.
 """
 
 from __future__ import annotations
@@ -44,13 +41,11 @@ DEMO_SIGNATURE = [{"kind": "global_buffer", "size": 8, "offset": 0}]
 
 @dataclass(frozen=True)
 class DemoSpec:
-    """A spec with the three readout shapes the contract distinguishes.
-
-    ``head_size`` and ``causal`` are plain fields the builder consumes verbatim.
-    ``block_n`` carries a constructor default, so an omitted authored key still
-    arrives as a definite value on the hydrated object. ``use_exp2_fast`` and
-    ``use_v_swizzle`` are tri-state: ``None`` is authored intent meaning "the
-    kernel's own policy decides", never a wildcard and never false.
+    """A spec with the three readout shapes the contract distinguishes: plain
+    fields (``head_size``, ``causal``), a constructor default (``block_n``) that
+    still arrives as a definite value when the key is omitted, and tri-state fields
+    (``use_exp2_fast``, ``use_v_swizzle``) whose ``None`` means the kernel's own
+    policy decides -- never a wildcard, never false.
     """
 
     head_size: int
@@ -150,11 +145,10 @@ class TestObservedValues:
     """What the observer reads off a real hydrated object."""
 
     def test_null_tri_state_resolves_to_true_or_false_by_the_kernels_own_policy(self):
-        """`None` is not a wildcard and not false: it is a question the object answers.
-
-        Both directions matter. A checker that mapped `None` to `False` would agree
-        with the bf16/D128 descriptor and silently mislabel every other shape; one
-        that treated it as "matches anything" would agree with both and mean nothing.
+        """`None` is a question the object answers, not a wildcard and not false.
+        A checker mapping it to `False` would agree with the bf16/D128 descriptor
+        and mislabel every other shape; treating it as "matches anything" would
+        agree with both and mean nothing.
         """
         on = observe_for(DemoSpec(head_size=64), consumer())
         off = observe_for(DemoSpec(head_size=128, dtype="bf16"), consumer())
@@ -163,21 +157,19 @@ class TestObservedValues:
         assert off["requests"][key]["values"]["use_exp2_fast"] == 0
 
     def test_a_constructor_default_is_observed_as_the_value_it_hydrates_to(self):
-        """An omitted authored key is a definite value on the object, not an absence.
-
-        `block_n` is never authored here, so only the dataclass default can supply
-        the 64 the comparison agrees with.
+        """An omitted authored key is a definite value on the object, not an
+        absence: `block_n` is never authored here, so only the dataclass default
+        can supply the 64 the comparison agrees with.
         """
         observations = observe_for(DemoSpec(head_size=64), consumer())
         key = agreement.digest(agreement.observation_request(consumer(), FULL_KMD))
         assert observations["requests"][key]["values"]["block_n"] == 64
 
     def test_effective_accessor_overrides_an_explicitly_true_raw_field(self):
-        """Raw swizzle True, effective False, because the cfvst path is disabled.
-
-        This is the case that makes "read the raw field when it is non-null" wrong.
-        The declaration binds the accessor, so the observation reports the decision
-        the builder took rather than the one the author asked for.
+        """Raw swizzle True, effective False, because the cfvst path is disabled --
+        the case that makes "read the raw field when non-null" wrong. The
+        declaration binds the accessor, so the observation reports the builder's
+        decision rather than the author's request.
         """
         spec = DemoSpec(head_size=64, use_cfvst=False, use_v_swizzle=True)
         assert spec.use_v_swizzle is True
@@ -283,12 +275,10 @@ class TestDeclarationValidation:
             agreement.validate_consumer(consumer(bindings=bindings), FULL_KMD)
 
     def test_a_declaration_cannot_name_an_import_root(self):
-        """There is nowhere in a declaration to redirect the compiler's imports.
-
-        The consumer's key set is closed, so a `provider_root` (or any other
-        root-naming key) is rejected outright rather than silently ignored --
-        which is what keeps a comparison declaration from becoming a second,
-        undeclared way to choose which producer runs.
+        """There is nowhere in a declaration to redirect the compiler's imports:
+        the consumer's key set is closed, so a `provider_root` is rejected outright
+        rather than ignored, keeping a declaration from becoming a second way to
+        choose which producer runs.
         """
         entry = consumer()
         entry["provider_root"] = "/some/unrelated/editable/checkout"
@@ -349,9 +339,8 @@ def contract_of(*consumers) -> dict:
 class TestSharedCarriage:
     """Where the declaration is written, and what each kernel resolves to.
 
-    One engine's inline kernels share one declaration by construction, so it may
-    be carried once by the enclosing KDP. What a reader must get is unchanged: the
-    consumers in force for the kernel in front of it.
+    One engine's inline kernels share one declaration, so the KDP may carry it
+    once; a reader still gets the consumers in force for the kernel before it.
     """
 
     @staticmethod
@@ -438,7 +427,7 @@ class TestComparison:
             )
 
     def test_an_absent_metadata_key_is_completed_from_the_kmd_default(self):
-        """The loader substitutes the KMD default, so the comparison must too --
+        """The loader substitutes the KMD default, so the comparison must too:
         otherwise a descriptor omitting a key would be checked against nothing
         while the runtime checked it against 64."""
         observations = observe_for(DemoSpec(head_size=64), consumer())
@@ -455,11 +444,9 @@ class TestComparison:
 
     def test_a_second_contradictory_consumer_of_one_compile_result_fails(self):
         """A shared variant is checked once per consumer, and the first one's
-        agreement certifies nothing about the second.
-
-        Both consumers ask the same builder object the same questions, so one
-        compile answers both -- and the second consumer's metadata contradicts the
-        answer. A checker that stopped at the first agreement would ship this.
+        agreement certifies nothing about the second: both ask the same object the
+        same questions, so one compile answers both, and the second consumer's
+        metadata contradicts the answer.
         """
         spec = DemoSpec(head_size=64)
         first = consumer()
@@ -529,9 +516,9 @@ def shipped_ukd(**overrides):
     doc = pipeline._rewrite_ukd_kpack(
         record, ARCH, "vk-demo", PAYLOAD_SHA, signature=DEMO_SIGNATURE
     )
-    # The producer stamps the ABI signature into the same kernel_source this helper's
-    # callers read the provenance out of, so assert it here: it is the one place both
-    # the signature thread and the agreement thread write the same document.
+    # The producer stamps the ABI signature into the same kernel_source this
+    # helper's callers read the provenance out of, so assert it here: it is where
+    # the signature thread and the agreement thread write one document.
     assert doc["kernel_source"]["signature"] == DEMO_SIGNATURE
     return doc, record.consumers
 
@@ -542,12 +529,10 @@ def observations_of(doc):
 
 
 def restamp_authored_spec(doc):
-    """Change the authored spec and re-stamp the descriptor digest over it.
-
-    `provenance.spec` sits inside the digested document, so the descriptor
-    binding refuses a bare edit of it before the authored-input binding is ever
-    consulted. Re-stamping is what someone holding the descriptor would do, and
-    it is what leaves the authored-input check as the one that speaks.
+    """Change the authored spec and re-stamp the descriptor digest over it, since
+    `provenance.spec` sits inside the digested document and a bare edit is refused
+    by the descriptor binding first. Re-stamping leaves the authored-input check as
+    the one that speaks.
     """
     doc["provenance"]["spec"] = {"head_size": 128}
     evidence = doc["provenance"]["effective_spec"]
@@ -638,16 +623,10 @@ class TestPackedVerification:
         """Each mutation is one field of the binding, and each fails on its own.
 
         The expected diagnostic travels with the mutation because `verify` raises
-        one exception class from nine sites: a bare `raises` passes on whichever
-        check happens to fire first, which would leave the binding a case is
-        named for unexercised and a break in it green.
-
-        The layering is why the first four cases share one message. The
-        descriptor digest covers the whole authored document, so an edit to the
-        symbol, the toc key or the arch there is refused before the evidence's
-        own copy of that same value is ever compared -- and reaching those
-        comparisons is what the three `observed-` cases do, by moving the
-        evidence rather than the document it binds.
+        one exception class from nine sites. The first four cases share one message
+        by layering: the descriptor digest covers the whole authored document, so an
+        edit to the symbol, toc key or arch is refused before the evidence's own
+        copy is compared, which the `observed-` cases reach by moving the evidence.
         """
         doc, records = shipped_ukd()
         mutate(doc)
@@ -691,12 +670,9 @@ class TestPackedVerification:
     )
     def test_a_changed_consumer_document_fails_its_binding(self, mutate):
         """Every document a record names, moved on its own, on the rebuild side.
-
-        The stored list names the documents and digests them rather than carrying
-        them, so this set is what says the projection kept every binding an
-        embedded document would have carried. Six mutations, six failures, each
-        one reaching the comparison alone: a field whose binding went missing
-        would leave its case the only green one here.
+        The stored list names and digests the documents rather than carrying them,
+        so six mutations and six failures say the projection kept every binding an
+        embedded document would have carried.
         """
         doc, records = shipped_ukd()
         altered = copy.deepcopy(records)
@@ -705,13 +681,10 @@ class TestPackedVerification:
             agreement.verify(doc, altered, PAYLOAD)
 
     def test_a_declaration_re_evidenced_over_its_own_edit_still_fails(self):
-        """A consistent edit on both sides is refused by the observation instead.
-
-        Re-deriving the evidence from edited descriptors is what someone holding
-        the whole tree can do, and it takes the consumer binding out of the way.
-        What is left is the compile itself: the edited declaration asks for
-        readouts the observation was never taken for, and no earlier check
-        reaches that far.
+        """A consistent edit on both sides is refused by the observation instead:
+        re-deriving the evidence takes the consumer binding out of the way, leaving
+        the compile itself, where the edited declaration asks for readouts the
+        observation was never taken for.
         """
         doc, records = shipped_ukd()
         records[0]["declaration"]["vocabulary"] = {}
@@ -783,14 +756,11 @@ def build(spec, *, arch):
 
 @contextlib.contextmanager
 def loaded_producer(directory):
-    """One copy of the same producer bytes, imported from `directory`.
-
-    Two roots holding identical source is what a second build machine presents to
-    the observer: one module name, one set of qualnames, one content hash, and a
-    different absolute path. Loaded by location under a fixed module name rather
-    than through `sys.path`, so the two copies differ in nothing else -- and
-    registered in `sys.modules` for the duration, because that is where
-    `inspect.getsourcefile` reads a class's defining file from.
+    """One copy of the same producer bytes, imported from `directory`: two roots of
+    identical source is what a second build machine presents to the observer -- one
+    module name, one content hash, a different absolute path. Loaded by location
+    under a fixed module name and registered in `sys.modules`, where
+    `inspect.getsourcefile` reads from.
     """
     directory.mkdir(parents=True)
     path = directory / "machine_demo.py"
@@ -868,13 +838,10 @@ class TestMachineIndependence:
     """What the shipped record may be a function of: its inputs, and nothing else."""
 
     def test_two_producer_directories_emit_byte_identical_evidence(self, tmp_path):
-        """The property the other reproducibility tests in this tree cannot see.
-
-        Those compare a serial run against a parallel one, where every producer
-        resolves to the same file, so they agree whether or not the resolved path
-        is published. Two roots of differing depth is what a second machine looks
-        like from inside the observer, and it is the only shape that separates
-        "reproducible here" from "reproducible anywhere".
+        """The property the other reproducibility tests cannot see: they compare a
+        serial run against a parallel one, where every producer resolves to the
+        same file. Two roots of differing depth is what a second machine looks like
+        from inside the observer.
         """
         left = published_evidence(tmp_path / "a")
         right = published_evidence(tmp_path / "b/deeper/still")
@@ -883,10 +850,9 @@ class TestMachineIndependence:
     def test_no_published_value_names_a_location_on_the_building_machine(
         self, tmp_path
     ):
-        """No separator and no install root anywhere, keys included.
-
-        Stated over every string rather than over the fields known to have held
-        one, so a path reintroduced under a new name fails here too.
+        """No separator and no install root anywhere, keys included. Stated over
+        every string rather than the fields known to have held one, so a path
+        reintroduced under a new name fails here too.
         """
         evidence = published_evidence(tmp_path / "a")
         for value in strings_in(evidence):
@@ -894,12 +860,9 @@ class TestMachineIndependence:
             assert "/" not in value and "\\" not in value
 
     def test_a_producer_identity_carrying_a_path_is_rejected(self):
-        """A four-key identity is refused rather than accepted and ignored.
-
-        The record is the only statement a checker has about what produced the
-        payload, so an identity in a shape this module does not write is one it
-        cannot reason about -- and reading three keys and skipping the fourth
-        would let the fourth say anything at all.
+        """A four-key identity is refused rather than accepted and ignored: the
+        record is the only statement a checker has about what produced the payload,
+        so a shape this module does not write is one it cannot reason about.
         """
         doc, records = shipped_ukd()
         observations_of(doc)["producer"]["builder"]["file"] = str(
@@ -1026,15 +989,11 @@ class _ReaderArtifact:
         archive.write(self.archive_path)
 
     def retire_evidence(self, origin_kind):
-        """Drop the producer's record AND the claim that would demand it back.
-
-        Together they are the shape a tree presents once its evidence is lost --
-        a partial copy, a hand-edit, a regenerated descriptor. Not the shape a
-        deliberate strip presents: that edit would move `origin_kind` too, which
-        is why the parameter exists rather than being fixed at `"rocke"`.
-        `origin_kind` is the only other thing that moves -- `None` removes it
-        outright -- so whatever verdict a caller then asserts is attributable to
-        the origin alone.
+        """Drop the producer's record AND the claim that would demand it back --
+        the shape a tree presents once its evidence is lost, not the shape a
+        deliberate strip presents, which would move `origin_kind` too. That is why
+        `origin_kind` is a parameter (`None` removes it) and the only other thing
+        that moves, so a verdict is attributable to the origin.
         """
         provenance = self.ukd["provenance"]
         # The frozen control is rocKE-produced, which is what makes "hip" and
@@ -1198,12 +1157,10 @@ class TestRealArchiveReaders:
     def test_recordless_packed_no_claim_from_a_hip_origin_remains_qualified(
         self, reader_artifact
     ):
-        """A hip-origin kernel with no claim and no record is the legitimate shape.
-
-        The same mutation `test_a_rocke_origin_cannot_waive_its_own_evidence`
-        performs, differing only in the origin it leaves behind. The pair is what
-        proves the check discriminates on origin rather than having been switched
-        off.
+        """A hip-origin kernel with no claim and no record is the legitimate shape:
+        the same mutation `test_a_rocke_origin_cannot_waive_its_own_evidence` makes,
+        differing only in the origin left behind, so the pair proves the check
+        discriminates on origin.
         """
         artifact = reader_artifact()
         artifact.assert_agreement()
@@ -1211,13 +1168,10 @@ class TestRealArchiveReaders:
         artifact.assert_qualified_waiver()
 
     def test_a_rocke_origin_cannot_waive_its_own_evidence(self, reader_artifact):
-        """The waiver keyed on the claim alone is a self-service exemption.
-
-        The packer publishes `effective_spec` onto every rocKE UKD it ships, so this
-        descriptor's own `origin_kind` contradicts the absence of the record. Left
-        waivable, deleting the record and relabelling the specialized fields as
-        matcher-only takes a shipped rocKE shard to a clean exit with the archive
-        bytes never read.
+        """The waiver keyed on the claim alone is a self-service exemption: the
+        packer publishes `effective_spec` onto every rocKE UKD it ships, so this
+        descriptor's `origin_kind` contradicts the absent record, and leaving it
+        waivable takes a shipped rocKE shard to a clean exit with the bytes unread.
         """
         artifact = reader_artifact()
         artifact.assert_agreement()
@@ -1231,11 +1185,9 @@ class TestRealArchiveReaders:
             assert "NOT VERIFIED HERE" not in result.stdout
 
     def test_an_absent_origin_kind_is_not_read_as_rocke(self, reader_artifact):
-        """Silence is not a claim of rocKE origin, so it keeps the waiver.
-
-        Descriptors packed before `origin_kind` existed, and hand-authored trees,
-        carry no origin at all. Inferring rocKE from the absence would fail every
-        one of them over evidence they were never asked to produce.
+        """Silence is not a claim of rocKE origin, so it keeps the waiver:
+        descriptors packed before `origin_kind` existed and hand-authored trees
+        carry none, and inferring rocKE would fail every one of them.
         """
         artifact = reader_artifact()
         artifact.assert_agreement()

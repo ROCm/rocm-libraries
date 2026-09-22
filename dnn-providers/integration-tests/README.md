@@ -27,8 +27,8 @@ graph test runs against every engine** — see
 
 ## Two Ways to Test a Graph
 
-There are two mechanisms for testing that a graph runs correctly on an engine.
-**Pick the mechanism first — it decides everything else.**
+Two mechanisms test that a graph runs correctly on an engine. Pick one first: it decides
+everything else.
 
 | | **Bundles + sweeps** (default) | **C++ integration tests** (special cases) |
 |---|---|---|
@@ -38,31 +38,20 @@ There are two mechanisms for testing that a graph runs correctly on an engine.
 | Discovery | Auto-discovered from `integration-test-bundles/` | Registered in CMake per file |
 | Runs against every engine | Yes | Yes |
 
-> **Bundles and sweeps are now the default way to test that a hipDNN graph runs
-> and verifies on an engine.** They decouple the test *data* (topology, shapes,
-> dtypes, golden tensors) from the test *harness* (build, execute, verify), so a
-> single template+sweep pair can replace dozens of near-identical C++ test
-> registrations.
->
-> **C++ integration tests are reserved for tests that exercise something *other
-> than* "a graph runs with an engine"** — error/unhappy paths, API-contract
-> behavior, serialization round-trips, benchmarking knobs, determinism, and
-> pass-by-value semantics. See
-> [C++ Integration Tests](#c-integration-tests-history--when-to-use).
+Bundles and sweeps keep test data (topology, shapes, dtypes, golden tensors) out of the
+harness, so one template+sweep pair replaces dozens of near-identical C++ registrations.
+C++ integration tests cover what is not "a graph runs with an engine": error paths,
+API-contract behavior, serialization round-trips, benchmarking knobs, determinism,
+pass-by-value semantics. See [C++ Integration Tests](#c-integration-tests).
 
 ### Bundles are the CI driver
 
-"Default" is true of both **authoring** and **execution**:
-
-- **Execution.** Bundle registration is on by default. `--no-bundles` (or
-  `HIPDNN_TEST_ALLOW_BUNDLES=0`) is the opt-out, leaving only the C++ tests
-  compiled into the binary.
-- **Build.** The C++ graph tests under `src/integration-tests/` no longer build
-  by default: they are gated behind `-DBUILD_CPP_GRAPH_TESTS=ON`, which is
-  `OFF` unless a developer opts in on their branch. So the provider CI checks
-  run bundles and nothing else.
-- **Authoring.** New graph-verification coverage must be a bundle. CMake
-  enforces this — see [Adding a C++ test](#adding-a-c-test-the-cmake-rule).
+- **Execution.** Bundle registration is on by default; `--no-bundles` (or
+  `HIPDNN_TEST_ALLOW_BUNDLES=0`) leaves only the compiled-in C++ tests.
+- **Build.** C++ graph tests under `src/integration-tests/` build only with
+  `-DBUILD_CPP_GRAPH_TESTS=ON` (default `OFF`), so provider CI runs bundles only.
+- **Authoring.** New graph-verification coverage must be a bundle; CMake enforces this —
+  see [Adding a C++ test](#adding-a-c-test-the-cmake-rule).
 
 ## Bundle Formats: Single-Graph vs Template-Sweep
 
@@ -70,8 +59,7 @@ A *bundle* is a graph, optionally paired with pre-computed golden reference
 tensors. hipDNN supports two bundle kinds (RFC 0011 §4.1), and either kind can
 be **full** (tensor data included) or **graph-only** (no tensor data — the
 engine's output is compared against a live GPU/CPU reference executor
-instead). The two kinds below differ only in whether one graph JSON serves
-one case or many; golden data is optional in both.
+instead).
 
 ### Single-graph bundle (no sweep)
 
@@ -112,35 +100,17 @@ field mapping between the two.
 
 ### When to use which
 
-**Default to a template-sweep bundle.** Use a straight single-graph bundle only
-when a sweep would buy you nothing.
+Default to a template-sweep bundle: one topology across several shapes, dtypes or
+layouts, a case list that grows by one `sweep.json` entry, and the case-id filter surface
+(`{shape}_{dtype}_{layout}`) for `--gtest_filter` and `find_case.py`.
 
-Use a **template-sweep** when:
+Use a single-graph bundle when there is one concrete graph and no axis to vary, when the
+topology itself changes per case (a sweep varies knob values, not structure, so SDPA
+forward yields one bundle per head-dim/mask/stats variant), or when golden data comes
+from a bespoke per-case generator.
 
-- You are testing the *same topology* across several shapes, dtypes, or layouts
-  (the common case — e.g. batchnorm inference over fp32/fp16 × nchw × small/large).
-- You expect the case list to grow: adding a shape/dtype is one entry in
-  `sweep.json`, not a new directory.
-- You want the readable case-id filter surface (`{shape}_{dtype}_{layout}`) so
-  `--gtest_filter` and `find_case.py` can slice the matrix.
-
-Use a **straight single-graph bundle** (no sweep) when:
-
-- There is exactly one concrete graph to test and no axis to vary over — a
-  one-off regression graph, a specific customer/model layer, or a captured graph
-  you want to pin byte-for-byte.
-- The topology itself changes per case (different node counts/wiring), so cases
-  cannot share one template. A sweep can only vary knob values, not structure;
-  distinct structures are distinct bundles. (SDPA-forward is an example: each
-  head-dim/mask/stats variant is generated as its own bundle rather than
-  templatized.)
-- Golden data comes from a bespoke per-case generator whose output does not map
-  cleanly onto a single parameterized skeleton.
-
-> Rule of thumb: **same skeleton, many knob values → sweep. One graph, or many
-> skeletons → single-graph bundles.** When in doubt, `import_graph.py` decides
-> for you: it groups by structure hash, appends to an existing sweep when the
-> skeleton matches, and falls back to a standalone bundle when it does not.
+`import_graph.py` decides for you: it groups by structure hash, appends to an existing
+sweep when the skeleton matches, and creates a standalone bundle when it does not.
 
 ## Adding a Bundle Test
 
@@ -164,37 +134,28 @@ What happens:
 
 ### What is a "sweep", and how do you author one?
 
-A **sweep** is the `sweep.json` case matrix belonging to a template-sweep
-bundle (see [Bundle Formats](#bundle-formats-single-graph-vs-template-sweep)):
-one row per case, each with concrete `values` for the template's `${case.*}`
-placeholders plus per-case metadata and an optional `golden` pointer.
+A **sweep** is the `sweep.json` case matrix of a template-sweep bundle (see
+[Bundle Formats](#bundle-formats-single-graph-vs-template-sweep)): one row per case, each
+with concrete `values` for the template's `${case.*}` placeholders, per-case metadata and
+an optional `golden` pointer.
 
-**Never hand-write a `sweep.json` from scratch.** Existing sweeps (some are
-thousands of lines, e.g. `quick/Batchnorm/Default/sweep.json`) are tool
-output, not hand-authored — `import_graph.py` appends one case at a time and
-auto-assigns its id; nobody typed those rows by hand.
+**Never hand-write a `sweep.json`.** Existing sweeps are tool output;
+`import_graph.py` appends one case at a time and assigns its id.
 
-**Gap: there is no tool to author a brand-new sweep's full case matrix from
-scratch.** `import_graph.py` only appends cases you already have as concrete
-graph JSON, one call per case; there's no "generate N cases for these
-dims/dtypes/layouts" command for a topology that doesn't already exist
-anywhere. Today's mitigation is a round trip through C++: write the case
-matrix as a normal C++ `INSTANTIATE_TEST_SUITE_P` graph test (fast to iterate
-over many shapes/dtypes in one parameterized fixture), then run the existing
-export tooling — `--capture-bundles` (Hop A) to serialize each parameterized
-case as JSON, then `place_bundles.py` (Hop B, bulk) or `import_graph.py`
-(Step 5, incremental) to fold them into a `sweep.json` — and delete the C++
-test once the exported bundle is verified equivalent (see
-[`migration-scripts/README.md`](migration-scripts/README.md)). A direct
-sweep-authoring tool that skips the C++ detour is a known future need, not
-yet built.
+No tool authors a new sweep's full case matrix: `import_graph.py` appends cases that
+already exist as concrete graph JSON, one call per case. For a new topology, write the
+matrix as a C++ `INSTANTIATE_TEST_SUITE_P` graph test, serialize each case with
+`--capture-bundles`, fold the results in with `place_bundles.py` (bulk) or
+`import_graph.py` (incremental), then delete the C++ test once the exported bundle is
+verified equivalent (see
+[`migration-scripts/README.md`](migration-scripts/README.md)).
 
 Golden tensor data is tracked with DVC (stored in S3, not git). See
-[`integration-test-bundles/README.md`](integration-test-bundles/README.md) for
-adding/updating/removing the `.bin` data and the `dvc push`/`dvc pull`
-workflow, and [`migration-scripts/README.md`](migration-scripts/README.md) for
-the full tooling reference (`import_graph.py`, `find_case.py`, `place_bundles.py`,
-the capture/verify pipeline, and manual `sweep.json` editing).
+[`integration-test-bundles/README.md`](integration-test-bundles/README.md) for the
+`.bin` data and the `dvc push`/`dvc pull` workflow, and
+[`migration-scripts/README.md`](migration-scripts/README.md) for the tooling reference
+(`import_graph.py`, `find_case.py`, `place_bundles.py`, the capture/verify pipeline, and
+manual `sweep.json` editing).
 
 ### Searching cases
 
@@ -224,14 +185,10 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 | `gpu` | compute the reference on the GPU ref executor |
 | `cpu` | compute the reference on the CPU ref executor |
 
-`auto` is the mode with a fallback chain. An explicit mode is a demand for a
-specific oracle, so `golden` on a bundle with no golden data is a failure, not a
-skip — `dvc pull` the op, or use `auto`.
-
-Golden data is optional in the other modes: `--verification-mode gpu` (or `cpu`)
-runs the bundle graphs without any DVC pull. Bundle registration is on by default;
-pass `--no-bundles` (or `HIPDNN_TEST_ALLOW_BUNDLES=0`) to leave only the C++ tests
-that were compiled into the binary.
+`auto` is the only mode with a fallback chain. An explicit mode demands a specific oracle,
+so `golden` on a bundle with no golden data fails rather than skips — `dvc pull` the op, or
+use `auto`. `--verification-mode gpu` (or `cpu`) runs the bundle graphs without any DVC
+pull.
 
 ### What the reference executors cannot verify
 
@@ -252,25 +209,23 @@ compute something wrong, each plan declines the graph up front:
 | softmax/output (de)quantization | `descale_s/scale_s/scale_o/amax_s/amax_o_tensor_uid` (node) | both |
 | FP8 q/k/v descale | `descale_q/k/v_tensor_uid` (node) | `GpuSdpaFwdPlan.hpp` (explicit `isApplicable` rejection) and `GpuSdpaFwdSignatureKey.hpp` (no FP8 plan registered) |
 
-**A sink-bearing graph requires a sink-capable numerical reference.** A sink is an
-extra per-head logit in the softmax denominator, but neither the current CPU
-reference (`SdpaFwdPlan.hpp`) nor the GPU reference (`GpuSdpaFwdPlan.hpp`) supports
-`sink_token_tensor_uid`. Selecting CPU verification does not provide a fallback.
-Use an actually capable, independently verified reference with evidence covering
-the graph's sink semantics, or record the workflow as **BLOCKED**. Unverified
-expected output, including a golden tensor without a capable reference behind it,
-does not satisfy this requirement.
+**Sinks have no numerical reference.** A sink is an extra per-head logit in the softmax
+denominator, and neither the CPU reference (`SdpaFwdPlan.hpp`) nor the GPU one
+(`GpuSdpaFwdPlan.hpp`) supports `sink_token_tensor_uid`, so selecting CPU verification is
+not a fallback. Use an independently verified sink-capable reference with evidence
+covering the graph's sink semantics, or record the workflow as **BLOCKED**. A golden
+tensor with no capable reference behind it does not satisfy this.
 
 **Log-sum-exp stats are supported; the other softmax stats are not.** Both plans accept
 `stats_tensor_uid` as a FLOAT log-sum-exp output, so a stats-bearing graph is verified
 rather than skipped — the `hd128_nomask_batch_stats/SmallStats` bundles under
-`integration-test-bundles/quick/SdpaFwd/bhsd/{bf16,fp16}` exercise exactly that. The two
-plans disagree on its rank: `GpuSdpaFwdPlan` squeezes a trailing unit dim
-(`squeezeTrailingUnitDim`) because `GpuFpReferenceSdpa::fprop` takes rank-3 `[B, H, Sq]`,
-while `SdpaFwdPlan` passes the tensor through unchanged because
-`CpuFpReferenceSdpa::forward` requires the graph-conventional rank-4 `[B, H, Sq, 1]`. A
-rank-4 stats tensor satisfies both; a rank-3 one passes both `isApplicable` checks and
-then throws inside the CPU reference.
+`integration-test-bundles/quick/SdpaFwd/bhsd/{bf16,fp16}` exercise that. The two plans
+disagree on its rank: `GpuSdpaFwdPlan` squeezes a trailing unit dim
+(`squeezeTrailingUnitDim`) for `GpuFpReferenceSdpa::fprop`'s rank-3 `[B, H, Sq]`, while
+`SdpaFwdPlan` passes the tensor through unchanged because `CpuFpReferenceSdpa::forward`
+requires the graph-conventional rank-4 `[B, H, Sq, 1]`. A rank-4 stats tensor satisfies
+both; a rank-3 one passes both `isApplicable` checks and then throws inside the CPU
+reference.
 
 **FP8 q/k/v descaling is a GPU-reference gap, not a shared one.** The CPU plan
 (`SdpaFwdPlan.hpp`) models q/k/v descales: an FP8 q/k/v graph must supply all three of
@@ -278,33 +233,29 @@ then throws inside the CPU reference.
 registers no FP8 plan (`GpuSdpaFwdSignatureKey.hpp`), so in `auto` mode an FP8 graph
 falls through to the CPU reference rather than skipping — but only if it matches the
 single FP8 signature in the CPU registry, `FP8_E4M3` q/k/v with a `BFLOAT16` output
-(`SdpaFwdSignatureKey.hpp`), and carries no separately declined feature. Any other FP8
-combination is a CPU capability miss, and the checked-in `bhsd/fp8/hd128_causal_group`
-bundles match the signature but also carry `seq_len_q/kv_tensor_uid`, so both plans
-decline them.
+(`SdpaFwdSignatureKey.hpp`), and carries no separately declined feature. The checked-in
+`bhsd/fp8/hd128_causal_group` bundles match the signature but also carry
+`seq_len_q/kv_tensor_uid`, so both plans decline them.
 
 In `auto` mode a declined graph falls through golden → GPU → CPU → **skip**, so a bundle
 for an unsupported feature reports as skipped rather than failing. A skip is not
 numerical evidence: required unsupported cases block engine acceptance even if
 the remaining cases pass.
 
-**These features are distinct and are easy to conflate.** Paged KV is a block-table
-indirection into a physical cache. Varlen is per-batch *valid lengths* inside a padded
-buffer. Ragged (RFC 0014) is one contiguous buffer where batch `b` occupies
-`[off[b], off[b+1])` with no padding at all — and it is a property of the **tensor**,
-not the node, gated on `K_RAGGED_TENSOR_MIN_API_VERSION`. A kernel parameter named
-`seq_lens_ptr` or `query_start_len_ptr` may be any of the three; determine which from the
-kernel's address arithmetic, not the parameter name.
+Paged KV, varlen and ragged are distinct. Paged KV is a block-table indirection into a
+physical cache. Varlen is per-batch *valid lengths* inside a padded buffer. Ragged
+(RFC 0014) is one contiguous buffer where batch `b` occupies `[off[b], off[b+1])` with no
+padding; it is a property of the **tensor**, not the node, and is gated on
+`K_RAGGED_TENSOR_MIN_API_VERSION`. A kernel parameter named `seq_lens_ptr` or
+`query_start_len_ptr` may be any of the three; determine which from the kernel's address
+arithmetic, not the parameter name.
 
-**Closing a gap is an adapter, not a new reference.** All three are pure address
-remapping onto the same mathematics: gather paged K/V to dense through the block table,
+Closing one of these gaps is an adapter, not a new reference: all three are address
+remapping onto the same mathematics. Gather paged K/V to dense through the block table,
 or expand ragged to padded-dense through the offset table, then call the existing
-`GpuFpReferenceSdpa::fprop`. Teaching the plan to do that unblocks every engine of that
-shape at once.
+`GpuFpReferenceSdpa::fprop`. Do not create an engine-specific private reference: one
+derived from the implementation under test is not independent validation.
 
-Avoid hand-rolling a private reference for one engine. A reference derived from the
-implementation under test proves the two agree, not that either is correct, and a shared
-misunderstanding cancels out silently.
 ### Validating golden data itself
 
 The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each
@@ -323,10 +274,6 @@ suite, and the counts — plus the ops responsible — are printed at registrati
 
 Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
 `integration-test-bundles/` registers nothing and says so.
-
-This replaces the former `--verification-mode=golden-check`, and the
-`--validate-golden-data` flag that briefly stood in for it: golden-data validation
-is its own binary, not a mode of the engine harness.
 
 ### Support claims
 
@@ -513,13 +460,12 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   means is a load error, never a silent fall-back. `"rms"` is only defined for
   float, half, bfloat16 and double outputs; a glob wide enough to catch an
   integer output fails that tensor with a message naming the glob to narrow.
-  Absent any match the comparison is allclose — **allclose is the default
-  everywhere, and this section is the only thing that changes it.** Use it when
-  a per-element check is the wrong question, not to buy slack: an output that is
-  a long reduction (layernorm/RMSNorm backward `dscale`/`dbias`) has elements
-  that land arbitrarily near zero through cancellation, so per-element relative
-  error is unbounded while the aggregate relative-RMS error is not. Prefer
-  `tolerance_overrides` for everything else.
+  Absent any match the comparison is allclose, and this section is the only thing that
+  changes it. Use `"rms"` where a per-element check is the wrong question, not to buy
+  slack: a long reduction (layernorm/RMSNorm backward `dscale`/`dbias`) has elements that
+  land arbitrarily near zero through cancellation, so per-element relative error is
+  unbounded while the aggregate relative-RMS error is not. Prefer `tolerance_overrides`
+  for everything else.
 - `test_skips`: the first matching entry wins; `reason` is surfaced in the
   `GTEST_SKIP` message. `archs` (substring match against the raw
   `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
@@ -556,51 +502,34 @@ cmake --build build --target miopen-provider-external-integration-check
 ctest -L quick
 ```
 
-## C++ Integration Tests (History & When to Use)
+## C++ Integration Tests
 
-Before bundles, every integration test was C++: a `buildGraph()` function plus
-an `INSTANTIATE_TEST_SUITE_P` with hardcoded shape/dtype/layout lists. Each new
-shape meant new C++ and a recompile, and the graphs were hard to audit or reuse
-across engines.
+"Does this graph run and verify on an engine" is a bundle concern, not a C++ one. C++
+integration tests cover what bundles cannot express, and live in two places:
 
-`ALMIOPEN-2221` / `ALMIOPEN-2279` introduced the bundle+sweep format and a
-migration pipeline (`migration-scripts/`) that captured the existing C++ graph
-tests to JSON, grouped them by structure into template+sweep bundles, and
-proved — byte-for-byte and behaviorally — that turning the C++ graph tests off
-lost no coverage. As a result, **"does this graph run and verify on an engine"
-is now a bundle concern, not a C++ one.**
-
-C++ integration tests still exist and still matter — but only for what bundles
-cannot express. The remaining C++ tests live in two places:
-
-- `src/integration-tests/{op}/` — shared cross-provider C++ tests built into
-  `hipdnn_integration_tests` (conv, matmul, sdpa, batchnorm, layernorm,
-  rmsnorm, reduction, pointwise). Most of these are graph tests and are
-  **not built by default** — see below.
-- `<provider>/integration_tests/` — provider-local C++ tests (e.g.
+- `src/integration-tests/{op}/` — shared cross-provider tests built into
+  `hipdnn_integration_tests` (conv, matmul, sdpa, batchnorm, layernorm, rmsnorm,
+  reduction, pointwise). Most are graph tests and are **not built by default**.
+- `<provider>/integration_tests/` — provider-local tests (e.g.
   `miopen_plugin_integration_tests`) for behavior specific to one plugin.
 
-Write a **C++ integration test** (not a bundle) when the test exercises
-something other than a graph running and matching a reference:
+Write a C++ integration test when the test exercises something other than a graph running
+and matching a reference:
 
-- **Unhappy / error paths** — unsupported dtypes, invalid layouts, unsupported
-  activation combinations (e.g. `IntegrationGpuBatchnormUnsupportedDataTypes`,
+- **Unhappy / error paths** — unsupported dtypes, invalid layouts, unsupported activation
+  combinations (`IntegrationGpuBatchnormUnsupportedDataTypes`,
   `IntegrationGpuBatchnormUnhappyLayouts`).
-- **API-contract behavior** — pass-by-value scalar semantics, `is_supported`
-  queries, benchmarking knobs (`IntegrationGpuPassByValue`,
-  `IntegrationGpuBenchmarkingKnob`, `IntegrationIsSupportedExtPerformance`).
-- **Serialization round-trips** — graph serialize/deserialize identity
-  (`IntegrationConvForwardSerializeRoundTrip`).
+- **API-contract behavior** — pass-by-value scalar semantics, `is_supported` queries,
+  benchmarking knobs (`IntegrationGpuPassByValue`, `IntegrationGpuBenchmarkingKnob`,
+  `IntegrationIsSupportedExtPerformance`).
+- **Serialization round-trips** (`IntegrationConvForwardSerializeRoundTrip`).
 - **Determinism / repeated-run invariants** (`IntegrationGpuDeterministic`).
 
-If a proposed C++ test is really just "build graph X, run it, compare to a
-reference," it belongs in a bundle instead. Convert it with
-[`migration-scripts/`](migration-scripts/README.md): `--capture-bundles`
-dumps the test's graph(s) as JSON, then `import_graph.py` merges each one
-into the bundle tree — see ["Quick path: convert one existing C++
-test"](migration-scripts/README.md#quick-path-convert-one-existing-c-test-no-full-pipeline-needed)
-for the exact two-step commands. Don't add another parameterized
-instantiation to the C++ test instead.
+A test that is really "build graph X, run it, compare to a reference" belongs in a bundle.
+Convert it with [`migration-scripts/`](migration-scripts/README.md): `--capture-bundles`
+dumps the test's graph(s) as JSON, then `import_graph.py` merges each one into the bundle
+tree — see ["Quick path: convert one existing C++
+test"](migration-scripts/README.md#quick-path-convert-one-existing-c-test-no-full-pipeline-needed).
 
 ### Adding a C++ test: the CMake rule
 
@@ -697,37 +626,10 @@ Existing `INSTANTIATE_TEST_SUITE_P` calls pick up new shapes automatically.
 
 ## Bundle Tests
 
-Bundle tests are data-driven: each test is a graph JSON + sweep of
-shapes/dtypes/layouts — no C++ needed. The bundle runner discovers them
-automatically from `integration-test-bundles/`.
-
-### Searching cases
-
-```bash
-# Find all batchnorm bundle cases
-python3 migration-scripts/find_case.py --op Batchnorm
-
-# Find cases that have an epsilon input
-python3 migration-scripts/find_case.py --input epsilon
-
-# Find cases where epsilon is in [-1,1]
-python3 migration-scripts/find_case.py --input epsilon:-1,1
-
-# Full detail for a hashed case id
-python3 migration-scripts/find_case.py --id f446b9 --detail
-```
-
-### Adding a bundle test
-
-```bash
-python3 migration-scripts/import_graph.py \
-    --graph new_conv.json \
-    --bundle-dir integration-test-bundles/
-```
-
-The case id is auto-generated and printed to stderr. No manual naming
-needed. See [`migration-scripts/README.md`](migration-scripts/README.md)
-for the full workflow and tooling reference.
+Bundle tests are data-driven: a graph JSON plus a sweep of shapes/dtypes/layouts,
+discovered automatically from `integration-test-bundles/`. See
+[Adding a Bundle Test](#adding-a-bundle-test) for `import_graph.py` and
+[Searching cases](#searching-cases) for `find_case.py`.
 
 ## Troubleshooting
 

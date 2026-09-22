@@ -21,7 +21,6 @@ using namespace hip_kernel_provider::test_utilities;
 namespace
 {
 
-// B1: use hipdnn_data_sdk::types::half (not __half which is undeclared here)
 using half_t = hipdnn_data_sdk::types::half;
 
 struct Flash2TestConfig
@@ -35,7 +34,7 @@ struct Flash2TestConfig
     int headDim;
     bool causal;
     float scale;
-    std::string expectedArch; // B1: all struct fields initialized
+    std::string expectedArch;
 };
 
 class IntegrationGpuHipFlash2Forward
@@ -85,11 +84,9 @@ protected:
                                    .set_stride(generateStrides(kvDims))
                                    .set_data_type(DataType_t::HALF));
 
-        // B1: use SdpaAttributes (not SdpaFwdAttributes which does not exist)
         SdpaAttributes sdpaAttrs;
         sdpaAttrs.set_causal_mask(cfg.causal).set_attn_scale(cfg.scale).set_generate_stats(false);
 
-        // B1: auto [O, stats] not auto [O, /*stats=*/]
         auto [O, stats] = graph->sdpa(q, k, v, sdpaAttrs);
         O->set_name("O").set_output(true).set_data_type(DataType_t::HALF);
 
@@ -105,7 +102,7 @@ protected:
 
 std::vector<Flash2TestConfig> getFlash2TestConfigs()
 {
-    // K3: all seq_q must be multiples of 64
+    // The Flash2 kernel requires seqQ to be a multiple of 64.
     return {
         {"mha_d128_causal_b1_sq512", 1, 32, 32, 512, 512, 128, true, 1.f / 11.314f, ""},
         {"mha_d128_causal_b2_sq512", 2, 32, 32, 512, 512, 128, true, 1.f / 11.314f, ""},

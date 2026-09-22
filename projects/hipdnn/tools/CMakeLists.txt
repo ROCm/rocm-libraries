@@ -2,26 +2,24 @@
 # SPDX-License-Identifier:  MIT
 
 add_executable(hipdnn_list_engines ListEngines.cpp)
-# hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
-# header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
+# hipdnn_data_sdk supplies formatEngineIdHex. It is a header-only INTERFACE target that
+# hipdnn_backend links privately, so the tool names it here.
 target_link_libraries(hipdnn_list_engines PRIVATE hipdnn_backend hipdnn_data_sdk)
 target_compile_definitions(hipdnn_list_engines PRIVATE HIPDNN_BACKEND_COMPILATION)
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
-# own engine name rather than a hexadecimal fallback.
-#
-# Discovery is pointed at ${HIPDNN_TEST_PLUGIN_DIR}/default via HIPDNN_PLUGIN_DIR. The /default
-# suffix is required: discovery is non-recursive, and default/ holds exactly one plugin,
-# ${TEST_GOOD_DEFAULT_PLUGIN_NAME}, which reports the engine name asserted below.
+# Smoke test: run the tool against a real, loadable engine plugin and assert it prints that
+# plugin's engine name rather than a hexadecimal fallback. Discovery points at
+# ${HIPDNN_TEST_PLUGIN_DIR}/default; the /default suffix is required because discovery is
+# non-recursive and default/ holds exactly one plugin, ${TEST_GOOD_DEFAULT_PLUGIN_NAME}.
 if(NOT HIPDNN_SKIP_TESTS AND TARGET ${TEST_GOOD_DEFAULT_PLUGIN_NAME})
-    # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME in tests/test_plugins/TestPluginEngineIdMap.hpp. The
-    # ID is left out: NamedPluginFixtureIdsAreTheHashOfTheirNames covers it, and a hand-copied
-    # literal here would only give it a second place to drift.
+    # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME in
+    # tests/test_plugins/TestPluginEngineIdMap.hpp. The ID is omitted;
+    # NamedPluginFixtureIdsAreTheHashOfTheirNames covers it.
     set(HIPDNN_LIST_ENGINES_SMOKE_EXPECTED "TEST_GOOD_DEFAULT_ENGINE (")
 
-    # The tool is not a gtest binary, so the checks live in a driver script: it asserts a zero exit
-    # status, a non-empty engine list, and the expected name anywhere in the output.
+    # The tool is not a gtest binary, so the checks live in a driver script: zero exit
+    # status, a non-empty engine list, and the expected name in the output.
     # cmake-format: off
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ListEnginesSmokeTest.cmake" [[
 if(NOT DEFINED HIPDNN_LIST_ENGINES_TOOL OR NOT DEFINED HIPDNN_LIST_ENGINES_EXPECTED)
@@ -65,27 +63,24 @@ endif()
             "${CMAKE_CURRENT_BINARY_DIR}/ListEnginesSmokeTest.cmake"
     )
 
-    # The tool only enumerates engines, so anything past a few seconds is a hang -- most likely in
-    # plugin dlopen/LoadLibrary. Fail fast rather than sitting until ctest's 1500 s default.
+    # The tool only enumerates engines, so anything past a few seconds is a hang, most
+    # likely in plugin dlopen/LoadLibrary. Fail fast rather than ctest's 1500 s default.
     set_tests_properties(hipdnn_list_engines_smoke PROPERTIES TIMEOUT 120)
 
-    # add_hipdnn_test() assumes a gtest executable registered as the test command; this test runs a
-    # CMake driver script instead, so its two run-time prerequisites -- the tool binary and the
-    # plugin it discovers -- are appended to CHECK_DEPENDS_GLOBAL by hand.
-    #
-    # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are deliberately not touched: both
-    # assume a gtest executable installed under its own test name. HIPDNN_TEST_TARGETS is what
-    # install_hipdnn_ctest_files() iterates, so this test is build-tree only -- the driver script
-    # and the plugin it discovers are not installed either. Its test_categories.yaml entry
-    # therefore labels it for `ctest` in the build tree and has no effect on the install tree.
+    # add_hipdnn_test() assumes a gtest executable registered as the test command; this
+    # test runs a CMake driver script, so its two run-time prerequisites (the tool binary
+    # and the plugin it discovers) are appended to CHECK_DEPENDS_GLOBAL by hand.
+    # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are left untouched: both assume
+    # a gtest executable installed under its own test name, and this test is build-tree
+    # only, so its test_categories.yaml entry has no effect on the install tree.
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_list_engines
                              ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
     )
 
-    # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial build plus a
-    # manual ctest doesn't load the stale System32 amd_comgr.dll. add_hipdnn_test() does this for
-    # gtest binaries; mirror it here.
+    # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial build
+    # plus a manual ctest does not load the stale System32 amd_comgr.dll, as
+    # add_hipdnn_test() does for gtest binaries.
     if(TARGET stage_shadowed_rocm_dlls)
         add_dependencies(hipdnn_list_engines stage_shadowed_rocm_dlls)
     endif()
@@ -123,9 +118,8 @@ endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # ValidateDescriptors.cpp transitively includes <hip/hip_runtime.h> through
-    # DescriptorLoader.hpp -> MakeEngine.hpp -> GenericEngine.hpp ->
-    # EnginePluginTypeTraits.hpp, so it needs the same HIP wiring every ingestor test
-    # target already carries (plugin_sdk/tests/CMakeLists.txt).
+    # DescriptorLoader.hpp, so it needs the same HIP wiring every ingestor test target
+    # carries (plugin_sdk/tests/CMakeLists.txt).
     find_package(hip REQUIRED)
 
     add_executable(hipdnn_validate_descriptors IngestorGenerator/ValidateDescriptors.cpp)
@@ -133,29 +127,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
     install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    # Smoke test: run the validator over a real descriptor bundle and assert it reports that
-    # bundle's own engine. Modeled on hipdnn_list_engines_smoke above -- same generated
-    # driver script, same exit-status-plus-output checks.
+    # Smoke test: run the validator over a real descriptor bundle and assert it reports
+    # that bundle's engine. Same generated-driver-script shape as
+    # hipdnn_list_engines_smoke above.
     #
-    # The input is the baseline bundle the tool's own mutation fixtures are mutations of.
-    # It is authored JSON carried in this project's source tree, so it needs neither a
-    # packing step nor a device, and it is the bundle tests/fixtures/validate_descriptors/
-    # README.md declares must exit 0. The staged provider trees under dnn-providers/ are
-    # the alternative and do not qualify: they exist only after a per-architecture packing
-    # rule has run, and that project need not be configured at all in a hipDNN-only build.
+    # The input is the baseline bundle the tool's mutation fixtures derive from: authored
+    # JSON in this source tree, needing neither a packing step nor a device, and the bundle
+    # tests/fixtures/validate_descriptors/README.md declares must exit 0. The staged
+    # provider trees under dnn-providers/ exist only after a per-architecture packing rule
+    # has run, which a hipDNN-only build need not configure.
     if(NOT HIPDNN_SKIP_TESTS)
         set(HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ROOT
             "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/fixtures/validate_descriptors/valid"
         )
 
-        # The `name` the bundle's UED authors, and the same engine tests/test_round_trip.py
-        # names. Passed as --expect-engine so a bundle whose engine the loader DROPS exits
-        # non-zero: a drop leaves no error behind on its own, and pinning the expected name
-        # also catches a catalog that loads some other engine instead.
+        # The `name` the bundle's UED authors, and the engine tests/test_round_trip.py
+        # names. Passed as --expect-engine so a bundle whose engine the loader drops exits
+        # non-zero, and so a catalog loading some other engine is caught too.
         set(HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE "hipkernel:ValidateFixture")
 
-        # The tool is not a gtest binary, so the checks live in a driver script: it asserts a
-        # zero exit status, a printed engine list, and the expected engine name in it.
+        # The tool is not a gtest binary, so the checks live in a driver script: zero exit
+        # status, a printed engine list, and the expected engine name in it.
         # cmake-format: off
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsSmokeTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
@@ -210,31 +202,26 @@ endif()
         )
 
         # The tool walks one small directory and parses its JSON, so anything past a few
-        # seconds is a hang. Fail fast rather than sitting until ctest's 1500 s default.
+        # seconds is a hang. Fail fast rather than ctest's 1500 s default.
         set_tests_properties(hipdnn_validate_descriptors_smoke PROPERTIES TIMEOUT 120)
 
         # add_hipdnn_test() assumes a gtest executable registered as the test command; this
-        # test runs a CMake driver script instead, so its one run-time prerequisite -- the
-        # tool binary -- is appended to CHECK_DEPENDS_GLOBAL by hand.
-        #
-        # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are deliberately not
-        # touched, for the reason given at hipdnn_list_engines_smoke above: both assume a
-        # gtest executable installed under its own test name, so this test is build-tree
-        # only and the driver script is not installed either.
+        # test runs a CMake driver script, so its one run-time prerequisite (the tool
+        # binary) is appended to CHECK_DEPENDS_GLOBAL by hand.
+        # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are left untouched for the
+        # reason given at hipdnn_list_engines_smoke above; this test is build-tree only.
         set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_validate_descriptors
             CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
         )
 
         # On Windows, stage the shadowed ROCm DLLs before the tool is built so a partial
-        # build plus a manual ctest doesn't load the stale System32 amd_comgr.dll.
-        # add_hipdnn_test() does this for gtest binaries; mirror it here.
+        # build plus a manual ctest does not load the stale System32 amd_comgr.dll.
         if(TARGET stage_shadowed_rocm_dlls)
             add_dependencies(hipdnn_validate_descriptors stage_shadowed_rocm_dlls)
         endif()
 
-        # No discovery environment of its own: the root is a command-line argument, and the
-        # validator registers stubs for the native symbols rather than loading a plugin. Only
-        # the ambient test environment applies.
+        # No discovery environment of its own: the root is a command-line argument and the
+        # validator registers stubs for the native symbols rather than loading a plugin.
         if(DEFINED TEST_ENVIRONMENT)
             set_tests_properties(
                 hipdnn_validate_descriptors_smoke PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}"

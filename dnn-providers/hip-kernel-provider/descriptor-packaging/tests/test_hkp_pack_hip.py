@@ -265,16 +265,11 @@ def test_rewrite_kpack_form_and_provenance(built):
 
 
 def test_rewrite_stamps_the_signature_read_from_the_object(built, rocm_kpack_dir):
-    """The stamped list comes from the compiled object, per symbol.
-
-    Recomputed from the archived blob rather than compared against a literal: a
-    hand-written expectation would be satisfied just as well by a stamp derived
-    from the authored descriptor, and derivation from the binary is the entire
-    reason the field is worth comparing at dispatch.
-
-    Both inline UKDs are checked because they share one toc_key and one blob.
-    Extracting once per variant and reusing the result would give the second its
-    neighbour's signature and pass every fixture with one symbol per variant.
+    """The stamped list comes from the compiled object, per symbol, recomputed from
+    the archived blob rather than compared against a literal a descriptor-derived
+    stamp would also satisfy. Both inline UKDs are checked because they share one
+    toc_key and one blob, and caching per variant would give the second its
+    neighbour's signature.
     """
     kpack = _load_kpack(rocm_kpack_dir)
     archive = kpack.PackedKernelArchive.read(
@@ -322,10 +317,9 @@ def test_multi_kernel_stored_once(built, rocm_kpack_dir):
     # one TOC entry (one gfx942 ordinal), not one per UKD.
     entries = archive.toc[shared]
     assert list(entries) == ["gfx942"]
-    # And overall the archive stores one blob per distinct toc_key, not per UKD.
-    # gfx942 carries five UKDs (four distinct inline variants) plus one
-    # standalone UKD (a fifth distinct variant), so a per-UKD duplication
-    # regression would show up as more TOC entries than distinct toc_keys.
+    # The archive stores one blob per distinct toc_key, not per UKD. gfx942 carries
+    # five UKDs (four distinct inline variants) plus one standalone, so a per-UKD
+    # duplication regression shows up as more TOC entries than distinct toc_keys.
     all_toc_keys = set()
     for jp in (built["out"] / "gfx942").glob("*.json"):
         if jp.name == "kpack" or not (
@@ -433,16 +427,10 @@ def _author_kpack_source(src, drop=None):
 @pytest.mark.quick
 @pytest.mark.parametrize("field", sorted(set(_KPACK_SOURCE) - {"kind"}))
 def test_neg_kpack_source_missing_field(tmp_path, main_fixture, field):
-    """The validator's kpack key list names what the loader will demand.
-
-    Nothing in this tree authors a kpack kernel_source -- it is the form the
-    packer rewrites into, and the fields it carries are read out of a compiled
-    object rather than written by hand. The list is pinned anyway because it is
-    the only place the tool can reject a descriptor the loader would reject
-    later, and it went a field stale once the loader began requiring
-    `signature`. Pinned as a list rather than one member, because going stale by
-    a field is the failure this exists to catch and the next field will go the
-    same way. Validation runs at load, so this needs no compiler.
+    """The validator's kpack key list names what the loader will demand. Nothing
+    here authors a kpack kernel_source, but this is the only place the tool can
+    reject a descriptor the loader would reject later, and the list went a field
+    stale once the loader began requiring `signature`.
     """
     src = _copy_fixture(tmp_path, main_fixture)
     _author_kpack_source(src, drop=field)
@@ -770,9 +758,9 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
     # A second referencing KDP is a second CONSUMER: it resolves to its own engine
-    # and its own KMD, so the UKD has to declare what it claims for that pair too.
-    # Every field of kmd-copy is matcher-only here -- a hip source compiles no
-    # specialization -- but the claim is stated rather than inferred from silence.
+    # and KMD, so the UKD declares what it claims for that pair too. Every field of
+    # kmd-copy is matcher-only here -- a hip source compiles no specialization --
+    # but the claim is stated rather than inferred from silence.
     ukd_path = src / _STANDALONE_UKD_FILE
     ukd_doc = _read(ukd_path)
     consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
@@ -801,12 +789,9 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
 def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """The same second reference, with the declaration left alone.
-
-    A UKD several engines reference carries one entry per engine. Silence is not a
-    waiver: without the entry there is no statement about what this descriptor
-    claims under `ued-copy`, and packing it anyway would ship a catalog entry
-    nothing checked.
+    """The same second reference with the declaration left alone. A UKD several
+    engines reference carries one entry per engine, and silence is not a waiver:
+    packing without the entry ships a catalog entry nothing checked.
     """
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
@@ -1121,10 +1106,9 @@ def test_scoped_ued_name_loads_clean(main_fixture):
 def test_authored_provenance_cannot_hijack(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # The shipped provenance block is the generated traceability record: an
-    # authored value for a field the producer writes is overwritten, while an
-    # authored field the producer does not write survives -- so this is the
-    # reservation at work rather than a wholesale drop.
+    # The shipped provenance block is the generated traceability record: an authored
+    # value for a field the producer writes is overwritten, while an authored field
+    # the producer does not write survives.
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / _STANDALONE_UKD_FILE
     doc = _read(p)

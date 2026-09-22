@@ -1,19 +1,17 @@
-"""Reconcile every decline against the reference, WITHIN THE SAME KERNEL FAMILY.
+"""Reconcile every decline against the reference, within the same kernel family.
 
-The rule: if the reference's implementation OF THE KERNEL BEING INTEGRATED serves an
-equivalent request and its result validates, hipDNN must serve it too. A decline that
-kernel does not share is a defect -- missing coverage, or wrong applicability logic --
-not a scope decision.
+If the reference's implementation of the kernel being integrated serves an
+equivalent request and its result validates, hipDNN must serve it too: a
+decline that kernel does not share is missing coverage or wrong applicability
+logic, not a scope decision.
 
-Scoped by `family` from the profile, never library-wide: a library registers several
-candidates per operation (for attention, a dense kernel, tiled paths, decode
-specialists) and a shape only a sibling serves is that sibling's job, not this
-integration's gap. The profile also names the attribute to match on, because a library
-may give every candidate the same `family` while `algorithm` is the real discriminator.
+Scoped by `family` from the profile, never library-wide, since a shape only a
+sibling candidate serves is that sibling's job. The profile also names the
+attribute to match on, because a library may give every candidate the same
+`family` while `algorithm` is the real discriminator.
 
-Only applicability is asked about, never numerics, so a reference that accepts a request
-it then computes WRONGLY is invisible here. That is a reference defect to report, not
-licence to decline quietly; correctness comes from the benchmark sweep with `--validate`.
+Only applicability is asked about, never numerics; correctness comes from the
+benchmark sweep with `--validate`.
 """
 
 from __future__ import annotations
@@ -79,11 +77,11 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
             f"exist would report EVERY shape as unreconciled."
         )
 
-    # The REFERENCE's request class; `reference_request:` overrides `request:` when
-    # present. An adapter class cannot be reused here, because candidates
-    # `isinstance`-check their argument and duck-typing does not satisfy a type check.
-    # That refusal is per-shape and looks exactly like a decline, so without the
-    # override every decline reconciles against a reference never actually consulted.
+    # The reference's request class; `reference_request:` overrides `request:`
+    # when present. An adapter class cannot be reused, because candidates
+    # `isinstance`-check their argument; that refusal is per-shape and looks
+    # exactly like a decline, so without the override every decline would
+    # reconcile against a reference never consulted.
     reference_decl = profile.get("reference_request") or profile.get("request") or {}
     request_cls = _import(
         *_required(reference_decl, "reference_request", "module", "class")
@@ -93,18 +91,18 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
     # matches when the request names it declines everything and reconciles trivially.
     defaults = dict(reference_decl.get("defaults") or {})
 
-    # An optional TRANSLATOR (`reference_request.via: {module, function}`) taking the
-    # shape dict to a reference request, for a corpus written in the generator side's
-    # vocabulary. The mapping lives in the integration's adapter, not guessed here.
+    # An optional translator (`reference_request.via: {module, function}`)
+    # taking the shape dict to a reference request, for a corpus written in the
+    # generator side's vocabulary. The mapping lives in the adapter.
     via = None
     via_decl = reference_decl.get("via") or {}
     if via_decl:
         via = _import(
             *_required(via_decl, "reference_request.via", "module", "function")
         )
-        # DECLARED and unusable is an error, never a fallback: a profile naming a
-        # translator has said its corpus is in the wrong vocabulary, so constructing
-        # the request class directly would make every type rejection read as a decline.
+        # Declared and unusable is an error, never a fallback: a profile naming
+        # a translator has said its corpus is in the wrong vocabulary, so every
+        # type rejection would otherwise read as a decline.
         if not callable(via):
             raise ParityError("reference_request.via must name a callable")
     if not isinstance(request_cls, type):
@@ -132,11 +130,10 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
                 f"reference request {index} construction failed: {exc}"
             ) from exc
         served, why = False, None
-        # Collect EVERY candidate's verdict, then choose the reason deliberately. On a
-        # multi-member family the last decline is arbitrary: a sibling's capability gate
-        # rejects on arch BEFORE the shared predicate runs, masking the kernel-specific
-        # reason that is the evidence RUNBOOK §7 exists to collect. See
-        # `_decline_reason`.
+        # Collect every candidate's verdict, then choose the reason
+        # deliberately: on a multi-member family a sibling's capability gate
+        # rejects on arch before the shared predicate runs, masking the
+        # kernel-specific reason. See `_decline_reason`.
         reasons = []
         for candidate in candidates:
             # Every candidate is consulted, even after an acceptance: a later broken
@@ -155,12 +152,10 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
 
 
 def _decline_reason(reasons: list[tuple[str, str]]) -> str:
-    """Pick the most informative decline from a family's candidates.
-
-    A capability rejection ("wrong arch", "wrong dtype") says only that this member is
-    not the one for this target -- true, and useless as evidence. Prefer a
-    non-capability reason, falling back to the first, and name the candidate either way.
-    """
+    """Pick the most informative decline from a family's candidates: a
+    capability rejection ("wrong arch") says only that this member is not the
+    one for this target, so prefer a non-capability reason, falling back to the
+    first, and name the candidate either way."""
     if not reasons:
         return "no candidate in this family accepted it"
     substantive = [
@@ -231,9 +226,9 @@ def main(argv=None) -> int:
             shape_names.append(names)
         ours = resolve_shapes(shapes, profile)
         theirs = reference_serves(shapes, profile)
-    # Every failure above is OPERATIONAL -- the comparison did not happen -- so it
-    # exits 2 whatever it was raised as. An enumerated exception list would let an
-    # unexpected type escape as exit 1, which reads as an unreconciled-decline result.
+    # Every failure above is operational -- the comparison did not happen -- so
+    # it exits 2 whatever it was raised as; an enumerated exception list would
+    # let an unexpected type escape as exit 1, an unreconciled-decline result.
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
@@ -288,10 +283,10 @@ def main(argv=None) -> int:
                 )
             )
         elif we_serve:
-            # WE serve a shape the reference declines -- not a coverage gap, but not
-            # agreement either, so it must not be filed under "both decline". Either
-            # this integration serves something the reference knows it computes wrongly,
-            # or the reference is missing a capability. Both are worth a look.
+            # We serve a shape the reference declines: not a coverage gap, but
+            # not agreement either. Either this integration serves something
+            # the reference computes wrongly, or the reference is missing a
+            # capability.
             only_ours.append((index, why))
         else:
             both_decline.append((index, why))
@@ -322,10 +317,10 @@ def main(argv=None) -> int:
     if only_ours:
         print(f"  only this integration   {len(only_ours)}")
 
-    # The signature of a misconfigured scope, and BOTH conditions are required. A
-    # corpus where nothing is served can be perfectly legitimate -- every shape out of
-    # scope and correctly declined by both sides -- so an empty serve count alone is
-    # evidence of nothing. A shape either side serves proves the comparison is live.
+    # The signature of a misconfigured scope, and both conditions are required:
+    # a corpus where nothing is served can be legitimate, so an empty serve
+    # count alone proves nothing. A shape either side serves proves the
+    # comparison is live.
     match_key = ((profile.get("reference_candidates") or {}).get("match")) or ""
     request_defaults = (profile.get("request") or {}).get("defaults") or {}
     nothing_served = not both_serve and not only_reference and not only_ours

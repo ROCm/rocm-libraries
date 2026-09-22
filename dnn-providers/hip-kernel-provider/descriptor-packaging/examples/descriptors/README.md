@@ -1,32 +1,18 @@
 # Example production descriptor tree
 
-A minimal but **real** authored source root for `hkp_pack`. Both producers are
-exercised end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half
-lowers a real rocKE builder through comgr. Placeholder shapes, real code paths.
+A minimal but **real** authored source root for `hkp_pack`. Both producers are exercised
+end to end: the hip half compiles a `.cpp` with `hipcc`, the rocKE half lowers a real
+rocKE builder through comgr. Placeholder shapes, real code paths.
 
-This is a **test fixture** tree, not the default production source root. It is read by the packaging
-suite's real-bundle regressions, and the Linux superbuild CI lane points
-`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` at it explicitly, so the product packing
-wiring is exercised against this fixture there.
-The default production root is `src/engines/kernel_ingestor_engine/descriptors/`,
-and it holds no bundle, so a default configure packs no product
-at all. That root's README states the gate and the rules a bundle authored there has
-to meet.
+This is a **test fixture** tree, not the default production source root. That default is
+`src/engines/kernel_ingestor_engine/descriptors/`, whose README states the gate and the
+rules a bundle authored there must meet. The Linux superbuild CI lane points
+`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` at this tree, so the ordinary production rules
+pack it and install the output into that build's prefix.
 
-## Disposition
-
-| Set | Verdict |
-|---|---|
-| `hip/pointwise_add/` | test fixture — CI production-path exercise and layout fixture |
-| `rocKE/gfx942_tiled_attention/` | test fixture — CI production-path exercise and layout fixture |
-
-Neither set is included by a default configure. When
-`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` names this tree, as in Linux superbuild CI,
-the ordinary production rules pack it and install the packed output into that build's
-install prefix.
-`test_hkp_pack_layout.py` packs the tree directly, which is what makes its
-layout assertion strict, and `test_desk_check_invariants.py` reads its bundles as real
-authored input: changing anything here changes what those tests pin.
+`test_hkp_pack_layout.py` packs this tree directly, which is what makes its layout
+assertion strict, and `test_desk_check_invariants.py` reads its bundles as real authored
+input: changing anything here changes what those tests pin.
 
 ## Layout
 
@@ -40,10 +26,9 @@ descriptors/                      <- the ONE source root
         └── shared.umd.json
 ```
 
-There is exactly one root. Child folders scope the content; producer selection is
-per-UKD on `kernel_source.kind`, never per-folder. The authored subpath is
-preserved verbatim into the staged and installed trees, so the shipped layout
-mirrors this one:
+Child folders scope the content; producer selection is per-UKD on `kernel_source.kind`,
+never per-folder. The authored subpath is preserved verbatim into the staged and
+installed trees, so the shipped layout mirrors this one:
 
 ```
 arch_content/hip-kernel-provider/gfx942/
@@ -52,76 +37,60 @@ arch_content/hip-kernel-provider/gfx942/
 └── rocKE/gfx942_tiled_attention/...
 ```
 
-**`shared.umd.json` appears in both child folders on purpose.** Reusing the
-filename keeps this tree a standing check that packing is path-preserving: a
-flat packer silently drops one of the two.
+**`shared.umd.json` appears in both child folders on purpose.** The duplicate filename
+keeps this tree a standing check that packing is path-preserving: a flat packer drops one.
 
 ## Authoring rules worth knowing
 
-**`source` means different things per producer.** For `kind: "hip"` it is a file
-path resolved **relative to the descriptor that names it** — a sibling `.cpp`,
-not a path from the root. There is no root-relative fallback: a miss is an error,
-because falling back would turn a typo into a silent bind to a same-named file
-elsewhere in the tree. To share one `.cpp` between sibling folders, say so:
-`"../shared/Kernel.cpp"`.
+**`source` means different things per producer.** For `kind: "hip"` it is a file path
+resolved **relative to the descriptor that names it** — a sibling `.cpp`, not a path from
+the root. There is no root-relative fallback, so a miss is an error rather than a silent
+bind to a same-named file elsewhere; share one `.cpp` between sibling folders by saying
+so: `"../shared/Kernel.cpp"`. For `kind: "rocke"` it is a **dotted Python module path
+resolved through the importable `kernels` package**, not a file under this root:
+`kernels/gfx942/attention_tiled_2d.py` comes from the installed rocKE wheel, which is why
+the rocKE folder carries no sources.
 
-For `kind: "rocke"` it is a **dotted Python module path resolved through the
-importable `kernels` package** — *not* a file under this root. `kernels/gfx942/
-attention_tiled_2d.py` is found via the installed rocKE wheel, which is why the
-rocKE folder carries no sources. This is the single biggest clarity trap in the
-format.
+**`builder` names a function taking `(spec, *, arch)`.** A builder with extra
+keyword-only parameters is rejected rather than packed, because a descriptor cannot
+supply them and they would be frozen at their defaults. `spec` is constructed into the
+builder's own spec dataclass, so its fields and their validation are the builder's.
 
-**`builder` names a function taking `(spec, *, arch)`.** Nothing else. A builder
-with extra keyword-only parameters is rejected rather than packed, because a
-descriptor cannot supply them and they would be silently frozen at their
-defaults. `spec` is constructed into the builder's own spec dataclass, so its
-fields and their validation are the builder's, not ours.
+**The launch symbol is never authored.** It is captured from the compiled artifact.
 
-**The launch symbol is never authored.** It is captured from the compiled
-artifact. Authoring it would let the descriptor disagree with the kernel.
+**`arch` filters which shard a descriptor ships in.** It does not select a builder:
+naming `gfx942` does not make a gfx950 builder produce gfx942 code.
 
-**`arch` filters which shard a descriptor ships in.** It does not select a
-builder: naming `gfx942` does not make a gfx950 builder produce gfx942 code.
-
-**`library` is relative to the descriptor that declared it**, and the archive is
-one per arch at the arch root — so a descriptor in a child folder climbs back out
-to reach it (`../../kpack/...`). Both halves matter: the runtime joins `library`
-onto the descriptor's own directory, but it bounds the result by the descriptor
-TREE, not by that directory. Writing the value arch-root-relative instead is
-correct only for a descriptor sitting flat at the arch root, and silently wrong
-for every nested one.
+**`library` is relative to the descriptor that declared it**, and the archive is one per
+arch at the arch root, so a descriptor in a child folder climbs back out to reach it
+(`../../kpack/...`). The runtime joins `library` onto the descriptor's own directory but
+bounds the result by the descriptor TREE. An arch-root-relative value is correct only for
+a descriptor sitting flat at the arch root, and silently wrong for every nested one.
 
 ## Why this rocKE builder
 
-`build_unified_attention_2d_tiled` rather than `build_attention_dense`. **Both are
-accepted.** No builder in this corpus is refused, so the packer's rejection shapes are
-covered synthetically instead — `tests/test_hkp_pack_producer_guards.py` exercises a
-keyword-only extra, a `**kwargs`, a second positional, and the accepting case.
+`build_unified_attention_2d_tiled` rather than `build_attention_dense`. Both are accepted
+— no builder in this corpus is refused, so the packer's rejection shapes are covered
+synthetically in `tests/test_hkp_pack_producer_guards.py`.
 
-Both carry the `(spec, *, arch)` signature the packer requires, and each has a
-regression test holding it there (`test_real_gfx942_tiled_2d_is_accepted`,
-`test_real_gfx942_attention_dense_is_accepted`), which makes the choice here about
-which one models a shipped descriptor. The tiled builder's spec is compile-time
-shape only — head size, KV block size, head counts, dtype, feature flags — with
-sequence count and lengths arriving at runtime through `cu_q` and the block
-tables, so one authored descriptor covers every problem size. `AttentionDenseSpec`
-bakes `batch`, `seqlen_q` and `seqlen_kv` in as constants, so a descriptor naming
-it pins its kernel to one exact problem shape and the tree would need another
-descriptor for the next one.
+The tiled builder's spec is compile-time shape only — head size, KV block size, head
+counts, dtype, feature flags — with sequence count and lengths arriving at runtime through
+`cu_q` and the block tables, so one authored descriptor covers every problem size.
+`AttentionDenseSpec` bakes `batch`, `seqlen_q` and `seqlen_kv` in as constants, so a
+descriptor naming it pins its kernel to one problem shape.
 
-**The rocKE half borrows the pointwise pack's native symbols, and that bounds what
-this tree proves.** A descriptor only resolves to something a compiled native pack
-registered, and today that is `hipkernel.pointwise.*` and `hipkernel.conv.*` — there
-is no rocKE/attention pack. So this tree proves the **packaging** path for rocKE:
-authored descriptor → comgr-lowered kernel → kpack archive → install layout, with the
-per-UKD `kind` dispatch exercised for real. It does **not** prove a rocKE-specific
-runtime dispatch; that needs a native pack nobody has written yet.
+**The rocKE half borrows the pointwise pack's native symbols, which bounds what this tree
+proves.** A descriptor only resolves to something a compiled native pack registered, and
+that is `hipkernel.pointwise.*` and `hipkernel.conv.*`; there is no rocKE/attention pack.
+This tree therefore proves the **packaging** path for rocKE — authored descriptor →
+comgr-lowered kernel → kpack archive → install layout, with per-UKD `kind` dispatch
+exercised for real — and not rocKE-specific runtime dispatch.
 
-The descriptors here are authored against the schema the C++ loader enforces,
-modelled on `src/engines/kernel_ingestor_engine/test_descriptors/`.
-Do not model them on `descriptor-packaging/tests/fixtures/`: that is packer-only
-test data which never passes through `DescriptorLoader.hpp`, so a tree copied
-from it can pack cleanly and still fail to load.
+The descriptors here are authored against the schema the C++ loader enforces, modelled on
+`src/engines/kernel_ingestor_engine/test_descriptors/`. Do not model them on
+`descriptor-packaging/tests/fixtures/`: that is packer-only test data which never passes
+through `DescriptorLoader.hpp`, so a tree copied from it can pack cleanly and still fail
+to load.
 
-gfx942 rather than gfx950 because `hipdnn-linux-superbuild` — the lane that can
-gate this — builds gfx942.
+gfx942 rather than gfx950 because `hipdnn-linux-superbuild` — the lane that can gate
+this — builds gfx942.

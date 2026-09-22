@@ -3,27 +3,23 @@
 # SPDX-License-Identifier: MIT
 """Detect or provision the wheel-based ROCm install on Windows.
 
-Outputs key=value lines to stdout so callers can parse them:
+Prints KEY=VALUE lines to stdout for the calling skill to parse:
     ROCM_PATH=<forward-slash path>
     CLANG_PATH=<forward-slash path>
     GPU_TARGETS=<arch>
 
-All human-readable progress goes to stderr so stdout carries only the
-KEY=VALUE lines the calling skill parses.
+All human-readable progress goes to stderr.
 
-Provisioning (Windows only): when the ROCm SDK devel wheel is not present in
-the target venv, this script creates the venv, pip-installs the ROCm SDK
-wheels (multi-arch nightlies, or S3 staging when --sha is given), and runs
-`python -m rocm_sdk init`. This is a Python port of the install logic in
-projects/hipdnn/scripts/windows/wheel_build_setup.ps1; that PowerShell script
-is intentionally left in place for its existing consumers: interactive users,
-and a setup script that lives in a separate benchmarking checkout outside this
-repository and relies on the in-shell venv activation and the ROCM_WHEEL_VENV
-variable that the PowerShell script publishes -- neither of which a child
-Python process can do for a parent shell.
+Provisioning (Windows only): when the ROCm SDK devel wheel is absent from the
+target venv, this creates the venv, pip-installs the ROCm SDK wheels
+(multi-arch nightlies, or S3 staging when --sha is given), and runs
+`python -m rocm_sdk init`. It mirrors the install logic in
+projects/hipdnn/scripts/windows/wheel_build_setup.ps1, which serves the
+consumers that need in-shell venv activation and the ROCM_WHEEL_VENV variable
+a child Python process cannot publish to a parent shell.
 
-Clang is NOT provisioned here: the wheel setup never installed it. If clang is
-missing, this script errors and points at windows_build_setup.ps1.
+Clang is NOT provisioned: a missing clang is an error pointing at
+windows_build_setup.ps1.
 
 On Linux this is a no-op that echoes any provided overrides.
 """
@@ -203,8 +199,6 @@ def main():
     )
     if needs_provision:
         if args.rocm_path:
-            # An explicit devel path can't be provisioned into: the venv layout
-            # is not implied. Provisioning only manages the venv-derived tree.
             log(
                 f"ERROR: --rocm-path was given but hipcc.exe is missing at {hipcc}. "
                 "Provisioning only manages --venv-path; supply a valid --rocm-path "

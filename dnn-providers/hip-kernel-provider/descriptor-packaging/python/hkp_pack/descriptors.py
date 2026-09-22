@@ -13,8 +13,7 @@ _ALL_TYPES = {KDP_TYPE, UKD_TYPE} | _GENERIC_TYPES
 
 # The per-arch archive directory, relative to an arch shard root. Reserved: the
 # packer writes the .kpack here and every packed UKD's `library` resolves into
-# it, so an authored folder of this name would collide with shipped output.
-# Defined here rather than in pipeline.py because the loader enforces it and
+# it. Defined here rather than in pipeline.py because the loader enforces it and
 # pipeline.py imports from this module.
 KPACK_DIR_NAME = "kpack"
 
@@ -27,10 +26,8 @@ _UED_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
 
 def type_from_filename(path):
-    """Descriptor type token from a `<name>.<type>.json` filename.
-
-    The type is the second-to-last dot-separated segment of the file name.
-    Returns None if the name has too few segments to carry a type token.
+    """Descriptor type token from a `<name>.<type>.json` filename: the
+    second-to-last dot-separated segment, or None when the name has too few.
     """
     parts = Path(path).name.split(".")
     if len(parts) < 3:
@@ -42,11 +39,9 @@ def type_from_filename(path):
 class Descriptor:
     """A parsed descriptor loaded from a flat-folder JSON file.
 
-    Holds a generic descriptor, a KDP, or a standalone UKD. A UKD may be
-    authored either inline in a KDP's kernelDescriptors vector or as its own
-    `<name>.ukd.json` file that a KDP references by Id. A descriptor's type is
-    derived from its filename (`<name>.<type>.json`), never from a field in the
-    document.
+    Holds a generic descriptor, a KDP, or a standalone UKD. A UKD may be authored
+    inline in a KDP's kernelDescriptors vector or as its own `<name>.ukd.json` a
+    KDP references by Id. The type comes from the filename, never from a field.
     """
 
     path: Path
@@ -105,8 +100,8 @@ def _require(doc, keys, where):
 def _validate_version(value, where):
     """A file-backed descriptor's version is '<major>.<minor>' with numeric halves.
 
-    Mirrors the loader's parseDescriptorVersion (loader is authoritative); the
-    tool fails fast on a malformed value rather than shipping an ungatable file.
+    Mirrors the loader's parseDescriptorVersion; the tool fails fast rather than
+    shipping an ungatable file.
     """
     if (
         not isinstance(value, str)
@@ -130,9 +125,8 @@ def arch_matches(kdp_doc, arch):
 def _arch_subset_ok(ukd_arch, kdp_arch):
     """A UKD's arch is admissible under a referencing KDP's arch.
 
-    An empty list on either side is a wildcard: a wildcard KDP admits any UKD,
-    and a wildcard UKD is admissible under any KDP. Two explicit lists require
-    the UKD's arches to be a subset of the KDP's.
+    An empty list on either side is a wildcard; two explicit lists require the
+    UKD's arches to be a subset of the KDP's.
     """
     if not ukd_arch or not kdp_arch:
         return True
@@ -140,11 +134,8 @@ def _arch_subset_ok(ukd_arch, kdp_arch):
 
 
 def kdp_survives(kdp_doc, flat, arch):
-    """Whether a KDP ships in a given arch's shard.
-
-    A KDP ships iff it matches the arch and at least one of its UKD entries
-    (an inline dict or a standalone resolved by id) also applies to that arch.
-    A KDP whose UKDs all filter out for this arch is dropped from the shard.
+    """Whether a KDP ships in a given arch's shard: it must match the arch and at
+    least one of its UKD entries (inline or resolved by id) must apply to it.
     """
     if not arch_matches(kdp_doc, arch):
         return False
@@ -162,9 +153,9 @@ def kdp_survives(kdp_doc, flat, arch):
 def validate_hip_build(build, where):
     """A hip UKD's build block is functional; reject anything unusable.
 
-    Rejects when build is absent/not an object or defines is present but is not
-    a flat map of macro-name -> scalar. flags, when present, must be a string
-    list. The failure substring is stable ('invalid build').
+    Rejects an absent or non-object build, defines that are not a flat map of
+    macro-name -> scalar, and flags that are not a string list. The failure
+    substring is stable ('invalid build').
     """
     if not isinstance(build, dict):
         raise HkpPackError(f"{where} has invalid build (not an object)")
@@ -192,9 +183,8 @@ def validate_hip_build(build, where):
 def validate_rocke_spec(spec, where):
     """A rocke UKD's spec block is a JSON object; nothing more is required here.
 
-    Field-level correctness (the builder's spec dataclass) is a compile-time
-    concern validated by build_spec in the producer, not at load time. The
-    failure substring is stable ('invalid spec').
+    Field-level correctness is a compile-time concern for build_spec. The failure
+    substring is stable ('invalid spec').
     """
     if not isinstance(spec, dict):
         raise HkpPackError(f"{where} has invalid spec (not an object)")
@@ -203,14 +193,10 @@ def validate_rocke_spec(spec, where):
 def _reject_nonbare_arch(archs, where):
     """Reject any arch entry that is not a bare gfx base target id.
 
-    Mirrors the loader's isPlausibleArchBaseId (loader is authoritative): 'gfx'
-    followed by one or more of [a-z0-9_-]. LLVM generic targets
-    ('gfx9-4-generic') are legal; a feature suffix ('gfx942:xnack-') is not,
-    since ':' is outside the set.
-
-    Fatal rather than advisory: a suffixed arch matches no shard, so the KDP
-    prunes from every arch and the pack exits 0 having installed nothing --
-    indistinguishable from a legitimate arch skip.
+    Mirrors the loader's isPlausibleArchBaseId: 'gfx' plus one or more of
+    [a-z0-9_-], so LLVM generic targets ('gfx9-4-generic') are legal and a feature
+    suffix ('gfx942:xnack-') is not. Fatal rather than advisory: a suffixed arch
+    matches no shard, so the pack exits 0 having installed nothing.
     """
     for arch in archs or []:
         body = arch[3:]
@@ -231,16 +217,12 @@ def _validate_provenance(provenance, where, *, produced=False):
     """Shape of one `provenance` block, wherever it is declared.
 
     A KDP and the kernels under it declare the same `specialization_contract`
-    object -- a kernel with none of its own inherits the enclosing KDP's -- so one
-    rule covers both. An unusable declaration fails at the document that wrote it
-    rather than at every kernel that inherited it.
+    object, so one rule covers both and an unusable declaration fails at the
+    document that wrote it.
 
-    `effective_spec` is the producing compiler's own statement about what it
-    observed while building the payload. An authored input claiming one would be
-    asserting an observation nothing made, so it is refused at the door rather than
-    overwritten later. `produced` is true only for the one form that legitimately
-    carries it -- a shipped `kpack` kernel, because packing is what wrote it. It is
-    never true of a KDP: evidence binds specific payload bytes and a pack has none.
+    `effective_spec` is the producing compiler's statement about what it observed,
+    so an authored input claiming one is refused. `produced` is true only for a
+    shipped `kpack` kernel, never for a KDP, which has no payload bytes to bind.
     """
     if not isinstance(provenance, dict):
         raise HkpPackError(f"{where}: provenance must be an object")
@@ -267,10 +249,8 @@ def _validate_provenance(provenance, where, *, produced=False):
 def _validate_embedded_source_file(source_file, where):
     """Reject an embedded_source `source_file` that cannot act as an identity.
 
-    The value names the source file and is not normalised anywhere. A '..'
-    segment lets one file be named by two different spellings, so one file
-    takes two identities. An absolute path names a location on one machine,
-    and the emitted key must be the same on every machine.
+    The value is never normalised, so a '..' segment would give one file two
+    identities and an absolute path names one machine's layout.
     """
     if not isinstance(source_file, str) or not source_file:
         raise HkpPackError(
@@ -290,11 +270,8 @@ def _validate_embedded_source_file(source_file, where):
 
 
 def _validate_ukd_fields(ukd, where, log=print):
-    """Validate the shape shared by inline and standalone UKDs.
-
-    Both authoring forms carry the same fields; only the surrounding context
-    (an entry in a KDP's kernelDescriptors vs. its own file) differs, which the
-    caller conveys via `where`.
+    """Validate the shape shared by inline and standalone UKDs; only the
+    surrounding context differs, which the caller conveys via `where`.
     """
     if not isinstance(ukd, dict):
         raise HkpPackError(f"{where} is not a JSON object")
@@ -348,11 +325,9 @@ def _validate_inline_ukd(ukd, kdp_path, log=print):
 def _validate_standalone_ukd(desc, log=print):
     """A standalone `<name>.ukd.json` carries the same fields as an inline UKD.
 
-    Kind-specific checks are delegated to _validate_ukd_fields, so a standalone
-    UKD may be of any kind that function accepts. Its optional `arch` narrows
-    the shards it ships in (empty/omitted = wildcard, applying to every
-    referencing arch) and must be a subset of each referencing KDP's arch,
-    checked in _validate_references.
+    Kind-specific checks are delegated to _validate_ukd_fields. Its optional `arch`
+    narrows the shards it ships in (empty/omitted = wildcard) and must be a subset
+    of each referencing KDP's arch, checked in _validate_references.
     """
     doc = desc.doc
     where = f"standalone UKD {desc.path.name}"
@@ -417,8 +392,7 @@ def _validate_umd(desc):
     """UMD: scope is a closed enum and match_symbol is required.
 
     Mirrors parseMatchDescriptor. A bad scope drops the matcher at load, which
-    cascades: a KDP naming a matcher no descriptor defines loses its pack, and
-    an engine with no loadable pack is dropped entirely.
+    cascades to the pack naming it and then to the engine.
     """
     where = f"UMD {desc.path.name}"
     _require(desc.doc, ["name", "scope", "match_symbol"], where)
@@ -441,10 +415,8 @@ def _validate_uhd(desc):
 def _validate_kmd(desc):
     """KMD: a list of fields, each with a name and a type from the enum.
 
-    Mirrors parseMetadataSchema. The default_value/type agreement the loader
-    also checks is not duplicated: it would have to match the loader's JSON-kind
-    coercion rules exactly, and a near-miss would reject descriptors the runtime
-    accepts.
+    Mirrors parseMetadataSchema. The loader's default_value/type agreement is not
+    duplicated: a near-miss would reject descriptors the runtime accepts.
     """
     where = f"KMD {desc.path.name}"
     _require(desc.doc, ["name", "fields"], where)
@@ -494,24 +466,18 @@ def _validate_shape(desc, log=print):
 def load_flat_input(root, log=print):
     """Load and structurally validate every *.json descriptor under a root.
 
-    Walks the root recursively: a descriptor's authored subpath is meaningful
-    and is carried through to the staged and installed layouts. Loads the KDPs
-    (with inline hip UKDs), standalone `<name>.ukd.json` files a KDP references
-    by Id, and the by-Id generic files (UMD/UED/UDD/KMD/UHD), plus the HIP
-    sources the UKDs name. Each descriptor's type is derived from its
-    `<name>.<type>.json` filename. A `*.json` whose name carries no type token
-    is not one of ours: warn and skip it rather than aborting the pack, so an
-    incidental file in the source folder is tolerated. A hidden path -- any
-    dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
-    the same way, so nothing the walk passes over is invisible. Raises
-    HkpPackError on any malformed / missing-field / unknown-type /
-    dangling-reference descriptor that IS type-tagged.
+    Walks recursively, preserving each descriptor's authored subpath into the
+    staged and installed layouts. Loads KDPs (with inline UKDs), standalone
+    `<name>.ukd.json` files referenced by id, the by-id generics
+    (UMD/UED/UDD/KMD/UHD), and the sources the UKDs name; type comes from the
+    `<name>.<type>.json` filename.
 
-    There is exactly ONE root. Child folders under it scope the content (a
-    `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
-    producer selection is per-UKD on `kernel_source.kind`, never per-root. Two
-    descriptors therefore cannot share a path, so the filesystem itself enforces
-    the uniqueness that a multi-root merge had to check for.
+    A `*.json` carrying no type token, and any hidden path, is warned and skipped.
+    Raises HkpPackError on any type-tagged descriptor that is malformed, missing
+    fields, of unknown type, or dangling.
+
+    There is exactly one root; producer selection is per-UKD on
+    `kernel_source.kind`, never per-root, and two descriptors cannot share a path.
     """
     root = Path(root)
     if not root.is_dir():
@@ -521,9 +487,8 @@ def load_flat_input(root, log=print):
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
-        # source root is user-supplied and plausibly a checkout, so `.git/`,
-        # `.venv/` and friends are skipped rather than refused, unlike the
-        # reserved `kpack/` below -- a hidden path collides with nothing.
+        # source root is plausibly a checkout, so `.git/`, `.venv/` and friends are
+        # skipped rather than refused: a hidden path collides with nothing.
         if any(part.startswith(".") for part in rel_path.parts):
             log(f"skipping hidden path {rel_path}")
             continue
@@ -531,19 +496,9 @@ def load_flat_input(root, log=print):
             log(f"skipping non-descriptor file {rel_path}")
             continue
         rel_dir = jp.parent.relative_to(root)
-        # `kpack/` at the arch root is where the archive itself is written, and
-        # `library` on every packed UKD is a path that ends there. An authored
-        # folder of that name lands descriptors inside the reserved directory,
-        # intermixed with the archive -- today they survive only because the
-        # archive happens to be written last. Refuse the name rather than depend
-        # on write order.
-        # The comparison is case-insensitive. On Linux `KPACK/` and `kpack/` are
-        # distinct directories and coexist harmlessly (verified), so a
-        # case-sensitive check would be correct here -- but the packed tree also
-        # gets built and consumed on Windows, where they are the SAME directory
-        # and the collision this guard exists to prevent comes back. Rejecting
-        # both spellings costs an author nothing and keeps the rule identical on
-        # every platform.
+        # `kpack/` at the arch root is where the archive is written and where every
+        # packed UKD's `library` path ends. The comparison is case-insensitive:
+        # on Windows `KPACK/` and `kpack/` are one directory.
         if rel_dir.parts and rel_dir.parts[0].lower() == KPACK_DIR_NAME:
             raise HkpPackError(
                 f"authored folder '{KPACK_DIR_NAME}/' is reserved: it is where "
@@ -571,8 +526,7 @@ def _reject_inline_standalone_collision(flat):
     """An inline UKD id colliding with a standalone UKD is ambiguous by-id.
 
     A subset of the global id-uniqueness rule, kept ahead of it for its more
-    specific message: a by-id KDP reference cannot pick between an inline and a
-    standalone UKD of the same id.
+    specific message.
     """
     ukd_ids = set(flat.ukd_by_id())
     for kdp in flat.kdps():
@@ -587,9 +541,7 @@ def _reject_inline_standalone_collision(flat):
 def _reject_duplicate_ids(flat):
     """Every descriptor id is unique across ALL types and forms at pack time.
 
-    Build-time invariant, deliberately stronger than the loader, which keys on
-    (type, id) and permits the same id on descriptors of different types. Packing
-    hard-fails on any repeat so a copy-pasted id can never ship. Iterates in
+    Deliberately stronger than the loader, which keys on (type, id). Iterates in
     sorted-file then authored order so the "already defined by" pointer is
     deterministic.
     """
@@ -614,10 +566,8 @@ def _reject_duplicate_ids(flat):
 
 
 def _warn_orphan_standalone_ukds(flat, log):
-    """Warn (non-fatal) for each standalone UKD no KDP references by id.
-
-    An orphan still packs; the warning flags a likely authoring slip (a UKD file
-    that no pack pulls in).
+    """Warn (non-fatal) for each standalone UKD no KDP references by id: an orphan
+    still packs, and the warning flags a likely authoring slip.
     """
     referenced = set()
     for kdp in flat.kdps():
@@ -669,9 +619,8 @@ def _validate_references(flat):
 
 
 def reachable_generic_ids(flat, surviving_kdps):
-    """Ids of the generics reachable from a set of surviving KDPs.
-
-    Walks KDP -> {matchers, engine, dispatch} and UED -> {heuristic, metadata}
+    """Ids of the generics reachable from a set of surviving KDPs, walking
+    KDP -> {matchers, engine, dispatch} and UED -> {heuristic, metadata}
     transitively. A generic survives pruning iff its Id is in this set.
     """
     by_id = flat.generic_by_id()

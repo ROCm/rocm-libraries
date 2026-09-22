@@ -19,9 +19,8 @@ add_executable(
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
-# To use the build tree plugin, we use the path relative to the test binary instead of the installed
-# libhipdnn_backend.so. HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the binary
-# directory to the plugin engine directory, derived from the configured install layout.
+# HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR is the offset from the test binary to the plugin
+# engine directory, so the build tree plugin is used rather than the installed one.
 target_compile_definitions(
     hip_kernel_provider_integration_tests
     PRIVATE
@@ -87,32 +86,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
         kernel_ingestor_engine/IntegrationGraphVerificationContext.cpp
     )
-    # This target links only the SDKs, not hip_kernel_provider_private, so it does not
-    # inherit the provider's gate and needs the definition set directly.
+    # Links only the SDKs, not hip_kernel_provider_private, so the gate is not inherited.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR=1
     )
-    # The one descriptor set this binary's cases resolve, as the offset from the binary to
-    # the staged tree. main() applies it when the environment names no set, so the binary
-    # runs standalone, and the offset holds in the install tree too, so no machine-specific
-    # path is compiled in or reaches the CTest files.
+    # Descriptor set resolved as an offset from the binary to the staged tree, applied by
+    # main() when the environment names no set. The offset holds in the install tree too.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
-    # The shared descriptor-root resolver lives with the unit tests
+    # The shared descriptor-root resolver lives with the unit tests.
     target_include_directories(hip_kernel_provider_integration_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../tests
     )
-    # The relative layout only, never an absolute build path: the kpack suite locates the
-    # staged tree by walking from the loaded plugin exactly as the loader does, and needs
-    # the same spelling of the subdirectory the provider compiled in. An absolute path
-    # here would be baked into the installed test binary as well, naming a build tree it
-    # cannot see.
+    # Relative layout only: the kpack suite walks from the loaded plugin as the loader
+    # does and needs the same subdirectory spelling the provider compiled in.
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_PACKAGED_FIXTURE_SUBDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}/${HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE}"
     )
-    # The integration root is packed by three roots, and each stages under its own
-    # packaging target. Name each one individually.
+    # The integration root is staged by three packaging targets; name each one.
     foreach(_hkp_set hkp_packaging_integration hkp_packaging_integration_shared
                      hkp_packaging_archive_fixture)
         if(TARGET ${_hkp_set})
@@ -120,9 +112,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
-    # The parent of the integration descriptor sets, which holds all three. A
-    # walk of a parent reaches every subtree staged under it, so a further pack
-    # there comes under the check with no edit here.
+    # Parent of the integration descriptor sets: the walk covers every subtree staged
+    # under it, so additional packs there need no edit here.
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_integration_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
@@ -132,37 +123,29 @@ endif()
 
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
-# ENVIRONMENT is forwarded to add_integration_test_target() rather than set
-# afterward via set_tests_properties(): when YAML-driven CTest
-# categorization is active (DNN_PROVIDER_CTEST_CATEGORIES_YAML), the raw
-# hip_kernel_provider_integration_tests CTest test is never registered --
-# only the tiered suites created later by apply_test_category_labels() in
-# ../CMakeLists.txt are, and set_tests_properties() on the unregistered
-# name is a hard CMake configure error. add_integration_test_target()
-# publishes the merged environment as
-# hip_kernel_provider_integration_tests_TEST_ENVIRONMENT so that later call
-# can forward it to whichever suites actually exist.
+# ENVIRONMENT is passed to add_integration_test_target() rather than applied afterward
+# with set_tests_properties(): under YAML-driven CTest categorization
+# (DNN_PROVIDER_CTEST_CATEGORIES_YAML) only the tiered suites from
+# apply_test_category_labels() in ../CMakeLists.txt are registered, and
+# set_tests_properties() on an unregistered name is a hard configure error.
+# add_integration_test_target() publishes the merged environment as
+# hip_kernel_provider_integration_tests_TEST_ENVIRONMENT for that later call.
 #
-# No descriptor entry: this suite loads the real plugin, and the engine resolves its
-# descriptor tree relative to the loaded module -- the staged copy in a build tree, the
-# installed copy in an install tree. Naming one explicitly would pin the build path into
-# the install-time CTest file and stop the installed descriptors from ever being read.
+# No descriptor entry: the engine resolves its descriptor tree relative to the loaded
+# module, so naming one would pin the build path into the install-time CTest file.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS slow
     ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
 
-# Forward the merged raw-test environment (published by add_integration_test_target)
-# to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can
-# pick it up. Setting ENVIRONMENT directly on the raw test name here is a hard
-# configure error when YAML categorization is active, hence the forwarding.
+# Forward the merged raw-test environment to the parent scope for the tiered CTest suites
+# created in ../CMakeLists.txt.
 if(DEFINED hip_kernel_provider_integration_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_integration_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
 endif()
 
-# Register the cross-provider ASM SDPA gpu-reference integration test target. In
-# standalone provider builds the harness may not already be in scope, so try to
-# import it first.
+# Cross-provider ASM SDPA gpu-reference integration test target. Standalone provider
+# builds may not have the harness in scope, so import it first.
 if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()

@@ -1,18 +1,17 @@
 """Plan a knob sweep: isolate each knob, pair only the survivors, ship what moved.
 
-Isolation first because a two-arm set holds everything else at parity, so an effect is
-attributable to one knob; restricting the pairwise pass to survivors keeps it from
-becoming the cross-product again. A knob the dispatcher already varies per shape, or
-one carrying a measured verdict in the kernel's own source, is not an open question
-and is excluded before any GPU time -- `--plan` prints that partition with reasons.
+A two-arm set holds everything else at parity, so an effect is attributable to
+one knob, and restricting the pairwise pass to survivors keeps it from becoming
+a cross-product. A knob the dispatcher already varies per shape, or one
+carrying a measured verdict in the kernel's source, is excluded before any GPU
+time; `--plan` prints that partition with reasons.
 
     knob_sweep.py --profile <p.yaml> --shapes <corpus.json> --plan
     knob_sweep.py --profile <p.yaml> --shapes <corpus.json> --isolate --out-dir <d>
     knob_sweep.py --profile <p.yaml> --shapes <corpus.json> \\
                   --pairwise waves_per_eu,block_n --out-dir <d>
 
-Emits one generator config per arm. It never measures: that is the harness's job, on
-one node in one session.
+Emits one generator config per arm and never measures.
 """
 
 from __future__ import annotations
@@ -60,13 +59,10 @@ def load_knobs(profile: dict) -> list[Knob]:
 
 
 def _promote(spec, arch_spec_cls, overrides: dict):
-    """Re-express `spec` as the arch subclass so a PRIVATE knob can be set.
-
-    The dispatcher returns the SHARED spec and touches no arch-private codegen knob, so
-    the knobs most worth sweeping are exactly the ones absent from what it hands back.
-    Every shared field is carried across unchanged, so the arm still differs from parity
-    in the named knobs and nothing else.
-    """
+    """Re-express `spec` as the arch subclass so a private knob can be set,
+    carrying every shared field across unchanged. The dispatcher returns the
+    shared spec and touches no arch-private codegen knob, so the knobs most
+    worth sweeping are exactly the ones absent from it."""
     shared = {f.name: getattr(spec, f.name) for f in dataclasses.fields(spec)}
     allowed = {f.name for f in dataclasses.fields(arch_spec_cls)}
     unknown = sorted(set(overrides) - allowed)
@@ -79,12 +75,9 @@ def _promote(spec, arch_spec_cls, overrides: dict):
 
 
 def _support_predicate(profile: dict):
-    """The engine's own eligibility predicate, or None when the profile declares none.
-
-    Bound once per arm rather than per shape: a predicate that will not import is an
-    operational failure of the whole run, and discovering it at shape 900 would leave
-    the earlier 899 reported as checked when they were not.
-    """
+    """The engine's own eligibility predicate, or None when the profile
+    declares none. Bound once per arm rather than per shape: a predicate that
+    will not import is an operational failure of the whole run."""
     declaration = profile.get("predicate") or {}
     if not declaration:
         return None
@@ -96,24 +89,19 @@ def _arm(
 ) -> tuple[dict, list[tuple[int, str]]]:
     """One arm: the parity set with `overrides` forced onto every served spec.
 
-    Built by MUTATING the dispatcher's own resolution rather than by authoring a config,
-    so the arm differs from parity in exactly the knobs named and in nothing else. EVERY
-    arm is promoted to the arch spec when one is declared, including the baseline with
-    no overrides: the subclass adds its private fields at their defaults, so a promoted
-    arm and an unpromoted baseline differ in three or four fields rather than the one
-    under test, and the isolation pass would attribute all of that to the named knob.
+    Built by mutating the dispatcher's own resolution, so the arm differs from
+    parity only in the named knobs. Every arm is promoted to the arch spec when
+    one is declared, including the baseline, which would otherwise also differ
+    in the subclass's private defaults.
 
-    Returns `(config, unbuildable)`, where `unbuildable` lists `(shape_index, reason)`
-    for every served shape whose spec REFUSES this arm's value -- a real property of the
-    set, not a tool error. The caller must report that count: a bare ratio against
-    parity over a different shape population is not a comparison.
+    Returns `(config, unbuildable)`, where `unbuildable` lists
+    `(shape_index, reason)` for every served shape whose spec refuses this
+    arm's value -- a property of the set that the caller must report, since a
+    ratio over a different shape population is not a comparison.
 
-    Refusal comes two ways, and only one of them raises. A spec constructor rejects an
-    illegal combination outright; the other kind constructs perfectly and is simply NOT
-    SUPPORTED, and the only thing that knows is the engine's own eligibility predicate.
-    So the predicate is asked about the FINAL spec, after promotion to the builder's
-    class and after this arm's overrides -- asking earlier answers a question about a
-    different kernel.
+    A shape is refused either by the spec constructor or by the eligibility
+    predicate, which is asked about the final spec, after promotion and this
+    arm's overrides.
     """
     mutated = []
     unbuildable: list[tuple[int, str]] = []
@@ -132,18 +120,17 @@ def _arm(
                 f"are exactly the ones the dispatcher leaves alone, so a sweep needs "
                 f"the builder's own spec class to reach them."
             )
-        # A KNOB VALUE CAN BE ILLEGAL FOR SOME SHAPES AND LEGAL FOR OTHERS, and that is
-        # a property of the SET, not an error in the tool: `wide_lds_dma` requires
-        # `block_n=64`, so a `block_n=128` arm cannot express any shape the dispatcher
-        # resolved wide-DMA for. Letting the constructor's ValueError escape would abort
-        # the whole isolation pass on the first such shape, so drop them and count them.
+        # A knob value can be illegal for some shapes and legal for others, and
+        # that is a property of the set: `wide_lds_dma` requires `block_n=64`,
+        # so a `block_n=128` arm cannot express a shape the dispatcher resolved
+        # wide-DMA for. Drop those shapes and count them rather than aborting.
         try:
             if arch_spec_cls is not None:
                 clone.spec = _promote(resolution.spec, arch_spec_cls, overrides)
             else:
-                # The spec is a FROZEN dataclass, so replace() rather than setattr.
-                # Worth keeping frozen: an arm built by mutating a shared object in
-                # place is how one arm's override leaks into the next one's baseline.
+                # The spec is a frozen dataclass, so replace() rather than
+                # setattr: mutating a shared object in place is how one arm's
+                # override leaks into the next one's baseline.
                 clone.spec = dataclasses.replace(resolution.spec, **overrides)
         except ParityError:
             raise
@@ -151,10 +138,9 @@ def _arm(
             unbuildable.append((index, f"{type(exc).__name__}: {exc}"))
             continue
         if predicate is not None:
-            # THE FINAL SPEC, not the one the dispatcher returned: promoted to the
-            # builder's class and carrying this arm's overrides. A perturbation that
-            # constructs and is still declined -- an unsupported head_size, a use_cfvst
-            # combination the kernel refuses -- is invisible to the constructor above.
+            # The final spec, promoted to the builder's class and carrying this
+            # arm's overrides: a perturbation that constructs and is still
+            # declined is invisible to the constructor above.
             supported, why = _predicate_result(
                 predicate, clone.spec, **({"arch": arch} if arch else {})
             )
@@ -280,9 +266,9 @@ def main(argv=None) -> int:
                 )
                 name = f"arm_{knob.name}_{value}.yaml"
                 count = _write(arm, out / name)
-                # An arm whose value is what the dispatcher already resolves is the
-                # baseline under another name: it measures exactly 1.000x, and the sweep
-                # reports the knob as "no effect" having never tried the other side.
+                # An arm whose value is what the dispatcher already resolves is
+                # the baseline under another name: it measures 1.000x and
+                # reports "no effect" having never tried the other side.
                 arm_specs = [
                     k["kernel_source"]["spec"] for k in arm["packs"][0]["kernels"]
                 ]
@@ -292,9 +278,9 @@ def main(argv=None) -> int:
                 )
                 note = "  == parity, measures nothing" if identical else ""
                 print(f"  {name:<30}{count:5d} kernels{note}")
-                # A NARROWED ARM IS NOT A FULL COMPARISON, and it must never read as
-                # one. Report the fraction and the distinct reasons so the arm's
-                # coverage is a number the reader checks rather than assumes.
+                # A narrowed arm is not a full comparison. Report the fraction
+                # and the distinct reasons so the arm's coverage is a number
+                # the reader checks rather than assumes.
                 if unbuildable:
                     reasons: dict[str, int] = {}
                     for _, why in unbuildable:

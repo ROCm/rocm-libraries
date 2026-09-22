@@ -14,30 +14,24 @@ import tempfile
 from pathlib import Path
 
 
-#: An architecture token, not a family prefix. Every shipping gfx name carries at
-#: least three characters after `gfx` (gfx90a, gfx942, gfx1100), so `gfx9` is a
-#: family the caller must resolve before a sweep can claim it measured one.
+#: An architecture token, not a family prefix. Every shipping gfx name carries
+#: at least three characters after `gfx` (gfx90a, gfx942, gfx1100), so `gfx9`
+#: is a family the caller must resolve before a sweep can claim it measured one.
 ARCH_TOKEN = r"gfx[0-9a-f]{3,}"
 
 
 class ProbeUnavailable(Exception):
     """The inspection utility could not be run, so nothing was observed.
 
-    Distinct from a negative observation on purpose. `rocminfo` missing from PATH
-    -- a packaging or platform difference, not a statement about the host's GPUs --
-    used to surface as FileNotFoundError, an OSError, and was caught beside the
-    ValueError that means "rocminfo ran and this arch is not here". Both exited 1,
-    so a healthy host without the utility reported device-absent and halted an
-    unattended run at its first gate. A tool that cannot run has not reported a
-    negative.
+    Distinct from a negative observation: a missing `rocminfo` is a packaging
+    or platform difference, not a statement about the host's GPUs.
     """
 
 
-#: Inspection utilities in probe order. `rocminfo` is the reference tool and reports
-#: the architecture as `Name:`/`gfx...`; `hipInfo` reports it as `gcnArchName:` and is
-#: what the Windows ROCm wheels ship instead. Trying the second one turns an
-#: unobservable condition into an observed one wherever it can: exit 3 is honest, but
-#: it still leaves a gate unmet on a host whose device is present and healthy.
+#: Inspection utilities in probe order. `rocminfo` reports the architecture as
+#: `Name:`/`gfx...`; `hipInfo` reports it as `gcnArchName:` and is what the
+#: Windows ROCm wheels ship instead. Trying both turns an unobservable
+#: condition into an observed one wherever it can.
 DEVICE_TOOLS = ("rocminfo", "hipInfo")
 
 

@@ -1,11 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""A real compiler's verdict on the emitted C++.
-
-``packs/<Name>Native.cpp`` is what an agent (or a human) fills in to make an
-engine serve real graphs (see RUNBOOK.md).
-"""
+"""A real compiler's verdict on the emitted C++. ``packs/<Name>Native.cpp`` is what an
+agent or a human fills in to make an engine serve real graphs (see RUNBOOK.md)."""
 
 import subprocess
 import shutil
@@ -26,13 +23,9 @@ def _find_include_dir(name: str) -> Path | None:
 
 @pytest.fixture(scope="module")
 def compile_env():
-    """Best-effort host-compile environment for the emitted native stub.
-
-    The SDKs' ``version.h``/``CacheRootDefaults.h`` are CMake-configured
-    (``.h.in`` templates), so a from-scratch compile needs stand-ins; their
-    macro values are irrelevant to whether the stub parses. Skips rather than
-    fails when a prerequisite is absent.
-    """
+    """Best-effort host-compile environment for the emitted native stub. The SDKs'
+    ``version.h``/``CacheRootDefaults.h`` are CMake-configured, so a from-scratch
+    compile needs stand-ins. Skips rather than fails when a prerequisite is absent."""
     gxx = shutil.which("g++") or shutil.which("clang++")
     if gxx is None:
         pytest.skip("no host C++ compiler (g++/clang++) found on PATH")
@@ -142,13 +135,10 @@ def _compile(compile_env, source: str, tmp_path: Path) -> subprocess.CompletedPr
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-#: A minimal stand-in for the gtest surface the emitted test files use, so parsing
-#: them does not pull googletest into this tool's test environment.
-#:
-#: Each expectation macro must instantiate the operation real gtest performs, not
-#: merely name its operands: one that only named them would catch a typo'd identifier
-#: but accept expectations real gtest rejects. ``TestTheGtestStandIn`` holds those
-#: properties directly.
+#: A minimal stand-in for the gtest surface the emitted test files use, so parsing them
+#: does not pull googletest into this tool's test environment. Each expectation macro
+#: must instantiate the operation real gtest performs, not merely name its operands;
+#: ``TestTheGtestStandIn`` holds those properties directly.
 _GTEST_STUB_HEADER = """#pragma once
 
 struct GTestMsg
@@ -215,12 +205,8 @@ protected:
 
 @pytest.fixture(scope="module")
 def host_cxx():
-    """A host C++ compiler and nothing else.
-
-    The cases that exercise the gtest stand-in itself compile against the stand-in
-    alone, so they must not inherit ``compile_env``'s skips on SDK headers,
-    flatbuffers and the provider source -- none of which they include.
-    """
+    """A host C++ compiler and nothing else: the stand-in cases include no SDK header,
+    flatbuffers or provider source, so they must not inherit ``compile_env``'s skips."""
     gxx = shutil.which("g++") or shutil.which("clang++")
     if gxx is None:
         pytest.skip("no host C++ compiler (g++/clang++) found on PATH")
@@ -272,13 +258,9 @@ def _parse_test_stub(
 
 
 class TestRealCompile:
-    """Host-compile the emitted stub with g++, best-effort.
-
-    Proof boundary: every case here runs ``-fsyntax-only``. A pass means the
-    emitted translation unit parses and type-checks against the real headers;
-    linking, symbol registration, loading and dispatch belong to the provider's
-    own tests.
-    """
+    """Host-compile the emitted stub with g++, best-effort. Every case runs
+    ``-fsyntax-only``, so linking, symbol registration, loading and dispatch belong to
+    the provider's own tests."""
 
     def test_single_pack_stub_compiles(
         self, compile_env, generator, scale_add_config, tmp_path
@@ -294,9 +276,9 @@ class TestRealCompile:
     def test_packaged_dialect_stub_compiles(
         self, compile_env, generator, gfx950_attention_dense_config, tmp_path
     ):
-        """The only config reaching the `{% if config.is_packaged %}` block: an
-        extra function definition placed outside the pack's anonymous namespace
-        so the IngestorPacks.cpp row can reference it."""
+        """The only config reaching the `{% if config.is_packaged %}` block: an extra
+        function definition outside the pack's anonymous namespace so IngestorPacks.cpp
+        can reference it."""
         config = gfx950_attention_dense_config
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
         rendered = generator._render_template(
@@ -310,8 +292,7 @@ class TestRealCompile:
     def test_matcher_test_stub_parses(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """`test_matchers.cpp.j2` ships pre-wired `GTEST_SKIP()` stubs; a
-        malformed one would first fail inside the provider's build."""
+        """`test_matchers.cpp.j2` ships pre-wired `GTEST_SKIP()` stubs."""
         rendered = generator._render_template(
             "test_matchers.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -323,9 +304,9 @@ class TestRealCompile:
     def test_pack_census_stub_parses(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """Unlike the two stubs an author is expected to finish, the census is
-        emitted complete and meant to run as written, so a defect in it ships
-        inside something that looks finished."""
+        """Unlike the two stubs an author finishes, the census is emitted complete and
+        meant to run as written, so a defect in it ships inside something that looks
+        finished."""
         rendered = generator._render_template(
             "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -337,8 +318,8 @@ class TestRealCompile:
     def test_multi_pack_census_stub_parses(
         self, compile_env, generator, binary_ops_config, tmp_path
     ):
-        """The census's multi-pack arm counts one graph-scoped matcher per pack,
-        against the single-pack arm's zero -- different code, not a constant."""
+        """The census's multi-pack arm counts one graph-scoped matcher per pack, against
+        the single-pack arm's zero: different code, not a constant."""
         config = binary_ops_config
         assert config.is_multi_pack, "fixture is no longer the multi-pack one"
         rendered = generator._render_template(
@@ -352,8 +333,8 @@ class TestRealCompile:
     def test_heuristic_free_stubs_parse(
         self, compile_env, generator, heuristic_free_config, tmp_path
     ):
-        """Every shipped config declares `heuristic: native`, so this is the only
-        case that parses the `{% else %}` arms of all three templates."""
+        """Every shipped config declares `heuristic: native`, so this is the only case
+        parsing the `{% else %}` arms of all three templates."""
         config = heuristic_free_config
         assert not config.engine.has_heuristic
         ids = mint_ids(config)
@@ -376,9 +357,8 @@ class TestRealCompile:
     def test_the_census_parse_catches_a_typo_inside_an_expectation(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """Sanity check on the gtest stand-in where it is weakest: an expectation
-        macro that discarded its operands would let this class report success on a
-        file real gtest rejects."""
+        """An expectation macro that discarded its operands would let this class report
+        success on a file real gtest rejects."""
         rendered = generator._render_template(
             "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -408,8 +388,7 @@ class TestRealCompile:
     def test_compile_catches_a_real_break(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """Sanity check on the check itself: an actually-broken stub must fail
-        to compile, or this whole class is silently vacuous."""
+        """An actually-broken stub must fail to compile, or this class is vacuous."""
         rendered = generator._render_template(
             "native.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -466,12 +445,8 @@ GTEST_SKIP() << "as does the skip form the matcher stubs ship";
 
 
 class TestTheGtestStandIn:
-    """What the stand-in accepts and rejects, checked directly.
-
-    ``TestRealCompile``'s verdict is only as strong as the operations this header
-    instantiates -- every expectation in an emitted file goes through these macros --
-    so a property missing here is one that class silently stops checking.
-    """
+    """``TestRealCompile``'s verdict is only as strong as the operations this header
+    instantiates."""
 
     @pytest.mark.parametrize(
         "statement",
@@ -501,13 +476,10 @@ class TestTheGtestStandIn:
         )
 
 
-#: Values that a generated C++ string literal must survive, keyed by what each one
-#: attacks. ``cpp_escape`` is the only thing standing between these and the emitted
-#: census: kernel names are charset-validated by no pattern anywhere, and
-#: ``engine.sdk_version`` is authored free-form.
-#:
-#: ASCII only: each case is checked byte-for-byte against its own code points below,
-#: and a multi-byte character would compare the wrong things.
+#: Values a generated C++ string literal must survive, keyed by what each attacks.
+#: ``cpp_escape`` is the only thing between these and the emitted census: no pattern
+#: charset-validates kernel names and ``engine.sdk_version`` is free-form. ASCII only,
+#: since each case is checked byte-for-byte against its own code points below.
 _HOSTILE_LITERAL_VALUES = {
     "quote-ends-the-literal": 'scale_add."f32"',
     "backslash-changes-the-string": "scale_add" + chr(92) + "path",
@@ -519,14 +491,10 @@ _HOSTILE_LITERAL_VALUES = {
     "delete-and-low-controls": "del\x7fsoh\x01end",
 }
 
-#: The subset whose RAW form a C++ front end actually refuses -- each key names the
-#: failure its own escaping prevents.
-#:
-#: The rest -- tab, DEL and the low control characters -- are LEGAL raw inside a C++
-#: string literal and denote the same bytes, as
-#: ``test_a_raw_control_character_is_accepted`` pins. Escaping them keeps the emitted
-#: census readable rather than carrying raw 0x01 bytes; it is not what stops it from
-#: compiling.
+#: The subset whose RAW form a C++ front end refuses, each key naming the failure its
+#: escaping prevents. Tab, DEL and the low control characters are LEGAL raw and denote
+#: the same bytes, as ``test_a_raw_control_character_is_accepted`` pins; escaping them
+#: keeps the census readable rather than making it compile.
 _MUST_BE_ESCAPED_TO_COMPILE = (
     "quote-ends-the-literal",
     "backslash-changes-the-string",
@@ -537,12 +505,9 @@ _MUST_BE_ESCAPED_TO_COMPILE = (
 
 
 def _byte_assertions(escaped: str, value: str) -> str:
-    """C++ that fails to compile unless ``escaped`` denotes exactly ``value``.
-
-    Compares against integer code points rather than another string literal: writing
-    the expectation as a literal would need escaping too, and the test would then
-    check ``cpp_escape`` against itself.
-    """
+    """C++ that fails to compile unless ``escaped`` denotes exactly ``value``. Compares
+    against integer code points, since a string literal would need escaping too and
+    would check ``cpp_escape`` against itself."""
     lines = [
         f'constexpr std::string_view kSubject = "{escaped}";',
         f"static_assert(kSubject.size() == {len(value)}, "
@@ -559,17 +524,10 @@ def _byte_assertions(escaped: str, value: str) -> str:
 class TestEscapedLiteralsDenoteTheAuthoredBytes:
     """A real compiler's verdict on ``cpp_escape``, not a string comparison.
 
-    ``test_generator.py``'s ``TestCppStringEscaping`` proves the filter is APPLIED --
-    a check on the call sites only. It cannot prove the filter is CORRECT, and
-    neither can the two value cases beside it, which compare a render against an
-    expected escaping written by the same hand: a filter and a test that share a
-    misunderstanding agree with each other.
-
-    These cases hand the escaped text to a C++ front end instead. The backslash and
-    control-character cases are the dangerous half, because they parse either way and
-    differ only in what the literal MEANS -- an expectation that compiles while
-    naming a string the descriptor never shipped. ``static_assert`` settles that at
-    compile time, so ``-fsyntax-only`` is enough and nothing has to be linked or run.
+    The value cases in ``test_generator.py`` compare a render against an escaping
+    written by the same hand. These hand the escaped text to a C++ front end instead:
+    the backslash and control-character cases parse either way and differ only in what
+    the literal MEANS, which ``static_assert`` settles at compile time.
     """
 
     @pytest.mark.parametrize(
@@ -588,10 +546,9 @@ class TestEscapedLiteralsDenoteTheAuthoredBytes:
 
     @pytest.mark.parametrize("case", _MUST_BE_ESCAPED_TO_COMPILE)
     def test_the_same_value_unescaped_is_rejected(self, host_cxx, case, tmp_path):
-        """The control: without it, a ``cpp_escape`` returning its input unchanged
-        would still pass whichever cases happen to need no escaping. The lone
-        backslash is the case that parses, and is caught only by the byte assertions.
-        """
+        """Without it, a ``cpp_escape`` returning its input unchanged would pass
+        whichever cases need no escaping; the lone backslash parses and is caught only
+        by the byte assertions."""
         value = _HOSTILE_LITERAL_VALUES[case]
         body = "#include <string_view>\n\n" + _byte_assertions(value, value)
         result = _parse_against_the_stub(host_cxx, body, tmp_path, "RawLiteral")
@@ -601,10 +558,8 @@ class TestEscapedLiteralsDenoteTheAuthoredBytes:
         )
 
     def test_a_raw_control_character_is_accepted(self, host_cxx, tmp_path):
-        """Why the control above covers only part of the table: the opposite is easy
-        to assume, and an assumed rejection here would make the escape-or-fail set
-        look stronger than it is.
-        """
+        """Why the control above covers only part of the table: an assumed rejection
+        would make the escape-or-fail set look stronger than it is."""
         value = _HOSTILE_LITERAL_VALUES["delete-and-low-controls"]
         body = "#include <string_view>\n\n" + _byte_assertions(value, value)
         result = _parse_against_the_stub(host_cxx, body, tmp_path, "RawControl")

@@ -31,9 +31,7 @@ FORBIDDEN_SKILL_TEXT = (
 FORBIDDEN_SKILL_PATTERNS = (re.compile(r"\bAskUserQuestion\b"),)
 
 # The lookbehind excludes '.' so a relative path into a sibling skill directory
-# ("../hipdnn-ingestor-engine/RUNBOOK.md") is not read as a slash command. A genuine
-# command reference is preceded by whitespace, a line start, a backtick or a
-# bracket, never by a path segment separator.
+# ("../hipdnn-ingestor-engine/RUNBOOK.md") is not read as a slash command.
 SLASH_SKILL_PATTERN = re.compile(r"(?<![\w:/.])/(?:hipdnn|pr-summary)[A-Za-z0-9_-]*")
 
 EXPECTED_SCRIPTS = {
@@ -52,15 +50,15 @@ MARKDOWN_LINK_PATTERN = re.compile(
     r"\[[^\]]*\]\(\s*<?([^)>\s]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)"
 )
 
-# Link targets that are not in-repo relative paths: any URL scheme (this also
+# Link targets that are not in-repo relative paths: any URL scheme (which also
 # covers a Windows drive letter), a protocol-relative URL, a site-absolute path
 # and a pure in-page fragment.
 NON_RELATIVE_LINK_PATTERN = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:|//|/|#)")
 
 BACKTICK_PATTERN = re.compile(r"`([^`\n]+)`")
 
-# Extensions that make a backticked token unambiguously a reference to a file
-# rather than to a directory, a command or a symbol.
+# Extensions that make a backticked token unambiguously a file reference rather
+# than a directory, command or symbol.
 PROSE_PATH_EXTENSIONS = frozenset(
     {".ps1", ".py", ".cmake", ".json", ".yaml", ".yml", ".md", ".j2"}
 )
@@ -69,12 +67,12 @@ PROSE_PATH_EXTENSIONS = frozenset(
 PATH_PLACEHOLDER_CHARS = "<>${}*|\"' \t"
 
 # A "<name>" placeholder. The lookbehind keeps C++ generics ("vector<int>") and
-# quoted strings from reading as placeholders.
+# quoted strings out.
 PLACEHOLDER_PATTERN = re.compile(r"(?<![A-Za-z0-9_\"'])<([A-Za-z][A-Za-z0-9_-]*)>")
 
-# Fence languages whose contents are commands. Untagged fences count; language
-# tagged fences for real languages do not, so "#include <algorithm>" and C++
-# template arguments never reach the placeholder check.
+# Fence languages whose contents are commands. Untagged fences count; fences
+# tagged for a real language do not, so C++ generics never reach the
+# placeholder check.
 COMMAND_FENCE_LANGUAGES = frozenset(
     {
         "",
@@ -139,13 +137,12 @@ def is_ignored(path: Path) -> bool:
 def symlink_target(path: Path) -> Path | None:
     """Return what `path` links to, or None when it is ordinary content.
 
-    A checkout on a filesystem without symlink support (Windows without the
-    privilege, or core.symlinks=false) stores git's mode-120000 entry as a
-    regular file whose entire content is the link target. Both forms are
-    recognised here so the byte-identity check below does not fire on a pair
-    that is a symlink upstream. Ordinary script content never round-trips as a
-    single-line path that resolves to an existing file, so this cannot mask a
-    genuine divergence.
+    A checkout without symlink support (Windows without the privilege, or
+    core.symlinks=false) stores git's mode-120000 entry as a regular file whose
+    whole content is the link target, so both forms are recognised and the
+    byte-identity check does not fire on a pair that is a symlink upstream.
+    Ordinary script content never round-trips as a single-line path resolving to
+    an existing file.
     """
     if path.is_symlink():
         return (path.parent / path.readlink()).resolve()
@@ -163,11 +160,10 @@ def symlink_target(path: Path) -> Path | None:
 def split_markdown(text: str) -> tuple[str, str]:
     """Split a markdown document into its prose half and its command half.
 
-    The prose half is everything outside a fenced code block: link, path and
+    Prose is everything outside a fenced code block; link, path and
     placeholder-definition checks run there so an illustrative snippet is never
-    mistaken for a real reference. The command half is the contents of fences
-    that hold commands (untagged, or tagged with a shell); placeholder *use* is
-    collected there.
+    mistaken for a real reference. Commands are the contents of untagged or
+    shell-tagged fences, where placeholder *use* is collected.
     """
     prose: list[str] = []
     commands: list[str] = []
@@ -206,12 +202,10 @@ def check_link_targets(skill: Path) -> list[str]:
     """Markdown links must still resolve from an *installed* skill root.
 
     install-skills.py copies exactly one skill directory and nothing above it,
-    so a link that reaches outside `skills/<this-skill>/` resolves in the
-    checkout and dangles once installed. Resolving against the checkout would
-    therefore prove nothing; targets are resolved against the installed layout.
-
-    The one permitted escape is a sibling skill directory under `skills/`: a
-    default install lays those down side by side.
+    so a link reaching outside `skills/<this-skill>/` resolves in the checkout
+    and dangles once installed; targets are resolved against the installed
+    layout instead. The one permitted escape is a sibling skill directory under
+    `skills/`, which a default install lays down side by side.
     """
     errors: list[str] = []
     skill_root = skill.resolve()
@@ -249,12 +243,10 @@ def check_link_targets(skill: Path) -> list[str]:
 def check_prose_paths(skill: Path) -> list[str]:
     """Backticked repo-relative file paths named in prose must exist.
 
-    False positives would make this check worthless, so the guards below are
-    deliberately narrow. The decisive one is the last: a token counts as a
-    claim about a location only when its FIRST component names a real
-    directory at the repository root or inside the skill. Without that anchor
-    the token may simply be relative to a working directory the prose
-    established earlier, and an ambiguous token is left alone.
+    The guards are deliberately narrow, because false positives would make the
+    check worthless. The decisive one is the last: a token is a claim about a
+    location only when its FIRST component names a real directory at the
+    repository root or inside the skill. An ambiguous token is left alone.
     """
     errors: list[str] = []
     for markdown in markdown_files(skill):
@@ -290,13 +282,10 @@ def check_prose_paths(skill: Path) -> list[str]:
 def check_placeholders(skill: Path) -> list[str]:
     """A '<name>' placeholder used in a command must be introduced in prose.
 
-    A command block that substitutes a placeholder the document never defines
-    leaves the reader guessing, and sibling commands then drift into using a
-    literal instead. Collection is restricted to command-shaped fences, and the
-    "defined" test is deliberately permissive: the bare token appearing
-    anywhere outside a fence in the same file counts, whether or not the prose
-    wraps it in angle brackets. Frontmatter counts as prose, so an
-    `argument-hint` introduction is enough.
+    Collection is restricted to command-shaped fences. The "defined" test is
+    deliberately permissive: the bare token appearing anywhere outside a fence
+    in the same file counts, with or without angle brackets, and frontmatter
+    counts as prose, so an `argument-hint` introduction is enough.
     """
     errors: list[str] = []
     for markdown in markdown_files(skill):

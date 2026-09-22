@@ -95,20 +95,16 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        // Step 1: Randomize Q, K, V, dO with identical seeds for both bundles
+        // Randomize Q, K, V, dO with identical seeds for both bundles.
         for(auto& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
         }
 
-        // Step 2: Compute valid O and stats from Q, K, V using CPU forward reference.
-        // The backward pass requires O and stats (LSE) that are mathematically consistent
-        // with Q, K, V — random values would cause GPU vs CPU divergence.
-        //
-        // UIDs are resolved here (not in runGraphTest) because graph.build() —
-        // called by verifyGraph() before initializeBundle() — is what assigns
-        // UIDs via assignUnsetTensorUids().  Querying get_uid() before build()
-        // returns the default (0) for all tensors.
+        // The backward pass needs O and stats (LSE) mathematically consistent with
+        // Q, K, V, so derive them with the CPU forward reference. UIDs are resolved here
+        // because graph.build() (run by verifyGraph() before initializeBundle()) is what
+        // assigns them; get_uid() before build() returns 0.
         auto& qTensor = bundle.getTensor(_qAttr->get_uid());
         auto& kTensor = bundle.getTensor(_kAttr->get_uid());
         auto& vTensor = bundle.getTensor(_vAttr->get_uid());
@@ -229,11 +225,8 @@ protected:
         auto validationResult = graph.validate();
         EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
-        // Store tensor attribute pointers — NOT UIDs.  UIDs are assigned by
-        // graph.build() (via assignUnsetTensorUids()), which runs inside
-        // verifyGraph().  Storing get_uid() here would return 0 for all tensors
-        // because validate() does not assign UIDs.  initializeBundle() resolves
-        // UIDs lazily via _qAttr->get_uid() after build() has run.
+        // Store tensor attribute pointers, not UIDs: validate() does not assign UIDs, so
+        // get_uid() here returns 0. initializeBundle() resolves UIDs after build().
         _qAttr = q;
         _kAttr = k;
         _vAttr = v;
@@ -274,22 +267,10 @@ using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
 
 TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
 {
-    // BF16 backward error comes from two sources:
-    // 1. Softmax recomputation divergence: GPU ASM kernel and CPU FP32 reference
-    //    compute exp(score - lse) with different rounding (BF16 hw vs FP32 scalar).
-    //    At positions where softmax probability is near-zero, small probability
-    //    differences produce large absolute gradient errors.
-    // 2. Inherent BF16 precision: 7-bit mantissa causes rounding at each
-    //    arithmetic step. The backward pass compounds this through softmax
-    //    recomputation, dS = P*(dP-D) catastrophic cancellation, and gradient
-    //    matmuls.
-    //
-    // The CPU reference accumulates dQ/dK/dV in FP32 and converts to BF16 once
-    // at the end, matching the GPU kernel's A32 accumulator + dq_convert path.
-    //
-    // Measured error floor (worst seed across 8 seeds): between 0.3 and 0.5.
-    // Use 5e-1 — same as FP16 backward, with ~2x margin over the measured floor
-    // of 0.3. Verified stable across seeds {0,42,123,456,789,1024,2048,31415}.
+    // BF16 backward error comes from softmax-recomputation divergence and from the 7-bit
+    // mantissa compounding through dS = P*(dP-D) and the gradient matmuls. The CPU
+    // reference accumulates dQ/dK/dV in FP32 and converts once at the end, matching the
+    // kernel's A32 accumulator + dq_convert path.
 
     auto tolerance = 5e-1f;
 
@@ -302,9 +283,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 {
-    // FP16 backward has the same error sources as BF16 but the 10-bit mantissa
-    // (vs BF16's 7) yields tighter results. Worst-case element lands under 0.25.
-    // Use 5e-1 — ~2x margin over that measured floor.
+    // Same error sources as BF16, with a 10-bit mantissa.
 
     auto tolerance = 5e-1f;
 
