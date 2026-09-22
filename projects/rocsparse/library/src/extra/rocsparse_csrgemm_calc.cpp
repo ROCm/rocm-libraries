@@ -49,10 +49,20 @@ namespace rocsparse
         return static_cast<uint32_t>((blocks < max_grid) ? blocks : max_grid);
     }
 
+    // True when the grid was clamped below the natural block count (the kernel must
+    // grid-stride); false lets the kernel take the straight-line single-sweep path.
+    template <typename I>
+    static inline bool csrgemm_grid_clamped(rocsparse_handle handle, I num_blocks)
+    {
+        return static_cast<int64_t>(num_blocks)
+               > static_cast<int64_t>(handle->properties.maxGridSize[0]);
+    }
+
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename T>
@@ -117,6 +127,11 @@ namespace rocsparse
                 idx_base_D,
                 mul,
                 add);
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
@@ -131,6 +146,7 @@ namespace rocsparse
               uint32_t HASHSIZE,
               uint32_t HASHVAL,
               uint32_t WARPSIZE,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename T>
@@ -193,6 +209,11 @@ namespace rocsparse
                     idx_base_D,
                     mul,
                     add);
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 
@@ -200,6 +221,7 @@ namespace rocsparse
               uint32_t WFSIZE,
               uint32_t CHUNKSIZE,
               uint32_t WARPSIZE,
+              bool     GRID_STRIDE,
               typename I,
               typename J,
               typename T>
@@ -263,6 +285,11 @@ namespace rocsparse
                     idx_base_D,
                     mul,
                     add);
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
+            }
         }
     }
 }
@@ -458,106 +485,76 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     }
 
     // Compute columns and accumulate values for each group
+#define CSRGEMM_FILL_WF_PER_ROW_IMPL(GROUP_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, GS) \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                        \
+        (rocsparse::csrgemm_fill_wf_per_row<CSRGEMM_DIM,                                       \
+                                            CSRGEMM_SUB,                                       \
+                                            CSRGEMM_HASHSIZE,                                  \
+                                            CSRGEMM_FLL_HASH,                                  \
+                                            GS>),                                              \
+        dim3(rocsparse::csrgemm_clamp_grid_size(                                               \
+            handle, (h_group_size[GROUP_ID] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),          \
+        dim3(CSRGEMM_DIM),                                                                     \
+        0,                                                                                     \
+        stream,                                                                                \
+        h_group_size[GROUP_ID],                                                                \
+        rocsparse::max(k, n),                                                                  \
+        &d_group_offset[GROUP_ID],                                                             \
+        d_perm,                                                                                \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),               \
+        csr_row_ptr_A,                                                                         \
+        csr_col_ind_A,                                                                         \
+        csr_val_A,                                                                             \
+        csr_row_ptr_B,                                                                         \
+        csr_col_ind_B,                                                                         \
+        csr_val_B,                                                                             \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),                \
+        csr_row_ptr_D,                                                                         \
+        csr_col_ind_D,                                                                         \
+        csr_val_D,                                                                             \
+        csr_row_ptr_C,                                                                         \
+        csr_col_ind_C,                                                                         \
+        csr_val_C,                                                                             \
+        base_A,                                                                                \
+        base_B,                                                                                \
+        descr_C->base,                                                                         \
+        base_D,                                                                                \
+        info_C->csrgemm_info->mul,                                                             \
+        info_C->csrgemm_info->add,                                                             \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+#define CSRGEMM_FILL_WF_PER_ROW(GROUP_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE)              \
+    if(rocsparse::csrgemm_grid_clamped(                                                            \
+           handle, (h_group_size[GROUP_ID] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1))                \
+    {                                                                                              \
+        CSRGEMM_FILL_WF_PER_ROW_IMPL(GROUP_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, true);  \
+    }                                                                                              \
+    else                                                                                           \
+    {                                                                                              \
+        CSRGEMM_FILL_WF_PER_ROW_IMPL(GROUP_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, false); \
+    }
+
     // Group 0: 0 - 16 non-zeros per row
     if(h_group_size[0] > 0)
     {
-#define CSRGEMM_DIM 256
-#define CSRGEMM_SUB 8
-#define CSRGEMM_HASHSIZE 16
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_fill_wf_per_row<CSRGEMM_DIM,
-                                                CSRGEMM_SUB,
-                                                CSRGEMM_HASHSIZE,
-                                                CSRGEMM_FLL_HASH>),
-            dim3(rocsparse::csrgemm_clamp_grid_size(
-                handle, (h_group_size[0] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
-            dim3(CSRGEMM_DIM),
-            0,
-            stream,
-            h_group_size[0],
-            rocsparse::max(k, n),
-            &d_group_offset[0],
-            d_perm,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            csr_val_C,
-            base_A,
-            base_B,
-            descr_C->base,
-            base_D,
-            info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
-#undef CSRGEMM_HASHSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
+        CSRGEMM_FILL_WF_PER_ROW(0, 256, 8, 16);
     }
 
     // Group 1: 17 - 32 non-zeros per row
     if(h_group_size[1] > 0)
     {
-#define CSRGEMM_DIM 256
-#define CSRGEMM_SUB 16
-#define CSRGEMM_HASHSIZE 32
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_fill_wf_per_row<CSRGEMM_DIM,
-                                                CSRGEMM_SUB,
-                                                CSRGEMM_HASHSIZE,
-                                                CSRGEMM_FLL_HASH>),
-            dim3(rocsparse::csrgemm_clamp_grid_size(
-                handle, (h_group_size[1] - 1) / (CSRGEMM_DIM / CSRGEMM_SUB) + 1)),
-            dim3(CSRGEMM_DIM),
-            0,
-            stream,
-            h_group_size[1],
-            rocsparse::max(k, n),
-            &d_group_offset[1],
-            d_perm,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            csr_val_C,
-            base_A,
-            base_B,
-            descr_C->base,
-            base_D,
-            info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
-#undef CSRGEMM_HASHSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
+        CSRGEMM_FILL_WF_PER_ROW(1, 256, 16, 32);
     }
 
-#define CSRGEMM_FILL_BLOCK_PER_ROW(                                                    \
-    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)       \
+#define CSRGEMM_FILL_BLOCK_PER_ROW_IMPL(                                               \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, GS)   \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
         (rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,                            \
                                                CSRGEMM_SUB,                            \
                                                CSRGEMM_HASHSIZE,                       \
                                                CSRGEMM_FLL_HASH,                       \
-                                               CSRGEMM_WARPSIZE>),                     \
+                                               CSRGEMM_WARPSIZE,                       \
+                                               GS>),                                   \
         dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[GROUP_SIZE_ID])), \
         dim3(CSRGEMM_DIM),                                                             \
         (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),     \
@@ -586,7 +583,21 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
         base_D,                                                                        \
         info_C->csrgemm_info->mul,                                                     \
         info_C->csrgemm_info->add,                                                     \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+// Dispatch the straight-line variant unless the clamp binds (AISPARSE-677).
+#define CSRGEMM_FILL_BLOCK_PER_ROW(                                                              \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)                 \
+    if(rocsparse::csrgemm_grid_clamped(handle, h_group_size[GROUP_SIZE_ID]))                     \
+    {                                                                                            \
+        CSRGEMM_FILL_BLOCK_PER_ROW_IMPL(                                                         \
+            GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, true);  \
+    }                                                                                            \
+    else                                                                                         \
+    {                                                                                            \
+        CSRGEMM_FILL_BLOCK_PER_ROW_IMPL(                                                         \
+            GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, false); \
+    }
 
 #define CSRGEMM_FILL_BLOCK_PER_ROW_2(                                              \
     GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)   \
@@ -596,6 +607,19 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                            CSRGEMM_HASHSIZE,       \
                                                            CSRGEMM_FLL_HASH,       \
                                                            CSRGEMM_WARPSIZE,       \
+                                                           true,                   \
+                                                           I,                      \
+                                                           J,                      \
+                                                           T>,                     \
+        hipFuncAttributeMaxDynamicSharedMemorySize,                                \
+        csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>())); \
+    RETURN_IF_HIP_ERROR(hipFuncSetAttribute(                                       \
+        (const void*)rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,            \
+                                                           CSRGEMM_SUB,            \
+                                                           CSRGEMM_HASHSIZE,       \
+                                                           CSRGEMM_FLL_HASH,       \
+                                                           CSRGEMM_WARPSIZE,       \
+                                                           false,                  \
                                                            I,                      \
                                                            J,                      \
                                                            T>,                     \
@@ -605,43 +629,57 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     CSRGEMM_FILL_BLOCK_PER_ROW(                                                    \
         GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)
 
-#define CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS(                                    \
-    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE) \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
-        (rocsparse::csrgemm_fill_block_per_row_multipass<CSRGEMM_DIM,            \
-                                                         CSRGEMM_SUB,            \
-                                                         CSRGEMM_CHUNKSIZE,      \
-                                                         CSRGEMM_WARPSIZE>),     \
-        dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[10])),      \
-        dim3(CSRGEMM_DIM),                                                       \
-        0,                                                                       \
-        stream,                                                                  \
-        h_group_size[10],                                                        \
-        n,                                                                       \
-        &d_group_offset[10],                                                     \
-        d_perm,                                                                  \
-        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host), \
-        csr_row_ptr_A,                                                           \
-        csr_col_ind_A,                                                           \
-        csr_val_A,                                                               \
-        csr_row_ptr_B,                                                           \
-        csr_col_ind_B,                                                           \
-        csr_val_B,                                                               \
-        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),  \
-        csr_row_ptr_D,                                                           \
-        csr_col_ind_D,                                                           \
-        csr_val_D,                                                               \
-        csr_row_ptr_C,                                                           \
-        csr_col_ind_C,                                                           \
-        csr_val_C,                                                               \
-        workspace_B,                                                             \
-        base_A,                                                                  \
-        base_B,                                                                  \
-        descr_C->base,                                                           \
-        base_D,                                                                  \
-        info_C->csrgemm_info->mul,                                               \
-        info_C->csrgemm_info->add,                                               \
-        handle->pointer_mode == rocsparse_pointer_mode_host);
+#define CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS_IMPL(                                   \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, GS) \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
+        (rocsparse::csrgemm_fill_block_per_row_multipass<CSRGEMM_DIM,                \
+                                                         CSRGEMM_SUB,                \
+                                                         CSRGEMM_CHUNKSIZE,          \
+                                                         CSRGEMM_WARPSIZE,           \
+                                                         GS>),                       \
+        dim3(rocsparse::csrgemm_clamp_grid_size(handle, h_group_size[10])),          \
+        dim3(CSRGEMM_DIM),                                                           \
+        0,                                                                           \
+        stream,                                                                      \
+        h_group_size[10],                                                            \
+        n,                                                                           \
+        &d_group_offset[10],                                                         \
+        d_perm,                                                                      \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),     \
+        csr_row_ptr_A,                                                               \
+        csr_col_ind_A,                                                               \
+        csr_val_A,                                                                   \
+        csr_row_ptr_B,                                                               \
+        csr_col_ind_B,                                                               \
+        csr_val_B,                                                                   \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),      \
+        csr_row_ptr_D,                                                               \
+        csr_col_ind_D,                                                               \
+        csr_val_D,                                                                   \
+        csr_row_ptr_C,                                                               \
+        csr_col_ind_C,                                                               \
+        csr_val_C,                                                                   \
+        workspace_B,                                                                 \
+        base_A,                                                                      \
+        base_B,                                                                      \
+        descr_C->base,                                                               \
+        base_D,                                                                      \
+        info_C->csrgemm_info->mul,                                                   \
+        info_C->csrgemm_info->add,                                                   \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+#define CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS(                                                    \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)                 \
+    if(rocsparse::csrgemm_grid_clamped(handle, h_group_size[10]))                                \
+    {                                                                                            \
+        CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS_IMPL(                                               \
+            GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, true);  \
+    }                                                                                            \
+    else                                                                                         \
+    {                                                                                            \
+        CSRGEMM_FILL_BLOCK_PER_ROW_MULTIPASS_IMPL(                                               \
+            GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE, false); \
+    }
 
     // Group 2: 33 - 256 non-zeros per row
     if(h_group_size[2] > 0)
