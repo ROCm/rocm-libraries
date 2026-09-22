@@ -241,6 +241,8 @@ def write(filename_noExt, data, format="yaml"):
         writeJson(filename_noExt + ".json", data)
     elif format == "msgpack":
         writeMsgPack(filename_noExt + ".dat", data)
+    elif format == "msgpack-indexed":
+        writeMsgPackIndexed(filename_noExt + ".dat", data)
     else:
         printExit("Unrecognized write format {}".format(format))
 
@@ -267,6 +269,61 @@ def writeJson(filename, data):
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
     raw = msgpack.packb(data)
+    compressed = zlib.compress(raw, 9)
+    with open(filename + ".zlib", "wb") as f:
+        f.write(compressed)
+    try:
+        os.unlink(filename)
+    except FileNotFoundError:
+        pass
+
+# Bumped only when the on-disk layout changes incompatibly. The C++ loader
+# accepts this exact value and rejects anything higher, so a reader that
+# predates a future format cannot silently misparse it.
+INDEXED_FORMAT_VERSION = 2
+
+def writeMsgPackIndexed(filename, data):
+    """Writes a MasterSolutionLibrary state dict in indexed Message Pack format.
+
+    Same artifact contract as writeMsgPack -- zlib level 9, ".dat.zlib" on
+    disk, stale uncompressed sibling removed -- but each solution is packed
+    on its own into one concatenated BIN blob, described by a flat
+    [index, offset, length, ...] side table. That lets the runtime hold the
+    blob unparsed and deserialize only the solutions a query actually
+    selects. The "library" decision tree and optional "version" are emitted
+    unchanged.
+
+    Only MasterSolutionLibrary payloads may be written this way. Flat
+    dictionaries such as the per-arch lazy-loading mapping file have no
+    "solutions" key and must keep using writeMsgPack.
+    """
+    if not isinstance(data, dict) or "solutions" not in data or "library" not in data:
+        printExit("writeMsgPackIndexed requires a MasterSolutionLibrary state dict "
+                  "with 'solutions' and 'library' keys")
+
+    # state() emits solutions as a list of dicts, so sorting needs an explicit
+    # key; a bare sorted() would try to order dicts and raise TypeError.
+    solutions = sorted(data["solutions"], key=lambda s: s["index"])
+
+    packer = msgpack.Packer(use_bin_type=True)
+    solutionsIndex = []
+    chunks = []
+    offset = 0
+    for solution in solutions:
+        packed = packer.pack(solution)
+        solutionsIndex.extend((solution["index"], offset, len(packed)))
+        chunks.append(packed)
+        offset += len(packed)
+
+    # Fixed key order keeps the artifact byte-reproducible across runs.
+    indexed = {"format_version": INDEXED_FORMAT_VERSION}
+    if "version" in data:
+        indexed["version"] = data["version"]
+    indexed["solutions_index"] = solutionsIndex
+    indexed["solutions_blob"] = b"".join(chunks)
+    indexed["library"] = data["library"]
+
+    raw = msgpack.packb(indexed, use_bin_type=True)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)

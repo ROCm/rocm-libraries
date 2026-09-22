@@ -46,12 +46,14 @@ This RFC adds end-to-end ragged-tensor support:
 
 1. **Frontend (`TensorAttributes`)** gains `set_ragged_offset` /
    `get_ragged_offset` and `set_alignment` / `get_alignment`.
-2. **Flatbuffer schema** gains defaulted `ragged_offset_tensor_uid`
-   and `alignment` fields (wire-compatible per RFC 0005).
-   `alignment` is a needed addition in its own right (and is
-   cuDNN-compatible); it is bundled into the same schema change so
-   plugins update once to support both it and ragged tensors,
-   though no logic in this RFC consumes it.
+2. **Flatbuffer schema** gains defaulted `ragged_offset_tensor_uid`,
+   `alignment`, and `ragged_offset_multiplier` fields (wire-compatible
+   per RFC 0005). `alignment` is a needed addition in its own right (and
+   is cuDNN-compatible); it is bundled into the same schema change so
+   plugins update once to support both it and ragged tensors, though no
+   logic in this RFC consumes it. `ragged_offset_multiplier`, by
+   contrast, is consumed by SDK logic and version-gated (see
+   [§4.3](#43-flatbuffer-schema-additions)).
 3. **Backend** propagates the new fields through existing
    get/set-attribute paths; no new C-API entry points; variant pack
    unchanged.
@@ -62,7 +64,10 @@ This RFC adds end-to-end ragged-tensor support:
    aux is held type-erased as `std::shared_ptr<ITensor>` and read
    through a runtime element-size branch (int32 or int64) that
    widens to `int64_t` at the read site, so neither ragged-tensor
-   type carries an `IndexT` template parameter.
+   type carries an `IndexT` template parameter. Each stored offset is
+   scaled to element units at a single read boundary by a per-tensor
+   `ragged_offset_multiplier` (default 1):
+   `element_offset = stored_offset * ragged_offset_multiplier`.
 5. **Plan layer** wraps the variant-pack pointer in a
    `ShallowRaggedTensor` per execute and passes it to the CPU
    reference as `TensorBase<T>&` — reference signatures gain only
@@ -113,6 +118,17 @@ The design supports this naturally: each primary's
 `TensorAttributes` references the aux by UID; the runtime holds
 one `ITensor` per UID; multiple `RaggedTensor<T>`s share the same
 `ragged_offset` aux via `shared_ptr<ITensor>`.
+
+A `ragged_offset` may be stored either in element units or in coarser
+units than a primary's element stride — e.g. one *token* offset per
+batch boundary. Each primary carries a `ragged_offset_multiplier`
+recovering element units at the single read boundary
+(`element_offset = stored_offset * multiplier`; default 1 means offsets
+are already in element units). This lets one shared token-unit aux
+serve primaries of differing `H*D`: AITER's SDPA implementation shares a
+`ragged_offset` across Q/O and another across K/V, and each primary sets
+its own `multiplier = H*D = seqStride` so the same stored offsets
+address each buffer correctly.
 
 This RFC does not introduce anything to address the way `seq_lens` are
 handled, but discussion of their role in the process is included for context.
@@ -282,6 +298,10 @@ auto get_ragged_offset() const -> std::shared_ptr<Tensor_attributes>;
 
 auto set_alignment(int64_t alignmentInBytes) -> Tensor_attributes&;
 auto get_alignment() const -> int64_t;   // default 16
+
+auto set_ragged_offset_multiplier(int64_t value) -> Tensor_attributes&;
+auto get_ragged_offset_multiplier() const -> int64_t;   // default 1
+bool has_ragged_offset_multiplier() const;              // != default
 ```
 
 `set_alignment` declares the required byte alignment of the
@@ -295,10 +315,15 @@ ragged-tensor SDK types.
 
 **Frontend validation** (in `validate()`):
 
-- The `ragged_offset` aux exists in the graph (by UID), has rank
-  4, and its first dim equals `B + 1` where `B` is the primary's
-  first dim.
 - `get_alignment() >= 1`.
+- `get_ragged_offset_multiplier() >= 1`.
+- A non-default multiplier requires a `ragged_offset` to be set.
+
+The frontend does **not** inspect the aux's rank or first dim: those
+structural constraints (rank 4, first dim `B + 1`, int32/int64 element
+type) are enforced at SDK construction in
+`RaggedTensorBase::validateRaggedStructure`
+([§4.5](#45-data-sdk-shared-elements) item 5).
 
 `seq_lens` validation, where an op cares, lives on that op's
 node-level `validate()`.
@@ -316,16 +341,22 @@ fields:
 ```
 ragged_offset_tensor_uid: long = null;
 alignment:                long = 16;
+ragged_offset_multiplier: long = 1;
 ```
 
-Wire-compatible per RFC 0005. Only `ragged_offset_tensor_uid` is
-functionally required by *this RFC's* logic. `alignment` is a
+Wire-compatible per RFC 0005. `alignment` is a
 needed addition in its own right (kept consistent with cuDNN, see
 [§4.2](#42-frontend-tensorattributes-additions)); it is appended
 in the same change so that plugins make a single update to support
 both alignment and ragged tensors, rather than going through two
 separate rounds of schema evolution and version bumps. No code in
 this RFC reads it.
+
+`ragged_offset_multiplier` differs from `alignment` on both counts: the
+SDK addressing path reads it ([§4.5](#45-data-sdk-shared-elements) item
+1) and it is gated by its own plugin-API floor (below). It is folded
+into the compiled-plan cache key **by value**, since it changes
+execution.
 
 No `seq_lens_tensor_uid` is added
 here: ops that consume `seq_lens` reference it through their own
@@ -338,6 +369,13 @@ requires an `is_ragged_tensor_enabled` boolean to be added to
 the graph, and `computeMinimumPluginApiVersion` to be updated
 to map that boolean to the appropriate version.
 
+`ragged_offset_multiplier` carries its own floor
+`K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION = "1.4.0"`, which **dominates**
+the ragged-tensor floor; `K_MAX_SUPPORTED_API_VERSION` is now `"1.4.0"`.
+It is surfaced by `GraphDescriptor::hasRaggedOffsetMultiplier()` (true
+when any tensor carries a non-default multiplier), which feeds
+`computeMinimumEnginePluginApiVersion` alongside the ragged flag.
+
 This also requires an update to the TensorAttributes and Graph
 json serialization/deserialization to output these values, and
 set appropriate defaults on older graphs where they aren't
@@ -347,11 +385,15 @@ present.
 ### 4.4 Backend wiring
 
 Backend tensor descriptor mirrors the frontend additions: optional
-`ragged_offset_tensor_uid` and `alignment` (default 16), exposed
-through existing get/set-attribute paths under new enum values in
-the hipDNN extension range. As on the frontend, `alignment` is
+`ragged_offset_tensor_uid`, `alignment` (default 16), and
+`ragged_offset_multiplier`
+(`HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER` = 1311, INT64, default 1),
+exposed through existing get/set-attribute paths under new enum values
+in the hipDNN extension range. As on the frontend, `alignment` is
 carried through but unused here (see
-[§4.2](#42-frontend-tensorattributes-additions)). No new `hipdnnBackend*` entry points,
+[§4.2](#42-frontend-tensorattributes-additions)); unlike `alignment`,
+`ragged_offset_multiplier` feeds the version gate
+([§4.3](#43-flatbuffer-schema-additions)). No new `hipdnnBackend*` entry points,
 and the variant pack representation is unchanged: at execute time
 the variant pack carries `UID → void*` for every tensor in the
 graph, including ragged primaries, their `ragged_offset`, and any
@@ -382,6 +424,21 @@ These apply to both `RaggedTensor<T>` and
        }
    }
    ```
+
+   The stored offset is scaled to element units at a single boundary:
+
+   ```cpp
+   int64_t readElementOffset(size_t b) const {
+       return readOffset(b) * _raggedOffsetMultiplier;
+   }
+   ```
+
+   `readOffset` still does the type-erased int32/int64 widening;
+   `readElementOffset` applies the per-tensor multiplier (default 1).
+   Every downstream consumer (`getIndexImpl`, and `collectRowOffsets`
+   feeding `raggedIterationInfo`) reads through `readElementOffset`, so
+   the offset table — and therefore `seqExtent(b)` (item 4) — is already
+   in element units and no other addressing math changes.
 
    The widen-to-`int64_t` cost is negligible relative to the per-
    element work the CPU reference does, and the structural
@@ -475,8 +532,11 @@ These apply to both `RaggedTensor<T>` and
    only ever encounters a supported element size.
 
    *Structural* (`validateRaggedStructure`):
-   - `paddedDims` is non-empty.
    - `raggedOffset != nullptr`.
+   - `raggedOffsetMultiplier >= 1`.
+   - `paddedDims` has rank `>= 2`.
+   - `strides.size() == paddedDims.size()`.
+   - `seqAxis ∈ [1, rank(paddedDims))`.
    - `raggedOffset->elementCount() == paddedDims[0] + 1`
      (i.e. `B + 1`).
    - `raggedOffset` has rank 4.
@@ -503,7 +563,10 @@ These apply to both `RaggedTensor<T>` and
    all batches' per-batch ranges, which is what the iterator
    visits. `elementSpace()` reports `physicalElementCount`, the
    size of the allocated buffer. The buffer is sized to exactly
-   `ragged_offset[B]` elements, so the two normally coincide.
+   `ragged_offset[B]` elements, so the two normally coincide. When the
+   aux is stored coarsely the stored `ragged_offset[B]` is a token count
+   and the reported element count is `stored * multiplier`, the scale
+   already applied by `readElementOffset` (item 1).
    `alignment` does **not** enter either calculation: it
    constrains the buffer *pointer*, not the buffer *size* (see
    [§4.2](#42-frontend-tensorattributes-additions)).
@@ -554,7 +617,8 @@ public:
                      std::vector<int64_t>     strides,
                      int                      seqAxis,   // BSHD_SEQ_AXIS
                      std::shared_ptr<ITensor> raggedOffset,
-                     std::optional<size_t>    physicalElementCount);
+                     std::optional<size_t>    physicalElementCount,
+                     int64_t                  raggedOffsetMultiplier = 1);
 
     const std::vector<int64_t>& dims() const override;        // paddedDims
     const std::vector<int64_t>& strides() const override;     // strides
@@ -577,6 +641,7 @@ protected:
     size_t                   _iteratedElementCount;  // ragged_offset[B]
     size_t                   _physicalElementCount;  // == ragged_offset[B]
     std::shared_ptr<ITensor> _raggedOffset;          // non-null, never reseated
+    int64_t                  _raggedOffsetMultiplier; // stored_offset -> element scale
 };
 ```
 
@@ -596,7 +661,8 @@ public:
                  std::vector<int64_t>     strides,
                  int                      seqAxis,   // BSHD_SEQ_AXIS
                  std::shared_ptr<ITensor> raggedOffset,
-                 std::optional<size_t>    physicalElementCount = std::nullopt);
+                 std::optional<size_t>    physicalElementCount = std::nullopt,
+                 int64_t                  raggedOffsetMultiplier = 1);
 
     // ITensor / TensorBase<T> overrides:
     //   dims()         -> paddedDims                    (dims()[1] == S_max)
@@ -604,7 +670,7 @@ public:
     //   elementSpace() -> physicalElementCount           (allocation size == ragged_offset[B])
     //   elementCount() -> ragged_offset[B]               (iterated elements)
     //   isPacked()     -> false
-    //   getIndexImpl() -> readOffset(b) + sq*stride_1 + ...  (ragged addressing)
+    //   getIndexImpl() -> readElementOffset(b) + sq*stride_1 + ...  (ragged addressing)
     //   begin/end      -> RaggedCompositeIndex (selected by the
     //                      iterator from raggedIterationInfo(); walks
     //                      each batch's ragged_offset range)
@@ -643,13 +709,13 @@ it. The primary's T-typed buffer remains mutable as usual via
 overrides `getIndexImpl` (the protected virtual from
 [§4.5](#45-data-sdk-shared-elements) item 3) so that a multi-dim
 index `{b, sq, …}` translates to a physical offset using
-`readOffset(b)` (i.e. `ragged_offset[b]` widened to `int64_t`) as
-the per-batch base:
-`physical_offset = readOffset(b) + inner_product({sq, …}, strides()[1:])`.
+`readElementOffset(b)` (i.e. `ragged_offset[b] * multiplier` widened to
+`int64_t`) as the per-batch base:
+`physical_offset = readElementOffset(b) + inner_product({sq, …}, strides()[1:])`.
 (The default implementation uses only the padded strides, indexing
 into `b * stride_0 + …` regardless of where batch `b`'s range
 actually starts in the physical buffer.) A bare index `{b}` bases
-at `readOffset(b)`, and an empty index `{}` returns offset `0`.
+at `readElementOffset(b)`, and an empty index `{}` returns offset `0`.
 Overriding `getIndexImpl` rather than the non-virtual
 `getHostValue` / `setHostValue` is what makes every addressing
 path ragged-aware at once (§4.5 item 3). Callers may index into
@@ -694,6 +760,19 @@ auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
 //    auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
 //        qAttr->get_dim(), qAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
 //        qRaggedOffset, static_cast<size_t>(myOffsetsHost.back()));
+//
+//    Form (c): a shared token-unit offset aux. When ragged_offset
+//    stores one token offset per batch boundary, each primary passes
+//    its own multiplier = H*D so the shared aux addresses its buffer in
+//    element units. AITER's SDPA shares one offset aux across Q and O,
+//    each setting its own multiplier (Q and O may differ in H*D):
+//
+//    auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
+//        qAttr->get_dim(), qAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
+//        qoRaggedOffset, std::nullopt, /*raggedOffsetMultiplier=*/qH * qD);
+//    auto oTensor = std::make_shared<utilities::RaggedTensor<float>>(
+//        oAttr->get_dim(), oAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
+//        qoRaggedOffset, std::nullopt, /*raggedOffsetMultiplier=*/oH * oD);
 
 // 3. Wire into variantPack as today — one entry per primary, one
 //    entry per aux. Nothing about variantPack assembly changes
@@ -726,7 +805,8 @@ public:
         std::vector<int64_t>     strides,
         int                      seqAxis,   // BSHD_SEQ_AXIS
         std::shared_ptr<ITensor> raggedOffset,
-        std::optional<size_t>    physicalElementCount = std::nullopt);
+        std::optional<size_t>    physicalElementCount = std::nullopt,
+        int64_t                  raggedOffsetMultiplier = 1);
 
     // Same overrides as RaggedTensor, inherited from
     // RaggedTensorBase<T>:
@@ -816,9 +896,15 @@ scope for this RFC.
 
 ### 4.10 Plan-layer construction and CPU reference impact
 
-The plan's `params` struct caches each ragged tensor's UID and
-that of its `ragged_offset` aux UID. At execute time the plan
-resolves both via the variant pack:
+> **Status.** The frontend → flatbuffer → backend → data-SDK plumbing
+> above (including `ragged_offset_multiplier`) is landed. The plan-layer
+> and test-harness *consumption* in §4.10–4.11 is forward design, not
+> yet implemented; the sketches below show the intended shape.
+
+The plan's `params` struct caches each ragged tensor's UID, that of
+its `ragged_offset` aux UID, and the primary's
+`ragged_offset_multiplier` (from the flatbuffer tensor field). At
+execute time the plan resolves the tensors via the variant pack:
 
 The aux is wrapped via a small dispatched factory shared with the
 executor's virtual-tensor pass (see
@@ -854,13 +940,17 @@ std::shared_ptr<ITensor> qRaggedOffset = makeShallowITensor(
 // The view's buffer is exactly ragged_offset[B] elements;
 // alignment plays no part in sizing (§4.2). physicalElementCount
 // is inferred from the aux here (see §4.6 for passing it
-// explicitly).
+// explicitly). The primary's ragged_offset_multiplier, cached in
+// _params from the flatbuffer tensor field, scales the stored
+// offsets to element units (§4.5 item 1).
 auto qView = std::make_shared<ShallowRaggedTensor<QType>>(
     variantPack.at(_params.qTensor.uid),
     _params.qTensor.dims,
     _params.qTensor.strides,
     BSHD_SEQ_AXIS,
-    qRaggedOffset);
+    qRaggedOffset,
+    std::nullopt,                          // physicalElementCount inferred
+    _params.qTensor.raggedOffsetMultiplier);
 
 // If the op consumes seq_lens, fetch it as an ordinary input.
 // seq_lens has its own data_type cached in _params; the same
@@ -954,9 +1044,11 @@ The new overload's contract:
      `shared_ptr<ITensor>` over the aux.
   4. Single-dispatches on the primary's `attribute.data_type()`
      and allocates
-     `make_unique<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS, auxSharedPtr)`,
+     `make_unique<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS,
+     auxSharedPtr, std::nullopt, attribute.ragged_offset_multiplier())`,
      letting the ctor infer the buffer size as `ragged_offset[B]`
-     from the aux. (`alignment` is not consulted — it does not
+     from the aux and forwarding the primary's multiplier (§4.5 item
+     1). (`alignment` is not consulted — it does not
      affect buffer size; see
      [§4.2](#42-frontend-tensorattributes-additions).)
   5. Returns `unique_ptr<ITensor>`.
@@ -1067,9 +1159,10 @@ For each `TensorAttributes`:
   in [§4.11.1](#4111-pre-supplied-input-bundle) guarantees its
   presence — and allocate
   `make_shared<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS,
-  raggedOffsetSharedPtr)`, letting the ctor infer the buffer size
-  as `ragged_offset[B]`. The factory does not need to know the
-  aux's element type statically — it is single-dispatched on the
+  raggedOffsetSharedPtr, std::nullopt, attr.ragged_offset_multiplier())`,
+  letting the ctor infer the buffer size as `ragged_offset[B]` and
+  forwarding the primary's multiplier. The factory does not need to know
+  the aux's element type statically — it is single-dispatched on the
   primary's `T` only.
 
 A single-pass walk suffices because every `ragged_offset` aux a
