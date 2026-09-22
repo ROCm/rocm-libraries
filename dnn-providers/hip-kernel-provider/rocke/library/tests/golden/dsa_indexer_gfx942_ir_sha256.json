@@ -1,0 +1,37 @@
+{
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "dsa_indexer_gfx942/deepseek_hi64": {
+          "bytes": 69290,
+          "sha256": "f7accee18fecab9e8b724fd2ca8fdd8f5ce6310154f2566a87bf7d903c781211"
+        },
+        "dsa_indexer_gfx942/glm_hi32": {
+          "bytes": 69290,
+          "sha256": "d648aa314e033c8e6324fc366d9935fb86d3d51c4a707ee7525edf9828f45205"
+        },
+        "dsa_indexer_gfx942/small": {
+          "bytes": 10798,
+          "sha256": "e4d06529a31357a73883bb1f3b7269a05b67032391e21d030c1a441e0114a220"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "dsa_indexer_gfx942/deepseek_hi64": {
+          "bytes": 69297,
+          "sha256": "10dd26a067a71dbe628eb7d1e0838a9da5f6272c6c53da3ac3503165be00e50c"
+        },
+        "dsa_indexer_gfx942/glm_hi32": {
+          "bytes": 69297,
+          "sha256": "e4173c1c9619bbb205630ecbf29dc6e5e08ce2c8cf9d1d9e697d2a7942f90304"
+        },
+        "dsa_indexer_gfx942/small": {
+          "bytes": 10805,
+          "sha256": "02bc55e00bedad53f896ca8a0429a77e177df800be3438744acfff537831bb5a"
+        }
+      }
+    }
+  },
+  "schema": "dsa_indexer_gfx942.ir_golden_sha256/v1"
+}
