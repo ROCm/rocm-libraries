@@ -87,6 +87,21 @@ endif()
 option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
     "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
 
+# Device LTO costs up to 8x on these kernels.
+#
+# Some clang versions default the AMDGCN LTO mode to full, and the register allocator then
+# spills into the software-pipelined inner loops of the direct, direct_l1 and
+# direct_wgrad families. The code is correct, so it passes CI, but performance is destroyed.
+# ROCm/llvm-project#4434 has the report.
+#
+# Set with target_compile_options rather than appended to CMAKE_HIP_FLAGS: a consumer may
+# compile these sources as CXX, and MIOpen does, so HIP flags never reach them. Must
+# precede the arch subdirectories, since hipconv_add_arch_lib reads it.
+option(HIPCONV_OFFLOAD_LTO "Use the compiler's LTO default" OFF)
+if(NOT HIPCONV_OFFLOAD_LTO)
+    set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -144,7 +159,8 @@ target_include_directories(hipconv
 # Position-independent so the static lib can link into libMIOpen.so
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
-target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
+                                       ${HIPCONV_DEVICE_COMPILE_OPTIONS})
 if(HIPCONV_ENABLE_POINTWISE)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_POINTWISE)
