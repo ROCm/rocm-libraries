@@ -473,7 +473,7 @@ constexpr double csr2csc_gbyte_count(int M, int N, int nnz, hipsparseAction_t ac
 }
 
 template <typename T>
-constexpr double csr2hyb_gbyte_count(int M, int nnz, int ell_nnz, int coo_nnz)
+constexpr double csr2hyb_gbyte_count(int32_t M, int32_t nnz, int64_t ell_nnz, int32_t coo_nnz)
 {
     return ((M + 1.0 + ell_nnz + 2.0 * coo_nnz) * sizeof(int)
             + (nnz + ell_nnz + coo_nnz) * sizeof(T))
@@ -481,7 +481,7 @@ constexpr double csr2hyb_gbyte_count(int M, int nnz, int ell_nnz, int coo_nnz)
 }
 
 template <typename T>
-constexpr double hyb2csr_gbyte_count(int M, int csr_nnz, int ell_nnz, int coo_nnz)
+constexpr double hyb2csr_gbyte_count(int32_t M, int32_t csr_nnz, int64_t ell_nnz, int32_t coo_nnz)
 {
     return ((M + 1.0 + csr_nnz + ell_nnz + 2.0 * coo_nnz) * sizeof(int)
             + (csr_nnz + ell_nnz + coo_nnz) * sizeof(T))
