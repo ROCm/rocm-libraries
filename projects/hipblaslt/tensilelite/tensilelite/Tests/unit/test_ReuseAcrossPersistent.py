@@ -26,13 +26,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.RequiredParameters import getRequiredParametersMin
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.SolutionStructs.Naming import getParameterNameAbbreviation
-from Tensile.SolutionStructs.Solution import Solution, validateParameterTypes
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.RequiredParameters import getRequiredParametersMin
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.SolutionStructs.Naming import getParameterNameAbbreviation
+from tensilelite.SolutionStructs.Solution import Solution, validateParameterTypes
 
 pytestmark = pytest.mark.unit
 
@@ -80,7 +80,7 @@ def test_rap_has_no_codegen_predicate_to_disagree_with_derivation():
     which makes assignDerivedParameters the only authority; this pins that there
     is nothing left for it to drift against.
     """
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     assert not hasattr(KernelWriter, "isReuseAcrossPersistentEnabled")
 
@@ -100,7 +100,7 @@ def _codegenKernel(**overrides):
 
 
 def _papEnabled(**overrides):
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     return KernelWriter.isPrefetchAcrossPersistentEnabled(
         SimpleNamespace(), _codegenKernel(**overrides)
@@ -131,9 +131,9 @@ def test_pap_is_off_when_its_own_flag_is_off_whatever_rap_says():
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -145,8 +145,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -156,7 +156,7 @@ def assembler():
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -178,8 +178,8 @@ def _gp_gfx1250(gfx1250_iim):
 # these guards). Each negative test flips exactly one knob.
 # ---------------------------------------------------------------------------
 def _make_params(gfx1250_iim, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -398,7 +398,7 @@ def test_rap_k_predicates_admit_a_range_of_whole_ktiles(
     (ContractionProblemPredicates.hpp), which is why the bounds are emitted as
     floor-1 and ceiling+1 rather than the bounds themselves.
     """
-    import Tensile.Contractions as C
+    import tensilelite.Contractions as C
 
     _pin_store_budget(monkeypatch, 4)
     sol, out = _derive(gfx1250_iim, assembler, capsys)
@@ -530,7 +530,7 @@ _MODEL_ISA = (12, 5, 0)
 
 
 def _modelTerms(threadTile1):
-    from Tensile.Common.DataType import DataType
+    from tensilelite.Common.DataType import DataType
 
     state = {
         "ThreadTile0": 16, "ThreadTile1": threadTile1,

@@ -12,12 +12,12 @@ import types
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components import DecouplePGR as DP
-from Tensile.Components import TDMFuse as TF
-from Tensile.Components.DecouplePGR import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components import DecouplePGR as DP
+from tensilelite.Components import TDMFuse as TF
+from tensilelite.Components.DecouplePGR import (
     _asDataType,
     _ldsAlignedBytes,
     _macroTileFromState,
@@ -42,7 +42,7 @@ from Tensile.Components.DecouplePGR import (
     resolvePrefetchGlobalReadSpecialValues,
     tdmWaveIssueOrder,
 )
-from Tensile.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
+from tensilelite.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
 
 pytestmark = pytest.mark.unit
 
@@ -444,7 +444,7 @@ def _realMacB(dt):
 
 def _validGemmAB():
     import ast
-    import Tensile.Common.DataType as dataTypeMod
+    import tensilelite.Common.DataType as dataTypeMod
     from pathlib import Path
     src = Path(dataTypeMod.__file__).resolve().parents[1] / "SolutionStructs" / "Problem.py"
     tree = ast.parse(src.read_text())
@@ -561,9 +561,9 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 
 @pytest.fixture(scope="module")
 def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     cxx = validateToolchain("amdclang++")
     isa = gfxToIsa("gfx1250")
@@ -575,8 +575,8 @@ def gfx1250_iim():
 
 @pytest.fixture(scope="module")
 def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
@@ -585,7 +585,7 @@ def assembler():
 
 @pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -603,9 +603,9 @@ def _gp_gfx1250(gfx1250_iim):
 
 
 def _derive(gfx1250_iim, assembler, capsys, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -686,12 +686,12 @@ def _emitDerived(sol, assembler):
     import shutil
 
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
-    from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
     with preserve_rocisa_kernel_state():
         kwa = KernelWriterAssembly(assembler, DebugConfig())
@@ -953,7 +953,7 @@ class _ThickWaitWriter:
 
 
 def _applyThickWait(kernel, asm):
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     writer = _ThickWaitWriter()
     return KernelWriter._dcpRelaxThickTextGate(writer, kernel, asm)
@@ -964,7 +964,7 @@ DCP_THICK_WAIT_UNCOVERED = 11
 
 def _thickWaitRejects(kernel, asm):
     """The overflowedResources code the pass set, or 0 if it accepted."""
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     writer = _ThickWaitWriter()
     KernelWriter._dcpRelaxThickTextGate(writer, kernel, asm)
@@ -1131,7 +1131,7 @@ def test_thick_wait_target_follows_the_label_the_fill_emitted(pgrA, pgrB, thick)
 # Thick-first issue order: s_wait_tensorcnt N is age-ordered on one counter.
 # ---------------------------------------------------------------------------
 def _issueOrder(pgrA, pgrB, *args):
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     writer = _ThickWaitWriter()
     return KernelWriter._dcpThickThinIssueOrder(
@@ -1199,7 +1199,7 @@ def test_four_item_matrix_instruction_still_yields_a_tile():
 
 
 def test_auto_selection_evaluates_every_candidate_on_the_normal_path(monkeypatch):
-    import Tensile.Components.DecouplePGR as dcp
+    import tensilelite.Components.DecouplePGR as dcp
 
     seen = []
     real = dcp.decouplePGRLdsBytesEstimate
@@ -1293,7 +1293,7 @@ def test_one_sided_auto_against_a_pinned_zero_names_the_real_reason(pgrA, pgrB, 
 # ---------------------------------------------------------------------------
 def test_candidates_above_two_blocks_never_enter_the_ranking():
     # Import here so a missing symbol fails this test, not collection.
-    from Tensile.Components.DecouplePGR import autoPairCandidateIsLegal
+    from tensilelite.Components.DecouplePGR import autoPairCandidateIsLegal
 
     legal = [p for p in pgrAutoPairCandidates(4) if autoPairCandidateIsLegal(*p)]
     assert (3, 2) not in legal and (2, 3) not in legal and (4, 3) not in legal
@@ -1324,10 +1324,10 @@ def test_no_candidate_can_strand_a_legal_pair():
 # Fixture vs matrixInstructionToMIParameters.
 # ---------------------------------------------------------------------------
 def test_fixture_matches_the_real_conversion():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -1800,7 +1800,7 @@ def test_no_fill_label_at_all_is_refused():
 
 def test_acceptance_does_not_depend_on_how_many_waits_were_retagged():
     """PER_SITE retags two waits, MERGED one; both must be accepted."""
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     solution = ks()
     gate = decoupledThickGateRelaxation(solution)
@@ -1947,7 +1947,7 @@ def test_solution_auto_does_not_retry_an_unrelated_rejection(
 
 def test_solution_derivation_leaves_no_capacity_marker_behind(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
 
     for maxLds in (327680, 40960):
         sol, _ = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
@@ -1978,7 +1978,7 @@ def _dcpSolutionModule():
     """The Solution *module*. Importing the class of the same name makes monkeypatch a no-op."""
     import importlib
 
-    return importlib.import_module("Tensile.SolutionStructs.Solution")
+    return importlib.import_module("tensilelite.SolutionStructs.Solution")
 
 
 @pytest.mark.parametrize("tdmFuse", [0, 1])

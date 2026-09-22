@@ -11,12 +11,12 @@ so the coverage lane credits them against the changed source lines.
 
 import pytest
 
-from Tensile.BenchmarkProblems import _hashableProblemTypeKV
-from Tensile.Common.DataType import DataType
-from Tensile.Common.Utilities import deriveWaveParams
-from Tensile.SolutionStructs.Naming import _getName, getKernelFileBase
-from Tensile.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
-from Tensile.Toolchain.Component import Assembler
+from tensilelite.BenchmarkProblems import _hashableProblemTypeKV
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.Utilities import deriveWaveParams
+from tensilelite.SolutionStructs.Naming import _getName, getKernelFileBase
+from tensilelite.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
+from tensilelite.Toolchain.Component import Assembler
 
 pytestmark = pytest.mark.unit
 

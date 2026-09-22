@@ -27,9 +27,9 @@ from textwrap import dedent, indent
 
 import pytest
 
-import Tensile
-import Tensile.TensileLogic.HandleCustomKernel as hck_mod
-from Tensile.AddCustomConfig import (
+import tensilelite
+import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
+from tensilelite.AddCustomConfig import (
     _fmt_yaml_args,
     _fmt_yaml_inline,
     _fmt_yaml_scalar,
@@ -38,9 +38,9 @@ from Tensile.AddCustomConfig import (
     build_custom_config_yaml,
     inject_custom_config,
 )
-from Tensile.Contractions import ProblemPredicate
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
-from Tensile.CustomKernels import (
+from tensilelite.Contractions import ProblemPredicate
+from tensilelite.Common.ValidParameters import checkParametersAreValid, validParameters
+from tensilelite.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
@@ -50,8 +50,8 @@ from Tensile.CustomKernels import (
     readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
-from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
-from Tensile.ValidateMetadata import validate_all
+from tensilelite.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
+from tensilelite.ValidateMetadata import validate_all
 
 pytestmark = pytest.mark.unit
 
