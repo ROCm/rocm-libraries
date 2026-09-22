@@ -611,8 +611,9 @@ rocke_status_t rocke_direct_depthwise_lower_to_llvm(const rocke_direct_depthwise
  *  Three phases, not four: the weights of a filter column depend on the
  *  runtime column index, so there is no prologue weight-load phase.
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_direct_depthwise_col(
-    rocke_ir_builder_t* b, const rocke_direct_depthwise_col_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_direct_depthwise_col(rocke_ir_builder_t* b,
+                                                     const rocke_direct_depthwise_col_spec_t* spec,
+                                                     const char* arch)
 {
     rocke_dconv_dwcol_ctx_t ctx;
 
@@ -660,13 +661,13 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_col_new(
     });
 }
 
-rocke_status_t rocke_direct_depthwise_col_lower_to_llvm(
-    const rocke_direct_depthwise_col_spec_t* spec,
-    const char* arch,
-    rocke_llvm_flavor_t flavor,
-    char** out_ll,
-    char* err,
-    size_t err_cap)
+rocke_status_t
+    rocke_direct_depthwise_col_lower_to_llvm(const rocke_direct_depthwise_col_spec_t* spec,
+                                             const char* arch,
+                                             rocke_llvm_flavor_t flavor,
+                                             char** out_ll,
+                                             char* err,
+                                             size_t err_cap)
 {
     rocke_ir_builder_t b;
     rocke_kernel_def_t* kernel;

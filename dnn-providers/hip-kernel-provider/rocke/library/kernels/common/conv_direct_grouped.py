@@ -5116,9 +5116,7 @@ def build_direct_depthwise_col(
     # every filter column contributes to every output row, so nothing can be
     # flushed until the column loop has closed.
     acc_args = [
-        (f"dw_acc_h{h}_w{w}", zero_f32)
-        for h in range(Ho)
-        for w in range(BLOCK_W)
+        (f"dw_acc_h{h}_w{w}", zero_f32) for h in range(Ho) for w in range(BLOCK_W)
     ]
     col_loop = b.scf_for_iter(
         c0,
@@ -5134,9 +5132,7 @@ def build_direct_depthwise_col(
         # One filter column: KH weights live for the whole body.
         w_col: List[Value] = []
         for r_const in range(p.KH):
-            w_off, _ = b_desc.offset(
-                b, k=ch, r=b.const_i32(r_const), s=s_iv, c=c0
-            )
+            w_off, _ = b_desc.offset(b, k=ch, r=b.const_i32(r_const), s=s_iv, c=c0)
             # No value-side zero-fill: ``addr`` already steers a failing lane to
             # an offset past ``num_records``, and a buffer load that misses the
             # bounds check returns 0 -- which is +0.0 in every supported element

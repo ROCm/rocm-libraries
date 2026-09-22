@@ -95,7 +95,14 @@ def _cases() -> dict[str, Callable]:
     add("s1_k7_h14_bw2", N=2, H=14, W=14, groups=64, KH=7, KW=7, PAD=3, block_w=2)
     add(
         "s1_k7_h14_2wv",
-        N=1, H=14, W=14, groups=128, KH=7, KW=7, PAD=3, block_waves=2,
+        N=1,
+        H=14,
+        W=14,
+        groups=128,
+        KH=7,
+        KW=7,
+        PAD=3,
+        block_waves=2,
     )
     # Large filter: the regime where the preload variant cannot be built and
     # this kernel is the only option. live_f32 = 14 + 31.
@@ -116,13 +123,33 @@ def _cases() -> dict[str, Callable]:
     # (y - r) % S == 0, so the emitted grid is periodically ragged rather than
     # rectangular. These pin that pruning: a formula that drops or duplicates a
     # row changes the hash even though the kernel would still run.
-    add("s2_k3_h28_bw2", N=1, H=28, W=28, groups=64, KH=3, KW=3, PAD=1,
-        stride=2, block_w=2)
+    add(
+        "s2_k3_h28_bw2",
+        N=1,
+        H=28,
+        W=28,
+        groups=64,
+        KH=3,
+        KW=3,
+        PAD=1,
+        stride=2,
+        block_w=2,
+    )
     add("s3_k3_h28_bw1", N=1, H=28, W=28, groups=64, KH=3, KW=3, PAD=1, stride=3)
     # Ragged on both axes at once: 5x5 at stride 3, and Wo=10 % block_w=3 != 0
     # so the W tail guard is live too.
-    add("s3_k5_h28_bw3", N=1, H=28, W=28, groups=64, KH=5, KW=5, PAD=2,
-        stride=3, block_w=3)
+    add(
+        "s3_k5_h28_bw3",
+        N=1,
+        H=28,
+        W=28,
+        groups=64,
+        KH=5,
+        KW=5,
+        PAD=2,
+        stride=3,
+        block_w=3,
+    )
     # PAD=2 > (KH-1)/2=1: the padded input overhangs the input, which is what
     # `n_iters = (Ho-1)*stride + KH` exists to cover. Unreachable at stride 1 --
     # there the same overhang makes Ho > H and the validator rejects it.
@@ -133,16 +160,36 @@ def _cases() -> dict[str, Callable]:
     # --- bf16 / fp32 ---------------------------------------------------------
     # Same geometry as s1_k3_h28_bw1 at the other two element types, so the diff
     # between these three hashes is exactly the load/convert/store width.
-    add("bf16_s1_k3_h28", N=1, H=28, W=28, groups=64, KH=3, KW=3, PAD=1,
-        dtype="bf16")
-    add("fp32_s1_k3_h28", N=1, H=28, W=28, groups=64, KH=3, KW=3, PAD=1,
-        dtype="fp32")
+    add("bf16_s1_k3_h28", N=1, H=28, W=28, groups=64, KH=3, KW=3, PAD=1, dtype="bf16")
+    add("fp32_s1_k3_h28", N=1, H=28, W=28, groups=64, KH=3, KW=3, PAD=1, dtype="fp32")
     # Element type crossed with the strided tap pruning and with a live W tail:
     # the two are independent code paths and both have to be right at once.
-    add("bf16_s2_k5_bw3", N=1, H=28, W=28, groups=64, KH=5, KW=5, PAD=2,
-        stride=2, block_w=3, dtype="bf16")
-    add("fp32_s3_chtail", N=1, H=28, W=28, groups=100, KH=3, KW=3, PAD=1,
-        stride=3, block_w=4, dtype="fp32")
+    add(
+        "bf16_s2_k5_bw3",
+        N=1,
+        H=28,
+        W=28,
+        groups=64,
+        KH=5,
+        KW=5,
+        PAD=2,
+        stride=2,
+        block_w=3,
+        dtype="bf16",
+    )
+    add(
+        "fp32_s3_chtail",
+        N=1,
+        H=28,
+        W=28,
+        groups=100,
+        KH=3,
+        KW=3,
+        PAD=1,
+        stride=3,
+        block_w=4,
+        dtype="fp32",
+    )
 
     return cases
 
@@ -206,8 +253,20 @@ def _cases_gfx942() -> dict[str, Callable]:
     # stride=1 fp16 — exercises the gfx942 VGPR budget + codegen target
     add("s1_k3_h8_bw4", N=2, H=8, W=8, groups=128, KH=3, KW=3, PAD=1)
     # stride=2 bf16 with both tile guards live — exercises strided tap pruning on gfx942
-    add("s2_bf16_tail", N=1, H=9, W=9, groups=70, KH=3, KW=3, PAD=1, stride=2,
-        block_w=4, block_waves=1, dtype="bf16")
+    add(
+        "s2_bf16_tail",
+        N=1,
+        H=9,
+        W=9,
+        groups=70,
+        KH=3,
+        KW=3,
+        PAD=1,
+        stride=2,
+        block_w=4,
+        block_waves=1,
+        dtype="bf16",
+    )
 
     return cases
 
@@ -237,10 +296,9 @@ def _check_golden(golden_path: Path, cases: dict, arch: str) -> None:
                 f"{cid}: {want} -> {got} "
                 f"({recorded[cid]['bytes']} -> {nbytes} bytes)"
             )
-    assert not drift, (
-        f"depthwise-col LLVM IR drift vs golden (arch={arch}):\n  "
-        + "\n  ".join(drift)
-    )
+    assert (
+        not drift
+    ), f"depthwise-col LLVM IR drift vs golden (arch={arch}):\n  " + "\n  ".join(drift)
 
 
 def test_direct_depthwise_col_ir_matches_golden():

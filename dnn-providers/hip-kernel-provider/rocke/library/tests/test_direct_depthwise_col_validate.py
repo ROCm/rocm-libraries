@@ -139,9 +139,9 @@ def test_col_spec_rejected(cid, kwargs, wants, arch):
     ok, reason = is_valid_depthwise_col_spec(spec, arch)
     assert not ok, f"{cid}: validator accepted a spec it must reject ({reason})"
     for want in wants:
-        assert want in reason, (
-            f"{cid}: reason does not name the offending value {want!r}; got {reason!r}"
-        )
+        assert (
+            want in reason
+        ), f"{cid}: reason does not name the offending value {want!r}; got {reason!r}"
 
     with pytest.raises(ValueError):
         build_direct_depthwise_col(spec, arch=arch)
@@ -156,9 +156,9 @@ def test_col_rejection_reasons_are_distinct():
     reasons = {}
     for cid, kwargs, _wants, arch in _REJECTIONS:
         _, reason = is_valid_depthwise_col_spec(_spec(**kwargs), arch)
-        assert reason not in reasons, (
-            f"{cid} and {reasons[reason]} share the rejection message {reason!r}"
-        )
+        assert (
+            reason not in reasons
+        ), f"{cid} and {reasons[reason]} share the rejection message {reason!r}"
         reasons[reason] = cid
 
 

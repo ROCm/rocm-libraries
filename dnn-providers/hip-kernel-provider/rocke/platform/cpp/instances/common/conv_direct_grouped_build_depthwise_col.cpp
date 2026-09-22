@@ -85,9 +85,8 @@ static rocke_value_t* dwcol_guard_ch(rocke_dconv_dwcol_ctx_t* ctx, rocke_value_t
 
 /* Python `addr(off, cond)`: element offset -> byte offset, poisoned to the OOB
  * sentinel when the access is not valid.  A NULL cond emits no select at all. */
-static rocke_value_t* dwcol_addr(rocke_dconv_dwcol_ctx_t* ctx,
-                                 rocke_value_t* off,
-                                 rocke_value_t* cond)
+static rocke_value_t*
+    dwcol_addr(rocke_dconv_dwcol_ctx_t* ctx, rocke_value_t* off, rocke_value_t* cond)
 {
     rocke_value_t* byte_off = rocke_b_mul(ctx->b, off, ctx->c_elem_bytes);
     if(cond == NULL)
@@ -99,9 +98,8 @@ static rocke_value_t* dwcol_addr(rocke_dconv_dwcol_ctx_t* ctx,
 
 /* Python `load_elem`: one element, widened to f32.  f32 goes through the
  * dtype-generic tile.buffer_load with no convert. */
-static rocke_value_t* dwcol_load_elem(rocke_dconv_dwcol_ctx_t* ctx,
-                                      rocke_value_t* rsrc,
-                                      rocke_value_t* byte_off)
+static rocke_value_t*
+    dwcol_load_elem(rocke_dconv_dwcol_ctx_t* ctx, rocke_value_t* rsrc, rocke_value_t* byte_off)
 {
     rocke_ir_builder_t* b = ctx->b;
     if(strcmp(ctx->DT->name, "f16") == 0)

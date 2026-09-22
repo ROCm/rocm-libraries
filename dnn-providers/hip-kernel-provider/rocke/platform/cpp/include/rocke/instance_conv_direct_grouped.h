@@ -381,8 +381,9 @@ bool rocke_direct_depthwise_col_w_tile_exact(const rocke_direct_depthwise_col_sp
 rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise_col_spec_t* spec,
                                                     char* out,
                                                     size_t out_cap);
-rocke_status_t rocke_direct_depthwise_col_kernel_name(
-    const rocke_direct_depthwise_col_spec_t* spec, char* out, size_t out_cap);
+rocke_status_t rocke_direct_depthwise_col_kernel_name(const rocke_direct_depthwise_col_spec_t* spec,
+                                                      char* out,
+                                                      size_t out_cap);
 rocke_status_t rocke_direct_depthwise_col_validate(const rocke_direct_depthwise_col_spec_t* spec,
                                                    char* reason,
                                                    size_t reason_cap);
@@ -550,8 +551,9 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_new(rocke_ir_builder_t* b,
 /* build_direct_depthwise_col(spec, arch). Column-streamed depthwise kernel
  * (cpg=kpg=1). The KW axis is a runtime scf.for whose iter_args carry the
  * Ho x block_w accumulator band, so register pressure is independent of KW. */
-rocke_kernel_def_t* rocke_build_direct_depthwise_col(
-    rocke_ir_builder_t* b, const rocke_direct_depthwise_col_spec_t* spec, const char* arch);
+rocke_kernel_def_t* rocke_build_direct_depthwise_col(rocke_ir_builder_t* b,
+                                                     const rocke_direct_depthwise_col_spec_t* spec,
+                                                     const char* arch);
 rocke_kernel_def_t* rocke_build_direct_depthwise_col_new(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_col_spec_t* spec, const char* arch);
 
@@ -638,13 +640,13 @@ rocke_status_t rocke_direct_depthwise_lower_to_llvm(const rocke_direct_depthwise
                                                     char* err,
                                                     size_t err_cap);
 
-rocke_status_t rocke_direct_depthwise_col_lower_to_llvm(
-    const rocke_direct_depthwise_col_spec_t* spec,
-    const char* arch,
-    rocke_llvm_flavor_t flavor,
-    char** out_ll,
-    char* err,
-    size_t err_cap);
+rocke_status_t
+    rocke_direct_depthwise_col_lower_to_llvm(const rocke_direct_depthwise_col_spec_t* spec,
+                                             const char* arch,
+                                             rocke_llvm_flavor_t flavor,
+                                             char** out_ll,
+                                             char* err,
+                                             size_t err_cap);
 
 rocke_status_t rocke_direct_conv_dgrad_lower_to_llvm(const rocke_direct_conv_dgrad_spec_t* spec,
                                                      const char* arch,

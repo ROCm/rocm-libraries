@@ -163,14 +163,21 @@ _COL_SHAPES: List[_Shape] = [
     _Shape("col_s3_g64_bw1", N=1, H=28, W=28, groups=64, cpg=1, stride=3),
     # --- W tail: Wo=14 is not a multiple of block_w=4 ------------------------
     _Shape("col_s1_wtail_bw4", N=2, H=14, W=14, groups=64, cpg=1, block_w=4),
-    _Shape(
-        "col_s2_wtail_bw4", N=1, H=28, W=28, groups=64, cpg=1, stride=2, block_w=4
-    ),
+    _Shape("col_s2_wtail_bw4", N=1, H=28, W=28, groups=64, cpg=1, stride=2, block_w=4),
     # Wo=10, block_w=3 → tail of 1, with a 5x5 filter at stride 3 so the tap
     # grid is ragged on both axes at once.
     _Shape(
         "col_s3_k5_bw3",
-        N=1, H=28, W=28, groups=64, cpg=1, KH=5, KW=5, PAD=2, stride=3, block_w=3,
+        N=1,
+        H=28,
+        W=28,
+        groups=64,
+        cpg=1,
+        KH=5,
+        KW=5,
+        PAD=2,
+        stride=3,
+        block_w=3,
     ),
     # --- channel tail and non-power-of-two groups ----------------------------
     # 100 % 64 = 36 lanes masked off in the last channel tile.
@@ -193,16 +200,34 @@ _COL_SHAPES: List[_Shape] = [
     _Shape("col_k1x1", N=2, H=12, W=12, groups=64, cpg=1, KH=1, KW=1, PAD=0, block_w=4),
     _Shape(
         "col_k1x1_s2",
-        N=1, H=12, W=12, groups=64, cpg=1, KH=1, KW=1, PAD=0, stride=2, block_w=4,
+        N=1,
+        H=12,
+        W=12,
+        groups=64,
+        cpg=1,
+        KH=1,
+        KW=1,
+        PAD=0,
+        stride=2,
+        block_w=4,
     ),
     # KW=31: the regime where the preload variant cannot be built at all.
     _Shape("col_k3x31", N=1, H=16, W=40, groups=64, cpg=1, KW=31),
     _Shape("col_k3x31_s2", N=1, H=32, W=40, groups=64, cpg=1, KW=31, stride=2),
     # --- multi-wave blocks (block_ch = 128) ----------------------------------
-    _Shape("col_2wv_g128", N=1, H=14, W=14, groups=128, cpg=1, block_w=2, block_waves=2),
+    _Shape(
+        "col_2wv_g128", N=1, H=14, W=14, groups=128, cpg=1, block_w=2, block_waves=2
+    ),
     _Shape(
         "col_2wv_chtail_g200",
-        N=1, H=14, W=14, groups=200, cpg=1, stride=2, block_w=2, block_waves=2,
+        N=1,
+        H=14,
+        W=14,
+        groups=200,
+        cpg=1,
+        stride=2,
+        block_w=2,
+        block_waves=2,
     ),
 ]
 
@@ -217,16 +242,30 @@ _COL_DTYPE_SHAPES: List[_Shape] = [
     _Shape("coldt_fp32", N=2, H=14, W=14, groups=64, cpg=1, block_w=2, dtype="fp32"),
     _Shape(
         "coldt_bf16_s2_k5",
-        N=1, H=28, W=28, groups=64, cpg=1, KH=5, KW=5, PAD=2, stride=2, block_w=3,
+        N=1,
+        H=28,
+        W=28,
+        groups=64,
+        cpg=1,
+        KH=5,
+        KW=5,
+        PAD=2,
+        stride=2,
+        block_w=3,
         dtype="bf16",
     ),
     _Shape(
         "coldt_fp32_s3_chtail",
-        N=1, H=28, W=28, groups=100, cpg=1, stride=3, block_w=4, dtype="fp32",
+        N=1,
+        H=28,
+        W=28,
+        groups=100,
+        cpg=1,
+        stride=3,
+        block_w=4,
+        dtype="fp32",
     ),
-    _Shape(
-        "coldt_fp32_k3x31", N=1, H=16, W=40, groups=64, cpg=1, KW=31, dtype="fp32"
-    ),
+    _Shape("coldt_fp32_k3x31", N=1, H=16, W=40, groups=64, cpg=1, KW=31, dtype="fp32"),
 ]
 
 

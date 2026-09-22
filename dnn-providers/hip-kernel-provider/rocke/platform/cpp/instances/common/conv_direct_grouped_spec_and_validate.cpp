@@ -1354,8 +1354,9 @@ rocke_status_t rocke_direct_depthwise_col_dtype_tag(const rocke_direct_depthwise
     return ROCKE_OK;
 }
 
-rocke_status_t rocke_direct_depthwise_col_kernel_name(
-    const rocke_direct_depthwise_col_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_direct_depthwise_col_kernel_name(const rocke_direct_depthwise_col_spec_t* spec,
+                                                      char* out,
+                                                      size_t out_cap)
 {
     char prob_short[128];
     char r_buf[32];
@@ -1464,8 +1465,9 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
     }
     /* dtype allow-list: fp16 / bf16 / fp32 (aliases resolved by dtype_to_ir). */
     dt = (spec->dtype != NULL) ? rocke_fuse_dtype_to_ir_str(spec->dtype) : NULL;
-    if(dt == NULL || !(strcmp(dt->name, "f16") == 0 || strcmp(dt->name, "bf16") == 0
-                       || strcmp(dt->name, "f32") == 0))
+    if(dt == NULL
+       || !(strcmp(dt->name, "f16") == 0 || strcmp(dt->name, "bf16") == 0
+            || strcmp(dt->name, "f32") == 0))
     {
         if(reason && reason_cap > 0)
         {
@@ -1502,11 +1504,8 @@ bool rocke_direct_depthwise_col_is_valid_spec(const rocke_direct_depthwise_col_s
     {
         if(reason && reason_cap > 0)
         {
-            snprintf(reason,
-                     reason_cap,
-                     "filter extents must be >= 1 (got KH=%d, KW=%d)",
-                     p->KH,
-                     p->KW);
+            snprintf(
+                reason, reason_cap, "filter extents must be >= 1 (got KH=%d, KW=%d)", p->KH, p->KW);
         }
         return false;
     }

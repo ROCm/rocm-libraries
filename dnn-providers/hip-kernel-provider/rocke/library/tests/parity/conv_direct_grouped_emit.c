@@ -499,7 +499,8 @@ int main(int argc, char** argv)
     rocke_direct_conv_dgrad_spec_t sdgrad;
     rocke_direct_depthwise_dgrad_spec_t sdw_dgrad;
     const char* arch = "gfx950";
-    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdwc, &sdgrad, &sdw_dgrad, &arch) != 0)
+    if(make_cfg(idx, &kind, &s16, &s4, &s8, &s32, &sdw, &ssp, &sdwc, &sdgrad, &sdw_dgrad, &arch)
+       != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
