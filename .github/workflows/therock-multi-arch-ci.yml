@@ -97,6 +97,11 @@ jobs:
       baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
       linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
+      # changed_files for skip-ci evaluation in TheRock
+      # null = unknown (schedule, workflow_dispatch, API error) -> must run CI
+      # [] = no changes -> can skip CI
+      # [...] = known files -> evaluate against skip patterns
+      changed_files: ${{ steps.changed-files.outputs.changed_files }}
     steps:
       - name: Checkout ci-env action
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -108,50 +113,51 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
-  configure:
-    name: Configure Changed Projects
-    runs-on: ubuntu-24.04
-    outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      changed_files: ${{ steps.configure.outputs.changed_files }}
-      # TheRock's determine_rocm_test_dependencies.py natively resolves
-      # shared/* monorepo subtrees (shared/stinkytofu, shared/tensile,
-      # shared/origami, shared/mxdatagenerator, shared/rocroller) into the
-      # right consumer set, so changed_projects is passed straight through
-      # as test_projects without a rocm-libraries-side translation step.
-      # See ROCm/rocm-libraries#11784 for the retired stopgap this replaces.
-      test_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-    steps:
-      - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/repos-config.json
-          sparse-checkout-cone-mode: false
-
-      - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
-          path: _therock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
-
-      - name: Configure CI
-        id: configure
+      - name: Get changed files
+        id: changed-files
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
-            --event-name "${{ github.event_name }}" \
-            --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
-            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
-            --config-path ".github/repos-config.json"
+          # Get changed files for skip-ci evaluation
+          # TheRock's configure_multi_arch_ci.py evaluates these against skip patterns
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            echo "Getting PR diff: ${BASE_SHA}...${HEAD_SHA}"
+            CHANGED_FILES=$(gh api "repos/${{ github.repository }}/compare/${BASE_SHA}...${HEAD_SHA}" \
+              --jq '[.files[].filename]' 2>/dev/null || echo "null")
+            # Check for truncation (GitHub API returns max 300 files)
+            FILE_COUNT=$(echo "$CHANGED_FILES" | jq 'if type == "array" then length else 0 end')
+            if [[ "$FILE_COUNT" -ge 300 ]]; then
+              echo "Warning: API returned 300+ files, result may be truncated"
+              CHANGED_FILES="null"
+            fi
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            BEFORE_SHA="${{ github.event.before }}"
+            # Null SHA indicates branch creation - no prior commit to diff against
+            if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+              echo "Branch creation push - no base to diff against"
+              CHANGED_FILES="null"
+            else
+              HEAD_SHA="${{ github.sha }}"
+              echo "Getting push diff: ${BEFORE_SHA}...${HEAD_SHA}"
+              CHANGED_FILES=$(gh api "repos/${{ github.repository }}/compare/${BEFORE_SHA}...${HEAD_SHA}" \
+                --jq '[.files[].filename]' 2>/dev/null || echo "null")
+              FILE_COUNT=$(echo "$CHANGED_FILES" | jq 'if type == "array" then length else 0 end')
+              if [[ "$FILE_COUNT" -ge 300 ]]; then
+                echo "Warning: API returned 300+ files, result may be truncated"
+                CHANGED_FILES="null"
+              fi
+            fi
+          else
+            # schedule, workflow_dispatch: unknown changes
+            echo "Event ${{ github.event_name }} - no diff available"
+            CHANGED_FILES="null"
+          fi
+          echo "changed_files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
 
   setup:
-    needs: [ci-env, configure]
+    needs: [ci-env]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
     with:
       build_variant: "release"
@@ -166,13 +172,12 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # Copy all stages except math-libs and ml-libs from TheRock baseline
-      # rocm-libraries only affects math-libs and ml-libs source sets
-      # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
+      # Copy all stages except math-libs and ml-libs from TheRock baseline.
+      # rocm-libraries only affects math-libs and ml-libs source sets.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
       # Copy prebuilt stages only when the resolved reuse policy provides a
       # baseline run ID. Otherwise, leave this empty for a full stage build.
-      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg') || '' }}
       # Use the baseline selected by the artifact reuse policy above.
       baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
@@ -207,14 +212,14 @@ jobs:
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
-          "changed_files": ${{ needs.configure.outputs.changed_files || 'null' }},
+          "changed_files": ${{ needs.ci-env.outputs.changed_files || 'null' }},
           "skip_ci_config": ".github/skip-ci-config.toml",
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
+    needs: [setup]
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
@@ -230,8 +235,6 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
@@ -241,7 +244,7 @@ jobs:
 
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
+    needs: [setup]
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
@@ -255,8 +258,6 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
       ref: 5c677058a44d6cc4a06587857cf8fca3c9abc925 # 2026-09-21
@@ -269,16 +270,12 @@ jobs:
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
+    needs: [ci-env, linux_build_and_test]
     if: >-
       ${{
         !cancelled() &&
         github.event_name == 'pull_request' &&
-        (
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
-          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
-        ) &&
+        contains(github.event.pull_request.labels.*.name, 'test:hipblaslt') &&
         needs.linux_build_and_test.result != 'skipped'
       }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
@@ -295,7 +292,6 @@ jobs:
     if: always()
     needs:
       - ci-env
-      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
