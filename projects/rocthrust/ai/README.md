@@ -31,9 +31,9 @@ them.
    or batch), porting each commit's Thrust changes by hand and ticking it
    off. Everything ported stays staged (`git add`), never committed.
 4. **`rocthrust-cccl-sync-finalize`** — run once every `todo.md` item is
-   ticked. Runs a readiness/lint gate, bumps `THRUST_VERSION`, writes the
-   CHANGELOG entry, runs `rmake.py`/`ctest` build+test verification, and
-   creates the single landing commit.
+   ticked. Runs a readiness/lint gate, the CMake-wiring and copyright-header
+   checks, bumps `THRUST_VERSION`, and writes the CHANGELOG entry, leaving
+   the sync staged and ready to commit.
 
 ## Starting a new session
 

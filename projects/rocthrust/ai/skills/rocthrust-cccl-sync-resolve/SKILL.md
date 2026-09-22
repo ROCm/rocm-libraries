@@ -236,6 +236,5 @@ rulebook.
 If you were invoked because a build broke on a specific file, find which
 `todo.md` item introduced the change to that file, treat it as reopened
 (un-tick it, note the failure), and work it again from step 3 above. There
-is no dedicated build-verification skill yet for rocThrust — build/test
-verification itself is `rocthrust-cccl-sync-finalize`'s job (direct
-`rmake.py`/`ctest`/`rtest.py` invocation, documented there).
+is no dedicated build-verification skill for rocThrust — build/test
+verification happens outside this skill family, whenever the human runs it.

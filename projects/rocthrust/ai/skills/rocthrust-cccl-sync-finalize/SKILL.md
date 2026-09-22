@@ -1,13 +1,14 @@
 ---
 name: rocthrust-cccl-sync-finalize
-description: Completes a CCCL-into-rocThrust sync once every item in todo.md is ticked - bumps THRUST_VERSION, writes the CHANGELOG entry, runs build/test verification, and creates the single landing commit. Use when every rocthrust-cccl-sync-resolve item is done and the sync is ready to land.
+description: Runs the pre-landing checks for a CCCL-into-rocThrust sync once every item in todo.md is ticked - readiness/lint gate, CMake-wiring and copyright-header checks, bumps THRUST_VERSION, and writes the CHANGELOG entry. Use when every rocthrust-cccl-sync-resolve item is done and the sync is ready to land.
 ---
 
 # CCCL → rocThrust Sync (finalize)
 
 Invoked once every checkbox in `todo.md` is ticked and every ported commit's
 changes are staged (`git add`), but nothing has been committed yet. This
-skill's job is to turn that staged state into a single, real landing commit.
+skill's job is to run the pre-landing checks and prep (version bump,
+CHANGELOG) so the staged state is ready to commit.
 
 ## Step 1 — Readiness check
 
@@ -198,54 +199,14 @@ confirming Signal D now reports `ok`, no drift:
 rocthrust-cccl-sync-investigate/scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO"
 ```
 
-## Step 9 — Build and test verification
+## Step 9 — Hand off for landing
 
-There is no dedicated build-verification skill for rocThrust yet — this is a
-documented gap, not an oversight. Invoke the build directly:
+Every check above (readiness/lint, rename audit, counterpart sweep,
+CMake-wiring, copyright headers, version numbers, CHANGELOG) is done. Report
+to the human that `todo.md` is fully ticked, the staged diff (`git diff
+--cached --stat`) is ready, and the sync is ready to commit. Creating the
+actual landing commit — and any build/test verification beforehand — is
+outside this skill's scope.
 
-```bash
-python rmake.py -ci -a <arch>
-```
-
-Then, from the build directory:
-
-```bash
-ctest --output-on-failure
-```
-
-(`rtest.py` is the CI-style alternative if that's the human's preferred
-entry point instead.)
-
-Iterate failures one at a time. For each failure, check whether it maps back
-to a specific `todo.md` item:
-- If it does, **reopen that item** (change it back to `- [ ]`, note the
-  failure), and hand it back to `rocthrust-cccl-sync-resolve`.
-- If it doesn't map to anything in `todo.md` — i.e. it's a pre-existing or
-  out-of-scope failure — surface it to the human rather than silently
-  patching around it.
-
-## Step 10 — Complete the sync
-
-There is no `git merge --continue` here — there was never a merge. Instead:
-
-```bash
-git add -A
-git commit
-```
-
-Follow the real historical commit-message convention (from `1eb022d06b`,
-"feat(rocthrust): CCCL 3.0.x changes (#3773)"):
-`feat(rocthrust): CCCL <version> changes (#<pr>)`, with a body noting that
-this pulls in the specific upstream commits listed in `todo.md`, plus fixes
-and workarounds attached to those commits.
-
-This produces exactly **one** commit with a single parent — no second
-parent, no subtree-merge lineage to preserve.
-
-Do not push or open a PR unless the human asks.
-
-Report:
-- The new commit SHA.
-- `git show --stat HEAD`.
-- That `todo.md` can now be discarded or attached to the tracking ticket —
-  it's uncommitted scratch state, not part of the landed history.
+`todo.md` can be discarded or attached to the tracking ticket once the sync
+lands — it's uncommitted scratch state, not part of the landed history.

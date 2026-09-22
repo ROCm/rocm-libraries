@@ -32,8 +32,8 @@ stages, each with their own skill:
 - **`rocthrust-cccl-sync-resolve`** — works through `todo.md` one commit at a
   time, in order, porting each upstream commit by hand.
 - **`rocthrust-cccl-sync-finalize`** — once every item in `todo.md` is
-  ticked, bumps `thrust/version.h`, updates the CHANGELOG, runs build/test
-  verification, and creates the single landing commit.
+  ticked, runs the pre-landing checks, bumps `thrust/version.h`, and updates
+  the CHANGELOG, leaving the sync staged and ready to commit.
 
 ## Conventions
 
