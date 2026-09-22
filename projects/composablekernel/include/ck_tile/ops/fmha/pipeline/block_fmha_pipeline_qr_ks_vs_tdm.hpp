@@ -1306,6 +1306,13 @@ struct BlockFmhaPipelineQRKSVSTdm
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
 
+        // drain-to-2: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
+        // K->ptrk1). Wait for the oldest (K->ptrk0) to land so the load_tile
+        // below can read ptrk0, while ptrk1 and V stay in flight. This count is
+        // structurally coupled to the prologue's prefetch sequence: it equals
+        // (TDM loads issued in prologue) - (loads that must complete before the
+        // first LDS read). If the prologue prefetch count changes, update this
+        // value or risk a silent data hazard / unnecessary stall.
         s_wait_tensorcnt_barrier<2>();
         auto k_tile = load_tile(k_lds_read_window);
 
