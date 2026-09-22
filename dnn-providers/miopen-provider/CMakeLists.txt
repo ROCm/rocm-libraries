@@ -203,29 +203,33 @@ set_target_properties(${MIOPEN_PROVIDER_MIOPEN_LIB} PROPERTIES SYSTEM TRUE)
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
-    engines/plans/MiopenUnaryActivationPlan.cpp
-    engines/plans/MiopenUnaryActivationChecks.cpp
-    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
-    engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
     engines/plans/MiopenBatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
+    engines/plans/MiopenBatchnormPlanBuilder.cpp
+    engines/plans/MiopenBinaryPointwiseChecks.cpp
+    engines/plans/MiopenBinaryPointwisePlan.cpp
+    engines/plans/MiopenBinaryPointwisePlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
+    engines/plans/MiopenPointwiseTensorChecks.cpp
+    engines/plans/MiopenUnaryActivationChecks.cpp
+    engines/plans/MiopenUnaryActivationPlan.cpp
+    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     HipdnnMiopenHandle.cpp
     MiopenActivationDescriptor.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
-    MiopenUtils.cpp
-    MiopenTensor.cpp
     MiopenPluginPublic.cpp
+    MiopenTensor.cpp
+    MiopenUtils.cpp
 )
 
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
