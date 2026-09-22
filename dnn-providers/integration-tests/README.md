@@ -679,3 +679,12 @@ for the full workflow and tooling reference.
 - [`docs/support-claim-enforcement.md`](docs/support-claim-enforcement.md) —
   `.support.json` sidecars, the verdict set comparison, the `TestBody()`
   enforcement lifecycle, and how to read the claim summary.
+
+## Project policies
+
+This suite is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
+
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)
