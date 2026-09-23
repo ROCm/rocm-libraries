@@ -113,6 +113,12 @@ def _temporalHint(kernel, tc):
 def _nonVolatile(kernel, tc):
   return NonVolatile(kernel.get("NonVolatile%s"%_cacheHintTensor(tc), 0))
 
+def _enableLdsTr6Rearrange(kernel, tP, tail):
+  """Return whether the per-WMMA path must rearrange ds_load_tr6 output."""
+  hasTdm = kernel["enableTDMA"] or kernel["enableTDMB"]
+  return (tP["bpe"] == 0.75 and kernel[f"enableLDSTr{tP['tensorChar']}"]
+          and (not tail or hasTdm))
+
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -10024,12 +10030,14 @@ class KernelWriterAssembly(KernelWriter):
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
 
-          if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
+          # Non-TDM tails rearrange in shiftK before their explicit masks. TDM
+          # tails skip shiftK, so rearrange them here like the main loop.
+          if _enableLdsTr6Rearrange(kernel, tPA, tail):
             if idxInner not in shiftedIndicesA:
               imod.add(_shiftLrElements(aStr_base, vgprPerInputA, idxInner))
               shiftedIndicesA.add(idxInner)
 
-          if not tail and tPB["bpe"] == 0.75 and kernel["enableLDSTrB"]:
+          if _enableLdsTr6Rearrange(kernel, tPB, tail):
             if idxOuter not in shiftedIndicesB:
               imod.add(_shiftLrElements(bStr_base, vgprPerInputB, idxOuter))
               shiftedIndicesB.add(idxOuter)

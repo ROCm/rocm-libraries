@@ -25,6 +25,10 @@ The RPP project is located in https://github.com/ROCm/rocm-libraries/tree/develo
     * :doc:`Install RPP <install/rpp-install>`
     * :doc:`Build from source <install/rpp-build>`
 
+  .. grid-item-card:: Examples
+
+    * `RPP examples <https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/RPP>`_
+
   .. grid-item-card:: Reference
 
     * :doc:`RPP environment variables <./reference/rpp-env-variables>`
