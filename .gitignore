@@ -19,3 +19,4 @@ CMakeUserPresets.json
 /parametric-chaos-v2.pdf
 /params-=findings.md
 /check_caps.py
+dnn-providers/hip-kernel-provider/rocke/library/builders/mla/*.md
