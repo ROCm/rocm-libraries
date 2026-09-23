@@ -3039,6 +3039,36 @@ Tests:
   unit_check: 1
   gpu_arch: '9(0a|42|50)'
 
+# ROCM-31258: hand-written custom kernels bound D and C stores with a buffer
+# descriptor length (num_records) of BufferOOB. While BufferOOB was 0x80000000,
+# the host admitted shapes whose checked store extent, ldd * min(MacroTile1, N)
+# * 4, lies past 2 GiB, and the kernel silently dropped those stores. On gfx950,
+# fp32 NN with the xf32 fast path selects such a kernel (MacroTile1 = 256):
+#   M = 2097152 -> extent is exactly 0x80000000, clean even with the old value
+#   M = 2097153 -> one step past it, the last element was dropped
+#   M = 3000000 -> 14976 elements in the trailing rows were dropped
+# The custom kernel is the heuristic's first choice for these shapes; checking
+# all ~680 candidates exceeds the per-test time limit. c_equal_d leaves
+# unwritten elements holding C rather than 2AB - 2C, so unit_check catches them.
+# With integer_exact and K = 32 every |D| is at most 256, exact on the xf32 path.
+# Each shape needs about 3.2 GiB of device memory and ~15 s end to end.
+- name: matmul_integer_exact_custom_kernel_store_extent_xf32_ROCM31258
+  category: pre_checkin
+  function:
+    matmul: *xf32_precision
+  matrix_size:
+    - { M: 2097152, N: 256, K: 32 }
+    - { M: 2097153, N: 256, K: 32 }
+    - { M: 3000000, N: 256, K: 32 }
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: -2.0
+  c_equal_d: true
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '950'
+
 
 - name: matmul_96_complex
   category: pre_checkin
