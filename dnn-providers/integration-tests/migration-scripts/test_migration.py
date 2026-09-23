@@ -10,6 +10,7 @@ and 1 distinct. Verifies:
   2. place_bundles produces 1 sweep (2 cases) + 1 standalone
   3. verify_migration round-trip passes for all 3
   4. import_graph detects an exact duplicate (skip) and a new case (append)
+  5. import_graph round-trip refusals name the mismatch and write nothing
 
 No C++ binary needed — everything is pure Python on synthetic data.
 
@@ -645,6 +646,231 @@ def test_import_inputs_uid_canonicalized_by_name():
         print("  PASS: import_inputs_uid_canonicalized_by_name")
 
 
+def _inventory(root):
+    """{relative path: file bytes, or None for a directory} under root."""
+    return {
+        str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+        for p in sorted(root.rglob("*"))
+    }
+
+
+def _import(tmp, name, graph, bundle_dir, *extra, check=True):
+    """Write graph to tmp/<name>.json and run import_graph.py on it."""
+    graph_path = tmp / f"{name}.json"
+    with open(graph_path, "w") as f:
+        json.dump(graph, f)
+    return run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "import_graph.py"),
+            "--graph",
+            str(graph_path),
+            "--bundle-dir",
+            str(bundle_dir),
+            *extra,
+        ],
+        check=check,
+    )
+
+
+def _reported(stderr, label):
+    """Rendered value of a '    <label>:  <value>  (<side>)' diagnostic line."""
+    prefix = f"    {label}:"
+    for line in stderr.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip().rsplit("  (", 1)[0]
+    raise AssertionError(f"no '{label}' line in stderr:\n{stderr}")
+
+
+def _assert_refused(r, bundle_dir, before, where):
+    """Import exited 1 at the named round-trip site and wrote nothing."""
+    assert r.returncode == 1, f"expected exit 1, got {r.returncode}:\n{r.stderr}"
+    assert (
+        f"ERROR: round-trip verify failed {where}" in r.stderr
+    ), f"expected failure {where}:\n{r.stderr}"
+    assert "Traceback" not in r.stderr, f"diagnostics crashed:\n{r.stderr}"
+    assert _inventory(bundle_dir) == before, "refused import changed the bundle tree"
+
+
+def test_roundtrip_mismatch_walk():
+    """_first_mismatch walks sorted keys then indices; _brief bounds renderings.
+
+    An absent side is the _MISSING object, so a key that is absent stays
+    distinguishable from a key whose value is null or a string that reads like
+    the absence marker.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from import_graph import _MISSING, _brief, _first_mismatch
+
+    found = _first_mismatch({"b": 1, "a": [1, 2]}, {"b": 2, "a": [1]})
+    assert found[0] == "a[1]" and found[1] == 2, f"sorted-key walk: {found}"
+    assert found[2] is _MISSING, f"missing list element must be _MISSING: {found}"
+
+    found = _first_mismatch([1], [1, 3])
+    assert found[0] == "[1]" and found[1] is _MISSING and found[2] == 3, found
+
+    found = _first_mismatch({"x": {"y": [{"z": 1}]}}, {"x": {"y": [{"z": 2}]}})
+    assert found == ("x.y[0].z", 1, 2), f"nested path: {found}"
+    assert _first_mismatch(1, 2) == ("<root>", 1, 2)
+    assert _first_mismatch({"a": 1}, {"a": 1.0}) is None, "walk adds no equality"
+
+    found = _first_mismatch({"k": None}, {})
+    assert found[1] is None and found[2] is _MISSING, f"null vs absent: {found}"
+    assert (_brief(found[1]), _brief(found[2])) == ("null", "<absent>")
+
+    found = _first_mismatch({"k": "<absent>"}, {})
+    assert found[1] == "<absent>" and found[1] is not _MISSING, found
+    assert found[2] is _MISSING, found
+    assert _brief(found[1]) == '"<absent>"' and _brief(found[2]) == "<absent>"
+
+    assert _brief("x" * 198) == '"' + "x" * 198 + '"', "200 chars must not truncate"
+    over = _brief("x" * 199)
+    assert len(over) == 200 and over.endswith("..."), f"201 chars: {over!r}"
+    assert len(_brief("x" * 500)) == 200
+    print("  PASS: roundtrip_mismatch_walk")
+
+
+def test_import_extraction_failure_diagnostics():
+    """A failed extraction round-trip names sweep, match counts and field; no write.
+
+    Two structural matches exist (full/ then quick/); the tier-preferred quick/
+    sweep is the one reported. The input's long top-level name is not a
+    template placeholder, so the expanded template cannot reproduce it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir, "--tier", "full")
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+        full_sweep = next((bundle_dir / "full").rglob("sweep.json"))
+        quick_dir = (
+            bundle_dir / "quick" / full_sweep.parent.relative_to(bundle_dir / "full")
+        )
+        shutil.copytree(full_sweep.parent, quick_dir)
+        quick_sweep = quick_dir / "sweep.json"
+
+        bad = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        bad["name"] = "n" * 500
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "bad", bad, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+
+        assert (
+            f"selected sweep: {quick_sweep} (of 2 structural match(es),"
+            f" 1 in tier 'quick')" in r.stderr
+        ), f"sweep path/count not reported:\n{r.stderr}"
+        assert _reported(r.stderr, "field") == "name", r.stderr
+        expected = _reported(r.stderr, "expected")
+        assert len(expected) == 200 and expected.endswith("..."), expected
+        assert expected.startswith('"nnn'), expected
+        assert _reported(r.stderr, "actual") == '""', r.stderr
+        print("  PASS: import_extraction_failure_diagnostics")
+
+
+def test_import_canonical_only_difference():
+    """int 1 vs float 1.0 compares equal field-wise; report canonical offsets.
+
+    The walk finds no unequal field, so the report gives the first differing
+    offset of the two canonical renderings and at most 60 characters of each.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import canon, canonical_uid_map_by_name, remap_graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g_int = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g_int["nodes"][0]["alpha"] = 1
+        r = _import(tmp, "g_int", g_int, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        g_float = json.loads(json.dumps(g_int))
+        g_float["nodes"][0]["alpha"] = 1.0
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "g_float", g_float, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+        assert "no field compares unequal" in r.stderr, r.stderr
+
+        want = canon(remap_graph(g_float, canonical_uid_map_by_name(g_float)))
+        got = canon(remap_graph(g_int, canonical_uid_map_by_name(g_int)))
+        at = next(i for i, (a, b) in enumerate(zip(want, got)) if a != b)
+        assert len(want) - at > 60 and len(got) - at > 60, "fixture too short"
+        assert _reported(r.stderr, "at offset") == str(at), r.stderr
+        assert _reported(r.stderr, "expected") == want[at : at + 60], r.stderr
+        assert _reported(r.stderr, "actual") == got[at : at + 60], r.stderr
+        print("  PASS: import_canonical_only_difference")
+
+
+def test_import_absent_vs_literal_marker():
+    """A key absent from the template is not confused with a look-alike string.
+
+    The input carries the literal string "<absent>" where the template has no
+    key at all: the input side renders as a quoted JSON string, the absent side
+    as the bare marker.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        bad = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        bad["nodes"][0]["note"] = "<absent>"
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "bad", bad, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "after extraction")
+        assert _reported(r.stderr, "field") == "nodes[0].note", r.stderr
+        assert _reported(r.stderr, "expected") == '"<absent>"', r.stderr
+        assert _reported(r.stderr, "actual") == "<absent>", r.stderr
+        print("  PASS: import_absent_vs_literal_marker")
+
+
+def test_import_new_template_failure_diagnostics():
+    """A failed new-template round-trip names the field and writes nothing.
+
+    A tensor without a uid cannot bind its per-tensor placeholders, so the
+    expanded template leaves them unresolved. An unrelated existing bundle
+    keeps the before/after inventory non-empty.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        conv = _make_graph("Conv", [0, 1, 2], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "conv", conv, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        bad = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        bad["tensors"].append(
+            {
+                "name": "orphan",
+                "dims": [7],
+                "strides": [1],
+                "data_type": "float",
+                "virtual": False,
+            }
+        )
+        before = _inventory(bundle_dir)
+        assert before, "fixture must start from a non-empty bundle tree"
+        r = _import(tmp, "bad", bad, bundle_dir, check=False)
+        _assert_refused(r, bundle_dir, before, "for new template")
+        assert "selected sweep" not in r.stderr, r.stderr
+        assert _reported(r.stderr, "field") == "tensors[1].data_type", r.stderr
+        assert _reported(r.stderr, "tensor") == 'name="orphan"', r.stderr
+        assert _reported(r.stderr, "expected") == '"float"', r.stderr
+        assert _reported(r.stderr, "actual") == '"${UNRESOLVED:data_type}"', r.stderr
+        print("  PASS: import_new_template_failure_diagnostics")
+
+
 def _write_sweep(bundle_dir, tier, operation, variant, cases):
     """Write a minimal sweep.json under <tier>/<operation>/<variant>/."""
     d = bundle_dir / tier / operation / variant
@@ -783,6 +1009,11 @@ def main() -> int:
         test_import_dedup,
         test_inputs_uid_canonicalized_by_name,
         test_import_inputs_uid_canonicalized_by_name,
+        test_roundtrip_mismatch_walk,
+        test_import_extraction_failure_diagnostics,
+        test_import_canonical_only_difference,
+        test_import_absent_vs_literal_marker,
+        test_import_new_template_failure_diagnostics,
         test_diff_coverage_suite_qualified_join,
     ]
 

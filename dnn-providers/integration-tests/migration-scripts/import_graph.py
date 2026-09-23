@@ -120,6 +120,82 @@ def _deep_set(obj, dotted_path, value):
     cur[parts[-1]] = value
 
 
+def _first_mismatch(expected, actual, path=""):
+    """First differing location between two JSON trees.
+
+    Walks the sorted union of dict keys, then list indices, then scalars.
+    Returns (path, expected_value, actual_value), or None when nothing compares
+    unequal; a side that lacks the key or index is ``_MISSING``. Used only to
+    describe a failed canonical comparison, never to decide it.
+    """
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        for key in sorted(set(expected) | set(actual)):
+            found = _first_mismatch(
+                expected.get(key, _MISSING),
+                actual.get(key, _MISSING),
+                f"{path}.{key}" if path else key,
+            )
+            if found:
+                return found
+        return None
+    if isinstance(expected, list) and isinstance(actual, list):
+        for i in range(max(len(expected), len(actual))):
+            found = _first_mismatch(
+                expected[i] if i < len(expected) else _MISSING,
+                actual[i] if i < len(actual) else _MISSING,
+                f"{path}[{i}]",
+            )
+            if found:
+                return found
+        return None
+    if expected is _MISSING or actual is _MISSING or expected != actual:
+        return (path or "<root>", expected, actual)
+    return None
+
+
+def _brief(value, limit=200):
+    """Render a JSON value (or ``<absent>`` for ``_MISSING``) in ``limit`` chars."""
+    text = "<absent>" if value is _MISSING else json.dumps(value, sort_keys=True)
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _report_roundtrip_failure(where, expanded, graph):
+    """Name the first location a failed round-trip lost, with expected vs actual."""
+    print(f"  ERROR: round-trip verify failed {where}", file=sys.stderr)
+    mismatch = _first_mismatch(graph, expanded)
+    if mismatch is None:
+        want, got = canon(graph), canon(expanded)
+        at = next(
+            (i for i, (a, b) in enumerate(zip(want, got)) if a != b),
+            min(len(want), len(got)),
+        )
+        print(
+            "    mismatch:  no field compares unequal, so this is a JSON rendering"
+            " difference, such as int 1 against float 1.0",
+            file=sys.stderr,
+        )
+        print(f"    at offset: {at}", file=sys.stderr)
+        print(f"    expected:  {want[at : at + 60]}  (input graph)", file=sys.stderr)
+        print(
+            f"    actual:    {got[at : at + 60]}  (template + values)", file=sys.stderr
+        )
+        return
+    field, expected, actual = mismatch
+    print(f"    field:     {field}", file=sys.stderr)
+    if field.startswith("tensors["):
+        index = int(field[len("tensors[") : field.index("]")])
+        tensors = graph.get("tensors", [])
+        tensor = tensors[index] if index < len(tensors) else {}
+        name = tensor.get("name", _MISSING) if isinstance(tensor, dict) else _MISSING
+        print(
+            f"    tensor:    name={_brief(name)}"
+            "  (tensors listed in canonical-uid order)",
+            file=sys.stderr,
+        )
+    print(f"    expected:  {_brief(expected)}  (input graph)", file=sys.stderr)
+    print(f"    actual:    {_brief(actual)}  (template + values)", file=sys.stderr)
+
+
 def _extract_values(graph: dict, template: dict) -> dict:
     """Extract per-case values from a concrete graph given its template."""
     values = {}
@@ -265,7 +341,13 @@ def main() -> int:
 
         expanded = expand(template, values)
         if canon(expanded) != canon(graph):
-            print("  ERROR: round-trip verify failed after extraction", file=sys.stderr)
+            print(
+                f"  selected sweep: {sweep_path}"
+                f" (of {len(matches)} structural match(es),"
+                f" {len(tier_matches)} in tier '{args.tier}')",
+                file=sys.stderr,
+            )
+            _report_roundtrip_failure("after extraction", expanded, graph)
             return 1
 
         if not args.dry_run:
@@ -293,7 +375,7 @@ def main() -> int:
 
     expanded = expand(template, values)
     if canon(expanded) != canon(graph):
-        print("  ERROR: round-trip verify failed for new template", file=sys.stderr)
+        _report_roundtrip_failure("for new template", expanded, graph)
         return 1
 
     tmap = tensors_by_uid(graph)
