@@ -1,6 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Adapt the Q27B MT64x256 ExLlama packed-FP16 kernel to sequential int4.
+"""Hoist Q27B MT64x256 offsets and adapt packed FP16 to sequential int4.
 
 The existing lifts extract nibble pairs (0,4), (1,5), (2,6), (3,7) from a
 sequential unsigned_bias8 dword. Subtraction of the integer zero point is
@@ -14,6 +14,46 @@ import re
 
 
 NAME = "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8X_UserArgs_MT64x256x64_MI16x16x1_gfx1151"
+
+
+def hoist_zero_point_offsets(source):
+    """Retain lane-dependent byte offsets across K iterations in v189/v190.
+
+    The original nibble offsets remain live for zero-point selection. Only
+    the scalar buffer descriptor advances along K. These two extra VGPRs
+    stay within the existing gfx1151 allocation block (192 registers).
+    """
+    marker = "// Zero-point byte offsets hoisted into v189/v190."
+    if marker in source:
+        return source
+    replacements = {
+        ".amdhsa_next_free_vgpr 189": ".amdhsa_next_free_vgpr 191",
+        "/* Num VGPR   =189 */": "/* Num VGPR   =191 */",
+        ".vgpr_count:                 189": ".vgpr_count:                 191",
+    }
+    for old, new in replacements.items():
+        if source.count(old) != 1:
+            raise ValueError(f"Unexpected register metadata: {old}")
+        source = source.replace(old, new)
+    source = source.replace(".amdgcn_target", marker + "\n.amdgcn_target", 1)
+    for index in range(2):
+        offset = f"v[vgprGlobalReadOffsetScaleZeroA+{index}]"
+        saved = f"v{189 + index}"
+        # The first prefetch initializes the saved offset before every use.
+        old = f"v_lshrrev_b32 v0, 1, {offset}"
+        if source.count(old) != 1:
+            raise ValueError(f"Unexpected prefetch offset calculation: {old}")
+        source = source.replace(old, f"v_lshrrev_b32 {saved}, 1, {offset}")
+        old = f"v_lshrrev_b32 v179, 1, {offset}\n"
+        if source.count(old) != 1:
+            raise ValueError(f"Unexpected loop offset calculation: {old}")
+        source = source.replace(old, "")
+        for temporary in ("v0", "v179"):
+            old = f"buffer_load_d16_u8 v[vgprG2LScaleZeroA+{index}], {temporary},"
+            if source.count(old) != 1:
+                raise ValueError(f"Unexpected zero-point load: {old}")
+            source = source.replace(old, f"buffer_load_d16_u8 v[vgprG2LScaleZeroA+{index}], {saved},")
+    return source
 
 
 def convert(source):
@@ -51,7 +91,9 @@ def main():
     directory = Path(__file__).resolve().parent.parent
     source = directory / (NAME + ".s")
     destination = directory / (NAME.replace("ZPU8X", "ZPU8") + ".s")
-    destination.write_text(convert(source.read_text()))
+    hoisted = hoist_zero_point_offsets(source.read_text())
+    source.write_text(hoisted)
+    destination.write_text(convert(hoisted))
 
 
 if __name__ == "__main__":
