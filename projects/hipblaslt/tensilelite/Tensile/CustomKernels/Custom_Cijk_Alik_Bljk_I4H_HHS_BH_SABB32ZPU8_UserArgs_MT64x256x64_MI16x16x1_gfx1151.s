@@ -5,6 +5,7 @@
 // restore (0,1),(2,3),(4,5),(6,7) after the exact subtract and FP16 multiply.
 // MIWaveTile 2x4, MIWaveGroup 2x4, DU64, PGR1, PLR0, SIA3,
 // single LDS buffer, store batch 1; Q27B M34816 N2048 K5120.
+// Zero-point byte offsets hoisted into v189/v190.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
 .protected Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
@@ -15,7 +16,7 @@
 .p2align 6
 .amdhsa_kernel Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB32ZPU8_UserArgs_MT64x256x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_next_free_vgpr 189 // vgprs
+  .amdhsa_next_free_vgpr 191 // vgprs
   .amdhsa_next_free_sgpr 90 // sgprs
   .amdhsa_group_segment_fixed_size 46080 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
@@ -28,7 +29,7 @@
   .amdhsa_float_denorm_mode_16_64 3
 .end_amdhsa_kernel
 .text
-/* Num VGPR   =189 */
+/* Num VGPR   =191 */
 /* Num AccVGPR=0 */
 /* Num SGPR   =90 */
 .amdgpu_metadata
@@ -207,7 +208,7 @@ amdhsa.kernels:
     .private_segment_fixed_size: 0
     .sgpr_count:                 90
     .sgpr_spill_count:           0
-    .vgpr_count:                 189
+    .vgpr_count:                 191
     .vgpr_spill_count:           0
     .wavefront_size:             32
 ...
@@ -1310,10 +1311,10 @@ buffer_load_b32 v[vgprG2LA+2], v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3
 buffer_load_b32 v[vgprG2LA+6], v[vgprGlobalReadOffsetA+1], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0
 buffer_load_d16_b16 v[vgprG2LScaleA+0], v[vgprGlobalReadOffsetScaleA+0], s[sgprSrdScaleA:sgprSrdScaleA+3], 0 offen offset:0
 buffer_load_d16_b16 v[vgprG2LScaleA+1], v[vgprGlobalReadOffsetScaleA+1], s[sgprSrdScaleA:sgprSrdScaleA+3], 0 offen offset:0
-v_lshrrev_b32 v0, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
-buffer_load_d16_u8 v[vgprG2LScaleZeroA+0], v0, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
-v_lshrrev_b32 v0, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
-buffer_load_d16_u8 v[vgprG2LScaleZeroA+1], v0, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
+v_lshrrev_b32 v189, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
+buffer_load_d16_u8 v[vgprG2LScaleZeroA+0], v189, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
+v_lshrrev_b32 v190, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
+buffer_load_d16_u8 v[vgprG2LScaleZeroA+1], v190, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
 buffer_load_b128 v[vgprG2LB+0:vgprG2LB+0+3], v[vgprGlobalReadOffsetB+0], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0
 buffer_load_b128 v[vgprG2LB+4:vgprG2LB+4+3], v[vgprGlobalReadOffsetB+1], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0
 buffer_load_b128 v[vgprG2LB+8:vgprG2LB+8+3], v[vgprGlobalReadOffsetB+2], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0
@@ -1634,10 +1635,8 @@ v_wmma_f32_16x16x16_f16 v[vgprValuC+8:vgprValuC+8+7], v[vgprValuB_X0_I0+0+0+0:vg
 ds_load_b128 v[vgprValuB_X0_I0+20:vgprValuB_X0_I0+20+3], v[vgprLocalReadAddrB+0] offset:18448
 buffer_load_d16_b16 v[vgprG2LScaleA+0], v[vgprGlobalReadOffsetScaleA+0], s[sgprSrdScaleA:sgprSrdScaleA+3], 0 offen offset:0
 buffer_load_d16_b16 v[vgprG2LScaleA+1], v[vgprGlobalReadOffsetScaleA+1], s[sgprSrdScaleA:sgprSrdScaleA+3], 0 offen offset:0
-v_lshrrev_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+0]
-buffer_load_d16_u8 v[vgprG2LScaleZeroA+0], v179, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
-v_lshrrev_b32 v179, 1, v[vgprGlobalReadOffsetScaleZeroA+1]
-buffer_load_d16_u8 v[vgprG2LScaleZeroA+1], v179, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
+buffer_load_d16_u8 v[vgprG2LScaleZeroA+0], v189, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
+buffer_load_d16_u8 v[vgprG2LScaleZeroA+1], v190, s[sgprSrdScaleZeroA:sgprSrdScaleZeroA+3], 0 offen offset:0
 s_waitcnt lgkmcnt(2)
 v_wmma_f32_16x16x16_f16 v[vgprValuC+16:vgprValuC+16+7], v[vgprValuB_X0_I0+8+0+0:vgprValuB_X0_I0+8+0+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuC+16:vgprValuC+16+7]
 buffer_load_b128 v[vgprG2LB+0:vgprG2LB+0+3], v[vgprGlobalReadOffsetB+0], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0

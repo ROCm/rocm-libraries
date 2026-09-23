@@ -123,3 +123,10 @@ It uses the same packed FP16 dequantization, then four byte permutations per
 eight weights to restore sequential nibble order before the LDS writes.
 The subtraction is exact and the scale multiplication rounds once to FP16.
 Tile dimensions, scheduling, LDS use, and VGPR allocation match ExLlama.
+
+The regeneration script also hoists the two zero-point byte-offset calculations
+in the ExLlama source before generating unsigned_bias8. Both kernels retain those
+lane-dependent offsets in v189/v190 from the initial prefetch through the K loop.
+The original nibble offsets remain available for selecting zero points. This
+removes two vector shifts per loop iteration; 191 declared VGPRs still fit in
+the same 192-register allocation block as the previous 189 on gfx1151.
