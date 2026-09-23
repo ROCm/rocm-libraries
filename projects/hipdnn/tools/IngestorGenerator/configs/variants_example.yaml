@@ -1,0 +1,138 @@
+# Worked example: pack-level `variants` -- a SHAPE LIST crossed per-shape with a NAMED
+# KNOB SET, for a dispatcher-derived set that has no single `kernel_template` for `axes`
+# to cross. Expansion happens at LOAD TIME into the same per-kernel dicts a hand-authored
+# `kernels:` entry produces, so generator.py, the emitters and the dedup pass never see
+# `variants`, and `kernel_defaults` applies underneath as usual.
+#
+# See README.md ("Generated variant sets") for when to reach for this instead of `axes`,
+# `tools/factorise_config.py` for converting an already-enumerated config, and
+# `tests/test_variants.py` for the load-time contract.
+
+dialect: packaged
+authored_subpath: rocKE/variants_example
+
+engine:
+  name: hipkernel:VariantsExample
+  sdk_version: "1.0.0"
+  knobs: [block_m]
+  heuristic: native
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: seqlen_q
+    type: int
+    default_value: 256
+  - name: block_m
+    type: int
+    default_value: 256
+  - name: waves_per_eu
+    type: int
+    default_value: 2
+  # A TRI-STATE the dispatcher never sets: it returns the shared spec and leaves
+  # arch-private knobs to the kernel's policy. `default_value: -1` because no real kernel
+  # takes it; a 0 default would alias "policy decided off" onto "explicitly off" and
+  # collapse two catalog entries into one.
+  - name: use_exp2_fast
+    type: int
+    default_value: -1
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: rocke
+workspace_policy: none
+
+packs:
+  - name: variants_example
+    arch: [gfx942]
+    # Constant across every kernel in the pack, whatever group it came from.
+    kernel_defaults:
+      kind: rocke
+      source: kernels/gfx942/dense_example.py
+      builder: build_dense_example
+
+    variants:
+      - # Every name slot is a spec field, an `md_<field>` metadata mirror, the arm's
+        # `{tag}`, or `{ordinal}` (set per shape with `ordinal:` and shifted per arm
+        # with `ordinal_offset:`, unused here). The name must encode everything that varies:
+        # the loader rejects an expansion producing two kernels with the same name, and
+        # nothing after it would, since the dedup pass keys on metadata.
+        name: dense.{dtype}_sq{seqlen_q}_bm{block_m}_w{waves_per_eu}_{tag}
+
+        # The fields the MATCHER compares, in the order they reach the descriptor.
+        metadata: [dtype, seqlen_q, block_m, waves_per_eu, use_exp2_fast]
+
+        # Metadata carries the hipDNN spelling, the spec the builder's. A descriptor
+        # written in the builder's vocabulary loads cleanly and matches NOTHING.
+        vocabulary:
+          dtype: {bf16: BF16, fp16: FP16}
+
+        # Knobs the KERNEL'S OWN POLICY decides when the spec leaves them absent, which
+        # is why each shape must state what the policy resolved to under `resolved`.
+        policy_knobs: [use_exp2_fast]
+
+        # Spec key ORDER reaches the emitted descriptor, so it is part of the bytes.
+        spec_order: [dtype, seqlen_q, block_m, waves_per_eu, use_exp2_fast]
+
+        # Spec fields constant across this GROUP; pack-level `kernel_defaults.spec`
+        # hoists what is constant across every kernel.
+        spec_defaults: {waves_per_eu: 2}
+
+        knob_sets:
+          # An arm that OMITS `use_exp2_fast` emits a spec that omits it, telling the
+          # builder its policy decides at build time. That is NOT pinning it false,
+          # though both reach metadata as 0.
+          policy: [{block_m: 128, tag: 'e{md_use_exp2_fast}'},
+                   {block_m: 256, tag: 'e{md_use_exp2_fast}'}]
+          # THE CONFUSABLE PAIR, commonest in the shipped gfx942 set (471 of 2,710
+          # entries): one arm leaves the knob to the policy, which answered 1, the other
+          # pins it OFF. The specs differ (absent versus `false`), so binaries and
+          # metadata differ, keeping them two catalog entries. What you CANNOT do is give
+          # one shape a policy-decided and a pinned arm resolving to the SAME metadata:
+          # the matcher would see one tuple and the dedup pass drops the second.
+          policy_and_off: [{block_m: 256, tag: 'e{md_use_exp2_fast}'},
+                           {block_m: 256, use_exp2_fast: false, tag: ed}]
+          # Both sides pinned; `tag` keeps them apart in the name. Quoted, because YAML
+          # 1.1 reads bare `on`/`off` as booleans and the tag would render `True`/`False`.
+          pinned: [{block_m: 256, use_exp2_fast: true, tag: 'on'},
+                   {block_m: 256, use_exp2_fast: false, tag: 'off'}]
+          # An arm may state `metadata` DIRECTLY for a knob the spec does not carry,
+          # changing which descriptor the MATCHER selects without changing the binary:
+          # two catalog entries over one kernel.
+          swept: [{block_m: 256, metadata: {use_exp2_fast: 0}, tag: sweep0},
+                  {block_m: 256, metadata: {use_exp2_fast: 1}, tag: sweep1}]
+
+        shapes:
+          # `resolved` states what the policy chose for a knob this shape's arms leave
+          # absent; without it the loader keys the catalog on the KMD `default_value`
+          # while the binary was built from the policy's answer.
+          - {dtype: bf16, seqlen_q: 512, knobs: policy, resolved: {use_exp2_fast: 1}}
+          - {dtype: bf16, seqlen_q: 4096, knobs: policy, resolved: {use_exp2_fast: 1}}
+          # The policy answered 1 here, so this shape's arms are the confusable pair.
+          - {dtype: bf16, seqlen_q: 256, knobs: policy_and_off, resolved: {use_exp2_fast: 1}}
+          # A shape carrying a DIFFERENT arm count -- the set is not a grid.
+          - {dtype: fp16, seqlen_q: 512, knobs: pinned}
+          # An arm-stated metadata value needs no `resolved`.
+          - {dtype: fp16, seqlen_q: 4096, knobs: swept}
+
+# What the COMPILER specialized on, carried once by each emitted KDP as
+# provenance.specialization_contract and inherited by the kernels under it.
+#
+# All five fields reach `kernel_source.spec` in at least one arm, so all five are checked
+# rather than waived. `use_exp2_fast` is the interesting one: arms leaving it absent tell
+# the builder its policy decides, so the SPEC attribute reads as unset there and its
+# binding must name the builder object's own effective accessor -- not the raw field, and
+# not a `resolved_<name>` convention guessed from the field name.
+specialization:
+  metadata_fields: [dtype, seqlen_q, block_m, waves_per_eu, use_exp2_fast]
+  matcher_only_fields: []
+  bindings:
+    dtype: {field: dtype}
+    seqlen_q: {field: seqlen_q}
+    block_m: {field: block_m}
+    waves_per_eu: {field: waves_per_eu}
+    use_exp2_fast: {method: effective_use_exp2_fast}
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}

@@ -54,25 +54,42 @@ protected:
                          << " but current device architecture is " << deviceString;
         }
 
-        auto graph = buildSdpaFwdGraph(testCase);
+        const SdpaFwdGraph built = buildSdpaFwdGraph(testCase);
+        const auto& graph = built.graph;
+        const auto& stats = built.stats;
 
         auto validationResult = graph->validate();
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
-        // Register output tensor validator
+        GraphVerificationContext context(*graph);
         graph->visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
-                if(!tensorAttr->get_is_virtual())
+                if(tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    continue;
+                }
+                if(tensorAttr == stats)
+                {
+                    // A fully masked causal row has a log-sum-exp of -inf in both the CPU
+                    // reference and the device result.
+                    this->registerValidator(context,
+                                            tensorAttr,
+                                            createAllCloseMatchingInfinitiesValidator(
+                                                frontendToSdkDataType(tensorAttr->get_data_type()),
+                                                tolerance,
+                                                tolerance));
+                }
+                else
+                {
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(*graph, 0);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;
@@ -167,17 +184,18 @@ protected:
         auto validationResult = graph.validate();
         ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
+        GraphVerificationContext context(graph);
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(!tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(graph, 0);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;

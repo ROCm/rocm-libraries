@@ -30,7 +30,26 @@
         "dtype": "FLOAT",
         "operation": "ADD"
       },
-      "priority": 0
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "d1f4a2b6-0c73-4e58-9a21-6b8f3c05d7e4",
+              "kmd_id": "9c05e7a4-3b18-4d62-8e5f-71a2d6039c8b",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "block_size",
+                "dtype",
+                "operation"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
     },
     "e70a52c8-1b64-4d9f-8027-c5931ae04b6d"
   ]

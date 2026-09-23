@@ -84,7 +84,7 @@ def main():
                 # the config-annotation.
                 assert return_complete
                 return_string = re.sub(r"^\w*", "", return_string)
-                return_string = re.sub(r"[\{\}a-zA-Z_ ]", "", return_string)
+                return_string = re.sub(r"[\{\} ]", "", return_string)
                 return_values = [try_make_int(x) for x in return_string.split(",")]
                 config |= dict(zip(args.variable, return_values))
                 log.debug(f"Found config: {config}")

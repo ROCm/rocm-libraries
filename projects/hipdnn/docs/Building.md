@@ -13,6 +13,7 @@
   - [Address Sanitizer Build](#address-sanitizer-build)
   - [Disabling JSON Support](#disabling-json-support)
   - [Kernel packing (rocm_kpack)](#kernel-packing-rocm_kpack)
+  - [comgr compilation cache (build speed)](#comgr-compilation-cache-build-speed)
   - [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)
   - [Clang Tools](#clang-tools)
 - [Build Targets](#build-targets)
@@ -422,6 +423,37 @@ Packaging installs the exact local `rocke` and `rocke_library` wheels into the b
 The `hkp_rocke_wheel_python_interp` target prepares those private imports, not a second interpreter. Every descriptor-packaging subprocess uses the supplied interpreter with the private directory prepended to its execution-time `PYTHONPATH`; ordinary Python startup, `.pth` files, enabled user-site packages, and the rest of `PYTHONPATH` remain effective. Changed wheel content replaces the private directory, and readiness is recorded inside it only after imports succeed. Identical wheel content does not reinstall.
 
 This is a dependency-acquisition policy, not a sealed Python environment or a global offline-build guarantee. The separate rocKE editable developer environment and wheel-generation setup are outside packaging's no-index installation guarantee.
+
+### comgr compilation cache (build speed)
+
+Every rocKE kernel packed by the hip-kernel-provider is lowered in-process through
+`libamd_comgr`, which keeps an on-disk cache of its compilation results. Where that cache
+lives dominates descriptor-packaging build time, above worker count and above whether the
+cache is warm.
+
+> [!IMPORTANT]
+> The default location is **`~/.cache/comgr`**. If your home directory is on a network
+> filesystem (NFS, or any mounted share), every cache probe and write becomes a network
+> round trip, and packing slows down by an order of magnitude. Point the cache at a
+> **RAM disk or local disk** instead.
+
+```bash
+# Anywhere on fast local storage. A tmpfs/RAM disk is ideal; a local SSD is fine.
+export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache
+```
+
+On a network home the cache costs more than it saves.
+
+Related variables, both read by comgr itself rather than by hipDNN:
+
+| Variable | Effect |
+|---|---|
+| `AMD_COMGR_CACHE_DIR` | Cache location. Defaults to `~/.cache/comgr`. |
+| `AMD_COMGR_CACHE` | Set to `0` to disable caching entirely. Unset means **enabled**. |
+
+Disabling the cache is a diagnostic, not a fix: every build then pays full compilation cost. A cache on local disk is per-machine and per-container, so a fresh CI runner or rebuilt container starts cold.
+
+The other lever is the packer's worker count. A CMake-driven build fixes it per packaging root through the `PACK_JOBS` argument at each `hkp_wire_pack_target()` call site, not through the `HKP_PACK_JOBS` environment variable, which reaches only a direct `hkp_pack` run. The [descriptor-packaging README](../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md) gives the per-root values.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 

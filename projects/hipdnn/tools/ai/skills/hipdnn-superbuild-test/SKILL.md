@@ -30,8 +30,15 @@ Infer options from the user request:
 
 2. Resolve paths:
    - Build directory: honor active workspace instructions first; otherwise use `<repo-root>/build`.
-   - Binary directory: `<build-dir>/bin`.
-   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
+   - Binary directory: `<build-dir>/bin`. `<binary-path>` below is the full path to a test
+     executable under it.
+   - `<installed-ctest-root>`: the CTest root of an *installed* tree, which for this
+     provider is `<install-prefix>/bin/hip_kernel_provider`, not the prefix itself.
+   - `<PY>`: for the corpus-sweep command below, the Python interpreter the active
+     workspace or repository instructions mandate, otherwise the active venv's
+     `python`. Resolve it once and substitute the full path.
+   - `<GEN>`: the IngestorGenerator root, `<repo-root>/projects/hipdnn/tools/IngestorGenerator`.
+   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, when the invoked skill has no bundled `scripts/` directory, or for ingestor engine create/extend work, where the helper revision must match the checkout being built.
 
 3. Verify the superbuild exists:
    ```bash
@@ -51,6 +58,27 @@ Infer options from the user request:
    ```
    The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
+
+   For an ingestor engine the discovery component is **`hip-kernel`**, not
+   `hip-kernel-provider`. A helper's first provider-prefixed command need not be the
+   requested engine's registration; inspect the actual installed CTest entry before
+   executing it. Replace `<your-bundle-ctest-target>` with the name your own
+   registration creates. The gfx942 dense names here are illustrative — the production
+   descriptor root ships no bundle, so
+   `hip_kernel_provider_gfx942_attention_dense_gpu_ref_integration_tests` is registered
+   in no checkout and copying it verbatim fails the second command under
+   `--no-tests=error`:
+   ```bash
+   ctest --test-dir <installed-ctest-root> -N -V \
+     -R '^<your-bundle-ctest-target>$'
+   ctest --test-dir <installed-ctest-root> --no-tests=error -V \
+     -R '^<your-bundle-ctest-target>$'
+   ```
+   Require your bundle's exact registration, its engine pin
+   (`hipkernel:Gfx942AttentionDense` in the illustration), current installed
+   executable/plugin/config paths and intended quick/standard cases. Missing
+   registration, wrong pin, zero selected cases, all-skipped support or failed numerical
+   comparisons fail this gate. A broad component PASS is not exact-engine evidence.
 
 6. Run tests through `cmake_run.py` when no gtest filter is requested:
    ```bash
@@ -86,7 +114,36 @@ Infer options from the user request:
 | `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` | `hip-kernel-provider-external-integration-check` when present |
 | `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` | — |
 
-The exact article/engine/config for the external suite is resolved at build time; get the ready-to-run command from `discover_test_targets.py --scope external-integration` (the `command:` line) rather than hardcoding paths.
+The exact article/engine/config for the external suite is resolved at build time. Use
+discovery for available commands, then inspect the specific CTest registration when
+proving a named engine; a generic `command:` line is not that proof.
+
+## Ingestor proof boundaries
+
+[The ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) is the sole ordered
+create/extend workflow and states how each gate is invoked. What matters here is what a
+pass does not establish: `device_probe.py` success, in either mode, is not dispatch.
+
+Native host proof executes actual typed provider registrations and descriptor loading,
+then checks the finalized emitted inventory. Use a fresh process, explicit
+`HIPDNN_TEST_EXPECTED_ARCH` from configured packaging architectures, the corresponding
+shard and a nonempty exact host-test selection. Missing or unknown architecture
+selection, wrong-arch data, absent/extra identities and wrong runtime source kind fail;
+packaged runtime source kind is KPACK. Source-text symbol matching and structural
+validation cannot certify native hooks, and host loading cannot prove device dispatch.
+
+Numerical acceptance needs a capable independent reference for the actual graph, and
+neither SDPA reference supports a sink UID. Record **BLOCKED** when no capable reference
+exists; a skip, automatic fallback exhaustion or unverified golden output cannot pass.
+
+The corpus sweep interface is `<PY> <GEN>/tools/sweep.py --config <absolute-YAML>` with
+`configs/sweep-isolation.sweep.yaml.example`. Correctness is separate from timing,
+engine attribution is exact, and resume is bound to current input content. `SWEEP_DONE`
+is validated completion; explicit `correctness.enabled: false` yields
+`SWEEP_TIMING_ONLY`, never final acceptance; unmet gates yield `SWEEP_INCOMPLETE`. After
+tuning or regeneration, repeat artifact/native/device/corpus gates against the final
+installation and complete the per-corpus runtime outcome join. Passing only unchanged
+baseline cases cannot establish that an extension's new variant served.
 
 ## Report
 
