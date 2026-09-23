@@ -5328,9 +5328,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
-    # Should check for is swizzled instead of usesubtileimpl
-    # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
+    # gfx950 HostPreSwizzle stores MX scales with K packed into the stride.
+    # gfx1250 TDM uses InMemorySwizzle in the descriptor (sizeShifter), not << 5.
+    if (kernel["UseSubtileImpl"]
+        and kernel.get("MXScaleFormat") == "HostPreSwizzle"
+        and kernel["ProblemType"]["MXBlockA"]
+        and kernel["ProblemType"]["MXBlockB"]):
       module.addComment("Scale StridesMXSA by 32")
       module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
       module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
@@ -5349,6 +5352,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="snapshot tensor base A"))
       module.add(SMovB64(dst=sgpr("AddressBBase", 2), src=sgpr("AddressB", 2),
                          comment="snapshot tensor base B"))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(SMovB64(dst=sgpr("AddressMXSABase", 2), src=sgpr("AddressMXSA", 2),
+                           comment="snapshot tensor base MXSA"))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(SMovB64(dst=sgpr("AddressMXSBBase", 2), src=sgpr("AddressMXSB", 2),
+                           comment="snapshot tensor base MXSB"))
 
     module.add(loopComponent.openPersistentLoop(self, kernel))
 
@@ -5438,11 +5447,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
                          comment="re-base A to tensor base"))
       module.add(SMovB64(dst=sgpr("AddressB", 2), src=sgpr("AddressBBase", 2),
                          comment="re-base B to tensor base"))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(SMovB64(dst=sgpr("AddressMXSA", 2), src=sgpr("AddressMXSABase", 2),
+                           comment="re-base MXSA to tensor base"))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(SMovB64(dst=sgpr("AddressMXSB", 2), src=sgpr("AddressMXSBBase", 2),
+                           comment="re-base MXSB to tensor base"))
     if hasTDM:
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockA"] and "MX" in tensorParametersA:
+        module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA["MX"]))
+        module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA["MX"]))
+      if kernel["ProblemType"]["MXBlockB"] and "MX" in tensorParametersB:
+        module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB["MX"]))
+        module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB["MX"]))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
@@ -5460,6 +5481,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if hasTDM and kernel["StreamK"]:
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA))
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockA"] and "MX" in tensorParametersA:
+        module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA["MX"]))
+      if kernel["ProblemType"]["MXBlockB"] and "MX" in tensorParametersB:
+        module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB["MX"]))
 
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
@@ -10418,6 +10443,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       self.defineSgpr("AddressABase", numSgprAddressA, 2)
       self.defineSgpr("AddressBBase", numSgprAddressB, 2)
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.defineSgpr("AddressMXSABase", numSgprAddressMXSA, 2)
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.defineSgpr("AddressMXSBBase", numSgprAddressMXSB, 2)
 
     # Actual allocation: prioritise 4-aligned SGPRs whenever the pool is
     # already on a 4-aligned boundary, otherwise consume unaligned ones.

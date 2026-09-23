@@ -548,6 +548,13 @@ class TileInfo:
       _lrBytesPerLoad          = geometry.lr.loadWidth * self.waveSize
       self.loadRatioLR         = _lrBytesPerLoad / self.lrSubtileSize if self.lrSubtileSize else 0
 
+      # Scales ride A/B TDM (enableTDMA/B); do not look up enableTDMMXSA.
+      isTDM = kernel.get("enableTDMA" if isA else "enableTDMB", False)
+      # Packed InMemorySwizzle footprint of one DepthU: scaleK * MT * bpe.
+      self.depthUBytes = int(self.scaleDepthU * self.macroTile * geometry.bpe) if isTDM \
+          else int(self.scaleDepthU * geometry.bpe)
+      self.ldsRowPadBytes = 0
+
     elif isinstance(geometry, CDTileGeometry):
       self.gr = None
       self.lr = None

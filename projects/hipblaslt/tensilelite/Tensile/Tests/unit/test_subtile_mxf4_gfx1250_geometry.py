@@ -112,6 +112,18 @@ def test_tileinfo_grids_match_smoke_yaml():
     assert tiD.mmaTileRegCount == 16
 
 
+def test_tileinfo_mx_tdm_packed_bytes():
+    kernel = _fp4_kernel()
+    kernel["enableTDMA"] = True
+    kernel["enableTDMB"] = True
+    tiSA = TileInfo(MXSA_B4_W32_M32, "MXSA", None, kernel)
+    tiSB = TileInfo(MXSB_B4_W32_N16, "MXSB", None, kernel)
+    assert tiSA.ldsRowPadBytes == 0
+    assert tiSB.ldsRowPadBytes == 0
+    assert tiSA.depthUBytes == (_DU // 32) * _MT0  # 8 * 128
+    assert tiSB.depthUBytes == (_DU // 32) * _MT1  # 8 * 64
+
+
 @pytest.fixture(scope="module")
 def gfx1250_iim():
     from Tensile.Common.Architectures import gfxToIsa

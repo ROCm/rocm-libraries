@@ -1270,6 +1270,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmLdsAddrB", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
       module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.defineSgpr("tdmLdsAddrMXSA", 1))
+        module.add(self.defineSgpr("tdmLdsSwapMaskMXSA", 1))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("tdmLdsAddrMXSB", 1))
+        module.add(self.defineSgpr("tdmLdsSwapMaskMXSB", 1))
 
     return module
 

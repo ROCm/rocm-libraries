@@ -338,6 +338,187 @@ class TestGfx1250SubtileCodegen:
         assert "tensor_load_to_lds" in asm
 
 
+def _fp4_tdm_kernel():
+    from Tensile.Common.DataType import DataType
+    dtype = DataType("f4")
+    e8 = DataType("e8")
+    return {
+        "DepthU": 256,
+        "_DepthU": 256,
+        "_DepthUA": 256,
+        "_DepthUB": 256,
+        "_DepthUMXSA": 8,
+        "_DepthUMXSB": 8,
+        "MacroTileA": 128,
+        "MacroTileB": 64,
+        "MacroTile0": 128,
+        "MacroTile1": 64,
+        "MatrixInstM": 32,
+        "MatrixInstN": 16,
+        "MatrixInstK": 128,
+        "MIWaveGroup": [2, 2],
+        "WavefrontSize": WAVESIZE_32,
+        "UseSubtileImpl": True,
+        "ISA": GFX1250_ISA,
+        "MIArchVgpr": True,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "NonTemporalMXSA": 0,
+        "NonTemporalMXSB": 0,
+        "TDMInst": 3,
+        "ProblemType": {
+            "DataTypeA": dtype,
+            "DataTypeB": dtype,
+            "DataTypeMXSA": e8,
+            "DataTypeMXSB": e8,
+            "MXBlockA": 32,
+            "MXBlockB": 32,
+            "Batched": False,
+            "StridedBatched": False,
+            "SupportUserArgs": False,
+        },
+    }
+
+
+def _create_writer_gfx1250_mx(kernel):
+    from rocisa.register import RegisterPool
+    from rocisa.enum import RegisterType
+    from Tensile.Components.Subtile.Kernel import (
+        TileInfo, AB_B4_W32_M32, AB_B4_W32_N16, MXSA_B4_W32_M32, MXSB_B4_W32_N16,
+    )
+
+    writer = SimpleNamespace()
+    writer.vgprPool = RegisterPool(0, RegisterType.Vgpr,
+                                   defaultPreventOverflow=False, printRP=False)
+    writer.sgprPool = RegisterPool(0, RegisterType.Sgpr,
+                                   defaultPreventOverflow=False, printRP=False)
+    writer.agprPool = RegisterPool(0, RegisterType.Accvgpr,
+                                   defaultPreventOverflow=False, printRP=False)
+    writer.sgprs = {}
+    writer.vgprPool.checkOut(1)
+    tiA = TileInfo(AB_B4_W32_M32, 'A', writer, kernel)
+    tiB = TileInfo(AB_B4_W32_N16, 'B', writer, kernel)
+    tiSA = TileInfo(MXSA_B4_W32_M32, 'MXSA', writer, kernel)
+    tiSB = TileInfo(MXSB_B4_W32_N16, 'MXSB', writer, kernel)
+    writer.states = SimpleNamespace(
+        a=SimpleNamespace(tileInfo=tiA),
+        b=SimpleNamespace(tileInfo=tiB),
+        mxsa=SimpleNamespace(tileInfo=tiSA),
+        mxsb=SimpleNamespace(tileInfo=tiSB),
+        regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
+        asmCaps={"HasMFMA": False, "HasWMMA_AccImmZero": True, "HasTDM": True},
+        kernel={"TDMInst": 3},
+        subtileLdsSwizzle=False,
+        laneSGPRCount=2,
+    )
+    writer.kernel = kernel
+    writer.ldsStartOffsetA = 0
+    writer.ldsStartOffsetB = 4096
+    writer.ldsStartOffsetMXSA = 8192
+    writer.ldsStartOffsetMXSB = 9216
+    writer.ldsTotalSize = 16384
+
+    from contextlib import contextmanager
+    from rocisa.code import Module as _Module
+
+    @contextmanager
+    def allocTmpSgpr(n, alignment=1, tag=""):
+        idx = writer.sgprPool.checkOutAligned(n, max(alignment, 1), preventOverflow=False)
+        yield SimpleNamespace(idx=idx)
+
+    writer.allocTmpSgpr = allocTmpSgpr
+    writer._resolveTDMGlobalAddr = lambda *a, **k: _Module()
+    return writer, tiA, tiB, tiSA, tiSB
+
+
+def _setup_sgprs_mx(writer):
+    writer.sgprPool.checkOut(12)
+    for name in ("WorkGroup0", "WorkGroup1", "SizeI", "SizeJ", "SizeL"):
+        writer.sgprs[name] = writer.sgprPool.checkOut(1, preventOverflow=False)
+    for tc in ['A', 'B', 'MXSA', 'MXSB']:
+        writer.sgprs["tdm%sGroup0" % tc] = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        writer.sgprs["tdm%sGroup1" % tc] = writer.sgprPool.checkOutAligned(8, 4, preventOverflow=False)
+        writer.sgprs["tdmLdsAddr%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+        writer.sgprs["tdmLdsSwapMask%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+        writer.sgprs["Address%s" % tc] = writer.sgprPool.checkOutAligned(2, 2, preventOverflow=False)
+
+
+def _mx_tp(tc):
+    return {
+        "tensorChar": tc,
+        "idx": 0 if tc.endswith("A") else 1,
+        "bpeGR": 1,
+        "ia": [0, 3, 2],
+    }
+
+
+class TestGfx1250MxSubtileTdm:
+    """Scale TDM transport on the gfx1250 32x16 MXF4 subtile path."""
+
+    @pytest.mark.parametrize("tc", ['MXSA', 'MXSB'])
+    def test_scale_gr_tdm_tensor_load(self, tc):
+        from Tensile.Components.Subtile.SubtileScaleEmit import globalReadDoScaleSubtile
+        kernel = _fp4_tdm_kernel()
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        asm = str(globalReadDoScaleSubtile(tc, writer, kernel))
+        assert "tensor_load_to_lds" in asm
+        assert "TDM: global->LDS for %s" % tc in asm
+        assert "buffer_load" not in asm
+
+    @pytest.mark.parametrize("tc", ['MXSA', 'MXSB'])
+    def test_scale_gr_ptr_updates_tdm(self, tc):
+        from Tensile.Components.Subtile.SubtileScaleEmit import emitScaleGRPtrUpdate
+        kernel = _fp4_tdm_kernel()
+        writer, _, _, tiSA, tiSB = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        ti = tiSA if tc == 'MXSA' else tiSB
+        asm = str(emitScaleGRPtrUpdate(ti, writer, kernel))
+        assert "s_add_u64" in asm
+        assert "sync descriptor global addr" in asm
+        assert "Srd%s" % tc not in asm
+
+    @pytest.mark.parametrize("tc", ['MXSA', 'MXSB'])
+    def test_scale_lds_swap_tdm(self, tc):
+        from Tensile.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
+        kernel = _fp4_tdm_kernel()
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        asm = str(globalReadLDSBufferSwap(tc, writer, kernel))
+        assert "s_xor_b32" in asm
+        assert "sync descriptor LDS addr" in asm
+        assert "LocalWriteBaseAddr%s" % tc not in asm
+
+    @pytest.mark.parametrize("tc,mt", [('MXSA', 128), ('MXSB', 64)])
+    def test_scale_tdm_global_offset_in_memory_swizzle(self, tc, mt):
+        from Tensile.Components.Subtile.SubtileGREmit import tdmGlobalOffsetSubtile
+        kernel = _fp4_tdm_kernel()
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        asm = str(tdmGlobalOffsetSubtile(writer, kernel, _mx_tp(tc)))
+        assert "wgId * mxUnit(4) * MT(%u) * bpe(1)" % mt in asm
+        # 2 k-groups, 4 waves: M/N split, not K-split; every wave loads this tensor.
+        assert "waveOff = waveId * (MT/4) * mxUnit * bpe" in asm
+        assert "numMxKGroups // numWaves" not in asm
+
+    @pytest.mark.parametrize("tc,lds", [('MXSA', 8192), ('MXSB', 9216)])
+    def test_scale_tdm_descriptor_uses_mxs_lds_base(self, tc, lds):
+        from unittest.mock import patch
+        from Tensile.Components.Subtile.SubtileGREmit import initTDMDescriptorSubtile
+        kernel = _fp4_tdm_kernel()
+        writer, *_ = _create_writer_gfx1250_mx(kernel)
+        _setup_sgprs_mx(writer)
+        with patch("Tensile.Components.ClusterLoad.ClusterLoadTDM.find", return_value=None):
+            asm = str(initTDMDescriptorSubtile(writer, kernel, _mx_tp(tc)))
+        assert "subtile LDS offset for %s" % tc in asm
+        assert "(subtile LDS offset for %s)" % tc in asm or str(lds) in asm
+        assert "ldsOffset = woffset + %u" % lds in asm
+        assert "swapMask = addr XOR (addr + ldsTotalSize)" in asm
+        # Smoke YAML: not enough k-groups, so Tile0 is MT*mxUnit/numWaves.
+        assert "tensor_load_to_lds" not in asm
+
+
 # ---------------------------------------------------------------------------
 # Iterate-mode (large DepthU) tests
 # ---------------------------------------------------------------------------

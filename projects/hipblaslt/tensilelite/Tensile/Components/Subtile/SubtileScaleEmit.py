@@ -22,7 +22,8 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SMulI32, SNop, SXorB32,
+    SAddCU32, SAddU32, SAddU64, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    TensorLoadToLds,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
@@ -196,9 +197,19 @@ def emitScaleLRLoad(ti, writer, kernel):
 # ---------------------------------------------------------------------------
 
 def emitScaleGRPtrUpdate(ti, writer, kernel):
-  """Advance scale SRD base pointer by one depthU iteration."""
+  """Advance scale SRD / TDM address by one depthU iteration."""
   module = Module()
   tc = ti.tc
+  if kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False):
+    inc = int(ti.depthUBytes)
+    module.addComment0("TDM addr update: %s += %u" % (tc, inc))
+    module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
+    group0 = "tdm%sGroup0" % tc
+    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2),
+                       comment="sync descriptor global addr"))
+    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30),
+                      comment="restore type field"))
+    return module
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
@@ -420,6 +431,14 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
   module = Module()
 
   if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+    return module
+
+  if kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False):
+    group0 = "tdm%sGroup0" % tc
+    group1 = "tdm%sGroup1" % tc
+    module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % tc)
+    module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
+                               comment="TDM: global->LDS for %s" % tc))
     return module
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
