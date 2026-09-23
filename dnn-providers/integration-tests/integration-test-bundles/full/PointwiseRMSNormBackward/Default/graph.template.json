@@ -15,8 +15,8 @@
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 4,
-        "in_1_tensor_uid": 8,
+        "in_0_tensor_uid": 3,
+        "in_1_tensor_uid": 7,
         "in_2_tensor_uid": null,
         "operation": "relu_bwd",
         "relu_lower_clip": "${case.attributes.relu_lower_clip}",
@@ -35,15 +35,14 @@
       "compute_data_type": "float",
       "inputs": {
         "dy_tensor_uid": 0,
-        "inv_rms_tensor_uid": 5,
-        "scale_tensor_uid": 6,
-        "x_tensor_uid": 7
+        "inv_rms_tensor_uid": 4,
+        "scale_tensor_uid": 5,
+        "x_tensor_uid": 6
       },
       "name": "RMSNormBackward_1",
       "outputs": {
-        "dbias_tensor_uid": 1,
-        "dscale_tensor_uid": 2,
-        "dx_tensor_uid": 3
+        "dscale_tensor_uid": 1,
+        "dx_tensor_uid": 2
       },
       "type": "RMSNormBackwardAttributes"
     }
@@ -64,7 +63,7 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "RMSNormBackward_1::DBIAS",
+      "name": "RMSNormBackward_1::DSCALE",
       "strides": "${case.strides}",
       "uid": 1,
       "virtual": false
@@ -74,7 +73,7 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "RMSNormBackward_1::DSCALE",
+      "name": "RMSNormBackward_1::DX",
       "strides": "${case.strides}",
       "uid": 2,
       "virtual": false
@@ -84,7 +83,7 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "RMSNormBackward_1::DX",
+      "name": "dy",
       "strides": "${case.strides}",
       "uid": 3,
       "virtual": false
@@ -94,7 +93,7 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "dy",
+      "name": "inv_rms",
       "strides": "${case.strides}",
       "uid": 4,
       "virtual": false
@@ -104,7 +103,7 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "inv_rms",
+      "name": "scale",
       "strides": "${case.strides}",
       "uid": 5,
       "virtual": false
@@ -114,7 +113,7 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "scale",
+      "name": "x",
       "strides": "${case.strides}",
       "uid": 6,
       "virtual": false
@@ -124,19 +123,9 @@
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
       "is_runtime_pass_by_value": false,
-      "name": "x",
-      "strides": "${case.strides}",
-      "uid": 7,
-      "virtual": false
-    },
-    {
-      "alignment": 16,
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "is_runtime_pass_by_value": false,
       "name": "y",
       "strides": "${case.strides}",
-      "uid": 8,
+      "uid": 7,
       "virtual": false
     }
   ]
