@@ -2,6 +2,11 @@
 
 Full documentation forrocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
+## (Unreleased) rocALUTION
+
+### Added
+* Added support for the `gfx1250-strict` architecture.
+
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
 ### Added

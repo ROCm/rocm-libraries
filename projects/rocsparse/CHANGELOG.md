@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.2.0
+
+### Added
+* Added support for the `gfx1250-strict` architecture.
+
 ## (Unreleased) rocSPARSE 5.1.0
 
 ### Added
