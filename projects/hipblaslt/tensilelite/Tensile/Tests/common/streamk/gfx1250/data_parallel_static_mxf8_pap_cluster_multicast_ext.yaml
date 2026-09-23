@@ -66,6 +66,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
+        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [0, 4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -79,8 +80,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
-        - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - TileProcessingStrategy: [DataParallel]
+        - WorkAssignment: [StaticGrid]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -89,6 +90,11 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
+        # 2-D shapes are the reason this file exists alongside the 1-D set: with
+        # Ck > 1 the PAP mask refresh keeps both MulticastMaskA and MulticastMaskB
+        # live (papDropsSelfOnlyMaskA only drops the self-only maskA on 1-D), so
+        # PAP + 2-D is the tightest SGPR case in the PR and needs numerical, not
+        # just codegen, coverage.
         - ClusterDim: [[2, 1], [4, 1], [8, 1], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
