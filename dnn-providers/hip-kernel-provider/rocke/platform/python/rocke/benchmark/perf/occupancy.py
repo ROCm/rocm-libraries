@@ -31,6 +31,11 @@ _NOTE_FIELDS = {
     "lds_bytes": r"\.group_segment_fixed_size:\s+(\d+)",
 }
 
+# The code object records the ISA it was built for
+# (`amdhsa.target: amdgcn-amd-amdhsa--gfx1201`). That beats any caller-supplied
+# arch: the occupancy model must follow the binary, not a stale CLI flag.
+_TARGET_FIELD = r"amdhsa\.target:\s*\S*?--(gfx[0-9a-z]+)"
+
 # Minimal per-arch caps for the coarse VGPR-limited occupancy estimate.
 # vgpr_per_simd = physical VGPRs per SIMD; granularity = allocation quantum.
 _CAPS = {
@@ -77,6 +82,9 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
         m = re.search(pat, notes)
         if m:
             fields[name] = int(m.group(1))
+    m = re.search(_TARGET_FIELD, notes)
+    if m:
+        fields["target"] = m.group(1)
     return fields
 
 
@@ -96,12 +104,19 @@ def _occupancy_estimate(vgpr: int, arch: str) -> Optional[int]:
 def resources(hsaco_bytes: bytes, arch: str) -> dict:
     """The record's `resources` section for a compiled HSACO (no GPU).
 
-    Keys: vgpr, agpr, sgpr, lds_bytes, vgpr_spill, sgpr_spill, occupancy.
-    Empty dict if the notes couldn't be read.
+    Keys: vgpr, agpr, sgpr, lds_bytes, vgpr_spill, sgpr_spill, target_arch,
+    occupancy. Empty dict if the notes couldn't be read.
+
+    `arch` is only a fallback: when the code object names its own target, that wins,
+    so passing a stale `--arch` can no longer produce a wave count for the wrong
+    family. `target_arch` reports what was actually used, so a caller can flag the
+    disagreement.
     """
     f = parse_notes(hsaco_bytes)
     if not f:
         return {}
+    target = f.get("target", "")
+    effective_arch = target or (arch or "").split(":", 1)[0]
     res = {
         "vgpr": f.get("vgpr", 0),
         "agpr": f.get("agpr", 0),
@@ -114,6 +129,7 @@ def resources(hsaco_bytes: bytes, arch: str) -> dict:
         # "rocprofv3"), which reports the runtime's allocated/rounded figures
         # (e.g. SGPRs incl. reserved) - so a consumer never conflates the two.
         "source": "elf_notes",
+        "target_arch": effective_arch,
     }
-    res["occupancy"] = _occupancy_estimate(res["vgpr"], arch)
+    res["occupancy"] = _occupancy_estimate(res["vgpr"], effective_arch)
     return res
