@@ -130,7 +130,7 @@ namespace TensileLite
         X_MACRO(TensileInternalArg0) \
         X_MACRO(TensileInternalArg1) \
         X_MACRO(NumWorkGroups) \
-        /* StreamK scheduling args */ \
+        /* Persistent and legacy scheduling args */ \
         X_MACRO(ItersPerTile) \
         X_MACRO(MagicNumberItersPerTile) \
         X_MACRO(MagicShiftItersPerTile) \
@@ -149,7 +149,22 @@ namespace TensileLite
         X_MACRO(ActivationArg) \
         X_MACRO(GSUSync) \
         /* Random seed args */ \
-        X_MACRO(RNDSeed)
+        X_MACRO(RNDSeed) \
+        /* Appended to preserve existing CustomArgSemantic values. */ \
+        X_MACRO(PersistentGrid) \
+        X_MACRO(BatchOffsetD) \
+        X_MACRO(BatchOffsetC) \
+        X_MACRO(BatchOffsetA) \
+        X_MACRO(BatchOffsetB) \
+        X_MACRO(AddressGateResidual) \
+        X_MACRO(GateResidualType) \
+        X_MACRO(StrideGate0) \
+        X_MACRO(StrideGate1) \
+        X_MACRO(StrideGate2) \
+        X_MACRO(StrideE2) \
+        X_MACRO(StrideScaleA2) \
+        X_MACRO(StrideScaleB2) \
+        X_MACRO(StrideMetadata2)
 
     enum class CustomArgSemantic
     {
@@ -602,7 +617,7 @@ namespace TensileLite
      * Parallel extras are per PartialIdx and tile-symmetric, so I % F == 0 is
      * not required (unlike the tree all-partial model without per-tile extras).
      */
-    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(PersistentLaunchSettings const& sk,
+    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(PersistentLaunchSettings const& launch,
                                                                    int  streamKAtomic,
                                                                    bool staticTwoTilePacking,
                                                                    size_t tiles);
@@ -1033,6 +1048,10 @@ namespace TensileLite
         PersistentLaunchSettings resolvePersistentSettings(Problem const& problem,
                                                            Hardware const& hardware) const;
 
+        // Constant-time policy/version guards used during dispatch.
+        void validatePersistentLoopArgsVersion() const;
+        // Validate the complete descriptor when loading a solution. Programmatic
+        // callers must also validate after constructing or changing a descriptor.
         void validatePersistentLoopArgs() const;
 
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
@@ -1139,7 +1158,7 @@ namespace TensileLite
                             dim3 const&              problemNumGroupTiles,
                             dim3 const&              numWorkGroups,
                             KA&                      args,
-                            PersistentLaunchSettings const&   sk,
+                            PersistentLaunchSettings const&   launch,
                             size_t                   resolvedGlobalAccumulation) const;
 
         template <bool T_Debug>
@@ -1187,7 +1206,7 @@ namespace TensileLite
         KernelInvocation generateCustomCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
-                                            PersistentLaunchSettings const&   sk) const;
+                                            PersistentLaunchSettings const&   launch) const;
 
         // Temporary: the proven per-feature argument-packing path, restored from
         // develop and used for all Tensile-generated kernels while the generic
@@ -1198,7 +1217,7 @@ namespace TensileLite
         KernelInvocation generateSingleCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
-                                            PersistentLaunchSettings const&   sk,
+                                            PersistentLaunchSettings const&   launch,
                                             GSUSettings const&       gsuSettings) const;
 
         template <bool T_Debug, typename KA>
@@ -1223,7 +1242,7 @@ namespace TensileLite
                                       ContractionInputs const& inputs,
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
-                                      PersistentLaunchSettings const&   sk,
+                                      PersistentLaunchSettings const&   launch,
                                       uint32_t                 autoGsuVal,
                                       size_t                   resolvedGlobalAccumulation,
                                       uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
@@ -1240,7 +1259,7 @@ namespace TensileLite
         template <bool T_Debug>
         KernelInvocation generateOutputConversionCall(Problem const&           problem,
                                                       ContractionInputs const& inputs,
-                                                      PersistentLaunchSettings const&   sk,
+                                                      PersistentLaunchSettings const&   launch,
                                                       uint32_t                 autoGsuVal,
                                                       size_t resolvedGlobalAccumulation) const;
 
@@ -1449,7 +1468,7 @@ namespace TensileLite
         std::string uniformSummationOrderLaunchObstacle(
             Problem const&         problem,
             Hardware const&        hardware,
-            PersistentLaunchSettings const& sk,
+            PersistentLaunchSettings const& launch,
             size_t                 resolvedGlobalAccumulation,
             uint32_t               gsu,
             void const*            synchronizer,
@@ -1459,7 +1478,7 @@ namespace TensileLite
         // Launch gate. Call once sk and resolvedGlobalAccumulation are final.
         void checkUniformSummationOrder(Problem const&         problem,
                                         Hardware const&        hardware,
-                                        PersistentLaunchSettings const& sk,
+                                        PersistentLaunchSettings const& launch,
                                         size_t                 resolvedGlobalAccumulation,
                                         uint32_t               gsu,
                                         void const*            synchronizer) const;

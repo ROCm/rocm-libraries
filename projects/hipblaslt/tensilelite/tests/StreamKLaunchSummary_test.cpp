@@ -15,7 +15,9 @@
 // pin that relationship between dynamicPartialsSlots, tiles%grid divisibility,
 // and whether a partials workspace is reserved.
 
+#include <array>
 #include <cstdlib>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <limits>
@@ -382,6 +384,132 @@ TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
     EXPECT_FALSE(d.dpOnly);
     EXPECT_EQ(d.numQueues, 0u) << "static SK3 mock device has no analytical work-queue count";
 }
+
+namespace
+{
+    struct StreamKArgumentCase
+    {
+        const char* name;
+        int mode;
+        bool dynamic;
+        bool parallel;
+        std::array<uint32_t, 6> scheduling;
+    };
+
+    class StreamKArgumentLayoutTest
+        : public ::testing::TestWithParam<std::tuple<int, StreamKArgumentCase>>
+    {
+    };
+}
+
+TEST_P(StreamKArgumentLayoutTest, PacksPartialWorkIntoKernelInvocation)
+{
+    auto const& [outerVersion, test] = GetParam();
+    AnalyticalEnv env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, test.mode);
+    solution.kernelName = "generated_streamk_argument_contract";
+    solution.customKernel.name = solution.kernelName;
+    solution.customKernel.generated = true;
+    solution.sizeMapping.globalSplitU = 0;
+    solution.sizeMapping.globalAccumulation = 0;
+    solution.sizeMapping.workGroupMapping = 1;
+    solution.sizeMapping.workGroupMappingXCC = 1;
+    solution.internalArgsSupport.version = outerVersion;
+    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    solution.internalArgsSupport.useUniversalArgs = true;
+
+    // Tree: 1056 tiles, eight K iterations each, grid 64. The two-tile
+    // algorithm assigns 96 tiles to StreamK, giving each WG 12 K iterations.
+    // Parallel: 64 tiles, 64 K iterations each, grid 256: four splits of 16.
+    auto problem = test.parallel ? makeGemmProblem(256, 4096, 4096)
+                                 : makeGemmProblem(4096, 4224, 512);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    problem.setParams().setStreamKTileSchedulingMode(test.dynamic ? 1 : 0);
+    env.device.skFixedGrid = test.parallel ? 256 : 64;
+    env.device.skDynamicGrid = test.parallel
+        ? static_cast<int>(origami::grid_selection_t::k_split_aware) : 0;
+    env.device.skFullTiles = 1;
+    // Dynamic: split 32 of the 1056 tiles into three items (3, 3, 2
+    // iterations). This requires 1120 work items, including actual partials.
+    env.device.skTiles = 32;
+    env.device.skSplit = 3;
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel());
+
+    auto launch = solution.resolvePersistentSettings(problem, env.device);
+    ASSERT_EQ(launch.tileProcessingStrategy, TileProcessingStrategy::StreamK);
+    ASSERT_EQ(launch.reduction, test.parallel ? origami::reduction_t::parallel
+                                              : origami::reduction_t::tree);
+    ASSERT_EQ(launch.effectiveWorkAssignment, test.dynamic ? WorkAssignment::DynamicWorkQueue
+                                                          : WorkAssignment::StaticGrid);
+    ASSERT_EQ(launch.grid, test.parallel ? 256u : 64u);
+    ASSERT_GT(launch.workspaceBytes, 0u);
+
+    std::array<uint32_t, 4> workspace{}, flags{};
+    ContractionInputs inputs;
+    inputs.alpha = 1.0f;
+    inputs.beta = 0.0f;
+    inputs.ws = workspace.data();
+    inputs.Synchronizer = flags.data();
+    auto invocation = solution.generateSingleCall<true>(
+        problem, inputs, env.device, launch, GSUSettings{});
+    auto const& args = invocation.args;
+    EXPECT_EQ(invocation.numWorkGroups.x, test.parallel ? 256u : 64u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    EXPECT_EQ(KernelArguments::const_iterator(args, "PersistentGrid"), args.end());
+
+    // Check the actual six transmitted words, not a recomputed launch summary.
+    // Division by eight/64 uses multiply-high constants 2^29/2^26, shift zero.
+    const char* firstName = test.mode == 3 ? "itersPerTile" : "ItersPerTile";
+    auto first = KernelArguments::const_iterator(args, firstName);
+    ASSERT_NE(first, args.end());
+    auto start = static_cast<uint8_t const*>((*first).first);
+    auto startOffset = start - static_cast<uint8_t const*>(args.data());
+    ASSERT_GE(args.size(), startOffset + sizeof(test.scheduling));
+    std::array<uint32_t, 6> packed{};
+    std::memcpy(packed.data(), start, sizeof(packed));
+    EXPECT_EQ(packed, test.scheduling);
+
+    auto last = KernelArguments::const_iterator(args, test.dynamic ? "SKGrid" : "skTiles");
+    ASSERT_NE(last, args.end());
+    EXPECT_EQ(static_cast<uint8_t const*>((*last).first) - start, 20);
+    if(outerVersion == 3)
+    {
+        auto alpha = KernelArguments::const_iterator(args, "alpha");
+        ASSERT_NE(alpha, args.end());
+        EXPECT_EQ(static_cast<uint8_t const*>((*alpha).first) - start, 24);
+    }
+    for(auto name : {"ws", "Flags"})
+    {
+        auto field = KernelArguments::const_iterator(args, name);
+        ASSERT_NE(field, args.end()) << name;
+        ASSERT_EQ((*field).second, sizeof(void*)) << name;
+        void* pointer = nullptr;
+        std::memcpy(&pointer, (*field).first, sizeof(pointer));
+        void* expected = std::string(name) == "ws" ? inputs.ws
+                       : test.parallel ? nullptr : inputs.Synchronizer;
+        EXPECT_EQ(pointer, expected) << name;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    StreamKModesAndOuterVersions, StreamKArgumentLayoutTest,
+    ::testing::Combine(
+        ::testing::Values(0, 1, 2, 3),
+        ::testing::Values(
+            StreamKArgumentCase{"StaticTree", 3, false, false, {8, 0x20000000, 0, 12, 64, 96}},
+            StreamKArgumentCase{"StaticParallel", 3, false, true, {64, 0x04000000, 0, 16, 256, 4}},
+            StreamKArgumentCase{"Dynamic", 4, true, false, {8, 1120, 32, 3, 3, 64}},
+            StreamKArgumentCase{"HybridStaticTree", 5, false, false, {8, 0x20000000, 0, 12, 64, 96}},
+            StreamKArgumentCase{"HybridStaticParallel", 5, false, true, {64, 0x04000000, 0, 16, 256, 4}},
+            StreamKArgumentCase{"HybridDynamic", 5, true, false, {8, 1120, 0x40000020, 3, 3, 64}})),
+    [](::testing::TestParamInfo<StreamKArgumentLayoutTest::ParamType> const& info) {
+        return "Outer" + std::to_string(std::get<0>(info.param)) + "_"
+             + std::get<1>(info.param).name;
+    });
 
 // ---------------------------------------------------------------------------
 // Force-DP-only (SK3): every tile stays data-parallel. skTiles==0, no partials,
