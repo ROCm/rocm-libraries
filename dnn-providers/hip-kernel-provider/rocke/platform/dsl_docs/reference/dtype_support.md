@@ -125,15 +125,21 @@ provider whose accepted dtype set defines the must-not-regress floor).
 | **C5** | **Kernel-family reach** | How many shipping families actually accept it — GEMM, MFMA-GEMM, conv, attention, norm/quant epilogues? | This is the criterion the *user* feels. The reference set is the hipDNN op surface this provider implements: conv fwd/bwd/wgrad, SDPA fwd/bwd, batchnorm, RMSNorm, resample, matmul. A dtype that passes C1–C4 but ships in zero instances delivers nothing. |
 | **C6** | **Numerical / dialect hygiene** | Is rounding + saturation defined, and is the *encoding dialect* unambiguous at the arch boundary? | Purely a correctness criterion, and the one with the worst failure mode: silence. gfx942 fp8 is **FNUZ** and gfx950 fp8 is **OCP** — same bytes, results off by a power of two. CK models this explicitly with distinct `f8_fnuz_t` / `f8_ocp_t` types; rocKE currently carries it as an arch-dependent decode dialect, so this criterion tracks real risk, not pedantry. MX types add a second axis (E8M0 scales are power-of-two only). |
 
-Not every criterion applies to every dtype. `C3` and `C6` are **N/A** for exact
-integer types used only for indexing (`i1`, `i16`, `i32`, `i64`) — there is no
-rounding to get wrong and no float bridge they are required to have.
+Not every criterion applies to every dtype. For `i1`, `i16`, and `i64`, this
+matrix assesses predicate/index/address storage and use: `C2` (matrix arithmetic),
+`C3` (float conversions), and `C6` (rounding/dialect) are **N/A**. Their integer
+operations do not imply that an MMA atom accepts those types. `i32` is also a
+matrix accumulator/output type, so its `C2` and `C3` are assessed; `C6` remains
+N/A for exact integer arithmetic. `i8` is assessed as quantized matrix input,
+including conversion rounding and saturation, so all six criteria apply.
 
 ### 2.3 Scoring rubric
 
 Each criterion is scored **0–3**. `N/A` criteria are dropped from both the
-numerator and the denominator, so `Support%` is comparable across rows with
-different applicable-criterion counts.
+numerator and the denominator. `Support% = 100 × sum(scores) / (3 × number of
+applicable criteria)`, rounded to the nearest integer. It describes only the
+applicable criteria; percentages for indexing types and matrix inputs do not
+measure the same capabilities.
 
 | Score | Meaning |
 |---|---|
@@ -181,10 +187,10 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `e8m0` (MX scale) | 0 | 3 | 3 | 2 | 3 | 2 | **72%** | — |
 | **Integer** | | | | | | | | |
 | `i32` | 3 | 3 | 3 | 3 | 3 | — | **100%** | — |
-| `i1` | 3 | 3 | — | 1 | 3 | — | **83%** | [P] |
+| `i1` | 3 | — | — | 1 | 3 | — | **78%** | [P] |
 | `i8` | 3 | 2 | 2 | 2 | 1 | 3 | **72%** | [P] |
-| `i64` | 3 | 3 | 1 | 1 | 1 | — | **60%** | [P] |
-| `i16` | 3 | 2 | 1 | 2 | 1 | — | **60%** | [P] |
+| `i64` | 3 | — | — | 1 | 1 | — | **56%** | [P] |
+| `i16` | 3 | — | — | 2 | 1 | — | **67%** | [P] |
 | `u8` | 0 | 0 | 0 | 0 | 0 | 0 | **0%** | [M] |
 | `u16/u32/u64` | 0 | 0 | 0 | 0 | 0 | 0 | **0%** | [M] |
 | **Compute mode (not a storage type)** | | | | | | | | |
@@ -224,11 +230,18 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
 - **`i8` C2=2** — full integer arithmetic and an `iu8` WMMA atom exists on
   gfx1151, but no CDNA integer MFMA path is wired *in rocKE*. Note the ceiling is
   software, not silicon: `V_MFMA_I32_*_I8` ships on every CDNA generation
-  including gfx942 and gfx950 (§4A), and gfx950 adds K64/K32 wide forms. **C3=2** — `f32→i8` with RNE
-  and saturating clamp at ±127 is present (`quant.py:66-70,141-204`), but
-  `i8→f32` requires a manual sext to `i32` first because `sitofp_f32` is
-  i32-only. **C5=1** — quant epilogues only (`add_rmsnorm2d_rdquant`); no
-  integer GEMM or attention instance ships.
+  including gfx942 and gfx950 (§4A), and gfx950 adds K64/K32 wide forms.
+  **C3=2** — both directions through f32 exist in
+  [quant.py](../../python/rocke/helpers/quant.py): `quantize_scalar_f32` uses
+  RNE with a symmetric ±127 clamp, and `dequantize_scalar_to_f32` handles
+  i8→i32→f32 internally. Use `scale=b.const_f32(1.0)` for an unscaled conversion; callers
+  do not need to write the extension themselves. Direct sibling conversions
+  still route through f32, so this remains Mostly rather than Full.
+  **C5=1** — quant epilogues and the gfx1151 integer WMMA GEMM instances in §5
+  exist. Matrix-family reach remains limited to targets with the `iu8` WMMA
+  atom and packed-input builders; universal/MFMA GEMM and attention do not
+  expose i8. The score remains Partial, but is not an assertion that integer
+  GEMM is absent.
 - **`i4` C1=0 / C3=3** — the inverse of the fp8 profile: not a `Type` at all,
   yet its conversion coverage is the *best* of any quantized type
   (`i4_dequant.py` targets i32, f32, f16, fp8, bf8). C2=1: `iu4` WMMA on RDNA
@@ -286,6 +299,8 @@ helpers `ir.py:849-1139` (casts), `helpers/io.py:48-211`,
 families `instances/common/gemm_universal.py:43,643-659`,
 `instances/common/mfma_gemm.py:62-65,192-195`,
 `instances/common/block_scale_gemm.py`, `instances/common/_matmul_nbits_common.py`,
+[integer WMMA GEMM](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py),
+[integer WMMA GEMM with dequantization](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py),
 `library/kernels/common/attention_unified.py` (`UNIFIED_DTYPES=("fp16","bf16")`),
 `library/kernels/common/fmha_fwd_fp8.py`; atoms
 `core/arch/data/arch_specs.json`, `helpers/atoms.py:302`,
@@ -312,10 +327,10 @@ bucket the ticket calls out):
 | `fp8e4m3/bf8e5m2 → f16` and `→ bf16` | dequant to `f32`, then cast | [C] |
 | `fp8/bf8 → i8` (and reverse) | via `f32` | [C] |
 | `fp8/bf8` in `io.py` `load_scalar`/`store_scalar`/`pack_f32_to` | raises `ValueError`; must use IR primitives or `quant.py` | [P] |
-| `sitofp` from `i8/i16` | sext/zext to `i32` first (`sitofp_f32` is i32-only) | [P] |
+| `sitofp_f32` primitive from `i8/i16` | Primitive accepts i32 only. For signed i8, use [quant.py](../../python/rocke/helpers/quant.py) `dequantize_scalar_to_f32(b, x, scale=b.const_f32(1.0))`; it emits sext + sitofp internally. For signed i16, explicitly sext to i32 first. | [P] |
 | MX scaled cvt (`cvt_scalef32_pk_*`) | E8M0 scale only → **power-of-two scales**; arbitrary scale needs unscaled cvt + `fmul` | [P] |
 | packed store `store_packed_chunk_local` | `n∈{4,8}` only (no `n=2`); `load_vec`/`store_vec` `n∈{2,4,8}` | [P] |
-| scalar `cvt_fp4_to_f32` / `cvt_fp6_to_f32` | not exposed; fp4/fp6 only via MX-MFMA path | [P] |
+| scalar `cvt_fp4_to_f32` / `cvt_fp6_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides `unpack_fp4_byte_to_pair_f32` and `unpack_fp6_bytes_to_quad_f32`, which decode packed codebook values to f32 without MFMA. | [P] |
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 
 Rounding/saturation that **is** present: round-to-nearest-even + saturating
@@ -466,6 +481,8 @@ scheduled to gain.
 |---|---|---|
 | Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum) | **fp8/bf8** — `NotImplementedError` at `:659` for any dtype that is not `F16`/`BF16` |
 | MFMA GEMM (`mfma_gemm.py`) | f16, bf16 | **fp8/bf8** — `:62-65` records that lane-decode and byte-wise A/B loads are absent |
+| Integer WMMA GEMM ([wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py)) | Signed int8 A/B packed four values per i32 → i32 accumulation/output; gfx1151 and gfx11-generic (`iu8` WMMA atom) | Raw byte-pointer inputs; targets without this atom; requires complete 16×16 tiles and K a multiple of 16 |
+| Integer WMMA GEMM with dequantization ([wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py)) | Same packed int8 input and i32 accumulation, runtime per-tensor scales → f16 output | Same target and packing constraints; no arbitrary output dtype selector |
 | Block-scale GEMM ([block_scale_gemm.py](../../python/rocke/instances/common/block_scale_gemm.py)) | `abquant`, FP8/BF8 A/B → **f32** out on gfx942/gfx950 | `aquant`/`bquant`; `i4_fp8`/`i4_bf8`; non-f32 output; WMMA targets including gfx1250 |
 | MatMul-NBits (`_matmul_nbits_common.py`) | A=f16, B=int4, scale f16/f32 (RDNA only) | B widths other than 4-bit; CDNA arches |
 | Convolution (`_conv_implicit_gemm_common.py`) | f16, bf16, f32 | **reduced-precision compute over f32 storage** — no selector exists to request it (gpu-ref carries a `USE_TF32` switch; see §1); **fp8/bf8** |
