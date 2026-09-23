@@ -86,21 +86,21 @@ def attention_execution_candidates() -> Tuple[KernelCandidate, ...]:
     return ATTENTION_EXECUTION_REGISTRY.candidates()
 
 
-def _attention_selector_ok(req: OperatorRequest, candidate: KernelCandidate) -> bool:
-    """Default algorithm/spec_id filter plus the gfx950 dense family-id alias."""
-    assert isinstance(req, AttentionRequest)
-    wanted = req.algorithm.strip().lower()
-    sid = req.spec_id.strip().lower()
-    family = gfx950.GFX950_DENSE_FAMILY_SPEC_ID
-    if wanted not in ("auto", candidate.algorithm):
+def _gfx950_dense_family_alias(
+    req: OperatorRequest, candidate: KernelCandidate
+) -> bool:
+    """Let the gfx950 dense family id admit every dense variant.
+
+    This only relaxes ``spec_id``. Algorithm pinning stays in
+    :func:`rocke.dispatch.core.selector_matches`.
+    """
+    if not isinstance(req, AttentionRequest):
         return False
-    if sid not in ("auto", candidate.spec_id) and not (
-        sid == family
+    return (
+        req.spec_id.strip().lower() == gfx950.GFX950_DENSE_FAMILY_SPEC_ID
         and candidate.algorithm == "attention_dense"
         and req.arch == "gfx950"
-    ):
-        return False
-    return True
+    )
 
 
 def iter_registered_attention_combos(
@@ -122,7 +122,7 @@ def iter_registered_attention_combos(
     for candidate, spec in ATTENTION_EXECUTION_REGISTRY.iter_combos(
         req,
         candidate_prefix=candidate_prefix,
-        selector_ok=_attention_selector_ok,
+        spec_id_alias=_gfx950_dense_family_alias,
     ):
         if (
             candidate.algorithm == "unified_tuning"
@@ -152,13 +152,20 @@ def registered_attention_combos(
 def attention_dispatch_result(
     req: AttentionRequest, candidate: KernelCandidate, spec: object
 ) -> DispatchResult:
-    """Wrap an already-selected executable ``(candidate, spec)`` as a result."""
+    """Wrap an already-selected executable ``(candidate, spec)`` as a result.
+
+    The stored request is the opt-in probe: the request this candidate admits,
+    not the caller's original ``algorithm='auto'`` request.
+    """
+    from rocke.dispatch.core import opt_in_probe
+
+    pinned = opt_in_probe(req, candidate)
     return DispatchResult(
-        request=req,
+        request=pinned,
         candidate=candidate,
         spec=spec,
-        kernel_id=_kernel_id(req, candidate, spec),
-        grid=candidate.grid(spec, req),
+        kernel_id=_kernel_id(pinned, candidate, spec),
+        grid=candidate.grid(spec, pinned),
         block=candidate.block(spec),
         signature=tuple(candidate.signature(spec)),
         explanation=(

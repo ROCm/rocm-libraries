@@ -6,8 +6,8 @@ from __future__ import annotations
 import os
 import traceback
 
-# gfx950 3D graph is default-on; leave the env unset so the probe
-# exercises the production gate. HIPDNN_GFX950_3D_GRAPH=0 still disables.
+# gfx950 3D graph replay is opt-in. Set HIPDNN_GFX950_3D_GRAPH=1 to
+# exercise it; leave the variable unset to see the production default.
 
 from dispatch.attention import AttentionRequest, registered_attention_combos
 from dispatch.attention.common import _problem

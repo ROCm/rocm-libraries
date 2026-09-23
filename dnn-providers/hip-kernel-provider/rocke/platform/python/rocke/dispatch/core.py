@@ -377,9 +377,10 @@ class ProblemBinding:
 class TorchBinding:
     """Launch contract over caller-owned tensors.
 
-    Distinct from :class:`ProblemBinding`, which allocates HIP buffers. This
-    type never imports Torch; ``launch`` closes over tensors the caller already
-    holds. Used by attention torch harnesses and graph capture.
+    The name is historical. This is not a Torch type: it never imports Torch,
+    and ``launch`` closes over tensors the caller already holds. Distinct from
+    :class:`ProblemBinding`, which allocates HIP buffers. Used by attention
+    tensor harnesses and graph capture.
     """
 
     launch: Callable[..., Any]
@@ -444,6 +445,11 @@ class KernelCandidate:
 
     Second substrate for families whose benches already hold torch tensors.
     Must not import Torch at module load; the callable may import it lazily.
+    """
+
+    opt_in: bool = False
+    """When true, ``supported`` and ``select`` ignore this candidate for
+    ``algorithm='auto'``. Sweeps still see it through ``include_opt_in``.
     """
 
     def built(self, spec: Any, arch: str) -> Any:
@@ -745,11 +751,13 @@ class CandidateRegistry:
         surface instead of reading source. Ordering follows :meth:`candidates`,
         so the manifest is stable across processes.
         """
+        candidates = self.candidates()
         return {
             "family": self.family,
             "requires_build": self.require_build,
             "requires_binding": self.require_binding,
             "requires_torch_binding": self.require_torch_binding,
+            "opt_in_candidates": sum(1 for c in candidates if c.opt_in),
             "candidates": [
                 {
                     "name": c.name,
@@ -764,11 +772,12 @@ class CandidateRegistry:
                     "buildable": c.build is not None,
                     "bindable": c.bind is not None,
                     "torch_bindable": c.bind_torch is not None,
+                    "opt_in": c.opt_in,
                     "capability": (
                         None if c.capability is None else c.capability.as_dict()
                     ),
                 }
-                for c in self.candidates()
+                for c in candidates
             ],
         }
 
@@ -785,8 +794,23 @@ class CandidateRegistry:
             if c.capability is not None and arch in c.capability.arches
         )
 
+    def _auto_visible(self, request: OperatorRequest, candidate: KernelCandidate) -> bool:
+        """Opt-in candidates stay out of production auto selection.
+
+        An explicit ``algorithm`` pin equal to the candidate's algorithm still
+        sees them, so a sweep or a replay can select one by name.
+        """
+        if not candidate.opt_in:
+            return True
+        algorithm = _request_selector(request, "algorithm")
+        return algorithm == candidate.algorithm.strip().lower()
+
     def supported(self, request: OperatorRequest) -> Tuple[KernelCandidate, ...]:
-        return tuple(c for c in self.candidates() if c.admits(request)[0])
+        return tuple(
+            c
+            for c in self.candidates()
+            if self._auto_visible(request, c) and c.admits(request)[0]
+        )
 
     def iter_combos(
         self,
@@ -795,36 +819,41 @@ class CandidateRegistry:
         candidate_prefix: str = "",
         include_opt_in: bool = True,
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
     ) -> Iterable[Tuple[KernelCandidate, Any]]:
         """Yield each ``(candidate, spec)`` that can launch ``request``.
 
         Unlike :meth:`supported`, this is the sweep primitive: it walks the
         full registry, probes opt-in candidates by pinning each candidate's
         own ``algorithm`` / ``spec_id``, and expands ``candidate.sweep_space``.
-        Production :meth:`select` is unchanged and still never sees a candidate
-        that refuses ``algorithm='auto'``.
+        Production :meth:`select` is unchanged and still never sees an opt-in
+        candidate under ``algorithm='auto'``.
 
-        ``request.algorithm`` / ``spec_id`` still filter when they are not
-        ``auto``. Pass ``selector_ok`` to replace that default (attention uses
-        it for the gfx950 dense family id that admits every dense variant).
+        Pin matching always goes through :func:`selector_matches`. ``selector_ok``
+        adds a further constraint; it does not replace the pin. ``spec_id_alias``
+        is the only relaxation, used when one family id should admit several
+        concrete ``spec_id`` values.
         """
-        wanted_algorithm = _request_selector(request, "algorithm")
-        wanted_spec_id = _request_selector(request, "spec_id")
         for candidate in self.candidates():
             if candidate_prefix and not candidate.name.startswith(candidate_prefix):
+                continue
+            if candidate.opt_in and not include_opt_in:
                 continue
             capability = candidate.capability
             arch = getattr(request, "arch", "")
             if capability is not None and arch and arch not in capability.arches:
                 continue
-            if selector_ok is not None:
-                if not selector_ok(request, candidate):
-                    continue
-            else:
-                if wanted_algorithm not in ("auto", candidate.algorithm):
-                    continue
-                if wanted_spec_id not in ("auto", candidate.spec_id):
-                    continue
+            pinned, _why = selector_matches(request, candidate)
+            if not pinned and spec_id_alias is not None:
+                algorithm = normalize_selector(request.algorithm)
+                if algorithm in ("auto", candidate.algorithm) and spec_id_alias(
+                    request, candidate
+                ):
+                    pinned = True
+            if not pinned:
+                continue
+            if selector_ok is not None and not selector_ok(request, candidate):
+                continue
             probe = opt_in_probe(request, candidate) if include_opt_in else request
             ok, _why = candidate.admits(probe)
             if not ok:
@@ -843,6 +872,7 @@ class CandidateRegistry:
         candidate_prefix: str = "",
         include_opt_in: bool = True,
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
     ) -> Tuple[Tuple[KernelCandidate, Any], ...]:
         """Materialized :meth:`iter_combos` for callers that need a sequence."""
         return tuple(
@@ -851,6 +881,7 @@ class CandidateRegistry:
                 candidate_prefix=candidate_prefix,
                 include_opt_in=include_opt_in,
                 selector_ok=selector_ok,
+                spec_id_alias=spec_id_alias,
             )
         )
 
@@ -861,6 +892,7 @@ class CandidateRegistry:
         candidate_prefix: str = "",
         include_opt_in: bool = True,
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
         spec_key: Callable[[Any], str] | None = None,
         spec_filter: Callable[[Any], bool] | None = None,
     ) -> Tuple[Any, ...]:
@@ -878,6 +910,7 @@ class CandidateRegistry:
             candidate_prefix=candidate_prefix,
             include_opt_in=include_opt_in,
             selector_ok=selector_ok,
+            spec_id_alias=spec_id_alias,
         ):
             if spec_filter is not None and not spec_filter(spec):
                 continue
@@ -895,6 +928,7 @@ class CandidateRegistry:
         candidate_prefix: str = "",
         include_opt_in: bool = True,
         selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
         spec_filter: Callable[[Any], bool] | None = None,
     ) -> Tuple[DispatchResult, ...]:
         """One :class:`DispatchResult` per :meth:`combos` entry.
@@ -909,17 +943,19 @@ class CandidateRegistry:
             candidate_prefix=candidate_prefix,
             include_opt_in=include_opt_in,
             selector_ok=selector_ok,
+            spec_id_alias=spec_id_alias,
         ):
             if spec_filter is not None and not spec_filter(spec):
                 continue
-            kid = kernel_id(request, candidate, spec)
+            probe = opt_in_probe(request, candidate) if include_opt_in else request
+            kid = kernel_id(probe, candidate, spec)
             results.append(
                 DispatchResult(
-                    request=request,
+                    request=probe,
                     candidate=candidate,
                     spec=spec,
                     kernel_id=kid,
-                    grid=candidate.grid(spec, request),
+                    grid=candidate.grid(spec, probe),
                     block=candidate.block(spec),
                     signature=tuple(candidate.signature(spec)),
                     explanation=(

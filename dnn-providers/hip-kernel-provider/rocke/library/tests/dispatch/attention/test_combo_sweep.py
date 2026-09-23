@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import sys
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace
@@ -72,8 +73,13 @@ class TestComboSweepLifecycle(unittest.TestCase):
         source = inspect.getsource(sweep)
         tree = ast.parse(source)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr in {"path", "insert"}:
-                continue
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "sys"
+                and node.attr == "path"
+            ):
+                self.fail("attention_combo_sweep mutates sys.path")
         self.assertNotIn("sys.path.insert", source)
         self.assertNotIn("ROCKE_ROOT", source)
         self.assertNotIn("PYTHONPATH", source)
@@ -171,10 +177,60 @@ class TestComboSweepLifecycle(unittest.TestCase):
             mock.patch.object(
                 type(result), "build", return_value=SimpleNamespace(name="k")
             ),
-            mock.patch.object(sweep, "_lower_kernel"),
             mock.patch("rocke.core.verify.verify_or_raise"),
+            mock.patch.object(
+                sweep, "_lower_kernel", side_effect=RuntimeError("boom")
+            ),
         ):
-            self.assertIsNone(sweep.host_validate(result))
+            reason = sweep.host_validate(result)
+        self.assertIsNotNone(reason)
+        self.assertIn("boom", reason)
+
+    def test_offset_limit_window_is_per_shape(self):
+        shapes = [SimpleNamespace(name="a"), SimpleNamespace(name="b")]
+
+        def results(req, _args):
+            return [SimpleNamespace(shape=req.name, index=i) for i in range(4)]
+
+        with (
+            mock.patch.object(sweep, "_requests", return_value=shapes),
+            mock.patch.object(sweep, "_iter_results", side_effect=results),
+        ):
+            low = list(sweep.iter_shard(_args(offset=0, limit=2)))
+            high = list(sweep.iter_shard(_args(offset=2, limit=2)))
+        low_keys = {(row[1].name, row[0]) for row in low}
+        high_keys = {(row[1].name, row[0]) for row in high}
+        self.assertEqual(low_keys, {("a", 0), ("a", 1), ("b", 0), ("b", 1)})
+        self.assertEqual(high_keys, {("a", 2), ("a", 3), ("b", 2), ("b", 3)})
+        self.assertTrue(low_keys.isdisjoint(high_keys))
+
+    def test_dtype_choices_reject_fp32(self):
+        for module in (sweep, dense_prefill_table_sweep, decode_table_sweep):
+            with self.subTest(module=module.__name__):
+                with (
+                    mock.patch.object(sys, "argv", [module.__name__, "--dtype", "fp32"]),
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    module.main()
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_table_sweeps_rewrite_json_after_each_row(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        for module in (dense_prefill_table_sweep, decode_table_sweep):
+            with self.subTest(module=module.__name__):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = str(Path(tmp) / "rows.json")
+                    args = SimpleNamespace(output_json=path)
+                    rows: list[dict] = []
+                    module._store_row(rows, {"i": 1}, args)
+                    self.assertEqual(json.loads(Path(path).read_text()), [{"i": 1}])
+                    module._store_row(rows, {"i": 2}, args)
+                    self.assertEqual(
+                        json.loads(Path(path).read_text()), [{"i": 1}, {"i": 2}]
+                    )
 
     def test_table_sweeps_fail_only_for_admitted_execution_failures(self):
         for module in (dense_prefill_table_sweep, decode_table_sweep):

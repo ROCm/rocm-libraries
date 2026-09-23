@@ -1,5 +1,9 @@
 # Attention dispatch
 
+Registration procedure and shared registry mechanics live in
+[`../AGENTS.md`](../AGENTS.md). This page only covers what is attention-specific:
+route versus execution, capability versus support, and the production boundary.
+
 This package selects attention implementations and exposes a uniform execution
 contract for benchmarks and graph integrations. It deliberately separates:
 
@@ -163,7 +167,9 @@ trusted callers that enforce immutable, bounds-checked metadata externally.
 Physical K/V cache size is not known during request-only dispatch. Once binding
 sees `k.shape[0]`, it refreshes the explicit kernel spec's i32/i64 addressing
 mode and stable tuning identity before compilation/cache lookup. FP8 OCP versus
-FNUZ encoding is likewise explicit spec state and part of tuning identity.
+FNUZ is a property of the architecture: the tuning wrapper records the request
+encoding so a mismatch is rejected, and the kernel name derives the FNUZ suffix
+from the gfx942 spec rather than from a free field.
 
 ## Package layout
 
@@ -182,17 +188,10 @@ accounting lives in `benchmarks/common/attention_flops.py`.
 
 ## Adding a candidate
 
-1. Put single-architecture candidates in the matching `gfx*.py`; use
-   `generic.py` only for genuinely multi-architecture coverage.
-2. Declare a complete `Capability`.
-3. Put only residual constraints in the support callback.
-4. Return a stable spec from `select_spec`.
-5. For an executable candidate, provide build, launch geometry, signature, and
-   Torch binding, then register it with `ATTENTION_EXECUTION_REGISTRY`.
-6. Register routing labels only with `ATTENTION_ROUTE_REGISTRY`.
-7. Add CPU tests for acceptance/rejection, exact replay, and executable
-   contracts. Add hardware correctness evidence before promoting an opt-in
-   candidate to production auto-dispatch.
+Follow [`../AGENTS.md`](../AGENTS.md). Attention adds two registration lines:
+routing labels go on `ATTENTION_ROUTE_REGISTRY`, and anything with `build` and
+`bind_torch` also goes on `ATTENTION_EXECUTION_REGISTRY`. Set `opt_in=True` on
+sweep-only candidates so `algorithm="auto"` cannot select them.
 
 ## Current production boundary
 

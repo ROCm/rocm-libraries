@@ -126,6 +126,44 @@ class TestRegistrySplit(unittest.TestCase):
                 self.assertIsNotNone(candidate.build)
                 self.assertIsNotNone(candidate.bind_torch)
 
+    def test_execution_registry_rejects_a_candidate_without_build(self):
+        from dispatch.attention.common import (
+            ATTENTION_ABI_VERSION,
+            ATTENTION_DIM_VOCABULARY,
+            FAMILY,
+        )
+        from rocke.dispatch.core import (
+            Capability,
+            CandidateRegistry,
+            KernelCandidate,
+        )
+
+        registry = CandidateRegistry(
+            FAMILY,
+            dim_vocabulary=ATTENTION_DIM_VOCABULARY,
+            require_build=True,
+            require_torch_binding=True,
+        )
+        candidate = KernelCandidate(
+            name="attention_missing_build",
+            family=FAMILY,
+            algorithm="probe",
+            spec_id="probe",
+            abi_version=ATTENTION_ABI_VERSION,
+            priority=100,
+            capability=Capability(arches=("gfx950",), dtypes=("bf16",)),
+            _supports=lambda _req: (True, "ok"),
+            select_spec=lambda _req: None,
+            signature=lambda _spec: (),
+            grid=lambda _spec, _req: (1, 1, 1),
+            block=lambda _spec: (1, 1, 1),
+            sweep_space=lambda _req: (),
+            build=None,
+            bind_torch=lambda *_args, **_kw: None,
+        )
+        with self.assertRaisesRegex(ValueError, "declares no build"):
+            registry.register(candidate)
+
     def test_dense_select_spec_returns_the_concrete_dense_spec(self):
         candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")
         req = _req(algorithm="attention_dense")

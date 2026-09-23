@@ -401,6 +401,7 @@ class AttentionTuningSpec:
     fp8_fnuz: bool = False
     num_kv_blocks: int = 0
     reduce_spec: Any = None
+    tuning_id_prefix: str = ""
 
     def kernel_name(self) -> str:
         return self.kernel_spec.kernel_name()

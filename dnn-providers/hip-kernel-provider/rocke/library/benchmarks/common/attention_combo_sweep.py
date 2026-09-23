@@ -29,6 +29,7 @@ from dispatch.attention import (
 from dispatch.attention.common import _problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 from benchmarks.common.attention_flops import attention_flops
+from kernels.common.attention_unified import UNIFIED_DTYPES
 
 
 def _kernel_name(spec) -> str:
@@ -595,7 +596,7 @@ def _default_arch() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arch", default=None)
-    ap.add_argument("--dtype", default="bf16", choices=("bf16", "fp16"))
+    ap.add_argument("--dtype", default="bf16", choices=UNIFIED_DTYPES)
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--heads", type=int, default=32)
     ap.add_argument("--kv-heads", type=int, default=8)
@@ -608,8 +609,18 @@ def main() -> int:
     ap.add_argument("--causal", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--candidate-prefix", default="")
     ap.add_argument("--tuning-id-prefix", default="")
-    ap.add_argument("--limit", type=int, default=0, help="configs per shape (0 = all)")
-    ap.add_argument("--offset", type=int, default=0, help="skip this many configs")
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="configs to take within each shape (0 = all of that shape)",
+    )
+    ap.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="configs to skip within each shape; not a global index across shapes",
+    )
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=10)
     ap.add_argument("--seed", type=int, default=7)

@@ -18,6 +18,7 @@ import traceback
 from dataclasses import replace
 from types import SimpleNamespace
 
+from kernels.common.attention_unified import UNIFIED_DTYPES
 from dispatch.attention import (
     AttentionRequest,
     attention_dispatch_result,
@@ -216,6 +217,17 @@ def _run_unified_graph(req, result, args) -> dict:
     }
 
 
+def _store_row(rows: list[dict], rec: dict, args) -> None:
+    """Append one row and rewrite the JSON so a crash keeps earlier rows."""
+    rows.append(rec)
+    path = getattr(args, "output_json", "") or ""
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(rows, fh)
+        fh.flush()
+
+
 def sweep(args) -> list[dict]:
     import torch
 
@@ -251,7 +263,7 @@ def sweep(args) -> list[dict]:
                 "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}",
             }
-            rows.append(rec)
+            _store_row(rows, rec, args)
             print(f"ERROR {label} Sk={s} registry: {exc}", flush=True)
             traceback.print_exc()
             continue
@@ -267,7 +279,7 @@ def sweep(args) -> list[dict]:
                 "status": "unsupported",
                 "reason": "no registered attention combo admits this decode shape",
             }
-            rows.append(rec)
+            _store_row(rows, rec, args)
             print(f"SKIP {label} Sk={s}: no registered combo", flush=True)
             continue
         for result in results:
@@ -327,7 +339,7 @@ def sweep(args) -> list[dict]:
                         flush=True,
                     )
                     traceback.print_exc()
-                rows.append(rec)
+                _store_row(rows, rec, args)
                 torch.cuda.empty_cache()
     return rows
 
@@ -392,7 +404,7 @@ def _rows_exit_code(rows: list[dict]) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dtype", default="bf16")
+    ap.add_argument("--dtype", default="bf16", choices=UNIFIED_DTYPES)
     ap.add_argument(
         "--algorithm",
         default="auto",

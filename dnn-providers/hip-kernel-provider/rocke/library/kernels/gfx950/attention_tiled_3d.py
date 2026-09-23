@@ -124,7 +124,6 @@ class UnifiedAttention3DTiledSpec:
     # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
     # See that spec's docstring for the semantics.
     kv_storage_dtype: Optional[str] = None
-    fp8_fnuz: bool = False
     # ``tile_size_override`` / ``use_invariant_hoist`` / ``use_wide_kv_load``
     # are accepted for signature parity with the shared dispatch spec builder
     # (``_tiled_3d_spec_from_problem``) and the gfx942 spec. They select gfx942
@@ -188,7 +187,6 @@ class UnifiedAttention3DTiledSpec:
             f"seg{self.num_segments}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
-            "fnuz" if self.kv_storage_dtype and self.fp8_fnuz else "",
             "i64kv" if self.use_i64_kv_addr else "",
             "sinks" if self.use_sinks else "",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",

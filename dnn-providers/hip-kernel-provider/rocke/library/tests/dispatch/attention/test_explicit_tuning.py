@@ -141,8 +141,6 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
         )
         self.assertEqual(gfx942.kv_storage_dtype, "fp8e4m3")
         self.assertEqual(gfx950.kv_storage_dtype, "fp8e4m3")
-        self.assertTrue(gfx942.fp8_fnuz)
-        self.assertFalse(gfx950.fp8_fnuz)
         self.assertIn("fnuz", gfx942.kernel_name())
         self.assertNotIn("fnuz", gfx950.kernel_name())
 
@@ -189,21 +187,55 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
 
 class TestAttentionTuningRegistry(unittest.TestCase):
     def test_tuning_candidates_are_arch_specific_and_opt_in(self):
+        from dispatch.attention.gfx942_tuning import GFX942_TUNING_VARIANTS
+        from dispatch.attention.gfx950_tuning import GFX950_TUNING_VARIANTS
+
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
-        self.assertEqual(len(tuning), 160)
+        self.assertEqual(
+            len(tuning), len(GFX942_TUNING_VARIANTS) + len(GFX950_TUNING_VARIANTS)
+        )
         for candidate in tuning:
             self.assertEqual(len(candidate.capability.arches), 1)
             arch = candidate.capability.arches[0]
             self.assertFalse(candidate.admits(_request(arch))[0])
 
     def test_auto_dispatch_is_unchanged(self):
+        from dispatch.attention import (
+            ATTENTION_EXECUTION_REGISTRY,
+            ATTENTION_ROUTE_REGISTRY,
+        )
+
+        cases = (
+            ("gfx950", 1, 4096, 128, "bf16", "attention_unified_3d"),
+            ("gfx950", 1024, 1024, 128, "bf16", "attention_unified_2d"),
+            ("gfx942", 1, 4096, 128, "bf16", "attention_unified_3d"),
+            ("gfx942", 1024, 1024, 128, "fp16", "attention_gfx942_dense_pipe"),
+        )
         old = au._RESOLVED_ATTENTION_ARCH
         try:
-            au._RESOLVED_ATTENTION_ARCH = "gfx950"
-            result = dispatch_attention(_request(seqlen_q=1, seqlen_k=4096))
+            for arch, sq, sk, hdim, dtype, expected in cases:
+                with self.subTest(arch=arch, sq=sq, sk=sk, dtype=dtype):
+                    au._RESOLVED_ATTENTION_ARCH = arch
+                    req = _request(
+                        arch,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                        hdim_q=hdim,
+                        hdim_v=hdim,
+                        dtype=dtype,
+                    )
+                    result = dispatch_attention(req)
+                    self.assertEqual(result.candidate.name, expected)
+                    self.assertFalse(result.candidate.opt_in)
+                    for registry in (
+                        ATTENTION_ROUTE_REGISTRY,
+                        ATTENTION_EXECUTION_REGISTRY,
+                    ):
+                        for candidate in registry.supported(req):
+                            self.assertFalse(candidate.opt_in)
+                            self.assertNotIn("unified_tuning", candidate.name)
         finally:
             au._RESOLVED_ATTENTION_ARCH = old
-        self.assertEqual(result.candidate.name, "attention_unified_3d")
 
     def test_explicit_spec_id_selects_only_that_geometry_candidate(self):
         req = replace(

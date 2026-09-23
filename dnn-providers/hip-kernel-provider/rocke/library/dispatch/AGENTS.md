@@ -57,8 +57,8 @@ params). Correctness rests entirely on the key.
 Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.
 
-The priority-30 tuning candidates are generated from a bounded geometry catalog
-(160 candidates total). Each candidate's `sweep_space` expands named schedule
+The priority-30 tuning candidates are generated from
+`GFX942_TUNING_VARIANTS` and `GFX950_TUNING_VARIANTS`. Each candidate's `sweep_space` expands named schedule
 stacks and a small set of legal micro-axes (not a valu×memory Cartesian
 product). gfx950 stays at or below 5K specs per representative shape; gfx942
 stays at or below 1.5K. They reject `algorithm="auto"` before constructing a

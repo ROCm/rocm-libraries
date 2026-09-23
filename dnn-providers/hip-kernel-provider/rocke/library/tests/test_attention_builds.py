@@ -2313,13 +2313,11 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
 
-    def test_gfx950_3d_graph_replay_default_on_decode(self):
-        """gfx950 3D split-KV decode captures segment+reduce by default.
+    def test_gfx950_3d_graph_replay_is_opt_in(self):
+        """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
 
-        Same contract as gfx942: unset / ``=1`` enable, ``=0`` disables,
-        long prefill and feature-flagged shapes stay off. The previous
-        opt-in (``HIPDNN_GFX950_3D_GRAPH=1`` required) left decode on the
-        ~43us eager floor.
+        Unset and ``=0`` disable. ``HIPDNN_GFX950_3D_GRAPH=1`` enables decode.
+        Long prefill and feature-flagged shapes stay off even when enabled.
         """
         import os
         from unittest import mock
@@ -2363,7 +2361,10 @@ class TestAttentionHelpers(unittest.TestCase):
         with _patch_resolved_arch("gfx950"):
             with mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
-                self.assertTrue(au._enable_3d_graph_replay(decode))
+                self.assertFalse(au._enable_3d_graph_replay(decode))
+                self.assertFalse(au._enable_3d_graph_replay(prefill))
+                self.assertFalse(au._enable_3d_graph_replay(sinks))
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
                 self.assertFalse(au._enable_3d_graph_replay(prefill))
                 self.assertFalse(au._enable_3d_graph_replay(sinks))
             with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):

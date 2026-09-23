@@ -14,6 +14,7 @@ Benchmarking enumerates every registered combo via
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Sequence, Tuple
 
 from kernels.common.attention_unified import supports_native_unified_attention
@@ -155,12 +156,11 @@ def _auto_variant(req: AttentionRequest) -> Gfx950DenseVariant:
     bn = int(geometry["block_n"])
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     mask_type = _parse_attention_mask_type(req.mask_type)
-    causal = mask_type != AttentionMaskType.NO_MASK
     moving_bottom_right = (
         mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sq != sk
     )
-    ragged = (sq == sk or moving_bottom_right) and (
-        (sq % bm != 0) or (sk % bn != 0)
+    ragged = _ragged_self_attention(
+        sq, sk, bm, bn, moving_bottom_right=moving_bottom_right
     )
     nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
@@ -178,16 +178,8 @@ def _auto_variant(req: AttentionRequest) -> Gfx950DenseVariant:
     else:
         persistent = False if moving_bottom_right else work >= np
     wdma_mode = _parse_on_off_auto(req.dense_wide_lds_dma, "dense_wide_lds_dma")
-    wdma_ok = (
-        persistent
-        and int(req.hdim_q) == 128
-        and int(req.hdim_v) == 128
-        and req.dtype.lower() in ("fp16", "bf16")
-        and causal
-        and int(req.sliding_window) == 0
-        and not bool(req.use_sinks)
-        and not ragged
-        and not moving_bottom_right
+    wdma_ok = _wide_dma_eligible(
+        req, SimpleNamespace(persistent=persistent, ragged=ragged)
     )
     if wdma_mode == "on":
         if not persistent:
@@ -220,6 +212,19 @@ def select_dense_variant(req: AttentionRequest) -> Gfx950DenseVariant:
         if variant.persistent == preferred.persistent:
             return variant
     return matching[0]
+
+
+def _ragged_self_attention(
+    sq: int,
+    sk: int,
+    block_m: int,
+    block_n: int,
+    *,
+    moving_bottom_right: bool = False,
+) -> bool:
+    return (sq == sk or moving_bottom_right) and (
+        sq % block_m != 0 or sk % block_n != 0
+    )
 
 
 def _wide_dma_eligible(req: AttentionRequest, spec) -> bool:
@@ -256,13 +261,19 @@ def _dense_opted_in(
     return True, "ok"
 
 
-def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant):
+def _dense_spec(
+    req: OperatorRequest, variant: Gfx950DenseVariant | None = None
+):
     """Build the launch-ready ``Gfx950AttentionDenseSpec`` for ``variant``.
 
     Tile, persist, and wide-DMA come from the frozen variant. ``persist_decode``
     stays on the request (``auto`` selects GQA-local mappings inside the spec).
     Non-tile-multiple self-attention lengths use the on-chip ragged path.
+    ``variant=None`` keeps the one-argument call used by existing tests and
+    selects the auto-policy variant.
     """
+    if variant is None:
+        variant = select_dense_variant(req)
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx950.attention_dense import (
         GFX950_DENSE_LAYOUTS,
@@ -289,8 +300,8 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant):
     )
     # Cross-length ragged attention is valid only when bottom-right supplies the
     # shifted diagonal. Equal-length bottom-right is ordinary causal attention.
-    ragged = (sq == sk or moving_bottom_right) and (
-        (sq % bm != 0) or (sk % bn != 0)
+    ragged = _ragged_self_attention(
+        sq, sk, bm, bn, moving_bottom_right=moving_bottom_right
     )
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),

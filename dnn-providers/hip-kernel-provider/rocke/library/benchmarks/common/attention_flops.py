@@ -26,7 +26,10 @@ def attended_pairs(
     for qi in range(sq):
         last = qi + offset if causal else sk - 1
         last = min(sk - 1, max(-1, last))
-        first = max(0, last - window + 1) if window > 0 else 0
+        if window > 0:
+            first = max(0, qi + offset - window + 1)
+        else:
+            first = 0
         if last >= first:
             total += last - first + 1
     return total

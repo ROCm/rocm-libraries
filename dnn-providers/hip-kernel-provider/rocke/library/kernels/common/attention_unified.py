@@ -3592,17 +3592,8 @@ def _run_3d_tiled(
     # microbench) skip the internal hipGraph above; this keeps the two
     # eager launches capturable. Workspace / compile still need a warmup
     # call outside capture — same contract as the internal graph path.
-    if capturing:
-        with no_fence():
-            return prepared.pipeline(
-                (seg_vals, red_vals),
-                (prepared.seg_config, prepared.red_config),
-                stream=int(stream),
-            )
-    return prepared.pipeline(
-        (seg_vals, red_vals),
-        (prepared.seg_config, prepared.red_config),
-        stream=int(stream),
+    return _launch_3d_pipeline(
+        prepared, seg_vals, red_vals, stream, capturing=capturing
     )
 
 
@@ -3650,6 +3641,62 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
+    """Launch segment+reduce, without a stream fence while capturing."""
+    if capturing:
+        with no_fence():
+            return prepared.pipeline(
+                (seg_vals, red_vals),
+                (prepared.seg_config, prepared.red_config),
+                stream=int(stream),
+            )
+    return prepared.pipeline(
+        (seg_vals, red_vals),
+        (prepared.seg_config, prepared.red_config),
+        stream=int(stream),
+    )
+
+
+_EXPLICIT_TUNING_ATTRS = (
+    "arch",
+    "path",
+    "kernel_spec",
+    "builder_kind",
+    "with_num_kv_blocks",
+)
+
+
+def _require_explicit_tuning_spec(tuning_spec) -> None:
+    """Reject a tuning spec that does not carry the launch contract."""
+    missing = [
+        name for name in _EXPLICIT_TUNING_ATTRS if not hasattr(tuning_spec, name)
+    ]
+    if missing:
+        raise TypeError(
+            "tuning spec is missing "
+            + ", ".join(missing)
+            + "; required attributes are "
+            + ", ".join(_EXPLICIT_TUNING_ATTRS)
+        )
+
+
+def _explicit_path_supported(
+    problem: UnifiedAttentionProblem, tuning_spec, kind: str
+) -> Tuple[bool, str]:
+    """Problem-shape support for an explicit spec.
+
+    A tuning spec is a knob combination, not proof the problem is runnable.
+    ``allow_unsupported=True`` is the only bypass, and it is visible on the spec.
+    """
+    if tuning_spec is not None and bool(getattr(tuning_spec, "allow_unsupported", False)):
+        return True, f"explicit {kind} tuning spec (unsupported override)"
+    if kind == "3d":
+        return supports_native_unified_attention_3d_tiled(problem)
+    if kind == "2d":
+        return supports_native_unified_attention_tiled(problem)
+    raise ValueError(f"unknown attention path kind {kind!r}")
 
 
 def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
@@ -3704,18 +3751,16 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         )
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     if arch == "gfx950":
-        # Same host-overhead story as gfx942: eager decode is ~43us
-        # (Python ~17us + device ~26-35us) and does not scale with KV;
-        # capturing segment+reduce into a hipGraph roughly halves that
-        # (measured 43->21us at k=2048), bitwise-identical. Default ON for
-        # the decode / short-q cohort (``_recommend_graph_replay``); set
-        # ``HIPDNN_GFX950_3D_GRAPH=0`` to disable. Skipped when the caller
-        # is already capturing so an outer torch.cuda.graph wins, and
-        # the eager path then launches under ``no_fence`` so a host
-        # stream sync cannot invalidate that capture.
+        # Decode / short-q 3D is launch-overhead bound. Keep replay opt-in
+        # until it is the production default (``HIPDNN_GFX950_3D_GRAPH=1``).
+        # Skipped when the caller is already capturing so an outer
+        # torch.cuda.graph wins.
         if not _recommend_graph_replay(problem):
             return False
-        return _graph_env_enabled("HIPDNN_GFX950_3D_GRAPH")
+        env = (
+            __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
+        )
+        return env in ("1", "on", "enable", "enabled", "yes", "true")
     return False
 
 
@@ -4200,6 +4245,27 @@ def _get_2d_launcher(
     return launcher
 
 
+def gfx942_4warp_launch_grid(problem) -> Tuple[int, int, int]:
+    """Grid the gfx942 4-warp GQA builder actually launches.
+
+    Fold-eligible shapes pack four query heads into one kv-head tile. The
+    dispatcher grid and ``_get_2d_launch_meta`` both call this so they cannot
+    drift.
+    """
+    fold = gfx942_gqa_fold_eligible(
+        problem.head_size,
+        problem.num_queries_per_kv,
+        problem.sliding_window,
+        problem.dtype,
+        problem.block_size,
+    )
+    if fold:
+        qblocks = problem.total_q // 32 + problem.num_seqs
+        return (int(problem.num_kv_heads), int(qblocks), 1)
+    qblocks = problem.total_q // 128 + problem.num_seqs
+    return (int(problem.num_query_heads), int(qblocks), 1)
+
+
 def gfx942_gqa_fold_eligible(
     head_size, num_queries_per_kv, sliding_window, dtype, block_size
 ) -> bool:
@@ -4239,20 +4305,9 @@ def _get_2d_launch_meta(
     arch = _resolve_attention_arch()
     if explicit_spec is not None:
         if builder_kind == "gfx942_4warp_gqa":
-            _fold = gfx942_gqa_fold_eligible(
-                problem.head_size,
-                problem.num_queries_per_kv,
-                problem.sliding_window,
-                problem.dtype,
-                problem.block_size,
+            meta = _Attention2DLaunchMeta(
+                grid=gfx942_4warp_launch_grid(problem), block=(256, 1, 1)
             )
-            if _fold:
-                qblocks = problem.total_q // 32 + problem.num_seqs
-                grid = (int(problem.num_kv_heads), int(qblocks), 1)
-            else:
-                qblocks = problem.total_q // 128 + problem.num_seqs
-                grid = (int(problem.num_query_heads), int(qblocks), 1)
-            meta = _Attention2DLaunchMeta(grid=grid, block=(256, 1, 1))
         else:
             block_m = int(explicit_spec.block_m)
             block_q = (
@@ -4398,12 +4453,19 @@ def run_unified_attention_torch(
     path under a hipgraph.
     """
     if tuning_spec is not None:
+        _require_explicit_tuning_spec(tuning_spec)
         if tuning_spec.arch != _resolve_attention_arch():
             raise ValueError(
                 f"tuning spec targets {tuning_spec.arch}, running on "
                 f"{_resolve_attention_arch()}"
             )
-        backend = "3d" if tuning_spec.path == "3d" else "tiled"
+        implied = "3d" if tuning_spec.path == "3d" else "tiled"
+        if backend not in ("auto", implied):
+            raise ValueError(
+                f"tuning spec path {tuning_spec.path!r} conflicts with "
+                f"backend {backend!r}"
+            )
+        backend = implied
 
     bt_stride = (
         int(block_table.stride(0))
@@ -4426,7 +4488,7 @@ def run_unified_attention_torch(
         )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
-    if tuning_spec is not None and hasattr(tuning_spec, "with_num_kv_blocks"):
+    if tuning_spec is not None:
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
@@ -4456,10 +4518,7 @@ def run_unified_attention_torch(
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
-        if tuning_spec is not None:
-            ok_3d, reason_3d = True, "explicit 3D tuning spec"
-        else:
-            ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, reason_3d = _explicit_path_supported(problem, tuning_spec, "3d")
         if ok_3d:
             return _run_3d_tiled(
                 problem=problem,
@@ -4527,10 +4586,7 @@ def run_unified_attention_torch(
             )
             if graphed is not _GRAPH_FALLBACK:
                 return graphed
-        if tuning_spec is not None:
-            ok_t, reason_t = True, "explicit 2D tuning spec"
-        else:
-            ok_t, reason_t = supports_native_unified_attention_tiled(problem)
+        ok_t, reason_t = _explicit_path_supported(problem, tuning_spec, "2d")
         if ok_t:
             # Hot path: compute the cache key directly from the problem +
             # selectors (skip the 17-field dataclass build). Spec is only

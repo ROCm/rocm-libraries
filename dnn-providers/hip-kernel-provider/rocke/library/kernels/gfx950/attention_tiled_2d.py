@@ -181,7 +181,6 @@ class UnifiedAttention2DTiledSpec:
     # still passed in the working dtype (``self.dtype``), and the rest
     # of the kernel (MFMA, softmax, epilogue) is unchanged.
     kv_storage_dtype: Optional[str] = None
-    fp8_fnuz: bool = False
     # FP8 K-in-LDS path (ULP-identical to default, faster). When True
     # (and ``kv_storage_dtype='fp8e4m3'``) the kernel stages K as raw
     # fp8 in LDS instead of dequant-then-store-bf16. Specifically:
@@ -850,7 +849,6 @@ class UnifiedAttention2DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
-            "fnuz" if self.kv_storage_dtype and self.fp8_fnuz else "",
             "" if not self.use_sinks else "sinks",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",

@@ -882,9 +882,11 @@ Every family exposes the same three entry points, all backed by
 `CandidateRegistry.combos` / `sweep_space` / `dispatch_all`:
 
 ```python
-ATTENTION_REGISTRY.combos(req)        # (candidate, spec) pairs
-ATTENTION_REGISTRY.sweep_space(req)   # deduped specs
-ATTENTION_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
+# ATTENTION_REGISTRY is the route registry. Its candidates are not all
+# buildable. Sweeps use the execution registry.
+ATTENTION_EXECUTION_REGISTRY.combos(req)        # (candidate, spec) pairs
+ATTENTION_EXECUTION_REGISTRY.sweep_space(req)   # deduped specs
+ATTENTION_EXECUTION_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 ```
 
 Family wrappers (`dispatch_gemm_fp16_all`, `kda_sweep_space`,
@@ -906,7 +908,7 @@ these candidates into timed, verified measurements.
 
 ```python
 result = dispatch_attention_by_id(req, "attention_gfx1250_wmma")
-result = ATTENTION_REGISTRY.resolve(kernel_id)
+result = ATTENTION_EXECUTION_REGISTRY.resolve(kernel_id)
 ```
 
 Requires the registry additions:
@@ -937,8 +939,8 @@ changed kernel.
 ### 7.4 Coverage query — no request needed
 
 ```python
-ATTENTION_REGISTRY.for_arch("gfx1250")   # -> candidates declaring gfx1250
-ATTENTION_REGISTRY.coverage()            # -> serializable manifest
+ATTENTION_EXECUTION_REGISTRY.for_arch("gfx1250")   # buildable candidates
+ATTENTION_EXECUTION_REGISTRY.coverage()            # serializable manifest
 ```
 
 Pure `Capability` reads. This is what a declarative capability buys, and it is

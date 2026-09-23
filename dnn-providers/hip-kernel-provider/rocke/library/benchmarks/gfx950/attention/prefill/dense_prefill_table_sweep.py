@@ -15,6 +15,7 @@ import json
 import traceback
 from types import SimpleNamespace
 
+from kernels.common.attention_unified import UNIFIED_DTYPES
 from dispatch.attention import (
     AttentionRequest,
     iter_dispatch_attention_all,
@@ -114,6 +115,17 @@ def list_combos(args) -> int:
     return 0
 
 
+def _store_row(rows: list[dict], rec: dict, args) -> None:
+    """Append one row and rewrite the JSON so a crash keeps earlier rows."""
+    rows.append(rec)
+    path = getattr(args, "output_json", "") or ""
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(rows, fh)
+        fh.flush()
+
+
 def sweep(args) -> list[dict]:
     import torch
 
@@ -142,7 +154,7 @@ def sweep(args) -> list[dict]:
                 "status": "error",
                 "reason": f"{type(exc).__name__}: {exc}",
             }
-            rows.append(rec)
+            _store_row(rows, rec, args)
             print(f"ERROR {label} S={s} registry: {exc}", flush=True)
             traceback.print_exc()
             continue
@@ -157,7 +169,7 @@ def sweep(args) -> list[dict]:
                 "status": "unsupported",
                 "reason": "no registered attention combo admits this shape",
             }
-            rows.append(rec)
+            _store_row(rows, rec, args)
             print(f"SKIP {label} S={s}: no registered combo", flush=True)
             continue
         for index, result in enumerate(results):
@@ -187,7 +199,7 @@ def sweep(args) -> list[dict]:
                 rec.update(status="error", reason=reason)
                 print(f"ERROR {label} S={s} {result.candidate.name}: {exc}", flush=True)
                 traceback.print_exc()
-            rows.append(rec)
+            _store_row(rows, rec, args)
             torch.cuda.empty_cache()
     return rows
 
@@ -251,7 +263,7 @@ def _rows_exit_code(rows: list[dict]) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dtype", default="bf16")
+    ap.add_argument("--dtype", default="bf16", choices=UNIFIED_DTYPES)
     ap.add_argument(
         "--algorithm",
         default="auto",

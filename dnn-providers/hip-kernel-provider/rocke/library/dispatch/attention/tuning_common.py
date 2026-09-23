@@ -100,10 +100,53 @@ def _merge(*parts: Mapping[str, object]) -> dict[str, object]:
     return out
 
 
+_STACK_KEY = "_stack"
+
+
 def _named(name: str, knobs: Mapping[str, object]) -> dict[str, object]:
+    if _STACK_KEY in knobs:
+        raise ValueError(f"knob name {_STACK_KEY!r} is reserved for the stack label")
     payload = dict(knobs)
-    payload["_stack"] = name
+    payload[_STACK_KEY] = name
     return payload
+
+
+def _k_schedule_bufs(spec) -> int:
+    if spec.use_k_single_buffer:
+        return 1
+    depth = int(spec.kv_ring_depth)
+    return depth if depth > 2 else 2
+
+
+def _kq_pad_eligible(spec) -> Tuple[bool, str]:
+    """Shared KQ-pad decision for the LDS model and the support predicate."""
+    if not spec.use_kq_lds_pad:
+        return False, "KQ LDS pad is off"
+    head = int(spec.head_size)
+    tile = int(spec.tile_size_eff)
+    pad = int(spec.kq_lds_pad_halves)
+    fp8_qk = spec.kv_storage_dtype == "fp8e4m3" and bool(spec.use_fp8_mfma_qk)
+    if fp8_qk:
+        return False, "KQ LDS pad does not support native-FP8 K LDS"
+    slab_rows = (512 // head) if head and 512 % head == 0 else 0
+    if not slab_rows or tile % slab_rows != 0 or pad % 8 != 0:
+        return (
+            False,
+            "KQ LDS pad requires an aligned slab layout "
+            f"(head_size={head}, tile_size={tile}, pad={pad})",
+        )
+    if _k_schedule_bufs(spec) != 1:
+        return False, "KQ LDS pad requires a single-K schedule"
+    k_elem_bytes = 1 if fp8_qk else 2
+    q_bytes = int(spec.block_m) * head * 2
+    q_aliases_k = bool(
+        not spec.use_q_reread
+        and not spec.use_q_direct_reg
+        and q_bytes <= 2 * tile * head * k_elem_bytes
+    )
+    if q_aliases_k:
+        return False, "padded K LDS does not support aliased Q"
+    return True, "ok"
 
 
 def _gfx950_tuning_lds_bytes(spec) -> int:
@@ -116,23 +159,12 @@ def _gfx950_tuning_lds_bytes(spec) -> int:
     fp8_pv = kv_fp8 and bool(spec.use_fp8_mfma_pv)
     k_elem_bytes = 1 if fp8_qk else 2
     v_elem_bytes = 1 if fp8_pv else 2
-    k_bufs = (
-        1
-        if spec.use_k_single_buffer
-        else int(spec.kv_ring_depth) if int(spec.kv_ring_depth) > 2 else 2
-    )
+    k_bufs = _k_schedule_bufs(spec)
     v_bufs = 2 if spec.use_v_double_buffer else 1
 
     pad = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
     slab_rows = (512 // head) if pad and 512 % head == 0 else 0
-    pad_active = bool(
-        pad
-        and not fp8_qk
-        and slab_rows
-        and tile % slab_rows == 0
-        and pad % 8 == 0
-        and k_bufs == 1
-    )
+    pad_active, _pad_why = _kq_pad_eligible(spec)
     if pad_active:
         k_bytes = k_bufs * (tile // slab_rows) * (slab_rows * head + pad) * k_elem_bytes
     else:
@@ -166,37 +198,9 @@ def _supports_tuning_spec(
         return True, "supported"
 
     if kernel_spec.use_kq_lds_pad:
-        head = int(kernel_spec.head_size)
-        tile = int(kernel_spec.tile_size_eff)
-        pad = int(kernel_spec.kq_lds_pad_halves)
-        slab_rows = (512 // head) if 512 % head == 0 else 0
-        if kernel_spec.kv_storage_dtype == "fp8e4m3" and kernel_spec.use_fp8_mfma_qk:
-            return False, "KQ LDS pad does not support native-FP8 K LDS"
-        if not slab_rows or tile % slab_rows != 0 or pad % 8 != 0:
-            return (
-                False,
-                "KQ LDS pad requires an aligned slab layout "
-                f"(head_size={head}, tile_size={tile}, pad={pad})",
-            )
-        k_bufs = (
-            1
-            if kernel_spec.use_k_single_buffer
-            else (
-                int(kernel_spec.kv_ring_depth)
-                if int(kernel_spec.kv_ring_depth) > 2
-                else 2
-            )
-        )
-        if k_bufs != 1:
-            return False, "KQ LDS pad requires a single-K schedule"
-        q_bytes = int(kernel_spec.block_m) * head * 2
-        q_aliases_k = bool(
-            q_bytes <= 2 * tile * head * 2
-            and not kernel_spec.use_q_reread
-            and not kernel_spec.use_q_direct_reg
-        )
-        if q_aliases_k:
-            return False, "padded K LDS does not support aliased Q"
+        pad_ok, pad_why = _kq_pad_eligible(kernel_spec)
+        if not pad_ok:
+            return False, pad_why
 
     from rocke.core.arch import ArchTarget
 
@@ -366,7 +370,10 @@ def _gfx942_profile_dicts(codepath: str) -> Iterable[dict[str, object]]:
         ("ksb", _merge(base, {"use_k_single_buffer": True})),
         ("qdglob", _merge(base, {"use_q_direct_global": True})),
         ("vhbm", _merge(base, {"use_v_hbm_direct": True})),
-        ("khbm", _merge(base, {"use_k_hbm_direct": True})),
+        # use_k_hbm_direct is omitted here too. The 16x16 path cannot use it
+        # (the QK loop always reads K_lds). The transposed-x8 path can build
+        # it, but the gfx942 prefill sweep produced wrong outputs, so it is
+        # not a feasible registry point until that path matches the reference.
         ("gldsk", _merge(base, {"use_global_load_lds_k": True})),
         ("qmajor", _merge(base, {"use_q_major_grid": True})),
         ("cphase", _merge(base, {"use_causal_mask_phase_split": True})),
@@ -445,6 +452,12 @@ def _canonical_payload(
     }
 
 
+def _tuning_id_prefix(variant: AttentionGeometryVariant, kernel_spec) -> str:
+    """Readable id stem stored on the spec. The hash suffix is display-only."""
+    wpe = getattr(kernel_spec, "waves_per_eu", None)
+    return f"{variant.variant_id}_wpe{wpe if wpe is not None else 'none'}"
+
+
 def _make_tuning_id(
     variant: AttentionGeometryVariant,
     kernel_spec,
@@ -452,7 +465,6 @@ def _make_tuning_id(
     *,
     fp8_fnuz: bool = False,
 ) -> str:
-    wpe = getattr(kernel_spec, "waves_per_eu", None)
     digest = stable_json_hash(
         _canonical_payload(
             arch=variant.arch,
@@ -465,7 +477,7 @@ def _make_tuning_id(
         ),
         n=16,
     )
-    return f"{variant.variant_id}_wpe{wpe if wpe is not None else 'none'}@{digest}"
+    return f"{_tuning_id_prefix(variant, kernel_spec)}@{digest}"
 
 
 def retarget_tuning_spec(
@@ -491,7 +503,12 @@ def retarget_tuning_spec(
     if refreshed_kernel == kernel_spec and int(spec.num_kv_blocks) == count:
         return spec
 
-    prefix = spec.tuning_id.rsplit("@", 1)[0]
+    prefix = spec.tuning_id_prefix
+    if not prefix:
+        raise ValueError(
+            f"tuning spec {spec.tuning_id!r} has no tuning_id_prefix; "
+            "the display id is not parsed back into identity"
+        )
     digest = stable_json_hash(
         _canonical_payload(
             arch=spec.arch,
@@ -525,8 +542,12 @@ def _explicit_configs(
                 {"use_wide_kv_load": True},
                 {"use_invariant_hoist": True, "use_wide_kv_load": True},
             )
-        else:
+        elif variant.arch == "gfx950":
             knob_sets = ({},)
+        else:
+            raise ValueError(
+                f"no explicit 3D tuning profiles for arch {variant.arch!r}"
+            )
         for wpe, knobs in product(_SWEEP_WAVES_3D, knob_sets):
             config = ExplicitAttention3DConfig(
                 num_segments=variant.num_segments,
@@ -552,6 +573,7 @@ def _explicit_configs(
                     reduce,
                     fp8_fnuz=bool(problem.fp8_fnuz),
                 ),
+                tuning_id_prefix=_tuning_id_prefix(variant, segment),
                 kernel_spec=segment,
                 fp8_fnuz=bool(problem.fp8_fnuz),
                 num_kv_blocks=int(problem.num_kv_blocks),
@@ -559,11 +581,12 @@ def _explicit_configs(
             )
         return
 
-    profiles = (
-        _gfx950_profile_dicts(variant.codepath)
-        if variant.arch == "gfx950"
-        else _gfx942_profile_dicts(variant.codepath)
-    )
+    if variant.arch == "gfx950":
+        profiles = _gfx950_profile_dicts(variant.codepath)
+    elif variant.arch == "gfx942":
+        profiles = _gfx942_profile_dicts(variant.codepath)
+    else:
+        raise ValueError(f"no explicit 2D tuning profiles for arch {variant.arch!r}")
     for profile in profiles:
         stack = str(profile.get("_stack", ""))
         knobs_base = {k: v for k, v in profile.items() if k != "_stack"}
@@ -625,6 +648,7 @@ def _explicit_configs(
                     kernel_spec,
                     fp8_fnuz=bool(problem.fp8_fnuz),
                 ),
+                tuning_id_prefix=_tuning_id_prefix(variant, kernel_spec),
                 kernel_spec=kernel_spec,
                 fp8_fnuz=bool(problem.fp8_fnuz),
                 num_kv_blocks=int(problem.num_kv_blocks),
@@ -713,8 +737,6 @@ def make_tuning_candidate(
             validate_explicit_fp8_encoding,
         )
 
-        if bool(spec.fp8_fnuz) != bool(getattr(spec.kernel_spec, "fp8_fnuz", False)):
-            raise ValueError("tuning wrapper and kernel spec disagree on fp8_fnuz")
         validate_explicit_fp8_encoding(
             arch=arch,
             use_fp8=spec.kernel_spec.kv_storage_dtype == "fp8e4m3",
@@ -757,8 +779,9 @@ def make_tuning_candidate(
             qblocks = problem.total_q // block_q + problem.num_seqs
             return (qblocks, problem.num_kv_heads, ks.num_segments)
         if spec.builder_kind == "gfx942_4warp_gqa":
-            qblocks = problem.total_q // 128 + problem.num_seqs
-            return (problem.num_query_heads, qblocks, 1)
+            from kernels.common.attention_unified import gfx942_4warp_launch_grid
+
+            return gfx942_4warp_launch_grid(problem)
         block_q = (
             ks.block_m // problem.num_queries_per_kv
             if problem.num_queries_per_kv <= ks.block_m
@@ -815,5 +838,6 @@ def make_tuning_candidate(
         sweep_space=sweep,
         build=build,
         bind_torch=bind_torch,
+        opt_in=True,
     )
     return candidate

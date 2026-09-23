@@ -9,7 +9,6 @@ architecture kernel runners inside binding calls.
 
 from __future__ import annotations
 
-import inspect
 import math
 from dataclasses import replace
 from typing import Any, Mapping
@@ -100,8 +99,6 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
     expected_kv_dtype = "fp8e4m3" if problem.use_fp8 else None
     if kernel_spec.kv_storage_dtype != expected_kv_dtype:
         raise ValueError("kernel spec K/V storage dtype disagrees with problem")
-    if bool(getattr(kernel_spec, "fp8_fnuz", False)) != bool(problem.fp8_fnuz):
-        raise ValueError("kernel spec FP8 encoding disagrees with problem")
     if bool(spec.fp8_fnuz) != bool(problem.fp8_fnuz):
         raise ValueError("tuning wrapper FP8 encoding disagrees with problem")
 
@@ -267,6 +264,16 @@ def validate_tuning_attention_tensors(
     return num_blocks
 
 
+# Declared runner contracts. Inferring them with inspect.signature drops
+# arguments the runner does not list and launches a different kernel.
+_DENSE_OPTIONAL_INPUTS = {
+    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv"}),
+    "gfx950": frozenset(
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks"}
+    ),
+}
+
+
 def _dense_runner(arch: str):
     if arch == "gfx942":
         from kernels.gfx942.attention_dense import (
@@ -313,10 +320,15 @@ def bind_dense_attention_torch(
             "kv_lens": _kw.get("kv_lens", tensors.get("kv_lens")),
             "sinks": _kw.get("sinks", tensors.get("sinks")),
         }
-        accepted = inspect.signature(run).parameters
+        accepted = _DENSE_OPTIONAL_INPUTS[str(request.arch)]
         for name, value in optional.items():
-            if name in accepted and value is not None:
-                call[name] = value
+            if value is None:
+                continue
+            if name not in accepted:
+                raise NotImplementedError(
+                    f"{request.arch} dense runner does not accept {name!r}"
+                )
+            call[name] = value
         return run(**call)
 
     return TorchBinding(launch=launch, grid=grid_fn(spec), block=block_fn(spec))

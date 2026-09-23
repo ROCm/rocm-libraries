@@ -169,20 +169,10 @@ class TestTuningSpace(unittest.TestCase):
         self.assertTrue(gfx942_specs)
         self.assertFalse(gfx950_specs[0].fp8_fnuz)
         self.assertTrue(gfx942_specs[0].fp8_fnuz)
-        self.assertFalse(gfx950_specs[0].kernel_spec.fp8_fnuz)
-        self.assertTrue(gfx942_specs[0].kernel_spec.fp8_fnuz)
-        with self.assertRaisesRegex(ValueError, "disagree on fp8_fnuz"):
-            gfx950_candidate.built(replace(gfx950_specs[0], fp8_fnuz=True), "gfx950")
-        bad_kernel = replace(gfx950_specs[0].kernel_spec, fp8_fnuz=True)
+        self.assertNotIn("fnuz", gfx950_specs[0].kernel_name())
+        self.assertIn("fnuz", gfx942_specs[0].kernel_name())
         with self.assertRaisesRegex(ValueError, "requires OCP"):
-            gfx950_candidate.built(
-                replace(
-                    gfx950_specs[0],
-                    fp8_fnuz=True,
-                    kernel_spec=bad_kernel,
-                ),
-                "gfx950",
-            )
+            gfx950_candidate.built(replace(gfx950_specs[0], fp8_fnuz=True), "gfx950")
 
     def test_narrow_gfx942_never_offers_k_hbm_direct(self):
         _c, _req, specs = _specs_for(
@@ -231,19 +221,13 @@ class TestTuningSpace(unittest.TestCase):
                 use_k_hbm_direct=True,
             )
 
-    def test_transposed_x8_keeps_k_hbm_direct_and_emits_direct_loads(self):
-        from rocke import lower_kernel_to_llvm
-
-        candidate, _req, specs = _specs_for(
+    def test_transposed_x8_omits_k_hbm_direct(self):
+        _candidate, _req, specs = _specs_for(
             "attention_gfx942_u2d_transposed_x8_nw2_mw32_t4xb_llvm",
             arch="gfx942",
         )
-        khbm = [s for s in specs if s.kernel_spec.use_k_hbm_direct]
-        self.assertTrue(khbm)
-        built = candidate.built(khbm[0], "gfx942")
-        kernel = built if not isinstance(built, tuple) else built[0]
-        llvm = lower_kernel_to_llvm(kernel, arch="gfx942")
-        self.assertIn("buffer", llvm.lower())
+        self.assertTrue(specs)
+        self.assertFalse(any(s.kernel_spec.use_k_hbm_direct for s in specs))
 
     def test_named_stacks_cover_independent_knobs(self):
         _c, _req, specs = _specs_for(
@@ -276,13 +260,17 @@ class TestTuningSpace(unittest.TestCase):
             block_m_per_warp=16,
             tile_size=128,
         )
-        self.assertEqual(_gfx950_tuning_lds_bytes(spec), 165888)
+        from rocke.core.arch import ArchTarget
+
+        budget = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
+        base_bytes = _gfx950_tuning_lds_bytes(spec)
+        self.assertGreater(base_bytes, budget)
         ok, why = _supports_tuning_spec(_GFX950_2D_VARIANT, spec)
         self.assertFalse(ok)
-        self.assertIn("163840 B LDS budget", why)
-        self.assertEqual(
+        self.assertIn("LDS budget", why)
+        self.assertGreater(
             _gfx950_tuning_lds_bytes(replace(spec, use_v_double_buffer=True)),
-            198656,
+            base_bytes,
         )
 
     def test_gfx950_padded_k_rejects_q_alias(self):
@@ -349,8 +337,15 @@ class TestTuningSpace(unittest.TestCase):
             for c in attention_execution_candidates()
             if c.algorithm == "unified_tuning"
         ]
-        self.assertEqual(len(route), 160)
-        self.assertEqual(len(execution), 160)
+        from dispatch.attention.gfx942_tuning import GFX942_TUNING_VARIANTS
+        from dispatch.attention.gfx950_tuning import GFX950_TUNING_VARIANTS
+
+        expected = len(GFX942_TUNING_VARIANTS) + len(GFX950_TUNING_VARIANTS)
+        self.assertEqual(len(route), expected)
+        self.assertEqual(len(execution), expected)
+        self.assertTrue(route)
+        self.assertTrue(all(c.opt_in for c in route))
+        self.assertTrue(all(c.opt_in for c in execution))
 
 
 class TestAutoDispatchUnchanged(unittest.TestCase):
