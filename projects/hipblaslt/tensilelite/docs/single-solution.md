@@ -150,3 +150,37 @@ checks the requested problem, allocates workspace, and uses the ordered
 invocation sequence from `ContractionSolution::solve`. Helper-generator counts
 and code-object counts do not determine the number of launches; the runtime
 problem and selected accumulation path determine that sequence.
+
+## Select a recipe from a canonical request
+
+`Tensile.JitGemm` accepts a JSON request containing the canonical Tensile
+`problem_type`, logical dimensions and physical tensor extents in `problem`,
+an explicit architecture, and ranked `candidates`. Each candidate contains an
+integer ID, its predicted cost or null, and Tensile tuning parameters.
+
+```bash
+python -m Tensile.JitGemm request.json new-request-output --architecture gfx950
+```
+
+The request uses `schema_version: 1`. `model: "origami.gemm.estimation"` means
+the caller supplied modeled candidates in increasing `predicted_cycles` order.
+This module validates those recipes through the existing Tensile solution
+machinery and builds the first supported candidate. It does not run Origami
+or measure kernel latency itself. If modeled candidates cannot be used,
+`model: "tensile.defaults"` selects actual default/native-instruction recipes
+with null cost and records the original ranking and rejection reasons.
+Tensor datatypes and operation semantics are preserved during fallback.
+
+Physical MX layout belongs to `problem.mx_scale_format` and is independent of
+tuning. Named `scale_mode_a` and `scale_mode_b` preserve the descriptor modes.
+The gfx950 subtile backend requires `HostPreSwizzle` with
+`Block_32_UE8M0_32_8_EXT`; natural scales are not implemented by that backend.
+The gfx1250 TDM backend requires `InMemorySwizzle` with its ordinary block-scale
+modes. A candidate cannot change the supplied physical layout.
+
+Bundles generated through this entry point additionally contain
+`jit_prediction`. The record includes selected tuning parameters, descriptor
+`implementation_parameters`, defaults, resolved values, candidate rejections,
+and either a modeled cost or null. Request and selected YAML siblings are
+retained for inspection. Generation still publishes exactly one complete
+solution and never benchmarks candidates.

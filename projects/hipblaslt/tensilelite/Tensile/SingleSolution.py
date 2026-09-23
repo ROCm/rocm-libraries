@@ -244,7 +244,8 @@ def _helperDescriptions(helpers):
     ]
 
 
-def _deriveSingleSolution(config, source, architecture, toolchain, debug, isaInfoMap):
+def _deriveSingleSolution(config, source, architecture, toolchain, debug, isaInfoMap,
+                          *, strictErrors=False):
     """Shared singleton derivation; no source emission, compilation, or benchmark."""
     from Tensile.BenchmarkStructs import BenchmarkProcess, constructLazyForkPermutations
     from Tensile.BenchmarkProblems import _generate_single_solution
@@ -263,9 +264,13 @@ def _deriveSingleSolution(config, source, architecture, toolchain, debug, isaInf
             raise SingleSolutionConfigError("Parameters must expand to exactly one combination")
         solution = _generate_single_solution(
             permutations[0], process.problemType, step.constantParams,
-            toolchain.assembler, debug, isaInfoMap,
+            toolchain.assembler, debug, isaInfoMap, strictErrors=strictErrors,
         )
     except Exception as error:
+        if strictErrors:
+            # Unexpected failures, including missing resources, must not become
+            # candidate rejections in the JIT driver.
+            raise
         raise SingleSolutionConfigError(f"{source}: {error}") from error
     if solution is None or not solution["Valid"]:
         raise SingleSolutionRejected(
@@ -283,6 +288,7 @@ def _build(
     codeObjectVersion,
     libraryFormat,
     keepBuildTmp,
+    _selection=None,
 ):
     from Tensile import LibraryIO
     from Tensile.Common import getVerbosity, setVerbosity, state
@@ -304,7 +310,7 @@ def _build(
     from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
     from Tensile.resources import copy_static_headers
 
-    config = LibraryIO.read(str(configPath))
+    config = LibraryIO.read(str(configPath)) if _selection is None else _selection[0]
     _, _, globalsConfig = _singleConfig(config, configPath)
     isa, compilerTarget = _target(architecture, globalsConfig)
     if libraryFormat not in ("msgpack", "yaml"):
@@ -349,8 +355,16 @@ def _build(
             "gfx1250v0" if architecture.split(":")[0] == "gfx1250v0" else ""
         )
         debug = makeDebugConfig(globalsConfig)
-        solution = _deriveSingleSolution(
-            config, configPath, architecture, toolchain, debug, isaInfoMap)
+        prediction = None
+        if _selection is None:
+            solution = _deriveSingleSolution(
+                config, configPath, architecture, toolchain, debug, isaInfoMap)
+        else:
+            def derive(candidateConfig, label):
+                return _deriveSingleSolution(
+                    candidateConfig, label, architecture, toolchain, debug, isaInfoMap,
+                    strictErrors=True)
+            configPath, solution, prediction = _selection[1](derive)
         helpers = initHelperKernelObjects(solution, KernelHelperEnum.All, str(compiler), isaInfoMap)
         # Match the normal build's helper-family deduplication. One writer may
         # emit several exported kernels, while activation writers emit support.
@@ -451,6 +465,8 @@ def _build(
                 "keep_build_tmp": keepBuildTmp,
             },
         }
+        if prediction is not None:
+            manifest["jit_prediction"] = prediction
         return manifest
     finally:
         globalParameters.clear()
@@ -487,6 +503,7 @@ def _generateAndBuild(
     codeObjectVersion: str = "4",
     libraryFormat: str = "msgpack",
     keepBuildTmp: bool = False,
+    _selection=None,
 ) -> SingleSolutionBuildResult:
     """Build one YAML-requested solution and publish ``outputPath/bundle`` atomically.
 
@@ -512,6 +529,7 @@ def _generateAndBuild(
             codeObjectVersion,
             libraryFormat,
             keepBuildTmp,
+            *(() if _selection is None else (_selection,)),
         )
         (staging / "manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
