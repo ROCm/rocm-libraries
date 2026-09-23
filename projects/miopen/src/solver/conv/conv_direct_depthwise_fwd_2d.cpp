@@ -121,6 +121,26 @@ bool ConvDirectDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
     return true;
 }
 
+float ConvDirectDepthwiseFwd2D::GetWti(const ExecutionContext& ctx,
+                                       const miopen::conv::ProblemDescription& problem) const
+{
+    const std::string dev_name = ctx.GetStream().GetDeviceName();
+    const bool measured_family =
+        StartsWith(dev_name, "gfx1151") && problem.IsFp16() && problem.GetWeightsHeight() == 3 &&
+        problem.GetWeightsWidth() == 3 && problem.GetPadH() == 1 && problem.GetPadW() == 1 &&
+        problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1 &&
+        problem.GetDilationH() == 1 && problem.GetDilationW() == 1 &&
+        problem.GetOutHeight() >= 16 && problem.GetOutWidth() >= 16;
+
+    if(!measured_family)
+        return wti_approximate_worst;
+
+    // Twelve sampled gfx1151 shapes spanning N=1..8, C=32..384, and
+    // H/W=16..80 (including 17x33) were 2.69x to 35.07x faster than
+    // GemmFwdRest. This narrowly clears its 0.342 estimate for N=1.
+    return 0.35f;
+}
+
 ConvSolution
 ConvDirectDepthwiseFwd2D::GetSolution(const ExecutionContext&,
                                       const miopen::conv::ProblemDescription& problem) const
