@@ -420,12 +420,12 @@ validParameters = { # we need to make sure this matches develop
     #            boundary (needs PrefetchGlobalRead=2).
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
-    # StreamK persistent loop: use the current tile's no-load-loop window to
+    # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
-    # StreamK persistent loop: keep the whole K extent of an operand (and its MX
+    # Persistent loop: keep the whole K extent of an operand (and its MX
     # scales) resident in VGPRs across persistent iterations, so every tile after
     # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
     # traffic. Only valid when every tile a workgroup visits shares that operand,
@@ -888,44 +888,16 @@ validParameters = { # we need to make sure this matches develop
     # In order to remove the copying from Acc vgpr to Arch vgpr, only use Arch vgprs for v_mfma_xxx.
     # Only support for kernel whose totalVgpr counts less than 256 and gcn that has control bit ACC_CD.
     "MIArchVgpr": [False, True],
-    # StreamK (SK) kernels divide work evenly among CUs by splitting along MT and K dimensions.
-    # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
-    # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
-    # 0 : Standard data-parallel kernel
-    # 3 : Two-Tile StreamK with DP before SK tiles
-    # 4 : Dynamic StreamK using per-XCD work queues
-    # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
-    #     selects the active sub-path (see StreamKHybrid in StreamK.py).
-    # StreamK kernels can adjust the number of CUs being used.
-    # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
-    # StreamK grid is controlled by setting these enviornment variables:
-    # TENSILE_STREAMK_FIXED_GRID lets you override the default grid size with a specific number
-    #   0 = override disabled (default)
-    # TENSILE_STREAMK_FULL_TILES sets the number of full tiles to be included in stream-k work
-    #   -1 = use prediction model for best performance (not yet implemented)
-    #   0 = only remainder tiles run in stream-k
-    #   1+ = remainder + 1 (or more) full grids of tiles run in stream-k (default=1)
-    # TENSILE_STREAMK_DYNAMIC_GRID selects dynamic grid mode, which automatically limits the number of CUs used:
-    #   0 = Off, always use all CUs.
-    #   1 = Only reduce CUs for small problems to number of output tiles when num_tiles < CU count.
-    #   2 = Also reduce CUs used for large sizes to improve data-parallel portion and reduce power.
-    #   3 = Analytically predict the best grid-size by weighing the cost of the fix-up step and the cost of processing MACs (default).
-    #       Note: dynamic grid coefficients currently apply to gfx942 variants
-    #   4 = StreamK algorithm will behave as data parallel (Launch WGs = #CUs)
-    #   5 = StreamK Algorithm will use Origami's "select_best_grid_size" function
-    # TENSILE_STREAMK_DYNAMIC_WGM Enables Origami's analytical model-based WGM selection
-    # TENSILE_STREAMK_MAX_CUS allows the user to manually set maximum number of CUs used, which could free up some CUs for
-    #   other operations to run in parallel with gemm.
-    # TENSILE_STREAMK_GRID_MULTIPLIER lets you set how many workgroups are created per CU being used.
-    #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
-    # The priority of these environment variables is defined as follows:
-    # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
+    # Persistent tile processing and work assignment are independent selectors.
+    # None disables persistence and ignores assignment. DataParallel supports StaticGrid;
+    # StreamK supports StaticGrid, DynamicWorkQueue and Hybrid.
+    # Grid-policy selection is independent of device work-queue assignment.
+    "TileProcessingStrategy": ["None", "DataParallel", "StreamK"],
+    "WorkAssignment": ["StaticGrid", "DynamicWorkQueue", "Hybrid"],
+    # Legacy input aliases are removed before solution derivation.
     "StreamK": [0, 3, 4, 5],
-    # Force StreamK=3 to run all output tiles through the persistent DP path.
-    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
-    # to skip the SK region, and keeps the normal StreamK grid selection policy.
-    # The invariant is no partial output tile fixup and no SK-region processing.
-    # Valid only with DP-first, non-atomic StreamK mode 3.
+    # Legacy regeneration alias: StreamK=3 + StreamKForceDPOnly=1 maps to
+    # DataParallel/StaticGrid before defaults, naming and code generation.
     "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
@@ -935,14 +907,16 @@ validParameters = { # we need to make sure this matches develop
     # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
     # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
     # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
-    # Valid only for StreamK in (4, 5).
+    # Valid only for StreamK with DynamicWorkQueue or Hybrid.
     #  0: off
     #  1: on
+    "WorkQueueStealing": [0, 1],
     "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
+    "PersistentXCCMapping": [0] + list(range(2, 9)),
     "StreamKXCCMapping": [0] + list(range(2, 9)),
     # Enables using a Tree-reduction for the fixup step of StreamK algorithm
     # 0: use linear reduction

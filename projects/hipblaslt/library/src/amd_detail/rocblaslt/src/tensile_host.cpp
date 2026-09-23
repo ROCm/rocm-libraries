@@ -3421,7 +3421,7 @@ static void bindFlagRegion(const RocblasltContractionProblem&      prob,
 {
     if(prob.streamKFlags == nullptr)
         return;
-    if(solution.sizeMapping.streamK <= 0 || solution.sizeMapping.streamKAtomic != 0)
+    if(!solution.sizeMapping.isStreamK() || solution.sizeMapping.streamKAtomic != 0)
         return;
     // outputAmaxD hands the same pointer to the amax counter, which would then
     // land on top of flag zero. Leave those on the GSU region: no better than
@@ -3939,7 +3939,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // below. If this solution reads the flags as Stream-K, point them at
             // a region private to this stream so two Gemm objects initialized on
             // different streams cannot share one.
-            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
+            if(solution->sizeMapping.isStreamK() && solution->sizeMapping.streamKAtomic == 0
                && !solution->problemType.outputAmaxD)
             {
                 void* region = nullptr;
@@ -4037,7 +4037,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // cover the stream as well as the problem index: offsetting by index
             // alone keeps one grouped call internally safe but still shares the
             // region with every other stream.
-            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
+            if(solution->sizeMapping.isStreamK() && solution->sizeMapping.streamKAtomic == 0
                && !solution->problemType.outputAmaxD)
             {
                 for(size_t i = 0; i < data->inputs.grouped.size(); i++)

@@ -30,6 +30,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from Tensile.ExecutionPolicy import isDataParallel, isPersistent
+
 pytestmark = pytest.mark.unit
 
 _TENSILE = Path(__file__).resolve().parents[2]
@@ -204,7 +206,8 @@ class TestForceGenerateKernel:
     """``_getKernelSource`` is where an overflowing kernel now lands."""
 
     def _getKernelSource(self, warnings):
-        namespace = {"Solution": object, "printWarning": warnings.append}
+        namespace = {"Solution": object, "printWarning": warnings.append,
+                     "isPersistent": isPersistent, "isDataParallel": isDataParallel}
         _exec(_funcDef(_KERNEL_WRITER_PY, "_getKernelSource"), namespace)
         return namespace["_getKernelSource"]
 
@@ -226,10 +229,10 @@ class TestForceGenerateKernel:
 
     def _kernel(self):
         # The solution keys that same metadata is built from; a real Solution always
-        # has them. StreamK is off, so the Stream-K grid branch is not taken here.
+        # has them. The policy is nonpersistent, so no persistent grid is needed.
         return {
             "UseSubtileImpl": False,
-            "StreamK": 0,
+            "TileProcessingStrategy": "None",
             "MacroTile0": 128,
             "MacroTile1": 128,
             "DepthU": 32,

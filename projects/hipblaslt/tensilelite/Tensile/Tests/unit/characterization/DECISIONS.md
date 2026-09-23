@@ -513,3 +513,11 @@ baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
 Configuration, asymmetric aligned layouts in segment_interleave, consolidated
 derived-state cases in Solution, LDS token selection in Component, and focused
 reduction/fixup paths in GSU and StreamK.
+
+## D29 — Canonical persistent execution policy in generated names and schemas
+
+[ADR 0014](adr/0014-canonical-persistent-policy-names.md) records the intended
+policy-field migration in generated names, derived solution state, parameter
+registries, and serialized defaults. The scoped codegen updates preserve
+fixture membership, kernel counts, and emission return codes. Explicit names
+for prebuilt kernels remain part of the compatibility contract.

@@ -13,11 +13,11 @@ from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 from rocisa.instruction import SAndB32, SLShiftLeftB32, SLShiftRightB32, SXorB32
 
 from Tensile.Common.ValidParameters import validParameters
+from Tensile.Components.TileProcessingStrategy import TileProcessingStrategy
 from Tensile.Components.StreamK import (
     StreamK,
     StreamKHybrid,
     StreamKTwoTileDPFirst,
-    streamKVariantClass,
 )
 
 from streamk5_test_helpers import (
@@ -37,15 +37,15 @@ class TestStreamK5ValidParameters:
 
 class TestStreamK5Component:
     def test_streamk_hybrid_is_registered_variant(self):
-        assert streamKVariantClass(5) is StreamKHybrid
-        assert StreamKHybrid.kernel == {"StreamK": 5}
+        assert issubclass(StreamKHybrid, TileProcessingStrategy)
+        assert StreamKHybrid.kernel == {"TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid"}
 
     def test_component_dispatches_streamk_5_to_hybrid(self, mock_streamk_writer):
-        impl = StreamK.find(mock_streamk_writer(5))
+        impl = TileProcessingStrategy.find(mock_streamk_writer(5))
         assert isinstance(impl, StreamKHybrid)
 
     def test_component_dispatches_streamk_3_to_static_path(self, mock_streamk_writer):
-        impl = StreamK.find(mock_streamk_writer(3))
+        impl = TileProcessingStrategy.find(mock_streamk_writer(3))
         assert isinstance(impl, StreamKTwoTileDPFirst)
 
 
@@ -59,7 +59,7 @@ class TestStreamK5ModeExtraction:
             and reg_name(list(inst.getParams())[1]) == "sgprMagicShiftItersPerTile"
         )
         params = list(shift_inst.getParams())
-        assert reg_name(params[0]) == "sgprStreamKHybridMode"
+        assert reg_name(params[0]) == "sgprWorkAssignmentMode"
         assert params[2] == hex(30)
 
     def test_mode_extraction_clears_bit_30_via_xor_of_extracted_mode(self):
@@ -71,7 +71,7 @@ class TestStreamK5ModeExtraction:
         params = list(xor_inst.getParams())
         assert reg_name(params[0]) == "sgprMagicShiftItersPerTile"
         assert reg_name(params[1]) == "sgprMagicShiftItersPerTile"
-        assert reg_name(params[2]) == "sgprStreamKHybridMode"
+        assert reg_name(params[2]) == "sgprWorkAssignmentMode"
         and_dests = [
             reg_name(list(inst.getParams())[0])
             for inst in module.flatitems()
@@ -89,7 +89,7 @@ class TestStreamK5ModeExtraction:
             inst
             for inst in module.flatitems()
             if isinstance(inst, SLShiftRightB32)
-            and reg_name(list(inst.getParams())[1]) == "sgprStreamKHybridMode"
+            and reg_name(list(inst.getParams())[1]) == "sgprWorkAssignmentMode"
         ]
         assert restore
         assert list(restore[-1].getParams())[2] == hex(30)
@@ -103,7 +103,7 @@ class TestStreamK5ModeExtraction:
 
 class TestStreamK5RegSetAliasing:
     def test_hybrid_variant_requests_parallel_reduction_aliases(self):
-        variant = streamKVariantClass(5)()
+        variant = StreamKHybrid()
         assert variant.emitsParallelReductionSgprAliases is True
 
     def test_macro_and_set_emits_sk4_to_sk3_kernarg_aliases(self):

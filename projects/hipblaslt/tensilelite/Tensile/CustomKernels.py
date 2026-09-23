@@ -25,6 +25,8 @@
 from .resources import custom_kernel_names, custom_kernel_text
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
+from .ExecutionPolicy import isPersistent, isDataParallel
+
 import re
 import yaml
 
@@ -339,10 +341,11 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     threads = [kernelMeta.get(".max_flat_workgroup_size", 256), 1, 1]
 
-    streamK = kernelConfig.get("StreamK", 0)
     hasNumWGArg = any(a.get("semantic") == "NumWorkGroups" for a in args)
 
-    if streamK:
+    if isDataParallel(kernelConfig):
+        grid = ["PersistentGrid", "One", "One"]
+    elif isPersistent(kernelConfig):
         batched = kernelConfig.get("ProblemType", {}).get("Batched", False)
         grid = ["StreamKWithBatch" if batched else "StreamKNoBatch", "One", "One"]
     elif hasNumWGArg:
@@ -391,9 +394,27 @@ def getCustomKernelConfig(
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
 
     kernelIsp = kernelConfig["InternalSupportParams"]
+    # Missing metadata describes the existing prebuilt scheduling payload.
+    kernelIsp.setdefault("PersistentLoopArgsVersion", 0)
     for key in internalSupportParams:
         if key not in kernelIsp:
             kernelIsp[key] = internalSupportParams[key]
+
+    version = kernelIsp["PersistentLoopArgsVersion"]
+    if type(version) is not int or version != 0:
+        raise ValueError("Unsupported PersistentLoopArgsVersion")
+
+    from .ExecutionPolicy import ALIASES, SELECTORS, normalize_execution_policy
+    if SELECTORS.intersection(kernelConfig):
+        kernelConfig = normalize_execution_policy(kernelConfig, regenerate=False)
+    else:
+        # A minimal custom.config can inherit its selectors from the consuming
+        # logic file. Preserve explicit shared controls until that merge.
+        for old, new in ALIASES.items():
+            if old in kernelConfig:
+                if new in kernelConfig and kernelConfig[new] != kernelConfig[old]:
+                    raise ValueError(f"Conflicting {old} and {new}")
+                kernelConfig[new] = kernelConfig.pop(old)
 
     # Compute a merged validParameters set locally; do NOT mutate the global
     # validParameters dict (that leaks state across calls and into unit tests

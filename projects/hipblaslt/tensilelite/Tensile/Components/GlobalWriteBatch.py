@@ -20,6 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from Tensile.ExecutionPolicy import isPersistent
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
@@ -546,7 +547,7 @@ class GlobalWriteBatchWriter:
         # can overflow simm16 ("branch size exceeds simm16"). longBranchScc0 emits a
         # getpc/setpc sequence that handles the full 32-bit distance.
         module.add(self.parentWriter.longBranchScc0(clsLabel, posNeg=-1, comment="loop while counter != 0"))
-        # if not self.kernel["StreamK"] == 3:
+        # if not hasStaticAssignment(self.kernel):
         #   module.add(SEndpgm(comment="stop here after CLS loop"))
         self.ss._clsLoopLabel = None
     return module
@@ -555,7 +556,7 @@ class GlobalWriteBatchWriter:
     vlcnt = -1
     dscnt = -1
     vscnt = -1
-    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
+    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(self.kernel)
     if interleaveStoreVmcnt:
       waitLocalLoadCnt = 0
       waitLocalLoadCntStrList = []
@@ -721,7 +722,7 @@ class GlobalWriteBatchWriter:
     dataScaleBVec         = self.ss.elementDataScaleBVec[elementIdx]
     dataScaleAlphaVec     = self.ss.elementDataScaleAlphaVec[elementIdx]
     skipLoad = True if self.factorDim else False
-    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
+    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(self.kernel)
 
     def addEpilogueLoad(modGwvw, ldName: str, addrVecVgpr, addrVec, dataVec, loadedDataVec,
                         vecOffset, gwvw, referenceVgpr, dim, referenceDim,
@@ -820,7 +821,7 @@ class GlobalWriteBatchWriter:
 
     isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or \
                       self.kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel") or \
-                     self.kernel["StreamK"] > 0
+                     isPersistent(self.kernel)
 
     # emitAddressSetupCode for elt 0 is safe: coordOffset0=0 and rowInc=0, so it
     # only emits the (d1,vc1,d0,vc0) comment + sets coord0Vgpr state -- no real
@@ -1133,7 +1134,7 @@ class GlobalWriteBatchWriter:
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
       self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
 
-      if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         tmpInrSgpr = self._epilogScratchSgpr(1)
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrEVgpr, self.addrE, 0))
         self._epilogScratchFree(tmpInrSgpr)
@@ -1156,7 +1157,7 @@ class GlobalWriteBatchWriter:
                                    loadInputCode, factor_gwvw,
                                    False)
       tmpInrSgpr = self._epilogScratchSgpr(1)
-      if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrEVgpr, self.addrE, 0))
       if self.storeBiasD == 1:
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
@@ -1377,7 +1378,7 @@ class GlobalWriteBatchWriter:
           storeCodeGSUSK.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * self.parentWriter.states.bpeCinternal, ContinuousRegister(self.tmpS01, 1)))
           storeCodeGSUSK.add(SMovB32(dst=sgpr(self.tmpS01), src=0, comment="Init sgpr offset"))
           storeCodeGSUSK.addSpaceLine()
-        if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+        if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
           vgprIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
           vgprDst = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else "ValuC+%d"%vgprIdx
           module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
@@ -1939,7 +1940,7 @@ class GlobalWriteBatchWriter:
           else:
             raise RuntimeError("Unsupported %s compute data type %s."%(addressStr, str(self.kernel["ProblemType"]["ComputeDataType"])))
 
-      isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
+      isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or isPersistent(self.kernel)
 
       scaleAVecModule = Module("ScaleAVecModule")
       scaleBVecModule = Module("ScaleBVecModule")
@@ -1970,7 +1971,7 @@ class GlobalWriteBatchWriter:
       if self.parentWriter.states.useBias == DataDirection.READ:
         if activationCDataType == self.kernel["ProblemType"]["ComputeDataType"] and self.kernel["ActivationFuncCall"]:
           mergeActFuncCall = True
-        if (self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["UseE"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+        if (self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["UseE"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
           mergeActFuncCall = False
 
         if self.factorDim and self.gwvw > 1:
@@ -2049,7 +2050,7 @@ class GlobalWriteBatchWriter:
         else:
           gateModule.add(_emit_gate_fma())
 
-      if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         vgprIdx   = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
         vgprDst   = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else vgprIdx
         prefixStr = "" if mergeActFuncCall else "ValuC+"
@@ -2091,7 +2092,7 @@ class GlobalWriteBatchWriter:
       SaturateTypeInt8 = SaturateCastType.NORMAL
 
       gradientCvtModule = Module("gradientCvtModule")
-      if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         loadOffset = int((self.kernel["ProblemType"]["ComputeDataType"].numRegisters() - self.kernel["ProblemType"]["DataTypeE"].numRegisters()) * self.ss.cfg.gwvw)
         if activationCDataType != self.kernel["ProblemType"]["DataTypeE"]:
           if activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isHalf():
@@ -2114,7 +2115,7 @@ class GlobalWriteBatchWriter:
       # Activation
       activationModule = None
       isActivationInsertAfter = False
-      if self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         gradientInput = dataE
         enableValuC   = False
       else:
@@ -2169,7 +2170,7 @@ class GlobalWriteBatchWriter:
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
           self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
       # Add C *= GradientAct
-      if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         if isActivationInsertAfter:
           assert 0, "Gradient does not support isActivationInsertAfter."
         for vi in range(0, self.gwvw):
@@ -2189,7 +2190,7 @@ class GlobalWriteBatchWriter:
             assert 0, "Unsupported gradient type"
 
       scaleDModule = Module("Empty scaleDModule")
-      if self.kernel["ProblemType"]["UseScaleCD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+      if self.kernel["ProblemType"]["UseScaleCD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
         for vi in range(0, self.gwvw):
           sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
@@ -2433,7 +2434,7 @@ class GlobalWriteBatchWriter:
             storeCodeModule.add(skipLabel)
           self.storesIssued += 1
 
-        if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+        if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
           self.storesIssued += 1
         if self.storeBiasD == 1:
           self.storesIssued += 1
@@ -2453,7 +2454,7 @@ class GlobalWriteBatchWriter:
           module.add(tmpStoreCode)
 
           self.storesIssued += 1
-          if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+          if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or isPersistent(self.kernel)):
             self.storesIssued += 1
           if self.storeBiasD == 1:
             self.storesIssued += 1

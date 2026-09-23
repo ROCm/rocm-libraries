@@ -44,6 +44,7 @@ def _writer(useBias=DataDirection.NONE, needBiasType=False, bpeCinternal=4,
         mxsa=ns(numSgprStrides=1), mxsb=ns(numSgprStrides=1),
         m=ns(numSgprStrides=1), e=ns(numSgprStrides=strides),
         bpeCinternal=bpeCinternal, useBias=useBias, needBiasType=needBiasType,
+        useGateResidual=False,
         numActivationArgSize=numActivationArgSize, kernelName="tensile_kernel",
     )
     return ns(states=states, debugConfig=ns(debugKernel=debugKernel), kernelArgDefs=[])
@@ -54,12 +55,13 @@ def _kernel(**over):
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
         "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
+        "GroupedGemm": False,
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
         "InternalSupportParams": {"KernArgsVersion": 1},
         "ProblemType": problem_type,
-        "StreamK": 0, "StreamKAtomic": 0,
+        "TileProcessingStrategy": "None", "WorkAssignment": "StaticGrid", "StreamKAtomic": 0,
         "PackedC0IdxChars": ["I"], "PackedC0IndicesX": [0],
         "PackedC1IdxChars": ["J"], "PackedC1IndicesX": [1],
         "GlobalSplitUAlgorithm": "SingleBuffer", "AdaptiveGemmGSUA": 0,
@@ -169,22 +171,24 @@ def test_alpha_narrow_compute_is_uint32():
 # --------------------------------------------------------------------------- #
 
 
-def test_streamk_two_tile_adds_workspace_and_all_scalar_args():
-    sems = _sems(_writer(), _kernel(StreamK=2, StreamKAtomic=0))
+def test_streamk_static_adds_workspace_and_all_scalar_args():
+    sems = _sems(_writer(), _kernel(TileProcessingStrategy="StreamK", StreamKAtomic=0))
     for expected in ["AddressWorkspace", "AddressFlags", "ItersPerTile",
                      "MagicNumberItersPerTile", "MagicShiftItersPerTile",
                      "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]:
         assert expected in sems
 
 
-def test_streamk_basic_omits_grid_and_split():
-    sems = _sems(_writer(), _kernel(StreamK=1, StreamKAtomic=0))
-    assert "SKItersPerWG" in sems
-    assert "SKGrid" not in sems and "SKTilesAndSplit" not in sems
+def test_data_parallel_keeps_legacy_scheduling_args_without_workspace():
+    sems = _sems(_writer(), _kernel(TileProcessingStrategy="DataParallel"))
+    for expected in ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                     "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]:
+        assert expected in sems
+    assert "AddressWorkspace" not in sems and "AddressFlags" not in sems
 
 
 def test_streamk_atomic_omits_workspace_addresses():
-    sems = _sems(_writer(), _kernel(StreamK=2, StreamKAtomic=1))
+    sems = _sems(_writer(), _kernel(TileProcessingStrategy="StreamK", StreamKAtomic=1))
     assert "AddressWorkspace" not in sems and "AddressFlags" not in sems
 
 

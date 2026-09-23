@@ -74,9 +74,10 @@ namespace
 
     void initStreamKSolution(ContractionSolution& solution, int streamK)
     {
-        solution.sizeMapping.streamK               = streamK;
+        solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::WorkAssignment::Hybrid : TensileLite::WorkAssignment::StaticGrid);
         solution.sizeMapping.streamKAtomic         = 0;
-        solution.sizeMapping.streamKForceDPOnly    = 0;
+
         solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
         // SizeMapping's dim3 members have no default member initializer
         // (geom.hpp: vector3() = default with plain T x,y,z), so a
@@ -317,37 +318,24 @@ TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
 // Force-DP-only (SK3): every tile stays data-parallel. skTiles==0, no partials,
 // workspace==0, dpOnly reported and sourced from the compile-time PARAM.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, ForceDpOnlyIsDpOnlyNoWorkspace)
+TEST(PersistentLaunchSummaryTest, DataParallelHasNoReductionOrWorkspace)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
-    solution.sizeMapping.streamKForceDPOnly = 1;
-
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-
-    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-
-    auto d = solution.computeStreamKDecisions(problem, device);
-
-    EXPECT_TRUE(d.forceDPOnly);
-    EXPECT_TRUE(d.dpOnly);
-    // dp-only distinction: this is the PARAM source, NOT the runtime fallback.
-    EXPECT_FALSE(d.workspaceDPFallbackFired) << "forceDPOnly is a param, not a runtime fallback";
-    EXPECT_FALSE(d.streamKDP);
-    EXPECT_EQ(d.skTiles, 0u);
-    EXPECT_FALSE(d.partialsPresent);
-    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
-    EXPECT_FALSE(d.workspaceAllocated);
-    // Force-DP-only launches on exactly the hardware CU count (mirrors
-    // StreamKForceDPOnlyTest.UsesHardwareCuCount). With clusterDim == 1 the param
-    // alone does not reset the grid to tiles -- only the cluster-multicast clamp
-    // (clusterDim.x*clusterDim.y > 1) and the runtime workspace-DP fallback do --
-    // so finalGrid == selectedGrid here.
-    EXPECT_EQ(d.skGrid, static_cast<size_t>(_CPX_CU));
-    EXPECT_EQ(d.finalGrid, static_cast<size_t>(_CPX_CU));
-    EXPECT_EQ(d.finalGrid, d.selectedGrid);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.grid, static_cast<size_t>(_CPX_CU));
+    EXPECT_EQ(launch.grid, launch.selectedGrid);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+    EXPECT_EQ(launch.workspaceBytes, 0u);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+    EXPECT_EQ(launch.tileProcessingStrategy, TileProcessingStrategy::DataParallel);
+    EXPECT_EQ(launch.workAssignment, WorkAssignment::StaticGrid);
+    EXPECT_EQ(launch.effectiveWorkAssignment, WorkAssignment::StaticGrid);
 }
 
 // ---------------------------------------------------------------------------
@@ -423,37 +411,29 @@ TEST(StreamKLaunchSummaryTest, SelectedVsFinalGridAttribution)
 // reloadDebugBitsForTest() intentionally does not refresh it. Its plumbing is
 // still asserted-absent below via d.streamKDP.)
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, DpOnlySourceDistinguishesParamVsRuntime)
+TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspaceFallback)
 {
     AnalyticalEnv env;
+    env.device.skFixedGrid = 64;
+    ContractionSolution dataParallel;
+    initStreamKSolution(dataParallel, 3);
+    dataParallel.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    auto problem = makeGemmProblem(4096, 4224, 64);
+    problem.setWorkspaceSize(0);
+    auto launch = dataParallel.resolvePersistentSettings(problem, env.device);
+    EXPECT_EQ(launch.tileProcessingStrategy, TileProcessingStrategy::DataParallel);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+    EXPECT_EQ(launch.workspaceBytes, 0u);
+    EXPECT_NE(launch.grid, launch.totalTiles);
 
-    // (1) PARAM source: forceDPOnly on an SK4 solution with ample workspace.
-    ContractionSolution paramSol;
-    initStreamKSolution(paramSol, 4);
-    paramSol.sizeMapping.streamKForceDPOnly = 1;
-    auto paramProblem                       = makeGemmProblem(4096, 4224, 64);
-    paramProblem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-    auto pd = paramSol.computeStreamKDecisions(paramProblem, env.device);
-
-    EXPECT_TRUE(pd.dpOnly);
-    EXPECT_TRUE(pd.forceDPOnly);
-    EXPECT_FALSE(pd.workspaceDPFallbackFired);
-    EXPECT_FALSE(pd.streamKDP);
-    // forceDPOnly does NOT reset the grid to tiles.
-    EXPECT_EQ(pd.finalGrid, pd.selectedGrid);
-    EXPECT_NE(pd.finalGrid, pd.tiles);
-
-    // (2) RUNTIME source: no workspace forces the DP fallback (grid=tiles).
-    ContractionSolution runSol;
-    initStreamKSolution(runSol, 4);
-    auto runProblem = makeGemmProblem(4096, 4224, 64);
-    runProblem.setWorkspaceSize(0);
-    auto rd = runSol.computeStreamKDecisions(runProblem, env.device);
-
-    EXPECT_TRUE(rd.dpOnly);
-    EXPECT_FALSE(rd.forceDPOnly);
-    EXPECT_TRUE(rd.workspaceDPFallbackFired);
-    EXPECT_EQ(rd.finalGrid, rd.tiles);
+    ContractionSolution streamK;
+    initStreamKSolution(streamK, 4);
+    auto fallback = streamK.computeStreamKDecisions(problem, env.device);
+    EXPECT_TRUE(fallback.dpOnly);
+    EXPECT_TRUE(fallback.workspaceDPFallbackFired);
+    EXPECT_EQ(fallback.finalGrid, fallback.tiles);
+    EXPECT_TRUE(streamK.sizeMapping.isStreamK());
+    EXPECT_FALSE(streamK.sizeMapping.isDataParallel());
 }
 
 // ---------------------------------------------------------------------------
@@ -693,240 +673,119 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryNaWorkQueueWhenNotDynamic)
 }
 
 // ---------------------------------------------------------------------------
-// StreamKForceDPOnly cluster-multicast grid clamp (gfx1250 ClusterDim path).
-//
-// This clamp is the third "reset the grid to tiles" clamp inside getSKGridImpl,
-// running AFTER the tree-fixup-bounds fallback. It fires on the conjunction of
-// three SOLUTION-side properties -- SK3, streamKForceDPOnly, and a cluster whose
-// x*y extent exceeds 1 -- so the launch runs exactly one work-group per output
-// tile (a multicast broadcast, not a K-split). It consults no hardware field, so
-// it is reproducible on the same mock AMDGPU the other static-SK3 tests use; no
-// gfx1250 device and no analytical hardware are required. streamKForceDPOnly
-// also short-circuits getSKReduction() to tree, which keeps the scenario fully
-// deterministic.
-//
-// The tests below pin the resulting REPORT behaviour: the clamp is visible in
-// the snapshot, it is what makes selectedGrid differ from finalGrid, and it wins
-// the changedBy attribution over the earlier clamps it supersedes.
+// DataParallel/StaticGrid uses one workgroup per output tile when spatial
+// cluster peers require multicast. The canonical resolver exposes the selected
+// grid and the clamped launch grid, with no reduction or partial workspace.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, ClusterDpMulticastClampsGridToTiles)
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelClampsGridToTiles)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
-    solution.sizeMapping.streamKForceDPOnly = 1;
-    // ClusterDim.x * ClusterDim.y == 4 > 1 -> multicast cluster launch.
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
     solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
-
-    // 4096x4224 -> tiles = 32*33 = 1056; the CU-count grid the selection logic
-    // picks is 64, so the clamp is observable (64 != 1056).
     auto problem = makeGemmProblem(4096, 4224, 512);
-    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-
-    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-
-    auto d = solution.computeStreamKDecisions(problem, device);
-
-    ASSERT_EQ(d.streamKMode, 3);
-    ASSERT_TRUE(d.forceDPOnly);
-
-    // The clamp fired, and it is the thing that moved the grid.
-    EXPECT_TRUE(d.clusterDPGridClamped);
-    EXPECT_EQ(d.selectedGrid, static_cast<size_t>(_CPX_CU))
-        << "selection still picks the CU-count grid before the clamp";
-    EXPECT_NE(d.selectedGrid, d.finalGrid) << "cluster-DP clamp changed the grid";
-    EXPECT_EQ(d.finalGrid, d.tiles) << "cluster multicast launches one work-group per tile";
-    EXPECT_EQ(d.skGrid, d.finalGrid);
-    // The clamp lives inside getSKGridImpl, so it is already reflected in the
-    // pre-(workspace)-fallback grid.
-    EXPECT_EQ(d.skGridPreFallback, d.tiles);
-
-    // ...and no OTHER grid-changing fallback is credited for it.
-    EXPECT_FALSE(d.fixedGridUsed);
-    EXPECT_FALSE(d.treeBoundsFallbackFired);
-    EXPECT_FALSE(d.workspaceDPFallbackFired)
-        << "forceDPOnly suppresses the partials reservation, so no workspace fallback";
-
-    // getSKGrid() -- the same helper solve() calls -- reproduces the clamped grid,
-    // so the report is not describing a grid the launch does not use.
-    EXPECT_EQ(solution.getSKGrid(problem, device, d.tiles, d.reduction), d.finalGrid);
-
-    // Force-DP-only semantics are unchanged by the clamp: every tile stays whole.
-    EXPECT_TRUE(d.dpOnly);
-    EXPECT_EQ(d.skTiles, 0u);
-    EXPECT_FALSE(d.partialsPresent);
-    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
-    EXPECT_EQ(d.requiredWorkspaceBytes, solution.requiredWorkspaceSize(problem, device));
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_TRUE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.selectedGrid, static_cast<size_t>(_CPX_CU));
+    EXPECT_EQ(launch.totalTiles, 32u * 33u);
+    EXPECT_EQ(launch.grid, launch.totalTiles);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
 }
 
 // ---------------------------------------------------------------------------
-// The clamp is a conjunction, and the report must not claim it on any of the
-// near-miss configurations. Each sub-case below flips exactly one of the three
-// conditions and asserts the grid is left alone.
+// The clamp requires whole-tile processing and spatial cluster peers. An
+// unsupported policy pair is rejected; partial StreamK and K-only clusters
+// retain their selected grid.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, ClusterDpGridClampRequiresSk3ForceDpOnlyAndXyCluster)
+TEST(PersistentLaunchSummaryTest, ClusterClampRequiresWholeTilesAndSpatialPeers)
 {
     auto problem = makeGemmProblem(4096, 4224, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-
-    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
+    ContractionSolution invalid;
+    initStreamKSolution(invalid, 4);
+    invalid.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    invalid.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    EXPECT_THROW(invalid.resolvePersistentSettings(problem, device), std::runtime_error);
 
-    // (1) Dynamic mode (SK4) with the same DP-only + cluster settings: the
-    // multicast clamp is a static-SK3 construct, so the dynamic grid survives.
-    {
-        ContractionSolution solution;
-        initStreamKSolution(solution, 4);
-        solution.sizeMapping.streamKForceDPOnly = 1;
-        solution.sizeMapping.clusterDim         = TensileLite::dim3(2, 2, 1);
+    ContractionSolution streamK;
+    initStreamKSolution(streamK, 3);
+    streamK.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
+    auto partial = streamK.computeStreamKDecisions(problem, device);
+    EXPECT_FALSE(partial.clusterDPGridClamped);
+    EXPECT_EQ(partial.finalGrid, partial.selectedGrid);
 
-        auto d = solution.computeStreamKDecisions(problem, device);
+    ContractionSolution dataParallel;
+    initStreamKSolution(dataParallel, 3);
+    dataParallel.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    dataParallel.sizeMapping.clusterDim = TensileLite::dim3(1, 1, 8);
+    auto launch = dataParallel.resolvePersistentSettings(problem, device);
+    EXPECT_FALSE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, static_cast<size_t>(_CPX_CU));
+}
 
-        EXPECT_FALSE(d.clusterDPGridClamped) << "SK4 is not the static multicast path";
-        EXPECT_EQ(d.finalGrid, d.selectedGrid);
-        EXPECT_NE(d.finalGrid, d.tiles);
-    }
-
-    // (2) SK3 with a multicast cluster but WITHOUT force-DP-only: the clamp is
-    // only sound when every tile is already data-parallel, so it must not fire.
-    {
-        ContractionSolution solution;
-        initStreamKSolution(solution, 3); // leaves streamKForceDPOnly == 0
-        solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
-
-        auto d = solution.computeStreamKDecisions(problem, device);
-
-        ASSERT_FALSE(d.forceDPOnly);
-        EXPECT_FALSE(d.clusterDPGridClamped);
-        EXPECT_EQ(d.finalGrid, d.selectedGrid);
-        EXPECT_NE(d.finalGrid, d.tiles);
-    }
-
-    // (3) SK3 + force-DP-only, but the cluster only extends in z. Multicast peers
-    // are laid out over the x/y tile grid, so a z-only cluster is not a multicast
-    // launch and the grid must be left alone.
+// ---------------------------------------------------------------------------
+// The printed summary uses canonical selectors, the final persistent grid,
+// and zero workspace for both clustered and ordinary DataParallel launches.
+// ---------------------------------------------------------------------------
+TEST(PersistentLaunchSummaryTest, DataParallelSummaryUsesCanonicalFields)
+{
+    auto problem = makeGemmProblem(4096, 4224, 512);
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    device.skDynamicGrid = 0;
+    for(bool clustered : {false, true})
     {
         ContractionSolution solution;
         initStreamKSolution(solution, 3);
-        solution.sizeMapping.streamKForceDPOnly = 1;
-        solution.sizeMapping.clusterDim         = TensileLite::dim3(1, 1, 8);
-
-        auto d = solution.computeStreamKDecisions(problem, device);
-
-        EXPECT_FALSE(d.clusterDPGridClamped) << "clusterDim.z does not make a multicast cluster";
-        EXPECT_EQ(d.finalGrid, d.selectedGrid);
-        EXPECT_EQ(d.finalGrid, static_cast<size_t>(_CPX_CU));
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+        solution.sizeMapping.clusterDim = clustered ? TensileLite::dim3(2, 2, 1) : TensileLite::dim3(1, 1, 1);
+        auto launch = solution.resolvePersistentSettings(problem, device);
+        std::ostringstream output;
+        solution.printPersistentLaunchSummary(output, problem, launch);
+        auto text = collapseSpaces(output.str());
+        EXPECT_NE(text.find("TileProcessingStrategy=DataParallel"), std::string::npos);
+        EXPECT_NE(text.find("WorkAssignment=StaticGrid"), std::string::npos);
+        EXPECT_NE(text.find("WorkspaceBytes=0"), std::string::npos);
+        EXPECT_NE(text.find("PersistentGrid=" + std::to_string(launch.grid)), std::string::npos);
+        EXPECT_EQ(text.find("StreamK"), std::string::npos);
+        EXPECT_EQ(text.find("forceDPOnly"), std::string::npos);
+        EXPECT_EQ(launch.clusterGridClamp, clustered);
     }
 }
 
 // ---------------------------------------------------------------------------
-// The printed summary reports the cluster-multicast clamp: it is named in the
-// fallbacks section, it is credited for the selected-vs-final grid change, and
-// the preFallback grid is surfaced because the clamp moved the grid inside
-// getSKGridImpl. The complementary run (no multicast cluster) prints the
-// negative form and attributes nothing.
+// A fixed-grid override selects 32 workgroups, then the spatial cluster clamp
+// sets the launch grid to the tile count. The summary exposes both values.
 // ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, PrintSummaryReportsClusterDpMulticastClamp)
-{
-    auto problem = makeGemmProblem(4096, 4224, 512);
-    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-
-    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
-    device.skDynamicGrid = 0;
-
-    // (1) Multicast cluster -> clamp fires and is reported.
-    ContractionSolution clustered;
-    clustered.kernelName = "test_streamk_cluster_dp";
-    initStreamKSolution(clustered, 3);
-    clustered.sizeMapping.streamKForceDPOnly = 1;
-    clustered.sizeMapping.clusterDim         = TensileLite::dim3(2, 2, 1);
-
-    auto dc = clustered.computeStreamKDecisions(problem, device);
-    ASSERT_TRUE(dc.clusterDPGridClamped) << "scenario must actually trip the clamp";
-
-    std::ostringstream osc;
-    clustered.printStreamKLaunchSummary(osc, problem, dc);
-    const std::string clusteredLine = collapseSpaces(osc.str());
-
-    EXPECT_NE(clusteredLine.find("clusterDPMulticast = yes"), std::string::npos);
-    EXPECT_NE(clusteredLine.find("changedBy = clusterDPMulticast"), std::string::npos);
-    // The other fallbacks are reported as not-fired, so the clamp is unambiguous.
-    EXPECT_NE(clusteredLine.find("fixedGrid = no"), std::string::npos);
-    EXPECT_NE(clusteredLine.find("workspaceDPFallback = no"), std::string::npos);
-    EXPECT_NE(clusteredLine.find("treeBoundsFallback = no"), std::string::npos);
-    // selected != final, and the intra-getSKGridImpl clamp surfaces preFallback.
-    EXPECT_NE(clusteredLine.find("selected = " + std::to_string(dc.selectedGrid)),
-              std::string::npos);
-    EXPECT_NE(clusteredLine.find("final = " + std::to_string(dc.tiles)), std::string::npos);
-    EXPECT_NE(clusteredLine.find("preFallback = " + std::to_string(dc.tiles)), std::string::npos);
-    // dp-only is still sourced from the param, not from a runtime fallback.
-    EXPECT_NE(clusteredLine.find("source = forceDPOnly(param)"), std::string::npos);
-
-    // (2) Same solution without a multicast cluster -> negative form, and the
-    // grid is not attributed to anything.
-    ContractionSolution plain;
-    plain.kernelName = "test_streamk_no_cluster";
-    initStreamKSolution(plain, 3);
-    plain.sizeMapping.streamKForceDPOnly = 1; // clusterDim stays {1, 1, 1}
-
-    auto dp = plain.computeStreamKDecisions(problem, device);
-    ASSERT_FALSE(dp.clusterDPGridClamped);
-
-    std::ostringstream osp;
-    plain.printStreamKLaunchSummary(osp, problem, dp);
-    const std::string plainLine = collapseSpaces(osp.str());
-
-    EXPECT_NE(plainLine.find("clusterDPMulticast = no"), std::string::npos);
-    EXPECT_NE(plainLine.find("changedBy = none"), std::string::npos);
-    EXPECT_EQ(plainLine.find("changedBy = clusterDPMulticast"), std::string::npos);
-    // Nothing moved the grid, so preFallback is suppressed.
-    EXPECT_EQ(plainLine.find("preFallback"), std::string::npos);
-}
-
-// ---------------------------------------------------------------------------
-// changedBy attribution names the clamp that actually produced the launch grid,
-// not merely the first one that fired. The skFixedGrid override picks 32 and the
-// cluster-multicast clamp then overwrites it with tiles, so 32 is NOT the
-// launched grid and crediting "fixedGrid" would be a lie.
-// ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, ClusterDpClampWinsAttributionOverFixedGrid)
+TEST(PersistentLaunchSummaryTest, SpatialClusterClampOverridesFixedGrid)
 {
     ContractionSolution solution;
-    solution.kernelName = "test_streamk_cluster_over_fixed";
     initStreamKSolution(solution, 3);
-    solution.sizeMapping.streamKForceDPOnly = 1;
-    solution.sizeMapping.clusterDim         = TensileLite::dim3(2, 2, 1);
-
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.clusterDim = TensileLite::dim3(2, 2, 1);
     auto problem = makeGemmProblem(4096, 4224, 512);
-    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-
-    auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
+    auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-    device.skFixedGrid   = 32;
-
-    auto d = solution.computeStreamKDecisions(problem, device);
-
-    ASSERT_TRUE(d.fixedGridUsed);
-    ASSERT_TRUE(d.clusterDPGridClamped);
-    EXPECT_EQ(d.selectedGrid, 32u) << "the override is what selection produced";
-    EXPECT_EQ(d.finalGrid, d.tiles) << "but the cluster clamp produced the launch grid";
-
-    std::ostringstream os;
-    solution.printStreamKLaunchSummary(os, problem, d);
-    const std::string line = collapseSpaces(os.str());
-
-    EXPECT_NE(line.find("changedBy = clusterDPMulticast"), std::string::npos);
-    EXPECT_EQ(line.find("changedBy = fixedGrid"), std::string::npos)
-        << "the fixed grid was overwritten; it did not produce the launch grid";
-    // Both are still reported as having fired in the fallbacks section.
-    EXPECT_NE(line.find("fixedGrid = yes"), std::string::npos);
-    EXPECT_NE(line.find("clusterDPMulticast = yes"), std::string::npos);
+    device.skFixedGrid = 32;
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.selectedGrid, 32u);
+    EXPECT_TRUE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, launch.totalTiles);
+    std::ostringstream output;
+    solution.printPersistentLaunchSummary(output, problem, launch);
+    const auto text = output.str();
+    EXPECT_NE(text.find("ClusterGridClamp="), std::string::npos);
+    EXPECT_NE(text.find("SelectedGrid=32"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
 // The parallel (split-K data-parallel) reduction path.
 //
-// Every other test in this file runs a tree-reduction launch. getSKReduction()
+// The other StreamK tests above run tree-reduction launches. getSKReduction()
 // delegates to origami's select_reduction() whenever the device's skDynamicGrid is
 // k_split_aware (== 6, the AMDGPU default), and select_reduction returns parallel
 // only on the narrow band "tiles < cuCount && itersPerTile >= 64 &&

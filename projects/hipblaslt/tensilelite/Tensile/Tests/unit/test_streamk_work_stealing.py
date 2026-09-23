@@ -4,7 +4,7 @@
 
 These tests assert that the work-stealing assembly is emitted by the helper
 methods on the ``StreamK`` base class, and -- crucially -- that those helpers
-are only ever reached behind the codegen-time ``StreamKWorkStealing`` toggle.
+are only ever reached behind the codegen-time ``WorkQueueStealing`` toggle.
 They import rocisa instructions and inspect emitted modules rather than matching
 source text; the toggle gating and the Solution-level validation are verified by
 executing the *real* source (via the AST) so the assertions track the actual code.
@@ -40,11 +40,13 @@ from rocisa.instruction import (
 )
 
 from Tensile.Common.ValidParameters import validParameters
+from Tensile.ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import normalize_execution_policy
 from Tensile.Components.StreamK import (
     StreamK,
     StreamKDynamic,
     StreamKHybrid,
-    streamKVariantClass,
+    StreamKTwoTileDPFirst,
 )
 from Tensile.SolutionStructs import Solution
 from Tensile.SolutionStructs.Utilities import reject
@@ -100,7 +102,7 @@ _WS_KERNEL = {"ISA": (9, 4, 0)}
 
 def _stream_k_instance(streamk: int) -> StreamK:
     """A concrete StreamK variant (helpers live on the base class)."""
-    return streamKVariantClass(streamk)()
+    return {3: StreamKTwoTileDPFirst, 4: StreamKDynamic, 5: StreamKHybrid}[streamk]()
 
 
 def _imm_in(inst, value: int) -> bool:
@@ -144,13 +146,13 @@ def _is_subscript_on(node, name: str, key: str) -> bool:
 
 def _ws_guarded_calls(func) -> set:
     """Names of ``self.streamKWorkStealing*`` calls that sit inside an
-    ``if kernel["StreamKWorkStealing"]:`` block in *func* (recursing into
+    ``if kernel["WorkQueueStealing"]:`` block in *func* (recursing into
     nested closures)."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
     guarded = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and _is_subscript_on(
-            node.test, "kernel", "StreamKWorkStealing"
+            node.test, "kernel", "WorkQueueStealing"
         ):
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
@@ -175,7 +177,7 @@ def _source_of(func) -> str:
 
 
 def _extract_ws_validation():
-    """Compile the *real* ``if state["StreamKWorkStealing"]:`` block out of
+    """Compile the *real* ``if state["WorkQueueStealing"]:`` block out of
     ``Solution.assignDerivedParameters`` into a standalone callable so the
     actual rejection logic can be exercised without a full Solution state.
 
@@ -189,11 +191,11 @@ def _extract_ws_validation():
     target = None
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and _is_subscript_on(
-            node.test, "state", "StreamKWorkStealing"
+            node.test, "state", "WorkQueueStealing"
         ):
             target = node
             break
-    assert target is not None, "could not find StreamKWorkStealing validation block"
+    assert target is not None, "could not find WorkQueueStealing validation block"
 
     func = ast.FunctionDef(
         name="_validate",
@@ -219,7 +221,8 @@ def _extract_ws_validation():
     )
     mod = ast.Module(body=[func], type_ignores=[])
     ast.fix_missing_locations(mod)
-    ns: dict = {}
+    ns: dict = {"hasDynamicAssignment": hasDynamicAssignment,
+                "hasHybridAssignment": hasHybridAssignment}
     exec(compile(mod, "<ws-validation>", "exec"), ns)
     return ns["_validate"]
 
@@ -240,10 +243,10 @@ def _fake_isa_info_map(isa):
 # ===========================================================================
 class TestValidParameters:
     def test_work_stealing_param_exists(self):
-        assert "StreamKWorkStealing" in validParameters
+        assert "WorkQueueStealing" in validParameters
 
     def test_work_stealing_param_is_zero_one(self):
-        assert validParameters["StreamKWorkStealing"] == [0, 1]
+        assert validParameters["WorkQueueStealing"] == [0, 1]
 
 
 # ===========================================================================
@@ -444,7 +447,7 @@ class TestQueueConstants:
 
 # ===========================================================================
 # 3e. Absence-by-toggle: the helpers are only reached behind the
-#     ``kernel["StreamKWorkStealing"]`` gate at every callsite. Verified
+#     ``kernel["WorkQueueStealing"]`` gate at every callsite. Verified
 #     against the real source so "off" provably emits nothing extra.
 # ===========================================================================
 class TestCallsitesAreToggleGated:
@@ -473,8 +476,10 @@ class TestSolutionValidation:
     def _run(self, *, streamk, atomic, work_stealing=1, debug_streamk=0, isa=(9, 4, 2)):
         isa = tuple(isa)
         state = {
-            "StreamKWorkStealing": work_stealing,
-            "StreamK": streamk,
+            "WorkQueueStealing": work_stealing,
+            "TileProcessingStrategy": "None" if streamk == 0 else "StreamK",
+            "WorkAssignment": {0: "StaticGrid", 3: "StaticGrid",
+                               4: "DynamicWorkQueue", 5: "Hybrid"}[streamk],
             "StreamKAtomic": atomic,
             "DebugStreamK": debug_streamk,
             "ISA": isa,
@@ -482,10 +487,15 @@ class TestSolutionValidation:
         self.validate(state, False, reject, isa, _fake_isa_info_map(isa))
         return state
 
-    @pytest.mark.parametrize("streamk", [0, 1, 2, 3])
+    @pytest.mark.parametrize("streamk", [0, 3])
     def test_rejected_when_streamk_not_4_or_5(self, streamk):
         state = self._run(streamk=streamk, atomic=0)
         assert state["Valid"] is False
+
+    @pytest.mark.parametrize("streamk", [1, 2])
+    def test_retired_legacy_modes_are_rejected_at_input(self, streamk):
+        with pytest.raises(ValueError, match="retired"):
+            normalize_execution_policy({"StreamK": streamk, "WorkQueueStealing": 1})
 
     @pytest.mark.parametrize("streamk", [4, 5])
     def test_accepted_for_dynamic_and_hybrid_without_atomic(self, streamk):
@@ -525,6 +535,6 @@ class TestSolutionValidation:
         assert state.get("Valid", True) is True
 
     def test_off_toggle_is_inert_on_gfx1250(self):
-        # StreamKWorkStealing=0 on gfx1250 must not fire the reject.
+        # WorkQueueStealing=0 on gfx1250 must not fire the reject.
         state = self._run(streamk=4, atomic=0, work_stealing=0, isa=(12, 5, 0))
         assert "Valid" not in state

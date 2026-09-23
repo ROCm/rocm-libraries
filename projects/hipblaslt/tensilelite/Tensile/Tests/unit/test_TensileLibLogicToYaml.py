@@ -24,10 +24,6 @@
 
 import pytest
 from unittest.mock import mock_open, patch
-import sys
-import os
-import tempfile
-import filecmp
 
 from Tensile import TensileLibLogicToYaml
 
@@ -431,8 +427,6 @@ BenchmarkProblems:
     - StorePriorityOpt: [1]
     - StoreSyncOpt: [4]
     - StoreVectorWidth: [1]
-    - StreamK: [3]
-    - StreamKXCCMapping: [8]
     - ThreadTile: [[1, 1]]
     - TransposeLDS: [2]
     - TransposeLDSMetadata: [1]
@@ -443,6 +437,8 @@ BenchmarkProblems:
     - WavefrontSize: [64]
     - WorkGroupMapping: [1]
     - WorkGroupMappingXCC: [2]
+    - TileProcessingStrategy: [StreamK]
+    - PersistentXCCMapping: [8]
     - Groups:
       - - MatrixInstruction: [16, 16, 32, 1, 1, 3, 3, 2, 2]
           WorkGroup: [32, 8, 1]
@@ -467,30 +463,55 @@ def mockLibLogicFile():
         yield mockFile
 
 
-def findAvailableArchs():
-    from Tensile.Tests.gpu_detection import get_available_archs
-    return get_available_archs()
+@pytest.mark.unit
+def test_TensileLibLogicToYaml(tmp_path):
+    # Extraction reads and writes metadata; no GPU or assembly target is needed.
+    source = tmp_path / "logic.yaml"
+    source.write_text(VALID_LIBLOGIC_FILE_CONTENT)
+    output = tmp_path / "config.yaml"
+    TensileLibLogicToYaml.TensileLibLogicToYaml(str(source), 0, str(output), False)
+    assert output.read_text() == VALID_CONFIG_FILE_CONTENT
 
-@pytest.mark.skipif(
-    "gfx950" not in findAvailableArchs(), reason="Requires gfx950 architecture"
-)
-def test_TensileLibLogicToYaml():
-    solutionIndex = 0
 
-    with tempfile.NamedTemporaryFile("w+", delete=False) as f:
-        f.write(VALID_LIBLOGIC_FILE_CONTENT)
-        f.flush()
-        libLogicFileName = f.name
+@pytest.mark.unit
+@pytest.mark.parametrize("mode,force,strategy,assignment,stealing", [
+    (0, 0, "None", "StaticGrid", 0),
+    (3, 0, "StreamK", "StaticGrid", 0),
+    (3, 1, "DataParallel", "StaticGrid", 0),
+    (4, 0, "StreamK", "DynamicWorkQueue", 1),
+    (5, 0, "StreamK", "Hybrid", 1),
+])
+def test_extract_legacy_policy_preserves_canonical_settings(mode, force, strategy, assignment, stealing):
+    from copy import deepcopy
+    from Tensile.Common.GlobalParameters import defaultSolution
 
-    with tempfile.TemporaryDirectory() as WORKSPACE:
-        configYaml = os.path.join(WORKSPACE, "config.yaml")
-        TensileLibLogicToYaml.TensileLibLogicToYaml(
-            libLogicFileName, solutionIndex, configYaml, False
-        )
+    raw = {
+        "StreamK": mode,
+        "StreamKForceDPOnly": force,
+        "StreamKWorkStealing": stealing,
+        "StreamKXCCMapping": 8,
+        "EnableMatrixInstruction": True,
+        "MatrixInstruction": [16, 16, 16, 1],
+        "MIBlock": [16, 16, 16, 1, 1],
+        "MIWaveTile": [1, 1],
+        "MIWaveGroup": [1, 1],
+        "WorkGroup": [256, 1, 1],
+        "MIArchVgpr": False,
+    }
+    before = deepcopy(raw)
+    extracted = TensileLibLogicToYaml.formForkParams(raw, False)
+    assert raw == before
+    fork = {key: value for item in extracted["ForkParameters"] for key, value in item.items()}
+    effective = dict(defaultSolution)
+    effective.update({key: value[0] for key, value in fork.items() if key != "Groups"})
+    assert effective["TileProcessingStrategy"] == strategy
+    assert effective["WorkAssignment"] == assignment
+    assert effective["WorkQueueStealing"] == stealing
+    assert effective["PersistentXCCMapping"] == (8 if mode else 0)
+    assert not set(fork) & {"StreamK", "StreamKForceDPOnly", "StreamKWorkStealing", "StreamKXCCMapping"}
 
-        with tempfile.NamedTemporaryFile("w+", delete=False) as f:
-            f.write(VALID_CONFIG_FILE_CONTENT)
-            f.flush()
-            configFileName = f.name
 
-        assert filecmp.cmp(configYaml, configFileName, shallow=False)
+@pytest.mark.unit
+def test_extract_rejects_conflicting_legacy_and_canonical_policy():
+    with pytest.raises(ValueError, match="Conflicting"):
+        TensileLibLogicToYaml.formForkParams({"StreamK": 5, "WorkAssignment": "StaticGrid"}, False)

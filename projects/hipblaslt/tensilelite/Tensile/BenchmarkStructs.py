@@ -286,6 +286,16 @@ class BenchmarkProcess:
                     )
 
         params = dict(itertools.chain(*[x.items() for x in defaultBenchmarkCommonParameters]))
+        # Policy defaults are applied by Solution only after each candidate's
+        # explicit common/fork/group settings have been merged. In particular,
+        # a default canonical selector must not conflict with an explicit legacy
+        # selector from one group (or mark keys from another group as explicit).
+        policyKeys = {"StreamK", "StreamKForceDPOnly", "TileProcessingStrategy", "WorkAssignment",
+                      "StreamKXCCMapping", "PersistentXCCMapping", "StreamKWorkStealing", "WorkQueueStealing",
+                      "StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK",
+                      "PrefetchAcrossPersistent", "ReuseAcrossPersistent", "DebugPersistentKernelLoopForever"}
+        for policyKey in policyKeys:
+            params.pop(policyKey, None)
         params.update({**benchmarkCommonParams, **forkParams})
         self.singleValueParams, self.multiValueParams = separateParameters(params)
 

@@ -2,9 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 #include <hip/hip_runtime.h>
@@ -235,11 +237,11 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
         << "SPX and CPX should select different solutions";
 }
 
-TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
+TEST(PersistentDataParallelTest, UsesHardwareCuCount)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceDPOnly     = 1;
+    solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::DataParallel;
     solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
@@ -249,17 +251,16 @@ TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
     auto problem         = dummyProblem();
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
-    auto tiles           = problem.getNumTiles(solution.sizeMapping, 1);
-
-    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
-    EXPECT_EQ(solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree), _CPX_CU);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+    EXPECT_EQ(launch.grid, _CPX_CU);
 }
 
-TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
+TEST(PersistentDataParallelTest, FixedGridOverridesHardwareCuCount)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceDPOnly     = 1;
+    solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::DataParallel;
     solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
@@ -270,17 +271,15 @@ TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
     device.skFixedGrid   = 17;
-    auto tiles           = problem.getNumTiles(solution.sizeMapping, 1);
-
-    EXPECT_EQ(solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree),
-              device.skFixedGrid);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.grid, device.skFixedGrid);
 }
 
-TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
+TEST(PersistentDataParallelTest, DoesNotRequestPartialWorkspace)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceDPOnly    = 1;
+    solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
+    solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::DataParallel;
     solution.sizeMapping.streamKAtomic         = 0;
     solution.sizeMapping.macroTile             = TensileLite::dim3(256, 256, 1);
     solution.sizeMapping.depthU                = 64;
@@ -356,7 +355,8 @@ namespace
 
     void initStreamK5Solution(ContractionSolution& solution)
     {
-        solution.sizeMapping.streamK           = 5;
+        solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
         solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU            = 64;
         solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
@@ -390,7 +390,8 @@ namespace
                                    TensileLite::dim3    macroTile,
                                    size_t               depthU)
     {
-        solution.sizeMapping.streamK           = 5;
+        solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::Hybrid;
         solution.sizeMapping.macroTile         = macroTile;
         solution.sizeMapping.depthU            = depthU;
         solution.sizeMapping.workGroupSize     = TensileLite::dim3(16, 16, 1);
@@ -417,7 +418,7 @@ namespace
         pack.tiles        = problem.getNumTiles(solution.sizeMapping, 1);
         pack.itersPerTile = std::max(size_t{1}, problem.getItersPerTile(solution.sizeMapping));
 
-        if(solution.sizeMapping.streamK == 5)
+        if(solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid)
         {
             pack.effectiveDynamic = solution.streamK5EffectiveDynamic(problem, hardware);
             pack.reduction        = pack.effectiveDynamic ? origami::reduction_t::tree
@@ -448,7 +449,7 @@ namespace
                                      pack.itersPerTile,
                                      pack.grid,
                                      pAMDGPU->skFullTiles,
-                                     solution.sizeMapping.streamKForceDPOnly != 0);
+                                     solution.sizeMapping.isDataParallel());
             pack.skTiles      = split.skTiles;
             pack.skItersPerWG = split.skItersPerWG;
         }
@@ -458,14 +459,15 @@ namespace
 
     void initEquality512Solution(ContractionSolution& solution, int streamK)
     {
-        solution.sizeMapping.streamK            = streamK;
+        solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::WorkAssignment::Hybrid : TensileLite::WorkAssignment::StaticGrid);
         solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
         solution.sizeMapping.depthU             = 16;
         solution.sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
         solution.sizeMapping.workGroupMapping   = 1;
         solution.sizeMapping.CUOccupancy        = -1;
-        solution.sizeMapping.streamKForceDPOnly = 0;
+
         solution.sizeMapping.streamKAtomic      = 0;
     }
 } // namespace
@@ -616,7 +618,8 @@ TEST(StreamKSmCountTargetTest, SmCountTargetChangesReductionAndGrid)
 {
     // streamK=3 on the gfx950 analytical device (256 CUs), k_split_aware selector.
     StreamK5AnalyticalEnv env;
-    env.solution.sizeMapping.streamK = 3;
+    env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+    env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
     env.device.skDynamicGrid         = static_cast<int>(origami::grid_selection_t::k_split_aware);
 
     // Make smCountTarget the sole grid budget source (AMDGPU defaults, explicit).
@@ -1129,7 +1132,8 @@ namespace
 TEST(StreamKFlagBound, DynamicQueueGridStopsBeforeTheNextBlock)
 {
     StreamK5AnalyticalEnv env;
-    env.solution.sizeMapping.streamK = 4;
+    env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+    env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::DynamicWorkQueue;
     pinGridToWholeFlagRegion(env);
     auto problem = makeFlagBoundProblem();
 
@@ -1141,7 +1145,8 @@ TEST(StreamKFlagBound, StaticGridKeepsTheWholeBlock)
     // StreamK 3 indexes its flags from offset 0, so tightening it for the
     // work-queue prefix would cost it grid it is entitled to.
     StreamK5AnalyticalEnv env;
-    env.solution.sizeMapping.streamK = 3;
+    env.solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+    env.solution.sizeMapping.workAssignment = TensileLite::WorkAssignment::StaticGrid;
     pinGridToWholeFlagRegion(env);
     auto problem = makeFlagBoundProblem();
 
@@ -1295,3 +1300,102 @@ INSTANTIATE_TEST_SUITE_P(BenchSweep,
                          [](::testing::TestParamInfo<BenchLaunchLimitCase> const& info) {
                              return info.param.label;
                          });
+
+struct DataParallelLaunchLimitCase
+{
+    const char*       label;
+    TensileLite::dim3 workGroup;
+    bool              analytical;
+    int               gridDelta;
+};
+
+class DataParallelLaunchLimitsTest
+    : public ::testing::TestWithParam<std::tuple<int, DataParallelLaunchLimitCase>>
+{
+};
+
+TEST_P(DataParallelLaunchLimitsTest, PackedGridFitsHipWorkItemLimit)
+{
+    auto const& [layoutVersion, param] = GetParam();
+    auto hw = makeGfx950AnalyticalHardware();
+    auto device = makeHipDeviceWithAnalytical(hw);
+    ContractionSolution solution;
+    // MI16x16x4 with MIWaveGroup=[2,2] derives this 32x32, 256-thread
+    // geometry. The additional workgroup sizes check the HIP limit's scaling.
+    initBenchStreamK5Solution(solution, TensileLite::dim3(32, 32, 1), 16);
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    solution.sizeMapping.workAssignment = WorkAssignment::StaticGrid;
+    solution.sizeMapping.workGroupSize = param.workGroup;
+    solution.sizeMapping.matrixInstruction = {16, 16, 4, 1};
+    solution.sizeMapping.workGroupMapping = 1;
+    solution.sizeMapping.workGroupMappingXCC = 1;
+    solution.sizeMapping.globalSplitU = 0;
+    solution.sizeMapping.globalAccumulation = 0;
+    solution.internalArgsSupport.version = 3;
+    solution.internalArgsSupport.persistentLoopArgsVersion = layoutVersion;
+    solution.internalArgsSupport.useUniversalArgs = true;
+
+    const size_t threads = threadsPerWorkGroup(solution);
+    const size_t maxGrid = std::numeric_limits<uint32_t>::max() / threads;
+    if(!param.analytical)
+        device.skFixedGrid = static_cast<int>(maxGrid) + param.gridDelta;
+
+    // 4097*4097 tiles are not divisible by the analytical CU grid. With no
+    // workspace, origami selects all tiles, exceeding UINT32_MAX work items.
+    auto problem = ContractionProblemGemm::GEMM(
+        false, true, 131104, 131104, 128, 131104, 131104, 131104, 1.0, false, 1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setWorkspaceSize(0);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.totalTiles, 16785409u);
+    ASSERT_GT(launch.grid, 0u);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+    EXPECT_FALSE(launch.clusterGridClamp);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+    if(param.analytical || param.gridDelta > 0)
+        EXPECT_EQ(launch.grid, kGfx950AnalyticalCuCount);
+    else
+        EXPECT_EQ(launch.grid, static_cast<size_t>(device.skFixedGrid))
+            << "A representable explicit grid must remain unchanged";
+
+    ContractionInputs inputs;
+    inputs.alpha = 1.0f;
+    inputs.beta = 0.0f;
+    auto invocation = solution.generateSingleCall<true>(
+        problem, inputs, device, launch, GSUSettings{});
+    EXPECT_EQ(invocation.numWorkGroups.x, launch.grid);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    EXPECT_EQ(invocation.numWorkItems.x, launch.grid * threads);
+    ASSERT_LE(invocation.numWorkItems.x, std::numeric_limits<uint32_t>::max());
+    // HIP receives a uint32 global work size. The actual workgroup count and
+    // the kernel's persistent tile stride must agree after that conversion.
+    const uint32_t hipWorkItems = static_cast<uint32_t>(invocation.numWorkItems.x);
+    const char* gridArgName = "skGrid";
+    auto gridArg = KernelArguments::const_iterator(invocation.args, gridArgName);
+    ASSERT_NE(gridArg, invocation.args.end());
+    ASSERT_EQ((*gridArg).second, sizeof(uint32_t));
+    uint32_t packedGrid = 0;
+    std::memcpy(&packedGrid, (*gridArg).first, sizeof(packedGrid));
+    EXPECT_EQ(packedGrid, hipWorkItems / threads);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PersistentPayloads,
+    DataParallelLaunchLimitsTest,
+    ::testing::Combine(
+        ::testing::Values(0),
+        ::testing::Values(
+            DataParallelLaunchLimitCase{"AnalyticalZeroWorkspace", {32, 8, 1}, true, 0},
+            DataParallelLaunchLimitCase{"FixedBelowLimit", {32, 8, 1}, false, -1},
+            DataParallelLaunchLimitCase{"FixedAtLimit", {32, 8, 1}, false, 0},
+            DataParallelLaunchLimitCase{"FixedAboveLimit", {32, 8, 1}, false, 1},
+            DataParallelLaunchLimitCase{"FixedAboveLimit128Threads", {32, 4, 1}, false, 1},
+            DataParallelLaunchLimitCase{"FixedAboveLimit512Threads", {32, 16, 1}, false, 1})),
+    [](::testing::TestParamInfo<DataParallelLaunchLimitsTest::ParamType> const& info) {
+        return std::string(std::get<1>(info.param).label) + "Layout"
+               + std::to_string(std::get<0>(info.param));
+    });

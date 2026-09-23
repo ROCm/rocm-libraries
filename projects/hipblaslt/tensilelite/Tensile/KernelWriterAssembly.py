@@ -23,6 +23,7 @@
 ################################################################################
 
 
+from Tensile.ExecutionPolicy import isPersistent, isDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -89,7 +90,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -1060,19 +1061,19 @@ class KernelWriterAssembly(KernelWriter):
     if needPackK16:
         module.add(self.defineSgpr("PackKForV0", 1))
         module.add(self.defineSgpr("PackKForV1", 1))
-        if kernel["StreamK"] != 0:
+        if isPersistent(kernel):
           self.states.nonPostLoopSgpr.append("PackKForV0")
           self.states.nonPostLoopSgpr.append("PackKForV1")
     if needPackK8Lw:
       module.add(self.defineSgpr("PackKFor%sV0"%tPackM, 1))
       module.add(self.defineSgpr("PackKFor%sV1"%tPackM, 1))
-      if kernel["StreamK"] != 0 and not needPackK16 :
+      if isPersistent(kernel) and not needPackK16 :
         self.states.nonPostLoopSgpr.append("PackKForV0")
         self.states.nonPostLoopSgpr.append("PackKForV1")
     if needPackK8Hi:
       module.add(self.defineSgpr("PackKFor%sV2"%tPackM, 1))
       module.add(self.defineSgpr("PackKFor%sV3"%tPackM, 1))
-      if kernel["StreamK"] != 0 and not needPackK16:
+      if isPersistent(kernel) and not needPackK16:
         self.states.nonPostLoopSgpr.append("PackKForV2")
         self.states.nonPostLoopSgpr.append("PackKForV3")
 
@@ -1897,12 +1898,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("s", "sgpr"+skey, self.sgprs[skey]))
     # module.addComment0("max SGPR=%u"%self.sgprPool.size())
 
-    if self.states.streamK.emitsParallelReductionSgprAliases:
+    if self.states.tileProcessing.emitsParallelReductionSgprAliases:
       module.addSpaceLine()
       module.addComment0("StreamK Parallel Reduction Assignments")
       module.add(RegSet("s", "sgprSkSplit", "sgprskTiles", 0))
       module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
-      if kernel["StreamK"] == 5:
+      if hasHybridAssignment(kernel):
         # SK5 hybrid: the kernel only declares the 6 SK3-named kernarg slots
         # (see KernelWriter.py SK5 defineSgpr block). The SK4 code path still
         # reads via SK4 names (TotalItems, SKTiles, SKSplit, SKItersPerWI,
@@ -1915,14 +1916,14 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprSKItersPerWI", "sgprskGrid",                  0))
         module.add(RegSet("s", "sgprSKGrid",       "sgprskTiles",                 0))
         # SK5 hybrid: the SK3-only and SK4-only persistent SGPRs are mutually
-        # exclusive at runtime (StreamKHybridMode selects one path), so the
+        # exclusive at runtime (WorkAssignmentMode selects one path), so the
         # SK3-only iter SGPRs are RegSet-aliased onto the SK4-only idx SGPRs
         # (defined via the for-skey RegSet loop above) instead of taking their
         # own physical registers. Drops 2 real SGPRs vs the naive union.
         module.addComment0("SK5 hybrid: SK3-only iter SGPR -> SK4-only idx slot (mutually exclusive)")
-        module.add(RegSet("s", "sgprStreamKIter",    "sgprStreamKTileIdx",    0))
-        module.add(RegSet("s", "sgprStreamKIterEnd", "sgprStreamKPartialIdx", 0))
-    elif kernel["StreamK"] == 4:
+        module.add(RegSet("s", "sgprPersistentIteration",    "sgprStreamKTileIdx",    0))
+        module.add(RegSet("s", "sgprPersistentIterationEnd", "sgprStreamKPartialIdx", 0))
+    elif hasDynamicAssignment(kernel):
       module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
 
     module.addSpaceLine()
@@ -2627,7 +2628,7 @@ class KernelWriterAssembly(KernelWriter):
     # Stream-K uses a 1-D cluster-aware grid (WorkGroup0 is the SK work-item
     # index, not an M-tile), and its grid is not padded, so this guard does not
     # apply.
-    if not clusterEnabled(kernel["ClusterDim"]) or kernel["StreamK"] != 0:
+    if not clusterEnabled(kernel["ClusterDim"]) or isPersistent(kernel):
       return module
     module.addComment1("Early stop padded work-groups in a boundary cluster (grid rounded up to ClusterDim)")
     padExitLabel   = Label(self.labels.getNameInc("ClusterPad_EarlyStop"), "")
@@ -2666,11 +2667,11 @@ class KernelWriterAssembly(KernelWriter):
     returns False (no write) where the caller must fall back to the full mask.
 
     The Stream-K ForceDPOnly cluster multicast IS handled: at this (kernel-init)
-    point WorkGroup0/1 hold the raw M-tile/N-tile coords (the linear StreamKIdx
+    point WorkGroup0/1 hold the raw M-tile/N-tile coords (the linear PersistentWorkGroupIndex
     fold runs later in StreamK.preLoop), the ClusterDim axes are Cs (X/M,
     B-multicast) and Ck (Y/N, A-multicast), and the grid is rounded up to a
     ClusterDim multiple, so the same validX/validY reduction applies. Its padded
-    peers early-exit in StreamK.streamKClusterPadEarlyExit, so the surviving
+    peers early-exit in StreamK.persistentClusterPadEarlyExit, so the surviving
     peers' ld_bcst must wait only on the present lanes. The two-tile
     (StreamKForceDPOnly==0) Stream-K cluster is excluded: WorkGroup0 there is the
     linear work index rather than an M-tile, so it derives Multicast=False and
@@ -2679,7 +2680,7 @@ class KernelWriterAssembly(KernelWriter):
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
     if not ((cx > 1 or cy > 1)
-            and (kernel["StreamK"] == 0 or streamKCluster(kernel))):
+            and (not isPersistent(kernel) or persistentSpatialCluster(kernel))):
       return False
 
     module.addComment0("reduce multicast mask to real WGs in cluster")
@@ -3109,7 +3110,7 @@ class KernelWriterAssembly(KernelWriter):
         moduleWg.addComment0("init: add agpr [%u...%u) to pool" % \
                             (0, numAccvgprs))
 
-      if kernel["StreamK"] == 0 and not kernel["UseSubtileImpl"]:
+      if not isPersistent(kernel) and not kernel["UseSubtileImpl"]:
         moduleWg.add(self.localReadAddresses(kernel, tPA, tPB, tPM))
         moduleWg.add(self.localWriteAddresses(kernel, tPA, tPB, tPM))
 
@@ -3185,15 +3186,15 @@ class KernelWriterAssembly(KernelWriter):
       # atomic wrap only if every queue receives exactly tiles_q + W_q
       # increments per launch, where W_q = distribute(skGrid, q) assumes the
       # queue index densely covers [0, skGrid). Both the wgmXCC CU-count remap
-      # (WGMXCC == -1 auto path) and the StreamKXCCMapping chiplet remap
+      # (WGMXCC == -1 auto path) and the PersistentXCCMapping chiplet remap
       # (SKXCC + WGMXCC > 1) rewrite WorkGroup0 with a permutation that is NOT
       # % numQueues-count-preserving when the grid does not block evenly, so the
-      # remapped StreamKIdx % numQueues skews the per-queue home-workgroup count
+      # remapped PersistentWorkGroupIndex % numQueues skews the per-queue home-workgroup count
       # and the counter drifts off 0. We snapshot the raw id (== physical XCD
       # rank) into the persistent StreamKTileIdx SGPR -- an ALREADY-allocated
       # slot that is provably dead in the [prologue, queue-read) window on both
       # the SK4 and SK5 dynamic paths (its first real write is after the queue
-      # read in graWorkGroup; for SK5 it aliases StreamKIter, whose only
+      # read in graWorkGroup; for SK5 it aliases PersistentIteration, whose only
       # in-window writes live on the mutually-exclusive SK3-static path). Reusing
       # it costs ZERO additional persistent SGPRs (unlike a dedicated StreamKQueue
       # SGPR, which overflows the SGPR file on tuned high-register SKXCC kernels).
@@ -3219,7 +3220,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ArgType3_Routed_To_ArgType0)
       module.add(deepcopy(moduleWg))
       module.add(self.clusterPadEarlyExit(kernel))
-      if kernel["StreamK"] == 0:
+      if not isPersistent(kernel):
         if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel, earlyStop=False))
@@ -3467,7 +3468,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(earlyReturnModule)
 
       module.add(self.clusterPadEarlyExit(kernel))
-      if kernel["StreamK"] == 0:
+      if not isPersistent(kernel):
         if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel))
@@ -3489,8 +3490,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # gfx1250 moves SK constants to VGPRs and fully frees their SGPR slots
     # before defineVariableSgprs so those slots can be reused.
-    if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-      module.add(self.moveStreamKConstantsToVgpr(kernel))
+    if isPersistent(kernel) and self.isPersistentConstantsToVgprEnabled(kernel):
+      module.add(self.movePersistentConstantsToVgpr(kernel))
 
     # define the rest of sgprs
     module.addModuleAsFlatItems(self.defineVariableSgprs(kernel))
@@ -3625,7 +3626,7 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def extractPackedCoord1ToRowStart(self, kernel, packedC1, packedCoordVgpr, storeChar):
-    if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+    if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
       printExit("extractPackedCoord1ToRowStart doe not support with output E.")
     # calculate packed rowStart vgpr
     # vgprTmp assignments:
@@ -3682,8 +3683,9 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("graWorkGroup")
     module.addComment0("graWorkGroup mapping")
 
-    skComponent = Component.StreamK.find(self)
-    module.add(skComponent.graWorkGroup(self, kernel, tPA, tPB))
+    if isPersistent(kernel):
+      processingComponent = Component.TileProcessingStrategy.find(self)
+      module.add(processingComponent.graWorkGroup(self, kernel, tPA, tPB))
 
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.graWorkGroup(self, kernel))
@@ -4984,8 +4986,9 @@ class KernelWriterAssembly(KernelWriter):
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
 
-        skComponent = Component.StreamK.find(self)
-        module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
+        if isPersistent(kernel):
+          processingComponent = Component.TileProcessingStrategy.find(self)
+          module.add(processingComponent.computeLoadSrd(self, kernel, tP, stmp))
 
         gsuComponent = Component.GSU.find(self)
         module.add(gsuComponent.computeLoadSrd(self, kernel, tP, stmp, tileStart))
@@ -5650,8 +5653,12 @@ class KernelWriterAssembly(KernelWriter):
     else:
       tmp = self.vgprPool.checkOut(2, tag="graAddresses_tmp", preventOverflow=self.states.preventVgprOverflowDuringNewTile)
 
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.graAddresses(self, kernel, tP, tmp))
+      if isPersistent(kernel):
+        processingComponent = Component.TileProcessingStrategy.find(self)
+        module.add(processingComponent.graAddresses(self, kernel, tP, tmp))
+      else:
+        module.add(VMovB32(dst=vgpr(tmp), src=sgpr("Address%s+0" % tc)))
+        module.add(VMovB32(dst=vgpr(tmp+1), src=sgpr("Address%s+1" % tc)))
 
       for perp in range(0, tP["nrp"]):
         for sPerp in range(0, tP["nrpv"]):
@@ -6545,7 +6552,7 @@ class KernelWriterAssembly(KernelWriter):
     # This branch could potentially be very far e.g. > SIMM16
     module.addComment1("after InitC, skip to end of prefetch last iter if numIter==0")
     if self.isPrefetchAcrossPersistentEnabled(kernel) and not kernel["SuppressNoLoadLoop"]:
-      module.add(SCMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+      module.add(SCMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
                  comment="discard primed PAP group when current slice skips NLL"))
     # use positive offset only long jump
     with self.allocTmpSgpr(3, tag="closeShadowInit_tmpSgprInfo") as tmpSgprInfo:
@@ -6721,8 +6728,9 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SLShiftLeftB32(dst=sgpr("StaggerUIter"), src=sgpr("StaggerUIter"), \
                 shiftHex=sgpr(staggerUStrideShift), comment="shift by StaggerUStride"))
 
-    skComponent = Component.StreamK.find(self)
-    module.add(skComponent.declareStaggerParms(self, kernel))
+    if isPersistent(kernel):
+      processingComponent = Component.TileProcessingStrategy.find(self)
+      module.add(processingComponent.declareStaggerParms(self, kernel))
 
     return module
 
@@ -7891,6 +7899,46 @@ class KernelWriterAssembly(KernelWriter):
   # 0 is outermost; self.states.unrollIdx is the unroll index.
   # -1 is tail loop (used only for the unroll loop)
   ##############################################################################
+  def _calculateOrdinaryLoopNumIter(self, kernel, loopCounterName, loopIdx, tmpSgprInfo):
+      module = Module("Ordinary calculateLoopNumIter")
+
+      quotient = loopCounterName
+      dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
+      divisor = kernel["DepthU"]
+
+      module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
+      if self.states.tailloopInNll:
+          maxUnit = self.states.tailloopInNllmaxUnit
+          sgprSizesSum = sgpr("SizesSum+%u" % self.states.unrollIdx)
+          depthU = kernel["DepthU"]
+          tmpSgpr = tmpSgprInfo.idx
+          assert (depthU > 1 and (depthU & (depthU - 1) == 0)), "DepthU should be power of 2 with tailloopInNll"
+          # We need to increment loop counter by 1 if we use tailloopInNll code
+          # We do not use tailloopInNll code if
+          #   summation is multiple of depthU, or
+          #   maxUnit > 1 and summation is not multiple of maxUnit
+          module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgprSizesSum, src1=depthU-1, \
+                             comment="tailloopInNll: check if summation is multiple of DepthU(%u)"%depthU))
+          module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=1, src1=0, \
+                                 comment="tailloopInNll: select loopcounter increment value (0 if summation is multiple of DepthU else 1"))
+          if maxUnit > 1:
+              # maxUnit > 1 case, check if summation is multiple of maxUnit or not
+              # if summation is multiple of maxUnit or not, tailloopInNll is used and increment loopCounter
+              module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgprSizesSum, src1=maxUnit-1, \
+                                 comment="if summation is multiple of %u, use tailloopInNll"%maxUnit))
+              module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=sgpr(tmpSgpr), \
+                                     comment="select loopcounter (0 if summation is multiple of %u)"%maxUnit))
+          if kernel["GlobalSplitU"] != 0:
+              # skip tailloopInNll code if GSU>1
+              module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+              module.add(SCmpGtU32(src0=sgpr(tmpSgpr+1), src1=1, comment="GSU > 1 ?"))
+              module.add(SCMovB32(dst=sgpr(tmpSgpr), src=0, comment="do not increment loopcounter if GSU > 1"))
+          module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \
+                             src1=sgpr(tmpSgpr), comment="increment loopcounter for tailloopInNll" ))
+
+
+      return module
+
   def calculateLoopNumIter(self, kernel, tPA, tPB, loopIdx, tailloopInNll=False, NLLindex=0):
     module = Module("calculateLoopNumIter")
 
@@ -8004,15 +8052,15 @@ class KernelWriterAssembly(KernelWriter):
           # DP-only: every WG processes the final iteration of its tile
           # (StreamKLocalEnd == ItersPerTile), so the "skip TailLoopINNLL" guard
           # never fires and there is no StreamKLocalEnd SGPR to read.
-          if kernel["StreamK"] and not kernel["StreamKForceDPOnly"]:
+          if isStreamK(kernel):
             # StreamK + TailLoopINNLL case
             # skip TailLoopINNLL if StreamK WG not processing final iteration
             # Check if tile finished
-            sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-            if self.isStreamKConstantsToVgprEnabled(kernel):
-              module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
+            sIpt = self.acquirePersistentConstSgpr(kernel, "ItersPerTile")
+            if self.isPersistentConstantsToVgprEnabled(kernel):
+              module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.persistentConstVgprs["ItersPerTile"])))
             module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt), comment="Check if WG processes final iteration of tile"))
-            self.releaseStreamKConstSgpr(sIpt)
+            self.releasePersistentConstSgpr(sIpt)
             module.add(SCMovB32(dst=loopCounter, src=0, comment="This WG not completing tile"))
           module.add(SCmpEQU32(src0=loopCounter, src1=0, comment="numIter%s == 0"%loopChar))
           EndOfTailLoopInNLLLabel = Label("TailLoopInNLLEnd%s"%(loopChar), "" )
@@ -8061,8 +8109,9 @@ class KernelWriterAssembly(KernelWriter):
 
       if not tailloopInNll:
         # skip tailLoopNumIter in tailloopInNll (already generated above)
-        skComponent = Component.StreamK.find(self)
-        module.add(skComponent.tailLoopNumIter(self, kernel, loopCounter))
+        if isPersistent(kernel):
+          processingComponent = Component.TileProcessingStrategy.find(self)
+          module.add(processingComponent.tailLoopNumIter(self, kernel, loopCounter))
 
         gsuComponent = Component.GSU.find(self)
         module.add(gsuComponent.tailLoopNumIter(self, kernel, loopCounter))
@@ -8082,8 +8131,11 @@ class KernelWriterAssembly(KernelWriter):
       if not self.do["PreLoop"]: module.add(ValueEndif())
 
       with self.allocTmpSgpr(3, tag="calculateLoopNumIter_tmpSgprInfo") as tmpSgprInfo:
-        skComponent = Component.StreamK.find(self)
-        module.add(skComponent.calculateLoopNumIter(self, kernel, loopCounterName, loopIdx, tmpSgprInfo))
+        if isPersistent(kernel):
+          processingComponent = Component.TileProcessingStrategy.find(self)
+          module.add(processingComponent.calculateLoopNumIter(self, kernel, loopCounterName, loopIdx, tmpSgprInfo))
+        else:
+          module.add(self._calculateOrdinaryLoopNumIter(kernel, loopCounterName, loopIdx, tmpSgprInfo))
 
         gsuComponent = Component.GSU.find(self)
         module.add(gsuComponent.calculateLoopNumIter(self, kernel, loopCounterName, tmpSgprInfo))
@@ -8608,7 +8660,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(EndOfTailLoopInNLLLabel)
 
       if needTailEndCode:
-        if len(kernel["ProblemType"]["IndicesSummation"]) > 1 or kernel["StreamK"]:
+        if len(kernel["ProblemType"]["IndicesSummation"]) > 1 or isPersistent(kernel):
           # recover the 'damage' done to LRO:
 
           # if LRA is backed-up before (wlr case), we simply restore the addr (sub inc*loop doesn't work)
@@ -9015,7 +9067,7 @@ class KernelWriterAssembly(KernelWriter):
             spilledVgprBase = vtile.regList.indices[0]
             break
       self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
-      if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \
+      if (isStreamK(kernel) and kernel["StreamKAtomic"] == 0) or \
          ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
         self.codes.accVgprWrite = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=True, spilledVgprBase=spilledVgprBase)  # same spilledVgprBase
       if kernel["MIArchVgpr"]:
@@ -10316,17 +10368,17 @@ class KernelWriterAssembly(KernelWriter):
           else:
             lastIterEnd = Label(self.rapLabel("PrefetchGlobalLastIterEnd"), "")
             if self.isPrefetchAcrossPersistentEnabled(kernel):
-              module.add(SCMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
+              module.add(SCMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
                          comment="discard primed PAP group when current slice skips NLL"))
             # StreamKMulticast: the long branch below skips the pass's first-load
             # cluster wait on the zero-iteration path; emit the matching
             # cluster-scope wait on that skip edge so the prologue cluster arrive
             # is consumed on every control-flow path (whole-cluster barrier
             # symmetry). scc (from checkLastIter) is preserved for the branch
-            # below. No-op unless streamKCluster.
-            if streamKCluster(kernel):
-              skComponent = Component.StreamK.find(self)
-              module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
+            # below. No-op unless persistentSpatialCluster.
+            if persistentSpatialCluster(kernel):
+              assignment = Component.WorkAssignment.find(self)
+              module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
             # use positive offset only long jump
             with self.allocTmpSgpr(3, tag="openSumAtLeastUnroll_tmpSgprInfo") as tmpSgprInfo:
               module.add(self.longBranchScc1(lastIterEnd, posNeg=1, tmpSgprInfo=tmpSgprInfo))
@@ -10343,7 +10395,7 @@ class KernelWriterAssembly(KernelWriter):
           if self.do["ApplyAlpha"]:
             # (The new hgemm (h,h,h,h,s,s) is included in ComputeType=Single)
             if kernel["ProblemType"]["ComputeDataType"].isHalf():
-              if kernel["ProblemType"]["HighPrecisionAccumulate"] and kernel["StreamK"]:
+              if kernel["ProblemType"]["HighPrecisionAccumulate"] and isPersistent(kernel):
                 module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
               else:
                 # for (h,h,h,h,h,h) no HPA,
@@ -11775,7 +11827,7 @@ class KernelWriterAssembly(KernelWriter):
         comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][0]])
       else:
         comp.setMemToken([self.states.ldsTensorTokenIdx])
-      if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
+      if self.states.inTailLoop and not kernel["1LDSBuffer"] and isPersistent(kernel):
         ldsAddrSgprName = comp.getLdsAddrSgprName("tdmAGroup0")
         if self.isPrefetchAcrossPersistentEnabled(kernel):
           with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -11872,7 +11924,7 @@ class KernelWriterAssembly(KernelWriter):
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
       if kernel["ProblemType"]["MXBlockA"]:
-        if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
+        if self.states.inTailLoop and not kernel["1LDSBuffer"] and isPersistent(kernel):
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
           if self.isPrefetchAcrossPersistentEnabled(kernel):
             with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -11925,7 +11977,7 @@ class KernelWriterAssembly(KernelWriter):
           comp.setMemToken([self.states.memTokenLdsSplit[tdmParity][0]])
         else:
           comp.setMemToken([self.states.ldsTensorTokenIdx])
-        if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
+        if self.states.inTailLoop and not kernel["1LDSBuffer"] and isPersistent(kernel):
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmBGroup0")
           if self.isPrefetchAcrossPersistentEnabled(kernel):
             with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -11959,7 +12011,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["NumWaves"] == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         comp.setMemToken([self.states.ldsTensorTokenIdx])
-        if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
+        if self.states.inTailLoop and not kernel["1LDSBuffer"] and isPersistent(kernel):
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSBGroup0")
           if self.isPrefetchAcrossPersistentEnabled(kernel):
             with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -14063,7 +14115,7 @@ class KernelWriterAssembly(KernelWriter):
     # that allocTmpSgpr calls within this function (and the SK component call below)
     # can borrow those slots. Restore SrdWS as InUse at the end.
     srdWsAvailableCtx = (
-        self.states.streamK.borrowsSrdWsInEpilogue
+        self.states.tileProcessing.borrowsSrdWsInEpilogue
         and kernel.get("StreamKAtomic", 1) == 0
         and "SrdWS" in self.sgprs
         and "SrdWS" not in self.states.freeSgprVarPool
@@ -14175,8 +14227,9 @@ class KernelWriterAssembly(KernelWriter):
                 if(i == 2 and (mat == "C" or mat == "D")):
                   gsuComp = Component.GSU.find(self)
                   module.add(gsuComp.routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1))
-                  skComp = Component.StreamK.find(self)
-                  module.add(skComp.routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))                                                              
+                  if isPersistent(kernel):
+                    processingComponent = Component.TileProcessingStrategy.find(self)
+                    module.add(processingComponent.routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
                   module.add(stridedBatchedGemmLoad)
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(tmpS0), comment="Scale%s %s by Stride"%(mat, coord)))
               else:
@@ -14190,8 +14243,9 @@ class KernelWriterAssembly(KernelWriter):
               if(i == 2 and (mat == "C" or mat == "D")):
                 gsuComp = Component.GSU.find(self)
                 module.add(gsuComp.routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1))
-                skComp = Component.StreamK.find(self)
-                module.add(skComp.routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))                                                              
+                if isPersistent(kernel):
+                  processingComponent = Component.TileProcessingStrategy.find(self)
+                  module.add(processingComponent.routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
                 module.add(stridedBatchedGemmLoad)
               module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             module.add(SLShiftLeftB64(dst=sgpr(tmpS0,2), src=sgpr(tmpS0,2), shiftHex=bpe, comment="scale by bpe"))
@@ -14248,8 +14302,9 @@ class KernelWriterAssembly(KernelWriter):
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.computeStoreSrdStart(self, kernel))
 
-    skComponent = Component.StreamK.find(self)
-    module.add(skComponent.computeStoreSrdStart(self, kernel))
+    if isPersistent(kernel):
+      processingComponent = Component.TileProcessingStrategy.find(self)
+      module.add(processingComponent.computeStoreSrdStart(self, kernel))
 
     for cdir in (0,1):
       indices = kernel["PackedC%uIndicesX"%cdir]
@@ -14367,7 +14422,7 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprBpeList = ["GSULog2BpeC", "GSULog2BpeD"] if kernel["GlobalSplitU"] != 0 else []
 
       # Set BPE based on reduction algorithm
-      if self.states.streamK.emitsWorkspaceReductionBpe and not kernel["StreamKForceDPOnly"]:
+      if self.states.tileProcessing.emitsWorkspaceReductionBpe and not isDataParallel(kernel):
         sgprLog2BpeC = self.sgprPool.checkOut(1, tag="globalWriteWorkGroupInit_sgprLog2BpeC", preventOverflow=False)
         sgprLog2BpeD = self.sgprPool.checkOut(1, tag="globalWriteWorkGroupInit_sgprLog2BpeD", preventOverflow=False)
 
@@ -14378,11 +14433,11 @@ class KernelWriterAssembly(KernelWriter):
 
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=bpeDoneLabel.getLabelName(), comment="If synchronizer, use regular output BPE"))
-        sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
-          module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
+        sSkt = self.acquirePersistentConstSgpr(kernel, "skTiles")
+        if self.isPersistentConstantsToVgprEnabled(kernel):
+          module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.persistentConstVgprs["skTiles"])))
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
-        self.releaseStreamKConstSgpr(sSkt)
+        self.releasePersistentConstSgpr(sSkt)
         module.add(SCBranchSCC1(labelName=bpeDoneLabel.getLabelName(), comment="If split == 1, use reguler output BPE"))
 
         # BPE for parallel reduction
@@ -14395,10 +14450,10 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.computeStoreSrdStart(kernel, ["C", "D"], sgprBpeList=self.sgprBpeList))
       if kernel["GlobalSplitU"] != 0:
         module.add(self.undefineSgpr("GSULog2BpeC"))
-      if kernel["StreamK"] == 0:
+      if not isPersistent(kernel):
         module.add(self.undefineSgpr("AddressC"))
 
-      if self.states.streamK.emitsWorkspaceReductionBpe and not kernel["StreamKForceDPOnly"]:
+      if self.states.tileProcessing.emitsWorkspaceReductionBpe and not isDataParallel(kernel):
         if not kernel["StoreRemapVectorWidth"]:
           self.sgprPool.checkIn(sgprLog2BpeD)
           self.sgprPool.checkIn(sgprLog2BpeC)
@@ -14446,7 +14501,7 @@ class KernelWriterAssembly(KernelWriter):
           strideD1 = "StrideD%s" % (self.states.indexChars[packedC1[0]])
           module.add(VMulLOU32(dst=vgpr(self.vgprs.cinRowPtr), src0=vgpr(self.vgprs.coord1InMT), src1=sgpr(strideC1), comment=" offset 1"))
           module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrD), src0=vgpr(self.vgprs.coord1InMT), src1=sgpr(strideD1), comment=" offset 1"))
-          if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+          if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
               module.add(VMovB32(dst=vgpr(self.vgprs.coutRowPtrE), src=vgpr(self.vgprs.coord1InMT), comment=" save offset 1 for E"))
           if self.vgprs.coutRowPtrGate != -1:
               module.add(VMovB32(dst=vgpr(self.vgprs.coutRowPtrGate), src=vgpr(self.vgprs.coord1InMT), comment=" save offset 1 for Gate"))
@@ -14594,15 +14649,17 @@ class KernelWriterAssembly(KernelWriter):
       # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
       # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be initialized to workspace pointer (AddressC/D)
       # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)      
-      if kernel["StreamKForceDPOnly"]:
+      if isDataParallel(kernel):
         # DP-only: reduction is always forced to the tree path (AddressFlags != 0
         # invariant), so initializeSrdAddressFlagsCheck always branches to the
         # general-batched (Srd=0) initialization. Fold it to an unconditional branch
         # here (the component method reads AddressFlags) and drop the dead reader.
         module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="DP-only: synchronizer always present, skip flag check"))
+      elif isPersistent(kernel):
+        processingComponent = Component.TileProcessingStrategy.find(self)
+        module.add(processingComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
       else:
-        skComponent = Component.StreamK.find(self)
-        module.add(skComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
+        module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="General Batched GEMM, Srd initialized to 0"))
     module.add(RegularSrdInitialization)      
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
     module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
@@ -15030,7 +15087,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
                 comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
 
-      if kernel["StreamK"] == 3 and not kernel["StreamKForceDPOnly"]:
+      if hasStaticAssignment(kernel) and not isDataParallel(kernel):
         module.add(VAddLShiftLeftU32(
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
@@ -15072,7 +15129,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
                 comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
 
-      if kernel["StreamK"] == 3 and not kernel["StreamKForceDPOnly"]:
+      if hasStaticAssignment(kernel) and not isDataParallel(kernel):
         module.add(VAddLShiftLeftU32(
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
@@ -15133,7 +15190,7 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.storeRemapAS = []
       for i in range(0, nElements, gwvw):
         self.vgprs.storeRemapAS.append(self.vgprPool.checkOutAligned(int(rpv), int(rpv), "store element d"))
-    if kernel["StreamK"] == 3 and not kernel["StreamKForceDPOnly"]:
+    if hasStaticAssignment(kernel) and not isDataParallel(kernel):
         self.sgprPool.checkIn(self.sgprBpeList[1])
         self.sgprPool.checkIn(self.sgprBpeList[0])
     return module
@@ -15153,7 +15210,7 @@ class KernelWriterAssembly(KernelWriter):
 
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
     # print("len(elements)= ", len(elements_1))
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.streamK.requiresWorkspaceReductionStorePath or kernel["StreamKForceDPOnly"]))
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isDataParallel(kernel)))
     module = Module("notLocalSplitUGlobalWrite")
     storeModule, deferredGSU0 = self.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -15200,7 +15257,7 @@ class KernelWriterAssembly(KernelWriter):
     vectorWidths   = [fullVw, edgeVw]
     vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.streamK.requiresWorkspaceReductionStorePath or kernel["StreamKForceDPOnly"]))
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isDataParallel(kernel)))
     module = Module("localSplitUGlobalWrite")
     storeModule, _ = self.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -15880,7 +15937,9 @@ class KernelWriterAssembly(KernelWriter):
       labelMB = Label(self.labels.getNameInc("GW_MB"), comment="Global Write MB")
       labelMBSK = Label(self.labels.getNameInc("GW_MBSK"), comment="Global Write MBSK")
 
-    skBackup           = kernel["StreamK"]
+    processingBackup   = kernel["TileProcessingStrategy"]
+    assignmentBackup   = kernel["WorkAssignment"]
+    persistenceBackup  = kernel["_PersistentLoop"]
     gsuBackup          = kernel["GlobalSplitU"]
     gsuAccumBackup     = kernel["_GlobalAccumulation"]
     bpeCexternalBackup = self.states.bpeCexternal
@@ -15904,7 +15963,7 @@ class KernelWriterAssembly(KernelWriter):
     deferGSU0 = (
       not noGSUBranch
       and kernel.get("UseSubtileImpl")
-      and kernel.get("StreamK", 0) > 0
+      and isPersistent(kernel)
     )
     gsu0DeferredLabel = None
     gsu0ReturnLabel = None
@@ -15912,13 +15971,13 @@ class KernelWriterAssembly(KernelWriter):
     gsuLimit = 1 if noGSUBranch or self.debugConfig.splitGSU else 2
     if gsuLimit > 1:
       gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
-      if kernel["StreamK"]:
+      if isPersistent(kernel):
         # DP-only never reaches this GSU-split store branch: SK3 sets GlobalSplitU==0
         # and StreamKForceDPOnly forces noGSUBranch=True (gsuLimit==1), so this block
         # is not entered. Assert to keep this dead AddressFlags reader out of DP-only
         # codegen and to fail loudly (rather than read a removed SGPR) if that
         # invariant ever changes.
-        assert not kernel["StreamKForceDPOnly"], \
+        assert not isDataParallel(kernel), \
           "StreamKForceDPOnly must not reach the GSU-split AddressFlags store branch"
         if deferGSU0:
           gsu0DeferredLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred"), comment="")
@@ -15926,11 +15985,11 @@ class KernelWriterAssembly(KernelWriter):
         # Keep original GSU check unchanged — falls through to GSU0, branches to gsuLabel for GSU1
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
         module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="Branch to stream-k store code"))
-        sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
-          module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
+        sSkt = self.acquirePersistentConstSgpr(kernel, "skTiles")
+        if self.isPersistentConstantsToVgprEnabled(kernel):
+          module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.persistentConstVgprs["skTiles"])))
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
-        self.releaseStreamKConstSgpr(sSkt)
+        self.releasePersistentConstSgpr(sSkt)
         # TODO May need long branch??
         module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if split == 1"))
       else:
@@ -15975,8 +16034,10 @@ class KernelWriterAssembly(KernelWriter):
             kernel["ActivationFuncCall"] = False
           kernel["GlobalSplitU"] = 2
           kernel["_GlobalAccumulation"] = kernel["_GlobalAccumulation"]
-          if kernel["StreamK"]:
-            kernel["StreamK"] = 0
+          if isPersistent(kernel):
+            kernel["TileProcessingStrategy"] = "None"
+            kernel["WorkAssignment"] = "StaticGrid"
+            kernel["_PersistentLoop"] = False
             kernel["_GlobalAccumulation"] = "MultipleBuffer"
           vectorWidths = vectorWidths_2
           elements     = elements_2
@@ -15988,8 +16049,10 @@ class KernelWriterAssembly(KernelWriter):
           kernel["ActivationFuncCall"] = afcBackup
           kernel["GlobalSplitU"] = 1
           kernel["_GlobalAccumulation"] = None
-          kernel["StreamK"] = skBackup
-          if kernel["StreamK"]:
+          kernel["TileProcessingStrategy"] = processingBackup
+          kernel["WorkAssignment"] = assignmentBackup
+          kernel["_PersistentLoop"] = persistenceBackup
+          if isPersistent(kernel):
             kernel["GlobalSplitU"] = gsuBackup
             kernel["_GlobalAccumulation"] = gsuAccumBackup
           vectorWidths = vectorWidths_1
@@ -16025,7 +16088,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.setSgprToInUseState("AddressScaleAlphaVec"))
           module.add(self.setSgprToInUseState("SrdScaleAlphaVec"))
 
-      isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') or kernel["StreamK"] > 0
+      isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') or isPersistent(kernel)
       # Issue read scale A/B value for later use
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and \
         isSingleKernel and \
@@ -16045,7 +16108,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(label)
 
       # Issue read scale C/D value for later use
-      if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+      if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
         module.add(SMovB32(dst=sgpr("ScaleD"), src=1.0 , comment="init as 1" ))
         module.add(SMovB32(dst=sgpr("ScaleD+1"), src=1.0 , comment="init as 1" ))
         label  = Label(self.labels.getNameInc("ScaleDValid"), "")
@@ -16292,7 +16355,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.undefineSgpr("AddressScaleAlphaVec"))
           module.add(self.undefineSgpr("SrdScaleAlphaVec"))
 
-      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') and \
+      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
         (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["MacDataTypeB"].numRegisters())):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
@@ -16304,7 +16367,7 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["MacDataTypeB"].numRegisters():
           module.add(VMulF32(dst=vgpr(newAlphaVgpr), src0=vgpr(newAlphaVgpr), src1=sgpr(sgprScaleB)))
         module.add(SNop(waitState=0, comment="1 wait states"))
-        if kernel["StreamK"] > 0:
+        if isPersistent(kernel):
           oldAlpha = self.sgprPool.checkOut(1, tag="globalWriteElements_oldAlpha", preventOverflow=False)
           module.add(SMovB32(dst=sgpr(oldAlpha), src=sgpr("Alpha"), comment="Save alpha value"))
         module.add(VReadfirstlaneB32(dst=sgpr("Alpha"), src=vgpr(newAlphaVgpr), comment="Update Alpha"))
@@ -16313,11 +16376,11 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprPool.checkIn(sgprScaleB)
 
       # Update beta with ScaleC (only when Beta is actually used)
-      if kernel["ProblemType"]["UseBeta"] and kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+      if kernel["ProblemType"]["UseBeta"] and kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
         newBetaVgpr = self.vgprPool.checkOut(1, tag="globalWriteElements_newBetaVgpr")
         module.add(VMovB32(dst=vgpr(newBetaVgpr), src=sgpr("Beta")))
-        if (not ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) or kernel["StreamK"] > 0:
+        if (not ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')) or isPersistent(kernel):
           module.add(SWaitCnt(kmcnt=0, comment="wait for scaleC load"))
         module.add(VMulF32(dst=vgpr(newBetaVgpr), src0=vgpr(newBetaVgpr), src1=sgpr(sgprScaleC)))
         module.add(SNop(waitState=0, comment="1 wait states"))
@@ -16327,7 +16390,7 @@ class KernelWriterAssembly(KernelWriter):
         # Copy scaleD for PK calculations
         module.add(SMovB32(dst=sgpr("ScaleD+1"), src=sgpr("ScaleD")))
 
-      if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+      if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
         # Update E offset1
         strideE1 = "StrideE%s" % (self.states.indexChars[kernel["PackedC1IndicesX"][0]])
         module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrE), src0=vgpr(self.vgprs.coutRowPtrE), src1=sgpr(strideE1), comment=" offset 1"))
@@ -16447,7 +16510,7 @@ class KernelWriterAssembly(KernelWriter):
       actTempSgpr = 0
       actExportType = ActivationType.Export.GRADONLY if kernel["ProblemType"]["Gradient"] else ActivationType.Export.NORMAL
       if kernel["ActivationFuncCall"] or \
-        ((((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0) and kernel["ActivationFused"]) and \
+        ((((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)) and kernel["ActivationFused"]) and \
         (kernel["ProblemType"]["ActivationType"] != 'none')):
         maxVw = max(vectorWidths)
         # Here is where activation creates cache if cache is enabled
@@ -16548,8 +16611,10 @@ class KernelWriterAssembly(KernelWriter):
       # allocate tmps for the store header (before the batch implementations)
       # branch B1 or B0
       skPartialsLabel = Label(label=self.labels.getNameInc("SK_Partials"), comment="")
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
+      # GSU0 temporarily selects the ordinary policy for this store branch.
+      processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) else None
+      if processingComponent is not None:
+        module.add(processingComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
       # support dynamic MBSK/MB selection by checking synchronizer after bias write
       if kernel["AdaptiveGemmGSUA"] == 1:
@@ -16692,12 +16757,13 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
-      module.add(skComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+      if processingComponent is not None:
+        module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
 
       # End label
       module.add(endLabel)
 
-      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["StreamK"] > 0 and \
+      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and isPersistent(kernel) and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
         (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["MacDataTypeB"].numRegisters())):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
@@ -17577,7 +17643,7 @@ class KernelWriterAssembly(KernelWriter):
     scaleVecVgpr is one or more vgpr :temp vGPR ( = gwvw * numbytes // 4 + 1 if cvt is needed)
     """
     module = Module("addScale%sVec"%srdName)
-    if kernel["ProblemType"]["UseScale%s"%name] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["StreamK"] > 0):
+    if kernel["ProblemType"]["UseScale%s"%name] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or isPersistent(kernel)):
       bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
       if kernel["BufferLoad"]:
         addr0 = vgpr(addrScaleVecVgpr)
@@ -18829,7 +18895,7 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ActivationFuncCall"]:
       activationLabelModules.append("")
       activationEnumStrList.append("none")
-    elif (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' or kernel["StreamK"] > 0) and kernel["ActivationFused"]) and \
+    elif (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' or isPersistent(kernel)) and kernel["ActivationFused"]) and \
       (activationType != 'none'):
       if activationType in ['all', 'hipblaslt_all']:
         exportType = ActivationType.Export.GRADONLY if kernel["ProblemType"]["Gradient"] else ActivationType.Export.NORMAL
@@ -18871,10 +18937,10 @@ class KernelWriterAssembly(KernelWriter):
 
   def insertActivationAfterPacked(self, kernel, activationTypeStr):
     result = False
-    if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
+    if kernel["ProblemType"]["UseScaleCD"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or isPersistent(kernel)):
       return result
     elif ((kernel["ProblemType"]["ActivationType"] != 'none') and \
-      ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["StreamK"] > 0) and kernel["ActivationFused"]):
+      ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or isPersistent(kernel)) and kernel["ActivationFused"]):
       if kernel["ActivationFuncCall"]:
         return (kernel["ProblemType"]["ActivationComputeDataType"] == kernel["ProblemType"]["DestDataType"])
       elif kernel["ProblemType"]["DestDataType"].isBFloat16() and (activationTypeStr == 'abs'):
@@ -18961,26 +19027,26 @@ class KernelWriterAssembly(KernelWriter):
     # DP-only tiles are always full: StreamKLocalStart/End are constant
     # (0 / ItersPerTile) and the next-tile setup recomputes the same values,
     # so they need no checkpoint/restore. (DP-only PAP: skip unneeded state.)
-    if not kernel["StreamKForceDPOnly"]:
+    if not isDataParallel(kernel):
       names.append("StreamKLocalStart")
       names.append("StreamKLocalEnd")
     if len(kernel["SpaceFillingAlgo"]):
-      names.append("StreamKTileID")
+      names.append("PersistentTileID")
     # SK4 (StreamKDynamic) derives the next-tile identity from a work-queue pop
     # and, unlike static StreamK, overwrites StreamKTileIdx/StreamKPartialIdx
     # while doing so. The current tile's fixup/store phase reads those (see
     # StreamK.py skFixupStep / globalWriteBatch), so they must be checkpointed
     # and restored around the borrowed next-tile identity.
     #
-    # SK5 (StreamKHybrid) aliases StreamKIter/StreamKIterEnd onto the same
+    # SK5 (StreamKHybrid) aliases PersistentIteration/PersistentIterationEnd onto the same
     # physical SGPRs as StreamKTileIdx/StreamKPartialIdx (see the SK5 RegSet
     # block). Checkpoint the idx names only; listing both the iter and idx
     # names would save/restore the same registers twice. On the dynamic
     # sub-path these regs hold the tile/partial index that the next-tile
     # identity overwrites (restore required); on the static sub-path they hold
-    # StreamKIter/StreamKIterEnd, which next-tile setup only reads, so the
+    # PersistentIteration/PersistentIterationEnd, which next-tile setup only reads, so the
     # save/restore is a no-op. One list covers both sub-paths.
-    if kernel["StreamK"] in (4, 5):
+    if (hasDynamicAssignment(kernel) or hasHybridAssignment(kernel)):
       names.append("StreamKTileIdx")
       names.append("StreamKPartialIdx")
     return names
@@ -19001,7 +19067,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("papRestoreCurrentTileIdentity")
     # PAP temporarily maps WorkGroup*/StreamKLocal* to the next persistent tile
     # so it can issue the first PGR early. Restore the current tile for the
-    # remaining NLL/tail code; StreamKIter already points at the next chunk.
+    # remaining NLL/tail code; PersistentIteration already points at the next chunk.
     for name in self.papTileIdentityNames(kernel):
       module.add(SMovB32(dst=sgpr(name), src=sgpr(prevTile[name]), comment="restore current %s after PAP" % name))
     return module
@@ -19010,7 +19076,7 @@ class KernelWriterAssembly(KernelWriter):
   # Prefetch across persistent: prefetch next tile's data during the NLL.
   #
   # Durable output from this sequence is limited to the issued first-PGR loads,
-  # SkPrefetchPrimed, and saved PAP TDM/DTL LDS-bank bits. The setup below borrows tile
+  # PersistentPrefetchState, and saved PAP TDM/DTL LDS-bank bits. The setup below borrows tile
   # identity, descriptor, stagger, and TDM/DTL descriptor state and restores it
   # before current-tile code observes those registers again.
   ##############################################################################
@@ -19019,26 +19085,26 @@ class KernelWriterAssembly(KernelWriter):
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
       return module
 
-    skComponent = Component.StreamK.find(self)
+    processingComponent = Component.TileProcessingStrategy.find(self)
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
     # Parallel reduction (no synchronizer): WGs do not advance across tiles.
     # Under StreamKForceDPOnly the reduction is always forced to the tree path
     # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
     # parallel-reduction skip never fires; fold it out.
-    if not kernel["StreamKForceDPOnly"]:
+    if not isDataParallel(kernel):
       module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
       module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     # Variant-specific "is there a next persistent iteration?" predicate. SK3
-    # (and the SK3/static path of SK5) compares StreamKIter/StreamKIterEnd; SK4
+    # (and the SK3/static path of SK5) compares PersistentIteration/PersistentIterationEnd; SK4
     # (StreamKDynamic) and SK5-dynamic override against the work-queue pop.
-    module.add(skComponent.papHasNextPersistentIteration(self, kernel, skipLabel))
+    module.add(processingComponent.papHasNextPersistentIteration(self, kernel, skipLabel))
 
     if not skipBarrier:
       module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
 
     with self.allocPapTileIdentitySgprs(kernel) as prevTile:
       module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
-      module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
+      module.add(processingComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))
       # From here to the restore below, WorkGroup* names the next tile. RAP's A
       # silencing reads that to decide whether the next tile still shares the
       # resident A; nothing else in this window depends on the flag.
@@ -19054,7 +19120,7 @@ class KernelWriterAssembly(KernelWriter):
       # (idempotent) and PAP never runs on the last tile. Skip the 2-VGPR
       # checkpoint/restore. (DP-only PAP saving.)  HalfPLR is the exception: it
       # enters PAP while LoopCounter is one, so the counters must be preserved.
-      snapshotLoopCounter = kernel["HalfPLR"] or not kernel["StreamKForceDPOnly"]
+      snapshotLoopCounter = kernel["HalfPLR"] or not isDataParallel(kernel)
       if snapshotLoopCounter:
         prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
         module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
@@ -19087,8 +19153,9 @@ class KernelWriterAssembly(KernelWriter):
     if addLabel:
       imod.add(Label("KernelEnd", ""))
 
-      skComponent = Component.StreamK.find(self)
-      imod.add(skComponent.kernelEnd(self, kernel))
+      if isPersistent(kernel):
+        processingComponent = Component.TileProcessingStrategy.find(self)
+        imod.add(processingComponent.kernelEnd(self, kernel))
 
       # TODO- refine this part, put outside of this function
       if kernel["ProblemType"]["OutputAmaxD"]:
@@ -20687,7 +20754,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(tdmGlobalOffsetLblEnd)
     return mod
 
-  def tdmApplyStreamKOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+  def tdmApplyTileKOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     mod = Module("TDM StreamK K-offset Wave Separated")
     tcA: str = tPA["tensorChar"]
     tcB: str = tPB["tensorChar"]
@@ -20696,7 +20763,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # DP-only: StreamKLocalStart == 0, so the K-offset is 0 * increment == 0 and
     # applying it is a no-op. StreamKLocalStart is not allocated in DP-only mode.
-    if kernel["StreamKForceDPOnly"]:
+    if isDataParallel(kernel):
       return mod
 
     # A shared scale set offsets its owner once; the other data tensor remains independent.
@@ -20704,7 +20771,7 @@ class KernelWriterAssembly(KernelWriter):
       if tcA != "A":
         return mod
       tcShared, tcSep = tdmSharedSetOrder(kernel, tcA, tcB)
-      with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
+      with self.allocTmpSgpr(1, tag="tdmApplyTileOffsetSharedScale_tmpSgprRes") as tmpSgprRes:
         tmpSgpr = tmpSgprRes.idx
         for group0, incs in ((f"tdm{tcShared}Group0", incSgprName),
                              (f"tdm{tcSep}Group0", sgpr(f"GlobalReadIncs{tcSep}"))):
@@ -20715,7 +20782,7 @@ class KernelWriterAssembly(KernelWriter):
                            comment=f"Apply StreamK K-offset to TDM {group0}"))
       return mod
 
-    with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
+    with self.allocTmpSgpr(1, tag="tdmApplyTileOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
                        comment="StreamK K-offset = localStart * increment"))
@@ -20724,7 +20791,7 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def tdmApplyStreamKTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+  def tdmApplyTileTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     # PAP rejects shared-scale groupings because this path requires tdm<tcA><tcB>Incs.
     mod = Module("TDM StreamK tail K-offset Wave Separated")
     tcA: str = tPA["tensorChar"]
@@ -20738,13 +20805,13 @@ class KernelWriterAssembly(KernelWriter):
       # the tail iteration index is (ItersPerTile - 1). StreamKLocalEnd is not
       # allocated in DP-only mode; derive it from the ItersPerTile constant
       # (kept in a VGPR on gfx1250).
-      if kernel["StreamKForceDPOnly"]:
-        sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if self.isStreamKConstantsToVgprEnabled(kernel):
-          mod.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
+      if isDataParallel(kernel):
+        sIpt = self.acquirePersistentConstSgpr(kernel, "ItersPerTile")
+        if self.isPersistentConstantsToVgprEnabled(kernel):
+          mod.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.persistentConstVgprs["ItersPerTile"])))
         mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(sIpt), src1=1,
                         comment="tail iteration index within current StreamK tile (DP-only: ItersPerTile - 1)"))
-        self.releaseStreamKConstSgpr(sIpt)
+        self.releasePersistentConstSgpr(sIpt)
       else:
         mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
                         comment="tail iteration index within current StreamK tile"))
@@ -20770,7 +20837,7 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module("PAP reset TDM descriptor for tail")
     resetDescriptor = Label(self.labels.getNameInc("PapResetTailDescriptor"), "")
     done = Label(self.labels.getNameInc("PapTailDescriptorDone"), "")
-    mod.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0,
                       comment="did PAP actually prefetch a persistent tile?"))
     mod.add(SCBranchSCC1(labelName=resetDescriptor.getLabelName(),
                          comment="normal tail keeps current-tile descriptor addressing"))
@@ -20780,13 +20847,13 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(self.papTdmRecomputeWaveIdx(kernel, waveIdxSgpr))
       mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
       mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
-    mod.add(self.tdmApplyStreamKTailOffsetWaveSeparated(kernel, tPA, tPB))
+    mod.add(self.tdmApplyTileTailOffsetWaveSeparated(kernel, tPA, tPB))
     mod.add(resetDescriptor)
     mod.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tPA, tPB))
     if kernel["LdsOffsetA_Blk"] == 0:
       mod.add(done)
       return mod
-    mod.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0,
+    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0,
                       comment="normal tail requires no PAP bank override"))
     mod.add(SCBranchSCC1(labelName=done.getLabelName(),
                          comment="keep normal tail LDS bank"))
@@ -20829,14 +20896,14 @@ class KernelWriterAssembly(KernelWriter):
       else:
         mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
       mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
-      if kernel["StreamK"] > 0:
-        mod.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tPA, tPB))
+      if isPersistent(kernel):
+        mod.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tPA, tPB))
     return mod
 
   def papTdmSaveLdsBank(self, kernel: Mapping) -> Module:
     # Bit 0 marks primed; bit 1 records the high LDS bank. LdsOffsetA_Blk is
     # not necessarily a power of two, so it must not be used as a bit mask.
-    mod = Module("TDM save PAP LDS bank in SkPrefetchPrimed")
+    mod = Module("TDM save PAP LDS bank in PersistentPrefetchState")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgpr: str = comp.getLdsAddrSgprName("tdmAGroup0")
     blkOffset: int = kernel["LdsOffsetA_Blk"]
@@ -20848,8 +20915,8 @@ class KernelWriterAssembly(KernelWriter):
               comment=f"PAP descriptor in high LDS bank ({blkOffset:#x})?"))
       mod.add(SCSelectB32(dst=sgpr(papBankSgpr), src0=2, src1=0,
               comment="encode PAP high-bank flag in bit 1"))
-      mod.add(SOrB32(dst=sgpr("SkPrefetchPrimed"), src0=sgpr("SkPrefetchPrimed"), src1=sgpr(papBankSgpr),
-              comment="encode PAP LDS bank in SkPrefetchPrimed"))
+      mod.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=sgpr(papBankSgpr),
+              comment="encode PAP LDS bank in PersistentPrefetchState"))
     return mod
 
   def papTdmRestoreLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
@@ -20862,12 +20929,12 @@ class KernelWriterAssembly(KernelWriter):
     if blkOffset == 0:
       return mod
 
-    mod.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0, comment="primed?"))
+    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
     mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="not primed, skip bank restore"))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
-      mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("SkPrefetchPrimed"), src1=2,
+      mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("PersistentPrefetchState"), src1=2,
               comment="extract PAP high-bank flag"))
       mod.add(SCmpEQU32(src0=sgpr(papBankSgpr), src1=0, comment="PAP wrote to bank 0?"))
       mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="bank 0, no adjustment needed"))
@@ -20899,9 +20966,9 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def papDtlSaveLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
-    # DTL PAP uses the same SkPrefetchPrimed side channel as TDM. Bit 0 marks
+    # DTL PAP uses the same PersistentPrefetchState side channel as TDM. Bit 0 marks
     # primed; LDS bank bits are ORed in when the prefetch lands in the high bank.
-    mod = Module("DTL save PAP LDS bank in SkPrefetchPrimed")
+    mod = Module("DTL save PAP LDS bank in PersistentPrefetchState")
     blkMask: int = kernel["LdsOffsetA_Blk"]
     if blkMask == 0:
       return mod
@@ -20922,8 +20989,8 @@ class KernelWriterAssembly(KernelWriter):
       else:
         mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr(f"LocalWriteAddr{firstDtc}"), src1=hex(blkMask),
                 comment=f"PAP DTL bank = LocalWriteAddr{firstDtc} & LdsOffsetA_Blk"))
-      mod.add(SOrB32(dst=sgpr("SkPrefetchPrimed"), src0=sgpr("SkPrefetchPrimed"), src1=sgpr(papBankSgpr),
-              comment="encode PAP DTL LDS bank in SkPrefetchPrimed"))
+      mod.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=sgpr(papBankSgpr),
+              comment="encode PAP DTL LDS bank in PersistentPrefetchState"))
     return mod
 
   def papDtlRestoreLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
@@ -20934,13 +21001,13 @@ class KernelWriterAssembly(KernelWriter):
     if blkMask == 0:
       return mod
 
-    mod.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0, comment="primed?"))
+    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
     mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="not primed, skip DTL bank restore"))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
-      mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("SkPrefetchPrimed"), src1=hex(blkMask),
-              comment="extract PAP DTL LDS bank from SkPrefetchPrimed"))
+      mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("PersistentPrefetchState"), src1=hex(blkMask),
+              comment="extract PAP DTL LDS bank from PersistentPrefetchState"))
       mod.add(SCmpEQU32(src0=sgpr(papBankSgpr), src1=0, comment="PAP DTL wrote to bank 0?"))
       mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="bank 0, no adjustment needed"))
 
@@ -20979,12 +21046,12 @@ class KernelWriterAssembly(KernelWriter):
   def papTdmSelectTailLdsBank(self, kernel: Mapping, dstSgpr: int) -> Module:
     mod = Module("TDM select tail LDS bank")
     blkOffset: int = kernel["LdsOffsetA_Blk"]
-    mod.add(SAndB32(dst=sgpr(dstSgpr), src0=sgpr("SkPrefetchPrimed"), src1=2,
+    mod.add(SAndB32(dst=sgpr(dstSgpr), src0=sgpr("PersistentPrefetchState"), src1=2,
                     comment="extract PAP high-bank flag"))
     mod.add(SCmpEQU32(src0=sgpr(dstSgpr), src1=0, comment="PAP wrote bank 0?"))
     mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=blkOffset, src1=0,
                        comment="tail uses opposite physical LDS bank"))
-    mod.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0, comment="no PAP primed?"))
+    mod.add(SCmpEQU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="no PAP primed?"))
     mod.add(SCMovB32(dst=sgpr(dstSgpr), src=0, comment="no primed PAP, keep tail in bank 0"))
     return mod
 
@@ -21486,8 +21553,8 @@ class KernelWriterAssembly(KernelWriter):
     #   buffer (buffer 1). However, when numReadsIterCoalesced{A,B} > 1 ("wider local read").
     #   recalcLocalReadAddressesAB() performs this switch by recomputing the local-read
     #   pointer to buffer 0; (e.g. ds_load_b128 covering 2 MI-K to ds_load_b64 per MI_K).
-    #   (needResetLROffsets or kernel["StreamK"]) in KernelWriter, keeping write/read consistent.
-    needLdsReset = (kernel["StreamK"] or
+    #   (needResetLROffsets or isPersistent(kernel)) in KernelWriter, keeping write/read consistent.
+    needLdsReset = (isPersistent(kernel) or
                     self.states.numReadsIterCoalescedA > 1 or
                     self.states.numReadsIterCoalescedB > 1)
     if not kernel["1LDSBuffer"] and needLdsReset:
@@ -21695,7 +21762,7 @@ class KernelWriterAssembly(KernelWriter):
       # Bias the counter instead of branching, to keep the loop body one basic block.
       with self.allocTmpSgpr(1, tag="graIncrementMask_notPrimed") as tmpSgprRes:
         biasedCounter = sgpr(tmpSgprRes.idx)
-        mod.add(SCmpLgU32(src0=sgpr("SkPrefetchPrimed"), src1=0, comment="PAP primed?"))
+        mod.add(SCmpLgU32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed?"))
         mod.add(SCSelectB32(dst=biasedCounter, src0=2, \
           src1=self.loopCounter(kernel, self.states.unrollIdx), \
           comment="keep increments live for the StreamK tail once primed"))

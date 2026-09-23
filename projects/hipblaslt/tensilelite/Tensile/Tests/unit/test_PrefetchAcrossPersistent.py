@@ -222,8 +222,8 @@ class _SetupNewTilePapTdmWriter:
     def tdmSetupIncrementWaveSeparated(self, kernel, tpa, tpb):
         return self._module("tdmSetupIncrementWaveSeparated_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
 
-    def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tpa, tpb):
-        return self._module("tdmApplyStreamKOffsetWaveSeparated_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
+    def tdmApplyTileKOffsetWaveSeparated(self, kernel, tpa, tpb):
+        return self._module("tdmApplyTileKOffsetWaveSeparated_%s_%s" % (tpa["tensorChar"], tpb["tensorChar"]))
 
     def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
         return self._module("releaseGlobalReadIncsSgprsAfterTdmWaveSep")
@@ -340,8 +340,8 @@ class _PapTdmDescriptorRefreshWriter:
         self.global_offset_waveidx.append(wave_idx_sgpr)
         return _module_with_comment("tdmGlobalOffsetWaveSeparated", "unit: global offset")
 
-    def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tpa, tpb):
-        return _module_with_comment("tdmApplyStreamKOffsetWaveSeparated", "unit: StreamK offset")
+    def tdmApplyTileKOffsetWaveSeparated(self, kernel, tpa, tpb):
+        return _module_with_comment("tdmApplyTileKOffsetWaveSeparated", "unit: StreamK offset")
 
 
 class _TrackingRegisterPool(RegisterPool):
@@ -453,7 +453,8 @@ _CLASSIC_KERNEL_BASE = {
     "PrefetchGL2": 0,
     "ProblemType": _problem_type(),
     "ReuseAcrossPersistent": 0,
-    "StreamKForceDPOnly": 0,
+    "TileProcessingStrategy": "None",
+    "WorkAssignment": "StaticGrid",
     "UseGeneralizedNLCOneA": False,
     "UseGeneralizedNLCOneB": False,
     "_UseSgprForGRO": False,
@@ -477,7 +478,7 @@ _SETUP_NEW_TILE_TDM_BASE = _kernel_from(
     NumWaves=2,
     PrefetchAcrossPersistent=1,
     PrefetchGlobalRead=1,
-    StreamK=3,
+    TileProcessingStrategy="StreamK",
     SuppressNoLoadLoop=False,
     TDMInst=3,
     UseCustomMainLoopSchedule=0,
@@ -498,9 +499,9 @@ def _setup_new_tile_tdm_kernel(prefetch_across_persistent=1, **overrides):
 
 
 def _pap_wrapper_kernel(**overrides):
+    overrides.setdefault("TileProcessingStrategy", "StreamK")
     return _classic_kernel(
         PrefetchAcrossPersistent=1,
-        StreamK=3,
         SpaceFillingAlgo=[],
         **overrides,
     )
@@ -599,7 +600,8 @@ def _pap_solution_config(**overrides):
         "MIWaveTile": [1, 1],
         "MIInputPerThread": 1,
         "WorkGroup": [32, 2, 1],
-        "StreamK": 3,
+        "TileProcessingStrategy": "StreamK",
+        "WorkAssignment": "StaticGrid",
         "PrefetchAcrossPersistent": 1,
         "PrefetchGlobalRead": 1,
         "ScheduleIterAlg": 0,
@@ -699,7 +701,7 @@ def _waveidx_is_in_pool(writer):
 
 
 def _prefetch_across_persistent(monkeypatch, *, skip_barrier=False, **kernel_overrides):
-    monkeypatch.setattr(kwa_module.Component.StreamK, "find", lambda writer: _StubStreamK())
+    monkeypatch.setattr(kwa_module.Component.TileProcessingStrategy, "find", lambda writer: _StubStreamK())
     writer = _ClassicPapWrapperWriter()
     module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
         writer,
@@ -715,7 +717,7 @@ def _streamk_with_stubbed_tile_indexing():
     streamk.skTileIndex = lambda writer, kernel, s_tmp, tpa, tpb, skipLroReset=False: (
         _module_with_comment("skTileIndex", "unit: tile index")
     )
-    streamk.skIndexToWG = lambda writer, kernel, s_tmp: _module_with_comment(
+    streamk.tileIndexToWorkGroup = lambda writer, kernel, s_tmp: _module_with_comment(
         "skIndexToWG", "unit: index to WG"
     )
     return streamk
@@ -725,6 +727,7 @@ def _streamk_wgm_writer():
     writer = SimpleNamespace(
         sgprPool=RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False),
         states=SimpleNamespace(WGMTransformLevels=-1),
+        isPersistentConstantsToVgprEnabled=lambda kernel: False,
     )
 
     # prefetchAcrossPersistentSetupNextTile now takes its SKPrefetchTemp through the
@@ -780,31 +783,31 @@ def test_solution_validation_accepts_pap_streamk_dynamic():
     # restriction is StreamK-agnostic and still applies. TDM is disabled here
     # (TDMInst=0): the TDM+PAP twin gate is intentionally kept SK3-only, so
     # SK4 PAP is supported for the non-TDM path only.
-    assert _pap_solution(StreamK=4, TDMInst=0)["Valid"] is True
+    assert _pap_solution(WorkAssignment="DynamicWorkQueue", TDMInst=0)["Valid"] is True
 
 
 def test_solution_validation_rejects_pap_streamk_dynamic_with_tdm(capsys):
     # The TDM + PAP twin gate is deliberately NOT relaxed for SK4: TDM+PAP
     # remains StreamK==3 only.
-    assert _pap_solution(StreamK=4, TDMInst=3)["Valid"] is False
-    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
+    assert _pap_solution(WorkAssignment="DynamicWorkQueue", TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires WorkAssignment=StaticGrid" in capsys.readouterr().out
 
 
 def test_solution_validation_accepts_pap_streamk_hybrid():
     # PAP is allowed for StreamK==5 (StreamKHybrid) in addition to StreamK==3
     # and StreamK==4. The validation gate accepts StreamK in (3, 4, 5). A
     # single PAP-enabled SK5 kernel is correct for BOTH runtime sub-paths
-    # (static SK3-like and dynamic SK4-like) via StreamKHybridMode dispatch.
+    # (static SK3-like and dynamic SK4-like) via WorkAssignmentMode dispatch.
     # TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is intentionally
     # kept SK3-only, so SK5 PAP is supported for the non-TDM path.
-    assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is True
+    assert _pap_solution(WorkAssignment="Hybrid", TDMInst=0)["Valid"] is True
 
 
 def test_solution_validation_rejects_pap_streamk_hybrid_with_tdm(capsys):
     # The TDM + PAP twin gate is deliberately NOT relaxed for SK5: TDM+PAP
     # remains StreamK==3 only (hybrid TDM+PAP deferred).
-    assert _pap_solution(StreamK=5, TDMInst=3)["Valid"] is False
-    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
+    assert _pap_solution(WorkAssignment="Hybrid", TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires WorkAssignment=StaticGrid" in capsys.readouterr().out
 
 @pytest.mark.parametrize(
     "overrides, reason",
@@ -970,7 +973,7 @@ def test_setup_new_tile_releases_waveidx_at_most_once(monkeypatch):
 def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):
     monkeypatch.setattr(kwa_module.TensorDataMoverLoad, "find", lambda writer: _StubTdmComp())
     writer = _PapTdmDescriptorRefreshWriter()
-    kernel = {"LdsOffsetA_Blk": 0, "StreamK": 3}
+    kernel = {"LdsOffsetA_Blk": 0, "TileProcessingStrategy": "StreamK", "WorkAssignment": "StaticGrid"}
     tpa, tpb = {"tensorChar": "A"}, {"tensorChar": "B"}
 
     module = kwa_module.KernelWriterAssembly.papTdmUpdateDescriptor(writer, kernel, tpa, tpb)
@@ -979,7 +982,7 @@ def test_pap_tdm_descriptor_refresh_threads_temporary_waveidx(monkeypatch):
         "papTdmRecomputeWaveIdx",
         "initTDMDescriptorWaveSeparated",
         "tdmGlobalOffsetWaveSeparated",
-        "tdmApplyStreamKOffsetWaveSeparated",
+        "tdmApplyTileKOffsetWaveSeparated",
     ]
     assert writer.recomputed_waveidx == [300]
     assert writer.init_waveidx == [300]
@@ -998,7 +1001,7 @@ def test_classic_pap_primes_mx_first_pgr_group_before_marking_primed():
     gr_mxsa = _module_index(items, "globalReadDo_MXSA")
     gr_mxsb = _module_index(items, "globalReadDo_MXSB")
     gr_b = _module_index(items, "globalReadDo_B")
-    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprSkPrefetchPrimed]", "1")
+    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprPersistentPrefetchState]", "1")
 
     assert gr_a < gr_mxsa
     assert gr_mxsa < gr_mxsb
@@ -1063,7 +1066,7 @@ def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
 
     module = writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb)
     items = _module_items(module)
-    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprSkPrefetchPrimed]", "1")
+    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprPersistentPrefetchState]", "1")
     save_lds_bank = _module_index(items, "papDtlSaveLdsBank")
 
     assert primed < save_lds_bank
@@ -1097,17 +1100,17 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
 def test_halfplr_pap_checkpoints_loop_counters_even_under_dp_only(monkeypatch):
     # HalfPLR enters PAP while LoopCounter is one, so the counters cannot be
     # recomputed and DP-only has to checkpoint them anyway.
-    writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1, HalfPLR=1)
+    writer, items = _prefetch_across_persistent(monkeypatch, TileProcessingStrategy="DataParallel", HalfPLR=1)
 
     _assert_loop_counters_checkpointed_in_vgprs(writer, items)
 
 
 def test_dp_only_pap_skips_loop_counter_checkpoint(monkeypatch):
-    # DP-only StreamK keeps LoopCounter/OrigLoopCounter constant (idempotent
+    # DataParallel keeps LoopCounter/OrigLoopCounter constant (idempotent
     # recompute, PAP never runs on the last tile), so prefetchAcrossPersistent
     # skips the 2-VGPR checkpoint/restore entirely
-    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not StreamKForceDPOnly).
-    writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
+    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not isDataParallel).
+    writer, items = _prefetch_across_persistent(monkeypatch, TileProcessingStrategy="DataParallel")
 
     assert not any(tag == "PAP loop counters" for _, _, tag in writer.vgprPool.checked_out)
     assert not _instruction_indices(items, kwa_module.VReadfirstlaneB32, dst_contains="sgprLoopCounterL")
@@ -1168,7 +1171,7 @@ def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
     # The PAP "is there a next persistent iteration?" predicate is now a
     # StreamK-component seam. The static StreamK variants (SK3 TwoTileDPFirst,
     # and the SK3/static path of SK5) keep the historical
-    # StreamKIter >= StreamKIterEnd compare + skip branch, byte-for-byte, so
+    # PersistentIteration >= PersistentIterationEnd compare + skip branch, byte-for-byte, so
     # relaxing the seam for SK4 (StreamKDynamic) does not perturb SK3 codegen.
     from rocisa.code import Label
 
@@ -1177,7 +1180,7 @@ def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
         writer=None, kernel={}, skipLabel=skip_label
     )
     rendered = str(module)
-    assert "s_cmp_ge_u32 s[sgprStreamKIter], s[sgprStreamKIterEnd]" in rendered
+    assert "s_cmp_ge_u32 s[sgprPersistentIteration], s[sgprPersistentIterationEnd]" in rendered
     assert "No next persistent iteration" in rendered
     assert "s_cbranch_scc1 label_SK_SkipNllPAP_unit" in rendered
 
@@ -1196,37 +1199,37 @@ def _fake_fetch(self, writer, kernel, preventOverflow=True, uniqueLabels=False):
 
 
 def test_sk4_pap_has_next_primes_before_drain_check(monkeypatch):
-    # SK4 PAP must stash SkNextWorkItem and set SkPrefetchPrimed before the
+    # SK4 PAP must stash NextWorkItem and set PersistentPrefetchState before the
     # TotalItems drain compare so the back-edge never re-pops a termination token.
     monkeypatch.setattr(StreamKDynamic, "_fetchWorkItemAndBroadcast", _fake_fetch)
     from rocisa.code import Label
 
     skip_label = Label("SK_SkipNllPAP_sk4", "")
     module = StreamKDynamic().papHasNextPersistentIteration(
-        _PapFetchWriter(), {"StreamK": 4}, skip_label
+        _PapFetchWriter(), {"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"}, skip_label
     )
     rendered = str(module)
-    primed = rendered.find("s[sgprSkPrefetchPrimed]")
+    primed = rendered.find("s[sgprPersistentPrefetchState]")
     drain = rendered.find("s[sgprTotalItems]")
     assert primed != -1 and drain != -1 and primed < drain
-    assert "s[sgprSkNextWorkItem]" in rendered
+    assert "s[sgprNextWorkItem]" in rendered
 
 
 def test_sk5_pap_has_next_dispatches_static_and_dynamic(monkeypatch):
-    # SK5 PAP is a runtime hybrid: mode==0 keeps the SK3 StreamKIter compare;
+    # SK5 PAP is a runtime hybrid: mode==0 keeps the SK3 PersistentIteration compare;
     # mode!=0 reuses the SK4 pop-and-prime handoff.
     monkeypatch.setattr(StreamKHybrid, "_fetchWorkItemAndBroadcast", _fake_fetch)
     from rocisa.code import Label
 
     skip_label = Label("SK_SkipNllPAP_sk5", "")
     module = StreamKHybrid().papHasNextPersistentIteration(
-        _PapFetchWriter(), {"StreamK": 5}, skip_label
+        _PapFetchWriter(), {"TileProcessingStrategy": "StreamK", "WorkAssignment": "Hybrid"}, skip_label
     )
     rendered = str(module)
-    assert "s[sgprStreamKHybridMode]" in rendered
-    assert "s[sgprStreamKIter]" in rendered
-    assert "s[sgprSkPrefetchPrimed]" in rendered
-    assert "s[sgprSkNextWorkItem]" in rendered
+    assert "s[sgprWorkAssignmentMode]" in rendered
+    assert "s[sgprPersistentIteration]" in rendered
+    assert "s[sgprPersistentPrefetchState]" in rendered
+    assert "s[sgprNextWorkItem]" in rendered
 
 
 def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
@@ -1239,12 +1242,12 @@ def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
     )
     module = StreamKDynamic().prefetchAcrossPersistentSetupNextTile(
         _PapFetchWriter(),
-        {"StreamK": 4},
+        {"TileProcessingStrategy": "StreamK", "WorkAssignment": "DynamicWorkQueue"},
         {"tensorChar": "A"},
         {"tensorChar": "B"},
     )
     rendered = str(module)
-    assert "s[sgprSkNextWorkItem]" in rendered
+    assert "s[sgprNextWorkItem]" in rendered
     assert "unit: tile identity" in rendered
 
 

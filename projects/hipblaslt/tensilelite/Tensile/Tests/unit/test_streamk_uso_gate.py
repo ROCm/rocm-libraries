@@ -72,7 +72,7 @@ _SK_CONST_VGPRS = {
     "SKItersPerWG": 43,
     "skGrid": 44,
     "skTiles": 45,
-    "StreamKIdx": 46,
+    "PersistentWorkGroupIndex": 46,
 }
 
 KERNEL = {"StreamK": 3, "WavefrontSize": 64, "MagicDivAlg": 2}
@@ -107,14 +107,14 @@ def _writer(inVgprs):
     pool = _Pool()
     return SimpleNamespace(
         # gfx1250 hands back a scratch index; everyone else the named SGPR.
-        acquireStreamKConstSgpr=lambda k, name: pool.checkOut(1, name) if inVgprs else name,
-        releaseStreamKConstSgpr=lambda x: pool.checkIn(x) if isinstance(x, int) else None,
-        isStreamKConstantsToVgprEnabled=lambda k: inVgprs,
+        acquirePersistentConstSgpr=lambda k, name: pool.checkOut(1, name) if inVgprs else name,
+        releasePersistentConstSgpr=lambda x: pool.checkIn(x) if isinstance(x, int) else None,
+        isPersistentConstantsToVgprEnabled=lambda k: inVgprs,
         labels=SimpleNamespace(
             getNameInc=lambda n, c=itertools.count(): "%s_%d" % (n, next(c))),
         sgprPool=pool,
         vgprPool=_Pool(),
-        states=SimpleNamespace(skConstVgprs=dict(_SK_CONST_VGPRS)),
+        states=SimpleNamespace(persistentConstVgprs=dict(_SK_CONST_VGPRS)),
     )
 
 
